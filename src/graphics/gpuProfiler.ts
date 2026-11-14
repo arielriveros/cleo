@@ -219,6 +219,8 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     'overlay.helpers': 'overlay',
     'overlay.giProbes': 'overlay',
     'overlay.composite': 'overlay',
+    // A split viewport's preview panes, put back on the canvas after the editing view's present.
+    paneBlit: 'present',
 };
 
 /** The scope a pass label reports under, or a `pass:` row of its own when there is no honest scope. */

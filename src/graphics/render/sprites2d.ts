@@ -55,7 +55,8 @@ export function spriteLightRadius(m: mat4): number {
 
 /** What Sprite2DPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface Sprite2DPassesHost {
-    readonly canvas: HTMLCanvasElement;
+    /** The CSS height of the view being drawn: the canvas, or its pane in a split layout. */
+    readonly viewCssHeight: number;
     readonly thumbnailMode: boolean;
 }
 
@@ -244,7 +245,7 @@ export class Sprite2DPasses {
         const m = this._billboardInto(node, this._spriteMatrix);
         // SpriteNode.maxScreenSize: no taller than that many CSS pixels (the editor's viewport icons).
         if (node.maxScreenSize > 0)
-            capSpriteScreenSize(m, node.maxScreenSize, this._view.camera, this._host.canvas.clientHeight);
+            capSpriteScreenSize(m, node.maxScreenSize, this._view.camera, this._host.viewCssHeight);
         const state = quadClipRect(m, this._rectViewProj, this._padX, this._padY, this._spriteRects, s * 4);
         if (state === CLIP_RECT_CULLED && this.batching) return;
         this._spriteMatrices.set(m, s * 16);

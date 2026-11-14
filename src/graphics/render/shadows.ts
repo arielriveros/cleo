@@ -774,6 +774,15 @@ export class ShadowPasses {
      * occluded. Idempotent: the dirty flag keeps it to one pass rather than clearing 4096² layers
      * every frame.
      */
+    /**
+     * Redraw every cascade layer at the next `renderCascades`, whatever the stagger and the layer cache
+     * remember. A preview pane (Renderer `_renderPreviews`) refits the cascades for its own camera; the
+     * editing view's next frame must not keep a layer judged against that fit.
+     */
+    public requestFullUpdate(): void {
+        this._shadowFullUpdate = true;
+    }
+
     public clearShadowMaps(): void {
         if (!this.shadowMapsDirty) return;
         this.shadowCascadeFBO.clearAll();
@@ -2114,7 +2123,9 @@ export class ShadowPasses {
         } else {
             // Orthographic (2D mode): the slice is a box, so take the corners. Still rotation
             // invariant — the corners transform rigidly with the camera.
-            mat4.ortho(this._csmProj, cam.left, cam.right, cam.bottom, cam.top, nearD, farD);
+            // Left and right times the aspect, as the camera's own projection has them (camera.ts):
+            // without it the shadowed slice was the square box of a 1:1 view, narrower than a wide one.
+            mat4.ortho(this._csmProj, cam.left * cam.ratio, cam.right * cam.ratio, cam.bottom, cam.top, nearD, farD);
             mat4.multiply(this._csmInvVP, this._csmProj, cam.viewMatrix);
             mat4.invert(this._csmInvVP, this._csmInvVP);
             let ci = 0;

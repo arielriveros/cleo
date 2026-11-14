@@ -103,7 +103,8 @@ export class SceneRadianceCopy {
      * Its label is still `ssao.history`, the profiler scope it had when SSIL was its only reader.
      */
     public capture(): void {
-        if (this._host.radianceScale <= 0 || this._host.thumbnailMode) return;
+        // Not from a preview pane: its stamp would hand the editing view another camera's light as fresh.
+        if (this._host.radianceScale <= 0 || this._host.thumbnailMode || this._view.preview) return;
         const target = this.ensure();
         if (!this.supported) return;
         if (!this._passes.beginPass('ssao.history')) return;

@@ -7,6 +7,7 @@ import type { Texture } from '../texture';
 import type { Buffer, RenderTarget } from '../rhi/resources';
 import { Logger } from '../../core/logger';
 import type { CommandEncoder, RenderPassEncoder } from '../rhi/device';
+import { paneViewport, type PaneRect } from './viewLayout';
 
 /** What PassEncoder reads from the renderer that owns it. */
 export interface PassEncoderHost {
@@ -39,7 +40,29 @@ export class PassEncoder {
     private _shadowDrawMark = 0;
     private _shadowTriangleMark = 0;
 
+    /**
+     * The pane of the canvas this frame's screen passes draw into (render/viewLayout.ts), or null for the
+     * whole canvas. Applied by {@link beginFullscreenPass} to every pass opened on {@link screenTarget}.
+     */
+    public screenRect: PaneRect | null = null;
+    /** The surface target handed out last, so `beginFullscreenPass` can tell a screen pass. */
+    private _screen: RenderTarget | null = null;
+    /** Whether a screen pass already cleared the canvas this frame (split layouts only). */
+    private _screenCleared = false;
+
     constructor(private readonly _host: PassEncoderHost) {}
+
+    /**
+     * Start the frame's screen writes: into `rect` of the canvas, or all of it when null. With a rect the
+     * FIRST screen pass of the frame clears the whole canvas and every later one loads, because a clear
+     * is not confined by the viewport on either backend (WebGPU's load op clears the attachment;
+     * `clearBufferfv` honours only the scissor, which the engine never enables) and would wipe the
+     * panes already drawn.
+     */
+    public beginScreenFrame(rect: PaneRect | null): void {
+        this.screenRect = rect;
+        this._screenCleared = false;
+    }
 
     /**
      * Record the size the fill-rate stats charge the next fullscreen passes by (`countFullscreenPass`).
@@ -60,7 +83,9 @@ export class PassEncoder {
      * frame rather than holding it — WebGPU hands back a fresh swap-chain texture each time.
      */
     public screenTarget(): RenderTarget {
-        return device.getCurrentSurfaceTarget();
+        const target = device.getCurrentSurfaceTarget();
+        this._screen = target;
+        return target;
     }
 
     /**
@@ -75,6 +100,12 @@ export class PassEncoder {
         this.encoder = this.acquireEncoder(label);
         // So `_pipelineFor` can read the formats it has to agree with. Same lifetime as the encoder.
         this.target = target;
+        // A screen pass in a split layout: only the frame's first one clears (see `beginScreenFrame`).
+        const pane = target === this._screen ? this.screenRect : null;
+        if (pane) {
+            if (this._screenCleared) clear = false;
+            this._screenCleared = true;
+        }
         // EVERY colour attachment when clearing to the standing colour (matching `gl.clear`); a NAMED
         // clearValue clears attachment 0 alone (matching `clearBufferfv`). The standing colour is
         // passed explicitly — WebGPU has no context-state equivalent of `gl.clearColor`.
@@ -103,6 +134,9 @@ export class PassEncoder {
             // though on a depthless framebuffer it happens to be a no-op.
             depthAttachment: { loadOp: clearDepth ? 'clear' : 'load', storeOp: 'store' },
         });
+        // After the pass begins: WebGL2's begin binds the framebuffer, which resets the viewport to the
+        // whole target. A fullscreen triangle spans exactly the clip square, so it stays inside the pane.
+        if (pane) pass.setViewport(...paneViewport(pane, target.height, device.capabilities.conventions.originTopLeft));
         return pass;
     }
 

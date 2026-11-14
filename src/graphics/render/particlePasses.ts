@@ -176,6 +176,8 @@ export class ParticlePasses {
             visible: this._sys.visibility.frustumCulling ? (min, max) => this._sys.visibility.frustum.intersectsAABB(min, max) : undefined,
             hidden: this._hiddenByVolume,
             lodDistanceScale: this.particleLodDistanceScale,
+            // A preview pane draws what the editing view measured (render/viewLayout.ts).
+            measure: !this._view.preview,
             exposure: this._view.exposure,
             preExposure: this._view.preExposure,
             // As the forward path picks a mesh's reflection: the probe containing it, else the sky. Never

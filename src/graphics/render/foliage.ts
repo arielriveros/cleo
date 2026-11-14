@@ -197,6 +197,8 @@ export class FoliagePasses {
      */
     private _prepareFoliage(scene: Scene): void {
         const camPos = this._view.camera.position;
+        // The eye every LOD decision below is measured from, kept for the preview panes that inherit them.
+        vec3.copy(this._lodEye, camPos);
         // The GPU path for the main view only, once a frame: its per-bucket parameters go up with
         // `writeBuffer`, which a second cull in the same unsubmitted frame would overwrite under the first.
         const gpu = this.foliageGpuCulling && FoliageGpuCuller.supported && this._sys.visibility.frustumCulling
@@ -224,22 +226,8 @@ export class FoliagePasses {
                 // straddling a band edge goes into BOTH neighbouring buckets; the dissolve does the rest.
                 const bands = foliageLodBands(layer, cullDistance);
                 this._foliageBands.set(layer, bands);
-                const camX = camPos[0], camY = camPos[1], camZ = camPos[2];
                 const place = (cell: FoliageCell) => {
-                    // The cell's distance SPAN, from its instance origins (not the geometry-padded box).
-                    const dn = Math.sqrt(this._sys.visibility.aabbDistSq(camPos, cell.pmin, cell.pmax));
-                    const fx = Math.max(Math.abs(camX - cell.pmin[0]), Math.abs(camX - cell.pmax[0]));
-                    const fy = Math.max(Math.abs(camY - cell.pmin[1]), Math.abs(camY - cell.pmax[1]));
-                    const fz = Math.max(Math.abs(camZ - cell.pmin[2]), Math.abs(camZ - cell.pmax[2]));
-                    const df = Math.sqrt(fx * fx + fy * fy + fz * fz);
-                    let first = -1;
-                    for (let slot = 0; slot <= billboardBucket; slot++) {
-                        const band = bands[slot];
-                        if (!band || band.lo > df || band.hi < dn) continue;
-                        (buckets[slot] ??= []).push(cell);
-                        if (first < 0) first = slot;
-                    }
-                    cell.lod = Math.max(0, first);
+                    cell.lod = Math.max(0, this._placeCell(buckets, bands, billboardBucket, camPos, cell));
                 };
 
                 // Newly in-range cells, nearest first. Off-screen ones are admitted for free (nothing is
@@ -329,6 +317,80 @@ export class FoliagePasses {
                 }
             }
         }
+    }
+
+    /**
+     * Put `cell` into every bucket whose LOD band its distance span from `eye` reaches (a cell straddling
+     * a band edge goes into both neighbours; the per-instance dissolve does the rest). Returns the first
+     * bucket it joined, or -1.
+     */
+    private _placeCell(buckets: FoliageCell[][], bands: (FoliageBand | null)[], billboardBucket: number,
+                       eye: ArrayLike<number>, cell: FoliageCell): number {
+        // The cell's distance SPAN, from its instance origins (not the geometry-padded box).
+        const dn = Math.sqrt(this._sys.visibility.aabbDistSq(eye as vec3, cell.pmin, cell.pmax));
+        const ex = eye[0], ey = eye[1], ez = eye[2];
+        const fx = Math.max(Math.abs(ex - cell.pmin[0]), Math.abs(ex - cell.pmax[0]));
+        const fy = Math.max(Math.abs(ey - cell.pmin[1]), Math.abs(ey - cell.pmax[1]));
+        const fz = Math.max(Math.abs(ez - cell.pmin[2]), Math.abs(ez - cell.pmax[2]));
+        const df = Math.sqrt(fx * fx + fy * fy + fz * fz);
+        let first = -1;
+        for (let slot = 0; slot <= billboardBucket; slot++) {
+            const band = bands[slot];
+            if (!band || band.lo > df || band.hi < dn) continue;
+            (buckets[slot] ??= []).push(cell);
+            if (first < 0) first = slot;
+        }
+        return first;
+    }
+
+    // --- Preview panes (render/viewLayout.ts) ------------------------------------------------------
+
+    /** The eye `_prepareFoliage` last measured LOD from: the editing view's. Previews inherit its choices. */
+    private readonly _lodEye = vec3.create();
+    /** Per layer: the cells a preview pane draws, bucketed like `layer.buckets`. */
+    private readonly _previewBuckets = new WeakMap<FoliageLayer, FoliageCell[][]>();
+    /** Per layer: their packed batches, apart from the editing view's so its recorded draws stay intact. */
+    private readonly _previewBatches = new WeakMap<FoliageLayer, FoliageBatch[][]>();
+    private static readonly _NO_BUCKETS: FoliageCell[][] = [];
+
+    /**
+     * A preview pane's plants, before its passes open: the cells the EDITING view admitted (its draw
+     * distance, its admission budget), in the buckets its eye puts them in (its LOD), that the preview's
+     * own frustum sees. A preview inherits the editing view's detail choices the way it inherits model LOD:
+     * those live on the cells and nodes, and an orthographic preview has no distance to choose by. Writes
+     * nothing the editing view keeps: no `cell.visible`, `cell.lod`, `sortEye` or `layer.buckets`.
+     */
+    public preparePreview(scene: Scene): void {
+        const visibility = this._sys.visibility;
+        for (const landscape of scene.landscapes) {
+            if (!landscape.visible) continue;
+            for (const layer of landscape.terrain.foliage) {
+                let buckets = this._previewBuckets.get(layer);
+                if (!buckets) { buckets = []; this._previewBuckets.set(layer, buckets); }
+                buckets.length = 0;
+                const bands = this._foliageBands.get(layer);
+                if (layer.count === 0 || !layer.initialized || !bands) continue;
+                const billboardBucket = layer.levels.length;
+                for (const cell of layer.cells) {
+                    if (!cell.visible) continue;
+                    if (visibility.frustumCulling && !visibility.frustum.intersectsAABB(cell.min, cell.max)) continue;
+                    this._placeCell(buckets, bands, billboardBucket, this._lodEye, cell);
+                }
+                let lists = this._previewBatches.get(layer);
+                if (!lists) { lists = []; this._previewBatches.set(layer, lists); }
+                for (let slot = 0; slot <= billboardBucket; slot++) {
+                    const models = slot === billboardBucket
+                        ? (layer.billboardModel ? [layer.billboardModel] : [])
+                        : layer.levels[slot].models;
+                    this._packFoliageBucket(layer, lists, slot, buckets[slot] ??= [], models, this._foliageKeep(layer, slot));
+                }
+            }
+        }
+    }
+
+    /** The cells a colour pass draws of `layer`: the editing view's buckets, or a preview's. */
+    private _bucketsOf(layer: FoliageLayer): FoliageCell[][] {
+        return this._view.preview ? (this._previewBuckets.get(layer) ?? FoliagePasses._NO_BUCKETS) : layer.buckets;
     }
 
     /**
@@ -939,7 +1001,8 @@ export class FoliagePasses {
         const [b, c, f] = this._lodVec;
         if (band) { b[0] = band.inStart; b[1] = band.inEnd; b[2] = band.outStart; b[3] = band.outEnd; }
         else { b[0] = b[1] = b[2] = b[3] = 0; }
-        const cam = this._view.camera.position;
+        // A preview pane dissolves by the editing view's distances, which chose its buckets.
+        const cam = this._view.preview ? this._lodEye : this._view.camera.position;
         c[0] = cam[0]; c[1] = cam[1]; c[2] = cam[2];
         c[3] = !band ? 0 : layer.kind === 'billboard' ? 2 : 1;
         // A different dither phase every frame, so TAA resolves the screen-door into a smooth blend.
@@ -1108,7 +1171,8 @@ export class FoliagePasses {
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
             for (const layer of landscape.terrain.foliage) {
-                if (layer.buckets.length === 0) continue;
+                const layerBuckets = this._bucketsOf(layer);
+                if (layerBuckets.length === 0) continue;
 
                 // Bucket index levels.length is the billboard-impostor bucket. Everything here was
                 // culled, merged and uploaded by `_prepareFoliage`, before this pass opened — see the
@@ -1130,7 +1194,7 @@ export class FoliagePasses {
                 const depthWritten = this._prepassScratch;
                 depthWritten.clear();
                 for (let slot = 0; slot < prepassSlots; slot++) {
-                    const cells = layer.buckets[slot];
+                    const cells = layerBuckets[slot];
                     const chunks = this.colourChunks(layer, slot);
                     if (!cells?.length || !chunks?.length) continue;
                     for (const model of layer.levels[slot].models) {
@@ -1162,7 +1226,7 @@ export class FoliagePasses {
                 }
 
                 const drawBucket = (models: Model[], billboard: boolean, slot: number) => {
-                    const cells = layer.buckets[slot];
+                    const cells = layerBuckets[slot];
                     if (!cells || cells.length === 0) return;
                     const chunks = this.colourChunks(layer, slot);
                     if (!chunks || chunks.length === 0) return;
@@ -1246,7 +1310,7 @@ export class FoliagePasses {
      * chunks, same crossfade band — with the atlas and its normals bound instead of a material.
      */
     private _drawOctahedralImpostors(layer: FoliageLayer, slot: number, pass: RenderPassEncoder): void {
-        const cells = layer.buckets[slot], chunks = this.colourChunks(layer, slot);
+        const cells = this._bucketsOf(layer)[slot], chunks = this.colourChunks(layer, slot);
         const model = layer.billboardModel, info = layer.billboardOctahedral;
         if (!cells?.length || !chunks?.length || !model || !info) return;
         frameStats.foliageCells += cells.length;
@@ -1412,6 +1476,7 @@ export class FoliagePasses {
      * frame can never repack a segment the main view's draws were recorded against.
      */
     public colourChunks(layer: FoliageLayer, slot: number): FoliageBatch[] | undefined {
+        if (this._view.preview) return this._previewBatches.get(layer)?.[slot];
         return layer.gpuCulled ? layer.gpuBatches[slot] : layer.batches[slot];
     }
 }

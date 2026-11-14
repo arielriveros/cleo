@@ -414,6 +414,23 @@ export class CleoEngine {
 
   public get scene(): Scene { return this._scene; }
   public get viewport(): HTMLElement { return this._viewport; }
+
+  /**
+   * Where the view the editor works through sits on screen, in client (CSS) pixels: the editing pane of a
+   * split viewport (`Renderer.setViewLayout`), else the whole viewport element. Pointer tools turn a mouse
+   * position into a ray against this rectangle and `scene.activeCamera`, so they work in whichever pane
+   * is being edited.
+   */
+  public viewRect(): DOMRect {
+    const pane = this._renderer.editingPaneRect;
+    if (!pane) return this._viewport ? this._viewport.getBoundingClientRect() : new DOMRect();
+    const canvas = this._renderer.canvas;
+    const box = canvas.getBoundingClientRect();
+    // Canvas pixels are CSS pixels as the renderer sizes them; scaled anyway, in case a host styles it.
+    const sx = canvas.width > 0 ? box.width / canvas.width : 1;
+    const sy = canvas.height > 0 ? box.height / canvas.height : 1;
+    return new DOMRect(box.left + pane.x * sx, box.top + pane.y * sy, pane.w * sx, pane.h * sy);
+  }
   public get renderer(): Renderer { return this._renderer; }
   /** The action-mapping input system: `engine.input.pressed('Jump')`, map enable/disable, rebinding. */
   public get input(): InputSystem { return InputSystem.instance; }

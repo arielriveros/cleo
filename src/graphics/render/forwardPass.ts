@@ -184,7 +184,8 @@ export class ForwardPass {
         // geometry (the shader reads the G-buffer depth to bound each ray — this runs before
         // copySceneDepth below, so the blitted copy does not exist yet).
         // Not while the clouds are drawn from the sky bake: they are already in the sky above.
-        if (!this._host.thumbnailMode && !this._sky.cloudSkyActive(scene) && this._passes.beginPass('clouds'))
+        // Nor in a preview pane: the raymarch reconstructs over frames, and a preview keeps no history.
+        if (!this._host.thumbnailMode && !this._view.preview && !this._sky.cloudSkyActive(scene) && this._passes.beginPass('clouds'))
             this._clouds.renderVolumetricClouds(scene);
 
         // Opaque Default (Blinn-Phong) models: forward-lit and depth-written, so they occlude correctly
@@ -229,7 +230,7 @@ export class ForwardPass {
 
         // Smoke-and-fire volumes, over the resolved image like the transparents (a volume has no velocity
         // and animates every frame, so TAA history would only smear it), occluded by the depth snapshot.
-        if (!this._host.thumbnailMode && scene.fluidVolumes.size > 0 && this._passes.beginPass('fluidVolumes'))
+        if (!this._host.thumbnailMode && scene.fluidVolumes.size > 0 && !this._view.preview && this._passes.beginPass('fluidVolumes'))
             this._fluids.renderFluidVolumes(scene);
 
         // Transparent models: back-to-front, depth-tested against opaque, no depth writes. Thumbnails

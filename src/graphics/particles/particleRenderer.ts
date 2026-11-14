@@ -179,6 +179,12 @@ export interface ParticleDrawFrame {
      * that cube is linear HDR (a probe capture) or sRGB. Null, or absent: the ambient as an even sky.
      */
     environment?: (position: vec3) => { cube: Texture; linear: boolean } | null;
+    /**
+     * Whether this draw decides what the systems DO: pauses the ones out of view (`offscreen`) and picks
+     * their distance LOD. Default true. A preview pane of the editor (Renderer `_renderPreviews`) draws the
+     * same systems through another camera and must leave both as the editing view set them.
+     */
+    measure?: boolean;
 }
 
 /** `u_surface.w` bits: the SURFACE_* constants in chunks/particleDraw.wgsl. */
@@ -1123,9 +1129,11 @@ export class ParticleRenderer {
             let inView = node.visible;
             if (inView && frame.visible) inView = frame.visible(box.min, box.max);
             if (inView && frame.hidden) inView = !frame.hidden(node);
-            node.offscreen = !inView;
-            // Distance LOD, for every system in or out of view: a culled one must be measured to come back.
-            ParticleRenderer._updateLod(node, box, frame);
+            if (frame.measure !== false) {
+                node.offscreen = !inView;
+                // Distance LOD, for every system in or out of view: a culled one must be measured to come back.
+                ParticleRenderer._updateLod(node, box, frame);
+            }
             if (node.lod.culled) { frameStats.particleSystemsLodCulled++; continue; }
             if (node.lod.level > 0) frameStats.particleSystemsLodReduced++;
             if (!inView || !node.isAlive) continue;

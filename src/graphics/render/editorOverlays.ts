@@ -154,8 +154,9 @@ export class EditorOverlays {
      * The shader encodes to sRGB and nothing else. No exposure, no tone curve, no LUT: see the note
      * at the graph node in `_buildPostGraph`.
      */
-    public overlayCompositePass(): void {
-        const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'overlay.composite', false);
+    public overlayCompositePass(target?: RenderTarget): void {
+        // Into the canvas, or a preview pane's own image (Renderer `_renderPreviews`).
+        const pass = this._passes.beginFullscreenPass(target ?? this._passes.screenTarget(), 'overlay.composite', false);
         this._fullscreen.bind(pass, 'overlayComposite', OverlayCompositeProgram, [this._targets.overlay.colors[0]], OVERLAY_COMPOSITE_BLEND);
         this._passes.drawFullscreenAndEnd(pass);
     }
@@ -343,13 +344,17 @@ export class EditorOverlays {
                 }
             }
 
-            // Gizmos on top (also draws the editor skeleton overlay when set).
-            if ((gizmoNodes.length > 0 || this.skeletonOverlay) && this._passes.beginPass('gizmos'))
-                this._renderGizmos(gizmoNodes);
+            // Gizmos on top (also draws the editor skeleton overlay when set). Not a preview pane's: its
+            // handles are sized for the editing view's camera, and only that view edits.
+            const gizmos = this._view.preview ? EditorOverlays._NO_GIZMOS : gizmoNodes;
+            if ((gizmos.length > 0 || this.skeletonOverlay) && this._passes.beginPass('gizmos'))
+                this._renderGizmos(gizmos);
         } finally {
             this._view.drawPreExposure = sceneDrawPreExposure;
         }
     }
+
+    private static readonly _NO_GIZMOS: ModelNode[] = [];
 
     /** The GI Volumes whose probes show: all of them with the menu's switch on, else the selected one. */
     private _giProbeVolumes(scene: Scene): GIVolumeNode[] {

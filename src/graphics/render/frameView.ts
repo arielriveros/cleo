@@ -16,6 +16,13 @@ export interface FrameView {
     frameIndex: number;
     /** True while a light-probe capture renders its cube faces (Renderer.captureProbe). */
     capturing: boolean;
+    /**
+     * True while a PREVIEW pane of a split viewport renders (render/viewLayout.ts, Renderer
+     * `_renderPreviews`): another camera onto the same scene, after the editing view, in the same frame. A
+     * preview reads no temporal history and writes none, meters nothing and measures nothing — every
+     * subsystem that keeps per-camera state checks this and leaves the editing view's state alone.
+     */
+    preview: boolean;
     // True only while the probe capture renders into cube faces. Inverting Y reverses triangle winding,
     // so `_pipelineFor` must flip `frontFace` too or every solid renders inside out.
     cubeFace: boolean;
@@ -108,6 +115,7 @@ export function createFrameView(): FrameView {
         camera: undefined as unknown as Camera,
         frameIndex: 0,
         capturing: false,
+        preview: false,
         cubeFace: false,
         taaJitterActive: false,
         movieJitter: null,
