@@ -101,7 +101,7 @@ function foliageObstaclesOf(node: LandscapeNode, volume: mat4 | null): NavObstac
  * the old form keeps its node's variables.
  */
 function isNavObstacle(collider: ColliderNode): boolean {
-  if (collider.mass > 0 || collider.simulatePhysics === false) return false
+  if (collider.isDynamic || collider.simulatePhysics === false) return false
   if (collider.getVariable('navObstacle') === false) return false
   return !collider.children.some(c => c.getVariable('navObstacle') === false)
 }

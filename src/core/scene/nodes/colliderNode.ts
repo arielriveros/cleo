@@ -61,6 +61,12 @@ export class ColliderNode extends Node {
     public mask: number = ALL_LAYERS;
     public shapes: ColliderShape[] = [];
 
+    /**
+     * Whether it falls and gets pushed (it has mass), as authored: the same answer while the scene is being
+     * edited (no body) as while it runs. The live body is {@link body}.
+     */
+    public get isDynamic(): boolean { return this.mass > 0; }
+
     constructor(name: string, id: string = uuidv4()) {
         super(name, 'collider', id);
         this.wantsPhysicsBuild = true;

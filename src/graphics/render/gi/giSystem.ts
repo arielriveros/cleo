@@ -35,6 +35,7 @@ import {
     giReduceSubSamples, gridCoords, hitCacheSize, tileSolidAngles, type GiAtlasLayout,
 } from './giLayout';
 import { GI_PROBE_ACTIVE, GI_PROBE_PENDING, GI_PROBE_SKIPPED, GI_PROBE_UNCAPTURED, classifyHitRows, isUnderground } from './giClassify';
+import { giMoves } from './giMotion';
 import { ModelDraw } from '../modelDraw';
 import {
     GI_AMBIENT_CUBE_FLOATS, MAX_GI_VOLUMES, giAmbientAt, giLightingAt, orderGiVolumes, type GiVolumeCpu,
@@ -452,24 +453,14 @@ export class GiSystem {
     }
 
     /**
-     * Whether something moves `node` at runtime, so a capture leaves it out (it would be baked where it
-     * happened to be): a script updating it or an ancestor (the windmill's sails), or a dynamic body.
-     *
-     * `linked` (the signature) asks of what is AUTHORED instead: any node a script asset is linked to
-     * (`__scriptId`, set at parse), whether or not its script has been compiled and attached yet. A load's
-     * signature is taken in its first frames and an export's long after, so only that answer is the same
-     * at both; a scripted node that never moves (the skull cave's entrance) is still captured, it just
-     * does not make a bake stale. Cached per batch.
+     * Whether something moves `node` at runtime, so a capture leaves it out; `linked` for the signature,
+     * which must give the same answer in Edit as in Play. The rules are {@link giMoves}'s. Cached per batch.
      */
     private _moves(node: ModelNode, linked: boolean = false): boolean {
         const cache = linked ? this._linked : this._moving;
         let known = cache.get(node);
         if (known !== undefined) return known;
-        known = false;
-        for (let p: any = node; p; p = p.parent) {
-            if (Object.prototype.hasOwnProperty.call(p, 'onUpdate') || (p.body && p.body.isDynamic)
-                || (linked && typeof p.getVariable === 'function' && p.getVariable('__scriptId') != null)) { known = true; break; }
-        }
+        known = giMoves(node, linked);
         cache.set(node, known);
         return known;
     }

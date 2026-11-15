@@ -890,6 +890,10 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   played an empty scene called "Scene", and during a scene switch it played the scene being left. Play,
   Simulate and Restart now wait until the project, the scene or the import has opened, and their tooltips
   say what they are waiting for.
+- **The Valley's Hamlet GI no longer captures again on every Play.** A GI bake's geometry signature asked a
+  Collider's live body whether it moves, and the editor's scene has none, so the pond's floating crates were
+  in a bake made in Edit and out of the scene in Play. A dynamic Collider (mass above 0) and everything under it
+  now count as moving in both, and the Hamlet GI is re-baked.
 - **Published games keep their retarget corrections.** The packer dropped the rig retarget corrections the
   player reads, so every published character played its corrected clips uncorrected.
 - **Examples open in the desktop app.** Its file server failed on a file that is not there instead of
