@@ -7,9 +7,8 @@ import { MAX_TERRAIN_SURFACES } from './terrainLayers';
 import type { TerrainSurfaceData } from './terrainLayers';
 import { clamp01, finiteOr } from '../core/math';
 
-/** The layer-texture sizes a project may choose, smallest first. */
-export const TERRAIN_LAYER_TEXTURE_SIZES = [512, 1024, 2048] as const;
-export const DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE = 1024;
+import { DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from './terrainLayerSizes';
+export { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from './terrainLayerSizes';
 
 /**
  * The albedo pack of one surface: rgb = albedo (white where there is none, so the tint alone shows).

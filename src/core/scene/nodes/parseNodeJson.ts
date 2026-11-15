@@ -6,7 +6,6 @@ import { CameraRigNode } from "./cameraRigNode";
 import { CharacterNode } from "./characterNode";
 import { ControllerNode } from "./controllerNode";
 import { NavMeshNode } from "./navMeshNode";
-import { LandscapeNode } from "./landscapeNode";
 import { LightNode } from "./lightNode";
 import { LightProbeNode } from "./lightProbeNode";
 import { SkyboxNode } from "./skyboxNode";
@@ -49,7 +48,6 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'sprite': SpriteNode.parse(parent, json); break;
     case 'animatedSprite': AnimatedSpriteNode.parse(parent, json); break;
     case 'sound': SoundNode.parse(parent, json); break;
-    case 'landscape': LandscapeNode.parse(parent, json); break;
     case 'skyAtmosphere': SkyAtmosphereNode.parse(parent, json); break;
     case 'skyLight': SkyLightNode.parse(parent, json); break;
     case 'wind': WindNode.parse(parent, json); break;

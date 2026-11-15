@@ -11,6 +11,7 @@ import type { GiSystem } from './gi/giSystem';
 import { GI_TIERS } from './gi/giSettings';
 import type { VolumetricFogPasses } from './volumetricFog';
 import type { ParticlePasses } from './particlePasses';
+import type { FoliagePasses } from './foliage';
 import { TemporalHistory } from './temporalHistory';
 
 /** A screen-sized target matched to the render resolution, made on first use. */
@@ -28,6 +29,7 @@ export const RENDER_FACTORY = {
     gi: 'render.gi',
     volumetricFog: 'render.volumetricFog',
     particles: 'render.particles',
+    foliage: 'render.foliage',
 } as const;
 
 // --- Decals (feature `decals`) ------------------------------------------------------------------------------------
@@ -123,5 +125,32 @@ export function createNullParticles(): ParticleSubsystem {
         particleLodDistanceScale: 1, precipitationDensity: 1,
         simulateParticles() {}, renderParticles() {}, isFlatParticleScene: () => false, draw2D() {},
         rememberCollisionCamera() {}, invalidateCollision() {},
+    };
+}
+
+// --- Landscape foliage (feature `landscape`) --------------------------------------------------------------------
+
+/** The `u_lodCamera` of a draw with no distance LOD (the geometry pass's ordinary models). */
+export const FOLIAGE_LOD_OFF: readonly number[] = [0, 0, 0, 0];
+
+/**
+ * What the renderer and its passes use of the landscape's foliage passes (render/foliage.ts): upload, culling,
+ * shadows, GI capture, the debug views and the weather's droop, and the foliage render settings.
+ */
+export type FoliageSubsystem = Pick<FoliagePasses,
+    'foliageShadowDistance' | 'foliagePrepass' | 'foliageGpuCulling' | 'foliageCullDistance' | 'foliageCellSize' |
+    'foliageAdmitPerFrame' | 'foliageDensityFalloff' | 'gpuCullingSupported' | 'weatherHash' | 'snowColor' |
+    'ensureFoliageUploaded' | 'preparePreview' | 'updateInteraction' | 'foliagePass' | 'prepareFoliageShadow' |
+    'foliageShadowPass' | 'prepareCapture' | 'drawCapture' | 'cellCullReasons' | 'colourChunks' | 'recordFoliageDraw'>;
+
+/** With FoliagePasses' defaults (terrain/foliage.ts FOLIAGE_DENSITY_FALLOFF is 0.75), so the settings read the same. */
+export function createNullFoliage(): FoliageSubsystem {
+    return {
+        foliageShadowDistance: 0, foliagePrepass: false, foliageGpuCulling: true, foliageCullDistance: 65,
+        foliageCellSize: 13, foliageAdmitPerFrame: 4, foliageDensityFalloff: 0.75, gpuCullingSupported: false,
+        weatherHash: 0, snowColor: [0.9, 0.9, 0.9, 0.85],
+        ensureFoliageUploaded() {}, preparePreview() {}, updateInteraction() {}, foliagePass() {},
+        prepareFoliageShadow: () => 0, foliageShadowPass() {}, prepareCapture: () => false, drawCapture: () => 0,
+        cellCullReasons: () => null, colourChunks: () => undefined, recordFoliageDraw() {},
     };
 }

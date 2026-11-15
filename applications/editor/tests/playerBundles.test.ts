@@ -32,6 +32,7 @@ const FEATURE_ROOTS: Record<string, string[]> = {
   physics2d: ['src/physics2d/world2d.ts', 'src/core/scene/nodes/characterBody2DNode.ts'],
   particles: ['src/graphics/particles/particleRenderer.ts', 'src/graphics/render/particlePasses.ts', 'src/particles/particleRuntime.ts'],
   weather: ['src/core/scene/nodes/weatherNode.ts', 'src/core/scene/precipitationRig.ts'],
+  landscape: ['src/core/scene/nodes/landscapeNode.ts', 'src/terrain/terrain.ts', 'src/terrain/foliage.ts', 'src/graphics/render/foliage.ts'],
 };
 
 describe.skipIf(!built)('the published player build', () => {

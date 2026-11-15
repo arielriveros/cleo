@@ -10,7 +10,7 @@ import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 import { Scene } from '../src/core/scene/scene';
 import { createModuleImporter, resolveScriptModule } from '../src/core/scripting/scriptRuntime';
 import {
-    RENDER_FACTORY, createNullClouds, createNullDecals, createNullFluids, createNullFog, createNullGi, createNullParticles,
+    RENDER_FACTORY, createNullClouds, createNullDecals, createNullFluids, createNullFog, createNullGi, createNullParticles, createNullFoliage,
 } from '../src/graphics/render/featureSubsystems';
 
 // The engine's optional features (src/modules/<id>): what a published game built without one does in its place.
@@ -99,6 +99,9 @@ describe('the optional features', () => {
         expect(clouds.cloudHistory.targets).toEqual([]);
         expect(createNullDecals().surfaceDecals).toEqual([]);
         expect(createNullFluids().traceFBO).toBeNull();
+        const foliage = createNullFoliage();
+        foliage.foliageCullDistance = 120;
+        expect([foliage.foliageCullDistance, foliage.gpuCullingSupported, foliage.prepareCapture(new Scene(), 0, [0, 0, 0], null as any, 1, true)]).toEqual([120, false, false]);
         const particles = createNullParticles();
         particles.precipitationDensity = 0.5;
         expect([particles.precipitationDensity, particles.particleLodDistanceScale, particles.isFlatParticleScene(new Scene())]).toEqual([0.5, 1, false]);

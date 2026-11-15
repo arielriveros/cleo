@@ -12,7 +12,7 @@ import type { ProgramRegistry } from './programRegistry';
 import type { ObjectTable } from '../objectTable';
 import type { GiSubsystem } from './featureSubsystems';
 import type { WindClock } from './windClock';
-import type { FoliagePasses } from './foliage';
+import type { FoliageSubsystem } from './featureSubsystems';
 
 /**
  * The renderer's subsystems, for the ones that reach each other while drawing. Filled once, at the end of
@@ -39,7 +39,7 @@ export interface RenderSubsystems {
     /** GI Volumes: their capture, relight and apply (render/gi/giSystem.ts). */
     readonly gi: GiSubsystem;
     /** The landscape's plants, which a GI capture draws too. */
-    readonly foliage: FoliagePasses;
+    readonly foliage: FoliageSubsystem;
     /** The effects clock and the frame's wind field (render/windClock.ts). */
     readonly wind: WindClock;
 }

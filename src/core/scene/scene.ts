@@ -8,7 +8,7 @@ import { LodGroupNode } from "./nodes/lodGroupNode";
 import { CameraRigNode } from "./nodes/cameraRigNode";
 import { SoundNode } from "./nodes/soundNode";
 import { AudioManager } from "../../audio/audioManager";
-import { LandscapeNode } from "./nodes/landscapeNode";
+import type { LandscapeNode } from "./nodes/landscapeNode";
 import type { TilemapNode } from "./nodes/tilemapNode";
 import { LightNode } from "./nodes/lightNode";
 import { LightProbeNode } from "./nodes/lightProbeNode";
@@ -129,14 +129,12 @@ function kindsOf(ctor: Function): number {
     let mask = kindsByConstructor.get(ctor);
     if (mask !== undefined) return mask;
     kindTable ??= [
-        [K.LIGHT, LightNode], [K.MODEL, ModelNode], [K.SPRITE, SpriteNode], [K.LANDSCAPE, LandscapeNode],
+        [K.LIGHT, LightNode], [K.MODEL, ModelNode], [K.SPRITE, SpriteNode],
         [K.LOD_GROUP, LodGroupNode], [K.CAMERA_RIG, CameraRigNode],
         [K.CHARACTER, CharacterNode], [K.CONTROLLER, ControllerNode], [K.NAV_MESH, NavMeshNode],
-        
-        [K.EXPOSURE, ExposureVolumeNode],
-        [K.OCCLUSION, OcclusionVolumeNode], [K.SOUND, SoundNode],
+        [K.EXPOSURE, ExposureVolumeNode], [K.OCCLUSION, OcclusionVolumeNode], [K.SOUND, SoundNode],
         [K.PROBE, LightProbeNode], [K.SKYBOX, SkyboxNode],
-        [K.ATMOSPHERE, SkyAtmosphereNode], [K.SKY_LIGHT, SkyLightNode], [K.WIND, WindNode], 
+        [K.ATMOSPHERE, SkyAtmosphereNode], [K.SKY_LIGHT, SkyLightNode], [K.WIND, WindNode],
         [K.CAMERA, CameraNode], [K.UI_NODE, UINode], [K.UI_ROOT, UIRootNode],
         // The optional features' node classes, each in the list of its kind (src/core/features/registry.ts).
         ...featureNodeKinds().map(([cls, bit]) => [bit, cls] as [number, Function]),

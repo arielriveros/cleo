@@ -5,7 +5,7 @@
 // its chunks and the module worker load exactly as they do for a player of a published game -- and checks
 // that it reached a frame, ran on the backend and thread it asked for, and that its crate fell onto the floor.
 //
-//   node tools/playerSmoke.mjs [outDir]
+//   node tools/playerSmoke.mjs [outDir]          (SMOKE_ONLY=name,name runs only those cases)
 //
 // Prints what each game ships (files, bytes) beside the result; exits 1 if any case failed.
 import { spawn, spawnSync } from 'node:child_process';
@@ -24,7 +24,9 @@ const viteNode = path.join(root, 'node_modules/.bin', process.platform === 'win3
 const packed = spawnSync(viteNode, ['--config', 'applications/editor/vitest.config.ts', 'tools/playerSmoke/pack.ts', out],
   { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
 if (packed.status !== 0) process.exit(packed.status ?? 1);
-const cases = JSON.parse(readFileSync(path.join(out, '..', 'smoke-cases.json'), 'utf8'));
+// SMOKE_ONLY=jolt-webgpu,cannon-3d-preset runs just those cases.
+const only = process.env.SMOKE_ONLY ? new Set(process.env.SMOKE_ONLY.split(',')) : null;
+const cases = JSON.parse(readFileSync(path.join(out, '..', 'smoke-cases.json'), 'utf8')).filter(c => !only || only.has(c.name));
 
 // 2. Run each one and read its result over the DevTools protocol.
 const env = { ...process.env };
@@ -56,14 +58,16 @@ async function run(c, port) {
   const child = spawn(electron, [c.dir, `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`], { env, stdio: 'ignore' });
   try {
     const deadline = Date.now() + 180_000;
+    let last = null;
     while (Date.now() < deadline) {
       await sleep(500);
       let state;
       try {
-        state = await evaluate(port, `JSON.stringify({ smoke: window.CLEO_SMOKE ?? null, firstFrame: window.CLEO_FIRST_FRAME_MS ?? null, error: document.getElementById('cleo-error')?.textContent ?? null })`);
+        state = await evaluate(port, `JSON.stringify({ smoke: window.CLEO_SMOKE ?? null, firstFrame: window.CLEO_FIRST_FRAME_MS ?? null, error: document.getElementById('cleo-error')?.textContent ?? null, loading: document.getElementById('cleo-loading-text')?.textContent ?? null })`);
       } catch { continue; } // DevTools not up yet
       if (!state) continue;
       const s = JSON.parse(state);
+      last = s;
       if (s.error) return { ok: false, why: s.error.split('\n').slice(0, 4).join(' | ') };
       if (s.smoke) {
         const why = [];
@@ -77,7 +81,8 @@ async function run(c, port) {
         return { ok: why.length === 0, why: why.join('; '), ...s.smoke, firstFrame: s.firstFrame };
       }
     }
-    return { ok: false, why: 'timed out' };
+    // Where it stopped: before its first frame (and on which loading step), or after it, the probe never reporting.
+    return { ok: false, why: last ? `timed out (first frame ${last.firstFrame == null ? 'none' : Math.round(last.firstFrame) + ' ms'}, loading "${last.loading ?? ''}")` : 'timed out (no page)' };
   } finally {
     stop(child);
   }

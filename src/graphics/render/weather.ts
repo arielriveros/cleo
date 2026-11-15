@@ -6,9 +6,9 @@ import type { ShaderProgram } from '../rhi/shaderProgram';
 import type { FrameView } from './frameView';
 import type { ViewProjection } from './viewProjection';
 import type { ShadowPasses } from './shadows';
-import type { FoliagePasses } from './foliage';
 import type { Texture } from '../texture';
 import { emptyWeatherPack, gatherWeather, packWeather, shelterClearanceDepth, shelterFootprint, type ShelterFootprint, type WeatherPack } from './weatherPack';
+import type { FoliageSubsystem } from './featureSubsystems';
 
 /** Flat snow: what the weather draws without a snow material (linear albedo, roughness). */
 const FLAT_SNOW: readonly number[] = [0.9, 0.9, 0.9, 0.85];
@@ -43,7 +43,7 @@ export class WeatherPasses {
     constructor(private readonly _view: FrameView,
                 private readonly _projection: ViewProjection,
                 private readonly _shadows: ShadowPasses,
-                private readonly _foliage: FoliagePasses) {}
+                private readonly _foliage: FoliageSubsystem) {}
 
     /** The shelter map's footprint this frame, or null (no volume keeps shelter, or it is switched off). */
     public get footprint(): ShelterFootprint | null { return this._footprint; }

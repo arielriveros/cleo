@@ -33,9 +33,7 @@ import type { OcclusionVolumeNode } from '../core/scene/nodes/occlusionVolumeNod
 import { EXTRA_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
 import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
 import { cpuProfiler } from './cpuProfiler';
-import { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from '../terrain/terrainSurfaceArrays';
-import { FoliageGpuCuller } from './foliageGpuCulling';
-import { gatherFoliageInteractors } from './foliageInteraction';
+import { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from '../terrain/terrainLayerSizes';
 
 import { ScreenProgram } from './render/programs';
 import { createFrameView, type FrameView } from './render/frameView';
@@ -53,13 +51,13 @@ import { AutoExposure } from './render/autoExposure';
 import { PostEffects } from './render/postEffects';
 import type { VolumetricCloudPasses } from './render/clouds';
 import type { DecalPasses } from './render/decals';
-import { createNullClouds, createNullDecals, createNullFluids, createNullFog, createNullGi, createNullParticles, RENDER_FACTORY } from './render/featureSubsystems';
-import type { CloudSubsystem, DecalSubsystem, FluidSubsystem, FogSubsystem, GiSubsystem, ParticleSubsystem } from './render/featureSubsystems';
+import { createNullClouds, createNullDecals, createNullFluids, createNullFog, createNullFoliage, createNullGi, createNullParticles, RENDER_FACTORY } from './render/featureSubsystems';
+import type { CloudSubsystem, DecalSubsystem, FluidSubsystem, FogSubsystem, FoliageSubsystem, GiSubsystem, ParticleSubsystem } from './render/featureSubsystems';
 import { featureFactory } from '../core/features/registry';
 import type { FluidVolumePasses } from './render/fluids';
 import type { ParticlePasses } from './render/particlePasses';
 import { Sprite2DPasses } from './render/sprites2d';
-import { FoliagePasses } from './render/foliage';
+import type { FoliagePasses } from './render/foliage';
 import { WindClock } from './render/windClock';
 import { ShadowPasses } from './render/shadows';
 import { Visibility } from './render/visibility';
@@ -186,7 +184,7 @@ export class Renderer {
     /** Sprites, tilemap chunks and the Y-sorted 2D pass (render/sprites2d.ts). */
     private readonly _sprites: Sprite2DPasses;
     /** Landscape foliage: upload, culling (CPU and GPU), wind, impostors, shadows and the colour pass (render/foliage.ts). */
-    private readonly _foliage: FoliagePasses;
+    private readonly _foliage: FoliageSubsystem;
     /** Shadow maps: casters, cascades and the far cascade, spot and point shadows, their uniforms (render/shadows.ts). */
     private readonly _shadows: ShadowPasses;
     /** What the view can see: frustum, CPU occluders and GPU occlusion queries, terrain and model LOD (render/visibility.ts). */
@@ -389,9 +387,10 @@ export class Renderer {
             get viewCssHeight() { return renderer._viewCssHeight; },
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._particlePasses, this._subsystems);
-        this._foliage = new FoliagePasses({
+        this._foliage = featureFactory<(...a: ConstructorParameters<typeof FoliagePasses>) => FoliagePasses>(RENDER_FACTORY.foliage)?.({
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._subsystems);
+        }, this._view, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._subsystems)
+            ?? createNullFoliage();
         this._shadows = new ShadowPasses({
             get deviceReady() { return renderer._deviceReady; },
             get renderHeight() { return renderer._renderHeight; },
@@ -848,7 +847,7 @@ export class Renderer {
         lightFlickerClock.time = this._view.windTime;
         // What is pushing foliage aside this frame (characters, moving bodies, blasts): stamps for the
         // instanced foliage programs, aged against the same clock as the wind.
-        this._foliage.foliageInteraction.update(gatherFoliageInteractors(scene), this._view.windTime, this._view.camera.position);
+        this._foliage.updateInteraction(scene);
 
         // Everything from here to the sky bake runs BEFORE `_statsT0`, so none of it is inside the
         // `Render (CPU)` figure the HUD shows — it lands in "Unattributed" instead. That exclusion is
@@ -2816,7 +2815,7 @@ export class Renderer {
     public get foliageGpuCulling(): boolean { return this._foliage.foliageGpuCulling; }
     public set foliageGpuCulling(on: boolean) { this._foliage.foliageGpuCulling = !!on; }
     /** Whether this device can cull foliage on the GPU at all (compute and indirect draws). */
-    public get foliageGpuCullingSupported(): boolean { return FoliageGpuCuller.supported; }
+    public get foliageGpuCullingSupported(): boolean { return this._foliage.gpuCullingSupported; }
     /** See RenderSettings.foliageShadowDistance. */
     public get foliageShadowDistance(): number { return this._foliage.foliageShadowDistance; }
     public set foliageShadowDistance(metres: number) {

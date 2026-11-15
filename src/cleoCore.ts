@@ -35,7 +35,6 @@ export type { Pawn } from "./core/scene/nodes/controllerNode";
 export type { BrainKind } from "./core/scene/nodes/controllerNode";
 export type { ControlSource, AimSource, BlackboardValue } from "./core/scene/nodes/controllerNode";
 export type { FollowSpace, AimMode } from "./core/scene/nodes/cameraRigNode";
-export { LandscapeNode } from "./core/scene/nodes/landscapeNode";
 export { ColliderNode, ALL_LAYERS } from "./core/scene/nodes/colliderNode";
 export type { ColliderShape } from "./core/scene/nodes/colliderNode";
 export { TriggerNode } from "./core/scene/nodes/triggerNode";
@@ -462,10 +461,6 @@ export type { PostChainEntry, PostEffectId, BuiltinEffectId } from "./graphics/r
 export { cpuProfiler } from "./graphics/cpuProfiler";
 export { convexHull, hullFromPositions, HULL_BUDGETS } from "./physics/convexHull";
 export type { Hull, HullQuality } from "./physics/convexHull";
-export { Terrain } from "./terrain/terrain";
-// Terrain layer relief is off; the editor hides its authoring controls behind the same flag so
-// nothing is exposed that does nothing. See the constant for why it is a flag and not a deletion.
-export { TERRAIN_RELIEF_ENABLED } from "./terrain/terrain";
 export { brushFalloffWeight, brushFalloffExponent } from "./terrain/brushFalloff";
 // The landscape layer stack: blend rules and their CPU evaluation, the stack itself, paint masks, the
 // sculpt tools and heightmap I/O. See terrain/terrainLayers.ts for the model.
@@ -474,27 +469,9 @@ export {
     slopeDegreesFromNormalY, surfaceAlpha, compositeWeights, ruleNoise,
 } from "./terrain/terrainLayers";
 export type { TerrainBlendRule, TerrainRuleRange, TerrainNoiseRule, TerrainFlatSurface, TerrainSurfaceData } from "./terrain/terrainLayers";
-export { TerrainLayerStack, defaultMaskResolution, materialSlots } from "./terrain/terrainLayerStack";
-export type { TerrainPaintLayer, TerrainBaseLayer, TerrainLayerWeights, StackLayersSnapshot } from "./terrain/terrainLayerStack";
-export { MaskGrid } from "./terrain/terrainMasks";
-export type { MaskRegion, MaskPatch, MaskPaint } from "./terrain/terrainMasks";
-export { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from "./terrain/terrainSurfaceArrays";
-export { applySculpt, brushWeight, curveWeight, readRegion, writeRegion, unionRegion, terraceHeight } from "./terrain/sculpt";
-export type { SculptTool, FalloffCurve, BrushShape, BrushSpec, SculptParams, GridRegion, HeightGrid, StampAlpha } from "./terrain/sculpt";
-export { decodeHeightmap, decodePng, decodeRaw16, encodePng16, encodeRaw16, heightsFromImage, imageFromHeights, sampleHeight } from "./terrain/heightmapIO";
-export type { HeightImage, HeightImportOptions } from "./terrain/heightmapIO";
-export { decodePngChannels, weightsToOverAlphas, weightPlanesToAlphaPlanes, readWorldManifest, weightPlanesFromImages, resamplePlane } from "./terrain/splatmapIO";
-export type { DecodedPng, WorldManifest, WorldManifestLayer } from "./terrain/splatmapIO";
-export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush, TerrainChunk, TerrainLodSettings, FoliageGenerateResult } from "./terrain/terrain";
-export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES, FOLIAGE_DRAW_TRIANGLE_BUDGET, foliageEffectiveCull, foliageLodBands, foliageDensityScale, FOLIAGE_DENSITY_STEPS } from "./terrain/foliage";
-export type { FoliageKind, FoliageParams } from "./terrain/foliage";
-export { FoliageInteraction, gatherFoliageInteractors, MAX_INTERACT_STAMPS, INTERACT_RANGE, type FoliageInteractor } from "./graphics/foliageInteraction";
-export { bakeOctahedralImpostor, rgbaSampler, impostorSphere } from "./terrain/octahedralBake";
-export type { OctahedralBakePart, OctahedralBakeOptions, OctahedralBakeResult } from "./terrain/octahedralBake";
-export { parseOctahedralInfo, OCTA_DEFAULT_FRAMES } from "./terrain/octahedralImpostor";
-export type { OctahedralImpostorInfo } from "./terrain/octahedralImpostor";
-export { FoliageColliderField, DEFAULT_FOLIAGE_COLLIDERS, foliageColliderPose } from "./terrain/foliageColliders";
-export type { FoliageColliderSettings } from "./terrain/foliageColliders";
+export { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from "./terrain/terrainLayerSizes";
+// Where a plant's collider sits on it: shared with the navmesh bake (AI), so it stays with the engine.
+export { foliageColliderPose } from "./terrain/foliageColliderPose";
 export { Tileset, MAX_TILESET_OVERDRIVE } from "./graphics/tilemap/tileset";
 export type { TilesetConfig, TileMeta, TileAnimation, TerrainSet, VariantSet, WangKind } from "./graphics/tilemap/tileset";
 export { Raycaster } from "./core/raycaster";

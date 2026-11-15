@@ -17,4 +17,5 @@ export const FEATURE_LOADERS: Readonly<Record<string, () => Promise<{ default: F
     physics2d: () => import("./physics2d/index"),
     particles: () => import("./particles/index"),
     weather: () => import("./weather/index"),
+    landscape: () => import("./landscape/index"),
 };

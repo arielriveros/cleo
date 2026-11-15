@@ -5,7 +5,7 @@ import { FOLIAGE_DENSITY_FALLOFF, collectOrphanedFoliageBuffers, collectOrphaned
 import type { FoliageCell, FoliageLayer, FoliageBand, FoliageBatch } from '../../terrain/foliage';
 import { FoliageGpuCuller } from '../foliageGpuCulling';
 import type { GpuCullBucket, GpuFoliageSegment } from '../foliageGpuCulling';
-import { FoliageInteraction } from '../foliageInteraction';
+import { FoliageInteraction, gatherFoliageInteractors } from '../foliageInteraction';
 import { isFoliageMaterial, Material } from '../material';
 import { Mesh } from '../mesh';
 import { Model } from '../model';
@@ -31,6 +31,7 @@ import { CULL_OCCLUDED, CULL_OUTSIDE } from './cullGhosts';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
+import { FOLIAGE_LOD_OFF } from './featureSubsystems';
 
 /** A foliage layer's cells bucketed on the ground plane, for the shadow pass's range query. */
 export interface FoliageCellGrid {
@@ -853,6 +854,14 @@ export class FoliagePasses {
     /** This frame's foliage interaction stamps (graphics/foliageInteraction.ts). */
     public readonly foliageInteraction = new FoliageInteraction();
 
+    /** Gather this frame's interactors (characters, bodies moving through the plants) and stamp them. */
+    public updateInteraction(scene: Scene): void {
+        this.foliageInteraction.update(gatherFoliageInteractors(scene), this._view.windTime, this._view.camera.position);
+    }
+
+    /** Whether this device can cull foliage on the GPU (compute and indirect draws). */
+    public get gpuCullingSupported(): boolean { return FoliageGpuCuller.supported; }
+
     /** A layer prototype's [base height, plant height] in object space, keyed on its first model. */
     private readonly _windShapes = new WeakMap<Model, [number, number, number]>();
 
@@ -1343,7 +1352,8 @@ export class FoliagePasses {
     }
 
     private readonly _impostorVec: [number[], number[]] = [[0, 0, 0, 0], [0, 0, 0, 0]];
-    public static readonly LOD_OFF = [0, 0, 0, 0];
+    /** No distance LOD (render/featureSubsystems.ts `FOLIAGE_LOD_OFF`, which the geometry pass uses). */
+    public static readonly LOD_OFF = FOLIAGE_LOD_OFF;
 
     /**
      * Merge a draw bucket's visible cells into ONE instance buffer, and return it ready to draw.
