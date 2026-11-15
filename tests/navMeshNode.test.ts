@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     NavMeshNode, parseBakedVolume, parseLinks, parseRoutes, parseSize,
 } from '../src/core/scene/nodes/navMeshNode';
+import './helpers/features';
 import { Node } from '../src/core/scene/nodes/node';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 import { bakeNavMesh } from '../src/ai/navBake';

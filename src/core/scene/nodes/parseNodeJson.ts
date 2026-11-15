@@ -5,7 +5,6 @@ import { LodGroupNode } from "./lodGroupNode";
 import { CameraRigNode } from "./cameraRigNode";
 import { CharacterNode } from "./characterNode";
 import { ControllerNode } from "./controllerNode";
-import { NavMeshNode } from "./navMeshNode";
 import { LightNode } from "./lightNode";
 import { LightProbeNode } from "./lightProbeNode";
 import { SkyboxNode } from "./skyboxNode";
@@ -54,7 +53,6 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'cameraRig': CameraRigNode.parse(parent, json); break;
     case 'character': CharacterNode.parse(parent, json); break;
     case 'controller': ControllerNode.parse(parent, json); break;
-    case 'navMesh': NavMeshNode.parse(parent, json); break;
     case 'exposureVolume': ExposureVolumeNode.parse(parent, json); break;
     case 'collider': ColliderNode.parse(parent, json); break;
     case 'trigger': TriggerNode.parse(parent, json); break;

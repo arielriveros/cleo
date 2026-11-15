@@ -20,6 +20,7 @@ const DEEP_FEATURE_MODULES: Record<string, string[]> = {
     weather: ['particles/precipitation.ts'],
     landscape: ['terrain/terrainSurfaceArrays.ts', 'graphics/foliageGpuCulling.ts', 'terrain/terrainLayerStack.ts', 'graphics/render/foliage.ts'],
     gameUi: ['core/uiLayout.ts', 'core/scene/nodes/ui/uiContent.ts'],
+    ai: ['ai/yuka.ts', 'ai/navBake.ts', 'ai/interop.ts', 'ai/navGraph2D.ts'],
 };
 
 // A published game runs on src/cleoCore.ts, the engine without the editor's tools: the model importers
@@ -52,7 +53,8 @@ function reach(entry: string): Set<string> {
             ...[...text.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g)].map(m => m[1]),
         ];
         for (const spec of specs) {
-            if (spec === 'sucrase' || spec === 'meshoptimizer') seen.add(`package:${spec}`);
+            // Packages the runtime must not carry: the editor's tools', and the AI feature's yuka.
+            if (spec === 'sucrase' || spec === 'meshoptimizer' || spec === 'yuka') seen.add(`package:${spec}`);
             const next = resolve(file, spec);
             if (next) visit(next);
         }

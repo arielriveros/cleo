@@ -19,4 +19,5 @@ export const FEATURE_LOADERS: Readonly<Record<string, () => Promise<{ default: F
     weather: () => import("./weather/index"),
     landscape: () => import("./landscape/index"),
     gameUi: () => import("./gameUi/index"),
+    ai: () => import("./ai/index"),
 };

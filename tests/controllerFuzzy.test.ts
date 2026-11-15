@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import './helpers/features';
 import { Scene } from '../src/core/scene/scene';
 import { CharacterNode } from '../src/core/scene/nodes/characterNode';
 import { ControllerNode } from '../src/core/scene/nodes/controllerNode';

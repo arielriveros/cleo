@@ -30,7 +30,8 @@ import {
     markRepathed, remainingDistance, repathPolicy, setNavPath, shouldRepath,
 } from "../../../ai/navPath";
 import type { NavPath, RepathPolicy, RepathState } from "../../../ai/navPath";
-import { Perception, perceptionTuning } from "../../../ai/perception";
+import type { Perception } from "../../../ai/perception";
+import { perceptionTuning } from "../../../ai/perceptionTuning";
 import {
     AXIS_Y, AXIS_Z, angleToTarget2D, facingYaw2D, fanProbes2D, paceDirection, probeLedge2D, probeWall2D, wallHeight2D,
 } from "../../control/control2D";
@@ -39,13 +40,17 @@ import { intentFromDesired2D } from "../../control/steering";
 import { createFollow2DOut, createFollow2DState, followPath2D, navAgent2D } from "../../../ai/navFollow2D";
 import type { Follow2DOut, Follow2DState, NavAgent2D } from "../../../ai/navFollow2D";
 import { raiseRequest } from "../../control/intent";
-import { yawFromDirection } from "../../../ai/interop";
-import type { LineOfSightTest, PerceptionCandidate, PerceptionTuning } from "../../../ai/perception";
-import { EMPTY_FUZZY_MODEL, FuzzyBrain, isDefaultFuzzyModel, parseFuzzyModel } from "../../../ai/fuzzy";
-import { EMPTY_GOAL_GRAPH, GoalBrain, isDefaultGoalGraph, parseGoalGraph } from "../../../ai/goals";
-import type { GoalContext, GoalGraph } from "../../../ai/goals";
+import { yawFromDirection } from "../../math";
+import type { LineOfSightTest, PerceptionCandidate } from "../../../ai/perception";
+import type { PerceptionTuning } from "../../../ai/perceptionTuning";
+import type { FuzzyBrain } from "../../../ai/fuzzy";
+import { EMPTY_FUZZY_MODEL, isDefaultFuzzyModel, parseFuzzyModel } from "../../../ai/fuzzyModel";
+import type { GoalBrain } from "../../../ai/goals";
+import { EMPTY_GOAL_GRAPH, isDefaultGoalGraph, parseGoalGraph } from "../../../ai/goalGraph";
+import type { GoalContext, GoalGraph } from "../../../ai/goalGraph";
 import { conditionNodeMet } from "../../conditions";
-import type { FuzzyModel } from "../../../ai/fuzzy";
+import type { FuzzyModel } from "../../../ai/fuzzyModel";
+import { featureFactory } from "../../features/registry";
 import { aiStats } from "../../../ai/aiStats";
 import { vec3 } from "gl-matrix";
 import { isCharacterBody2D } from "./nodeType";
@@ -305,7 +310,16 @@ export class ControllerNode extends Node {
     private _steerTarget: Node | null = null;
     private _routeIndex: number = 0;
     private readonly _pathScratch: vec3[] = [];
-    private readonly _perception = new Perception();
+    /**
+     * The eyes and memory (ai/perception.ts, on yuka: the AI feature's), made when first looked through. A game
+     * built without AI has none: nothing is seen and nothing remembered, so AI-driven controllers stand idle.
+     */
+    private _perceptionRuntime: Perception | null | undefined = undefined;
+    private get _perception(): Perception | null {
+        if (this._perceptionRuntime === undefined)
+            this._perceptionRuntime = featureFactory<() => Perception>('ai.perception')?.() ?? null;
+        return this._perceptionRuntime;
+    }
     private readonly _candidates: PerceptionCandidate[] = [];
     private readonly _rayHit: vec3 = vec3.create();
     private readonly _eye: vec3 = vec3.create();
@@ -622,7 +636,7 @@ export class ControllerNode extends Node {
         // relative to the body and reads 0 while standing still -- a guard's cone would then be pinned
         // to world +Z no matter which way it was turned.
         const forward = pawn.worldForward;
-        this._perception.step(
+        this._perception?.step(
             this._eye, yawFromDirection(forward[0], forward[2]),
             this._candidates, this.perception, delta,
             this._scene?.physics ? this._lineOfSight : null);
@@ -654,7 +668,7 @@ export class ControllerNode extends Node {
         }
         const feet = pawn.worldPosition;
         vec3.set(this._eye, feet[0], feet[1] + this.eyeHeight, 0);
-        this._perception.step(this._eye, facingYaw2D(pawn.facing), this._candidates, this.perception, delta,
+        this._perception?.step(this._eye, facingYaw2D(pawn.facing), this._candidates, this.perception, delta,
             this._scene?.physics2D ? this._lineOfSight2D : null, 'xy');
         if (this.autoAcquire) this._acquire(pawn);
     }
@@ -691,7 +705,7 @@ export class ControllerNode extends Node {
     private _acquire(pawn: Pawn): void {
         let bestId: string | null = null;
         let bestDistance = Infinity;
-        for (const sighting of this._perception.sightings) {
+        for (const sighting of this._perception?.sightings ?? []) {
             if (!sighting.noticed) continue;
             const target = this._scene?.getNodeById(sighting.id);
             if (!target) continue;
@@ -702,7 +716,7 @@ export class ControllerNode extends Node {
         if (bestId) { this.setBlackboard(this.targetKey, bestId); return; }
 
         const current = this._blackboard.get(this.targetKey);
-        if (typeof current === 'string' && current && !this._perception.remembers(current, this.perception)) {
+        if (typeof current === 'string' && current && !this._perception?.remembers(current, this.perception)) {
             this.setBlackboard(this.targetKey, undefined);
         }
     }
@@ -734,13 +748,13 @@ export class ControllerNode extends Node {
     }
 
     /** What this controller can see right now, for `onThink` and the editor readout. */
-    public get sightings() { return this._perception.sightings; }
+    public get sightings() { return this._perception?.sightings ?? []; }
 
     /** Where the current target was last seen, or null. Backs the `investigate` goal. */
     public get lastKnownPosition(): vec3 | null {
         const id = this._blackboard.get(this.targetKey);
         if (typeof id !== 'string' || !id) return null;
-        const sighting = this._perception.sightingOf(id);
+        const sighting = this._perception?.sightingOf(id) ?? null;
         return sighting && Number.isFinite(sighting.timeSinceSeen) ? sighting.lastKnownPosition : null;
     }
 
@@ -1292,7 +1306,9 @@ export class ControllerNode extends Node {
     } | null {
         if (this.goals !== this._goalSource) {
             this._goalSource = this.goals;
-            this._goalBrain = isDefaultGoalGraph(this.goals) ? null : GoalBrain.from(this.goals);
+            // Built by the AI feature (ai/goals.ts, on yuka); none in a game built without it.
+            this._goalBrain = isDefaultGoalGraph(this.goals) ? null
+                : featureFactory<(graph: GoalGraph) => GoalBrain>('ai.goalBrain')?.(this.goals) ?? null;
         }
         const brain = this._goalBrain;
         if (!brain) return null;
@@ -1349,7 +1365,9 @@ export class ControllerNode extends Node {
     private _refreshFuzzy(pawn: Pawn): void {
         if (this.fuzzy !== this._fuzzySource) {
             this._fuzzySource = this.fuzzy;
-            this._fuzzyBrain = isDefaultFuzzyModel(this.fuzzy) ? null : FuzzyBrain.from(this.fuzzy);
+            // Built by the AI feature (ai/fuzzy.ts, on yuka); none in a game built without it.
+            this._fuzzyBrain = isDefaultFuzzyModel(this.fuzzy) ? null
+                : featureFactory<(model: FuzzyModel) => FuzzyBrain>('ai.fuzzyBrain')?.(this.fuzzy) ?? null;
             this._fuzzyOutputs = {};
         }
         const brain = this._fuzzyBrain;
@@ -1455,7 +1473,7 @@ export class ControllerNode extends Node {
         // names rather than about whatever happens to be visible.
         const seenId = this._blackboard.get(this.targetKey);
         const sighting = typeof seenId === 'string' && seenId
-            ? this._perception.sightingOf(seenId) : null;
+            ? this._perception?.sightingOf(seenId) ?? null : null;
         if (name === 'targetInSight') return sighting?.noticed === true;
         if (name === 'timeSinceSeen') return sighting ? sighting.timeSinceSeen : Infinity;
         if (name === 'lastKnownDistance') {
@@ -1687,7 +1705,7 @@ export class ControllerNode extends Node {
         // A respawned brain starts from its entry state rather than resuming mid-chase -- and must not
         // remember where it last saw you either.
         this._behaviorRuntime = createBehaviorRuntime();
-        this._perception.clear();
+        this._perceptionRuntime?.clear();
         this._goalBrain?.clear();
         clearNavPath(this._path);
     }

@@ -4,10 +4,11 @@ Project ▸ Features chooses which of the engine's optional features this projec
 2D game can leave out the landscape and global illumination; a cinematic that plays itself can leave out
 input and game UI. A published game then carries less engine: fewer shaders, no data for what was left out
 and less code. Global illumination, volumetric fog and clouds, decals, landscape, water, particles, fire and
-smoke, weather, cloth, cinematics, game UI (with the React layer that draws it), the 2D world and 2D physics are
-each a part of the player of their own, and a game ships only those it was built with; so do the physics
-backends. In a game built without 2D physics,
-`scene.physics2D` is null; without weather, nothing falls from `scene.precipitation`.
+smoke, weather, cloth, cinematics, game UI (with the React layer that draws it), AI navigation (with the yuka
+library its navmeshes and brains run on), the 2D world and 2D physics are each a part of the player of their
+own, and a game ships only those it was built with; so do the physics backends. In a game built without 2D
+physics, `scene.physics2D` is null; without weather, nothing falls from `scene.precipitation`; without AI
+navigation, an AI-driven controller sees nothing and its fuzzy and goal brains do not run (its data is kept).
 
 The choice is the project's: it is saved in its Project Settings and travels with its bundle. The editor
 itself keeps everything, so a feature left out still works while you edit; what changes is what you are

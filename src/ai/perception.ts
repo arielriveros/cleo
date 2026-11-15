@@ -47,44 +47,9 @@ import { clamp, DEG2RAD, finiteOr } from "../core/math";
 import { GameEntity, MemorySystem, Vector3, Vision } from "./yuka";
 import { toYuka, yawToYukaRotation } from "./interop";
 import type { Vec3Like } from "./interop";
-
-export interface PerceptionTuning {
-    /** Full cone width in DEGREES. 360 sees everything within range. */
-    fieldOfView: number;
-    /** How far the agent can see, in world units. */
-    range: number;
-    /**
-     * Seconds a target stays remembered after it was last seen. This is what makes an agent walk to
-     * where you were rather than forgetting you the instant you break line of sight.
-     */
-    memorySpan: number;
-    /**
-     * Seconds of continuous visibility before a target counts as NOTICED.
-     *
-     * Without it an agent reacts on the exact frame a pixel of you clears a doorway, which reads as
-     * clairvoyance. Backed by Yuka's `timeBecameVisible`, which exists for this.
-     */
-    reactionTime: number;
-}
-
-export const PERCEPTION_DEFAULTS: PerceptionTuning = {
-    fieldOfView: 120,
-    range: 20,
-    memorySpan: 5,
-    reactionTime: 0.25,
-};
-
-/** Every field defaulted and clamped, so a partial or junk record passes. Mirrors `steeringTuning`. */
-export function perceptionTuning(over?: Partial<PerceptionTuning> | null): PerceptionTuning {
-    const o = (over ?? {}) as Partial<PerceptionTuning>;
-    const d = PERCEPTION_DEFAULTS;
-    return {
-        fieldOfView: clamp(finiteOr(o.fieldOfView, d.fieldOfView), 0, 360),
-        range: Math.max(0, finiteOr(o.range, d.range)),
-        memorySpan: Math.max(0, finiteOr(o.memorySpan, d.memorySpan)),
-        reactionTime: Math.max(0, finiteOr(o.reactionTime, d.reactionTime)),
-    };
-}
+import { type PerceptionTuning } from './perceptionTuning';
+// The data half (parsing, defaults) lives in ./perceptionTuning, which the engine's core reads without this module.
+export * from './perceptionTuning';
 
 /** Something that might be seen. The caller decides what is worth offering. */
 export interface PerceptionCandidate {

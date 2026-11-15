@@ -69,6 +69,18 @@ describe('the optional features', () => {
         expect(scene.physics2D).not.toBeNull();
     });
 
+    it('leave an AI-driven controller without eyes or brains when the game has no AI', async () => {
+        const { ControllerNode } = await import('../src/core/scene/nodes/controllerNode');
+        restrictFeatures(['particles']);
+        const blind = new ControllerNode('Guard');
+        expect([...blind.sightings]).toEqual([]);
+        expect(blind.lastKnownPosition).toBeNull();
+        expect(blind.goalState).toBe('');
+        restrictFeatures(null);
+        expect(featureFactory('ai.perception')).toBeTypeOf('function');
+        expect([...new ControllerNode('Watcher').sightings]).toEqual([]);
+    });
+
     it('leave a game without Game UI no UI roots to lay out', () => {
         const json = { type: 'uiRoot', name: 'HUD', id: 'hud-1', children: [{ type: 'uiText', name: 'Score', id: 'score-1' }] };
         const live = new Scene();

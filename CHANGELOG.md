@@ -30,11 +30,12 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     is 6.1 MB in all. When the game still uses one, Publish lists every use and asks: turn it back on, publish
     without it, or cancel. A game without Input binds no input map and shows no touch controls.
   - *New project* asks for a name, a features preset and the addons; a 2D preset's first scene is 2D.
-  - *Their code* goes too, for fourteen of them: global illumination, volumetric fog, volumetric clouds, decals,
+  - *Their code* goes too, for fifteen of them: global illumination, volumetric fog, volumetric clouds, decals,
     landscape (terrain, foliage, impostors, sculpting), water, particles, fire and smoke, weather, cloth,
-    cinematics, game UI (with React, which only its layer uses), the 2D world (tilemaps, 2D cameras, rooms,
-    parallax) and 2D physics are each a part of the published player of their own (730 KB between them),
-    loaded at boot only by a game built with it. The engine every game ships went from 2.55 MB to 1.88 MB.
+    cinematics, game UI (with React, which only its layer uses), AI navigation (navmeshes, perception, fuzzy
+    and goal brains, and the yuka library under them), the 2D world (tilemaps, 2D cameras, rooms, parallax) and
+    2D physics are each a part of the published player of their own (840 KB between them), loaded at boot
+    only by a game built with it. The engine every game ships went from 2.55 MB to 1.77 MB.
     A published game draws its touch controls itself, positioned on the screen: before, they used the editor's
     styles, which a published game does not have. Each feature's size in Project ▸ Features counts its
     code now, not only its shaders. A

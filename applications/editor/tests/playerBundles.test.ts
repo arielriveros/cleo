@@ -34,6 +34,7 @@ const FEATURE_ROOTS: Record<string, string[]> = {
   weather: ['src/core/scene/nodes/weatherNode.ts', 'src/core/scene/precipitationRig.ts'],
   landscape: ['src/core/scene/nodes/landscapeNode.ts', 'src/terrain/terrain.ts', 'src/terrain/foliage.ts', 'src/graphics/render/foliage.ts'],
   gameUi: ['src/core/scene/nodes/ui/uiNode.ts', 'src/core/scene/nodes/ui/uiWidgets.ts', 'src/core/uiLayout.ts'],
+  ai: ['src/core/scene/nodes/navMeshNode.ts', 'src/ai/navMesh.ts', 'src/ai/perception.ts', 'src/ai/goals.ts'],
 };
 
 describe.skipIf(!built)('the published player build', () => {
@@ -65,6 +66,11 @@ describe.skipIf(!built)('the published player build', () => {
       expect([...core].filter(m => m.includes(root)), `${root} is in the core`).toEqual([]);
       expect([...host].some(m => m.includes(root)), `${root} is not in the UI host`).toBe(true);
     }
+  });
+
+  it('keeps yuka in the AI part, out of the core', () => {
+    expect(modulesOf(build.core).filter(m => m.includes('node_modules/yuka/'))).toEqual([]);
+    expect(modulesOf(build.features.ai?.files ?? []).some(m => m.includes('node_modules/yuka/'))).toBe(true);
   });
 
   it('keeps every physics backend out of the core', () => {
