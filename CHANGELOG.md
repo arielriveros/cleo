@@ -886,6 +886,10 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Fixes & refactors
 
+- **Play waits for the project to open.** Pressing Play (or Simulate) while a project was still opening
+  played an empty scene called "Scene", and during a scene switch it played the scene being left. Play,
+  Simulate and Restart now wait until the project, the scene or the import has opened, and their tooltips
+  say what they are waiting for.
 - **Published games keep their retarget corrections.** The packer dropped the rig retarget corrections the
   player reads, so every published character played its corrected clips uncorrected.
 - **Examples open in the desktop app.** Its file server failed on a file that is not there instead of

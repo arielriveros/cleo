@@ -11,7 +11,7 @@ import AddonsModal from "./addons/AddonsModal";
 import { importBundleJob } from "../workers/workerClient";
 import { exportBundle } from "../utils/bundleExport";
 import { applyBundleReplace, applyBundleMerge, applyBundleAsNewProject, IMPORT_WRITE_STEPS } from "../utils/bundleImport";
-import { beginLoad, type LoadStepSpec } from "@cleo/app-kit/feedback/loadingStore";
+import { beginLoad, useLoad, type LoadStepSpec } from "@cleo/app-kit/feedback/loadingStore";
 import { confirmDiscard } from "./unloadGuard";
 import type { BundleData } from "../utils/bundle";
 import ImportBundleModal from "./dialogs/ImportBundleModal";
@@ -40,6 +40,7 @@ import { scriptDebugger, useScriptDebugger } from "./scriptDebugger/debugSession
 import { releaseVsCode, useVsCodeDebug } from "./scriptDebugger/vscodeAttach";
 import { scriptLocationLabel, scriptSourceUrl } from "cleo";
 import { usePlayTarget, writePlayTarget } from "./playWindow/playTarget";
+import { playBlockedReason } from "./playWindow/playGate";
 import ProjectsModal from "./projects/ProjectsModal";
 import { useProjectName } from "./projects/useProjectName";
 
@@ -83,7 +84,7 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, pair
 const LOGO = `${import.meta.env.BASE_URL}brand/logo.png`;
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, startPlay, startSimulate, stopPlay, pausePlay, buildWindowPlayData, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings, setProjectSettings, createScene, selectedNode, isPlayMode } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, startPlay, startSimulate, stopPlay, pausePlay, buildWindowPlayData, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings, setProjectSettings, createScene, selectedNode, isPlayMode, isSceneReady } = useCleoEngine();
   const history = useHistory();
   // View ▸ Frame Selected, and the F key (installed here, once).
   const { canFrame, frameSelected } = useFrameSelected(true);
@@ -310,9 +311,15 @@ export default function MenuBar() {
   const debugFrame = debugSession.paused?.frames[debugSession.selectedFrame];
   // Or stopped in VS Code's (Debug scripts with ▸ VS Code): Play lets it go, as VS Code's Continue does.
   const vscodeStopped = windowActive && !!windowSession.sessionId && vscodeDebug.stopped.includes(windowSession.sessionId);
+  // Until the project (or a scene, an import) has opened, the editor's scene is not the project's yet: a new
+  // game would play the empty boot scene. Only STARTING one waits (playGate.ts); a running game is never held.
+  const load = useLoad();
+  const openingReason = playBlockedReason({ sceneReady: isSceneReady, openSceneId, load });
+  const startBlocked = !!openingReason && !windowActive && playState === 'stopped';
   const onPlay = () => {
     if (debugStopped) { scriptDebugger().resume(); return; }
     if (vscodeStopped && windowSession.sessionId) { void releaseVsCode(windowSession.sessionId); return; }
+    if (startBlocked) return;
     if (windowActive) {
       if (windowSession.status === 'paused') windowPlay().resume();
       else windowPlay().start(buildWindowPlayData, windowSize());
@@ -323,18 +330,18 @@ export default function MenuBar() {
     else startPlay();
   };
 
-  const onSimulate = () => startSimulate();
+  const onSimulate = () => { if (!startBlocked) startSimulate(); };
 
   const onStop = () => { if (windowActive || windowSession.status === 'failed') windowPlay().stop(); else stopPlay(); };
 
   const onPause = () => { if (windowActive) windowPlay().pause(); else pausePlay(); };
 
-  const onRestart = () => windowPlay().restart(buildWindowPlayData);
+  const onRestart = () => { if (!openingReason) windowPlay().restart(buildWindowPlayData); };
 
   const inEditorSession = playState !== 'stopped';
   // Play's own state, which its segment (Play and the target chevron) draws for both halves.
   const playLit = windowActive ? windowSession.status === 'running' : playState === 'playing';
-  const playDisabled = windowActive ? false : (playState === 'playing' || sessionKind === 'simulate');
+  const playDisabled = startBlocked || (windowActive ? false : (playState === 'playing' || sessionKind === 'simulate'));
   const targetDisabled = windowActive || inEditorSession;
   const windowBusy = windowSession.status === 'building' || windowSession.status === 'starting' || windowSession.rebuilding;
   const windowLabel =
@@ -489,7 +496,8 @@ export default function MenuBar() {
           <div className={cn('flex border-r border-control-hover', playLit ? 'bg-success' : 'bg-control', playDisabled && 'opacity-40')}>
             <Transport
               paired className='w-[22px] justify-end'
-              title={debugStopped ? 'Continue — the game is stopped in the script debugger (F8)'
+              title={startBlocked ? openingReason!
+                : debugStopped ? 'Continue — the game is stopped in the script debugger (F8)'
                 : vscodeStopped ? 'Continue — the game is stopped in VS Code'
                 : windowActive
                 ? (windowSession.status === 'paused' ? 'Resume the game in its window' : 'Bring the game window forward')
@@ -515,8 +523,8 @@ export default function MenuBar() {
           {/* Play without possession: physics, AI and scripts run on a throwaway copy, watched through the
               editor camera. Stop puts the scene back exactly as it was. */}
           <Transport
-            title='Simulate — run physics, AI and scripts, viewed from the editor camera'
-            disabled={windowActive || playState === 'simulating' || sessionKind === 'play'}
+            title={startBlocked ? openingReason! : 'Simulate — run physics, AI and scripts, viewed from the editor camera'}
+            disabled={startBlocked || windowActive || playState === 'simulating' || sessionKind === 'play'}
             active={playState === 'simulating'} activeClass='bg-primary hover:bg-primary text-fg'
             accent='hover:text-primary' onClick={() => onSimulate()}
           >
@@ -543,8 +551,8 @@ export default function MenuBar() {
               that is running keeps going until the new one is ready. */}
           {windowActive && (
             <Transport
-              title='Restart — rebuild the game from the editor and reload its window'
-              disabled={windowBusy}
+              title={openingReason ?? 'Restart — rebuild the game from the editor and reload its window'}
+              disabled={windowBusy || !!openingReason}
               active={false} activeClass=''
               accent='hover:text-success' onClick={() => onRestart()}
             >

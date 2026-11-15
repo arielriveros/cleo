@@ -63,6 +63,10 @@ After the menus come, when there is something to say:
 | **Stop** | Ends the game. A game window closes. |
 | **Restart** | Only while a game runs in its window: rebuilds it from what the editor holds now and reloads the window. |
 
+Play, Simulate and Restart wait while a project, a scene or an import is still opening: until then the
+editor's scene is not the project's yet. Their tooltips say what they are waiting for. A game that is
+already running is never held.
+
 **Right** — the [mode selector](modes.md), then **Claude**, which opens the [Claude panel](ai-agent-link.md).
 
 In the desktop app on Windows and Linux the menu bar is also the window's title bar, and **Minimize**,

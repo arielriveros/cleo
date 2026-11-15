@@ -6859,6 +6859,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const scene = editorSceneRef.current;
     const instance = instanceRef.current;
     if (!scene || !instance) throw new Error('No scene to play');
+    // Until the project's scene is parsed in (and between a scene switch's halves) the editor's scene is the
+    // bare boot scene, and the open id is '' or the old one's: the game would be an empty "Scene".
+    if (!scenesLoadedRef.current || !openSceneIdRef.current || openingSceneRef.current)
+      throw new Error('The project is still opening; play it once it is open');
     stopSequencePreviews();
     reembedSceneFields(scene);
     if (reembedSequences(scene, sequencesRef.current)) markTabDirty(SCENE_TAB_ID, 'sequence-reembed');
@@ -6894,6 +6898,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // A movie films a fresh session, never one already running.
     if (startedRef.current && movie) { movie(null); return; }
     if (startedRef.current) { eventEmitter.current.emit('SET_PLAY_STATE', simulate ? 'simulate' : 'play'); return; }
+    // A new session only once the project's scene is in the editor: before that (the project opening, a scene
+    // switching) the editor's scene is the bare boot scene or half of a swap. The menu bar's Play waits for
+    // the same (playGate.ts); this covers every other caller.
+    if (!scenesLoadedRef.current || openingSceneRef.current) {
+      Logger.warn('Play waits until the project has finished opening', 'Editor');
+      movie?.(null);
+      return;
+    }
 
     // Play always runs the game scene, from wherever the user happens to be; Stop brings them back.
     // It cannot be done in one pass: both this and the tab-activate effect call instance.setScene, and
