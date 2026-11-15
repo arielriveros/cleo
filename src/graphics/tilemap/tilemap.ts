@@ -13,8 +13,9 @@ import {
 } from './cellMath';
 import {
     CELL_EMPTY, CHUNK_SIZE, cellFlipX, cellFlipY, cellKey, cellRot90, cellTile, chunkCoord, chunkKey,
-    packCell,
+    packCell, type TileChunk,
 } from './chunk';
+import { TileMesh } from './tileMesh';
 import { TilemapLayer, TilemapLayerConfig } from './tilemapLayer';
 import { Tileset } from './tileset';
 import { greedyMerge } from './tilemapCollision';
@@ -174,6 +175,38 @@ export class Tilemap {
     public cellToWorld(col: number, row: number): [number, number] {
         const p = cellToWorld(this._grid, col, row);
         return [p[0] + this._origin[0], p[1] + this._origin[1]];
+    }
+
+    /**
+     * The mesh a chunk of `layer` draws with: built on first use, rebuilt when its cells changed, and its animated
+     * tiles' UVs re-patched otherwise. The renderer's 2D pass asks the map for it, so the renderer holds no tile
+     * code of its own (the map is the 2D world feature's).
+     */
+    public chunkMesh(layer: TilemapLayer, chunk: TileChunk, tileset: Tileset): TileMesh {
+        if (!chunk.mesh) chunk.mesh = new TileMesh();
+        if (chunk.meshDirty) {
+            chunk.mesh.build(chunk, layer, tileset, this._grid, this._time);
+            chunk.meshDirty = false;
+        } else if (chunk.animated) {
+            chunk.mesh.patchAnimatedUVs(tileset, this._time);
+        }
+        return chunk.mesh;
+    }
+
+    /**
+     * A chunk's world box for frustum culling, written to `min`/`max`: local cell math plus `origin` (the owning
+     * node's world position), matching how the mesh is built and drawn. `cellToWorld` above would fold in the map's
+     * own origin, which only the per-frame update refreshes, and the editor never runs it. Isometric chunks are
+     * diamonds whose axis-aligned extent reaches the opposite corners too, so the box is padded by a chunk's width:
+     * conservative for every grid kind.
+     */
+    public chunkWorldBox(chunk: TileChunk, origin: ArrayLike<number>, min: number[], max: number[]): void {
+        const g = this._grid;
+        const c0 = cellToWorld(g, chunk.cx * CHUNK_SIZE, chunk.cy * CHUNK_SIZE);
+        const c1 = cellToWorld(g, (chunk.cx + 1) * CHUNK_SIZE, (chunk.cy + 1) * CHUNK_SIZE);
+        const padX = CHUNK_SIZE * g.cellWidth, padY = CHUNK_SIZE * g.cellHeight;
+        min[0] = origin[0] + Math.min(c0[0], c1[0]) - padX; min[1] = origin[1] + Math.min(c0[1], c1[1]) - padY; min[2] = origin[2] - 1;
+        max[0] = origin[0] + Math.max(c0[0], c1[0]) + padX; max[1] = origin[1] + Math.max(c0[1], c1[1]) + padY; max[2] = origin[2] + 1;
     }
 
     /** Cell containing a world-space point. Always succeeds — the grid is infinite. */

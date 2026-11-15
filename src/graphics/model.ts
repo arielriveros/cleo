@@ -1,8 +1,7 @@
 import { Mesh } from './mesh';
 import { Material } from './material';
 import { Geometry } from '../core/geometry';
-import { Loader } from './loader';
-import { ImportTransform } from './utils/gltfLoader';
+import type { ImportTransform } from './utils/gltfLoader';
 import { Logger } from '../core/logger';
 
 interface FromPathptions {
@@ -13,6 +12,33 @@ interface FromPathptions {
 interface FromFileOptions {
     files: File[]
     material?: Material;
+}
+
+/** A model file read into meshes: what {@link Model.fromPath} and {@link Model.fromFile} build models from. */
+export type ImportedMesh = { name: string, geometry: Geometry, material: Material, transform?: ImportTransform };
+
+/**
+ * What reads model files (FBX, OBJ, glTF...) for {@link Model.fromPath} and {@link Model.fromFile}: the model
+ * loader (loader.ts, with assimp's 5 MB of WASM and the glTF reader). Installed by the full engine (src/cleo.ts)
+ * rather than imported here, so a published game, which loads its models packed and never reads a model
+ * file, does not carry the importers.
+ */
+export interface ModelFileImporter {
+    loadModelsFromPath(filePaths: string[]): Promise<ImportedMesh[]>;
+    loadModelsFromFile(files: File[]): Promise<ImportedMesh[]>;
+}
+
+let modelFileImporter: ModelFileImporter | null = null;
+
+/** Install what {@link Model.fromPath} and {@link Model.fromFile} read files with (src/cleo.ts installs the loader). */
+export function setModelFileImporter(importer: ModelFileImporter | null): void {
+    modelFileImporter = importer;
+}
+
+function requireModelFileImporter(): ModelFileImporter {
+    if (!modelFileImporter)
+        throw new Error('Model: this build reads no model files (import them in the editor; a published game loads its models packed)');
+    return modelFileImporter;
 }
 
 /** One slice of a model's index buffer, drawn with `materials[i]`. */
@@ -67,7 +93,7 @@ export class Model {
 
     public static fromPath(config: FromPathptions): Promise<{name: string, model: Model, transform?: ImportTransform}[]> {
         return new Promise<{name: string, model: Model, transform?: ImportTransform}[]>((resolve, reject) => {
-            Loader.loadModelsFromPath(config.filePaths)
+            Promise.resolve().then(() => requireModelFileImporter().loadModelsFromPath(config.filePaths))
             .then((meshes) => {
                 const models: {name: string, model: Model, transform?: ImportTransform}[] = [];
                 for (const mesh of meshes)
@@ -84,7 +110,7 @@ export class Model {
 
     public static fromFile(config: FromFileOptions): Promise<{name: string, model: Model, transform?: ImportTransform}[]> {
         return new Promise<{name: string, model: Model, transform?: ImportTransform}[]>((resolve, reject) => {
-            Loader.loadModelsFromFile(config.files)
+            Promise.resolve().then(() => requireModelFileImporter().loadModelsFromFile(config.files))
             .then((meshes) => {
                 const models: {name: string, model: Model, transform?: ImportTransform}[] = [];
                 for (const mesh of meshes)

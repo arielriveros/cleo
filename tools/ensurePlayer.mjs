@@ -1,6 +1,6 @@
 // Dev startup guard for the standalone game player (applications/editor/public/player/, git-ignored). Publishing
 // fetches that bundle, so it has to exist and match the engine -- but rebuilding it on every
-// `npm run editor:dev` / `desktop:dev` cost a full Vite library build each launch for a file most dev
+// `npm run editor:dev` / `desktop:dev` cost a full Vite build each launch for a file most dev
 // sessions never touch. It is rebuilt only when it is missing, built against an older player contract,
 // or older than the newest engine/player source file.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -22,10 +22,15 @@ function newestMtime(dir) {
 }
 
 function staleReason() {
-    if (!existsSync(path.join(out, 'game.js')) || !existsSync(path.join(out, 'build.json'))) return 'missing';
+    if (!existsSync(path.join(out, 'build.json'))) return 'missing';
     const built = JSON.parse(readFileSync(path.join(out, 'build.json'), 'utf-8'));
     const { contract } = JSON.parse(readFileSync(path.join(editor, 'src/features/publish/playerContract.json'), 'utf-8'));
     if (built.contract !== contract) return `contract ${built.contract} -> ${contract}`;
+    // Every file build.json lists (the core and each optional part's chunks), which publishing copies.
+    const files = [...(built.core ?? []), ...Object.values(built.features ?? {}).flatMap(f => f.files)];
+    if (!files.length) return 'no file list';
+    const lost = files.find(f => !existsSync(path.join(out, f)));
+    if (lost) return `${lost} missing`;
     const sources = [path.join(root, 'src'), path.join(editor, 'src/player')];
     if (Math.max(...sources.map(newestMtime)) > Date.parse(built.builtAt)) return 'sources changed';
     return null;

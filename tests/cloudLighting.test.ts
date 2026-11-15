@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import './helpers/features';
 import { atmosphereTransmittance, shHemisphereMeans } from '../src/graphics/cloudLighting';
 import { VolumetricCloudsNode } from '../src/core/scene/nodes/volumetricCloudsNode';
 

@@ -5,7 +5,7 @@ import { authoring } from "../../eventBus";
 import { Node } from "./node";
 import { isEditorOwnedName } from "../editorOwnership";
 import { CharacterNode } from "./characterNode";
-import { CharacterBody2DNode } from "./characterBody2DNode";
+import type { CharacterBody2DNode } from "./characterBody2DNode";
 import { CameraRigNode } from "./cameraRigNode";
 import { unwrapScriptNode } from "./nodeScripting";
 import { InputSystem } from "../../../input/inputSystem";
@@ -30,7 +30,8 @@ import {
     markRepathed, remainingDistance, repathPolicy, setNavPath, shouldRepath,
 } from "../../../ai/navPath";
 import type { NavPath, RepathPolicy, RepathState } from "../../../ai/navPath";
-import { Perception, perceptionTuning } from "../../../ai/perception";
+import type { Perception } from "../../../ai/perception";
+import { perceptionTuning } from "../../../ai/perceptionTuning";
 import {
     AXIS_Y, AXIS_Z, angleToTarget2D, facingYaw2D, fanProbes2D, paceDirection, probeLedge2D, probeWall2D, wallHeight2D,
 } from "../../control/control2D";
@@ -39,15 +40,20 @@ import { intentFromDesired2D } from "../../control/steering";
 import { createFollow2DOut, createFollow2DState, followPath2D, navAgent2D } from "../../../ai/navFollow2D";
 import type { Follow2DOut, Follow2DState, NavAgent2D } from "../../../ai/navFollow2D";
 import { raiseRequest } from "../../control/intent";
-import { yawFromDirection } from "../../../ai/interop";
-import type { LineOfSightTest, PerceptionCandidate, PerceptionTuning } from "../../../ai/perception";
-import { EMPTY_FUZZY_MODEL, FuzzyBrain, isDefaultFuzzyModel, parseFuzzyModel } from "../../../ai/fuzzy";
-import { EMPTY_GOAL_GRAPH, GoalBrain, isDefaultGoalGraph, parseGoalGraph } from "../../../ai/goals";
-import type { GoalContext, GoalGraph } from "../../../ai/goals";
+import { yawFromDirection } from "../../math";
+import type { LineOfSightTest, PerceptionCandidate } from "../../../ai/perception";
+import type { PerceptionTuning } from "../../../ai/perceptionTuning";
+import type { FuzzyBrain } from "../../../ai/fuzzy";
+import { EMPTY_FUZZY_MODEL, isDefaultFuzzyModel, parseFuzzyModel } from "../../../ai/fuzzyModel";
+import type { GoalBrain } from "../../../ai/goals";
+import { EMPTY_GOAL_GRAPH, isDefaultGoalGraph, parseGoalGraph } from "../../../ai/goalGraph";
+import type { GoalContext, GoalGraph } from "../../../ai/goalGraph";
 import { conditionNodeMet } from "../../conditions";
-import type { FuzzyModel } from "../../../ai/fuzzy";
+import type { FuzzyModel } from "../../../ai/fuzzyModel";
+import { featureFactory } from "../../features/registry";
 import { aiStats } from "../../../ai/aiStats";
 import { vec3 } from "gl-matrix";
+import { isCharacterBody2D } from "./nodeType";
 
 /**
  * A whisker hit whose surface faces up at least this much (cos 50 deg) is ground to walk on, not a
@@ -304,7 +310,16 @@ export class ControllerNode extends Node {
     private _steerTarget: Node | null = null;
     private _routeIndex: number = 0;
     private readonly _pathScratch: vec3[] = [];
-    private readonly _perception = new Perception();
+    /**
+     * The eyes and memory (ai/perception.ts, on yuka: the AI feature's), made when first looked through. A game
+     * built without AI has none: nothing is seen and nothing remembered, so AI-driven controllers stand idle.
+     */
+    private _perceptionRuntime: Perception | null | undefined = undefined;
+    private get _perception(): Perception | null {
+        if (this._perceptionRuntime === undefined)
+            this._perceptionRuntime = featureFactory<() => Perception>('ai.perception')?.() ?? null;
+        return this._perceptionRuntime;
+    }
     private readonly _candidates: PerceptionCandidate[] = [];
     private readonly _rayHit: vec3 = vec3.create();
     private readonly _eye: vec3 = vec3.create();
@@ -432,7 +447,7 @@ export class ControllerNode extends Node {
         const found = this._scene?.getNodeById(id) ?? null;
         // An id pointing at some other node type resolves to NULL rather than to something that cannot be
         // driven — a controller quietly steering a light would be harder to diagnose than one doing nothing.
-        this._possessed = found instanceof CharacterNode || found instanceof CharacterBody2DNode ? found : null;
+        this._possessed = found instanceof CharacterNode || isCharacterBody2D(found) ? found : null;
         if (this._possessed) this._possessed._setController(this);
         return this._possessed;
     }
@@ -537,7 +552,7 @@ export class ControllerNode extends Node {
         }
 
         // A 2D body moves in world axes: no camera basis, no aim rig to steer.
-        const flat = pawn instanceof CharacterBody2DNode;
+        const flat = isCharacterBody2D(pawn);
         const basisYaw = flat ? 0 : this._basisYaw();
 
         switch (this.controlSource) {
@@ -598,7 +613,7 @@ export class ControllerNode extends Node {
     public perceive(delta: number): void {
         const pawn = this._resolvePossessed();
         if (!pawn || this.controlSource !== 'ai') return;
-        if (pawn instanceof CharacterBody2DNode) { this._perceive2D(pawn, delta); return; }
+        if (isCharacterBody2D(pawn)) { this._perceive2D(pawn, delta); return; }
 
         // Every other pawn in the scene. A player and every NPC is a Character, so this is both the
         // set an agent cares about and a bounded one — as opposed to "every node", which is neither.
@@ -621,7 +636,7 @@ export class ControllerNode extends Node {
         // relative to the body and reads 0 while standing still -- a guard's cone would then be pinned
         // to world +Z no matter which way it was turned.
         const forward = pawn.worldForward;
-        this._perception.step(
+        this._perception?.step(
             this._eye, yawFromDirection(forward[0], forward[2]),
             this._candidates, this.perception, delta,
             this._scene?.physics ? this._lineOfSight : null);
@@ -653,7 +668,7 @@ export class ControllerNode extends Node {
         }
         const feet = pawn.worldPosition;
         vec3.set(this._eye, feet[0], feet[1] + this.eyeHeight, 0);
-        this._perception.step(this._eye, facingYaw2D(pawn.facing), this._candidates, this.perception, delta,
+        this._perception?.step(this._eye, facingYaw2D(pawn.facing), this._candidates, this.perception, delta,
             this._scene?.physics2D ? this._lineOfSight2D : null, 'xy');
         if (this.autoAcquire) this._acquire(pawn);
     }
@@ -690,7 +705,7 @@ export class ControllerNode extends Node {
     private _acquire(pawn: Pawn): void {
         let bestId: string | null = null;
         let bestDistance = Infinity;
-        for (const sighting of this._perception.sightings) {
+        for (const sighting of this._perception?.sightings ?? []) {
             if (!sighting.noticed) continue;
             const target = this._scene?.getNodeById(sighting.id);
             if (!target) continue;
@@ -701,7 +716,7 @@ export class ControllerNode extends Node {
         if (bestId) { this.setBlackboard(this.targetKey, bestId); return; }
 
         const current = this._blackboard.get(this.targetKey);
-        if (typeof current === 'string' && current && !this._perception.remembers(current, this.perception)) {
+        if (typeof current === 'string' && current && !this._perception?.remembers(current, this.perception)) {
             this.setBlackboard(this.targetKey, undefined);
         }
     }
@@ -733,13 +748,13 @@ export class ControllerNode extends Node {
     }
 
     /** What this controller can see right now, for `onThink` and the editor readout. */
-    public get sightings() { return this._perception.sightings; }
+    public get sightings() { return this._perception?.sightings ?? []; }
 
     /** Where the current target was last seen, or null. Backs the `investigate` goal. */
     public get lastKnownPosition(): vec3 | null {
         const id = this._blackboard.get(this.targetKey);
         if (typeof id !== 'string' || !id) return null;
-        const sighting = this._perception.sightingOf(id);
+        const sighting = this._perception?.sightingOf(id) ?? null;
         return sighting && Number.isFinite(sighting.timeSinceSeen) ? sighting.lastKnownPosition : null;
     }
 
@@ -815,7 +830,7 @@ export class ControllerNode extends Node {
         }
 
         const up = this._resolveUp();
-        const body2D = pawn instanceof CharacterBody2DNode ? pawn : null;
+        const body2D = isCharacterBody2D(pawn) ? pawn : null;
         this._following2D = false;
         this._wantJump = false;
         this._wantDown = false;
@@ -840,7 +855,7 @@ export class ControllerNode extends Node {
         if (target) {
             const p = target.worldPosition;
             vec3.set(this._targetPos, p[0], p[1], p[2]);
-            if (target instanceof CharacterBody2DNode) {
+            if (isCharacterBody2D(target)) {
                 // A 2D target's own velocity, and its middle for a flier to fly at (a walker goes to its feet).
                 if (flier) this._targetPos[1] += target.size[1] * 0.5;
                 vec3.set(this._targetVel, target.velocity2D[0], target.velocity2D[1], 0);
@@ -954,7 +969,7 @@ export class ControllerNode extends Node {
      * as it did before, rather than standing still for a reason nothing explains.
      */
     private _steerPath(pawn: Pawn, tuning: SteeringTuning, up: vec3, delta: number): void {
-        if (pawn instanceof CharacterBody2DNode) { this._steerPath2D(pawn, tuning, up, delta); return; }
+        if (isCharacterBody2D(pawn)) { this._steerPath2D(pawn, tuning, up, delta); return; }
         const source = this._resolveNavMesh();
         if (!source?.mesh) {
             clearNavPath(this._path);
@@ -1041,7 +1056,7 @@ export class ControllerNode extends Node {
     private _gatherNeighbours(pawn: Pawn): void {
         this._neighbourCount = 0;
         const radius = Math.max(0, this.flockRadius);
-        if (pawn instanceof CharacterBody2DNode) { this._gatherNeighbours2D(pawn, radius); return; }
+        if (isCharacterBody2D(pawn)) { this._gatherNeighbours2D(pawn, radius); return; }
         const characters = this._scene?.characters;
         if (radius <= 0 || !characters) return;
 
@@ -1133,7 +1148,7 @@ export class ControllerNode extends Node {
      * one wraps to the first, which is what makes a patrol a patrol.
      */
     private _steerPatrol(pawn: Pawn, tuning: SteeringTuning, up: vec3): void {
-        if (pawn instanceof CharacterBody2DNode) { this._steerPatrol2D(pawn, tuning, up); return; }
+        if (isCharacterBody2D(pawn)) { this._steerPatrol2D(pawn, tuning, up); return; }
         const source = this._resolveNavMesh();
         const points = this.routeName && source ? source.routePoints(this.routeName) : [];
         if (points.length === 0) {
@@ -1224,7 +1239,7 @@ export class ControllerNode extends Node {
     private _warnNavProfile(source: { name: string, agent2D?: NavAgent2D }): void {
         const pawn = this._possessed;
         const baked = source.agent2D;
-        if (this._warnedNavProfile || !baked || !(pawn instanceof CharacterBody2DNode) || pawn.movement !== 'walk') return;
+        if (this._warnedNavProfile || !baked || !(isCharacterBody2D(pawn)) || pawn.movement !== 'walk') return;
         if (pawn.jumpHeight < baked.jumpHeight - 0.05 || pawn.walkSpeed < baked.walkSpeed - 0.05) {
             this._warnedNavProfile = true;
             Logger.warn(
@@ -1268,7 +1283,7 @@ export class ControllerNode extends Node {
         if (!ai) return null;
         // A 2D pawn wants a 2D graph for its kind of mover; a 3D one a navmesh.
         const pawn = this._possessed;
-        const source = pawn instanceof CharacterBody2DNode
+        const source = isCharacterBody2D(pawn)
             ? ai.navMeshFor(this._navMeshId, { space: '2D', movement: pawn.movement })
             : ai.navMeshFor(this._navMeshId);
         if (this._navMeshId && source?.id !== this._navMeshId && !this._warnedDanglingNavMesh) {
@@ -1291,7 +1306,9 @@ export class ControllerNode extends Node {
     } | null {
         if (this.goals !== this._goalSource) {
             this._goalSource = this.goals;
-            this._goalBrain = isDefaultGoalGraph(this.goals) ? null : GoalBrain.from(this.goals);
+            // Built by the AI feature (ai/goals.ts, on yuka); none in a game built without it.
+            this._goalBrain = isDefaultGoalGraph(this.goals) ? null
+                : featureFactory<(graph: GoalGraph) => GoalBrain>('ai.goalBrain')?.(this.goals) ?? null;
         }
         const brain = this._goalBrain;
         if (!brain) return null;
@@ -1348,7 +1365,9 @@ export class ControllerNode extends Node {
     private _refreshFuzzy(pawn: Pawn): void {
         if (this.fuzzy !== this._fuzzySource) {
             this._fuzzySource = this.fuzzy;
-            this._fuzzyBrain = isDefaultFuzzyModel(this.fuzzy) ? null : FuzzyBrain.from(this.fuzzy);
+            // Built by the AI feature (ai/fuzzy.ts, on yuka); none in a game built without it.
+            this._fuzzyBrain = isDefaultFuzzyModel(this.fuzzy) ? null
+                : featureFactory<(model: FuzzyModel) => FuzzyBrain>('ai.fuzzyBrain')?.(this.fuzzy) ?? null;
             this._fuzzyOutputs = {};
         }
         const brain = this._fuzzyBrain;
@@ -1454,7 +1473,7 @@ export class ControllerNode extends Node {
         // names rather than about whatever happens to be visible.
         const seenId = this._blackboard.get(this.targetKey);
         const sighting = typeof seenId === 'string' && seenId
-            ? this._perception.sightingOf(seenId) : null;
+            ? this._perception?.sightingOf(seenId) ?? null : null;
         if (name === 'targetInSight') return sighting?.noticed === true;
         if (name === 'timeSinceSeen') return sighting ? sighting.timeSinceSeen : Infinity;
         if (name === 'lastKnownDistance') {
@@ -1470,7 +1489,7 @@ export class ControllerNode extends Node {
         const target = this._resolveTarget(this.targetKey);
         if (name === 'hasTarget') return target !== null;
         if (!target) return name === 'targetVisible' || name === 'targetInFront' ? false : 0;
-        if (pawn instanceof CharacterBody2DNode) return this._sense2D(name, pawn, target);
+        if (isCharacterBody2D(pawn)) return this._sense2D(name, pawn, target);
 
         const from = pawn.worldPosition;
         const to = target.worldPosition;
@@ -1524,7 +1543,7 @@ export class ControllerNode extends Node {
             const world = this._scene?.physics2D;
             if (!world) return true;
             const eyeY = from[1] + this.eyeHeight;
-            const toY = to[1] + (target instanceof CharacterBody2DNode ? target.size[1] * 0.5 : 0);
+            const toY = to[1] + (isCharacterBody2D(target) ? target.size[1] * 0.5 : 0);
             const reach = Math.hypot(dx, toY - eyeY);
             if (!(reach > 1e-6)) return true;
             const hit = world.raycast(from[0], eyeY, dx, toY - eyeY, reach);
@@ -1538,7 +1557,7 @@ export class ControllerNode extends Node {
      * world's probes for a 2D body, the physics ray for a 3D Character (from the hips, as the whiskers).
      */
     private _senseAhead(name: 'wallAhead' | 'ledgeAhead', pawn: Pawn): boolean {
-        if (pawn instanceof CharacterBody2DNode) {
+        if (isCharacterBody2D(pawn)) {
             const p = pawn.worldPosition;
             const half = pawn.size[0] / 2;
             return name === 'wallAhead'
@@ -1575,7 +1594,7 @@ export class ControllerNode extends Node {
     private _resolveUp(): vec3 {
         // A 2D pawn steers in the picture plane: a walker along X (flattened by +Y), a flier in XY (by +Z).
         const pawn = this._possessed;
-        if (pawn instanceof CharacterBody2DNode) return vec3.copy(this._steerUp, pawn.movement === 'fly' ? AXIS_Z : AXIS_Y);
+        if (isCharacterBody2D(pawn)) return vec3.copy(this._steerUp, pawn.movement === 'fly' ? AXIS_Z : AXIS_Y);
         const up = this._scene?.physics?.up;
         return up ? vec3.set(this._steerUp, up[0], up[1], up[2]) : vec3.set(this._steerUp, 0, 1, 0);
     }
@@ -1686,7 +1705,7 @@ export class ControllerNode extends Node {
         // A respawned brain starts from its entry state rather than resuming mid-chase -- and must not
         // remember where it last saw you either.
         this._behaviorRuntime = createBehaviorRuntime();
-        this._perception.clear();
+        this._perceptionRuntime?.clear();
         this._goalBrain?.clear();
         clearNavPath(this._path);
     }

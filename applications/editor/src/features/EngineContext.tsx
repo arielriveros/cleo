@@ -328,6 +328,8 @@ const EngineContext = createContext<{
   setInputMap: React.Dispatch<React.SetStateAction<InputMap>>;
   /** Engine runtime + publish-window options (Options ▸ Engine / Project). Applied live; published in `config`. */
   projectSettings: ProjectSettings;
+  /** The project's stored settings have been read (until then `projectSettings` is the defaults). */
+  projectSettingsReady: boolean;
   setProjectSettings: React.Dispatch<React.SetStateAction<ProjectSettings>>;
   templates: Template[];
   addTemplate: (t: Template) => void;
@@ -729,6 +731,7 @@ const EngineContext = createContext<{
     inputMap: DEFAULT_INPUT_MAP,
     setInputMap: () => {},
     projectSettings: DEFAULT_PROJECT_SETTINGS,
+    projectSettingsReady: false,
     setProjectSettings: () => {},
     addTemplate: () => {},
     removeTemplate: () => {},
@@ -1167,6 +1170,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Same lifecycle as the input map: project-wide, its own key, persisted on change.
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>(() => parseProjectSettings(null));
   const projectSettingsLoadedRef = useRef(false);
+  const [projectSettingsReady, setProjectSettingsReady] = useState(false);
   // The stored settings, read once: the engine waits for them too, since its physics backend is chosen
   // when it is built.
   const storedProjectSettingsRef = useRef<Promise<ProjectSettings | null> | null>(null);
@@ -1175,7 +1179,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     storedProjectSettings()
       .then(stored => { if (stored) setProjectSettings(stored); })
-      .finally(() => { projectSettingsLoadedRef.current = true; });
+      .finally(() => { projectSettingsLoadedRef.current = true; setProjectSettingsReady(true); });
   }, []);
   usePersistedLibrary(projectSettingsKey(), projectSettings, projectSettingsLoadedRef);
   const projectSettingsRef = useRef(projectSettings);
@@ -7280,6 +7284,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       inputMap,
       setInputMap,
       projectSettings,
+      projectSettingsReady,
       setProjectSettings,
       addTemplate,
       removeTemplate,

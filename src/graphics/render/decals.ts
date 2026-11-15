@@ -3,7 +3,8 @@ import { isEditorOnlyNode } from '../../core/scene/editorNodes';
 import { DecalNode, DECAL_RADIAL_CURVES, decalFlipbookFrame } from '../../core/scene/nodes/decalNode';
 import type { DecalFlipbookFrame } from '../../core/scene/nodes/decalNode';
 import { ModelNode } from '../../core/scene/nodes/modelNode';
-import { Scene } from '../../core/scene/scene';
+import type { Scene } from '../../core/scene/scene';
+import { sizedTarget } from './featureSubsystems';
 import { Framebuffer } from '../framebuffer';
 import { Material } from '../material';
 import type { RenderPassEncoder } from '../rhi/device';
@@ -131,10 +132,7 @@ export class DecalPasses {
      * cost ~75 MB at 1080p between them, so a scene without decals never allocates them at all.
      */
     public decalTarget(existing: Framebuffer | null, make: () => Framebuffer): Framebuffer {
-        const fbo = existing ?? make();
-        if (fbo.width !== this._host.renderWidth || fbo.height !== this._host.renderHeight)
-            fbo.create(this._host.renderWidth, this._host.renderHeight);
-        return fbo;
+        return sizedTarget(existing, make, this._host.renderWidth, this._host.renderHeight);
     }
 
     /** The receiver pass's pipeline per material (see PipelineCache.memoized). */

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import './helpers/features';
 import { VolumetricCloudsNode } from '../src/core/scene/nodes/volumetricCloudsNode';
 import { VOLUMETRIC_CLOUDS_PRESETS } from '../src/core/scene/nodes/volumetricCloudsPresets';
 

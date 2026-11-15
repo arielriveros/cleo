@@ -6,7 +6,7 @@ import { TemporalHistory } from './temporalHistory';
 import { DirectionalLight } from '../lighting';
 import { skyAmbient } from '../particles/particleLighting';
 import { keyLight } from '../skyNight';
-import { VolumetricCloudPasses } from './clouds';
+import { CLOUD_BLEND } from './blendStates';
 import { FluidVolumeProgram, FluidVolumeResolveProgram, FluidVolumeCompositeProgram } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
@@ -92,7 +92,7 @@ export class FluidVolumePasses {
             const pipeline = this._pipelines.get('fluidVolume', FluidVolumeProgram, {
                 // Back faces: `Geometry.Cube` winds counter-clockwise from outside (see `DecalPasses._decalCull`).
                 cullMode: FluidVolumePasses._volumeMirrored(node) ? 'back' : 'front',
-                blend: VolumetricCloudPasses.CLOUD_BLEND,
+                blend: CLOUD_BLEND,
                 targets: 2,
                 vertex: 'model',
                 builtFor: 'irradiance',   // `SkyPasses.iblCubeMesh` is position-only, built from that program's attributes
@@ -191,7 +191,7 @@ export class FluidVolumePasses {
 
         // --- 3. Composite ---
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'fluidVolumes.composite', false, undefined, false);
-        this._fullscreen.bind(pass, 'fluidVolumeComposite', FluidVolumeCompositeProgram, [image, this._fluidTraceFBO!.colors[1], depth], VolumetricCloudPasses.CLOUD_BLEND);
+        this._fullscreen.bind(pass, 'fluidVolumeComposite', FluidVolumeCompositeProgram, [image, this._fluidTraceFBO!.colors[1], depth], CLOUD_BLEND);
         sm.bind('fluidVolumeComposite');
         sm.setUniform('u_invViewProj', this._view.invViewProjStable);
         this._passes.drawFullscreenAndEnd(pass);

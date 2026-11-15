@@ -3,11 +3,11 @@ import { Logger, isDefaultInputMap } from "cleo";
 import { isDefaultProjectSettings } from "./options/projectSettings";
 import { useCleoEngine, KIND_LABEL } from "./EngineContext";
 import { useVfs } from "./assets/VfsContext";
-import { buildMultiSceneGameData } from "./publish/buildMultiSceneGameData";
+import { buildMultiSceneGameData, PublishCanceledError } from "./publish/buildMultiSceneGameData";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
 import WorkspaceStatusChip from "./scriptWorkspace/WorkspaceStatusChip";
-import AgentBridgeChip from "./agentBridge/AgentBridgeChip";
-import { AgentChatToggle } from "./agentChat/AgentChatPanel";
+import { AddonSlot } from "./addons/AddonHost";
+import AddonsModal from "./addons/AddonsModal";
 import { importBundleJob } from "../workers/workerClient";
 import { exportBundle } from "../utils/bundleExport";
 import { applyBundleReplace, applyBundleMerge, applyBundleAsNewProject, IMPORT_WRITE_STEPS } from "../utils/bundleImport";
@@ -27,8 +27,11 @@ import {
   SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
   SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon,
   PlayGlyph, SimulateGlyph, PauseGlyph, StopGlyph, RestartGlyph, PlayWindowIcon, PlayEditorIcon,
-  FrameIcon, DeleteIcon, KeyboardIcon, InfoIcon, WebIcon, DesktopIcon, InstallerIcon,
+  FrameIcon, DeleteIcon, KeyboardIcon, InfoIcon, WebIcon, DesktopIcon, InstallerIcon, FeaturesIcon, AddonsIcon,
 } from "./topbarIcons";
+import ProjectFeaturesModal from "./projectFeatures/ProjectFeaturesModal";
+import FeatureCheckModal from "./projectFeatures/FeatureCheckModal";
+import type { FeatureUsage } from "./publish/featureUsage";
 import { iconFor } from "./assets/assetKinds";
 import { useFrameSelected } from "./viewport/useFrameSelected";
 import { VERSION_LABEL } from "../version";
@@ -80,12 +83,16 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, pair
 const LOGO = `${import.meta.env.BASE_URL}brand/logo.png`;
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, startPlay, startSimulate, stopPlay, pausePlay, buildWindowPlayData, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings, createScene, selectedNode, isPlayMode } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, startPlay, startSimulate, stopPlay, pausePlay, buildWindowPlayData, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings, setProjectSettings, createScene, selectedNode, isPlayMode } = useCleoEngine();
   const history = useHistory();
   // View ▸ Frame Selected, and the F key (installed here, once).
   const { canFrame, frameSelected } = useFrameSelected(true);
   const importInput = useRef<HTMLInputElement>(null);
   const [helpDialog, setHelpDialog] = useState<'shortcuts' | 'about' | null>(null);
+  // Project ▸ Features, and Publish's question when the game uses one the project leaves out.
+  const [showFeatures, setShowFeatures] = useState(false);
+  const [showAddons, setShowAddons] = useState(false);
+  const [featureCheck, setFeatureCheck] = useState<{ uses: FeatureUsage; answer: (enable: string[] | null) => void } | null>(null);
   const { vfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -246,6 +253,15 @@ export default function MenuBar() {
           // What this session drew, so the published game can build those pipelines up front. The more of
           // the game was played (Play or Simulate) before publishing, the more of them there are.
           pipelines: instance?.renderer.pipelineRecipes(),
+          // The game uses a feature the project leaves out (Project ▸ Features): ask. Turning one back on is
+          // for good, as if done in Project ▸ Features.
+          onDisabledFeatureUse: uses => new Promise<string[] | null>(resolve => {
+            setFeatureCheck({ uses, answer: enable => {
+              setFeatureCheck(null);
+              if (enable?.length) setProjectSettings(prev => ({ ...prev, features: { ...prev.features, disabled: prev.features.disabled.filter(id => !enable.includes(id)) } }));
+              resolve(enable);
+            } });
+          }),
         });
       } catch (e: any) {
         task.setStep(0, { status: 'failed', error: String(e?.message ?? e) });
@@ -264,7 +280,8 @@ export default function MenuBar() {
       task.setStep(1, { status: 'done', detail: message });
       Logger.info(message, 'Publish');
     } catch (e: any) {
-      Logger.error(`Publish failed: ${e?.message || e}`, 'Publish');
+      if (e instanceof PublishCanceledError) Logger.info('Publish canceled', 'Publish');
+      else Logger.error(`Publish failed: ${e?.message || e}`, 'Publish');
     } finally {
       task.finish();
       setPublishing(null);
@@ -380,6 +397,11 @@ export default function MenuBar() {
         { kind: 'item', label: 'Export Project', icon: <ExportIcon />, title: 'Export the whole project (scenes, assets, textures) to a .zip',
           disabled: libEdit, onSelect: () => void onExport() },
         { kind: 'separator' },
+        { kind: 'item', label: 'Features…', icon: <FeaturesIcon />, title: "Choose the engine features this project's games ship with: presets for 2D, 3D and more",
+          disabled: !stopped, onSelect: () => setShowFeatures(true) },
+        { kind: 'item', label: 'Addons…', icon: <AddonsIcon />, title: 'Turn editor addons on or off for this project, such as the Claude Code panel',
+          disabled: !stopped, onSelect: () => setShowAddons(true) },
+        { kind: 'separator' },
         { kind: 'submenu', label: 'Publish', icon: <PublishIcon />, title: 'Publish an optimized build of your game',
           disabled: !!publishing || libEdit, items: [
             { kind: 'item', label: 'Web (HTML)', icon: <WebIcon />,
@@ -425,8 +447,8 @@ export default function MenuBar() {
         {/* The script workspace appears here only when it needs attention (paused sync, error, conflict);
             setting it up and its everyday status live in Options ▸ Editor ▸ Scripts. */}
         <WorkspaceStatusChip />
-        {/* The AI agent link, shown only while the Claude panel is open and started (agentBridge). */}
-        <AgentBridgeChip />
+        {/* The addons' status chips: the Claude Code addon's agent link, shown while its panel is open and started. */}
+        <AddonSlot name="topbarChips" />
         {/* The bundle is dropped only once the import commits. New project and Merge ask about
             unsaved work first (see bundleImport), and a declined confirm leaves this modal up so the
             choice can be made again rather than dumping the user back into the editor. A successful
@@ -444,6 +466,9 @@ export default function MenuBar() {
               'Merging into this project', () => applyBundleMerge(pendingBundle, true)); }}
           />
         )}
+        {showFeatures && <ProjectFeaturesModal onClose={() => setShowFeatures(false)} />}
+        {showAddons && <AddonsModal onClose={() => setShowAddons(false)} />}
+        {featureCheck && <FeatureCheckModal uses={featureCheck.uses} onAnswer={featureCheck.answer} />}
         {helpDialog === 'shortcuts' && (
           <ShortcutsDialog page='editor/interface' anchor='keyboard-shortcuts' onClose={() => setHelpDialog(null)} />
         )}
@@ -568,8 +593,8 @@ export default function MenuBar() {
       </div>
       <ModeSelector />
       <div className='flex items-center h-full px-1.5 gap-1.5'>
-        {/* Opens the Claude panel (Claude Code in a terminal) docked at the right edge (agentChat/AgentChatPanel). */}
-        <AgentChatToggle />
+        {/* The addons' toggles: the Claude Code addon's opens its panel, docked at the right edge. */}
+        <AddonSlot name="topbarRight" />
       </div>
     </Topbar>
   )

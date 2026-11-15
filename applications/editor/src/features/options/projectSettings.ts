@@ -55,25 +55,61 @@ export interface PublishWindowSettings {
    * list missed often enough to matter; it still runs either way.
    */
   onlyUsedShaders: boolean;
+  /**
+   * Ship the WebGL 2 versions of the game's shaders, so it also runs where WebGPU does not. Off: a WebGPU-only
+   * game, a fifth or so of its shader text lighter, which tells a player without WebGPU so.
+   */
+  webgl2Fallback: boolean;
+}
+
+/**
+ * The engine features this project's games leave out (Project ▸ Features; the catalog is the engine's
+ * src/modules/catalog.ts). A DISABLED list, as Godot's build profiles are: a feature the engine gains later is
+ * on in every project until someone turns it off.
+ */
+export interface ProjectFeatureSettings {
+  disabled: string[];
+}
+
+/**
+ * The editor addons this project turns on (Project ▸ Addons; the built-in ones are in features/addons). Per
+ * project, like Godot's editor plugins: they travel with the project's bundle.
+ */
+export interface ProjectAddonSettings {
+  enabled: string[];
+  /** Each addon's own settings, by addon id: whatever it keeps. */
+  settings: Record<string, unknown>;
 }
 
 export interface ProjectSettings {
   /**
    * The settings' format. 2: the physics worker became the default. A stored 'off' from before that is the
-   * old default rather than a choice, so it reads as 'on'.
+   * old default rather than a choice, so it reads as 'on'. 3: features and addons. A project from before
+   * reads as every feature on and the Claude Code addon on, which is what it had.
    */
   version: number;
   engine: EngineRuntimeSettings;
   publish: PublishWindowSettings;
+  features: ProjectFeatureSettings;
+  addons: ProjectAddonSettings;
 }
 
-export const PROJECT_SETTINGS_VERSION = 2;
+export const PROJECT_SETTINGS_VERSION = 3;
+
+/** The addons a project from before addons had: the Claude Code panel was always there. */
+export const LEGACY_ADDONS: readonly string[] = ['claude-code'];
 
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   version: PROJECT_SETTINGS_VERSION,
   engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'on', physicsBackend: 'cannon', maxFrameDelta: 0.1, masterVolume: 1 },
-  publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true },
+  publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true, webgl2Fallback: true },
+  features: { disabled: [] },
+  addons: { enabled: [...LEGACY_ADDONS], settings: {} },
 };
+
+const ID = /^[\w.-]{1,64}$/;
+const idList = (v: unknown): string[] | null =>
+  Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === 'string' && ID.test(x)))] : null;
 
 const num = (v: unknown, d: number, min: number, max: number) =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : d;
@@ -81,7 +117,7 @@ const num = (v: unknown, d: number, min: number, max: number) =>
 /** A stored blob read tolerantly: anything missing or malformed falls back to the default. */
 export function parseProjectSettings(raw: unknown): ProjectSettings {
   const o = (raw && typeof raw === 'object' ? raw : {}) as any;
-  const e = o.engine ?? {}, p = o.publish ?? {};
+  const e = o.engine ?? {}, p = o.publish ?? {}, f = o.features ?? {}, a = o.addons ?? {};
   const d = DEFAULT_PROJECT_SETTINGS;
   const version = typeof o.version === 'number' && Number.isFinite(o.version) ? o.version : 1;
   // Before version 2 every project stored 'off' whether or not anyone chose it: it was the default.
@@ -109,6 +145,13 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       fullscreen: typeof p.fullscreen === 'boolean' ? p.fullscreen : d.publish.fullscreen,
       resizable: typeof p.resizable === 'boolean' ? p.resizable : d.publish.resizable,
       onlyUsedShaders: typeof p.onlyUsedShaders === 'boolean' ? p.onlyUsedShaders : d.publish.onlyUsedShaders,
+      webgl2Fallback: typeof p.webgl2Fallback === 'boolean' ? p.webgl2Fallback : d.publish.webgl2Fallback,
+    },
+    features: { disabled: idList(f.disabled) ?? [] },
+    addons: {
+      // Before version 3 there were no addons, and the Claude Code panel was always on.
+      enabled: version < 3 ? [...LEGACY_ADDONS] : idList(a.enabled) ?? [...d.addons.enabled],
+      settings: a.settings && typeof a.settings === 'object' && !Array.isArray(a.settings) ? { ...a.settings } : {},
     },
   };
 }
@@ -131,8 +174,9 @@ export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
     },
     runtime: { maxFrameDelta: s.engine.maxFrameDelta },
     audio: { masterVolume: s.engine.masterVolume },
-    // A publish-time switch, not something the running game reads.
-    window: (({ onlyUsedShaders: _unused, ...w }) => w)(s.publish),
+    // Publish-time switches, not something the running game reads (the WebGL 2 one reaches it through
+    // config.graphics, see buildMultiSceneGameData).
+    window: (({ onlyUsedShaders: _shaders, webgl2Fallback: _webgl2, ...w }) => w)(s.publish),
   };
 }
 

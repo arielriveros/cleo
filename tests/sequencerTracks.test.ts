@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mat4, quat, vec3 } from 'gl-matrix';
+import './helpers/features';
 import { Scene } from '../src/core/scene/scene';
 import { SequenceNode } from '../src/core/scene/nodes/sequenceNode';
 import { SequencePlayer, type SequencePlayerHost } from '../src/sequencer/sequencePlayer';

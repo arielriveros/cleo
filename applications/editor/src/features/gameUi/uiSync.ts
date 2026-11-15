@@ -1,7 +1,6 @@
-import {
-    UINode, UIRootNode, UITextNode, UIImageNode, UIButtonNode, UIProgressBarNode,
-    UISliderNode, UIToggleNode, UITextInputNode, UIColor, TextureManager,
-} from 'cleo';
+import { TextureManager } from 'cleo';
+import type { UINode, UIColor } from 'cleo';
+import { isUI } from './uiTypes';
 import { clamp } from '@cleo/app-kit/utils/math';
 
 /**
@@ -53,7 +52,7 @@ export function textureSrc(id: string | null): string {
  * run on independent version counters, so a second writer would reset a flex box on a layout-only frame.
  */
 function displayFor(node: UINode): string {
-    return (node instanceof UITextNode || node instanceof UIButtonNode || node instanceof UIToggleNode)
+    return (isUI(node, 'uiText') || isUI(node, 'uiButton') || isUI(node, 'uiToggle'))
         ? 'flex' : 'block';
 }
 
@@ -71,7 +70,7 @@ function syncLayout(binding: UIBinding, interactive: boolean, editorPick: boolea
     const { node, box } = binding;
     const style = box.style;
 
-    if (node instanceof UIRootNode) {
+    if (isUI(node, 'uiRoot')) {
         // A root is positioned in real viewport pixels and carries the scale for its whole subtree;
         // descendants lay out in reference units underneath it.
         const rect = node.rect;
@@ -143,9 +142,9 @@ function syncContent(binding: UIBinding): void {
     const { node, box } = binding;
     const style = box.style;
 
-    if (node instanceof UIRootNode) return;
+    if (isUI(node, 'uiRoot')) return;
 
-    if (node instanceof UITextNode) {
+    if (isUI(node, 'uiText')) {
         if (binding.label && binding.label.textContent !== node.text) binding.label.textContent = node.text;
         style.color = cssColor(node.tint);
         style.fontSize = `${node.fontSize}px`;
@@ -162,7 +161,7 @@ function syncContent(binding: UIBinding): void {
         return;
     }
 
-    if (node instanceof UIImageNode) {
+    if (isUI(node, 'uiImage')) {
         if (binding.image) {
             const src = textureSrc(node.textureId);
             if (binding.image.getAttribute('src') !== src) binding.image.setAttribute('src', src);
@@ -176,7 +175,7 @@ function syncContent(binding: UIBinding): void {
         return;
     }
 
-    if (node instanceof UIButtonNode) {
+    if (isUI(node, 'uiButton')) {
         if (binding.label && binding.label.textContent !== node.label) binding.label.textContent = node.label;
         style.background = cssColor(node.disabled ? node.disabledTint : node.tint);
         style.cursor = node.disabled ? 'not-allowed' : 'pointer';
@@ -187,7 +186,7 @@ function syncContent(binding: UIBinding): void {
         return;
     }
 
-    if (node instanceof UIProgressBarNode) {
+    if (isUI(node, 'uiProgressBar')) {
         style.background = cssColor(node.tint);
         applyBorder(style, node);
         if (binding.fill) {
@@ -208,7 +207,7 @@ function syncContent(binding: UIBinding): void {
         return;
     }
 
-    if (node instanceof UISliderNode) {
+    if (isUI(node, 'uiSlider')) {
         style.background = cssColor(node.tint);
         applyBorder(style, node);
         const f = node.fraction;
@@ -236,7 +235,7 @@ function syncContent(binding: UIBinding): void {
         return;
     }
 
-    if (node instanceof UIToggleNode) {
+    if (isUI(node, 'uiToggle')) {
         style.background = cssColor(node.checked ? node.onTint : node.offTint);
         style.alignItems = 'center';
         style.gap = '6px';
@@ -254,7 +253,7 @@ function syncContent(binding: UIBinding): void {
         return;
     }
 
-    if (node instanceof UITextInputNode) {
+    if (isUI(node, 'uiTextInput')) {
         style.background = cssColor(node.tint);
         applyBorder(style, node);
         if (binding.input) {

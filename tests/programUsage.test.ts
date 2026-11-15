@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import './helpers/features';
 import { PROGRAM_CLASS, createProgramUsage, usageFromSceneJson, usageFromRenderSettings, programsFor, castsShadows } from '../src/graphics/programUsage';
 import { physicalFor, variantLogicalNames, EXTRA_LOGICAL_NAMES } from '../src/graphics/programVariants';
 import { ShaderManager } from '../src/graphics/systems/shaderManager';

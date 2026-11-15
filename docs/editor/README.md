@@ -51,6 +51,8 @@ If you are new, read [Core concepts](../concepts.md) first, then
 |---|---|
 | [Rendering](rendering.md) | Every render setting, debug channels, the performance HUD |
 | [Publishing](publishing.md) | Exporting a playable game |
+| [Project features](project-features.md) | Which engine features a project's games ship: presets for 2D, 3D and more |
+| [Addons](addons.md) | Editor addons a project turns on, such as Claude Code |
 
 ## A first pass through the editor
 

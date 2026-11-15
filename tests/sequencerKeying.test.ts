@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import './helpers/features';
 import { Scene } from '../src/core/scene/scene';
 import { Node } from '../src/core/scene/nodes/node';
 import { LightNode } from '../src/core/scene/nodes/lightNode';

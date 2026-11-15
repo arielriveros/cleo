@@ -1,4 +1,4 @@
-import { Loader } from "../loader";
+import { loadImage } from "../imageLoad";
 import { CubemapFaces, Texture, TextureConfig } from "../texture";
 import { parseBase64DataUri } from "../../core/base64";
 import { Logger } from "../../core/logger";
@@ -58,7 +58,7 @@ export class TextureManager {
         const texture = new Texture(config);
         this._textures.set(identifier, texture);
         this._beginLoad();
-        Loader.loadImage(path).then((image: HTMLImageElement) => {
+        loadImage(path).then((image: HTMLImageElement) => {
             texture.create(image, image.width, image.height);
         }).catch((err) => {
             // Drop the texture rather than let the load promise surface as an unhandled rejection.

@@ -12,7 +12,7 @@ import type { FrameView } from './frameView';
 import type { PassEncoder } from './passEncoder';
 import type { LightingPasses } from './lighting';
 import type { ShadowPasses } from './shadows';
-import type { DecalPasses } from './decals';
+import type { DecalSubsystem } from './featureSubsystems';
 import type { Sprite2DPasses } from './sprites2d';
 import type { EditorOverlays } from './editorOverlays';
 import type { FullscreenPasses } from './fullscreenPasses';
@@ -52,7 +52,7 @@ export class Frame2DPasses {
                 private readonly _projection: ViewProjection,
                 private readonly _lighting: LightingPasses,
                 private readonly _shadows: ShadowPasses,
-                private readonly _decals: DecalPasses,
+                private readonly _decals: DecalSubsystem,
                 private readonly _sprites: Sprite2DPasses,
                 private readonly _overlays: EditorOverlays) {}
 

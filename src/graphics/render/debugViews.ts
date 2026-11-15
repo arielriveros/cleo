@@ -15,12 +15,12 @@ import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
 import type { TemporalPasses } from './temporal';
 import type { PostEffects } from './postEffects';
-import type { FoliagePasses } from './foliage';
 import type { ShadowPasses } from './shadows';
 import type { SsilPasses } from './ssil';
 import type { SsrPasses } from './ssr';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
+import type { FoliageSubsystem } from './featureSubsystems';
 
 /** What DebugViews reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface DebugViewsHost {
@@ -47,7 +47,7 @@ export class DebugViews {
                 private readonly _projection: ViewProjection,
                 private readonly _temporal: TemporalPasses,
                 private readonly _post: PostEffects,
-                private readonly _foliage: FoliagePasses,
+                private readonly _foliage: FoliageSubsystem,
                 private readonly _shadows: ShadowPasses,
                 private readonly _ssil: SsilPasses,
                 private readonly _ssr: SsrPasses,

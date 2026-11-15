@@ -13,12 +13,13 @@ import { BundleSource, bundleEntries, readBundle } from '../utils/bundleRead';
 // what lets it run here under the no-DOM/no-WebGL/no-`cleo` rule above.
 import { simplify, type SimplifyBuffers } from '../utils/simplify';
 
-// The files that make up a published game: index.html + game.js + game.scripts.js + game.bin.
-// All game DATA lives in the single binary; scripts stay a separate real <script> file so they load
-// as native functions with no eval.
+// The files that make up a published game: index.html + the player's modules (game.js, physics-worker.js and
+// the chunks/ the game needs) + game.scripts.js + game.bin. All game DATA lives in the single binary; scripts
+// stay a separate real <script> file so they load as native functions with no eval.
 export interface PublishFiles {
   indexHtml: string;
-  gameJs: string;      // the player+engine bundle (static)
+  /** The player+engine modules (static), by their path in the game's folder: game.js, chunks/x-1a2b.js... */
+  playerFiles: Record<string, string>;
   gameBin: ArrayBuffer; // all game data, binary-packed
   scriptsJs: string;   // per-game scripts as real functions (game.scripts.js)
 }
@@ -26,7 +27,8 @@ export interface PublishFiles {
 /** Player templates are fetched same-origin on the main thread and handed to the job. */
 export interface PlayerTemplates {
   indexHtml: string;
-  gameJs: string;
+  /** The player modules this game ships, by path (see publishClient.loadPlayerTemplates). */
+  files: Record<string, string>;
 }
 
 export type ProjectJob =
@@ -83,7 +85,7 @@ async function runPublish(job: Extract<ProjectJob, { kind: 'publish' }>): Promis
 
   const files: PublishFiles = {
     indexHtml: job.templates.indexHtml,
-    gameJs: job.templates.gameJs,
+    playerFiles: job.templates.files,
     gameBin,
     scriptsJs,
   };
@@ -92,7 +94,7 @@ async function runPublish(job: Extract<ProjectJob, { kind: 'publish' }>): Promis
 
   const archive = new JSZip();
   archive.file('index.html', files.indexHtml);
-  archive.file('game.js', files.gameJs);
+  for (const [file, text] of Object.entries(files.playerFiles)) archive.file(file, text);
   archive.file('game.scripts.js', files.scriptsJs);
   archive.file('game.bin', gameBin);
   const zipped = await archive.generateAsync({ type: 'arraybuffer' });

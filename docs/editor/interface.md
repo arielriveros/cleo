@@ -33,7 +33,7 @@ screen's pixel scan across it, and its tooltip names the open project.
 | **File** | **Save** (Ctrl+S) the active tab, **Save All** (Ctrl+Shift+S) every tab with unsaved changes, **New Scene**. |
 | **Edit** | **Undo** and **Redo** (named after what they undo), **Delete** the selected node. |
 | **View** | **Frame Selected** (F) and **Reset Layout**. |
-| **Project** | **Import Project…** (a project `.zip`), **Export Project** (the whole project to a `.zip`), and **Publish ▸** Web (HTML), Desktop (Electron) or Desktop installer. See [Projects](projects.md) and [Publishing](publishing.md). |
+| **Project** | **Import Project…** (a project `.zip`), **Export Project** (the whole project to a `.zip`), **Features…** (the engine features the games ship, see [Project features](project-features.md)), **Addons…** (editor addons such as Claude Code, see [Addons](addons.md)), and **Publish ▸** Web (HTML), Desktop (Electron) or Desktop installer. See [Projects](projects.md) and [Publishing](publishing.md). |
 | **Help** | **Documentation** (F1), **What's This?** (Shift+F1), **Keyboard Shortcuts…** (the table below) and **About Cleo Engine…** (the version). See [Help and the docs](#help-and-the-docs). |
 
 Click a menu to open it; while one is open, pointing at another opens that one instead. The arrow keys move

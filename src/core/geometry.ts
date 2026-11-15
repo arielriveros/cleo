@@ -1,5 +1,7 @@
 import { vec2, vec3 } from "gl-matrix";
 import { BVH } from "./bvh";
+// A leaf: decoding an image needs nothing else from graphics (see imageLoad.ts).
+import { imageToArray } from "../graphics/imageLoad";
 
 /** Anything the constructor accepts for a vertex attribute: flat typed/plain arrays, or the legacy
  *  array-of-tuples shape. */
@@ -1505,18 +1507,13 @@ export class Geometry {
     }
 
     public static async Terrain(heightmapPath: string): Promise<Geometry> {
-        // Imported lazily so this module stays a leaf: a top-level import of the loader closes a cycle
-        // back to this file and drags in every GL module. The player build is Vite lib/IIFE and inlines
-        // this back into the single bundle; the editor app build lets it become its own chunk.
-        const { Loader } = await import("../graphics/loader");
-
         return new Promise<Geometry>((resolve, reject) => {
             const positions: [number, number, number][] = [];
             const normals: [number, number, number][] = [];
             const uvs: [number, number][] = [];
             const indices: number[] = [];
 
-            Loader.ImageToArray(heightmapPath).then((image: { data: Uint8Array, width: number, height: number }) => {
+            imageToArray(heightmapPath).then((image: { data: Uint8Array, width: number, height: number }) => {
                 const width = image.width;
                 const height = image.height;
     

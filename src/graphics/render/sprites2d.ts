@@ -11,13 +11,12 @@ import { Frustum } from '../../core/frustum';
 import { isEditorOnlyNode } from '../../core/scene/editorNodes';
 import type { ParticleSystemNode } from '../../core/scene/nodes/particleSystemNode';
 import { SpriteNode } from '../../core/scene/nodes/spriteNode';
-import { TilemapNode } from '../../core/scene/nodes/tilemapNode';
+import type { TilemapNode } from '../../core/scene/nodes/tilemapNode';
 import { Scene } from '../../core/scene/scene';
-import { cellToWorld } from '../tilemap/cellMath';
-import { TileChunk, CHUNK_SIZE } from '../tilemap/chunk';
-import { Tilemap } from '../tilemap/tilemap';
-import { TilemapLayer } from '../tilemap/tilemapLayer';
-import { TileMesh } from '../tilemap/tileMesh';
+// The tile types only: the meshes and their bounds come from the map itself (feature `world2d`).
+import type { TileChunk } from '../tilemap/chunk';
+import type { Tilemap } from '../tilemap/tilemap';
+import type { TilemapLayer } from '../tilemap/tilemapLayer';
 import { frameStats } from '../renderStats';
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderTarget } from '../rhi/resources';
@@ -33,7 +32,7 @@ import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
-import type { ParticlePasses } from './particlePasses';
+import type { ParticleSubsystem } from './featureSubsystems';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
@@ -132,7 +131,7 @@ export class Sprite2DPasses {
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _materials: MaterialBinder,
                 private readonly _projection: ViewProjection,
-                private readonly _particlePasses: ParticlePasses,
+                private readonly _particlePasses: ParticleSubsystem,
                 private readonly _sys: RenderSubsystems) {}
 
     /**
@@ -429,22 +428,15 @@ export class Sprite2DPasses {
                     if (!this._chunkVisible(tilemap, layer, chunk, node.worldPosition)) continue;
                     frameStats.tilemapChunks++;
 
-                    if (!chunk.mesh) chunk.mesh = new TileMesh();
-                    if (chunk.meshDirty) {
-                        chunk.mesh.build(chunk, layer, tileset, tilemap.grid, tilemap.time);
-                        chunk.meshDirty = false;
-                    } else if (chunk.animated) {
-                        chunk.mesh.patchAnimatedUVs(tileset, tilemap.time);
-                    }
-
+                    const mesh = tilemap.chunkMesh(layer, chunk, tileset);
                     if (layer.cfg.ySorted) {
-                        for (const b of chunk.mesh.bands)
+                        for (const b of mesh.bands)
                             this._pushUnsorted(KIND_TILE, this._addTile(node, layer, chunk, b, b.indexOffset, b.indexCount),
                                                layer.cfg.order, -b.sortY);
                     } else {
                         // One band on a layer that is not Y-sorted, covering every tile: its bounds are the chunk's.
-                        const all = chunk.mesh.bands[0] ?? null;
-                        this._pushUnsorted(KIND_TILE, this._addTile(node, layer, chunk, all, 0, chunk.mesh.indexCount),
+                        const all = mesh.bands[0] ?? null;
+                        this._pushUnsorted(KIND_TILE, this._addTile(node, layer, chunk, all, 0, mesh.indexCount),
                                            layer.cfg.order, 0);
                     }
                 }
@@ -535,7 +527,7 @@ export class Sprite2DPasses {
                 this._drawSpriteBatch(pass, ref, record, n, blend, blendClass);
                 record += n;
             } else if (kind === KIND_PARTICLES) {
-                this._particlePasses.particles.draw([this._particleNodes[ref]], this._particlePasses.particleDrawFrame(scene!, pass, this._passTarget ?? this._targets.scene.renderTarget));
+                this._particlePasses.draw2D(this._particleNodes[ref], scene!, pass, this._passTarget ?? this._targets.scene.renderTarget);
             } else {
                 this._drawTileBand(this._tileNodes[ref], this._tileLayers[ref], this._tileChunks[ref],
                                    this._tileOffsets[ref], this._tileCounts[ref], pass);
@@ -584,7 +576,7 @@ export class Sprite2DPasses {
         const key = this._litKeyLight, k = s * 6;
         for (let i = 0; i < 6; i++) key[k + i] = i === 1 ? 1 : 0;
         if (!scene) { out[0] = 0; out[1] = 0; out[2] = 0; return out; }
-        const light = this._particlePasses.frameLight(scene);
+        const light = this._sys.lighting.frameLight(scene);
         const m = this._spriteMatrices, at = s * 16;
         vec3.set(this._litPos, m[at + 12], m[at + 13], m[at + 14]);
         const ambient = this._sys.lighting.probeAmbientAt(scene, this._litPos, light.ambient, this._litScratch);
@@ -667,7 +659,7 @@ export class Sprite2DPasses {
             material.properties.set('keyColor', [0, 0, 0]);
             return;
         }
-        const light = this._particlePasses.frameLight(scene);
+        const light = this._sys.lighting.frameLight(scene);
         material.properties.set('sunDir', [light.sunDirection[0], light.sunDirection[1], light.sunDirection[2]]);
         material.properties.set('sunColor', [light.sunColor[0], light.sunColor[1], light.sunColor[2]]);
         const key = this._litKeyLight, k = s * 6;
@@ -758,6 +750,9 @@ export class Sprite2DPasses {
     private readonly _tileNodes: TilemapNode[] = [];
     private readonly _tileLayers: TilemapLayer[] = [];
     private readonly _tileChunks: TileChunk[] = [];
+    /** Scratch for a chunk's world box (`_chunkVisible`). */
+    private readonly _chunkMin: number[] = [0, 0, 0];
+    private readonly _chunkMax: number[] = [0, 0, 0];
     private readonly _tileBands: (DepthBand | null)[] = [];
     private readonly _tileOffsets: number[] = [];
     private readonly _tileCounts: number[] = [];
@@ -793,18 +788,8 @@ export class Sprite2DPasses {
         // A parallaxed layer is drawn at a camera-dependent offset, so its world box moves with the
         // camera; culling it against the un-offset box would pop tiles in and out at the screen edge.
         if (layer.cfg.parallax[0] !== 1 || layer.cfg.parallax[1] !== 1) return true;
-        const g = tilemap.grid;
-        // Local cell math plus the node's world position, matching how the mesh is built and drawn —
-        // `tilemap.cellToWorld` would fold in the map's own origin, which is only refreshed by the
-        // per-frame update the editor never runs.
-        const c0 = cellToWorld(g, chunk.cx * CHUNK_SIZE, chunk.cy * CHUNK_SIZE);
-        const c1 = cellToWorld(g, (chunk.cx + 1) * CHUNK_SIZE, (chunk.cy + 1) * CHUNK_SIZE);
-        // Isometric chunks are diamonds, so their axis-aligned extent runs to the opposite corners too;
-        // padding by the chunk's own width keeps the test conservative for every grid kind.
-        const padX = CHUNK_SIZE * g.cellWidth, padY = CHUNK_SIZE * g.cellHeight;
-        const min = [origin[0] + Math.min(c0[0], c1[0]) - padX, origin[1] + Math.min(c0[1], c1[1]) - padY, origin[2] - 1];
-        const max = [origin[0] + Math.max(c0[0], c1[0]) + padX, origin[1] + Math.max(c0[1], c1[1]) + padY, origin[2] + 1];
-        return this._sys.visibility.frustum.intersectsAABB(min, max);
+        tilemap.chunkWorldBox(chunk, origin, this._chunkMin, this._chunkMax);
+        return this._sys.visibility.frustum.intersectsAABB(this._chunkMin, this._chunkMax);
     }
 
     private _drawTileBand(node: TilemapNode, layer: TilemapLayer, chunk: TileChunk,

@@ -4,7 +4,7 @@
 
 import type { ShaderProgramDescriptor } from '../rhi/shaderProgram';
 import type { ShaderResource } from '../rhi/types';
-import { PARTICLE_PROGRAMS } from '../particles/particleRenderer';
+import { PARTICLE_PROGRAMS } from '../particles/particlePrograms';
 
 import BasicProgram from '../shaders/wgsl/basic.wgsl';
 import BasicInstancedProgram from '../shaders/wgsl/basicInstanced.wgsl';
@@ -344,6 +344,20 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         // A pixel-perfect 2D frame scaled up to the screen unfiltered (render/frame2d.ts). APPENDED.
         ['pixelUpscale',                 PixelUpscaleProgram],
     ];
+}
+
+/**
+ * The shader module each program-table entry is built from, by the entry's name: 'pbr' -> 'wgsl/pbr.wgsl'.
+ * A publish reads it to ship the variants a game's program list names (`pbr~pcf` is module wgsl/pbr.wgsl,
+ * variant `pcf`) from the player's shader library (src/graphics/shaderLibrary.ts).
+ */
+export function programModules(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [name, descriptor] of programTable()) {
+        const module = (descriptor as { module?: unknown }).module;
+        if (typeof module === 'string') out[name] = module;
+    }
+    return out;
 }
 
 /** WGSL reflection for the depth-only shadow programs, reachable by the name the pass picks. */

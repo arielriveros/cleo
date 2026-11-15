@@ -23,11 +23,10 @@ import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
 import type { PostEffects } from './postEffects';
-import type { DecalPasses } from './decals';
+import type { DecalSubsystem, GiSubsystem } from './featureSubsystems';
 import type { Sprite2DPasses } from './sprites2d';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
-import type { GiSystem } from './gi/giSystem';
 import type { GIVolumeNode } from '../../core/scene/nodes/giVolumeNode';
 import type { Camera } from '../../core/camera';
 import type { LightNode } from '../../core/scene/nodes/lightNode';
@@ -45,7 +44,7 @@ export interface EditorOverlaysHost {
     /** The node the editor has selected (Renderer.setSelectedNode), for the GI probe overlay. */
     readonly selectedNodeId: string | null;
     /** The GI Volumes, which draw their own probes (they hold the atlases the spheres are lit from). */
-    readonly gi: GiSystem;
+    readonly gi: GiSubsystem;
 }
 
 /**
@@ -65,7 +64,7 @@ export class EditorOverlays {
                 private readonly _materials: MaterialBinder,
                 private readonly _projection: ViewProjection,
                 private readonly _post: PostEffects,
-                private readonly _decals: DecalPasses,
+                private readonly _decals: DecalSubsystem,
                 private readonly _sprites: Sprite2DPasses,
                 private readonly _fullscreen: FullscreenPasses,
                 private readonly _modelDraw: ModelDraw,

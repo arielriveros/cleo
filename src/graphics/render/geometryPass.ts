@@ -10,7 +10,6 @@ import { device } from '../rhi/deviceHandle';
 import type { Buffer as RhiBuffer } from '../rhi/resources';
 import { BufferUsage } from '../rhi/types';
 import { DrawSortKeys } from '../shaderOptimizer';
-import { FoliagePasses } from './foliage';
 import { ModelDraw } from './modelDraw';
 import type { MaterialDrawState } from './modelDraw';
 import { GEOMETRY_PROGRAMS } from './programs';
@@ -25,6 +24,7 @@ import type { ViewProjection } from './viewProjection';
 import type { Visibility } from './visibility';
 import type { LightingPasses } from './lighting';
 import { ShaderManager } from '../systems/shaderManager';
+import { FOLIAGE_LOD_OFF, type FoliageSubsystem } from './featureSubsystems';
 
 /** One node in the opaque sort: its key, and the program chosen for it. */
 interface SortRecord {
@@ -59,7 +59,7 @@ export class GeometryPass {
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _materials: MaterialBinder,
                 private readonly _projection: ViewProjection,
-                private readonly _foliage: FoliagePasses,
+                private readonly _foliage: FoliageSubsystem,
                 private readonly _visibility: Visibility,
                 private readonly _lighting: LightingPasses,
                 private readonly _modelDraw: ModelDraw) {}
@@ -353,7 +353,7 @@ export class GeometryPass {
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
         // Placed instanced models never crossfade, and the foliage pass may have left it on.
-        this._shaderManager.setUniform('u_lodCamera', FoliagePasses.LOD_OFF);
+        this._shaderManager.setUniform('u_lodCamera', FOLIAGE_LOD_OFF);
         this._materials.setCameraHole(false);
         this._materials.applyProperties(material);
         pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));

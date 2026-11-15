@@ -32,13 +32,13 @@ import type { PassEncoder } from './passEncoder';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
-import type { VolumetricCloudPasses } from './clouds';
-import type { FoliagePasses } from './foliage';
+import type { CloudSubsystem } from './featureSubsystems';
 import { ShaderManager } from '../systems/shaderManager';
 import { DEPTH_WRITE } from './pipelineCache';
 import type { RenderSubsystems } from './subsystems';
 import { shelterMatrix, footprintKey, type ShelterFootprint } from './weatherPack';
 import { unitDirection } from '../../core/math';
+import type { FoliageSubsystem } from './featureSubsystems';
 
 /**
  * One punctual-light shadow atlas, spot or point, as the shared layer routine sees it. The FBOs are read
@@ -190,8 +190,8 @@ export class ShadowPasses {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
-                private readonly _clouds: VolumetricCloudPasses,
-                private readonly _foliage: FoliagePasses,
+                private readonly _clouds: CloudSubsystem,
+                private readonly _foliage: FoliageSubsystem,
                 private readonly _sys: RenderSubsystems) {}
 
     // ---- Cascaded shadow maps --------------------------------------------------------------

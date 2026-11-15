@@ -33,9 +33,7 @@ import type { OcclusionVolumeNode } from '../core/scene/nodes/occlusionVolumeNod
 import { EXTRA_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
 import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
 import { cpuProfiler } from './cpuProfiler';
-import { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from '../terrain/terrainSurfaceArrays';
-import { FoliageGpuCuller } from './foliageGpuCulling';
-import { gatherFoliageInteractors } from './foliageInteraction';
+import { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from '../terrain/terrainLayerSizes';
 
 import { ScreenProgram } from './render/programs';
 import { createFrameView, type FrameView } from './render/frameView';
@@ -51,12 +49,16 @@ import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSetting
 import { TemporalPasses } from './render/temporal';
 import { AutoExposure } from './render/autoExposure';
 import { PostEffects } from './render/postEffects';
-import { VolumetricCloudPasses } from './render/clouds';
-import { DecalPasses } from './render/decals';
-import { FluidVolumePasses } from './render/fluids';
-import { ParticlePasses } from './render/particlePasses';
+import type { VolumetricCloudPasses } from './render/clouds';
+import type { DecalPasses } from './render/decals';
+import { createNullClouds, createNullDecals, createNullFluids, createNullFog, createNullFoliage, createNullGi, createNullParticles, RENDER_FACTORY } from './render/featureSubsystems';
+import type { CloudSubsystem, DecalSubsystem, FluidSubsystem, FogSubsystem, FoliageSubsystem, GiSubsystem, ParticleSubsystem } from './render/featureSubsystems';
+import { featureFactory } from '../core/features/registry';
+import type { FluidVolumePasses } from './render/fluids';
+import type { ParticlePasses } from './render/particlePasses';
 import { Sprite2DPasses } from './render/sprites2d';
-import { FoliagePasses } from './render/foliage';
+import type { FoliagePasses } from './render/foliage';
+import { WindClock } from './render/windClock';
 import { ShadowPasses } from './render/shadows';
 import { Visibility } from './render/visibility';
 import { SsilPasses } from './render/ssil';
@@ -64,7 +66,7 @@ import { SsrPasses } from './render/ssr';
 import { SceneRadianceCopy } from './render/sceneRadiance';
 import { ssrStepCount } from './ssrSettings';
 import { LightingPasses } from './render/lighting';
-import { VolumetricFogPasses } from './render/volumetricFog';
+import type { VolumetricFogPasses } from './render/volumetricFog';
 import { WeatherPasses } from './render/weather';
 import { snowForLandscape } from './render/weatherPack';
 import type { VolumetricFogNode } from '../core/scene/nodes/volumetricFogNode';
@@ -75,13 +77,13 @@ import { ObjectTable } from './objectTable';
 import { GeometryPass } from './render/geometryPass';
 import { ForwardPass } from './render/forwardPass';
 import { Frame2DPasses } from './render/frame2d';
-import { Camera2DNode } from '../core/scene/nodes/camera2DNode';
+import type { Camera2DNode } from '../core/scene/nodes/camera2DNode';
 import { EditorOverlays } from './render/editorOverlays';
 import { DebugViews } from './render/debugViews';
 import { Capture } from './render/capture';
 import { MovieCapture } from './render/movieCapture';
 import { TextureManager } from './systems/textureManager';
-import { GiSystem } from './render/gi/giSystem';
+import type { GiSystem } from './render/gi/giSystem';
 import { GI_TIERS, clampGiFillDrawsPerFrame, clampGiRaysPerFrame, clampGiResolutionScale } from './render/gi/giSettings';
 import { RenderStats } from './render/stats';
 import type { RenderSubsystems } from './render/subsystems';
@@ -98,6 +100,7 @@ import { createDevice } from './rhi/createDevice';
 // failure and chunk-load failure the same observable event.
 import { setDevice, device } from './rhi/deviceHandle';
 import { jitterMatrix } from './utils/taaJitter';
+import { isCamera2D } from "../core/scene/nodes/nodeType";
 
 interface RendererConfig {
     clearColor?: number[];
@@ -145,6 +148,8 @@ export class Renderer {
      * capture that swaps the camera is seen by all of them at once.
      */
     private readonly _view: FrameView = createFrameView();
+    /** The effects clock (`windTime`) and the frame's wind field (render/windClock.ts). */
+    private readonly _wind = new WindClock(this._view);
     /** The frame's shared render targets (render/frameTargets.ts), held by reference like `_view`. */
     private readonly _targets = new FrameTargets();
     /** Pass and encoder plumbing (render/passEncoder.ts): opens and closes passes, owns the frame encoder. */
@@ -166,20 +171,20 @@ export class Renderer {
     /** The post chain's effect passes and the display transform: bloom, DOF, lens, grading, present (render/postEffects.ts). */
     private readonly _post: PostEffects;
     /** Volumetric clouds: noise bake, raymarch, temporal reconstruction and composite (render/clouds.ts). */
-    private readonly _clouds: VolumetricCloudPasses;
+    private readonly _clouds: CloudSubsystem;
     /** Decal volumes: collection, the landscape receiver depth, DBuffer, emissive and overlay passes (render/decals.ts). */
-    private readonly _decals: DecalPasses;
+    private readonly _decals: DecalSubsystem;
     /** Smoke-and-fire volumes: the raymarch, its temporal history and the composite (render/fluids.ts). */
-    private readonly _fluids: FluidVolumePasses;
+    private readonly _fluids: FluidSubsystem;
     /** GPU particle simulation, sorting and drawing, and the per-frame data they are handed (render/particlePasses.ts). */
-    private readonly _particlePasses: ParticlePasses;
+    private readonly _particlePasses: ParticleSubsystem;
     /** Froxel volumetric fog for VolumetricFogNode volumes (render/volumetricFog.ts). */
-    private readonly _fog: VolumetricFogPasses;
+    private readonly _fog: FogSubsystem;
     private readonly _weather: WeatherPasses;
     /** Sprites, tilemap chunks and the Y-sorted 2D pass (render/sprites2d.ts). */
     private readonly _sprites: Sprite2DPasses;
     /** Landscape foliage: upload, culling (CPU and GPU), wind, impostors, shadows and the colour pass (render/foliage.ts). */
-    private readonly _foliage: FoliagePasses;
+    private readonly _foliage: FoliageSubsystem;
     /** Shadow maps: casters, cascades and the far cascade, spot and point shadows, their uniforms (render/shadows.ts). */
     private readonly _shadows: ShadowPasses;
     /** What the view can see: frustum, CPU occluders and GPU occlusion queries, terrain and model LOD (render/visibility.ts). */
@@ -219,7 +224,7 @@ export class Renderer {
     /** What {@link beginMovie} changed, put back by {@link endMovie}. */
     private _movieRestore: { readInterval: number; admit: number; blocking: boolean } | null = null;
     /** GI Volumes: their capture, relight and per-pixel apply (render/gi/giSystem.ts). */
-    private readonly _gi: GiSystem;
+    private readonly _gi: GiSubsystem;
     /** Frame statistics for the performance HUD, the GPU memory estimate and the opt-in GL error check (render/stats.ts). */
     private readonly _stats: RenderStats;
     /** The subsystems, for the ones that reach each other while drawing (render/subsystems.ts). Filled at the end of the constructor. */
@@ -345,39 +350,47 @@ export class Renderer {
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._temporal, this._fullscreen, this._subsystems);
-        this._clouds = new VolumetricCloudPasses({
+        // Optional features' subsystems come from their factories (src/core/features/registry.ts), else a stand-in
+        // that draws nothing (render/featureSubsystems.ts).
+        this._clouds = featureFactory<(...a: ConstructorParameters<typeof VolumetricCloudPasses>) => VolumetricCloudPasses>(RENDER_FACTORY.clouds)?.({
             get quality() { return renderer._quality; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems);
-        this._decals = new DecalPasses({
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems)
+            ?? createNullClouds();
+        this._decals = featureFactory<(...a: ConstructorParameters<typeof DecalPasses>) => DecalPasses>(RENDER_FACTORY.decals)?.({
             get deferred() { return renderer._deferred; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._subsystems);
-        this._fluids = new FluidVolumePasses({
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._subsystems)
+            ?? createNullDecals();
+        this._fluids = featureFactory<(...a: ConstructorParameters<typeof FluidVolumePasses>) => FluidVolumePasses>(RENDER_FACTORY.fluids)?.({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems);
-        this._particlePasses = new ParticlePasses({
-            get renderHeight() { return renderer._renderHeight; },
-            get renderWidth() { return renderer._renderWidth; },
-            get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._projection, this._temporal, this._subsystems);
-        this._fog = new VolumetricFogPasses({
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems)
+            ?? createNullFluids();
+        this._particlePasses = featureFactory<(...a: ConstructorParameters<typeof ParticlePasses>) => ParticlePasses>(RENDER_FACTORY.particles)?.({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._bindGroups, this._fullscreen, this._projection, this._particlePasses, this._subsystems);
+        }, this._view, this._targets, this._passes, this._projection, this._temporal, this._subsystems)
+            ?? createNullParticles();
+        this._fog = featureFactory<(...a: ConstructorParameters<typeof VolumetricFogPasses>) => VolumetricFogPasses>(RENDER_FACTORY.volumetricFog)?.({
+            get renderHeight() { return renderer._renderHeight; },
+            get renderWidth() { return renderer._renderWidth; },
+            get thumbnailMode() { return renderer._thumbnailMode; },
+        }, this._view, this._targets, this._passes, this._bindGroups, this._fullscreen, this._projection, this._subsystems)
+            ?? createNullFog();
         this._sprites = new Sprite2DPasses({
             get viewCssHeight() { return renderer._viewCssHeight; },
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._particlePasses, this._subsystems);
-        this._foliage = new FoliagePasses({
+        this._foliage = featureFactory<(...a: ConstructorParameters<typeof FoliagePasses>) => FoliagePasses>(RENDER_FACTORY.foliage)?.({
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._subsystems);
+        }, this._view, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._subsystems)
+            ?? createNullFoliage();
         this._shadows = new ShadowPasses({
             get deviceReady() { return renderer._deviceReady; },
             get renderHeight() { return renderer._renderHeight; },
@@ -458,10 +471,11 @@ export class Renderer {
             get cutEpoch() { return renderer._cutEpoch; },
             present: (source, target) => renderer._post.presentPass(source, target),
         }, this._view, this._passes, this._fullscreen);
-        this._gi = new GiSystem({
+        this._gi = featureFactory<(...a: ConstructorParameters<typeof GiSystem>) => GiSystem>(RENDER_FACTORY.gi)?.({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._shadows, this._lighting, this._fullscreen, this._subsystems);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._shadows, this._lighting, this._fullscreen, this._subsystems)
+            ?? createNullGi();
         this._stats = new RenderStats({
             get canvas() { return renderer._canvas; },
             get deferred() { return renderer._deferred; },
@@ -487,6 +501,7 @@ export class Renderer {
             objects: this._objects,
             gi: this._gi,
             foliage: this._foliage,
+            wind: this._wind,
         } satisfies RenderSubsystems);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._shadows.shadowDistance = config.shadowDistance ?? 100;
@@ -567,10 +582,6 @@ export class Renderer {
         // ping-pong blur targets are float — an RGBA8 bloom would clamp and defeat the HDR bright-pass.
         for (let i = 0; i < PostEffects.BLOOM_MIP_COUNT; i++)
             this._post.bloomMips.push(new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }));
-        // Same config as the blur scratch buffers (LINEAR-filtered float) so the low-res clouds upsample smoothly.
-        this._clouds.cloudsFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
-        // Same float/LINEAR config: the resolve reads it with bilinear taps for its neighbourhood bounds.
-        this._clouds.cloudTraceFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // `mipMap: false` matters here more than anywhere else in this list, and it was the ONE
         // render target missing it.
         //
@@ -800,7 +811,7 @@ export class Renderer {
         // A 2D game camera sizes its projection from the screen, in art pixels: fitted before either frame
         // builds its matrices from it.
         const active = scene.activeCamera;
-        if (active instanceof Camera2DNode) active.fitView(this._renderWidth, this._renderHeight);
+        if (isCamera2D(active)) active.fitView(this._renderWidth, this._renderHeight);
         if (this._view.flat2D && !flat) this.invalidateTemporalHistory();
         this._view.flat2D = flat;
         try {
@@ -827,16 +838,16 @@ export class Renderer {
         // multiplied by it. A preview (thumbnail, offscreen capture, non-scene tab) renders at k = 1.
         this._autoExposure.beginFrame(this._thumbnailMode || !!this._subsystems.capture.presentTarget
                                       || !this._autoExposure.exposureMeteringAllowed);
-        this._foliage.advanceWindTime();
+        this._wind.advanceWindTime();
         // The scene's wind field (core/wind/windField.ts) on that clock: foliage and particles share it.
-        this._foliage.prepareWindField(scene);
+        this._wind.prepareWindField(scene);
         // The clouds' drift, on the same clock, before the sky bake and the cloud shadows read it.
         this._clouds.advanceCloudWind(scene, this._view.windDelta);
         // One clock for every flickering light and everything that follows one (graphics/lightFlicker.ts).
         lightFlickerClock.time = this._view.windTime;
         // What is pushing foliage aside this frame (characters, moving bodies, blasts): stamps for the
         // instanced foliage programs, aged against the same clock as the wind.
-        this._foliage.foliageInteraction.update(gatherFoliageInteractors(scene), this._view.windTime, this._view.camera.position);
+        this._foliage.updateInteraction(scene);
 
         // Everything from here to the sky bake runs BEFORE `_statsT0`, so none of it is inside the
         // `Render (CPU)` figure the HUD shows — it lands in "Unattributed" instead. That exclusion is
@@ -1044,10 +1055,7 @@ export class Renderer {
         // And the camera behind this frame's depth snapshot, for next frame's particle collision. Not
         // from an offscreen capture: those resize the depth buffer and render from somewhere else.
         if (!this._thumbnailMode && !this._view.capturing) {
-            mat4.copy(this._particlePasses.particleCollideViewProj, this._view.viewProj);
-            vec3.copy(this._particlePasses.particleCollideCamPos, this._view.camera.position);
-            this._particlePasses.particleCollideOrtho = this._view.camera.type === 'orthographic';
-            this._particlePasses.particleCollideValid = true;
+            this._particlePasses.rememberCollisionCamera(this._view);
         }
 
         // Same for every model's world matrix and bone pose. Here rather than in `updateTransforms`:
@@ -1093,8 +1101,8 @@ export class Renderer {
         // Display-referred: pre-exposure 1 (and the exposure 1, `AutoExposure.resolveExposure`).
         this._autoExposure.beginFrame(true);
         // The render clock, for what runs on it in 2D: light flicker, particle wind, custom materials' time.
-        this._foliage.advanceWindTime();
-        this._foliage.prepareWindField(scene);
+        this._wind.advanceWindTime();
+        this._wind.prepareWindField(scene);
         lightFlickerClock.time = this._view.windTime;
 
         this._passes.scope('prepare.view');
@@ -1122,11 +1130,11 @@ export class Renderer {
         const _statsT0 = performance.now();
 
         // Particles step with no weather and no depth to collide against (no snapshot is taken in 2D).
-        this._particlePasses.particleCollideValid = false;
+        this._particlePasses.invalidateCollision();
         this._particlePasses.simulateParticles(scene, null);
         // Pixel-perfect when the game's 2D camera asks for it, and never for a capture, a thumbnail or a movie,
         // which draw at their own size.
-        const camera2D = scene.activeCamera instanceof Camera2DNode ? scene.activeCamera : null;
+        const camera2D = isCamera2D(scene.activeCamera) ? scene.activeCamera : null;
         const pixel = camera2D && camera2D.pixelPerfect && !this._thumbnailMode && !this._subsystems.capture.presentTarget
             && !this._movie.active && !this._view.capturing ? camera2D : null;
         this._frame2D.render(scene, pixel);
@@ -2659,7 +2667,7 @@ export class Renderer {
 
     /** See {@link RenderSettings.ssrEnabled}. A quality-tier field, like `ssaoEnabled`. */
     /** GI Volumes: state, counters and settings (render/gi/giSystem.ts). */
-    public get gi(): GiSystem { return this._gi; }
+    public get gi(): GiSubsystem { return this._gi; }
 
     /** See {@link RenderSettings.giEnabled}. A quality-tier field. */
     public get giEnabled(): boolean { return this._gi.enabled; }
@@ -2807,21 +2815,21 @@ export class Renderer {
     public get foliageGpuCulling(): boolean { return this._foliage.foliageGpuCulling; }
     public set foliageGpuCulling(on: boolean) { this._foliage.foliageGpuCulling = !!on; }
     /** Whether this device can cull foliage on the GPU at all (compute and indirect draws). */
-    public get foliageGpuCullingSupported(): boolean { return FoliageGpuCuller.supported; }
+    public get foliageGpuCullingSupported(): boolean { return this._foliage.gpuCullingSupported; }
     /** See RenderSettings.foliageShadowDistance. */
     public get foliageShadowDistance(): number { return this._foliage.foliageShadowDistance; }
     public set foliageShadowDistance(metres: number) {
         this._foliage.foliageShadowDistance = Number.isFinite(metres) ? Math.max(0, metres) : 0;
     }
     /** See RenderSettings.effectsFollowTimeScale. */
-    public get effectsFollowTimeScale(): boolean { return this._foliage.effectsFollowTimeScale; }
-    public set effectsFollowTimeScale(on: boolean) { this._foliage.effectsFollowTimeScale = !!on; }
+    public get effectsFollowTimeScale(): boolean { return this._wind.effectsFollowTimeScale; }
+    public set effectsFollowTimeScale(on: boolean) { this._wind.effectsFollowTimeScale = !!on; }
     /**
      * The game's time scale for the coming frame, which the render clock runs at while
      * `effectsFollowTimeScale` is on. The engine passes it before every render (1 while paused).
      */
     public setEffectsTimeScale(scale: number): void {
-        this._foliage.effectsTimeScale = Number.isFinite(scale) ? Math.max(0, scale) : 1;
+        this._wind.effectsTimeScale = Number.isFinite(scale) ? Math.max(0, scale) : 1;
     }
     /** The render clock, seconds: what wind, clouds, fog, flicker and custom materials' `u_time` run on. */
     public get effectsTime(): number { return this._view.windTime; }
@@ -3273,7 +3281,7 @@ export class Renderer {
             foliageShadowDistance: this._foliage.foliageShadowDistance,
             foliagePrepass: this._foliage.foliagePrepass,
             foliageGpuCulling: this._foliage.foliageGpuCulling,
-            effectsFollowTimeScale: this._foliage.effectsFollowTimeScale,
+            effectsFollowTimeScale: this._wind.effectsFollowTimeScale,
             occlusionQueries: this._visibility.occlusionQueriesEnabled,
             lightOcclusionCulling: this._visibility.lightOcclusionCulling,
             foliageCullDistance: this._foliage.foliageCullDistance,

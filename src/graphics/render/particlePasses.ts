@@ -1,17 +1,12 @@
 import { mat4, vec3 } from 'gl-matrix';
 import { MAX_FORCE_FIELDS } from '../../core/scene/nodes/forceFieldNode';
 import { packFrameFields } from '../../particles/particleFields';
-import { LightNode } from '../../core/scene/nodes/lightNode';
 import type { ParticleSystemNode } from '../../core/scene/nodes/particleSystemNode';
-import { Scene } from '../../core/scene/scene';
-import { AreaLight, DirectionalLight, PointLight, Spotlight } from '../lighting';
-import { skyAmbient } from '../particles/particleLighting';
-import type { ParticleLocalLight } from '../particles/particleLighting';
+import type { Scene } from '../../core/scene/scene';
 import { ParticleRenderer } from '../particles/particleRenderer';
 import type { ParticleSimFrame, ParticleDrawFrame } from '../particles/particleRenderer';
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderTarget } from '../rhi/resources';
-import { keyLight } from '../skyNight';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -64,6 +59,27 @@ export class ParticlePasses {
     // Keep every material's derived texture slots in step with its authored sources. Per frame rather
     // than on assignment: sources decode asynchronously, and an unresolved pack simply retries.
     /**
+     * Remember the camera behind this frame's depth snapshot, for next frame's particle collision (the Renderer, after
+     * a frame that is neither a thumbnail nor an offscreen capture).
+     */
+    public rememberCollisionCamera(view: FrameView): void {
+        mat4.copy(this.particleCollideViewProj, view.viewProj);
+        vec3.copy(this.particleCollideCamPos, view.camera.position);
+        this.particleCollideOrtho = view.camera.type === 'orthographic';
+        this.particleCollideValid = true;
+    }
+
+    /** No depth snapshot to collide against this frame (a flat 2D frame takes none). */
+    public invalidateCollision(): void {
+        this.particleCollideValid = false;
+    }
+
+    /** Draw one system inside the 2D pass, sorted among the sprites and tiles (render/sprites2d.ts). */
+    public draw2D(node: ParticleSystemNode, scene: Scene, pass: RenderPassEncoder, target: RenderTarget): void {
+        this.particles.draw([node], this.particleDrawFrame(scene, pass, target));
+    }
+
+    /**
      * Run the particle systems' queued simulation steps. See {@link ParticleRenderer.simulate}. `weather`:
      * the frame's weather volumes and shelter map (WeatherPasses.particleWeather), null in a preview.
      */
@@ -107,9 +123,9 @@ export class ParticlePasses {
             orthographic: this.particleCollideOrtho,
             fields: this._forceFieldScratch,
             fieldCount,
-            // The scene's wind field this frame (FoliagePasses.prepareWindField), for Scene-wind emitters.
-            windBase: this._sys.foliage.windField.params.subarray(0, 4),
-            windMotion: this._sys.foliage.windField.params.subarray(4, 8),
+            // The scene's wind field this frame (WindClock.prepareWindField), for Scene-wind emitters.
+            windBase: this._sys.wind.windField.params.subarray(0, 4),
+            windMotion: this._sys.wind.windField.params.subarray(4, 8),
         };
     }
 
@@ -157,7 +173,7 @@ export class ParticlePasses {
      */
     public particleDrawFrame(scene: Scene, pass: RenderPassEncoder, target: RenderTarget): ParticleDrawFrame {
         const camera = this._view.camera;
-        const { ambient, sunDirection, sunColor, localLights } = this.frameLight(scene);
+        const { ambient, sunDirection, sunColor, localLights } = this._sys.lighting.frameLight(scene);
 
         return {
             pass, target,
@@ -194,85 +210,9 @@ export class ParticlePasses {
         };
     }
 
-    /**
-     * The frame's light as lit particles and lit sprites (Sprite.lit) take it: the key directional light
-     * (the sun, or the moon at night) as a unit direction TOWARD it and its colour times its intensity, the
-     * ambient and sky fill surfaces get, and the punctual lights for `gatherParticleLocalLight` to pick a
-     * key from at each effect. Worked out once per scene and frame; the result is shared, not a copy.
-     */
-    public frameLight(scene: Scene): FrameLight {
-        const cached = this._frameLight;
-        if (cached && this._frameLightScene === scene && this._frameLightFrame === this._view.frameIndex) return cached;
-        let sun: LightNode | null = null;
-        for (const light of scene.lights) if (light.type === 'directional') { sun = light; break; }
-        const sunColor = [0, 0, 0];
-        const sunDirection = [0, 1, 0];
-        if (sun) {
-            const light = sun.light as DirectionalLight;
-            const key = sun === this._sys.lighting.keyLightNode ? this._sys.lighting.keyLight : null;
-            const k = key ? key.intensity : light.internalIntensity;
-            const c = key ? key.color : light.color;
-            sunColor[0] = c[0] * k; sunColor[1] = c[1] * k; sunColor[2] = c[2] * k;
-            const f = this._sys.lighting.dirOf(sun);
-            sunDirection[0] = -f[0]; sunDirection[1] = -f[1]; sunDirection[2] = -f[2];
-        }
-        // The fallback indirect term surfaces get (deferredLighting `indirect.diffuse`): the scene ambient,
-        // as the sky light scales it, plus the sky light's mean irradiance. No invented floor: a scene with
-        // neither is dark, for particles as for everything else.
-        const ambient = this._sys.lighting.internalAmbient(scene);
-        const skyNode = scene.skyLight;
-        if (skyNode && this._sys.sky.skySHValid) {
-            const grade = this._sys.lighting.cloudGrade(scene);
-            const sky = skyAmbient(this._sys.sky.skySH, skyNode.intensity * grade.sky);
-            ambient[0] += sky[0]; ambient[1] += sky[1]; ambient[2] += sky[2];
-        }
-
-        // The punctual lights as the light grid has them, less those whose whole reach was hidden this frame
-        // and those inside an occlusion volume the camera cannot see.
-        const localLights = this._particleLights;
-        localLights.length = 0;
-        for (const node of scene.lights) {
-            if (node.type === 'directional' || node.index < 0) continue;
-            if (this._sys.visibility.lightOccludedMemo.get(node) === true || this._sys.visibility.volumeCulled(node)) continue;
-            const light = node.light as PointLight | Spotlight;
-            const record: ParticleLocalLight = {
-                // Flickering with the light, as the light grid does, so torch smoke pulses with its torch.
-                position: node.worldPosition, intensity: light.internalIntensity * node.flickerFactor, color: light.color,
-                range: light.range, sourceRadius: light.sourceRadius,
-            };
-            if (node.type === 'spotlight') {
-                record.direction = node.worldForward;
-                record.cone = (light as Spotlight).coneScaleOffset;
-            } else if (node.type === 'area' && !(node.light as AreaLight).twoSided) {
-                // As its light record has it (render/lighting.ts): a one-sided panel lights its half-space.
-                record.direction = node.worldForward;
-                record.cone = [1, 0];
-            }
-            localLights.push(record);
-        }
-
-        const light: FrameLight = { ambient, sunDirection, sunColor, localLights };
-        this._frameLight = light;
-        this._frameLightScene = scene;
-        this._frameLightFrame = this._view.frameIndex;
-        return light;
-    }
-
     private readonly _hiddenByVolume = (node: ParticleSystemNode) =>
         this._sys.visibility.volumeCulled(node) || this._sys.visibility.previewVolumeDrops(node);
     private readonly _particleViewProj: mat4 = mat4.create();
-    private readonly _particleLights: ParticleLocalLight[] = [];
     /** Scratch for `ambientAt`: read by the particle renderer before its next call. */
     private readonly _probeAmbient: number[] = [0, 0, 0];
-    private _frameLight: FrameLight | null = null;
-    private _frameLightScene: Scene | null = null;
-    private _frameLightFrame = -1;
-}
-
-/** See {@link ParticlePasses.frameLight}. */
-export interface FrameLight {
-    readonly ambient: number[];
-    readonly sunDirection: number[];
-    readonly sunColor: number[];
-    readonly localLights: readonly ParticleLocalLight[];
 }

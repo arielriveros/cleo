@@ -322,12 +322,24 @@ async function pickGameDirectory(win, kind, name) {
   return parent ? { dir: path.join(parent, folder), name: folder } : null;
 }
 
-// Write the four files that make up a published game into `dir`. All game data — scenes, meshes and
-// textures — is in the single binary game.bin; only scripts are a separate file.
+// Write the files that make up a published game into `dir`: index.html, the player's modules, game.scripts.js
+// and game.bin. All game data — scenes, meshes and textures — is in the single binary game.bin; only scripts
+// are a separate file.
+// A player module's path inside the game folder (game.js, chunks/x-1a2b.js): relative, forward slashes, no
+// dot segments. The paths arrive over IPC from the renderer, so they are checked before anything is written.
+const PLAYER_FILE = /^(?:[\w-]+\/)*[\w-][\w.-]*\.js$/;
+
 async function writeWebFiles(dir, files) {
   await fsp.mkdir(dir, { recursive: true });
   await fsp.writeFile(path.join(dir, 'index.html'), files.indexHtml, 'utf-8');
-  await fsp.writeFile(path.join(dir, 'game.js'), files.gameJs, 'utf-8');
+  // The player: game.js, physics-worker.js and the chunks this game needs (see the editor's playerManifest.ts).
+  for (const [file, text] of Object.entries(files.playerFiles || {})) {
+    if (!PLAYER_FILE.test(file) || file.split('/').some(part => part.startsWith('.')))
+      throw new Error(`Refusing to write an unexpected player file: ${file}`);
+    const target = path.join(dir, ...file.split('/'));
+    await fsp.mkdir(path.dirname(target), { recursive: true });
+    await fsp.writeFile(target, text, 'utf-8');
+  }
   await fsp.writeFile(path.join(dir, 'game.scripts.js'), files.scriptsJs || 'window.CLEO_GAME_SCRIPTS = {};\nwindow.CLEO_GAME_MODULES = {};\n', 'utf-8');
   await fsp.writeFile(path.join(dir, 'game.bin'), Buffer.from(files.gameBin));
 }

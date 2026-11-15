@@ -1,3 +1,4 @@
+import { useProjectFeatures } from '../projectFeatures/featureUi';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { NodeRendererProps, Tree, TreeApi } from 'react-arborist'
 import { useCleoEngine } from '../EngineContext'
@@ -80,6 +81,9 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
   // the tint for the standard indigo fill and white text: selection must never be ambiguous.
   const isUI = isUINodeType(data.type);
   const TypeIcon = typeIconFor(data.type);
+  // A node of a feature the project leaves out (Project ▸ Features) stays in the scene, but a published game
+  // drops it: the row says so.
+  const offFeature = useProjectFeatures().offFeatureOfNodeType(data.type);
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
     // react-dnd carries moves within the tree; these are for targets outside it (the Assets explorer,
@@ -107,10 +111,11 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
       </span>
       {/* Dormant nodes (spawnOnStart off) read as "present but asleep": the row is dimmed, but stays fully
           interactive — it is still authored here, and the only way to select it. */}
-      <div className={`flex items-center min-w-0 flex-1 ${data.spawnOnStart === false ? 'opacity-50' : ''}`}
-           title={data.spawnOnStart === false ? 'Dormant until a script spawns it' : undefined}>
+      <div className={`flex items-center min-w-0 flex-1 ${data.spawnOnStart === false || offFeature ? 'opacity-50' : ''}`}
+           title={offFeature ? `Not shipped: the ${offFeature.label} feature is off for this project (Project ▸ Features)`
+             : data.spawnOnStart === false ? 'Dormant until a script spawns it' : undefined}>
         { TypeIcon && <span className='inline-flex w-4 h-4 mr-1.5 align-middle items-center justify-center'><TypeIcon /></span> }
-        { node.isEditing ? <RenameInput node={node} /> : <span className='truncate'>{data.name}</span> }
+        { node.isEditing ? <RenameInput node={node} /> : <span className={`truncate ${offFeature ? 'line-through' : ''}`}>{data.name}</span> }
       </div>
       <NodeControls data={data} />
     </div>

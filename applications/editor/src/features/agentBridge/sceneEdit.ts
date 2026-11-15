@@ -2,6 +2,8 @@ import * as cleo from 'cleo'
 import type { Node, Scene } from 'cleo'
 import type { ShapeDescription } from '../engineContextTypes'
 import { ADD_ITEMS, addItemTo, findAddItem } from '../sceneInspector/addCatalog'
+import { featureOfAddItem, projectFeatures } from '../projectFeatures/featureUi'
+import { featureById } from 'cleo'
 import { buildTemplateFromNode, instantiateTemplate, isWithinTemplateInstance, TEMPLATE_ID_VAR, type Template } from '../../utils/templates'
 import { OVERRIDES_VAR, setFieldOverride, setNameOverride, writeOverrides } from '../../utils/templateOverrides'
 import { cloneJson, variantFromContent } from '../../utils/templateVariants'
@@ -339,6 +341,10 @@ async function opCreate(ctx: EditCtx, op: any): Promise<string> {
       const near = nearestNames(op.type, ADD_ITEMS.map(i => i.id))
       throw new Error(`Unknown type "${op.type}". ${near.length ? `Did you mean: ${near.join(', ')}?` : `Types: ${ADD_ITEMS.map(i => i.id).join(', ')}.`}`)
     }
+    // What the editor's Add menu hides, the agent cannot add either (Project ▸ Features).
+    const feature = featureOfAddItem(op.type)
+    if (feature && !projectFeatures(h.engine.projectSettings.features.disabled).isOn(feature))
+      throw new Error(`"${op.type}" belongs to the ${featureById(feature)?.label ?? feature} feature, which this project leaves out (Project ▸ Features).`)
     node = await addItemTo(item, parent, { editorScene: scene, eventEmitter: h.engine.eventEmitter })
     what = op.type
   } else if (op.template) {

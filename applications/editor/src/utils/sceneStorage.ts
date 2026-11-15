@@ -148,12 +148,13 @@ export async function migrateLegacyProject(): Promise<ProjectMeta | null> {
 }
 
 /** Meta for a brand-new project: a single empty "Main" scene (blob written on first save). */
-export function createFreshProjectMeta(): ProjectMeta {
+/** A new project's meta: one empty scene, Main, of `dimension` when one is given (a 2D project's preset). */
+export function createFreshProjectMeta(dimension?: '2D' | '3D'): ProjectMeta {
   const id = cryptoRandomId();
   return {
     version: 2,
     mainSceneId: id,
     openSceneId: id,
-    scenes: [{ id, name: 'Main', updatedAt: Date.now() }],
+    scenes: [{ id, name: 'Main', updatedAt: Date.now(), ...(dimension ? { dimension } : {}) }],
   };
 }

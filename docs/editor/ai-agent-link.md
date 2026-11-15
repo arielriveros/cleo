@@ -12,6 +12,10 @@ An AI agent such as Claude Code or Claude Desktop can work in the editor alongsi
 - take screenshots of the viewport, from up to four angles at once
 - play the game, press its keys, and read back how things moved and what the console said
 
+The panel and the agent link are the **Claude Code** addon: Project ▸ Addons turns them on or off for the
+project ([Addons](addons.md)). With it off there is no Claude button and no agent link, for the panel and
+for an external agent alike.
+
 **Claude** at the right end of the menu bar opens the Claude panel at the right edge of the editor: your own
 Claude Code, running in a terminal inside the panel. It signs in with your Claude account, so it runs on
 your Claude plan with no extra charge.

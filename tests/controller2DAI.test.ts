@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { vec3 } from 'gl-matrix';
+import './helpers/features';
 import { CleoEngine } from '../src/core/engine';
 import { Scene } from '../src/core/scene/scene';
 import { CharacterBody2DNode } from '../src/core/scene/nodes/characterBody2DNode';

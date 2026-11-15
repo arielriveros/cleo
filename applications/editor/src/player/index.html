@@ -19,16 +19,33 @@
         #cleo-error { position: absolute; inset: 0; margin: 0; color: #ff6b6b; background: #111; font-family: monospace; font-size: 13px; padding: 16px; white-space: pre-wrap; overflow: auto; z-index: 9999; }
     </style>
     <!-- Per-game scripts (real functions, populated at publish). Deferred so it runs before game.js
-         but after the DOM parses; both are `defer` so document order is preserved. -->
+         but after the DOM parses: a deferred classic script and a module script run in document order. -->
     <script defer src="game.scripts.js"></script>
 </head>
 <body>
     <div id="game-viewport"></div>
     <div id="ui-root"></div>
     <div id="cleo-loading"><div class="spin"></div><div id="cleo-loading-text">Loading…</div></div>
-    <!-- Written here rather than injected: this file is copied verbatim by vite.player.config.ts.
-         A classic `defer` script, never type="module": the player is one self-contained file that runs
-         from anywhere, file:// included, where a module script is blocked by the opaque origin. -->
-    <script defer src="game.js"></script>
+    <!-- Written here rather than injected: this file is copied verbatim by vite.player.config.ts, and
+         publishing adds a <link rel="modulepreload"> per chunk the game ships (CLEO_PRELOADS).
+         game.js is an ES module that loads the rest of the engine in chunks. A page opened from file://
+         cannot load modules (the opaque origin blocks them, with nothing on screen), so this classic
+         script says so first; a web build is served over HTTP, a desktop build over game://. -->
+    <script>
+        if (location.protocol === 'file:') {
+            var pre = document.createElement('pre');
+            pre.id = 'cleo-error';
+            pre.textContent = 'This web build must be served over HTTP.\n' +
+                'Browsers do not run a game opened directly from its folder (file://).\n\n' +
+                'Run one of these inside this folder, then open the URL it prints:\n' +
+                '    npx http-server .\n' +
+                '    python -m http.server\n\n' +
+                'Tip: to get a double-click game instead, use Publish → Desktop in the editor.';
+            document.body.appendChild(pre);
+            document.getElementById('cleo-loading').remove();
+        }
+    </script>
+    <!--CLEO_PRELOADS-->
+    <script type="module" src="game.js"></script>
 </body>
 </html>

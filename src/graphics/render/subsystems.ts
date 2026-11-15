@@ -10,8 +10,9 @@ import type { EditorOverlays } from './editorOverlays';
 import type { Capture } from './capture';
 import type { ProgramRegistry } from './programRegistry';
 import type { ObjectTable } from '../objectTable';
-import type { GiSystem } from './gi/giSystem';
-import type { FoliagePasses } from './foliage';
+import type { GiSubsystem } from './featureSubsystems';
+import type { WindClock } from './windClock';
+import type { FoliageSubsystem } from './featureSubsystems';
 
 /**
  * The renderer's subsystems, for the ones that reach each other while drawing. Filled once, at the end of
@@ -36,7 +37,9 @@ export interface RenderSubsystems {
     /** The per-object table every converted draw reads its matrix and per-object values from. */
     readonly objects: ObjectTable;
     /** GI Volumes: their capture, relight and apply (render/gi/giSystem.ts). */
-    readonly gi: GiSystem;
+    readonly gi: GiSubsystem;
     /** The landscape's plants, which a GI capture draws too. */
-    readonly foliage: FoliagePasses;
+    readonly foliage: FoliageSubsystem;
+    /** The effects clock and the frame's wind field (render/windClock.ts). */
+    readonly wind: WindClock;
 }

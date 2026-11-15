@@ -7,6 +7,7 @@ import { AssetExplorer } from '@cleo/app-kit/assets/AssetExplorer'
 import { installBadgeStyles } from './badgeStyles'
 
 import { useCleoEngine } from '../EngineContext'
+import { useProjectFeatures, featureOfNewAsset } from '../projectFeatures/featureUi'
 import { useVfs } from './VfsContext'
 import { useFileManagerBridge, FM_MODE_KEY } from './useFileManagerBridge'
 import { useDragOutPatch } from './useDragOutPatch'
@@ -64,6 +65,7 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     importModelFiles, addTemplate, createScene, editorScene, scripts, eventEmitter, scriptAssets,
   } = useCleoEngine()
   const { vfs, libs, pathIndexRef, folderKindsRef, landingFolderRef, depsRef } = useVfs()
+  const features = useProjectFeatures()
   // The tree's root reads "<project> Files" rather than SVAR's "My files".
   const projectName = useProjectName()
 
@@ -300,7 +302,8 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
 
   // The explorer's entire chrome is ONE 28px row; every saved pixel goes to the card area below, which at
   // a 30vh bottom bar has only ~130px for a full card row.
-  const addItems: AddMenuItem[] = [
+  // A feature the project leaves out (Project ▸ Features) offers none of its assets.
+  const addItems: AddMenuItem[] = ([
     { label: 'Material', icon: <img src={iconFor('material')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterMaterialEditor(), title: 'Create a new material asset' },
     { label: 'Foliage Material', icon: <img src={iconFor('material')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterFoliageMaterialEditor(), title: 'Create a new foliage material: PBR that sways in the wind, parts for what walks through, and answers the weather (on landscape foliage)' },
     { label: 'Landscape Material', icon: <img src={iconFor('terrainMaterial')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTerrainMaterialEditor(), title: 'Create a new landscape material asset: a surface for a landscape’s base or paint layers' },
@@ -328,7 +331,7 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     { label: 'Animation', icon: <img src={iconFor('animation')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('animation-clip-import')?.click(), title: 'Import animation clips from a .fbx/.glb/.gltf and pick the character they belong to' },
     { label: 'Scene', icon: <img src={iconFor('scene')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => { void createScene() }, title: 'Create a new scene asset' },
     { label: 'Folder', icon: <img src={iconFor('folder')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: newFolder, title: 'Create a folder in the current directory' },
-  ]
+  ] as AddMenuItem[]).filter(item => features.isOn(featureOfNewAsset(item.label)))
   return (<>
     <AssetExplorer
       rootLabel={`${projectName || 'Project'} Files`}

@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Bridge exposed to the editor renderer. The renderer assembles the game files (index.html + game.js
-// + game.scripts.js + game.bin) and hands the bytes to the main process, which writes them to a
+// Bridge exposed to the editor renderer. The renderer assembles the game files (index.html + the player's
+// modules + game.scripts.js + game.bin) and hands the bytes to the main process, which writes them to a
 // user-chosen folder.
 contextBridge.exposeInMainWorld('cleoDesktop', {
   publishWeb: (files, options) => ipcRenderer.invoke('publish:web', files, options),

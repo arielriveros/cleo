@@ -105,6 +105,9 @@ function GeneralOptions() {
         <Field label='Only used shaders' labelClassName={OPTION_LABEL}>
           <span className='flex flex-1'><Toggle checked={w.onlyUsedShaders} onChange={v => setWindow({ onlyUsedShaders: v })} /></span>
         </Field>
+        <Field label='WebGL 2 fallback' labelClassName={OPTION_LABEL}>
+          <span className='flex flex-1'><Toggle checked={w.webgl2Fallback} onChange={v => setWindow({ webgl2Fallback: v })} /></span>
+        </Field>
       </Section>
 
       <Button size='sm' variant='ghost' onClick={() => setWindow({ ...d })}>

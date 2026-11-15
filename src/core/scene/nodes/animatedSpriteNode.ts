@@ -3,7 +3,7 @@ import type { Scene } from "../scene";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 import { SpriteNode, spritePayload } from "./spriteNode";
-import { CharacterBody2DNode } from "./characterBody2DNode";
+import type { CharacterBody2DNode } from "./characterBody2DNode";
 import { TriggerNode } from "./triggerNode";
 import { createConditionContext } from "../../conditions";
 import type { ConditionContext } from "../../conditions";
@@ -11,6 +11,7 @@ import {
     advanceClip, cloneSpriteAnimationSet, createPlayhead, normalizedTime, parseSpriteAnimationSet, stepSpriteMachine,
 } from "../../../animation/spriteAnimation";
 import type { SpriteAnimationSet, SpriteClip } from "../../../animation/spriteAnimation";
+import { isCharacterBody2D } from "./nodeType";
 
 /**
  * A sprite that plays a frame sequence.
@@ -257,7 +258,7 @@ export class AnimatedSpriteNode extends SpriteNode {
 
     /** The character body this sprite belongs to: itself or its nearest ancestor. Its state drives the machine. */
     private _ownerBody2D(): CharacterBody2DNode | null {
-        for (let n: Node | null = this.parent; n; n = n.parent) if (n instanceof CharacterBody2DNode) return n;
+        for (let n: Node | null = this.parent; n; n = n.parent) if (isCharacterBody2D(n)) return n;
         return null;
     }
 

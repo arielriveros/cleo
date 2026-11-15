@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mat4, vec3 } from 'gl-matrix';
+import './helpers/features';
 import { Geometry } from '../src/core/geometry';
 import { SkinnedCloth } from '../src/physics/cloth/skinnedCloth';
 import { parseSkinnedCloth } from '../src/physics/cloth/skinnedClothData';

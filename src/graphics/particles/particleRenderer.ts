@@ -36,52 +36,13 @@ import type { ParticleWeather } from '../render/weather';
 import { LayeredDepthFramebuffer } from '../layeredDepthFramebuffer';
 import { builtinSpriteTexture, releaseBuiltinSprites } from './builtinSprites';
 import { gatherParticleLocalLight, type ParticleLocalLight, type ParticleLocalLighting } from './particleLighting';
+import { PARTICLE_PROGRAMS, particleSimVariants, type ParticleProgram } from './particlePrograms';
+// Re-exported for the full engine's barrel and its tests; the core reads them from ./particlePrograms.
+export { PARTICLE_PROGRAMS, setParticleSimVariants } from './particlePrograms';
 // @ts-ignore -- WGSL modules, typed by the loader
 import ParticleSimComputeProgram from '../shaders/wgsl/particleSimCompute.wgsl';
 // @ts-ignore
-import ParticleSimProgram from '../shaders/wgsl/particleSim.wgsl';
-// @ts-ignore
-import ParticleBillboardProgram from '../shaders/wgsl/particleBillboard.wgsl';
-// @ts-ignore
-import ParticleMeshProgram from '../shaders/wgsl/particleMesh.wgsl';
-// @ts-ignore
 import ParticleSortComputeProgram from '../shaders/wgsl/particleSortCompute.wgsl';
-// @ts-ignore
-import ParticleSortProgram from '../shaders/wgsl/particleSort.wgsl';
-
-/** A `.wgsl` import, as far as this module reads one. */
-interface ParticleProgram {
-    readonly wgsl: string;
-    readonly vertex?: string;
-    readonly fragment?: string;
-    readonly entryPoints: { vertex?: string; fragment?: string; compute?: string };
-    readonly resources: readonly ShaderResource[];
-    readonly vertexInputs: readonly { name: string; location: number; type: string }[];
-    readonly uniformBlocks: readonly unknown[];
-    /** Build-time variants (`// @variant` lines), by tag. See programVariants.ts. */
-    readonly variants?: Readonly<Record<string, ParticleProgram>>;
-}
-
-/**
- * Whether simulation steps use the build-time variants with unused modules compiled out
- * (`particleSim~s<mask>`). Off in the editor, which toggles modules live and would recompile on each
- * toggle; on in a published game, whose emitters are fixed. Set by the Renderer.
- */
-let useSimVariants = false;
-export function setParticleSimVariants(on: boolean): void { useSimVariants = on; }
-
-/** Program names in `ShaderManager`, with their imports. Registered through `programTable` (render/programs.ts). */
-export const PARTICLE_PROGRAMS: {
-    readonly sim: readonly [string, ParticleProgram];
-    readonly billboard: readonly [string, ParticleProgram];
-    readonly mesh: readonly [string, ParticleProgram];
-    readonly sort: readonly [string, ParticleProgram];
-} = {
-    sim: ['particleSim', ParticleSimProgram],
-    billboard: ['particleBillboard', ParticleBillboardProgram],
-    mesh: ['particleMesh', ParticleMeshProgram],
-    sort: ['particleSort', ParticleSortProgram],
-};
 
 /** Additive colour, destination alpha (the bloom mask) untouched. */
 const ADDITIVE_KEEP_ALPHA: BlendState = {
@@ -763,7 +724,7 @@ export class ParticleRenderer {
     private _stepCompute(emitter: EmitterGpu, values: Record<string, unknown>, frame: ParticleSimFrame,
                          parent: EmitterGpu | null, _start: number, count: number): void {
         const base = this._ensureComputePipeline();
-        const strip = !emitter.packed.custom && useSimVariants ? simStripMask(emitter.packed.simMask, !!parent) : 0;
+        const strip = !emitter.packed.custom && particleSimVariants() ? simStripMask(emitter.packed.simMask, !!parent) : 0;
         const pipeline = emitter.packed.custom ? this._customComputePipeline(emitter.packed.custom)
             : strip ? this._variantComputePipeline(strip) : base;
         const pid = pipelineId(pipeline);
@@ -799,7 +760,7 @@ export class ParticleRenderer {
     private _stepRaster(emitter: EmitterGpu, values: Record<string, unknown>, frame: ParticleSimFrame,
                         parent: EmitterGpu | null, start: number, count: number): void {
         const custom = emitter.packed.custom;
-        const strip = !custom && useSimVariants ? simStripMask(emitter.packed.simMask, !!parent) : 0;
+        const strip = !custom && particleSimVariants() ? simStripMask(emitter.packed.simMask, !!parent) : 0;
         const program = custom ? this._customRasterProgram(custom) : particleSimProgram(strip);
         const pipeline = custom ? this._customRasterPipeline(program)
             : strip ? this._variantRasterPipeline(program, strip) : this._ensureRasterPipeline('sim', 4);
@@ -847,7 +808,7 @@ export class ParticleRenderer {
         const key = 'v:' + program;
         let pipeline = this._customPipelines.get(key) as RenderPipeline | undefined;
         if (!pipeline) {
-            const variant = ParticleSimProgram.variants?.[`s${strip}`] ?? ParticleSimProgram;
+            const variant = PARTICLE_PROGRAMS.sim[1].variants?.[`s${strip}`] ?? PARTICLE_PROGRAMS.sim[1];
             const module = device.createShaderModule({
                 label: program, program, stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
                 source: variant.wgsl, entryPoints: variant.entryPoints, resources: variant.resources,

@@ -7,15 +7,13 @@ import { TextureManager } from '../systems/textureManager';
 import type { FrameTargets } from './frameTargets';
 import type { TemporalPasses } from './temporal';
 import type { PostEffects } from './postEffects';
-import type { VolumetricCloudPasses } from './clouds';
-import type { DecalPasses } from './decals';
+import type { CloudSubsystem, DecalSubsystem, FluidSubsystem } from './featureSubsystems';
 import type { ShadowPasses } from './shadows';
 import type { SsilPasses } from './ssil';
 import type { SsrPasses } from './ssr';
 import type { SceneRadianceCopy } from './sceneRadiance';
 import type { SkyPasses } from './sky';
 import type { DebugViews } from './debugViews';
-import type { FluidVolumePasses } from './fluids';
 
 /** What RenderStats reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface RenderStatsHost {
@@ -40,13 +38,13 @@ export class RenderStats {
                 private readonly _targets: FrameTargets,
                 private readonly _temporal: TemporalPasses,
                 private readonly _post: PostEffects,
-                private readonly _clouds: VolumetricCloudPasses,
-                private readonly _decals: DecalPasses,
+                private readonly _clouds: CloudSubsystem,
+                private readonly _decals: DecalSubsystem,
                 private readonly _shadows: ShadowPasses,
                 private readonly _ssil: SsilPasses,
                 private readonly _sky: SkyPasses,
                 private readonly _debugViews: DebugViews,
-                private readonly _fluids: FluidVolumePasses,
+                private readonly _fluids: FluidSubsystem,
                 private readonly _ssr: SsrPasses,
                 private readonly _radiance: SceneRadianceCopy) {}
 

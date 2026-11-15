@@ -4,7 +4,7 @@ import { Frustum } from '../../core/frustum';
 import { LightNode } from '../../core/scene/nodes/lightNode';
 import { ModelNode } from '../../core/scene/nodes/modelNode';
 import { Scene } from '../../core/scene/scene';
-import { TerrainLodSettings } from '../../terrain/terrain';
+import type { TerrainLodSettings } from '../../terrain/terrain';
 import type { Terrain } from '../../terrain/terrain';
 import { GpuOcclusion, GPU_OCCLUSION_BUDGET } from '../gpuOcclusion';
 import { OcclusionBuffer } from '../occlusion/occlusionBuffer';

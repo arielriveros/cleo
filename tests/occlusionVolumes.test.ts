@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mat4, quat, vec3 } from 'gl-matrix';
+import './helpers/features';
 import { Frustum } from '../src/core/frustum';
 import { OcclusionVolumes } from '../src/graphics/occlusion/occlusionVolumes';
 import type { VolumeContentKind, VolumeContentSource, VolumeFrameInput, VolumeLike } from '../src/graphics/occlusion/occlusionVolumes';

@@ -96,6 +96,6 @@ describe('renderer wiring', () => {
     });
     it('turns the crossfade off for placed (non-foliage) instanced models', () => {
         // Once: the instanced-group draw (its immediate-mode twin went with the legacy paths).
-        expect(renderer.match(/setUniform\('u_lodCamera', FoliagePasses\.LOD_OFF\)/g)?.length).toBe(1);
+        expect(renderer.match(/setUniform\('u_lodCamera', FOLIAGE_LOD_OFF\)/g)?.length).toBe(1);
     });
 });

@@ -16,6 +16,51 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Project features.** Project ▸ Features chooses which of the engine's optional features a project's games ship
+  with, from presets (2D, 2.5D, 3D, High-fidelity 3D, Cinematic, Everything) that every box stays free to
+  change, and Save as preset keeps a set on this computer. Twenty features: global illumination, screen-space
+  reflections, ambient occlusion, volumetric fog and clouds, sky atmosphere, decals, the cel and Blinn-Phong
+  shading models, landscape, water, particles, fire and smoke, weather, the 2D world and 2D physics, cloth,
+  input, AI navigation, game UI, cinematics, and the WebGL 2 fallback. Each row shows what leaving it out saves
+  and whether the project uses it; Detect from Project sets them from the scenes, templates and scripts.
+  - *In the editor*, a feature left out leaves the Add menu, the New asset menu and the mode selector; a node of
+    one already in a scene is struck through in the scene tree, with a note in its inspector, and the AI agent
+    cannot add one.
+  - *Publishing* strips its nodes and render settings and leaves its shaders out: a small game on the 2D preset
+    is 6.1 MB in all. When the game still uses one, Publish lists every use and asks: turn it back on, publish
+    without it, or cancel. A game without Input binds no input map and shows no touch controls.
+  - *New project* asks for a name, a features preset and the addons; a 2D preset's first scene is 2D.
+  - *Their code* goes too, for fifteen of them: global illumination, volumetric fog, volumetric clouds, decals,
+    landscape (terrain, foliage, impostors, sculpting), water, particles, fire and smoke, weather, cloth,
+    cinematics, game UI (with React, which only its layer uses), AI navigation (navmeshes, perception, fuzzy
+    and goal brains, and the yuka library under them), the 2D world (tilemaps, 2D cameras, rooms, parallax) and
+    2D physics are each a part of the published player of their own (840 KB between them), loaded at boot
+    only by a game built with it. The engine every game ships went from 2.55 MB to 1.77 MB.
+    A published game draws its touch controls itself, positioned on the screen: before, they used the editor's
+    styles, which a published game does not have. Each feature's size in Project ▸ Features counts its
+    code now, not only its shaders. A
+    script that names a left-out feature's class (`DecalNode` in a game without Decals) gets an error naming the
+    feature instead of `undefined`, in a published game and in Play in window alike.
+  - *Detect from Project* also counts a trigger in a 2D scene as 2D physics, an AI-driven controller as AI
+    navigation, a model with cloth parts as Cloth, a script that reaches `scene.physics2D` as 2D physics, and any
+    name a feature's module adds that a script uses.
+- **Addons.** Project ▸ Addons turns editor addons on or off per project; the choice travels with the project's
+  bundle. The Claude Code panel is the first addon: with it off, its code is not even loaded (no panel, no
+  toggle, no agent link). Projects from before addons have it on.
+- **Published games carry only the shaders they use: about 10 MB smaller.** The player no longer holds every
+  shader's every variant for both graphics APIs (17 MB of it): the shaders travel in the game's game.bin, each
+  one's general version plus the variants the game draws with (Options ▸ Project ▸ Only used shaders). A small
+  physics game is now 9.2 MB in all, where the player alone was 25.7 MB. New
+  option *WebGL 2 fallback*: off, the game ships no WebGL 2 shaders and tells a player without WebGPU so.
+- **Published games are 5.8 MB smaller.** The editor's tools no longer ship in a game: the model importers
+  (assimp's WASM alone was 5.5 MB), the script compiler and the movie renderer. A published game runs on the
+  engine's runtime (`cleoCore`); the editor installs the importers and the compiler into it. A cannon game's
+  player is 19.8 MB, was 25.7.
+- **Smaller published games on Rapier and Jolt.** The published player is ES modules split into chunks, one
+  build for every game where it used to be one file per physics backend. A game ships only the chunks it
+  needs: a Rapier or Jolt game carries its backend once, shared by the page and the physics worker, where it
+  used to carry it twice (about 4.5 MB less for Rapier, 4 MB for Jolt), and a cannon game carries neither. A
+  published web build opened straight from its folder now says to serve it over HTTP.
 - **Debugging scripts.** A game playing in a window can be stopped at a line of a script and stepped through,
   while the editor stays live. See *Debugging scripts* in the editor docs.
   - *Breakpoints.* Click in the script editor's margin to set one. Right-click it for a conditional breakpoint

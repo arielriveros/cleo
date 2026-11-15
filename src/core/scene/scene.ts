@@ -8,36 +8,36 @@ import { LodGroupNode } from "./nodes/lodGroupNode";
 import { CameraRigNode } from "./nodes/cameraRigNode";
 import { SoundNode } from "./nodes/soundNode";
 import { AudioManager } from "../../audio/audioManager";
-import { LandscapeNode } from "./nodes/landscapeNode";
-import { TilemapNode } from "./nodes/tilemapNode";
+import type { LandscapeNode } from "./nodes/landscapeNode";
+import type { TilemapNode } from "./nodes/tilemapNode";
 import { LightNode } from "./nodes/lightNode";
 import { LightProbeNode } from "./nodes/lightProbeNode";
-import { DecalNode } from "./nodes/decalNode";
-import { FluidVolumeNode } from "./nodes/fluidVolumeNode";
-import { ParticleSystemNode } from "./nodes/particleSystemNode";
-import { ForceFieldNode } from "./nodes/forceFieldNode";
-import { ClothNode } from "./nodes/clothNode";
-import { WaterVolumeNode } from "./nodes/waterVolumeNode";
+import type { DecalNode } from "./nodes/decalNode";
+import type { FluidVolumeNode } from "./nodes/fluidVolumeNode";
+import type { ParticleSystemNode } from "./nodes/particleSystemNode";
+import type { ForceFieldNode } from "./nodes/forceFieldNode";
+import type { ClothNode } from "./nodes/clothNode";
+import type { WaterVolumeNode } from "./nodes/waterVolumeNode";
 import { ExposureVolumeNode } from "./nodes/exposureVolumeNode";
-import { GIVolumeNode } from "./nodes/giVolumeNode";
-import { VolumetricFogNode } from "./nodes/volumetricFogNode";
+import type { GIVolumeNode } from "./nodes/giVolumeNode";
+import type { VolumetricFogNode } from "./nodes/volumetricFogNode";
 import { OcclusionVolumeNode } from "./nodes/occlusionVolumeNode";
 import { SkyboxNode } from "./nodes/skyboxNode";
-import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
+import type { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./nodes/skyAtmosphereNode";
 import { SkyLightNode } from "./nodes/skyLightNode";
 import { WindNode } from "./nodes/windNode";
 import { sampleSceneWind, windFieldClock } from "../wind/windField";
-import { WeatherNode } from "./nodes/weatherNode";
+import type { WeatherNode } from "./nodes/weatherNode";
 import { CameraNode } from "./nodes/cameraNode";
 import { SpriteNode } from "./nodes/spriteNode";
-import { UINode } from "./nodes/ui/uiNode";
-import { UIRootNode } from "./nodes/ui/uiRoot";
+import type { UINode } from "./nodes/ui/uiNode";
+import type { UIRootNode } from "./nodes/ui/uiRoot";
 import { parseNodeJson } from "./nodes/parseNodeJson";
 import { InputSystem } from "../../input/inputSystem";
 import { CharacterNode } from "./nodes/characterNode";
 import { ControllerNode } from "./nodes/controllerNode";
-import { NavMeshNode } from './nodes/navMeshNode';
+import type { NavMeshNode } from './nodes/navMeshNode';
 import type { ActionChange } from "../../input/resolveActions";
 import { mat4, vec3 } from "gl-matrix";
 import { DEFAULT_SCENE_AMBIENT_LUX, legacyAmbientFromSceneJson, MAX_LIGHTS } from "../../graphics/lighting";
@@ -52,14 +52,16 @@ import { authoring } from "../eventBus";
 import { cloneNodeJson, regenerateNodeIds } from "./nodeJson";
 import { getTemplate, templateNames } from "./templates";
 import { followSocket, resolveSocketOwner } from "./socketFollow";
-import { PrecipitationRig } from "./precipitationRig";
+import { createNullPrecipitation, type ScenePrecipitation } from "./scenePrecipitation";
 import type { SequenceNode } from "./nodes/sequenceNode";
 import type { Camera2DNode } from "./nodes/camera2DNode";
 import type { Room2DNode } from "./nodes/room2DNode";
 import type { CharacterBody2DNode } from "./nodes/characterBody2DNode";
 import type { Body2DNode } from "./nodes/body2DNode";
 import type { TriggerNode } from "./nodes/triggerNode";
-import { World2D } from "../../physics2d/world2d";
+import type { World2D } from "../../physics2d/world2d";
+import { K } from "./sceneKinds";
+import { featureFactory, featureNodeKinds, onFeaturesChanged } from "../features/registry";
 
 /** Object-space up, rotated by the camera's world orientation to give the audio listener its up axis. */
 const UP_AXIS: vec3 = vec3.fromValues(0, 1, 0);
@@ -113,17 +115,10 @@ export function sceneDimensionOf(sceneJson: { dimension?: unknown } | null | und
     return sceneJson?.dimension === '2D' ? '2D' : '3D';
 }
 
-/** The node kinds the scene's typed lists are built from, one bit each (see {@link kindsOf}). */
-const K = {
-    LIGHT: 1, MODEL: 2, SPRITE: 4, LANDSCAPE: 8, TILEMAP: 16, LOD_GROUP: 32, CAMERA_RIG: 64, CHARACTER: 128,
-    CONTROLLER: 256, NAV_MESH: 512, DECAL: 1024, FLUID: 2048, CLOTH: 4096, PARTICLES: 8192, FORCE_FIELD: 16384,
-    WATER: 32768, EXPOSURE: 65536, GI: 131072, FOG: 262144, OCCLUSION: 524288, SOUND: 1048576, PROBE: 2097152,
-    SKYBOX: 4194304, CLOUDS: 8388608, ATMOSPHERE: 16777216, SKY_LIGHT: 33554432, WIND: 67108864,
-    WEATHER: 134217728, CAMERA: 268435456, UI_NODE: 536870912, UI_ROOT: 1073741824,
-} as const;
-
 let kindTable: [number, Function][] | null = null;
 const kindsByConstructor = new Map<Function, number>();
+// An optional feature installed (or restricted out) since brings classes of its own: work the masks out again.
+onFeaturesChanged(() => { kindTable = null; kindsByConstructor.clear(); });
 
 /**
  * Which typed lists a node of this class belongs to, as a bitmask, worked out once per class. The class tests
@@ -134,15 +129,13 @@ function kindsOf(ctor: Function): number {
     let mask = kindsByConstructor.get(ctor);
     if (mask !== undefined) return mask;
     kindTable ??= [
-        [K.LIGHT, LightNode], [K.MODEL, ModelNode], [K.SPRITE, SpriteNode], [K.LANDSCAPE, LandscapeNode],
-        [K.TILEMAP, TilemapNode], [K.LOD_GROUP, LodGroupNode], [K.CAMERA_RIG, CameraRigNode],
-        [K.CHARACTER, CharacterNode], [K.CONTROLLER, ControllerNode], [K.NAV_MESH, NavMeshNode],
-        [K.DECAL, DecalNode], [K.FLUID, FluidVolumeNode], [K.CLOTH, ClothNode], [K.PARTICLES, ParticleSystemNode],
-        [K.FORCE_FIELD, ForceFieldNode], [K.WATER, WaterVolumeNode], [K.EXPOSURE, ExposureVolumeNode],
-        [K.GI, GIVolumeNode], [K.FOG, VolumetricFogNode], [K.OCCLUSION, OcclusionVolumeNode], [K.SOUND, SoundNode],
-        [K.PROBE, LightProbeNode], [K.SKYBOX, SkyboxNode], [K.CLOUDS, VolumetricCloudsNode],
-        [K.ATMOSPHERE, SkyAtmosphereNode], [K.SKY_LIGHT, SkyLightNode], [K.WIND, WindNode], [K.WEATHER, WeatherNode],
-        [K.CAMERA, CameraNode], [K.UI_NODE, UINode], [K.UI_ROOT, UIRootNode],
+        [K.LIGHT, LightNode], [K.MODEL, ModelNode], [K.SPRITE, SpriteNode], [K.CAMERA, CameraNode],
+        [K.LOD_GROUP, LodGroupNode], [K.CAMERA_RIG, CameraRigNode], [K.CHARACTER, CharacterNode], [K.CONTROLLER, ControllerNode],
+        [K.EXPOSURE, ExposureVolumeNode], [K.OCCLUSION, OcclusionVolumeNode], [K.SOUND, SoundNode],
+        [K.PROBE, LightProbeNode], [K.SKYBOX, SkyboxNode],
+        [K.ATMOSPHERE, SkyAtmosphereNode], [K.SKY_LIGHT, SkyLightNode], [K.WIND, WindNode],
+        // The optional features' node classes, each in the list of its kind (src/core/features/registry.ts).
+        ...featureNodeKinds().map(([cls, bit]) => [bit, cls] as [number, Function]),
     ];
     mask = 0;
     for (const [bit, cls] of kindTable) if (ctor === cls || ctor.prototype instanceof cls) mask |= bit;
@@ -257,9 +250,11 @@ export class Scene {
 
     /**
      * The rain and snow falling from this scene's weather volumes (WeatherNode `precipitation`): one
-     * particle system per kind round the camera, outside the tree. See PrecipitationRig.
+     * particle system per kind round the camera, outside the tree. See PrecipitationRig (feature `weather`); in a
+     * game built without weather, a stand-in where nothing falls (scenePrecipitation.ts).
      */
-    public readonly precipitation: PrecipitationRig = new PrecipitationRig(this);
+    public readonly precipitation: ScenePrecipitation =
+        featureFactory<(scene: Scene) => ScenePrecipitation>('precipitation')?.(this) ?? createNullPrecipitation();
 
     /**
      * The navigation system serving this scene (set by `CleoEngine.setScene`). Reachable from a script
@@ -628,11 +623,13 @@ export class Scene {
             // THE 2D PHYSICS PASS. After every script has said what its body wants (a jump, a steer), before
             // the cameras follow: 2D colliders with mass fall, 2D character bodies move through the tilemaps
             // and 2D colliders, and 2D triggers report who came and went. Only while the game plays.
-            if ((this._bodies2D.size > 0 || this._areas2D.size > 0 || this._colliders2D.size > 0)
-                && this._hasStarted && !paused && !CleoEngine.authoringMode) {
+            // A game built without the 2D physics feature has no world to step (`physics2D` is null).
+            const world2D = (this._bodies2D.size > 0 || this._areas2D.size > 0 || this._colliders2D.size > 0)
+                && this._hasStarted && !paused && !CleoEngine.authoringMode ? this.physics2D : null;
+            if (world2D) {
                 const physicsStart = performance.now();
                 authoring.derived++;
-                try { this.physics2D.step(delta, this); }
+                try { world2D.step(delta, this); }
                 catch (error) { logScriptError(`Error in the 2D physics`, error, 'Scene'); }
                 finally { authoring.derived--; }
                 sceneStats.physics2DMs = performance.now() - physicsStart;
@@ -1336,10 +1333,14 @@ export class Scene {
      * The scene's 2D physics (src/physics2d): what moves its 2D bodies every frame the game plays, and what a
      * script queries -- `raycast(x, y, dx, dy, maxDistance)`, `overlapsSolid(minX, minY, maxX, maxY)`. Made on
      * first use; the world it queries is the one the last step built (or a fresh one, made here, before any).
+     * Null in a game built without the 2D physics feature (src/modules/physics2d), which steps no 2D bodies.
      */
-    public get physics2D(): World2D {
+    public get physics2D(): World2D | null {
         if (!this._physics2D) {
-            this._physics2D = new World2D();
+            // Asked every time until the feature answers: a miss is never cached.
+            const make = featureFactory<() => World2D>('world2D');
+            if (!make) return null;
+            this._physics2D = make();
             this._physics2D.refresh(this);
         }
         return this._physics2D;

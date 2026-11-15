@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import './helpers/features';
 import { keyLight, moonDirection, nightFactor } from '../src/graphics/skyNight';
 import { SkyAtmosphereNode, DEFAULT_MOON_LUX } from '../src/core/scene/nodes/skyAtmosphereNode';
 import { VolumetricCloudsNode } from '../src/core/scene/nodes/volumetricCloudsNode';

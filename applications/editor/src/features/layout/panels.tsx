@@ -42,6 +42,7 @@ import TilemapLayersPanel from '../tilemap/TilemapLayersPanel';
 import LandscapeToolsPanel from '../landscape/LandscapeToolsPanel';
 import LandscapeLayersPanel from '../landscape/LandscapeLayersPanel';
 import TemplateInstanceNotice from '../nodeInspector/TemplateInstanceNotice';
+import NotShippedNotice from '../projectFeatures/NotShippedNotice';
 import TemplateVariantNotice from '../nodeInspector/TemplateVariantNotice';
 import { useSelectedNode } from '../nodeInspector/useSelectedNode';
 import ConsolePanel from '@cleo/app-kit/feedback/ConsolePanel';
@@ -182,6 +183,7 @@ function PropertiesPanel(_: IDockviewPanelProps) {
     <SidePanel>
       {simulating ? <SimulationNotice /> : readOnly && <TemplateInstanceNotice revert />}
       {editorMode === 'template' && <TemplateVariantNotice />}
+      <NotShippedNotice node={node} />
       {/* An editor-owned node (a preview tab's holder) is not the user's content: shown, never edited. */}
       {node && <PropertyEditor node={node} readOnly={readOnly || node.isEditorOwned} />}
     </SidePanel>
