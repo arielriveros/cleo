@@ -1,3 +1,4 @@
+import { useProjectFeatures, featureOfAddItem } from '../projectFeatures/featureUi';
 import { useEffect, useMemo, useState } from 'react';
 import { SegmentedControl } from '@cleo/app-kit/ui';
 import { useCleoEngine } from '../EngineContext';
@@ -37,6 +38,8 @@ function AddCell({ item, locked, onAdd }: { item: AddItem, locked: boolean, onAd
 
 export default function AddNew({ scope = 'scene' }: { scope?: AddScope }) {
   const { editorScene, selectedNode, editorMode, eventEmitter } = useCleoEngine();
+  // A feature the project leaves out (Project ▸ Features) offers none of its nodes.
+  const features = useProjectFeatures();
 
   // The palette's OWN scope decides its categories, not the editor mode; the hosting panel picks the half.
   const categories = useMemo(
@@ -77,7 +80,7 @@ export default function AddNew({ scope = 'scene' }: { scope?: AddScope }) {
     addItemTo(item, parent, ctx).catch(err => console.error(err));
   };
 
-  const items = ADD_ITEMS.filter(item => item.category === category);
+  const items = ADD_ITEMS.filter(item => item.category === category && features.isOn(featureOfAddItem(item.id)));
 
   return (
     <>

@@ -47,10 +47,23 @@ export function shadersAreLibraryHandles(): boolean {
     return handles > 0;
 }
 
+/**
+ * Whether a program's module came with the game: false for a handle onto a module a publish left out (a
+ * feature the project turns off), true for everything else, inline programs included.
+ */
+export function shaderIsShipped(program: unknown): boolean {
+    const id = (program as { module?: unknown } | null)?.module;
+    if (!installed || typeof id !== 'string' || !handleIds.has(program as object)) return true;
+    return !!installed[id];
+}
+
+/** The handles made here, so shaderIsShipped tells one from an inline program with the same fields. */
+const handleIds = new WeakSet<object>();
+
 function entryOf(id: string): ShaderLibraryEntry {
     if (!installed) throw new Error(`Shader ${id}: no shader library is installed (the game's game.bin carries it)`);
     const entry = installed[id];
-    if (!entry) throw new Error(`Shader ${id} was not shipped with this game`);
+    if (!entry) throw new Error(`Shader ${id} was not shipped with this game: its feature is off for the project (Project ▸ Features)`);
     return entry;
 }
 
@@ -69,6 +82,7 @@ function handleOnto(id: string, read: () => ShaderModuleData): Record<string, un
 export function shaderModuleHandle(id: string, tags: readonly string[]): Record<string, unknown> {
     handles++;
     const handle = handleOnto(id, () => entryOf(id).base);
+    handleIds.add(handle);
     if (!tags.length) return handle;
     let cached: Record<string, unknown> | null = null;
     let cachedFor = -1;
@@ -77,6 +91,9 @@ export function shaderModuleHandle(id: string, tags: readonly string[]): Record<
         enumerable: true,
         get: () => {
             if (cached && cachedFor === generation) return cached;
+            // A module the game did not ship has no variants either: the registry looks at every program's,
+            // shipped or not, and builds none of an unshipped one.
+            if (installed && !installed[id]) return undefined;
             const shipped = entryOf(id).variants ?? {};
             const out: Record<string, unknown> = {};
             for (const tag of tags) {

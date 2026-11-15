@@ -75,6 +75,8 @@ After that the two halves are independent, and you can read either first:
 | [Scripting workflow](editor/scripting-workflow.md) | Script assets, the code editor, editing in VS Code |
 | [Debugging scripts](editor/debugging.md) | Script errors that link to their line; breakpoints, stepping and variables for a game playing in a window |
 | [Publishing](editor/publishing.md) | Exporting a playable game |
+| [Project features](editor/project-features.md) | Which engine features a project's games ship: presets for 2D, 3D and more |
+| [Addons](editor/addons.md) | Editor addons a project turns on, such as Claude Code |
 
 ## The scripting guide
 

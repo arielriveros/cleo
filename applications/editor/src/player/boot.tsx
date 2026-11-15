@@ -127,6 +127,10 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   // Before engine.run(), so frame one already has bindings. An older build's bin carries no
   // `config.input`; parseInputMap reads that as the shipped defaults rather than as no bindings at all.
   InputSystem.instance.setMap(data?.config?.input);
+  // A game built without the Input feature (Project ▸ Features; config.features lists what it was built with,
+  // absent on older builds) takes no input: every action map off, no pointer capture, no touch controls.
+  const takesInput = !Array.isArray(data?.config?.features) || data.config.features.includes('input');
+  if (!takesInput) for (const map of InputSystem.instance.map.maps) InputSystem.instance.disableMap(map.name);
 
   const viewport = document.getElementById('game-viewport');
   if (!viewport) throw new Error('Missing #game-viewport element');
@@ -134,7 +138,7 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   engine.input.preventDefault = true;
   // As the editor's Play does: a click on the game captures the mouse (mouse-look is gated on the lock),
   // and the UI/Cancel action lets it go again.
-  InputSystem.instance.pointerLockOnClick = true;
+  InputSystem.instance.pointerLockOnClick = takesInput;
   InputSystem.instance.onAction('UI/Cancel', state => {
     if (state.started) InputSystem.instance.releasePointerLock();
   });
@@ -146,7 +150,7 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
       <>
         <UILayer getScene={() => engine.scene} interactive />
         {/* Only appears on a device with a touch screen — see VirtualControlsLayer. */}
-        <VirtualControlsLayer controls={InputSystem.instance.map.virtualControls} />
+        <VirtualControlsLayer controls={takesInput ? InputSystem.instance.map.virtualControls : []} />
       </>
     );
     // The layout pass anchors to #ui-root, not the canvas, which may be render-scaled.

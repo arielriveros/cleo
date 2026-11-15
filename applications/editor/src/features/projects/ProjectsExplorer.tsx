@@ -7,11 +7,12 @@ import './projects.css'
 import { iconFor } from '../assets/assetKinds'
 
 import {
-  ProjectRecord, createProject, deleteProject, loadProjects, openProject, renameProject,
+  ProjectRecord, deleteProject, loadProjects, openProject, renameProject,
 } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
 import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
-import { Button, TextInput } from '@cleo/app-kit/ui'
+import { Button } from '@cleo/app-kit/ui'
+import NewProjectModal from './NewProjectModal'
 
 // The project browser: the same SVAR file manager the Assets tab uses, over the project registry. A flat
 // list — projects do not nest — so every project is one "file" whose id is its display path.
@@ -58,8 +59,8 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
   const activeId = activeProjectId()
 
   const [busy, setBusy] = useState(false)
+  // The new-project dialog (NewProjectModal): a name, a features preset, addons.
   const [naming, setNaming] = useState(false)
-  const [newName, setNewName] = useState('')
   // The selected card's path. Deleting used to depend entirely on reading the right-clicked card's
   // `data-id` back out of the DOM, which leaves no way to delete anything if that read misses. Tracking
   // the selection gives the toolbar button something real to act on, and the menu a fallback.
@@ -123,19 +124,6 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
     }
   }, [activeId, refresh])
 
-  const create = useCallback(async () => {
-    const name = newName.trim()
-    if (!name) return
-    setBusy(true)
-    try {
-      const record = await createProject(name)
-      // Same as `open`: a declined confirm leaves the new project created but not switched to.
-      if (!await openProject(record.id)) { setBusy(false); await refresh() }
-    } catch (e) {
-      setBusy(false)
-      Logger.error(`Could not create the project: ${e}`, 'Editor')
-    }
-  }, [newName, refresh])
 
   const init = useCallback((api: IApi) => {
     apiRef.current = api
@@ -236,44 +224,15 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
   return (
     <div className={`w-full h-full flex flex-col text-ui ${className}`}>
       <div className='h-[28px] flex items-center gap-1.5 px-2 border-b border-border-subtle shrink-0 bg-surface-sunken'>
-        {naming ? (
-          <>
-            <TextInput
-              autoFocus
-              className='shrink min-w-[120px] w-[220px] h-[20px] py-0 text-ui-sm placeholder:text-dim'
-              placeholder='Project name'
-              value={newName}
-              onChange={setNewName}
-              onKeyDown={e => {
-                if (e.key === 'Enter') void create()
-                if (e.key === 'Escape') { setNaming(false); setNewName('') }
-              }}
-            />
-            <Button
-              variant='success'
-              size='sm'
-              className='shrink-0 h-[20px] text-ui-sm leading-none whitespace-nowrap font-semibold disabled:opacity-40'
-              disabled={!newName.trim() || busy}
-              onClick={() => void create()}>
-              Create
-            </Button>
-            <Button
-              variant='ghost'
-              size='sm'
-              className='shrink-0 h-[20px] text-ui-sm leading-none whitespace-nowrap font-normal'
-              onClick={() => { setNaming(false); setNewName('') }}>
-              Cancel
-            </Button>
-          </>
-        ) : (
+        {(
           <>
             <Button
               variant='success'
               size='sm'
               className='shrink-0 h-[20px] text-ui-sm leading-none whitespace-nowrap font-semibold disabled:opacity-40'
               disabled={busy}
-              onClick={() => { setNaming(true); setNewName('') }}
-              title='Create an empty project with its own scenes, assets and layout'>
+              onClick={() => setNaming(true)}
+              title='Create a project: its name, the engine features its games ship, and its addons'>
               + New Project
             </Button>
             <Button
@@ -295,6 +254,8 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
           {busy ? 'Working…' : 'Double-click to open · select and Delete, or right-click'}
         </span>
       </div>
+
+      {naming && <NewProjectModal onClose={() => setNaming(false)} onCreated={() => void refresh()} />}
 
       <div className='cleo-fm cleo-projects relative flex-1 min-h-0'>
         <WillowDark fonts={false}>

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { installShaderLibrary, shaderModuleHandle, shadersAreLibraryHandles } from '../src/graphics/shaderLibrary';
+import { installShaderLibrary, shaderModuleHandle, shadersAreLibraryHandles, shaderIsShipped } from '../src/graphics/shaderLibrary';
 import { programModules, programTable } from '../src/graphics/render/programs';
 import PbrProgram from '../src/graphics/shaders/wgsl/pbr.wgsl';
 
@@ -30,6 +30,18 @@ describe('a shader handle', () => {
     expect(Object.keys(variants)).toEqual(['pcf']);
     expect(variants.pcf.wgsl).toBe('// pcf');
     expect((handle.variants as any).pcf).toBe(variants.pcf);
+  });
+
+  it('tells a module the game left out from one it shipped, and lists no variants for it', () => {
+    const gone = shaderModuleHandle('wgsl/off.wgsl', ['pcf']);
+    const kept = shaderModuleHandle('wgsl/on.wgsl', ['pcf']);
+    installShaderLibrary({ 'wgsl/on.wgsl': { base: data('on') } });
+    expect(shaderIsShipped(gone)).toBe(false);
+    expect(shaderIsShipped(kept)).toBe(true);
+    expect(gone.variants).toBeUndefined();
+    expect(kept.variants).toEqual({});
+    // An inline program (every build but the published player) is always at hand.
+    expect(shaderIsShipped(PbrProgram)).toBe(true);
   });
 
   it('says what is missing: no library, or a module the game did not ship', () => {

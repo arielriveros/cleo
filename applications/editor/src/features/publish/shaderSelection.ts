@@ -7,6 +7,8 @@
 //   - the VARIANTS the game's program list names (config.graphics.programs, `pbr~pcf`): what the player
 //     builds at boot. With no list (Options ▸ Project ▸ Only used shaders off) the game builds variants as it
 //     goes, so it gets all of them.
+//   - nothing of the features the project leaves out (Project ▸ Features): their nodes and settings are gone
+//     from the game, so their programs never run.
 //   - the programs' GLSL only when the game may run on WebGL 2 (Options ▸ Project ▸ WebGL 2 fallback). The
 //     GLSL chunks custom materials paste in stay either way: on WebGPU those compile from GLSL too.
 // Pure, so a test can check a selection without a built player.
@@ -23,6 +25,8 @@ export interface ShaderSelectionOptions {
   programModules: Readonly<Record<string, string>>;
   /** Keep the GLSL: the game may run on WebGL 2. */
   webgl2: boolean;
+  /** Modules of the features the game leaves out. One a listed program still draws with ships all the same. */
+  leaveOut?: ReadonlySet<string>;
 }
 
 /**
@@ -54,7 +58,11 @@ export function selectShaders(library: ShaderLibraryJson, options: ShaderSelecti
   const named = options.programs ? variantsNamed(options.programs, options.programModules) : null;
   const keep = (data: ShaderData) => options.webgl2 ? data : withoutGlsl(data);
   const out: ShaderLibraryJson = {};
+  const listed = options.programs
+    ? new Set(options.programs.map(p => options.programModules[p.split('~')[0]]).filter(Boolean))
+    : null;
   for (const [id, entry] of Object.entries(library)) {
+    if (options.leaveOut?.has(id) && !listed?.has(id)) continue;
     const shipped: ShaderEntry = { base: keep(entry.base) };
     if (entry.variants) {
       const tags = named ? [...(named.get(id) ?? [])].filter(t => entry.variants![t]) : Object.keys(entry.variants);

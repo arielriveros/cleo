@@ -506,6 +506,9 @@ export type { ProgramUsage } from "./graphics/programUsage";
 export { programModules } from "./graphics/render/programs";
 export { installShaderLibrary, shadersAreLibraryHandles } from "./graphics/shaderLibrary";
 export type { ShaderLibrary, ShaderLibraryEntry, ShaderModuleData } from "./graphics/shaderLibrary";
+// The optional features a project can leave out of its games (Project ▸ Features), as data.
+export { FEATURES, FEATURE_GROUPS, FEATURE_PRESETS, featureById, enabledFeatures, dependentsOf, featureOfNodeType, presetMatching } from "./modules/catalog";
+export type { FeatureDef, FeatureGroup, FeaturePreset } from "./modules/catalog";
 export { physicalFor, particleSimProgram, usesParallax } from "./graphics/programVariants";
 export type { ShaderBuildRecord } from "./graphics/shaderStats";
 export { gpuProfiler, frameHistory, Ring, RENDER_PASSES, TOGGLEABLE_PASSES } from "./graphics/gpuProfiler";

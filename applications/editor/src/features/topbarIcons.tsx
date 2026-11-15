@@ -21,6 +21,10 @@ export const ChevronDownIcon = () => (<S width='12' height='12'><path d='M6 9l6 
 export const SpinnerIcon = () => (<S className='animate-spin'><path d='M21 12a9 9 0 1 1-6.22-8.56' /></S>);
 export const CheckIcon = () => (<S><path d='M5 13l4 4L19 7' /></S>);
 export const AlertIcon = () => (<S><path d='M12 3l9 16H3Z' /><path d='M12 10v4' /><path d='M12 17h.01' /></S>);
+// Three switches — Project ▸ Features, which engine features the games ship.
+export const FeaturesIcon = () => (<S><rect x='3' y='4' width='18' height='4' rx='2' /><circle cx='17' cy='6' r='1' /><rect x='3' y='10' width='18' height='4' rx='2' /><circle cx='7' cy='12' r='1' /><rect x='3' y='16' width='18' height='4' rx='2' /><circle cx='17' cy='18' r='1' /></S>);
+// A puzzle piece — Project ▸ Addons, the editor extensions a project turns on.
+export const AddonsIcon = () => (<S><path d='M9 4h3.5a1.5 1.5 0 0 1 3 0H19v4.5a1.5 1.5 0 0 1 0 3V16h-3.5a1.5 1.5 0 0 0-3 0H9v-3.5a1.5 1.5 0 0 0 0-3Z' /><path d='M5 8v12h12' /></S>);
 // Panel grid — restore the default dock layout.
 export const LayoutIcon = () => (<S><rect x='3' y='4' width='18' height='16' rx='1.5' /><path d='M9 4v16M9 12h12' /></S>);
 // Stacked folders — the project browser.

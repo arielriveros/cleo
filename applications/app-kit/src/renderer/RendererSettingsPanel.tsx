@@ -120,7 +120,23 @@ const FXAA_QUALITY = [
   { value: 'high' as const,   label: 'High', title: 'Searches 12 steps — long, shallow edges come out smoother' },
 ];
 
-export default function RendererSettingsPanel() {
+/**
+ * The render features a project leaves out of its games (the editor's Project ▸ Features), by the setting that
+ * runs each: the panel says a published game will not have them. Each value is the feature's name.
+ */
+export interface LeftOutRenderFeatures {
+  volumetricFog?: string;
+  ssil?: string;
+  ssr?: string;
+  gi?: string;
+}
+
+/** A setting the editor still previews but a published game will not run. */
+function LeftOut({ feature }: { feature?: string }) {
+  return feature ? <Hint>Not shipped: this project leaves {feature} out of its games (Project ▸ Features).</Hint> : null;
+}
+
+export default function RendererSettingsPanel({ leftOut = {} }: { leftOut?: LeftOutRenderFeatures } = {}) {
   const { instance, isPlayMode, eventEmitter } = useEngineHost();
   const renderer: any = instance?.renderer ?? null;
 
@@ -687,6 +703,7 @@ export default function RendererSettingsPanel() {
       <Collapsable title='Volumetric Fog' persistKey='renderer.volumetricFog' defaultOpen={false}><div className='w-full p-2'>
         <Toggle label='Enabled' checked={fogOn} className='my-1'
           onChange={(v) => { renderer.volumetricFogEnabled = v; setFogOn(v); touch(); }} />
+        <LeftOut feature={leftOut.volumetricFog} />
         <Slider label='Distance (m)' value={fogDistance} min={10} max={500} step={1}
           onChange={(v) => { renderer.volumetricFogDistance = v; setFogDistance(v); touch(); }} />
         <Toggle label='Temporal' checked={fogTemporal} className='my-1'
@@ -983,6 +1000,7 @@ export default function RendererSettingsPanel() {
           onChange={(c) => { renderer.ssaoEnabled = c; setSsaoEnabled(c); touch(); }} />
         <Toggle label='Indirect Light' checked={ssilEnabled} className='my-1'
           onChange={(c) => { renderer.ssilEnabled = c; setSsilEnabled(c); touch(); }} />
+        <LeftOut feature={leftOut.ssil} />
         <Slider label='Indirect Intensity' value={ssilIntensity} min={0} max={4} step={0.05}
           onChange={(v) => { renderer.ssilIntensity = v; setSsilIntensity(v); touch(); }} />
         <Slider label='Radius' value={ssaoRadius} min={0} max={2} step={0.05}
@@ -1000,6 +1018,7 @@ export default function RendererSettingsPanel() {
       <Collapsable title='Screen-Space Reflections' persistKey='renderer.screen-space-reflections' defaultOpen={false}><div className='w-full p-2'>
         <Toggle label='Enabled' checked={ssrEnabled} className='my-1'
           onChange={(c) => { renderer.ssrEnabled = c; setSsrEnabled(c); touch(); }} />
+        <LeftOut feature={leftOut.ssr} />
         {ssrEnabled && !renderer.ssrSupported &&
           <Hint>Disabled on this device: float render targets are unavailable, so the reflection buffers
             cannot hold HDR light. Probes and the environment still reflect.</Hint>}
@@ -1032,6 +1051,7 @@ export default function RendererSettingsPanel() {
       <Collapsable title='GI Volumes' persistKey='renderer.gi-volumes' defaultOpen={false}><div className='w-full p-2'>
         <Toggle label='Enabled' checked={giEnabled} className='my-1'
           onChange={(c) => { renderer.giEnabled = c; setGiEnabled(c); touch(); }} />
+        <LeftOut feature={leftOut.gi} />
         {giEnabled && !renderer.gi.supported &&
           <Hint>Disabled on this device: half-float render targets are unavailable. The light probes and the
             sky light light everything.</Hint>}

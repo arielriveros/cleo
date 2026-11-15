@@ -7,6 +7,8 @@ import type { ProjectSettings } from '../options/projectSettings'
 import { buildGameData, bakeTemplates, attachScriptModules } from './buildGameData'
 import { compressTerrainData, compressTilemapData } from './terrainImages'
 import { stripDimensionData, stampSceneDimension } from './stripDimensionData'
+import { featureStripRules, stripFeatureNodes, stripFeatureSettings } from './featureStrip'
+import { featureUsage, disabledFeatureUses, type FeatureUsage } from './featureUsage'
 import { collectPublishedTextureIds, collectPublishedSoundIds, collectGiBakeIds } from '../../utils/references'
 import { collectPrograms } from './collectProgramUsage'
 import { extractNodeState } from '../../utils/projectStorage'
@@ -50,6 +52,17 @@ export interface MultiSceneSources {
    * while its loading screen is up, so a WebGPU game does not compile one on each first draw.
    */
   pipelines?: readonly unknown[]
+  /**
+   * The game uses features the project leaves out (Project ▸ Features): Publish asks what to do. Resolves to
+   * the features to turn back on for this build (none: publish without them), or null to stop. Absent: the
+   * build strips them without asking, as Play in window does to play what a publish would.
+   */
+  onDisabledFeatureUse?: (uses: FeatureUsage) => Promise<string[] | null>
+}
+
+/** The build was stopped at the features question (MultiSceneSources.onDisabledFeatureUse). */
+export class PublishCanceledError extends Error {
+  constructor() { super('Publish canceled') }
 }
 
 export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<any> {
@@ -92,6 +105,32 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     scenes[meta.id] = { name: meta.name, scene: gd.scene, ...(data.config?.render ? { render: data.config.render } : {}) }
   }
 
+  // Templates once, like textures: the runtime registry is global and a Game.loadScene switch must not
+  // invalidate what a script can still instantiate. Every template ships — a script may name any of them.
+  // Baked before the strips below, which apply to templates too.
+  const templates = bakeTemplates(src.libs.templates ?? [], src.libs.materials, src.scriptAssets)
+  // Script modules ONCE for the whole game, like templates: a module's state lives across Game.loadScene,
+  // and two scenes importing the same helper must get the same instance. Every scene and template is
+  // stamped with its scripts' paths in place, and the union of their import closures ships here.
+  let modules: Record<string, string> | undefined
+  if (src.scriptPaths && src.scriptAssets) {
+    const all = { scene: { children: Object.values(scenes).map(e => e.scene) }, templates } as any
+    attachScriptModules(all, src.scriptAssets, src.scriptPaths)
+    if (all.modules) modules = all.modules
+  }
+
+  // The features the project leaves out (Project ▸ Features, src/modules/catalog.ts in the engine). A game
+  // that still uses one is asked about first: turn it back on, or publish without it.
+  let rules = featureStripRules(src.projectSettings?.features.disabled ?? [])
+  const dimensionOf = (id: string) => (id === src.openSceneId ? (src.liveDimension ?? src.scenes.find(m => m.id === id)?.dimension) : src.scenes.find(m => m.id === id)?.dimension)
+  const scanned = Object.fromEntries(Object.entries(scenes).map(([id, e]) => [id, { ...e, dimension: dimensionOf(id) }]))
+  const uses = disabledFeatureUses(featureUsage({ scenes: scanned, templates, modules }), rules.enabled)
+  if (uses.size && src.onDisabledFeatureUse) {
+    const enable = await src.onDisabledFeatureUse(uses)
+    if (!enable) throw new PublishCanceledError()
+    if (enable.length) rules = featureStripRules((src.projectSettings?.features.disabled ?? []).filter(id => !enable.includes(id)))
+  }
+
   // Discard the authoring each scene's dimension does not use. The ordering is load-bearing: the texture
   // filter below is driven off the SERIALIZED scenes, so a landscape stripped after it would still drag
   // its layer textures into the build.
@@ -107,6 +146,14 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
       stampSceneDimension(entry.scene, dimension)
     }
   }
+  // ...and the nodes and render settings of the features it leaves out, from the scenes and the templates,
+  // for the same reason: what they reference must not be collected below. A scene's render settings can be
+  // the renderer's own object, so each is copied before it changes.
+  for (const entry of Object.values(scenes)) {
+    stripFeatureNodes(entry.scene, rules)
+    if (entry.render) { entry.render = { ...entry.render }; stripFeatureSettings(entry.render, rules) }
+  }
+  for (const t of templates) stripFeatureNodes((t as any).node, rules)
 
   // Bulk terrain and tilemap data (height field, splat map, tile grids) out of the JSON manifest and into
   // deflated byte arrays the packer moves into game.bin. Main thread: CompressionStream lives here.
@@ -114,10 +161,6 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     await compressTerrainData(entry.scene)
     await compressTilemapData(entry.scene)
   }
-
-  // Templates once, like textures: the runtime registry is global and a Game.loadScene switch must not
-  // invalidate what a script can still instantiate. Every template ships — a script may name any of them.
-  const templates = bakeTemplates(src.libs.templates ?? [], src.libs.materials, src.scriptAssets)
 
   // Textures once, for the whole game, as raw compressed bytes the packer writes verbatim into game.bin.
   // Must run on the main thread — the canvas fallback inside needs a DOM. Narrowed to what the SERIALIZED
@@ -202,14 +245,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     templates,
     textureBytes,
   }
-  // Script modules ONCE for the whole game, like templates: a module's state lives across Game.loadScene,
-  // and two scenes importing the same helper must get the same instance. Every scene and template is
-  // stamped with its scripts' paths in place, and the union of their import closures ships here.
-  if (src.scriptPaths && src.scriptAssets) {
-    const all = { scene: { children: Object.values(scenes).map(e => e.scene) }, templates } as any
-    attachScriptModules(all, src.scriptAssets, src.scriptPaths)
-    if (all.modules) out.modules = all.modules
-  }
+  if (modules) out.modules = modules
   // Flatten the rig-level retarget corrections into the (model, animation) pair the player can index.
   // Stored on the target rig keyed by SOURCE rig; the player has a model and an animation, so publish
   // resolves the two hops here rather than shipping a rig table.
@@ -245,10 +281,14 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   const config: Record<string, any> = {}
   if (src.settings) {
     config.graphics = { clearColor: src.settings.clearColor }
-    config.render = src.settings
+    config.render = { ...src.settings }
+    stripFeatureSettings(config.render, rules)
   }
-  if (src.input && !isDefaultInputMap(src.input)) config.input = src.input
+  // A game without the Input feature takes no input: it ships no input map, and the player binds none.
+  if (src.input && !isDefaultInputMap(src.input) && rules.enabled.has('input')) config.input = src.input
   if (src.projectSettings) Object.assign(config, projectSettingsConfig(src.projectSettings))
+  // The features the game was built with, for the player (and the shaders publish picks: see publishClient).
+  config.features = [...rules.enabled].sort()
   // The shader programs the game uses: the player builds only these at boot (see collectPrograms).
   if (src.projectSettings?.publish.onlyUsedShaders !== false)
     (config.graphics ??= {}).programs = collectPrograms(out, config.render)

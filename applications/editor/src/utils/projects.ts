@@ -6,7 +6,8 @@
 
 import { Logger } from 'cleo';
 import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from '@cleo/app-kit/utils/idb';
-import { KEYS, MIGRATABLE_KEYS, libKey, metaKey, scenePrefix, vfsKey } from './storageKeys';
+import { KEYS, MIGRATABLE_KEYS, libKey, metaKey, scenePrefix, vfsKey, projectSettingsKey } from './storageKeys';
+import type { ProjectSettings } from '../features/options/projectSettings';
 import { projectPrefix, setActiveProjectId } from './projectScope';
 import { MIGRATABLE_LS_KEYS, lsKey, projectLsKeys } from './lsScope';
 import { deleteProjectTextures, migrateUnscopedTextures } from './textureStore';
@@ -196,8 +197,16 @@ export async function initProjects(): Promise<{ projects: ProjectRecord[]; activ
   return { projects, activeId };
 }
 
+/** What a new project starts with besides its name (the new-project dialog): its settings and first scene. */
+export interface NewProjectOptions {
+  /** Its Project Settings: the features its games ship, the addons it turns on. Absent: the defaults. */
+  settings?: ProjectSettings;
+  /** Its first scene's dimension. */
+  dimension?: '2D' | '3D';
+}
+
 /** Create an empty project. Does not switch to it — the caller decides (openProject reloads). */
-export async function createProject(name: string): Promise<ProjectRecord> {
+export async function createProject(name: string, options: NewProjectOptions = {}): Promise<ProjectRecord> {
   const now = Date.now();
   const record: ProjectRecord = {
     id: cryptoRandomId(),
@@ -209,7 +218,9 @@ export async function createProject(name: string): Promise<ProjectRecord> {
   };
   const id = record.id;
   // No scene blob: setupInitialScene handles "meta exists, blob absent" by creating an empty scene.
-  await idbSet(metaKey(id), createFreshProjectMeta());
+  await idbSet(metaKey(id), createFreshProjectMeta(options.dimension));
+  // By the explicit id: there is no open project to scope to while the launcher runs.
+  if (options.settings) await idbSet(projectSettingsKey(id), options.settings);
   await idbSet(vfsKey(id), EMPTY_VFS);
   // The libraries tolerate a missing key, but writing them makes the project visible to the prefix scan
   // that deletion and duplication walk.

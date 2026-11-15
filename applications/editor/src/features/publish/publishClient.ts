@@ -1,4 +1,4 @@
-import { Logger, programModules } from 'cleo';
+import { Logger, programModules, FEATURES } from 'cleo';
 import { extractScripts, buildScriptsSource } from './extractScripts';
 import { PLAYER_CONTRACT } from './pack';
 import { runPublishJob } from '../../workers/workerClient';
@@ -87,10 +87,14 @@ async function loadShaderLibrary(build: PlayerBuild, config: any): Promise<Shade
   if (!res?.ok) throw new Error(`Player bundle is incomplete: its shader library is missing. ${STALE_PLAYER_HINT}`);
   const library = (await res.json())?.modules as ShaderLibraryJson | undefined;
   if (!library) throw new Error(`The player's shader library cannot be read. ${STALE_PLAYER_HINT}`);
+  // The shader modules of the features the game was built without (config.features, buildMultiSceneGameData).
+  const built: string[] | undefined = config?.features;
+  const leaveOut = new Set(built ? FEATURES.filter(f => !built.includes(f.id)).flatMap(f => f.shaderModules ?? []) : []);
   return selectShaders(library, {
     programs: config?.graphics?.programs,
     programModules: programModules(),
     webgl2: config?.graphics?.webgl2 !== false,
+    leaveOut,
   });
 }
 

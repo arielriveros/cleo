@@ -26,8 +26,7 @@ import DimensionSwitchModal from "./dialogs/DimensionSwitchModal";
 import { useDocument } from "./DocumentContext";
 import { useAssetLibrary } from "./AssetLibraryContext";
 import { groupTabStrip } from "../utils/animationWorkspace";
-import AgentBridgeHost from "./agentBridge/AgentBridgeHost";
-import AgentChatPanel from "./agentChat/AgentChatPanel";
+import { AddonHost, AddonSlot } from "./addons/AddonHost";
 
 // Ctrl/Cmd+S saves the active tab, Ctrl/Cmd+Shift+S saves everything. Bound on the window (capture phase)
 // so it fires wherever focus is — including inside the Monaco script editor, which handles Ctrl+S itself
@@ -86,10 +85,11 @@ function Shell() {
   useSaveShortcuts();
   useUndoShortcuts();
   return (
+    <AddonHost>
     <div className="flex flex-col h-full w-full overflow-hidden">
       <MenuBar />
-      {/* The editor's work area beside the Claude panel (agentChat/), which docks at the right edge, outside
-          dockview, so it stays up in every mode and during Play. */}
+      {/* The editor's work area beside the addons' side panels (Project ▸ Addons: the Claude panel), which
+          dock at the right edge, outside dockview, so they stay up in every mode and during Play. */}
       <div className="flex flex-1 min-h-0">
       <div className="flex flex-col flex-1 min-w-0 min-h-0">
       {/* Each authoring session wraps the whole dock so its panels keep the working copy wherever the
@@ -117,7 +117,7 @@ function Shell() {
         </AnimationFieldProvider>
       </StateMachineProvider>
       </div>
-      <AgentChatPanel />
+      <AddonSlot name="editorAside" />
       </div>
       {/* Global mesh-import review modal — overlays the whole editor while an import awaits the user. */}
       <ModelImportModal />
@@ -131,9 +131,11 @@ function Shell() {
       <UnsavedSceneModal />
       {/* Warns when switching a scene's dimension would strand the other dimension's authoring. */}
       <DimensionSwitchModal />
-      {/* The link to a Cleo MCP server (applications/mcp): an AI agent's commands run here. Renders nothing. */}
-      <AgentBridgeHost />
+      {/* The addons' background services: the Claude Code addon's link to a Cleo MCP server (applications/mcp),
+          where an AI agent's commands run. Render nothing. */}
+      <AddonSlot name="background" />
     </div>
+    </AddonHost>
   );
 }
 

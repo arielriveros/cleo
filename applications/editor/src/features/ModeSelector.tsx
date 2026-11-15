@@ -1,3 +1,4 @@
+import { useProjectFeatures, featureOfMode } from './projectFeatures/featureUi';
 import { useCleoEngine, EditorMode } from "./EngineContext";
 import { useProject } from "./ProjectContext";
 import { Button, cn, useDocEntry, useDocTooltip } from "@cleo/app-kit/ui";
@@ -76,6 +77,8 @@ function Segment({ active, disabled, mode, onClick, children }: SegmentProps) {
 export default function ModeSelector() {
   const { editorMode, setEditorMode, isPlayMode, activeTab } = useCleoEngine();
   const { sceneDimension } = useProject();
+  // A mode of a feature the project leaves out (Project ▸ Features) is not offered.
+  const features = useProjectFeatures();
 
   const select = (mode: EditorMode) => { if (mode !== editorMode) setEditorMode(mode); };
 
@@ -92,19 +95,21 @@ export default function ModeSelector() {
         <Segment active={editorMode === 'scene'} disabled={isPlayMode} mode='Scene' onClick={() => select('scene')}>
           <SceneIcon /> Scene
         </Segment>
-        {is2D ? (
+        {is2D ? features.isOn(featureOfMode('tilemap')) && (
           <Segment active={editorMode === 'tilemap'} disabled={isPlayMode} mode='Tilemap' onClick={() => select('tilemap')}>
             <TilemapIcon /> Tilemap
           </Segment>
-        ) : (
+        ) : features.isOn(featureOfMode('landscape')) && (
           <Segment active={editorMode === 'landscape'} disabled={isPlayMode} mode='Landscape' onClick={() => select('landscape')}>
             <LandscapeIcon /> Landscape
           </Segment>
         )}
         {/* Not dimension-gated, unlike the Landscape/Tilemap slot: a HUD applies equally to 2D and 3D. */}
-        <Segment active={editorMode === 'ui'} disabled={isPlayMode} mode='UI' onClick={() => select('ui')}>
-          <UIIcon /> UI
-        </Segment>
+        {features.isOn(featureOfMode('ui')) && (
+          <Segment active={editorMode === 'ui'} disabled={isPlayMode} mode='UI' onClick={() => select('ui')}>
+            <UIIcon /> UI
+          </Segment>
+        )}
         {/* Engine, editor and project settings over the live viewport. Not dimension-gated. */}
         <Segment active={editorMode === 'options'} disabled={isPlayMode} mode='Options' onClick={() => select('options')}>
           <OptionsIcon /> Options

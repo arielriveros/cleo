@@ -50,6 +50,14 @@ describe('the shaders a game ships', () => {
     expect(out['wgsl/chunks.wgsl'].base.glslChunk).toBe('vec3 f();');
   });
 
+  it('leaves out the modules of features the game is built without, unless a listed program draws with one', () => {
+    const leaveOut = new Set(['wgsl/particleSim.wgsl', 'wgsl/sky.wgsl'])
+    const out = selectShaders(library, { programs: ['pbr~pcf', 'skybox'], programModules, webgl2: true, leaveOut });
+    expect(out['wgsl/particleSim.wgsl']).toBeUndefined();
+    expect(out['wgsl/sky.wgsl']).toBeDefined();
+    expect(out['wgsl/pbr.wgsl']).toBeDefined();
+  });
+
   it('ignores a listed variant the library does not have', () => {
     const out = selectShaders(library, { programs: ['pbr~wind'], programModules, webgl2: true });
     expect(out['wgsl/pbr.wgsl'].variants).toBeUndefined();

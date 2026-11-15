@@ -1,4 +1,5 @@
-import { PHYSICS_BACKENDS } from 'cleo'
+import { PHYSICS_BACKENDS, featureById } from 'cleo'
+import { useProjectFeatures } from '../projectFeatures/featureUi'
 import { useCleoEngine } from '../EngineContext'
 import RendererSettingsPanel from '@cleo/app-kit/renderer/RendererSettingsPanel'
 import PerformancePanel from '@cleo/app-kit/renderer/PerformancePanel'
@@ -19,6 +20,10 @@ export default function EngineOptionsPanel() {
   const [page, setPage] = useOptionsPage<Page>('engine', 'renderer')
   const { projectSettings } = useCleoEngine()
   const { pinPerformanceInPlay } = useEditorPrefs()
+  // The render features the project leaves out of its games (Project ▸ Features), for the Renderer page to say so.
+  const features = useProjectFeatures()
+  const off = (id: string) => (features.isOn(id) ? undefined : featureById(id)?.label)
+  const leftOut = { volumetricFog: off('volumetricFog'), ssil: off('ssil'), ssr: off('ssr'), gi: off('gi') }
   return (
     <OptionsShell
       page={page}
@@ -29,7 +34,7 @@ export default function EngineOptionsPanel() {
         { value: 'runtime', label: 'Runtime', doc: 'editor/options#runtime' },
       ]}
     >
-      {page === 'renderer' && <RendererSettingsPanel />}
+      {page === 'renderer' && <RendererSettingsPanel leftOut={leftOut} />}
       {page === 'performance' && (
         <PerformancePanel physicsThread={{
           project: projectSettings.engine.physicsWorker,

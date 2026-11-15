@@ -6,7 +6,7 @@ import { device } from '../rhi/deviceHandle';
 import type { ShaderProgramDescriptor, ShaderProgram } from '../rhi/shaderProgram';
 import { ProgramCompileQueue, shaderOptimizerStats, recordStall } from '../shaderOptimizer';
 import { shaderStats } from '../shaderStats';
-import { shadersAreLibraryHandles } from '../shaderLibrary';
+import { shadersAreLibraryHandles, shaderIsShipped } from '../shaderLibrary';
 import { programTable } from './programs';
 import { setParticleSimVariants } from '../particles/particleRenderer';
 import type { PipelineCacheHost } from './pipelineCache';
@@ -128,9 +128,10 @@ export class ProgramRegistry implements PipelineCacheHost {
         if (this._tableDescriptors.size === 0)
             for (const [n, d] of programTable()) this._tableDescriptors.set(n, d);
         const split = splitPhysical(name);
-        if (!split) return this._tableDescriptors.get(name) ?? null;
+        // A program a published game left out (its feature is off) has no descriptor: nothing can build it.
+        if (!split) { const d = this._tableDescriptors.get(name); return d && shaderIsShipped(d) ? d : null; }
         const base = this._tableDescriptors.get(split[0]);
-        return (base && ProgramRegistry._variantsOf(base)?.[split[1]]) ?? null;
+        return (base && shaderIsShipped(base) && ProgramRegistry._variantsOf(base)?.[split[1]]) || null;
     }
 
     /**
@@ -210,7 +211,7 @@ export class ProgramRegistry implements PipelineCacheHost {
         if (!shadersAreLibraryHandles()) return undefined;
         const split = splitPhysical(physical);
         const base = split && this._tableDescriptors.get(split[0]);
-        if (!split || !base) return undefined;
+        if (!split || !base || !shaderIsShipped(base)) return undefined;
         if (!this._unshippedWarned.has(physical)) {
             this._unshippedWarned.add(physical);
             Logger.warn(`[shaders] '${physical}' was not shipped with this game; '${split[0]}' draws in its place`, 'Renderer');

@@ -12,6 +12,7 @@ import { playerFeaturesFor, playerFilesFor, withModulePreloads, type PlayerBuild
 import { selectShaders } from '../../applications/editor/src/features/publish/shaderSelection';
 import { collectPrograms } from '../../applications/editor/src/features/publish/collectProgramUsage';
 import { programModules } from '../../src/graphics/render/programs';
+import { FEATURES, FEATURE_PRESETS, enabledFeatures } from '../../src/modules/catalog';
 
 const ROOT = path.resolve(__dirname, '../..');
 const PLAYER = path.join(ROOT, 'applications/editor/public/player');
@@ -26,6 +27,8 @@ export interface SmokeCase {
   programList: boolean;
   /** Keep the WebGL 2 shaders (WebGL 2 fallback). */
   webgl2: boolean;
+  /** A features preset the game is built with (Project ▸ Features): its left-out shaders are not shipped. */
+  preset?: string;
 }
 
 export const CASES: SmokeCase[] = [
@@ -33,6 +36,7 @@ export const CASES: SmokeCase[] = [
   { name: 'cannon-inline', backend: 'cannon', worker: 'off', programList: false, webgl2: true },
   { name: 'rapier-worker', backend: 'rapier', worker: 'on', programList: true, webgl2: true },
   { name: 'jolt-webgpu', backend: 'jolt', worker: 'on', programList: true, webgl2: false },
+  { name: 'cannon-2d-preset', backend: 'cannon', worker: 'on', programList: true, webgl2: true, preset: '2d' },
 ];
 
 const box = (w: number, h: number, d: number) => ({ type: 'box', width: w, height: h, depth: d, offset: [0, 0, 0], rotation: [0, 0, 0] });
@@ -100,8 +104,12 @@ export function writeSmokeGames(out: string) {
     const data: any = gameData(c);
     // What Publish does (buildMultiSceneGameData, publishClient): the program list, then the shaders for it.
     if (c.programList) data.config.graphics.programs = collectPrograms(data, data.config.render);
+    // What publishClient does with the features the game is built without.
+    const enabled = enabledFeatures(FEATURE_PRESETS.find(p => p.id === c.preset)?.disabled ?? []);
+    data.config.features = [...enabled].sort();
+    const leaveOut = new Set(FEATURES.filter(f => !enabled.has(f.id)).flatMap(f => f.shaderModules ?? []));
     data.shaderLibrary = selectShaders(library, {
-      programs: data.config.graphics.programs, programModules: programModules(), webgl2: c.webgl2,
+      programs: data.config.graphics.programs, programModules: programModules(), webgl2: c.webgl2, leaveOut,
     });
     const files = playerFilesFor(build, playerFeaturesFor(data.config));
     let bytes = 0;

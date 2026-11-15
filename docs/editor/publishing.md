@@ -34,6 +34,7 @@ are taken live from the renderer, the others as last saved.
 | Scripts, obfuscated | |
 | The engine, as the player's modules the game needs | The physics backends the game does not run on |
 | Every shader's general version, and the variants the game uses (with **Only used shaders**) | The other shader variants; the WebGL 2 shaders when **WebGL 2 fallback** is off |
+| The features the project keeps ([Project features](project-features.md)) | The nodes, render settings and shaders of the features it leaves out; publishing asks first when the game still uses one |
 | | The editor's tools: the model importers, the script compiler and the movie renderer. A script in a published game cannot import them from `cleo` |
 
 Editor-only nodes are **structurally absent**, not merely hidden — there is no flag left to turn

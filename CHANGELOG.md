@@ -16,6 +16,23 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Project features.** Project ▸ Features chooses which of the engine's optional features a project's games ship
+  with, from presets (2D, 2.5D, 3D, High-fidelity 3D, Cinematic, Everything) that every box stays free to
+  change, and Save as preset keeps a set on this computer. Twenty features: global illumination, screen-space
+  reflections, ambient occlusion, volumetric fog and clouds, sky atmosphere, decals, the cel and Blinn-Phong
+  shading models, landscape, water, particles, fire and smoke, weather, the 2D world and 2D physics, cloth,
+  input, AI navigation, game UI, cinematics, and the WebGL 2 fallback. Each row shows what leaving it out saves
+  and whether the project uses it; Detect from Project sets them from the scenes, templates and scripts.
+  - *In the editor*, a feature left out leaves the Add menu, the New asset menu and the mode selector; a node of
+    one already in a scene is struck through in the scene tree, with a note in its inspector, and the AI agent
+    cannot add one.
+  - *Publishing* strips its nodes and render settings and leaves its shaders out: a small game on the 2D preset
+    is 6.1 MB in all. When the game still uses one, Publish lists every use and asks: turn it back on, publish
+    without it, or cancel. A game without Input binds no input map and shows no touch controls.
+  - *New project* asks for a name, a features preset and the addons; a 2D preset's first scene is 2D.
+- **Addons.** Project ▸ Addons turns editor addons on or off per project; the choice travels with the project's
+  bundle. The Claude Code panel is the first addon: with it off, its code is not even loaded (no panel, no
+  toggle, no agent link). Projects from before addons have it on.
 - **Published games carry only the shaders they use: about 10 MB smaller.** The player no longer holds every
   shader's every variant for both graphics APIs (17 MB of it): the shaders travel in the game's game.bin, each
   one's general version plus the variants the game draws with (Options ▸ Project ▸ Only used shaders). A small
