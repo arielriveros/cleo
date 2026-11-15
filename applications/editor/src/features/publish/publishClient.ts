@@ -1,10 +1,11 @@
-import { Logger } from 'cleo';
+import { Logger, programModules } from 'cleo';
 import { extractScripts, buildScriptsSource } from './extractScripts';
 import { PLAYER_CONTRACT } from './pack';
 import { runPublishJob } from '../../workers/workerClient';
 import type { PublishFiles, PlayerTemplates } from '../../workers/projectJobs';
 import type { PublishWindowSettings } from '../options/projectSettings';
 import { isSafePlayerPath, playerFeaturesFor, playerFilesFor, withModulePreloads, type PlayerBuild } from './playerManifest';
+import { selectShaders, type ShaderLibraryJson } from './shaderSelection';
 
 // Re-exported so callers keep importing the publish types from the publish module.
 export type { PublishFiles } from '../../workers/projectJobs';
@@ -41,7 +42,7 @@ const STALE_PLAYER_HINT =
 // vite.player.config.ts and playerManifest.ts.
 // public/player/ is git-ignored and no build step depends on it, so a bundle can silently drift behind
 // the packer; the contract check stops the publish instead. See pack.ts PLAYER_CONTRACT.
-async function loadPlayerTemplates(config: any): Promise<PlayerTemplates> {
+async function loadPlayerTemplates(config: any): Promise<PlayerTemplates & { build: PlayerBuild }> {
   let htmlRes: Response, buildRes: Response;
   try {
     [htmlRes, buildRes] = await Promise.all([fetch('player/index.html'), fetch('player/build.json')]);
@@ -72,7 +73,25 @@ async function loadPlayerTemplates(config: any): Promise<PlayerTemplates> {
     return [file, await res.text()] as const;
   }));
 
-  return { indexHtml: withModulePreloads(await htmlRes.text(), build, wanted), files: Object.fromEntries(texts) };
+  return { indexHtml: withModulePreloads(await htmlRes.text(), build, wanted), files: Object.fromEntries(texts), build };
+}
+
+/**
+ * The shaders this game ships, from the player's shader library (shaders.json beside it): every module's base
+ * program, the variants its program list names, and the GLSL only when it may run on WebGL 2. See
+ * shaderSelection.ts.
+ */
+async function loadShaderLibrary(build: PlayerBuild, config: any): Promise<ShaderLibraryJson> {
+  const file = build.shaders?.file;
+  const res = file ? await fetch(`player/${file}`).catch(() => null) : null;
+  if (!res?.ok) throw new Error(`Player bundle is incomplete: its shader library is missing. ${STALE_PLAYER_HINT}`);
+  const library = (await res.json())?.modules as ShaderLibraryJson | undefined;
+  if (!library) throw new Error(`The player's shader library cannot be read. ${STALE_PLAYER_HINT}`);
+  return selectShaders(library, {
+    programs: config?.graphics?.programs,
+    programModules: programModules(),
+    webgl2: config?.graphics?.webgl2 !== false,
+  });
 }
 
 /**
@@ -82,7 +101,9 @@ async function loadPlayerTemplates(config: any): Promise<PlayerTemplates> {
  * so the packer's mutations never reach the caller's object.
  */
 async function assemble(data: any, zip: boolean) {
-  const templates = await loadPlayerTemplates(data?.config);
+  const { build, ...templates } = await loadPlayerTemplates(data?.config);
+  // Into the pack's manifest (pack.ts): the player's shaders read it.
+  data.shaderLibrary = await loadShaderLibrary(build, data?.config);
   const { scripts, paths, modules } = extractScripts(data); // strips node scripts and modules out of `data`
   const scriptsSource = buildScriptsSource(scripts, paths, modules);
 

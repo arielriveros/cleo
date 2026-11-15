@@ -140,7 +140,12 @@ build fills the page it is embedded in, so only the title applies there.
 - **Start fullscreen** / **Resizable window** — how the desktop window opens, and whether the player
   may resize it.
 - **Only used shaders** — compile just the shaders this game uses at startup, not all of them: a much
-  shorter first launch. Anything missed still compiles when first needed.
+  shorter first launch, and a smaller game: of each shader's variants it ships only those. Anything missed
+  still runs when first needed, drawn by the shader's general version (a parallax material then draws
+  flat).
+- **WebGL 2 fallback** — ship the WebGL 2 versions of the shaders too, so the game also runs where WebGPU
+  does not. Off makes a WebGPU-only game, lighter by its GLSL shaders, which tells a player whose browser
+  or graphics card has no WebGPU that it needs it.
 
 ### Input
 

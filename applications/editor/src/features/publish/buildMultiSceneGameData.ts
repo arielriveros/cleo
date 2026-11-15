@@ -253,6 +253,8 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   if (src.projectSettings?.publish.onlyUsedShaders !== false)
     (config.graphics ??= {}).programs = collectPrograms(out, config.render)
   if (src.pipelines?.length) (config.graphics ??= {}).pipelines = src.pipelines
+  // Published without its WebGL 2 shaders: the player asks for WebGPU and says so where there is none.
+  if (src.projectSettings?.publish.webgl2Fallback === false) (config.graphics ??= {}).webgl2 = false
   if (Object.keys(config).length > 0) out.config = config
   return out
 }

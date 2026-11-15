@@ -6,6 +6,8 @@ import engineConfig from '../../vite.config'
 import { appKitAlias } from '../app-kit/vite.preset'
 import { buildVersionDefines } from './buildVersion'
 import { contract } from './src/features/publish/playerContract.json'
+// @ts-expect-error -- a plain .mjs shared with the engine's vite.config.ts; it has no declarations.
+import { glslRaw, createShaderLibrary } from '../../tools/viteGlsl.mjs'
 
 /**
  * Builds the standalone game player (engine + runtime) into applications/editor/public/player/: the static,
@@ -62,6 +64,26 @@ export interface PlayerManifest {
   core: string[];
   coreBytes: number;
   features: Record<string, PlayerManifestFeature>;
+  /** The shader library (shaders.json): what a publish picks each game's shaders from. */
+  shaders: PlayerManifestShaders;
+}
+
+/** A shader's text in the library, measured: all of it, and the part that is GLSL (WebGL 2 only). */
+export interface ShaderSize { bytes: number; glslBytes: number }
+
+export interface PlayerManifestShaders {
+  file: string;
+  bytes: number;
+  /** Each module's base program and variants, by module id. */
+  modules: Record<string, ShaderSize & { variants?: Record<string, ShaderSize> }>;
+}
+
+/** The fields of a translated program only WebGL 2 reads (a custom material's GLSL chunks are read on WebGPU too). */
+const GLSL_FIELDS = ['vertex', 'fragment'] as const
+
+function shaderSize(data: Record<string, unknown>): ShaderSize {
+  const glslBytes = GLSL_FIELDS.reduce((sum, f) => sum + (typeof data[f] === 'string' ? Buffer.byteLength(data[f] as string) : 0), 0)
+  return { bytes: Buffer.byteLength(JSON.stringify(data)), glslBytes }
 }
 
 const isChunk = (o: OutputBundle[string]): o is OutputChunk => o.type === 'chunk'
@@ -114,7 +136,7 @@ export function playerManifest(bundle: OutputBundle, features: Record<string, (i
   const core = walk(entries.map(c => c.fileName), file => featureOf.has(file), new Set())
   // Assets a chunk emitted (none today) go with the core: no chunk graph says which part needs them.
   const assets = Object.values(bundle).filter(o => o.type === 'asset').map(o => o.fileName)
-    .filter(f => f !== 'index.html' && !f.startsWith('build.'))
+    .filter(f => f !== 'index.html' && !f.startsWith('build.') && f !== 'shaders.json')
   const bytesOf = (files: Iterable<string>) => [...files].reduce((sum, f) => {
     const o = bundle[f]
     return sum + (!o ? 0 : o.type === 'chunk' ? Buffer.byteLength(o.code) : typeof o.source === 'string' ? Buffer.byteLength(o.source) : o.source.byteLength)
@@ -133,6 +155,13 @@ export function playerManifest(bundle: OutputBundle, features: Record<string, (i
   return { entry: entry.fileName, worker: worker.fileName, core: coreFiles, coreBytes: bytesOf(coreFiles), features: out }
 }
 
+/**
+ * Every shader the player's modules import, as the shader plugin translated them (library mode): the
+ * player's .wgsl imports are handles onto it (src/graphics/shaderLibrary.ts), and a publish copies the part a
+ * game uses into its game.bin.
+ */
+const shaderLibrary = createShaderLibrary()
+
 function playerAssets(): Plugin {
   return {
     name: 'cleo:player-assets',
@@ -148,7 +177,18 @@ function playerAssets(): Plugin {
     // build.report.json is for tests (tests/playerBundles.test.ts): the modules in each chunk. Publishing
     // never copies it.
     generateBundle(_options, bundle) {
-      const manifest: PlayerManifest = { contract, builtAt: new Date().toISOString(), ...playerManifest(bundle, PLAYER_FEATURES) }
+      // The shader library: every module, base and variants, as the shader plugin translated them.
+      const modules = Object.fromEntries([...shaderLibrary.modules.entries()].sort(([a], [b]) => a < b ? -1 : 1))
+      const shadersJson = JSON.stringify({ version: 1, modules })
+      const shaderSizes: PlayerManifestShaders['modules'] = {}
+      for (const [id, entry] of Object.entries<any>(modules)) {
+        shaderSizes[id] = { ...shaderSize(entry.base) }
+        if (entry.variants) shaderSizes[id].variants = Object.fromEntries(Object.entries<any>(entry.variants).map(([tag, v]) => [tag, shaderSize(v)]))
+      }
+      const manifest: PlayerManifest = {
+        contract, builtAt: new Date().toISOString(), ...playerManifest(bundle, PLAYER_FEATURES),
+        shaders: { file: 'shaders.json', bytes: Buffer.byteLength(shadersJson), modules: shaderSizes },
+      }
       const report = Object.fromEntries(Object.values(bundle).filter(isChunk).map(c => [c.fileName, {
         bytes: Buffer.byteLength(c.code),
         isEntry: c.isEntry,
@@ -162,12 +202,18 @@ function playerAssets(): Plugin {
       }]))
       this.emitFile({ type: 'asset', fileName: 'index.html', source: readFileSync(PLAYER_HTML) })
       this.emitFile({ type: 'asset', fileName: 'build.json', source: JSON.stringify(manifest, null, 2) })
+      this.emitFile({ type: 'asset', fileName: 'shaders.json', source: shadersJson })
       this.emitFile({ type: 'asset', fileName: 'build.report.json', source: JSON.stringify(report, null, 1) })
     },
 
     // index.html is not in the module graph, so nothing else would rebuild on a change to it.
     buildStart() { this.addWatchFile(PLAYER_HTML) },
   }
+}
+
+/** The shared config's inline shader plugin out: the player's own, in library mode, takes every .wgsl. */
+function withoutInlineShaders<T extends { plugins?: unknown[] }>(config: T): T {
+  return { ...config, plugins: (config.plugins ?? []).flat(Infinity as 1).filter((p: any) => p?.name !== 'glsl-raw') }
 }
 
 /**
@@ -216,7 +262,7 @@ function playerGraphGuard(): Plugin {
 // The shared engine config (../vite.config.ts) contributes the shader plugin and the `cleo` -> ../src/cleo.ts
 // alias -- the same source the editor dev server and both test suites use, so a published game is built from
 // exactly the engine the editor previewed it with.
-export default defineConfig(() => mergeConfig(engineConfig, defineConfig({
+export default defineConfig(() => withoutInlineShaders(mergeConfig(engineConfig, defineConfig({
   // `cleo` -> the engine's runtime barrel (src/cleoCore.ts) rather than the full one: everything in the player
   // that imports 'cleo' gets the runtime, and a name only the editor's tools export fails the build. Vite puts
   // an overriding config's aliases first, so this wins over the shared config's `cleo` -> src/cleo.ts.
@@ -236,7 +282,8 @@ export default defineConfig(() => mergeConfig(engineConfig, defineConfig({
   // Chunks name each other relatively, so a game runs from whatever folder or URL it is served at.
   base: './',
 
-  plugins: [playerGraphGuard(), playerAssets()],
+  // Shaders in library mode: each .wgsl import is a handle onto the game's shader library, not its text.
+  plugins: [glslRaw({ library: shaderLibrary }), playerGraphGuard(), playerAssets()],
 
   build: {
     outDir: 'public/player',
@@ -263,4 +310,4 @@ export default defineConfig(() => mergeConfig(engineConfig, defineConfig({
       },
     },
   },
-})))
+}))))

@@ -9,6 +9,9 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { packGameBin } from '../../applications/editor/src/features/publish/pack';
 import { playerFeaturesFor, playerFilesFor, withModulePreloads, type PlayerBuild } from '../../applications/editor/src/features/publish/playerManifest';
+import { selectShaders } from '../../applications/editor/src/features/publish/shaderSelection';
+import { collectPrograms } from '../../applications/editor/src/features/publish/collectProgramUsage';
+import { programModules } from '../../src/graphics/render/programs';
 
 const ROOT = path.resolve(__dirname, '../..');
 const PLAYER = path.join(ROOT, 'applications/editor/public/player');
@@ -19,26 +22,35 @@ export interface SmokeCase {
   name: string;
   backend: 'cannon' | 'rapier' | 'jolt';
   worker: 'on' | 'off';
+  /** Ship the program list publish writes (Only used shaders), so only its variants; else every variant. */
+  programList: boolean;
+  /** Keep the WebGL 2 shaders (WebGL 2 fallback). */
+  webgl2: boolean;
 }
 
 export const CASES: SmokeCase[] = [
-  { name: 'cannon-worker', backend: 'cannon', worker: 'on' },
-  { name: 'cannon-inline', backend: 'cannon', worker: 'off' },
-  { name: 'rapier-worker', backend: 'rapier', worker: 'on' },
-  { name: 'jolt-worker', backend: 'jolt', worker: 'on' },
+  { name: 'cannon-worker', backend: 'cannon', worker: 'on', programList: true, webgl2: true },
+  { name: 'cannon-inline', backend: 'cannon', worker: 'off', programList: false, webgl2: true },
+  { name: 'rapier-worker', backend: 'rapier', worker: 'on', programList: true, webgl2: true },
+  { name: 'jolt-webgpu', backend: 'jolt', worker: 'on', programList: true, webgl2: false },
 ];
 
 const box = (w: number, h: number, d: number) => ({ type: 'box', width: w, height: h, depth: d, offset: [0, 0, 0], rotation: [0, 0, 0] });
 const node = (extra: any) => ({ position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: [], ...extra });
 
-/** The probe: after 90 frames, what the engine ran on and where the crate is (it starts at y = 3, rests at 0.5). */
-const PROBE = `function(__cleoImport, __cleoExports) {
+/**
+ * The probe: after 90 frames, what the engine ran on and where the crate is (it starts at y = 3, rests at 0.5).
+ * A game asking for the physics worker waits for it (up to 900 frames): the worker can come up after the
+ * first frames, which then step on the main thread.
+ */
+const probe = (wantWorker: boolean) => `function(__cleoImport, __cleoExports) {
   const cleo = __cleoImport('cleo');
   let frames = 0;
   this.onUpdate = function () {
-    if (++frames !== 90) return;
+    if (window.CLEO_SMOKE || ++frames < 90) return;
     const engine = cleo.CleoEngine.instance;
     const physics = engine.physics;
+    if (${wantWorker} && physics.executor !== 'worker' && frames < 900) return;
     const crate = engine.scene.root.getChildByName('Crate')[0];
     window.CLEO_SMOKE = {
       frames,
@@ -69,7 +81,7 @@ function gameData(c: SmokeCase) {
       },
     },
     config: {
-      graphics: { clearColor: [0.1, 0.1, 0.12, 1] },
+      graphics: { clearColor: [0.1, 0.1, 0.12, 1], ...(c.webgl2 ? {} : { webgl2: false }) } as Record<string, any>,
       render: { exposure: 1 },
       physics: { gravity: [0, -9.81, 0], backend: c.backend, worker: c.worker },
     },
@@ -80,11 +92,17 @@ function gameData(c: SmokeCase) {
 export function writeSmokeGames(out: string) {
   const build: PlayerBuild = JSON.parse(readFileSync(path.join(PLAYER, 'build.json'), 'utf8'));
   const indexHtml = readFileSync(path.join(PLAYER, 'index.html'), 'utf8');
+  const library = JSON.parse(readFileSync(path.join(PLAYER, build.shaders!.file), 'utf8')).modules;
   rmSync(out, { recursive: true, force: true });
   return CASES.map(c => {
     const dir = path.join(out, c.name);
     mkdirSync(dir, { recursive: true });
-    const data = gameData(c);
+    const data: any = gameData(c);
+    // What Publish does (buildMultiSceneGameData, publishClient): the program list, then the shaders for it.
+    if (c.programList) data.config.graphics.programs = collectPrograms(data, data.config.render);
+    data.shaderLibrary = selectShaders(library, {
+      programs: data.config.graphics.programs, programModules: programModules(), webgl2: c.webgl2,
+    });
     const files = playerFilesFor(build, playerFeaturesFor(data.config));
     let bytes = 0;
     for (const f of files) {
@@ -94,9 +112,11 @@ export function writeSmokeGames(out: string) {
       writeFileSync(path.join(dir, f), text);
     }
     writeFileSync(path.join(dir, 'index.html'), withModulePreloads(indexHtml, build, files));
-    writeFileSync(path.join(dir, 'game.bin'), Buffer.from(packGameBin(data).buffer));
+    const bin = Buffer.from(packGameBin(data).buffer);
+    bytes += bin.byteLength;
+    writeFileSync(path.join(dir, 'game.bin'), bin);
     writeFileSync(path.join(dir, 'game.scripts.js'),
-      `window.CLEO_GAME_SCRIPTS = {};\nwindow.CLEO_GAME_MODULES = {};\nwindow.CLEO_GAME_SCRIPTS['probe'] = ${PROBE};\n`);
+      `window.CLEO_GAME_SCRIPTS = {};\nwindow.CLEO_GAME_MODULES = {};\nwindow.CLEO_GAME_SCRIPTS['probe'] = ${probe(c.worker === 'on')};\n`);
     writeFileSync(path.join(dir, 'main.js'), templates.GAME_MAIN_JS);
     writeFileSync(path.join(dir, 'preload.js'), templates.GAME_PRELOAD_JS);
     writeFileSync(path.join(dir, 'window.json'), JSON.stringify({ title: `smoke ${c.name}`, width: 640, height: 360 }));

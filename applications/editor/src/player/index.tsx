@@ -1,8 +1,14 @@
-import { bootPlayer, hideLoadingWhenSmooth, showError } from './boot';
+import { hideLoadingWhenSmooth, showError } from './pageStatus';
+import { unpackGameBin } from './unpack';
+import { installShaderLibrary } from 'cleo/graphics/shaderLibrary';
 
 // The PUBLISHED player: the standalone, data-driven runtime for a published Cleo game. It loads game.bin
 // and runs it outside the editor, silent, its scripts precompiled into game.scripts.js. The boot itself is
 // shared with the editor's Play-in-window page (see boot.tsx).
+//
+// This entry imports next to nothing, and loads the engine only once the game's shaders are installed: the
+// player's shader imports are handles onto the library game.bin carries (src/graphics/shaderLibrary.ts),
+// and some engine modules read theirs as they load.
 
 // Bytes are either injected on window (desktop build, via preload) or fetched next to index.html (web).
 async function loadGameBuffer(): Promise<ArrayBuffer> {
@@ -41,8 +47,13 @@ function createPhysicsWorker(): Worker {
 }
 
 async function boot(): Promise<void> {
+  const buffer = await loadGameBuffer();
+  const pack = unpackGameBin(buffer);
+  if (pack.manifest.shaders) installShaderLibrary(pack.manifest.shaders);
+  const { bootPlayer } = await import('./boot');
   await bootPlayer({
-    buffer: await loadGameBuffer(),
+    buffer,
+    pack,
     // A shipped game runs silent.
     logging: false,
     physicsWorkerFactory: createPhysicsWorker,

@@ -1,10 +1,13 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, addScriptModuleSources, registerTemplates, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry } from 'cleo';
+import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, addScriptModuleSources, registerTemplates, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles } from 'cleo';
 import type { BackendKind, LoadProgressListener } from 'cleo';
 import UILayer from '../features/gameUi/UILayer';
 import VirtualControlsLayer from '../features/gameUi/VirtualControlsLayer';
-import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData } from './unpack';
+import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData, type UnpackedGame } from './unpack';
+import { showError, setLoadingText } from './pageStatus';
+// The page status helpers, for the pages that import them from here (session.tsx).
+export { showError, setLoadingText, hideLoadingWhenSmooth } from './pageStatus';
 import { attachSharedAnimations, attachTemplateAnimations } from './animations';
 import { PLAYER_CONTRACT } from '../features/publish/pack';
 import { physicsBackendOverride, physicsWorkerOverride } from '../features/options/projectSettings';
@@ -23,6 +26,8 @@ import { physicsBackendOverride, physicsWorkerOverride } from '../features/optio
 export interface PlayerBootOptions {
   /** The game.bin bytes. Mesh arrays and texture payloads stay views onto this buffer. */
   buffer: ArrayBuffer;
+  /** `buffer` already unpacked, by a page that read it before loading the engine (index.tsx). */
+  pack?: UnpackedGame;
   /** Keep the engine Logger on. A shipped game runs silent; Play in window forwards it to the editor. */
   logging?: boolean;
   /** The graphics API to ask for, over the pack's. Play in window passes the editor's own preference. */
@@ -41,43 +46,16 @@ export interface PlayerHandle {
   currentSceneName(): string;
 }
 
-/** Cover the page with a boot failure. Logger-independent: a published game has no Logger by then. */
-export function showError(err: unknown): void {
-  const pre = document.createElement('pre');
-  pre.id = 'cleo-error';
-  pre.textContent = 'Failed to start game:\n\n' + ((err as any)?.stack || String(err));
-  document.body.appendChild(pre);
-  document.getElementById('cleo-loading')?.remove();
-}
+const NEEDS_WEBGPU =
+  'This game needs WebGPU, which this browser or graphics card does not provide.\n\n' +
+  'Try a current Chrome or Edge, or update the graphics driver. (The game was published without its\n' +
+  'WebGL 2 shaders: Options ▸ Project ▸ WebGL 2 fallback.)';
 
-/** The loading screen's line of text (#cleo-loading-text), when the page has one. */
-export function setLoadingText(text: string): void {
-  const el = document.getElementById('cleo-loading-text');
-  if (el) el.textContent = text;
-}
-
-// Lift #cleo-loading once frames are actually flowing. The first frames of a first launch compile every
-// shader the scene needs, each one a long stall, so "a frame ran" is not enough: wait for a run of quick
-// frames. Counting starts after startScene's deferred scene.start (100 ms), which spawns more to compile.
-// A machine too slow to ever manage that still gets the game after a frame cap.
-export function hideLoadingWhenSmooth(): void {
-  // When the first frame after boot finished: how long the window waited, shader builds included.
-  requestAnimationFrame(() => { (window as any).CLEO_FIRST_FRAME_MS = performance.now(); });
-  const el = document.getElementById('cleo-loading');
-  if (!el) return;
-  const from = performance.now() + 300;
-  let last = performance.now(), smooth = 0, frames = 0;
-  const tick = (now: number) => {
-    smooth = now >= from && now - last < 100 ? smooth + 1 : 0;
-    last = now;
-    if (smooth >= 10 || ++frames >= 240) {
-      el.classList.add('done');
-      setTimeout(() => el.remove(), 500);
-      return;
-    }
-    requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+/** Throw the reason a WebGPU-only game cannot run here, if it cannot: no WebGPU, or no adapter for it. */
+async function requireWebGPU(): Promise<void> {
+  const gpu = (navigator as any).gpu;
+  const adapter = gpu ? await gpu.requestAdapter().catch(() => null) : null;
+  if (!adapter) throw new Error(NEEDS_WEBGPU);
 }
 
 /** Boot the game in `buffer` and start its entry scene. Resolves once that scene has started. */
@@ -87,7 +65,7 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   Logger.setEnabled(!!options.logging);
   const fail = options.onError ?? showError;
 
-  const pack = unpackGameBin(options.buffer);
+  const pack = options.pack ?? unpackGameBin(options.buffer);
   const data = pack.manifest;
 
   // Refuse a game.bin from a packer newer than this bundle. Only a NEWER pack is fatal; an older one
@@ -97,6 +75,15 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
       `This game was published for game format v${data.contract}, but this player only understands ` +
       `v${PLAYER_CONTRACT}. Rebuild the player ("npm run build:player") and publish again.`
     );
+
+  // The published player's shaders are handles onto the library the game carries (src/graphics/
+  // shaderLibrary.ts), and they are read from the moment the engine starts. Play in window's are inline.
+  if (data.shaders) installShaderLibrary(data.shaders);
+  else if (shadersAreLibraryHandles())
+    throw new Error('This game.bin carries no shaders: it was packed for another player. Publish it again.');
+  // A game published without its WebGL 2 shaders (Options ▸ Project ▸ WebGL 2 fallback off) needs WebGPU:
+  // said here, before the engine would fall back to a WebGL 2 it has no shaders for.
+  if (data?.config?.graphics?.webgl2 === false) await requireWebGPU();
 
   // Startup shader profile: every program's build time is recorded (shaderStats) and readable from
   // devtools as CLEO_SHADER_STATS. `?shaderProfile` (the desktop build: launch with --shader-profile)
@@ -108,8 +95,10 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   // cannot start, the step stays on the main thread.
   PhysicsSystem.workerFactory = options.physicsWorkerFactory;
   const graphics = data?.config?.graphics ?? { clearColor: [0, 0, 0, 1] };
+  // A WebGPU-only game asks for WebGPU whatever the page prefers: it has no WebGL 2 shaders to fall back on.
+  const backend = graphics.webgl2 === false ? 'webgpu' : options.graphicsBackend;
   const engine = new CleoEngine({
-    graphics: options.graphicsBackend ? { ...graphics, backend: options.graphicsBackend } : graphics,
+    graphics: backend ? { ...graphics, backend } : graphics,
     // Gravity, max substeps, the physics backend, and the frame-delta cap: the project's engine options
     // (Options ▸ Engine). `?physicsBackend=` asks for another backend, for a comparison.
     physics: { ...(data?.config?.physics ?? {}), backend: physicsBackendOverride() ?? data?.config?.physics?.backend },

@@ -502,6 +502,10 @@ export {
 export type { ShaderOptimizerStats, PipelineRecipe } from "./graphics/shaderOptimizer";
 export { createProgramUsage, usageFromSceneJson, usageFromRenderSettings, castsShadows, programsFor, PROGRAM_CLASS } from "./graphics/programUsage";
 export type { ProgramUsage } from "./graphics/programUsage";
+// A published game's shader library: which program needs which module, and the library the player installs.
+export { programModules } from "./graphics/render/programs";
+export { installShaderLibrary, shadersAreLibraryHandles } from "./graphics/shaderLibrary";
+export type { ShaderLibrary, ShaderLibraryEntry, ShaderModuleData } from "./graphics/shaderLibrary";
 export { physicalFor, particleSimProgram, usesParallax } from "./graphics/programVariants";
 export type { ShaderBuildRecord } from "./graphics/shaderStats";
 export { gpuProfiler, frameHistory, Ring, RENDER_PASSES, TOGGLEABLE_PASSES } from "./graphics/gpuProfiler";

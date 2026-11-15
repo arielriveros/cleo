@@ -104,6 +104,13 @@ export interface PackManifest {
    * play window, built with this packer, so no contract bump either.
    */
   modules?: Record<string, string>;
+  /**
+   * The game's shader library: each shipped shader module's text and reflection, by module id, as the
+   * published player's own shaders.json has them (publish/shaderSelection.ts picks the part this game uses).
+   * The player's shader imports are handles onto it (src/graphics/shaderLibrary.ts). Absent from a Play in
+   * window pack: that page is built by the editor, its shaders inline.
+   */
+  shaders?: Record<string, { base: any; variants?: Record<string, any> }>;
   config?: any;
   geometries: Record<string, PackedGeometry>;
   textures: PackedTexture[];
@@ -356,6 +363,7 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     modelAnimations: data?.modelAnimations,
     ...(data?.retargets ? { retargets: data.retargets } : {}),
     ...(data?.modules ? { modules: data.modules } : {}),
+    ...(data?.shaderLibrary ? { shaders: data.shaderLibrary } : {}),
     config: data?.config,
     geometries,
     textures,

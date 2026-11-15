@@ -30,6 +30,11 @@ const cases = JSON.parse(readFileSync(path.join(out, '..', 'smoke-cases.json'), 
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE; // set by VS Code-hosted shells: Electron would start as plain Node
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+/** End a game and every process it started: killing Electron's main process alone leaves its renderers running. */
+function stop(child) {
+  if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  else child.kill('SIGKILL');
+}
 
 async function evaluate(port, expression) {
   const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
@@ -70,7 +75,7 @@ async function run(c, port) {
     }
     return { ok: false, why: 'timed out' };
   } finally {
-    child.kill();
+    stop(child);
   }
 }
 
@@ -80,7 +85,7 @@ for (const c of cases) {
   const r = await run(c, port++);
   if (!r.ok) failed++;
   const mb = (c.bytes / 1e6).toFixed(2);
-  console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${c.name.padEnd(14)} ${String(c.files).padStart(2)} files ${mb.padStart(6)} MB` +
-    (r.ok ? `  ${r.backend}/${r.executor} crate y=${r.crateY.toFixed(3)} first frame ${Math.round(r.firstFrame)} ms` : `  ${r.why}`));
+  console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${c.name.padEnd(14)} ${String(c.files).padStart(2)} files + game.bin ${mb.padStart(6)} MB` +
+    (r.ok ? `  ${r.backend}/${r.executor} on ${r.graphics ?? '?'} crate y=${r.crateY.toFixed(3)} first frame ${Math.round(r.firstFrame)} ms` : `  ${r.why}`));
 }
 process.exit(failed ? 1 : 0);

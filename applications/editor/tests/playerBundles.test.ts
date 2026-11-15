@@ -54,6 +54,26 @@ describe.skipIf(!built)('the published player build', () => {
     expect(all).toContain('src/cleoCore.ts');
   });
 
+  it('keeps its shaders in the library beside it, not in its modules', () => {
+    // Shader text in the chunks would be the whole engine's again: a handle per import is all they hold.
+    // (Custom materials assemble GLSL from templates in customShaders.ts, and the WebGPU device blits with a
+    // WGSL program of its own; those stay.)
+    const library = JSON.parse(readFileSync(path.join(PLAYER, build.shaders!.file), 'utf8')).modules;
+    const samples = ['wgsl/pbr.wgsl', 'wgsl/deferredLighting.wgsl', 'wgsl/particleSim.wgsl']
+      .flatMap(id => [library[id].base.wgsl, library[id].base.fragment ?? ''])
+      .map((text: string) => text.slice(text.length / 2, text.length / 2 + 300)).filter(Boolean);
+    for (const f of Object.keys(report)) {
+      const code = readFileSync(path.join(PLAYER, f), 'utf8');
+      for (const sample of samples) expect(code.includes(JSON.stringify(sample).slice(1, -1)), `${f} carries shader text`).toBe(false);
+    }
+    // All the engine's code, with no shader text: the boot chunk alone was 19 MB with it.
+    const codeBytes = Object.values(report).reduce((sum, c) => sum + c.bytes, 0) - build.features['physics-rapier'].bytes - build.features['physics-jolt'].bytes;
+    expect(codeBytes).toBeLessThan(4e6);
+    expect(Object.keys(library).length).toBeGreaterThan(100);
+    expect(Object.keys(build.shaders!.modules).sort()).toEqual(Object.keys(library).sort());
+    expect(library['wgsl/pbr.wgsl'].variants.pcf.wgsl).toMatch(/@fragment/);
+  });
+
   it('carries each backend once, in its own part, for the page and the worker alike', () => {
     for (const [feature, pkg] of Object.entries(BACKEND_PACKAGES)) {
       expect(modulesOf(build.features[feature].files).some(m => m.includes(pkg)), feature).toBe(true);

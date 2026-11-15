@@ -55,6 +55,11 @@ export interface PublishWindowSettings {
    * list missed often enough to matter; it still runs either way.
    */
   onlyUsedShaders: boolean;
+  /**
+   * Ship the WebGL 2 versions of the game's shaders, so it also runs where WebGPU does not. Off: a WebGPU-only
+   * game, a fifth or so of its shader text lighter, which tells a player without WebGPU so.
+   */
+  webgl2Fallback: boolean;
 }
 
 export interface ProjectSettings {
@@ -72,7 +77,7 @@ export const PROJECT_SETTINGS_VERSION = 2;
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   version: PROJECT_SETTINGS_VERSION,
   engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'on', physicsBackend: 'cannon', maxFrameDelta: 0.1, masterVolume: 1 },
-  publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true },
+  publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true, webgl2Fallback: true },
 };
 
 const num = (v: unknown, d: number, min: number, max: number) =>
@@ -109,6 +114,7 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       fullscreen: typeof p.fullscreen === 'boolean' ? p.fullscreen : d.publish.fullscreen,
       resizable: typeof p.resizable === 'boolean' ? p.resizable : d.publish.resizable,
       onlyUsedShaders: typeof p.onlyUsedShaders === 'boolean' ? p.onlyUsedShaders : d.publish.onlyUsedShaders,
+      webgl2Fallback: typeof p.webgl2Fallback === 'boolean' ? p.webgl2Fallback : d.publish.webgl2Fallback,
     },
   };
 }
@@ -131,8 +137,9 @@ export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
     },
     runtime: { maxFrameDelta: s.engine.maxFrameDelta },
     audio: { masterVolume: s.engine.masterVolume },
-    // A publish-time switch, not something the running game reads.
-    window: (({ onlyUsedShaders: _unused, ...w }) => w)(s.publish),
+    // Publish-time switches, not something the running game reads (the WebGL 2 one reaches it through
+    // config.graphics, see buildMultiSceneGameData).
+    window: (({ onlyUsedShaders: _shaders, webgl2Fallback: _webgl2, ...w }) => w)(s.publish),
   };
 }
 

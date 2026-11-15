@@ -22,6 +22,12 @@ export interface PlayerBuild {
   core: string[];
   coreBytes: number;
   features: Record<string, PlayerBuildFeature>;
+  /** The shader library beside the player (shaders.json), and each module's size. */
+  shaders?: {
+    file: string;
+    bytes: number;
+    modules: Record<string, { bytes: number; glslBytes: number; variants?: Record<string, { bytes: number; glslBytes: number }> }>;
+  };
 }
 
 /** The parts a game needs, from its published config: today, the physics backend it was made with. */

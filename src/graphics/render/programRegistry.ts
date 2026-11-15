@@ -6,6 +6,7 @@ import { device } from '../rhi/deviceHandle';
 import type { ShaderProgramDescriptor, ShaderProgram } from '../rhi/shaderProgram';
 import { ProgramCompileQueue, shaderOptimizerStats, recordStall } from '../shaderOptimizer';
 import { shaderStats } from '../shaderStats';
+import { shadersAreLibraryHandles } from '../shaderLibrary';
 import { programTable } from './programs';
 import { setParticleSimVariants } from '../particles/particleRenderer';
 import type { PipelineCacheHost } from './pipelineCache';
@@ -164,7 +165,7 @@ export class ProgramRegistry implements PipelineCacheHost {
         const existing = this._shaderManager.find(physical);
         if (existing) { this._registerProgram(physical, existing); return existing; }
         const descriptor = this.descriptorFor(physical);
-        if (!descriptor) return undefined;
+        if (!descriptor) return this._unshippedVariant(physical);
         let program = this._builtByDescriptor.get(descriptor);
         if (program) { this._registerProgram(physical, program); return program; }
 
@@ -190,6 +191,35 @@ export class ProgramRegistry implements PipelineCacheHost {
         shaderOptimizerStats.syncCompiles++;
         recordStall(physical, performance.now() - start);
         this._builtByDescriptor.set(descriptor, program);
+        this._registerProgram(physical, program);
+        return program;
+    }
+
+    /** Variants already reported as not shipped, so a name looked up each frame warns once. */
+    private readonly _unshippedWarned = new Set<string>();
+
+    /**
+     * A variant a published game did not ship: its shader library carries the variants the game's program
+     * list names (src/graphics/shaderLibrary.ts), and this one was not among them -- the other side of a
+     * shadow-filter switch, a particle module set no emitter had at publish. Its family's base program serves
+     * its names for good: the base's runtime branches cover what the variant compiles out, all but the
+     * parallax march, so a height-mapped material it serves draws flat. Undefined outside a published game,
+     * where every variant is at hand and a missing one is a name nothing provides.
+     */
+    private _unshippedVariant(physical: string): ShaderProgram | undefined {
+        if (!shadersAreLibraryHandles()) return undefined;
+        const split = splitPhysical(physical);
+        const base = split && this._tableDescriptors.get(split[0]);
+        if (!split || !base) return undefined;
+        if (!this._unshippedWarned.has(physical)) {
+            this._unshippedWarned.add(physical);
+            Logger.warn(`[shaders] '${physical}' was not shipped with this game; '${split[0]}' draws in its place`, 'Renderer');
+        }
+        let program = this._builtByDescriptor.get(base);
+        if (!program) {
+            program = this._host.device.createShaderProgram({ ...base, label: split[0] });
+            this._builtByDescriptor.set(base, program);
+        }
         this._registerProgram(physical, program);
         return program;
     }

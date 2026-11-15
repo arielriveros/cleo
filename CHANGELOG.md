@@ -16,6 +16,11 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Published games carry only the shaders they use: about 10 MB smaller.** The player no longer holds every
+  shader's every variant for both graphics APIs (17 MB of it): the shaders travel in the game's game.bin, each
+  one's general version plus the variants the game draws with (Options ▸ Project ▸ Only used shaders). A small
+  physics game is now 9.2 MB in all, where the player alone was 25.7 MB. New
+  option *WebGL 2 fallback*: off, the game ships no WebGL 2 shaders and tells a player without WebGPU so.
 - **Published games are 5.8 MB smaller.** The editor's tools no longer ship in a game: the model importers
   (assimp's WASM alone was 5.5 MB), the script compiler and the movie renderer. A published game runs on the
   engine's runtime (`cleoCore`); the editor installs the importers and the compiler into it. A cannon game's
