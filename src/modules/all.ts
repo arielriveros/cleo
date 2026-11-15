@@ -3,6 +3,8 @@
 // it does): it loads only the features the game was built with, through ./loaders.ts.
 import { installFeatures } from "../core/features/registry";
 import sequencer from "./sequencer/index";
+import weather from "./weather/index";
+import particles from "./particles/index";
 import physics2d from "./physics2d/index";
 import world2d from "./world2d/index";
 import volumetricFog from "./volumetricFog/index";
@@ -14,6 +16,6 @@ import cloth from "./cloth/index";
 import water from "./water/index";
 
 /** The feature modules, in a stable order (installFeatures puts dependencies first). */
-export const ALL_FEATURE_MODULES = [sequencer, water, cloth, decals, fluids, volumetricClouds, gi, volumetricFog, world2d, physics2d];
+export const ALL_FEATURE_MODULES = [sequencer, water, cloth, decals, fluids, volumetricClouds, gi, volumetricFog, world2d, physics2d, particles, weather];
 
 installFeatures(ALL_FEATURE_MODULES);

@@ -6,6 +6,7 @@ import {
     windPcg, windLatticeHash, windPerlin, windPerlinGrad, windGustAt, windVeerAt, sampleWindField,
     packWindSources, WindFieldSnapshot, sampleSceneWind, windFieldClock,
 } from '../src/core/wind/windField';
+import './helpers/features';
 import { WindNode } from '../src/core/scene/nodes/windNode';
 import { ForceFieldNode, type ForceFieldOptions } from '../src/core/scene/nodes/forceFieldNode';
 import { FORCE_FIELD_PRESETS } from '../src/core/scene/nodes/forceFieldPresets';

@@ -63,32 +63,15 @@ export type { StaleProbe, StaleLight, LightBakeChange } from "./core/scene/probe
 export { GiBakeRegistry, newGiBakeId } from "./graphics/render/gi/giBakeRegistry";
 export { ExposureVolumeNode, EXPOSURE_OVERRIDE_KEYS, MIN_EXPOSURE_VOLUME_SIZE } from "./core/scene/nodes/exposureVolumeNode";
 export type { ExposureOverrides } from "./core/scene/nodes/exposureVolumeNode";
-export { ParticleSystemNode } from "./core/scene/nodes/particleSystemNode";
-export type { ParticleSystemNodeOptions, ParticleCullingMode } from "./core/scene/nodes/particleSystemNode";
-export { ForceFieldNode, MAX_FORCE_FIELDS } from "./core/scene/nodes/forceFieldNode";
 export type { SkinnedClothData } from "./physics/cloth/skinnedClothData";
 export { parseSkinnedCloth } from "./physics/cloth/skinnedClothData";
-export type { ForceFieldOptions, ForceFieldKind, ForceFieldShape } from "./core/scene/nodes/forceFieldNode";
-export * from "./particles/particleSystemAsset";
-export { selectParticleLod, particleLodDistance, particleLodFactors, PARTICLE_LOD_HYSTERESIS, type ParticleLodState } from "./particles/particleLod";
-export * from "./particles/particleModules";
 export * from "./particles/curves";
 export { NITS_PER_INTERNAL_UNIT, particleLuminanceNits, particleIntensityForNits, formatNits } from "./graphics/particles/particleLighting";
-export { packEmitter, stepUniforms, SIM as PARTICLE_SIM_FLAGS, DRAW as PARTICLE_DRAW_FLAGS } from "./particles/particlePack";
-export type { PackedEmitter } from "./particles/particlePack";
-export { EmitterRuntime, ParticleSystemRuntime, particleTextureLayout, PARTICLE_TEXTURE_WIDTH, resolveSubEmitters } from "./particles/particleRuntime";
-export type { SimStep, EmitterState, SubEmitterLink } from "./particles/particleRuntime";
-export { builtinParticleMesh, particleMeshFromNodeJson, parseParticleMesh, PARTICLE_MESH_TRIANGLE_WARNING } from "./particles/particleMesh";
-export type { ParticleMeshData, ParticleMeshKind } from "./particles/particleMesh";
-export { customCodeKey, composeCustomSim, validatedCustomCode } from "./particles/particleCustomCode";
-export type { CompiledCustomCode } from "./particles/particleCustomCode";
-export { setParticleGlslTranslator, hasParticleGlslTranslator, compileParticleCustomCode } from "./graphics/particles/particleCustom";
 export { SkyboxNode } from "./core/scene/nodes/skyboxNode";
 // One-click presets: a table per node / render section, all applied through `applyPreset`.
 export { applyPreset, definePresets, type Preset } from "./core/presets";
 export { WIND_PRESETS, type WindPreset } from "./core/scene/nodes/windPresets";
 export { WEATHER_PRESETS, type WeatherPreset } from "./core/scene/nodes/weatherPresets";
-export { FORCE_FIELD_PRESETS, type ForceFieldPreset } from "./core/scene/nodes/forceFieldPresets";
 export { SKY_ATMOSPHERE_PRESETS, type SkyAtmospherePreset } from "./core/scene/nodes/skyAtmospherePresets";
 export { CAMERA_RIG_PRESETS, type CameraRigPreset, type CameraRigPresetOptions } from "./core/scene/nodes/cameraRigPresets";
 export { CHARACTER_PRESETS, type CharacterPreset, type CharacterPresetOptions } from "./core/scene/nodes/characterPresets";
@@ -118,19 +101,6 @@ export {
     WIND_REFERENCE_SPEED, MAX_WIND_SOURCES, WIND_SOURCE_FLOATS, WIND_DEFAULT_GUSTINESS, WIND_DEFAULT_VEER,
     type WindSample, type WindFieldParams, type WindFieldSource,
 } from "./core/wind/windField";
-export {
-    WeatherNode, WEATHER_DEFAULTS, MIN_WEATHER_VOLUME_SIZE, PRECIPITATION_KINDS, parsePrecipitationSprite,
-    type WeatherOptions, type PrecipitationKind, type PrecipitationSprite,
-} from "./core/scene/nodes/weatherNode";
-// Falling rain and snow: the particle system a WeatherNode's precipitation falls with, and its own sprites.
-export { PrecipitationRig } from "./core/scene/precipitationRig";
-export {
-    precipitationSystem, PRECIPITATION_DEFAULTS, builtinSpriteOf,
-    type FallingKind, type PrecipitationStyle, type PrecipitationEnvironment,
-} from "./particles/precipitation";
-export {
-    BUILTIN_RAIN_SPRITE, BUILTIN_SNOW_SPRITE, BUILTIN_SPRITE_PREFIX, isBuiltinTextureId, builtinSpriteSheet,
-} from "./particles/precipitationSprites";
 export { OcclusionVolumeNode, OCCLUSION_VOLUME_CULL_KEYS, defaultOcclusionVolumeCull, type OcclusionVolumeCull } from "./core/scene/nodes/occlusionVolumeNode";
 export { OcclusionBuffer } from "./graphics/occlusion/occlusionBuffer";
 export { TerrainOccluder } from "./graphics/occlusion/terrainOccluder";

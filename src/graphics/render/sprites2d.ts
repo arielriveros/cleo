@@ -32,7 +32,7 @@ import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
-import type { ParticlePasses } from './particlePasses';
+import type { ParticleSubsystem } from './featureSubsystems';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
@@ -131,7 +131,7 @@ export class Sprite2DPasses {
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _materials: MaterialBinder,
                 private readonly _projection: ViewProjection,
-                private readonly _particlePasses: ParticlePasses,
+                private readonly _particlePasses: ParticleSubsystem,
                 private readonly _sys: RenderSubsystems) {}
 
     /**
@@ -527,7 +527,7 @@ export class Sprite2DPasses {
                 this._drawSpriteBatch(pass, ref, record, n, blend, blendClass);
                 record += n;
             } else if (kind === KIND_PARTICLES) {
-                this._particlePasses.particles.draw([this._particleNodes[ref]], this._particlePasses.particleDrawFrame(scene!, pass, this._passTarget ?? this._targets.scene.renderTarget));
+                this._particlePasses.draw2D(this._particleNodes[ref], scene!, pass, this._passTarget ?? this._targets.scene.renderTarget);
             } else {
                 this._drawTileBand(this._tileNodes[ref], this._tileLayers[ref], this._tileChunks[ref],
                                    this._tileOffsets[ref], this._tileCounts[ref], pass);

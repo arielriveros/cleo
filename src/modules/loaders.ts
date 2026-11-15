@@ -15,4 +15,6 @@ export const FEATURE_LOADERS: Readonly<Record<string, () => Promise<{ default: F
     volumetricFog: () => import("./volumetricFog/index"),
     world2d: () => import("./world2d/index"),
     physics2d: () => import("./physics2d/index"),
+    particles: () => import("./particles/index"),
+    weather: () => import("./weather/index"),
 };

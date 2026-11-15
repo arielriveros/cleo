@@ -14,8 +14,8 @@ import { LightNode } from "./nodes/lightNode";
 import { LightProbeNode } from "./nodes/lightProbeNode";
 import type { DecalNode } from "./nodes/decalNode";
 import type { FluidVolumeNode } from "./nodes/fluidVolumeNode";
-import { ParticleSystemNode } from "./nodes/particleSystemNode";
-import { ForceFieldNode } from "./nodes/forceFieldNode";
+import type { ParticleSystemNode } from "./nodes/particleSystemNode";
+import type { ForceFieldNode } from "./nodes/forceFieldNode";
 import type { ClothNode } from "./nodes/clothNode";
 import type { WaterVolumeNode } from "./nodes/waterVolumeNode";
 import { ExposureVolumeNode } from "./nodes/exposureVolumeNode";
@@ -28,7 +28,7 @@ import { SkyAtmosphereNode } from "./nodes/skyAtmosphereNode";
 import { SkyLightNode } from "./nodes/skyLightNode";
 import { WindNode } from "./nodes/windNode";
 import { sampleSceneWind, windFieldClock } from "../wind/windField";
-import { WeatherNode } from "./nodes/weatherNode";
+import type { WeatherNode } from "./nodes/weatherNode";
 import { CameraNode } from "./nodes/cameraNode";
 import { SpriteNode } from "./nodes/spriteNode";
 import { UINode } from "./nodes/ui/uiNode";
@@ -52,7 +52,7 @@ import { authoring } from "../eventBus";
 import { cloneNodeJson, regenerateNodeIds } from "./nodeJson";
 import { getTemplate, templateNames } from "./templates";
 import { followSocket, resolveSocketOwner } from "./socketFollow";
-import { PrecipitationRig } from "./precipitationRig";
+import { createNullPrecipitation, type ScenePrecipitation } from "./scenePrecipitation";
 import type { SequenceNode } from "./nodes/sequenceNode";
 import type { Camera2DNode } from "./nodes/camera2DNode";
 import type { Room2DNode } from "./nodes/room2DNode";
@@ -132,11 +132,11 @@ function kindsOf(ctor: Function): number {
         [K.LIGHT, LightNode], [K.MODEL, ModelNode], [K.SPRITE, SpriteNode], [K.LANDSCAPE, LandscapeNode],
         [K.LOD_GROUP, LodGroupNode], [K.CAMERA_RIG, CameraRigNode],
         [K.CHARACTER, CharacterNode], [K.CONTROLLER, ControllerNode], [K.NAV_MESH, NavMeshNode],
-        [K.PARTICLES, ParticleSystemNode],
-        [K.FORCE_FIELD, ForceFieldNode], [K.EXPOSURE, ExposureVolumeNode],
+        
+        [K.EXPOSURE, ExposureVolumeNode],
         [K.OCCLUSION, OcclusionVolumeNode], [K.SOUND, SoundNode],
         [K.PROBE, LightProbeNode], [K.SKYBOX, SkyboxNode],
-        [K.ATMOSPHERE, SkyAtmosphereNode], [K.SKY_LIGHT, SkyLightNode], [K.WIND, WindNode], [K.WEATHER, WeatherNode],
+        [K.ATMOSPHERE, SkyAtmosphereNode], [K.SKY_LIGHT, SkyLightNode], [K.WIND, WindNode], 
         [K.CAMERA, CameraNode], [K.UI_NODE, UINode], [K.UI_ROOT, UIRootNode],
         // The optional features' node classes, each in the list of its kind (src/core/features/registry.ts).
         ...featureNodeKinds().map(([cls, bit]) => [bit, cls] as [number, Function]),
@@ -254,9 +254,11 @@ export class Scene {
 
     /**
      * The rain and snow falling from this scene's weather volumes (WeatherNode `precipitation`): one
-     * particle system per kind round the camera, outside the tree. See PrecipitationRig.
+     * particle system per kind round the camera, outside the tree. See PrecipitationRig (feature `weather`); in a
+     * game built without weather, a stand-in where nothing falls (scenePrecipitation.ts).
      */
-    public readonly precipitation: PrecipitationRig = new PrecipitationRig(this);
+    public readonly precipitation: ScenePrecipitation =
+        featureFactory<(scene: Scene) => ScenePrecipitation>('precipitation')?.(this) ?? createNullPrecipitation();
 
     /**
      * The navigation system serving this scene (set by `CleoEngine.setScene`). Reachable from a script

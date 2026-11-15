@@ -10,7 +10,7 @@ import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 import { Scene } from '../src/core/scene/scene';
 import { createModuleImporter, resolveScriptModule } from '../src/core/scripting/scriptRuntime';
 import {
-    RENDER_FACTORY, createNullClouds, createNullDecals, createNullFluids, createNullFog, createNullGi,
+    RENDER_FACTORY, createNullClouds, createNullDecals, createNullFluids, createNullFog, createNullGi, createNullParticles,
 } from '../src/graphics/render/featureSubsystems';
 
 // The engine's optional features (src/modules/<id>): what a published game built without one does in its place.
@@ -69,6 +69,18 @@ describe('the optional features', () => {
         expect(scene.physics2D).not.toBeNull();
     });
 
+    it('let it neither rain nor snow without weather', () => {
+        restrictFeatures(['particles']);
+        const dry = new Scene();
+        expect(dry.precipitation.systems).toEqual([]);
+        expect(dry.precipitation.haze).toBeNull();
+        expect(dry.precipitation.clock).toBe(0);
+        dry.precipitation.update(1, 1);
+        expect(dry.precipitation.systemOf('rain')).toBeNull();
+        restrictFeatures(null);
+        expect(new Scene().precipitation.constructor.name).toBe('PrecipitationRig');
+    });
+
     it('stand in with subsystems that draw nothing and keep their settings', () => {
         const fog = createNullFog();
         fog.tileSize = 32;
@@ -87,6 +99,9 @@ describe('the optional features', () => {
         expect(clouds.cloudHistory.targets).toEqual([]);
         expect(createNullDecals().surfaceDecals).toEqual([]);
         expect(createNullFluids().traceFBO).toBeNull();
+        const particles = createNullParticles();
+        particles.precipitationDensity = 0.5;
+        expect([particles.precipitationDensity, particles.particleLodDistanceScale, particles.isFlatParticleScene(new Scene())]).toEqual([0.5, 1, false]);
     });
 });
 

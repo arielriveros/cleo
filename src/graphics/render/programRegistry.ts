@@ -8,7 +8,7 @@ import { ProgramCompileQueue, shaderOptimizerStats, recordStall } from '../shade
 import { shaderStats } from '../shaderStats';
 import { shadersAreLibraryHandles, shaderIsShipped } from '../shaderLibrary';
 import { programTable } from './programs';
-import { setParticleSimVariants } from '../particles/particleRenderer';
+import { setParticleSimVariants } from '../particles/particlePrograms';
 import type { PipelineCacheHost } from './pipelineCache';
 import { ShaderManager } from '../systems/shaderManager';
 import type { RenderSubsystems } from './subsystems';

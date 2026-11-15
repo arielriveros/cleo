@@ -13,14 +13,11 @@ import { SkyboxNode } from "./skyboxNode";
 import { SkyAtmosphereNode } from "./skyAtmosphereNode";
 import { SkyLightNode } from "./skyLightNode";
 import { WindNode } from "./windNode";
-import { WeatherNode } from "./weatherNode";
 import { OcclusionVolumeNode } from "./occlusionVolumeNode";
 import { CameraNode } from "./cameraNode";
 import { SpriteNode } from "./spriteNode";
 import { AnimatedSpriteNode } from "./animatedSpriteNode";
 import { SoundNode } from "./soundNode";
-import { ParticleSystemNode } from "./particleSystemNode";
-import { ForceFieldNode } from "./forceFieldNode";
 import { ExposureVolumeNode } from "./exposureVolumeNode";
 import { ColliderNode } from "./colliderNode";
 import { TriggerNode } from "./triggerNode";
@@ -56,7 +53,6 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'skyAtmosphere': SkyAtmosphereNode.parse(parent, json); break;
     case 'skyLight': SkyLightNode.parse(parent, json); break;
     case 'wind': WindNode.parse(parent, json); break;
-    case 'weather': WeatherNode.parse(parent, json); break;
     case 'occlusionVolume': OcclusionVolumeNode.parse(parent, json); break;
     // Saved before occluders became occlusion volumes (see OcclusionVolumeNode.parseLegacyOccluder).
     case 'occluder': OcclusionVolumeNode.parseLegacyOccluder(parent, json); break;
@@ -65,8 +61,6 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'character': CharacterNode.parse(parent, json); break;
     case 'controller': ControllerNode.parse(parent, json); break;
     case 'navMesh': NavMeshNode.parse(parent, json); break;
-    case 'particleSystem': ParticleSystemNode.parse(parent, json); break;
-    case 'forceField': ForceFieldNode.parse(parent, json); break;
     case 'exposureVolume': ExposureVolumeNode.parse(parent, json); break;
     case 'collider': ColliderNode.parse(parent, json); break;
     case 'trigger': TriggerNode.parse(parent, json); break;

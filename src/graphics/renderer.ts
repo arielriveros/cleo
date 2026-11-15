@@ -53,13 +53,14 @@ import { AutoExposure } from './render/autoExposure';
 import { PostEffects } from './render/postEffects';
 import type { VolumetricCloudPasses } from './render/clouds';
 import type { DecalPasses } from './render/decals';
-import { createNullClouds, createNullDecals, createNullFluids, createNullFog, createNullGi, RENDER_FACTORY } from './render/featureSubsystems';
-import type { CloudSubsystem, DecalSubsystem, FluidSubsystem, FogSubsystem, GiSubsystem } from './render/featureSubsystems';
+import { createNullClouds, createNullDecals, createNullFluids, createNullFog, createNullGi, createNullParticles, RENDER_FACTORY } from './render/featureSubsystems';
+import type { CloudSubsystem, DecalSubsystem, FluidSubsystem, FogSubsystem, GiSubsystem, ParticleSubsystem } from './render/featureSubsystems';
 import { featureFactory } from '../core/features/registry';
 import type { FluidVolumePasses } from './render/fluids';
-import { ParticlePasses } from './render/particlePasses';
+import type { ParticlePasses } from './render/particlePasses';
 import { Sprite2DPasses } from './render/sprites2d';
 import { FoliagePasses } from './render/foliage';
+import { WindClock } from './render/windClock';
 import { ShadowPasses } from './render/shadows';
 import { Visibility } from './render/visibility';
 import { SsilPasses } from './render/ssil';
@@ -149,6 +150,8 @@ export class Renderer {
      * capture that swaps the camera is seen by all of them at once.
      */
     private readonly _view: FrameView = createFrameView();
+    /** The effects clock (`windTime`) and the frame's wind field (render/windClock.ts). */
+    private readonly _wind = new WindClock(this._view);
     /** The frame's shared render targets (render/frameTargets.ts), held by reference like `_view`. */
     private readonly _targets = new FrameTargets();
     /** Pass and encoder plumbing (render/passEncoder.ts): opens and closes passes, owns the frame encoder. */
@@ -176,7 +179,7 @@ export class Renderer {
     /** Smoke-and-fire volumes: the raymarch, its temporal history and the composite (render/fluids.ts). */
     private readonly _fluids: FluidSubsystem;
     /** GPU particle simulation, sorting and drawing, and the per-frame data they are handed (render/particlePasses.ts). */
-    private readonly _particlePasses: ParticlePasses;
+    private readonly _particlePasses: ParticleSubsystem;
     /** Froxel volumetric fog for VolumetricFogNode volumes (render/volumetricFog.ts). */
     private readonly _fog: FogSubsystem;
     private readonly _weather: WeatherPasses;
@@ -370,11 +373,12 @@ export class Renderer {
             get renderWidth() { return renderer._renderWidth; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems)
             ?? createNullFluids();
-        this._particlePasses = new ParticlePasses({
+        this._particlePasses = featureFactory<(...a: ConstructorParameters<typeof ParticlePasses>) => ParticlePasses>(RENDER_FACTORY.particles)?.({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._projection, this._temporal, this._subsystems);
+        }, this._view, this._targets, this._passes, this._projection, this._temporal, this._subsystems)
+            ?? createNullParticles();
         this._fog = featureFactory<(...a: ConstructorParameters<typeof VolumetricFogPasses>) => VolumetricFogPasses>(RENDER_FACTORY.volumetricFog)?.({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
@@ -498,6 +502,7 @@ export class Renderer {
             objects: this._objects,
             gi: this._gi,
             foliage: this._foliage,
+            wind: this._wind,
         } satisfies RenderSubsystems);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._shadows.shadowDistance = config.shadowDistance ?? 100;
@@ -834,9 +839,9 @@ export class Renderer {
         // multiplied by it. A preview (thumbnail, offscreen capture, non-scene tab) renders at k = 1.
         this._autoExposure.beginFrame(this._thumbnailMode || !!this._subsystems.capture.presentTarget
                                       || !this._autoExposure.exposureMeteringAllowed);
-        this._foliage.advanceWindTime();
+        this._wind.advanceWindTime();
         // The scene's wind field (core/wind/windField.ts) on that clock: foliage and particles share it.
-        this._foliage.prepareWindField(scene);
+        this._wind.prepareWindField(scene);
         // The clouds' drift, on the same clock, before the sky bake and the cloud shadows read it.
         this._clouds.advanceCloudWind(scene, this._view.windDelta);
         // One clock for every flickering light and everything that follows one (graphics/lightFlicker.ts).
@@ -1051,10 +1056,7 @@ export class Renderer {
         // And the camera behind this frame's depth snapshot, for next frame's particle collision. Not
         // from an offscreen capture: those resize the depth buffer and render from somewhere else.
         if (!this._thumbnailMode && !this._view.capturing) {
-            mat4.copy(this._particlePasses.particleCollideViewProj, this._view.viewProj);
-            vec3.copy(this._particlePasses.particleCollideCamPos, this._view.camera.position);
-            this._particlePasses.particleCollideOrtho = this._view.camera.type === 'orthographic';
-            this._particlePasses.particleCollideValid = true;
+            this._particlePasses.rememberCollisionCamera(this._view);
         }
 
         // Same for every model's world matrix and bone pose. Here rather than in `updateTransforms`:
@@ -1100,8 +1102,8 @@ export class Renderer {
         // Display-referred: pre-exposure 1 (and the exposure 1, `AutoExposure.resolveExposure`).
         this._autoExposure.beginFrame(true);
         // The render clock, for what runs on it in 2D: light flicker, particle wind, custom materials' time.
-        this._foliage.advanceWindTime();
-        this._foliage.prepareWindField(scene);
+        this._wind.advanceWindTime();
+        this._wind.prepareWindField(scene);
         lightFlickerClock.time = this._view.windTime;
 
         this._passes.scope('prepare.view');
@@ -1129,7 +1131,7 @@ export class Renderer {
         const _statsT0 = performance.now();
 
         // Particles step with no weather and no depth to collide against (no snapshot is taken in 2D).
-        this._particlePasses.particleCollideValid = false;
+        this._particlePasses.invalidateCollision();
         this._particlePasses.simulateParticles(scene, null);
         // Pixel-perfect when the game's 2D camera asks for it, and never for a capture, a thumbnail or a movie,
         // which draw at their own size.
@@ -2821,14 +2823,14 @@ export class Renderer {
         this._foliage.foliageShadowDistance = Number.isFinite(metres) ? Math.max(0, metres) : 0;
     }
     /** See RenderSettings.effectsFollowTimeScale. */
-    public get effectsFollowTimeScale(): boolean { return this._foliage.effectsFollowTimeScale; }
-    public set effectsFollowTimeScale(on: boolean) { this._foliage.effectsFollowTimeScale = !!on; }
+    public get effectsFollowTimeScale(): boolean { return this._wind.effectsFollowTimeScale; }
+    public set effectsFollowTimeScale(on: boolean) { this._wind.effectsFollowTimeScale = !!on; }
     /**
      * The game's time scale for the coming frame, which the render clock runs at while
      * `effectsFollowTimeScale` is on. The engine passes it before every render (1 while paused).
      */
     public setEffectsTimeScale(scale: number): void {
-        this._foliage.effectsTimeScale = Number.isFinite(scale) ? Math.max(0, scale) : 1;
+        this._wind.effectsTimeScale = Number.isFinite(scale) ? Math.max(0, scale) : 1;
     }
     /** The render clock, seconds: what wind, clouds, fog, flicker and custom materials' `u_time` run on. */
     public get effectsTime(): number { return this._view.windTime; }
@@ -3280,7 +3282,7 @@ export class Renderer {
             foliageShadowDistance: this._foliage.foliageShadowDistance,
             foliagePrepass: this._foliage.foliagePrepass,
             foliageGpuCulling: this._foliage.foliageGpuCulling,
-            effectsFollowTimeScale: this._foliage.effectsFollowTimeScale,
+            effectsFollowTimeScale: this._wind.effectsFollowTimeScale,
             occlusionQueries: this._visibility.occlusionQueriesEnabled,
             lightOcclusionCulling: this._visibility.lightOcclusionCulling,
             foliageCullDistance: this._foliage.foliageCullDistance,

@@ -30,10 +30,10 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     is 6.1 MB in all. When the game still uses one, Publish lists every use and asks: turn it back on, publish
     without it, or cancel. A game without Input binds no input map and shows no touch controls.
   - *New project* asks for a name, a features preset and the addons; a 2D preset's first scene is 2D.
-  - *Their code* goes too, for ten of them: global illumination, volumetric fog, volumetric clouds, decals,
-    water, fire and smoke, cloth, cinematics, the 2D world (tilemaps, 2D cameras, rooms, parallax) and 2D physics
-    are each a part of the published player of their own (258 KB between them), loaded at boot only by a game
-    built with it; a 3D game on the 3D preset is 7.14 MB. Each feature's size in Project ▸ Features counts its
+  - *Their code* goes too, for twelve of them: global illumination, volumetric fog, volumetric clouds, decals,
+    water, particles, fire and smoke, weather, cloth, cinematics, the 2D world (tilemaps, 2D cameras, rooms,
+    parallax) and 2D physics are each a part of the published player of their own (410 KB between them), loaded
+    at boot only by a game built with it; a 3D game on the 3D preset is 7.14 MB. Each feature's size in Project ▸ Features counts its
     code now, not only its shaders. A
     script that names a left-out feature's class (`DecalNode` in a game without Decals) gets an error naming the
     feature instead of `undefined`, in a published game and in Play in window alike.

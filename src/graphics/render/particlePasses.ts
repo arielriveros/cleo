@@ -59,6 +59,27 @@ export class ParticlePasses {
     // Keep every material's derived texture slots in step with its authored sources. Per frame rather
     // than on assignment: sources decode asynchronously, and an unresolved pack simply retries.
     /**
+     * Remember the camera behind this frame's depth snapshot, for next frame's particle collision (the Renderer, after
+     * a frame that is neither a thumbnail nor an offscreen capture).
+     */
+    public rememberCollisionCamera(view: FrameView): void {
+        mat4.copy(this.particleCollideViewProj, view.viewProj);
+        vec3.copy(this.particleCollideCamPos, view.camera.position);
+        this.particleCollideOrtho = view.camera.type === 'orthographic';
+        this.particleCollideValid = true;
+    }
+
+    /** No depth snapshot to collide against this frame (a flat 2D frame takes none). */
+    public invalidateCollision(): void {
+        this.particleCollideValid = false;
+    }
+
+    /** Draw one system inside the 2D pass, sorted among the sprites and tiles (render/sprites2d.ts). */
+    public draw2D(node: ParticleSystemNode, scene: Scene, pass: RenderPassEncoder, target: RenderTarget): void {
+        this.particles.draw([node], this.particleDrawFrame(scene, pass, target));
+    }
+
+    /**
      * Run the particle systems' queued simulation steps. See {@link ParticleRenderer.simulate}. `weather`:
      * the frame's weather volumes and shelter map (WeatherPasses.particleWeather), null in a preview.
      */
@@ -102,9 +123,9 @@ export class ParticlePasses {
             orthographic: this.particleCollideOrtho,
             fields: this._forceFieldScratch,
             fieldCount,
-            // The scene's wind field this frame (FoliagePasses.prepareWindField), for Scene-wind emitters.
-            windBase: this._sys.foliage.windField.params.subarray(0, 4),
-            windMotion: this._sys.foliage.windField.params.subarray(4, 8),
+            // The scene's wind field this frame (WindClock.prepareWindField), for Scene-wind emitters.
+            windBase: this._sys.wind.windField.params.subarray(0, 4),
+            windMotion: this._sys.wind.windField.params.subarray(4, 8),
         };
     }
 

@@ -11,6 +11,7 @@ import type { Capture } from './capture';
 import type { ProgramRegistry } from './programRegistry';
 import type { ObjectTable } from '../objectTable';
 import type { GiSubsystem } from './featureSubsystems';
+import type { WindClock } from './windClock';
 import type { FoliagePasses } from './foliage';
 
 /**
@@ -39,4 +40,6 @@ export interface RenderSubsystems {
     readonly gi: GiSubsystem;
     /** The landscape's plants, which a GI capture draws too. */
     readonly foliage: FoliagePasses;
+    /** The effects clock and the frame's wind field (render/windClock.ts). */
+    readonly wind: WindClock;
 }

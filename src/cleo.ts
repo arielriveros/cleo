@@ -6,6 +6,8 @@ export * from "./cleoCore";
 // The optional features' names (src/modules/<id>/api.ts): the runtime barrel leaves them out, since a published
 // game loads each feature as a chunk of its own; the full engine has them all, and installs them all below.
 export * from "./modules/sequencer/api";
+export * from "./modules/weather/api";
+export * from "./modules/particles/api";
 export * from "./modules/physics2d/api";
 export * from "./modules/world2d/api";
 export * from "./modules/volumetricFog/api";
@@ -15,6 +17,9 @@ export * from "./modules/fluids/api";
 export * from "./modules/decals/api";
 export * from "./modules/cloth/api";
 export * from "./modules/water/api";
+// The particle modules also name a `RenderSettings` (an emitter's draw settings, particles/particleModules.ts);
+// the engine's own name is the renderer's.
+export type { RenderSettings } from "./cleoCore";
 
 export { Loader } from "./graphics/loader";
 export type { TextureLoadReport, UnresolvedTexture } from "./graphics/loader";

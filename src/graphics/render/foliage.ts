@@ -27,12 +27,10 @@ import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
-import { renderNow, renderClockOverridden } from './renderClock';
 import { CULL_OCCLUDED, CULL_OUTSIDE } from './cullGhosts';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
-import { WindFieldSnapshot, windFieldClock, advanceGustTravel } from '../../core/wind/windField';
 
 /** A foliage layer's cells bucketed on the ground plane, for the shadow pass's range query. */
 export interface FoliageCellGrid {
@@ -852,52 +850,11 @@ export class FoliagePasses {
         }
     }
 
-    private _windClock: number = -1;
-
     /** This frame's foliage interaction stamps (graphics/foliageInteraction.ts). */
     public readonly foliageInteraction = new FoliageInteraction();
 
     /** A layer prototype's [base height, plant height] in object space, keyed on its first model. */
     private readonly _windShapes = new WeakMap<Model, [number, number, number]>();
-
-    /** See RenderSettings.effectsFollowTimeScale. */
-    public effectsFollowTimeScale = false;
-    /** The game's time scale this frame (Renderer.setEffectsTimeScale): the clock's rate while effects follow it. */
-    public effectsTimeScale = 1;
-
-    /**
-     * Advance the render clock (`windTime`) by the render clock's frame delta (renderClock.ts: the wall clock,
-     * or a movie's), clamped against a backgrounded tab, and scaled by the game's
-     * time scale when effects follow it: at time ×2 the grass sways, the clouds drift and the rain falls
-     * twice as fast, a time-lapse rather than only the sun moving faster.
-     */
-    public advanceWindTime(): void {
-        const now = renderNow();
-        // No clamp when a movie drives the clock: its step is exact, and a slow movie's is longer than 0.1 s.
-        const cap = renderClockOverridden() ? Infinity : 0.1;
-        const wall = this._windClock < 0 ? 0 : Math.min(cap, Math.max(0, (now - this._windClock) / 1000));
-        this._windClock = now;
-        const rate = this.effectsFollowTimeScale && Number.isFinite(this.effectsTimeScale) ? Math.max(0, this.effectsTimeScale) : 1;
-        const dt = wall * rate;
-        this._view.windTimePrev = this._view.windTime;
-        this._view.windTime += dt;
-        this._view.windDelta = dt;
-        windFieldClock.time = this._view.windTime;
-    }
-
-    /**
-     * The scene's wind field this frame (core/wind/windField.ts): the WindNode's parameters and the Force
-     * Fields that move the air, captured once per frame, after `advanceWindTime`. Foliage uploads it to
-     * every wind program; the particles sample the same snapshot, so everything rides one air. The gusts'
-     * travel is integrated here first, so a wind whose gust speed or size is changing (a preset blending
-     * in) carries its gusts on rather than racing them.
-     */
-    public readonly windField = new WindFieldSnapshot();
-
-    public prepareWindField(scene: Scene): void {
-        advanceGustTravel(windFieldClock, scene.wind, this._view.windDelta);
-        this.windField.capture(scene, this._view.windTime, windFieldClock.gustTravel);
-    }
 
     /**
      * How `layer` moves and looks this frame, or null when nothing of it runs the foliage path.
@@ -913,8 +870,8 @@ export class FoliagePasses {
      * the whole prototype, and the bend is measured against the whole prototype's height.
      */
     private _foliageWind(scene: Scene, layer: FoliageLayer): FoliageState | null {
-        // Any air at all: a visible WindNode, or a Force Field that moves the air (prepareWindField).
-        const field = this.windField;
+        // Any air at all: a visible WindNode, or a Force Field that moves the air (WindClock.prepareWindField).
+        const field = this._sys.wind.windField;
         const windOn = field.active;
         const pushed = this.foliageInteraction.count > 0;
         const billboard = layer.kind === 'billboard';
@@ -977,7 +934,7 @@ export class FoliagePasses {
      * The field (base wind and sources) is the frame's snapshot, the same for every model of every layer.
      */
     private _setWindUniforms(scene: Scene, w: FoliageState, material: Material): void {
-        const field = this.windField;
+        const field = this._sys.wind.windField;
         const windOn = field.active;
         const p = field.params;
         const cam = this._view.lodEye;

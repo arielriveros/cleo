@@ -176,12 +176,11 @@ describe('the gusts roll on when the wind changes', () => {
 // The render modules are a large import: a generous timeout for the first one.
 describe('the render clock and the clouds\' drift', { timeout: 120_000 }, () => {
     it('runs the render clock at the game\'s speed only when effects follow it', async () => {
-        const { FoliagePasses } = await import('../src/graphics/render/foliage');
+        const { WindClock } = await import('../src/graphics/render/windClock');
         const { windFieldClock } = await import('../src/core/wind/windField');
         const view = { windTime: 0, windTimePrev: 0, windDelta: 0 };
-        const passes: any = Object.assign(Object.create(FoliagePasses.prototype), {
-            _view: view, _windClock: -1, effectsFollowTimeScale: false, effectsTimeScale: 2,
-        });
+        const passes = new WindClock(view as any);
+        passes.effectsTimeScale = 2;
         let now = 1000;
         const realNow = performance.now;
         (performance as any).now = () => now;

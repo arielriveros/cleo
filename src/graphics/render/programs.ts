@@ -4,7 +4,7 @@
 
 import type { ShaderProgramDescriptor } from '../rhi/shaderProgram';
 import type { ShaderResource } from '../rhi/types';
-import { PARTICLE_PROGRAMS } from '../particles/particleRenderer';
+import { PARTICLE_PROGRAMS } from '../particles/particlePrograms';
 
 import BasicProgram from '../shaders/wgsl/basic.wgsl';
 import BasicInstancedProgram from '../shaders/wgsl/basicInstanced.wgsl';

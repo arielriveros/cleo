@@ -10,6 +10,7 @@ import type { FluidVolumePasses } from './fluids';
 import type { GiSystem } from './gi/giSystem';
 import { GI_TIERS } from './gi/giSettings';
 import type { VolumetricFogPasses } from './volumetricFog';
+import type { ParticlePasses } from './particlePasses';
 import { TemporalHistory } from './temporalHistory';
 
 /** A screen-sized target matched to the render resolution, made on first use. */
@@ -26,6 +27,7 @@ export const RENDER_FACTORY = {
     clouds: 'render.clouds',
     gi: 'render.gi',
     volumetricFog: 'render.volumetricFog',
+    particles: 'render.particles',
 } as const;
 
 // --- Decals (feature `decals`) ------------------------------------------------------------------------------------
@@ -105,5 +107,21 @@ export function createNullFog(): FogSubsystem {
     return {
         enabled: true, tileSize: 16, slices: 64, distance: 128, temporal: true, localLights: true, localShadows: true,
         frameVolumes: [], render: () => false, invalidate() {},
+    };
+}
+
+// --- Particle systems (feature `particles`) --------------------------------------------------------------------
+
+/** What the renderer and its forward and 2D passes use of the particle passes (render/particlePasses.ts). */
+export type ParticleSubsystem = Pick<ParticlePasses,
+    'simulateParticles' | 'renderParticles' | 'isFlatParticleScene' | 'draw2D' | 'rememberCollisionCamera' |
+    'invalidateCollision' | 'particleLodDistanceScale' | 'precipitationDensity'>;
+
+/** With ParticlePasses' defaults, so the settings read the same either way. */
+export function createNullParticles(): ParticleSubsystem {
+    return {
+        particleLodDistanceScale: 1, precipitationDensity: 1,
+        simulateParticles() {}, renderParticles() {}, isFlatParticleScene: () => false, draw2D() {},
+        rememberCollisionCamera() {}, invalidateCollision() {},
     };
 }

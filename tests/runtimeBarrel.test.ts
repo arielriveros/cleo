@@ -16,6 +16,8 @@ const DEEP_FEATURE_MODULES: Record<string, string[]> = {
     sequencer: ['sequencer/sequencePlayer.ts'],
     world2d: ['graphics/tilemap/tileMesh.ts', 'graphics/tilemap/cellMath.ts', 'graphics/tilemap/autotile.ts'],
     physics2d: ['physics2d/world2d.ts', 'core/scene/nodes/body2DLegacy.ts'],
+    particles: ['graphics/particles/particleRenderer.ts', 'particles/particleRuntime.ts', 'graphics/particles/builtinSprites.ts'],
+    weather: ['particles/precipitation.ts'],
 };
 
 // A published game runs on src/cleoCore.ts, the engine without the editor's tools: the model importers

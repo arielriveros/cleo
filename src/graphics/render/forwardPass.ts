@@ -26,8 +26,7 @@ import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
 import type { TemporalPasses } from './temporal';
-import { sizedTarget, type CloudSubsystem, type DecalSubsystem, type FluidSubsystem } from './featureSubsystems';
-import type { ParticlePasses } from './particlePasses';
+import { sizedTarget, type CloudSubsystem, type DecalSubsystem, type FluidSubsystem, type ParticleSubsystem } from './featureSubsystems';
 import type { Sprite2DPasses } from './sprites2d';
 import type { Visibility } from './visibility';
 import type { SceneRadianceCopy } from './sceneRadiance';
@@ -83,7 +82,7 @@ export class ForwardPass {
                 private readonly _clouds: CloudSubsystem,
                 private readonly _decals: DecalSubsystem,
                 private readonly _fluids: FluidSubsystem,
-                private readonly _particlePasses: ParticlePasses,
+                private readonly _particlePasses: ParticleSubsystem,
                 private readonly _sprites: Sprite2DPasses,
                 private readonly _visibility: Visibility,
                 private readonly _radiance: SceneRadianceCopy,
