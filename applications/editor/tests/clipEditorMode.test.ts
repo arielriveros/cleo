@@ -209,7 +209,8 @@ describe('events are authored on the clip, in one place', () => {
 
   it('the animator no longer authors its own markers, and moves old ones onto the clips when opened', () => {
     const smc = read('features', 'animation', 'StateMachineContext.tsx')
-    for (const gone of ['addEvent', 'setEvent', 'removeEvent']) expect(smc).not.toContain(gone)
+    // Whole names: the Event actions bindings (`setEventActions`) are a different thing, and stay.
+    for (const gone of ['addEvent', 'setEvent', 'removeEvent']) expect(smc).not.toMatch(new RegExp(`\\b${gone}\\b`))
     expect(smc).toContain('liftMachineEvents(')
     expect(read('features', 'animation', 'StateMachineEditor.tsx')).not.toContain("title='Events'")
     expect(read('features', 'animation', 'AnimationPlayer.tsx')).not.toContain('addEvent(')

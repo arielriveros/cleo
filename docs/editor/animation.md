@@ -374,7 +374,7 @@ embedded in a model rather than kept in a `.anim` shows its events, read-only.
 > marker fires twice. A marker on a clip embedded in the model has no `.anim` to move to: it stays on
 > the animator, still fires, and shows on the track as a hollow circle.
 
-### Event actions: what an event does
+### Event actions
 
 A marker says WHEN; the animator says WHAT. In the Parameters panel's **Event actions** section, add an
 **Event**, pick its name from the markers the animator's clips carry (or type a new one), and give it

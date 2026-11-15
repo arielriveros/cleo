@@ -6,27 +6,32 @@ import { readBundle } from '../src/utils/bundleRead';
 import type { BundleData } from '../src/utils/bundle';
 
 /**
- * The packer against a REAL project, not a fixture: the Valley example shipped under applications/editor/public/examples.
+ * The packer against REAL projects, not fixtures: examples shipped under applications/editor/public/examples.
  *
  * Synthetic bundles cannot produce what actually broke this format twice — geometry the foliage baker
  * computed in float64 and stored as nested tuples, animation samplers that are genuinely float64, key
  * orders that a hand-built object happens to get right. Both bugs were byte-level and silent: the scene
  * still loaded, it just came back with a different content hash and resynced every placement.
  *
- * Skipped rather than failed when the folder is absent, so removing or swapping the example is not a
- * test failure.
+ * Two examples, one per bug: the Valley for the foliage and building geometry (it is scenery since it lost
+ * its characters, so it has no clips), the Dungeon for the animation samplers. Each is skipped rather than
+ * failed when its folder is absent, so removing or swapping an example is not a test failure.
  */
 
-const DIR = path.join(__dirname, '..', 'public', 'examples', 'valley');
-const present = fs.existsSync(path.join(DIR, 'manifest.json'));
+const EXAMPLES = path.join(__dirname, '..', 'public', 'examples');
+const CASES: { name: string; dir: string; clips: boolean }[] = [
+  { name: 'Valley', dir: 'valley', clips: false },
+  { name: 'Dungeon', dir: 'dungeon', clips: true },
+];
+const present = (dir: string) => fs.existsSync(path.join(EXAMPLES, dir, 'manifest.json'));
 
 /**
  * The example as the editor imports it — through `readBundle`, which also stitches a split assets blob
  * (assets.bin, assets.1.bin, …) back together. Textures are dropped: they are already raw bytes, and
  * ~90 MB of them proves nothing extra here.
  */
-async function load(): Promise<BundleData> {
-  const file = (p: string) => path.join(DIR, ...p.split('/'));
+async function load(dir: string): Promise<BundleData> {
+  const file = (p: string) => path.join(EXAMPLES, dir, ...p.split('/'));
   const { bundle } = await readBundle({
     async json(p) { return fs.existsSync(file(p)) ? JSON.parse(fs.readFileSync(file(p), 'utf8')) : null; },
     async bytes(p) {
@@ -54,9 +59,9 @@ const sectionsOf = (b: BundleData): [string, string][] => [
 ];
 const totalLength = (sections: [string, string][]) => sections.reduce((n, [, s]) => n + s.length, 0);
 
-describe.skipIf(!present)('assets.bin against the shipped Valley example', () => {
-  it('round-trips it byte-for-byte, and shrinks the JSON by an order of magnitude', async () => {
-    let bundle: BundleData | null = await load();
+describe.each(CASES)('assets.bin against the shipped $name example', ({ dir, clips }) => {
+  it.skipIf(!present(dir))('round-trips it byte-for-byte, and shrinks the JSON by an order of magnitude', async () => {
+    let bundle: BundleData | null = await load(dir);
     let before: Map<string, string> | null = new Map(sectionsOf(bundle));
     const beforeLength = totalLength([...before]);
 
@@ -71,7 +76,8 @@ describe.skipIf(!present)('assets.bin against the shipped Valley example', () =>
       for (const bulky of ['"positions":[', '"output":[', '"inverseBindMatrix":[', '"heights":"', 'data:image'])
         expect(json.includes(bulky), `${name} still holds ${bulky}`).toBe(false);
     }
-    expect(packed.some(([, json]) => json.includes('"samplers"'))).toBe(true);
+    // Its clips' records are still there too, their keyframes moved out (only an example with clips has any).
+    if (clips) expect(packed.some(([, json]) => json.includes('"samplers"')), 'no clip records left to check').toBe(true);
 
     // Asserted loosely: the point is the order of magnitude, not a number that has to be edited whenever the example changes.
     // The blob bound is looser than the JSON one: the Valley is mostly foliage and building geometry, whose
