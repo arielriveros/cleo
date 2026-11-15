@@ -33,7 +33,8 @@ export function featureSizesFrom(build: PlayerBuild): FeatureSizes | null {
     }
     // Its code: the player part of its own (src/modules/<id>), whatever the graphics API. A chunk two parts share
     // counts in both.
-    const code = build.features[f.id]?.bytes ?? 0
+    // Game UI also brings the UI layer that draws it (React and src/player/uiHost.tsx).
+    const code = (build.features[f.id]?.bytes ?? 0) + (f.id === 'gameUi' ? build.features['ui-host']?.bytes ?? 0 : 0)
     byFeature[f.id] = { all: all + code, webgpuOnly: all - glsl + code }
   }
   let coreAll = build.coreBytes, coreGlsl = 0, glsl = 0

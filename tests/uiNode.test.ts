@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import './helpers/features';
 import { CleoEngine } from '../src/core/engine';
 import { Scene } from '../src/core/scene/scene';
 import { Camera } from '../src/core/camera';

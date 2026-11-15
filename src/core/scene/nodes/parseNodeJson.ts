@@ -24,10 +24,6 @@ import { migrateLegacyPhysicsJson } from "./physicsLegacy";
 import { featureNodeParser, isFeatureRestrictedOut } from "../../features/registry";
 import { featureOfNodeType } from "../../../modules/catalog";
 import { Logger } from "../../logger";
-import { UIRootNode } from "./ui/uiRoot";
-import { UIPanelNode, UIStackNode, UISpacerNode } from "./ui/uiContainers";
-import { UITextNode, UIImageNode } from "./ui/uiContent";
-import { UIButtonNode, UIProgressBarNode, UISliderNode, UIToggleNode, UITextInputNode } from "./ui/uiWidgets";
 
 /**
  * Reconstruct a serialized subtree under `parent`, dispatching on its `type`.
@@ -62,17 +58,6 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'exposureVolume': ExposureVolumeNode.parse(parent, json); break;
     case 'collider': ColliderNode.parse(parent, json); break;
     case 'trigger': TriggerNode.parse(parent, json); break;
-    case 'uiRoot': UIRootNode.parse(parent, json); break;
-    case 'uiPanel': UIPanelNode.parse(parent, json); break;
-    case 'uiText': UITextNode.parse(parent, json); break;
-    case 'uiImage': UIImageNode.parse(parent, json); break;
-    case 'uiButton': UIButtonNode.parse(parent, json); break;
-    case 'uiStack': UIStackNode.parse(parent, json); break;
-    case 'uiSpacer': UISpacerNode.parse(parent, json); break;
-    case 'uiProgressBar': UIProgressBarNode.parse(parent, json); break;
-    case 'uiSlider': UISliderNode.parse(parent, json); break;
-    case 'uiToggle': UIToggleNode.parse(parent, json); break;
-    case 'uiTextInput': UITextInputNode.parse(parent, json); break;
     default: parseOptionalNode(parent, json);
   }
 }

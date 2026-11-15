@@ -19,6 +19,7 @@ const DEEP_FEATURE_MODULES: Record<string, string[]> = {
     particles: ['graphics/particles/particleRenderer.ts', 'particles/particleRuntime.ts', 'graphics/particles/builtinSprites.ts'],
     weather: ['particles/precipitation.ts'],
     landscape: ['terrain/terrainSurfaceArrays.ts', 'graphics/foliageGpuCulling.ts', 'terrain/terrainLayerStack.ts', 'graphics/render/foliage.ts'],
+    gameUi: ['core/uiLayout.ts', 'core/scene/nodes/ui/uiContent.ts'],
 };
 
 // A published game runs on src/cleoCore.ts, the engine without the editor's tools: the model importers

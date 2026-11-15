@@ -1,10 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-    CleoEngine, Scene, UINode, UIRootNode, UIImageNode, UIButtonNode, UIProgressBarNode,
-    UISliderNode, UIToggleNode, UITextInputNode, UITextNode,
-} from 'cleo';
-import type { SceneChange } from 'cleo';
+import { CleoEngine } from 'cleo';
+import type { Scene, SceneChange, UINode } from 'cleo';
 import { UIBinding, UIRegistry, syncUI } from './uiSync';
+import { isUI } from './uiTypes';
 
 /**
  * The game UI, rendered as DOM over the WebGL canvas.
@@ -92,13 +90,13 @@ function UIElementView({ node, registry, onSelect, interactive, selectedId, forc
             return;
         }
         if (!interactive) return;
-        if (node instanceof UIButtonNode) { e.stopPropagation(); node.press(); }
-        else if (node instanceof UIToggleNode) { e.stopPropagation(); node.toggle(); }
+        if (isUI(node, 'uiButton')) { e.stopPropagation(); node.press(); }
+        else if (isUI(node, 'uiToggle')) { e.stopPropagation(); node.toggle(); }
     }, [node, onSelect, interactive]);
 
     // Pointer capture keeps a slider drag tracking when the cursor leaves the thin track.
     const handlePointerDown = useCallback((e: React.PointerEvent) => {
-        if (!interactive || !(node instanceof UISliderNode)) return;
+        if (!interactive || !(isUI(node, 'uiSlider'))) return;
         e.stopPropagation();
         const el = e.currentTarget as HTMLElement;
         el.setPointerCapture(e.pointerId);
@@ -145,19 +143,19 @@ function UIElementView({ node, registry, onSelect, interactive, selectedId, forc
         onPointerDown: handlePointerDown,
     } as any;
 
-    if (node instanceof UIImageNode)
+    if (isUI(node, 'uiImage'))
         return <div {...common}><img ref={imageRef} alt='' draggable={false} />{children}</div>;
 
-    if (node instanceof UITextNode || node instanceof UIButtonNode)
+    if (isUI(node, 'uiText') || isUI(node, 'uiButton'))
         return <div {...common}><span ref={labelRef} />{children}</div>;
 
-    if (node instanceof UIToggleNode)
+    if (isUI(node, 'uiToggle'))
         return <div {...common}><div ref={knobRef} /><span ref={labelRef} />{children}</div>;
 
-    if (node instanceof UISliderNode)
+    if (isUI(node, 'uiSlider'))
         return <div {...common}><div ref={fillRef} /><div ref={knobRef} />{children}</div>;
 
-    if (node instanceof UITextInputNode)
+    if (isUI(node, 'uiTextInput'))
         return (
             <div {...common}>
                 <input
@@ -171,7 +169,7 @@ function UIElementView({ node, registry, onSelect, interactive, selectedId, forc
             </div>
         );
 
-    if (node instanceof UIProgressBarNode)
+    if (isUI(node, 'uiProgressBar'))
         return <div {...common}><div ref={fillRef} />{children}</div>;
 
     return <div {...common}>{children}</div>;
@@ -205,7 +203,7 @@ export default function UILayer({ getScene, interactive, onSelect, forceVisibleI
         if (!scene) return [];
         const all = Array.from(scene.uiRoots);
         return all.filter(root => {
-            for (let p = root.parent; p; p = p.parent) if (p instanceof UIRootNode) return false;
+            for (let p = root.parent; p; p = p.parent) if (isUI(p, 'uiRoot')) return false;
             return true;
         });
     }, [scene, structureTick]);

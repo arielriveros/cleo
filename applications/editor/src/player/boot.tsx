@@ -1,9 +1,6 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
 import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, addScriptModuleSources, registerTemplates, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles, restrictFeatures, setAbsentFeatureNames } from 'cleo';
 import type { BackendKind, LoadProgressListener } from 'cleo';
-import UILayer from '../features/gameUi/UILayer';
-import VirtualControlsLayer from '../features/gameUi/VirtualControlsLayer';
+import { mountVirtualControls } from './virtualControls';
 import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData, type UnpackedGame } from './unpack';
 import { showError, setLoadingText } from './pageStatus';
 // The page status helpers, for the pages that import them from here (session.tsx).
@@ -163,13 +160,12 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   // `getScene` must stay a FUNCTION: Game.loadScene replaces engine.scene wholesale.
   const uiRoot = document.getElementById('ui-root');
   if (uiRoot) {
-    ReactDOM.createRoot(uiRoot).render(
-      <>
-        <UILayer getScene={() => engine.scene} interactive />
-        {/* Only appears on a device with a touch screen — see VirtualControlsLayer. */}
-        <VirtualControlsLayer controls={takesInput ? InputSystem.instance.map.virtualControls : []} />
-      </>
-    );
+    // The game's UI nodes, drawn by React: a part of the player of its own, loaded only by a game built with the
+    // Game UI feature (or an older one, which lists no features). This file holds no JSX, or the JSX runtime would
+    // bring React back into every game.
+    if (!features || features.includes('gameUi')) (await import('./uiHost')).mountUILayer(uiRoot, () => engine.scene);
+    // The touch controls (plain DOM), on a device with a touch screen.
+    mountVirtualControls(uiRoot, takesInput ? InputSystem.instance.map.virtualControls : []);
     // The layout pass anchors to #ui-root, not the canvas, which may be render-scaled.
     const pushViewport = () => {
       const rect = uiRoot.getBoundingClientRect();

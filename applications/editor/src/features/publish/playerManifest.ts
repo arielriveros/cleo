@@ -40,8 +40,11 @@ export function playerFeaturesFor(config: any, build?: Pick<PlayerBuild, 'featur
   const backend = config?.physics?.backend;
   if (backend === 'rapier') out.push('physics-rapier');
   if (backend === 'jolt') out.push('physics-jolt');
-  if (build && Array.isArray(config?.features))
+  if (build && Array.isArray(config?.features)) {
     for (const id of config.features) if (typeof id === 'string' && build.features[id]) out.push(id);
+    // The UI layer (React) draws the Game UI feature's nodes: a part of the player's own (src/player/uiHost.tsx).
+    if (config.features.includes('gameUi') && build.features['ui-host']) out.push('ui-host');
+  }
   return out;
 }
 

@@ -6,6 +6,7 @@ export * from "./cleoCore";
 // The optional features' names (src/modules/<id>/api.ts): the runtime barrel leaves them out, since a published
 // game loads each feature as a chunk of its own; the full engine has them all, and installs them all below.
 export * from "./modules/sequencer/api";
+export * from "./modules/gameUi/api";
 export * from "./modules/landscape/api";
 export * from "./modules/weather/api";
 export * from "./modules/particles/api";

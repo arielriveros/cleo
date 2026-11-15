@@ -47,6 +47,8 @@ export const PLAYER_FEATURES: Record<string, (moduleId: string) => boolean> = {
   // feature into this config.
   ...Object.fromEntries(featureLoaderIds().map(id => [id, (moduleId: string) =>
     moduleId.replace(/\\/g, '/').endsWith(`/src/modules/${id}/index.ts`)])),
+  // The game's UI layer and React with it (src/player/uiHost.tsx), for a game built with Game UI.
+  'ui-host': id => id.replace(/\\/g, '/').endsWith('/src/player/uiHost.tsx'),
 }
 
 /** The feature ids src/modules/loaders.ts can load. */

@@ -69,6 +69,18 @@ describe('the optional features', () => {
         expect(scene.physics2D).not.toBeNull();
     });
 
+    it('leave a game without Game UI no UI roots to lay out', () => {
+        const json = { type: 'uiRoot', name: 'HUD', id: 'hud-1', children: [{ type: 'uiText', name: 'Score', id: 'score-1' }] };
+        const live = new Scene();
+        parseNodeJson(live.root, json);
+        expect([live.uiRoots.size, live.uiNodes.size]).toEqual([1, 2]);
+        restrictFeatures(['particles']);
+        const bare = new Scene();
+        parseNodeJson(bare.root, json);
+        expect([bare.uiRoots.size, bare.uiNodes.size]).toEqual([0, 0]);
+        expect(bare.root.children[0].children[0].nodeType).toBe('uiText');
+    });
+
     it('let it neither rain nor snow without weather', () => {
         restrictFeatures(['particles']);
         const dry = new Scene();

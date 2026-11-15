@@ -31,8 +31,8 @@ import { sampleSceneWind, windFieldClock } from "../wind/windField";
 import type { WeatherNode } from "./nodes/weatherNode";
 import { CameraNode } from "./nodes/cameraNode";
 import { SpriteNode } from "./nodes/spriteNode";
-import { UINode } from "./nodes/ui/uiNode";
-import { UIRootNode } from "./nodes/ui/uiRoot";
+import type { UINode } from "./nodes/ui/uiNode";
+import type { UIRootNode } from "./nodes/ui/uiRoot";
 import { parseNodeJson } from "./nodes/parseNodeJson";
 import { InputSystem } from "../../input/inputSystem";
 import { CharacterNode } from "./nodes/characterNode";
@@ -135,7 +135,7 @@ function kindsOf(ctor: Function): number {
         [K.EXPOSURE, ExposureVolumeNode], [K.OCCLUSION, OcclusionVolumeNode], [K.SOUND, SoundNode],
         [K.PROBE, LightProbeNode], [K.SKYBOX, SkyboxNode],
         [K.ATMOSPHERE, SkyAtmosphereNode], [K.SKY_LIGHT, SkyLightNode], [K.WIND, WindNode],
-        [K.CAMERA, CameraNode], [K.UI_NODE, UINode], [K.UI_ROOT, UIRootNode],
+        [K.CAMERA, CameraNode], 
         // The optional features' node classes, each in the list of its kind (src/core/features/registry.ts).
         ...featureNodeKinds().map(([cls, bit]) => [bit, cls] as [number, Function]),
     ];

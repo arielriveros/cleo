@@ -72,7 +72,7 @@ async function run(c, port) {
       if (s.smoke) {
         const why = [];
         if (s.smoke.backend !== c.backend) why.push(`ran on ${s.smoke.backend} (${s.smoke.fallback ?? 'no reason'})`);
-        if (s.smoke.executor !== (c.worker === 'on' ? 'worker' : 'inline')) why.push(`stepped ${s.smoke.executor}`);
+        if (s.smoke.executor !== (c.worker === 'on' ? 'worker' : 'inline')) why.push(`stepped ${s.smoke.executor}${s.smoke.fallback ? ` (${s.smoke.fallback})` : ""}`);
         if (!(Math.abs(s.smoke.crateY - 0.5) < 0.1)) why.push(`crate at y=${s.smoke.crateY}`);
         // Each optional feature's node came through its chunk; a left-out one's names tell a script why.
         if (s.smoke.decals !== (c.decals ? 1 : 0)) why.push(`${s.smoke.decals} decals`);

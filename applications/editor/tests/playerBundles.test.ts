@@ -33,6 +33,7 @@ const FEATURE_ROOTS: Record<string, string[]> = {
   particles: ['src/graphics/particles/particleRenderer.ts', 'src/graphics/render/particlePasses.ts', 'src/particles/particleRuntime.ts'],
   weather: ['src/core/scene/nodes/weatherNode.ts', 'src/core/scene/precipitationRig.ts'],
   landscape: ['src/core/scene/nodes/landscapeNode.ts', 'src/terrain/terrain.ts', 'src/terrain/foliage.ts', 'src/graphics/render/foliage.ts'],
+  gameUi: ['src/core/scene/nodes/ui/uiNode.ts', 'src/core/scene/nodes/ui/uiWidgets.ts', 'src/core/uiLayout.ts'],
 };
 
 describe.skipIf(!built)('the published player build', () => {
@@ -55,6 +56,15 @@ describe.skipIf(!built)('the published player build', () => {
     }
     expect(build.core).toContain(build.entry);
     expect(build.core).toContain(build.worker);
+  });
+
+  it('keeps React and the UI layer in the UI host part, out of the core', () => {
+    const core = new Set(modulesOf(build.core));
+    const host = new Set(modulesOf(build.features['ui-host']?.files ?? []));
+    for (const root of ['node_modules/react-dom/', 'node_modules/react/', 'applications/editor/src/features/gameUi/UILayer.tsx']) {
+      expect([...core].filter(m => m.includes(root)), `${root} is in the core`).toEqual([]);
+      expect([...host].some(m => m.includes(root)), `${root} is not in the UI host`).toBe(true);
+    }
   });
 
   it('keeps every physics backend out of the core', () => {
@@ -159,6 +169,9 @@ describe('choosing the player files a game ships', () => {
       .toEqual(['physics-jolt', 'sequencer']);
     // Without the build to check against, only the backend.
     expect(playerFeaturesFor({ features: ['sequencer'] })).toEqual([]);
+    // Game UI brings the UI layer that draws it.
+    const withHost = { ...build, features: { ...build.features, gameUi: { files: ['chunks/gameUi-7.js'], bytes: 0, deps: [] }, 'ui-host': { files: ['chunks/ui-host-8.js'], bytes: 0, deps: [] } } };
+    expect(playerFeaturesFor({ features: ['gameUi'] }, withHost)).toEqual(['gameUi', 'ui-host']);
   });
 
   it('names a part for every feature the engine can load as a chunk', () => {

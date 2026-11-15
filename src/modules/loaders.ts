@@ -18,4 +18,5 @@ export const FEATURE_LOADERS: Readonly<Record<string, () => Promise<{ default: F
     particles: () => import("./particles/index"),
     weather: () => import("./weather/index"),
     landscape: () => import("./landscape/index"),
+    gameUi: () => import("./gameUi/index"),
 };
