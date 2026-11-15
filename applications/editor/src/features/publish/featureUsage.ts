@@ -48,13 +48,20 @@ function nodeUses(node: any, dimension: '2D' | '3D' | undefined): [string, strin
 }
 
 /**
- * The script names of a feature: every name its module adds to the engine API (src/modules/<id>/api.ts) once
- * it has code of its own, else the catalog's list.
+ * The script names of a feature: every name its module adds to the engine API (src/modules/<id>/api.ts), and the
+ * catalog's list (which also holds core names that are a feature's only sign of use, such as `InputSystem`).
  */
 function namesOf(f: FeatureDef): readonly string[] {
-  const api = featureApiNames(f.id)
-  return api.length ? api : (f.apiNames ?? [])
+  return [...new Set([...featureApiNames(f.id), ...(f.apiNames ?? [])])]
 }
+
+/**
+ * Features a script reaches through the scene rather than by name, so whether or not it imports the engine:
+ * `this.scene.physics2D` is the 2D physics world.
+ */
+const MEMBER_USES: readonly { feature: string; test: RegExp; name: string }[] = [
+  { feature: 'physics2d', test: /\.physics2D\b/, name: 'scene.physics2D' },
+]
 
 const label = (type: string) => type.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase())
 
@@ -63,8 +70,13 @@ const importsCleo = (source: string) => /\bfrom\s*['"]cleo['"]|import\s*\(\s*['"
 
 /** The feature names a script uses, by whole word, when it imports the engine. */
 function scriptUses(source: string): { feature: FeatureDef; name: string }[] {
-  if (typeof source !== 'string' || !importsCleo(source)) return []
+  if (typeof source !== 'string') return []
   const out: { feature: FeatureDef; name: string }[] = []
+  for (const use of MEMBER_USES) {
+    const feature = FEATURE_BY_ID.get(use.feature)
+    if (feature && use.test.test(source)) out.push({ feature, name: use.name })
+  }
+  if (!importsCleo(source)) return out
   for (const f of FEATURES) for (const name of namesOf(f))
     if (new RegExp(`\\b${name}\\b`).test(source)) out.push({ feature: f, name })
   return out

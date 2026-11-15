@@ -11,13 +11,12 @@ import { Frustum } from '../../core/frustum';
 import { isEditorOnlyNode } from '../../core/scene/editorNodes';
 import type { ParticleSystemNode } from '../../core/scene/nodes/particleSystemNode';
 import { SpriteNode } from '../../core/scene/nodes/spriteNode';
-import { TilemapNode } from '../../core/scene/nodes/tilemapNode';
+import type { TilemapNode } from '../../core/scene/nodes/tilemapNode';
 import { Scene } from '../../core/scene/scene';
-import { cellToWorld } from '../tilemap/cellMath';
-import { TileChunk, CHUNK_SIZE } from '../tilemap/chunk';
-import { Tilemap } from '../tilemap/tilemap';
-import { TilemapLayer } from '../tilemap/tilemapLayer';
-import { TileMesh } from '../tilemap/tileMesh';
+// The tile types only: the meshes and their bounds come from the map itself (feature `world2d`).
+import type { TileChunk } from '../tilemap/chunk';
+import type { Tilemap } from '../tilemap/tilemap';
+import type { TilemapLayer } from '../tilemap/tilemapLayer';
 import { frameStats } from '../renderStats';
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderTarget } from '../rhi/resources';
@@ -429,22 +428,15 @@ export class Sprite2DPasses {
                     if (!this._chunkVisible(tilemap, layer, chunk, node.worldPosition)) continue;
                     frameStats.tilemapChunks++;
 
-                    if (!chunk.mesh) chunk.mesh = new TileMesh();
-                    if (chunk.meshDirty) {
-                        chunk.mesh.build(chunk, layer, tileset, tilemap.grid, tilemap.time);
-                        chunk.meshDirty = false;
-                    } else if (chunk.animated) {
-                        chunk.mesh.patchAnimatedUVs(tileset, tilemap.time);
-                    }
-
+                    const mesh = tilemap.chunkMesh(layer, chunk, tileset);
                     if (layer.cfg.ySorted) {
-                        for (const b of chunk.mesh.bands)
+                        for (const b of mesh.bands)
                             this._pushUnsorted(KIND_TILE, this._addTile(node, layer, chunk, b, b.indexOffset, b.indexCount),
                                                layer.cfg.order, -b.sortY);
                     } else {
                         // One band on a layer that is not Y-sorted, covering every tile: its bounds are the chunk's.
-                        const all = chunk.mesh.bands[0] ?? null;
-                        this._pushUnsorted(KIND_TILE, this._addTile(node, layer, chunk, all, 0, chunk.mesh.indexCount),
+                        const all = mesh.bands[0] ?? null;
+                        this._pushUnsorted(KIND_TILE, this._addTile(node, layer, chunk, all, 0, mesh.indexCount),
                                            layer.cfg.order, 0);
                     }
                 }
@@ -758,6 +750,9 @@ export class Sprite2DPasses {
     private readonly _tileNodes: TilemapNode[] = [];
     private readonly _tileLayers: TilemapLayer[] = [];
     private readonly _tileChunks: TileChunk[] = [];
+    /** Scratch for a chunk's world box (`_chunkVisible`). */
+    private readonly _chunkMin: number[] = [0, 0, 0];
+    private readonly _chunkMax: number[] = [0, 0, 0];
     private readonly _tileBands: (DepthBand | null)[] = [];
     private readonly _tileOffsets: number[] = [];
     private readonly _tileCounts: number[] = [];
@@ -793,18 +788,8 @@ export class Sprite2DPasses {
         // A parallaxed layer is drawn at a camera-dependent offset, so its world box moves with the
         // camera; culling it against the un-offset box would pop tiles in and out at the screen edge.
         if (layer.cfg.parallax[0] !== 1 || layer.cfg.parallax[1] !== 1) return true;
-        const g = tilemap.grid;
-        // Local cell math plus the node's world position, matching how the mesh is built and drawn —
-        // `tilemap.cellToWorld` would fold in the map's own origin, which is only refreshed by the
-        // per-frame update the editor never runs.
-        const c0 = cellToWorld(g, chunk.cx * CHUNK_SIZE, chunk.cy * CHUNK_SIZE);
-        const c1 = cellToWorld(g, (chunk.cx + 1) * CHUNK_SIZE, (chunk.cy + 1) * CHUNK_SIZE);
-        // Isometric chunks are diamonds, so their axis-aligned extent runs to the opposite corners too;
-        // padding by the chunk's own width keeps the test conservative for every grid kind.
-        const padX = CHUNK_SIZE * g.cellWidth, padY = CHUNK_SIZE * g.cellHeight;
-        const min = [origin[0] + Math.min(c0[0], c1[0]) - padX, origin[1] + Math.min(c0[1], c1[1]) - padY, origin[2] - 1];
-        const max = [origin[0] + Math.max(c0[0], c1[0]) + padX, origin[1] + Math.max(c0[1], c1[1]) + padY, origin[2] + 1];
-        return this._sys.visibility.frustum.intersectsAABB(min, max);
+        tilemap.chunkWorldBox(chunk, origin, this._chunkMin, this._chunkMax);
+        return this._sys.visibility.frustum.intersectsAABB(this._chunkMin, this._chunkMax);
     }
 
     private _drawTileBand(node: TilemapNode, layer: TilemapLayer, chunk: TileChunk,

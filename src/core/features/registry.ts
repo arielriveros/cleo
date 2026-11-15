@@ -4,46 +4,22 @@
 // (src/modules/all.ts). The catalog of the same features, as data, is src/modules/catalog.ts.
 //
 // The core never imports a feature module as a value: it asks this registry instead -- for the parser of a node
-// type, the factory of a render subsystem, the passes a scene runs. Must stay a LEAF (type imports only), so
+// type, the factory of a render subsystem or of a scene service. Must stay a LEAF (type imports only), so
 // that anything in the core can read it without closing a cycle.
 import type { Node } from '../scene/nodes/node';
 
 /** Builds a node of a type under `parent` from its JSON (a node class's static `parse`). */
 export type NodeParser = (parent: Node, json: any) => void;
 
-/** Where in `Scene.update` a feature's per-frame pass runs. */
-export type ScenePassSlot =
-    /** Before the node loop: sequences drive what the nodes then read. */
-    | 'beforeNodes'
-    /** After the node loop: the 2D physics step. */
-    | 'afterNodes'
-    /** After socket followers: cloth. */
-    | 'afterFollowers'
-    /** After camera rigs: the 2D cameras. */
-    | 'afterCameraRigs'
-    /** After late updates: precipitation. */
-    | 'afterLateUpdates';
-
-/** What a scene pass is told about the frame. */
-export interface ScenePassFrame {
-    readonly delta: number;
-    readonly unscaledDelta: number;
-    /** The scene is running a game (Play or Simulate, not paused), not being authored. */
-    readonly playing: boolean;
-    /** The scene has started. */
-    readonly started: boolean;
-}
-
-/** A per-frame pass. Returns true when it moved nodes and the scene's world transforms must be brought up to date. */
-export type ScenePass = (scene: any, frame: ScenePassFrame) => boolean | void;
-
-/** What a feature plugs in when it is installed. */
+/**
+ * What a feature plugs in when it is installed. A feature's per-frame work runs where the scene already calls it
+ * (through methods on its nodes, or on a service made by a factory below), so there are no scene passes to register.
+ */
 export interface FeatureRegistrar {
     /** Parse nodes of `type` with `parse`, after `migrate` (an old save's JSON brought up to date). */
     nodeType(type: string, parse: NodeParser, migrate?: (json: any) => any): void;
     /** Put nodes of `ctor` (and its subclasses) in the scene list of kind `bit` (src/core/scene/sceneKinds.ts). */
     nodeKind(ctor: Function, bit: number): void;
-    scenePass(slot: ScenePassSlot, pass: ScenePass): void;
     /** A named factory the core asks for: a render subsystem, a scene service. */
     factory(name: string, make: (...args: any[]) => any): void;
 }
@@ -62,7 +38,6 @@ interface Installed {
     module: FeatureModule;
     nodeTypes: Map<string, { parse: NodeParser; migrate?: (json: any) => any }>;
     nodeKinds: [Function, number][];
-    passes: [ScenePassSlot, ScenePass][];
     factories: Map<string, (...args: any[]) => any>;
 }
 
@@ -95,11 +70,10 @@ export function onFeaturesChanged(cb: () => void): () => void {
 /** Install a feature (once; again is a no-op). Its dependencies must already be installed, if present at all. */
 export function installFeature(module: FeatureModule): void {
     if (installed.has(module.id)) return;
-    const entry: Installed = { module, nodeTypes: new Map(), nodeKinds: [], passes: [], factories: new Map() };
+    const entry: Installed = { module, nodeTypes: new Map(), nodeKinds: [], factories: new Map() };
     module.install({
         nodeType: (type, parse, migrate) => { entry.nodeTypes.set(type, { parse, migrate }); },
         nodeKind: (ctor, bit) => { entry.nodeKinds.push([ctor, bit]); },
-        scenePass: (slot, pass) => { entry.passes.push([slot, pass]); },
         factory: (name, make) => { entry.factories.set(name, make); },
     });
     installed.set(module.id, entry);
@@ -162,13 +136,6 @@ export function featureNodeParser(type: string | undefined): { parse: NodeParser
 export function featureNodeKinds(): [Function, number][] {
     const out: [Function, number][] = [];
     for (const e of liveEntries()) out.push(...e.nodeKinds);
-    return out;
-}
-
-/** The live features' passes for a slot, in installation order. */
-export function featureScenePasses(slot: ScenePassSlot): ScenePass[] {
-    const out: ScenePass[] = [];
-    for (const e of liveEntries()) for (const [s, p] of e.passes) if (s === slot) out.push(p);
     return out;
 }
 

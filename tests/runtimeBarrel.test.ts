@@ -7,6 +7,16 @@ import { buildFactoryBody, setScriptTranspiler } from '../src/core/scripting/scr
 import { sucraseTranspiler } from '../src/core/scripting/sucraseTranspiler';
 import { Model, setModelFileImporter } from '../src/graphics/model';
 import { ALL_FEATURE_MODULES } from '../src/modules/all';
+import { FEATURES } from '../src/modules/catalog';
+
+/** Per feature, modules deeper than its index and api that must be its own (not reached by the runtime barrel). */
+const DEEP_FEATURE_MODULES: Record<string, string[]> = {
+    gi: ['graphics/render/gi/giLighting.ts', 'graphics/render/gi/giJobs.ts'],
+    volumetricClouds: ['graphics/cloudLighting.ts'],
+    sequencer: ['sequencer/sequencePlayer.ts'],
+    world2d: ['graphics/tilemap/tileMesh.ts', 'graphics/tilemap/cellMath.ts', 'graphics/tilemap/autotile.ts'],
+    physics2d: ['physics2d/world2d.ts', 'core/scene/nodes/body2DLegacy.ts'],
+};
 
 // A published game runs on src/cleoCore.ts, the engine without the editor's tools: the model importers
 // (assimp's WASM alone is 5 MB), the script compiler and the movie renderer. src/cleo.ts is the runtime plus
@@ -96,6 +106,24 @@ describe('the runtime barrel (cleoCore)', () => {
         }
         expect(reached.has('modules/all.ts')).toBe(false);
         expect(reached.has('modules/loaders.ts')).toBe(false);
+    });
+
+    it("leaves each feature's deeper modules out too, the ones only its own modules import", () => {
+        // A feature's index and api import its node classes and passes; what those import in turn can still leak
+        // into the core through another path (a re-export, a helper), which the check above would not see.
+        const core = new Set([...reach(path.join(SRC, 'cleoCore.ts'))].map(rel));
+        for (const [id, deep] of Object.entries(DEEP_FEATURE_MODULES)) {
+            const own = new Set([...reach(path.join(SRC, 'modules', id, 'index.ts'))].map(rel).filter(f => !core.has(f)));
+            for (const f of deep) expect(own.has(f), `${f} is not the ${id} feature's alone`).toBe(true);
+        }
+    });
+
+    it('installs each feature after the ones the catalog says it needs', () => {
+        for (const m of ALL_FEATURE_MODULES) {
+            const def = FEATURES.find(f => f.id === m.id);
+            expect(def, m.id).toBeDefined();
+            expect([...(m.dependsOn ?? [])].sort(), m.id).toEqual([...(def!.dependsOn ?? [])].sort());
+        }
     });
 
     it('exports the runtime, and the full engine adds only the tools', () => {

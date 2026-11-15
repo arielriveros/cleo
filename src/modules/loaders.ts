@@ -13,4 +13,6 @@ export const FEATURE_LOADERS: Readonly<Record<string, () => Promise<{ default: F
     volumetricClouds: () => import("./volumetricClouds/index"),
     gi: () => import("./gi/index"),
     volumetricFog: () => import("./volumetricFog/index"),
+    world2d: () => import("./world2d/index"),
+    physics2d: () => import("./physics2d/index"),
 };

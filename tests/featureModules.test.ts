@@ -54,6 +54,21 @@ describe('the optional features', () => {
         expect(featureFactory('fogVolume')).toBeUndefined();
     });
 
+    it('take their scene services with them: no 2D world without 2D physics, asked again once it is back', () => {
+        restrictFeatures(['world2d']);
+        const scene = new Scene();
+        expect(scene.physics2D).toBeNull();
+        // A tilemap still parses and lists with the 2D world on.
+        parseNodeJson(scene.root, { type: 'tilemap', name: 'Map', id: 'map-1' });
+        expect(scene.tilemaps.size).toBe(1);
+        // The 2D physics' own nodes do not.
+        parseNodeJson(scene.root, { type: 'characterBody2D', name: 'Hero', id: 'hero-1' });
+        expect(scene.root.children[1].nodeType).toBe('characterBody2D');
+        expect(scene.root.children[1].constructor).toBe(Node);
+        restrictFeatures(null);
+        expect(scene.physics2D).not.toBeNull();
+    });
+
     it('stand in with subsystems that draw nothing and keep their settings', () => {
         const fog = createNullFog();
         fog.tileSize = 32;

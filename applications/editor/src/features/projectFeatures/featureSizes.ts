@@ -31,7 +31,10 @@ export function featureSizesFrom(build: PlayerBuild): FeatureSizes | null {
       all += m.bytes
       glsl += m.glslBytes
     }
-    byFeature[f.id] = { all, webgpuOnly: all - glsl }
+    // Its code: the player part of its own (src/modules/<id>), whatever the graphics API. A chunk two parts share
+    // counts in both.
+    const code = build.features[f.id]?.bytes ?? 0
+    byFeature[f.id] = { all: all + code, webgpuOnly: all - glsl + code }
   }
   let coreAll = build.coreBytes, coreGlsl = 0, glsl = 0
   for (const [id, m] of Object.entries(modules)) {

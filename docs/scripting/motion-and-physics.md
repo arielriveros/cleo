@@ -414,6 +414,8 @@ scene.physics2D.raycast(x, y, dx, dy, maxDistance)   // { x, y, distance, owner 
 scene.physics2D.overlapsSolid(minX, minY, maxX, maxY)
 ```
 
+`scene.physics2D` is null in a game published without the 2D physics feature (Project ▸ Features).
+
 ## Wind
 
 The scene's wind is a field: `windAt` reads the air velocity (m/s) anywhere — the Wind node's gusting,

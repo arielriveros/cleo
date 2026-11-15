@@ -101,6 +101,11 @@ describe('what a game uses of the features', () => {
     expect(featureUsage({ scenes: { a: { name: 'A', scene, dimension: '3D' } } }).has('physics2d')).toBe(false)
   })
 
+  it('sees the 2D physics world a script reaches through its scene, import or not', () => {
+    const usage = featureUsage({ scenes: {}, modules: { '/Probe': 'export function ground(s) { return s.physics2D.raycast(0, 0, 0, -1, 9) }' } })
+    expect(usage.get('physics2d')).toEqual([{ where: 'script /Probe', what: 'uses scene.physics2D' }])
+  })
+
   it("reads a script's use of any name a feature's module adds, not only its node class", () => {
     const usage = featureUsage({ scenes: {}, modules: { '/Fx': "import { decalFlipbookFrame, VOLUMETRIC_FOG_PRESETS } from 'cleo'" } })
     expect(usage.get('decals')).toEqual([{ where: 'script /Fx', what: 'uses decalFlipbookFrame' }])

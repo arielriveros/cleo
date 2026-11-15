@@ -5,7 +5,7 @@ import { authoring } from "../../eventBus";
 import { Node } from "./node";
 import { isEditorOwnedName } from "../editorOwnership";
 import { CharacterNode } from "./characterNode";
-import { CharacterBody2DNode } from "./characterBody2DNode";
+import type { CharacterBody2DNode } from "./characterBody2DNode";
 import { CameraRigNode } from "./cameraRigNode";
 import { unwrapScriptNode } from "./nodeScripting";
 import { InputSystem } from "../../../input/inputSystem";
@@ -48,6 +48,7 @@ import { conditionNodeMet } from "../../conditions";
 import type { FuzzyModel } from "../../../ai/fuzzy";
 import { aiStats } from "../../../ai/aiStats";
 import { vec3 } from "gl-matrix";
+import { isCharacterBody2D } from "./nodeType";
 
 /**
  * A whisker hit whose surface faces up at least this much (cos 50 deg) is ground to walk on, not a
@@ -432,7 +433,7 @@ export class ControllerNode extends Node {
         const found = this._scene?.getNodeById(id) ?? null;
         // An id pointing at some other node type resolves to NULL rather than to something that cannot be
         // driven — a controller quietly steering a light would be harder to diagnose than one doing nothing.
-        this._possessed = found instanceof CharacterNode || found instanceof CharacterBody2DNode ? found : null;
+        this._possessed = found instanceof CharacterNode || isCharacterBody2D(found) ? found : null;
         if (this._possessed) this._possessed._setController(this);
         return this._possessed;
     }
@@ -537,7 +538,7 @@ export class ControllerNode extends Node {
         }
 
         // A 2D body moves in world axes: no camera basis, no aim rig to steer.
-        const flat = pawn instanceof CharacterBody2DNode;
+        const flat = isCharacterBody2D(pawn);
         const basisYaw = flat ? 0 : this._basisYaw();
 
         switch (this.controlSource) {
@@ -598,7 +599,7 @@ export class ControllerNode extends Node {
     public perceive(delta: number): void {
         const pawn = this._resolvePossessed();
         if (!pawn || this.controlSource !== 'ai') return;
-        if (pawn instanceof CharacterBody2DNode) { this._perceive2D(pawn, delta); return; }
+        if (isCharacterBody2D(pawn)) { this._perceive2D(pawn, delta); return; }
 
         // Every other pawn in the scene. A player and every NPC is a Character, so this is both the
         // set an agent cares about and a bounded one — as opposed to "every node", which is neither.
@@ -815,7 +816,7 @@ export class ControllerNode extends Node {
         }
 
         const up = this._resolveUp();
-        const body2D = pawn instanceof CharacterBody2DNode ? pawn : null;
+        const body2D = isCharacterBody2D(pawn) ? pawn : null;
         this._following2D = false;
         this._wantJump = false;
         this._wantDown = false;
@@ -840,7 +841,7 @@ export class ControllerNode extends Node {
         if (target) {
             const p = target.worldPosition;
             vec3.set(this._targetPos, p[0], p[1], p[2]);
-            if (target instanceof CharacterBody2DNode) {
+            if (isCharacterBody2D(target)) {
                 // A 2D target's own velocity, and its middle for a flier to fly at (a walker goes to its feet).
                 if (flier) this._targetPos[1] += target.size[1] * 0.5;
                 vec3.set(this._targetVel, target.velocity2D[0], target.velocity2D[1], 0);
@@ -954,7 +955,7 @@ export class ControllerNode extends Node {
      * as it did before, rather than standing still for a reason nothing explains.
      */
     private _steerPath(pawn: Pawn, tuning: SteeringTuning, up: vec3, delta: number): void {
-        if (pawn instanceof CharacterBody2DNode) { this._steerPath2D(pawn, tuning, up, delta); return; }
+        if (isCharacterBody2D(pawn)) { this._steerPath2D(pawn, tuning, up, delta); return; }
         const source = this._resolveNavMesh();
         if (!source?.mesh) {
             clearNavPath(this._path);
@@ -1041,7 +1042,7 @@ export class ControllerNode extends Node {
     private _gatherNeighbours(pawn: Pawn): void {
         this._neighbourCount = 0;
         const radius = Math.max(0, this.flockRadius);
-        if (pawn instanceof CharacterBody2DNode) { this._gatherNeighbours2D(pawn, radius); return; }
+        if (isCharacterBody2D(pawn)) { this._gatherNeighbours2D(pawn, radius); return; }
         const characters = this._scene?.characters;
         if (radius <= 0 || !characters) return;
 
@@ -1133,7 +1134,7 @@ export class ControllerNode extends Node {
      * one wraps to the first, which is what makes a patrol a patrol.
      */
     private _steerPatrol(pawn: Pawn, tuning: SteeringTuning, up: vec3): void {
-        if (pawn instanceof CharacterBody2DNode) { this._steerPatrol2D(pawn, tuning, up); return; }
+        if (isCharacterBody2D(pawn)) { this._steerPatrol2D(pawn, tuning, up); return; }
         const source = this._resolveNavMesh();
         const points = this.routeName && source ? source.routePoints(this.routeName) : [];
         if (points.length === 0) {
@@ -1224,7 +1225,7 @@ export class ControllerNode extends Node {
     private _warnNavProfile(source: { name: string, agent2D?: NavAgent2D }): void {
         const pawn = this._possessed;
         const baked = source.agent2D;
-        if (this._warnedNavProfile || !baked || !(pawn instanceof CharacterBody2DNode) || pawn.movement !== 'walk') return;
+        if (this._warnedNavProfile || !baked || !(isCharacterBody2D(pawn)) || pawn.movement !== 'walk') return;
         if (pawn.jumpHeight < baked.jumpHeight - 0.05 || pawn.walkSpeed < baked.walkSpeed - 0.05) {
             this._warnedNavProfile = true;
             Logger.warn(
@@ -1268,7 +1269,7 @@ export class ControllerNode extends Node {
         if (!ai) return null;
         // A 2D pawn wants a 2D graph for its kind of mover; a 3D one a navmesh.
         const pawn = this._possessed;
-        const source = pawn instanceof CharacterBody2DNode
+        const source = isCharacterBody2D(pawn)
             ? ai.navMeshFor(this._navMeshId, { space: '2D', movement: pawn.movement })
             : ai.navMeshFor(this._navMeshId);
         if (this._navMeshId && source?.id !== this._navMeshId && !this._warnedDanglingNavMesh) {
@@ -1470,7 +1471,7 @@ export class ControllerNode extends Node {
         const target = this._resolveTarget(this.targetKey);
         if (name === 'hasTarget') return target !== null;
         if (!target) return name === 'targetVisible' || name === 'targetInFront' ? false : 0;
-        if (pawn instanceof CharacterBody2DNode) return this._sense2D(name, pawn, target);
+        if (isCharacterBody2D(pawn)) return this._sense2D(name, pawn, target);
 
         const from = pawn.worldPosition;
         const to = target.worldPosition;
@@ -1524,7 +1525,7 @@ export class ControllerNode extends Node {
             const world = this._scene?.physics2D;
             if (!world) return true;
             const eyeY = from[1] + this.eyeHeight;
-            const toY = to[1] + (target instanceof CharacterBody2DNode ? target.size[1] * 0.5 : 0);
+            const toY = to[1] + (isCharacterBody2D(target) ? target.size[1] * 0.5 : 0);
             const reach = Math.hypot(dx, toY - eyeY);
             if (!(reach > 1e-6)) return true;
             const hit = world.raycast(from[0], eyeY, dx, toY - eyeY, reach);
@@ -1538,7 +1539,7 @@ export class ControllerNode extends Node {
      * world's probes for a 2D body, the physics ray for a 3D Character (from the hips, as the whiskers).
      */
     private _senseAhead(name: 'wallAhead' | 'ledgeAhead', pawn: Pawn): boolean {
-        if (pawn instanceof CharacterBody2DNode) {
+        if (isCharacterBody2D(pawn)) {
             const p = pawn.worldPosition;
             const half = pawn.size[0] / 2;
             return name === 'wallAhead'
@@ -1575,7 +1576,7 @@ export class ControllerNode extends Node {
     private _resolveUp(): vec3 {
         // A 2D pawn steers in the picture plane: a walker along X (flattened by +Y), a flier in XY (by +Z).
         const pawn = this._possessed;
-        if (pawn instanceof CharacterBody2DNode) return vec3.copy(this._steerUp, pawn.movement === 'fly' ? AXIS_Z : AXIS_Y);
+        if (isCharacterBody2D(pawn)) return vec3.copy(this._steerUp, pawn.movement === 'fly' ? AXIS_Z : AXIS_Y);
         const up = this._scene?.physics?.up;
         return up ? vec3.set(this._steerUp, up[0], up[1], up[2]) : vec3.set(this._steerUp, 0, 1, 0);
     }

@@ -36,20 +36,12 @@ export type { BrainKind } from "./core/scene/nodes/controllerNode";
 export type { ControlSource, AimSource, BlackboardValue } from "./core/scene/nodes/controllerNode";
 export type { FollowSpace, AimMode } from "./core/scene/nodes/cameraRigNode";
 export { LandscapeNode } from "./core/scene/nodes/landscapeNode";
-export { TilemapNode } from "./core/scene/nodes/tilemapNode";
-export { Camera2DNode } from "./core/scene/nodes/camera2DNode";
-export { Room2DNode } from "./core/scene/nodes/room2DNode";
-export { ParallaxLayerNode } from "./core/scene/nodes/parallaxLayerNode";
-export { CharacterBody2DNode } from "./core/scene/nodes/characterBody2DNode";
-export { Body2DNode } from "./core/scene/nodes/body2DNode";
-export type { Body2DKind } from "./core/scene/nodes/body2DNode";
 export { ColliderNode, ALL_LAYERS } from "./core/scene/nodes/colliderNode";
 export type { ColliderShape } from "./core/scene/nodes/colliderNode";
 export { TriggerNode } from "./core/scene/nodes/triggerNode";
 /** @deprecated A 2D trigger is a {@link TriggerNode} in a 2D scene; Area 2D nodes load as Trigger nodes. */
 export { TriggerNode as Area2DNode } from "./core/scene/nodes/triggerNode";
 export { migrateLegacyPhysicsJson, migrateLegacyPhysicsTree, hasLegacyPhysics, isLegacyWrapper, legacyColliderId, legacyTriggerId } from "./core/scene/nodes/physicsLegacy";
-export { World2D } from "./physics2d/world2d";
 export { advanceClip, clipLength, frameDuration, normalizedTime as clipNormalizedTime, stepSpriteMachine, parseSpriteAnimationSet, parseSpriteClip, cloneSpriteAnimationSet, createPlayhead } from "./animation/spriteAnimation";
 export type { SpriteAnimationSet, SpriteClip, SpriteFrame, SpriteFrameHitbox, SpriteClipLoop, SpriteStateMachine, SpriteMachineState, SpriteMachineTransition, ClipPlayhead } from "./animation/spriteAnimation";
 export {
@@ -533,24 +525,8 @@ export { parseOctahedralInfo, OCTA_DEFAULT_FRAMES } from "./terrain/octahedralIm
 export type { OctahedralImpostorInfo } from "./terrain/octahedralImpostor";
 export { FoliageColliderField, DEFAULT_FOLIAGE_COLLIDERS, foliageColliderPose } from "./terrain/foliageColliders";
 export type { FoliageColliderSettings } from "./terrain/foliageColliders";
-export { Tilemap, DEFAULT_FILL_LIMIT } from "./graphics/tilemap/tilemap";
-export type { EntitySort } from "./graphics/tilemap/tilemap";
-export type { TileEdit, TileOrientation } from "./graphics/tilemap/tilemap";
-export { TilemapLayer, defaultLayerConfig } from "./graphics/tilemap/tilemapLayer";
-export type { TilemapLayerConfig, LayerBounds } from "./graphics/tilemap/tilemapLayer";
 export { Tileset, MAX_TILESET_OVERDRIVE } from "./graphics/tilemap/tileset";
 export type { TilesetConfig, TileMeta, TileAnimation, TerrainSet, VariantSet, WangKind } from "./graphics/tilemap/tileset";
-export {
-    cellToWorld, worldToCell, cellCorners, cellSortY, neighbours, neighbourCount, normalizeGrid,
-} from "./graphics/tilemap/cellMath";
-export type { GridSpec, GridKind, HexOrientation, HexOffset } from "./graphics/tilemap/cellMath";
-export {
-    CHUNK_SIZE, CELL_EMPTY, packCell, cellTile, cellFlags, cellFlipX, cellFlipY, cellRot90, withTile, chunkKey, chunkCoord,
-} from "./graphics/tilemap/chunk";
-export type { TileChunk } from "./graphics/tilemap/chunk";
-export { autoTileMask, resolveAutoTile, pickWeightedVariant } from "./graphics/tilemap/autotile";
-export { greedyMerge } from "./graphics/tilemap/tilemapCollision";
-export type { SolidBox } from "./graphics/tilemap/tilemapCollision";
 export { Raycaster } from "./core/raycaster";
 export type { Ray, RaycastHit } from "./core/raycaster";
 export { BVH } from "./core/bvh";

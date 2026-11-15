@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mat4, vec3 } from 'gl-matrix';
+import './helpers/features';
 import { CleoEngine } from '../src/core/engine';
 import { Camera } from '../src/core/camera';
 import { camera2DLayout, confineAxis, deadzoneAxis, parallaxSpan, smoothDamp } from '../src/core/math';

@@ -28,6 +28,8 @@ const FEATURE_ROOTS: Record<string, string[]> = {
   volumetricClouds: ['src/core/scene/nodes/volumetricCloudsNode.ts', 'src/graphics/render/clouds.ts'],
   gi: ['src/core/scene/nodes/giVolumeNode.ts', 'src/graphics/render/gi/giSystem.ts'],
   volumetricFog: ['src/core/scene/nodes/volumetricFogNode.ts', 'src/graphics/render/volumetricFog.ts'],
+  world2d: ['src/core/scene/nodes/tilemapNode.ts', 'src/graphics/tilemap/tilemap.ts', 'src/graphics/tilemap/tileMesh.ts'],
+  physics2d: ['src/physics2d/world2d.ts', 'src/core/scene/nodes/characterBody2DNode.ts'],
 };
 
 describe.skipIf(!built)('the published player build', () => {

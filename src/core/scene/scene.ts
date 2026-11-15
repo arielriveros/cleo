@@ -9,7 +9,7 @@ import { CameraRigNode } from "./nodes/cameraRigNode";
 import { SoundNode } from "./nodes/soundNode";
 import { AudioManager } from "../../audio/audioManager";
 import { LandscapeNode } from "./nodes/landscapeNode";
-import { TilemapNode } from "./nodes/tilemapNode";
+import type { TilemapNode } from "./nodes/tilemapNode";
 import { LightNode } from "./nodes/lightNode";
 import { LightProbeNode } from "./nodes/lightProbeNode";
 import type { DecalNode } from "./nodes/decalNode";
@@ -59,9 +59,9 @@ import type { Room2DNode } from "./nodes/room2DNode";
 import type { CharacterBody2DNode } from "./nodes/characterBody2DNode";
 import type { Body2DNode } from "./nodes/body2DNode";
 import type { TriggerNode } from "./nodes/triggerNode";
-import { World2D } from "../../physics2d/world2d";
+import type { World2D } from "../../physics2d/world2d";
 import { K } from "./sceneKinds";
-import { featureNodeKinds, featureScenePasses, onFeaturesChanged, type ScenePassFrame } from "../features/registry";
+import { featureFactory, featureNodeKinds, onFeaturesChanged } from "../features/registry";
 
 /** Object-space up, rotated by the camera's world orientation to give the audio listener its up axis. */
 const UP_AXIS: vec3 = vec3.fromValues(0, 1, 0);
@@ -130,7 +130,7 @@ function kindsOf(ctor: Function): number {
     if (mask !== undefined) return mask;
     kindTable ??= [
         [K.LIGHT, LightNode], [K.MODEL, ModelNode], [K.SPRITE, SpriteNode], [K.LANDSCAPE, LandscapeNode],
-        [K.TILEMAP, TilemapNode], [K.LOD_GROUP, LodGroupNode], [K.CAMERA_RIG, CameraRigNode],
+        [K.LOD_GROUP, LodGroupNode], [K.CAMERA_RIG, CameraRigNode],
         [K.CHARACTER, CharacterNode], [K.CONTROLLER, ControllerNode], [K.NAV_MESH, NavMeshNode],
         [K.PARTICLES, ParticleSystemNode],
         [K.FORCE_FIELD, ForceFieldNode], [K.EXPOSURE, ExposureVolumeNode],
@@ -625,11 +625,13 @@ export class Scene {
             // THE 2D PHYSICS PASS. After every script has said what its body wants (a jump, a steer), before
             // the cameras follow: 2D colliders with mass fall, 2D character bodies move through the tilemaps
             // and 2D colliders, and 2D triggers report who came and went. Only while the game plays.
-            if ((this._bodies2D.size > 0 || this._areas2D.size > 0 || this._colliders2D.size > 0)
-                && this._hasStarted && !paused && !CleoEngine.authoringMode) {
+            // A game built without the 2D physics feature has no world to step (`physics2D` is null).
+            const world2D = (this._bodies2D.size > 0 || this._areas2D.size > 0 || this._colliders2D.size > 0)
+                && this._hasStarted && !paused && !CleoEngine.authoringMode ? this.physics2D : null;
+            if (world2D) {
                 const physicsStart = performance.now();
                 authoring.derived++;
-                try { this.physics2D.step(delta, this); }
+                try { world2D.step(delta, this); }
                 catch (error) { logScriptError(`Error in the 2D physics`, error, 'Scene'); }
                 finally { authoring.derived--; }
                 sceneStats.physics2DMs = performance.now() - physicsStart;
@@ -1333,10 +1335,14 @@ export class Scene {
      * The scene's 2D physics (src/physics2d): what moves its 2D bodies every frame the game plays, and what a
      * script queries -- `raycast(x, y, dx, dy, maxDistance)`, `overlapsSolid(minX, minY, maxX, maxY)`. Made on
      * first use; the world it queries is the one the last step built (or a fresh one, made here, before any).
+     * Null in a game built without the 2D physics feature (src/modules/physics2d), which steps no 2D bodies.
      */
-    public get physics2D(): World2D {
+    public get physics2D(): World2D | null {
         if (!this._physics2D) {
-            this._physics2D = new World2D();
+            // Asked every time until the feature answers: a miss is never cached.
+            const make = featureFactory<() => World2D>('world2D');
+            if (!make) return null;
+            this._physics2D = make();
             this._physics2D.refresh(this);
         }
         return this._physics2D;

@@ -23,3 +23,18 @@ const UI_NODE_TYPES: ReadonlySet<string> = new Set<NodeType>([
 
 /** Whether a serialized `type` string belongs to the UI family. */
 export function isUINodeType(type: string): boolean { return UI_NODE_TYPES.has(type); }
+
+// Guards for node classes that live in optional features (src/modules/<id>): the core asks by type rather than with
+// `instanceof`, which would import the class and so the feature into every game.
+import type { CharacterBody2DNode } from './characterBody2DNode';
+import type { Camera2DNode } from './camera2DNode';
+
+/** A 2D character body (feature `physics2d`). */
+export function isCharacterBody2D(node: unknown): node is CharacterBody2DNode {
+  return (node as { nodeType?: unknown } | null | undefined)?.nodeType === 'characterBody2D';
+}
+
+/** A 2D camera (feature `world2d`). */
+export function isCamera2D(node: unknown): node is Camera2DNode {
+  return (node as { nodeType?: unknown } | null | undefined)?.nodeType === 'camera2D';
+}

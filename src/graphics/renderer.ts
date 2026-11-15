@@ -78,7 +78,7 @@ import { ObjectTable } from './objectTable';
 import { GeometryPass } from './render/geometryPass';
 import { ForwardPass } from './render/forwardPass';
 import { Frame2DPasses } from './render/frame2d';
-import { Camera2DNode } from '../core/scene/nodes/camera2DNode';
+import type { Camera2DNode } from '../core/scene/nodes/camera2DNode';
 import { EditorOverlays } from './render/editorOverlays';
 import { DebugViews } from './render/debugViews';
 import { Capture } from './render/capture';
@@ -101,6 +101,7 @@ import { createDevice } from './rhi/createDevice';
 // failure and chunk-load failure the same observable event.
 import { setDevice, device } from './rhi/deviceHandle';
 import { jitterMatrix } from './utils/taaJitter';
+import { isCamera2D } from "../core/scene/nodes/nodeType";
 
 interface RendererConfig {
     clearColor?: number[];
@@ -806,7 +807,7 @@ export class Renderer {
         // A 2D game camera sizes its projection from the screen, in art pixels: fitted before either frame
         // builds its matrices from it.
         const active = scene.activeCamera;
-        if (active instanceof Camera2DNode) active.fitView(this._renderWidth, this._renderHeight);
+        if (isCamera2D(active)) active.fitView(this._renderWidth, this._renderHeight);
         if (this._view.flat2D && !flat) this.invalidateTemporalHistory();
         this._view.flat2D = flat;
         try {
@@ -1132,7 +1133,7 @@ export class Renderer {
         this._particlePasses.simulateParticles(scene, null);
         // Pixel-perfect when the game's 2D camera asks for it, and never for a capture, a thumbnail or a movie,
         // which draw at their own size.
-        const camera2D = scene.activeCamera instanceof Camera2DNode ? scene.activeCamera : null;
+        const camera2D = isCamera2D(scene.activeCamera) ? scene.activeCamera : null;
         const pixel = camera2D && camera2D.pixelPerfect && !this._thumbnailMode && !this._subsystems.capture.presentTarget
             && !this._movie.active && !this._view.capturing ? camera2D : null;
         this._frame2D.render(scene, pixel);

@@ -6,6 +6,8 @@ export * from "./cleoCore";
 // The optional features' names (src/modules/<id>/api.ts): the runtime barrel leaves them out, since a published
 // game loads each feature as a chunk of its own; the full engine has them all, and installs them all below.
 export * from "./modules/sequencer/api";
+export * from "./modules/physics2d/api";
+export * from "./modules/world2d/api";
 export * from "./modules/volumetricFog/api";
 export * from "./modules/gi/api";
 export * from "./modules/volumetricClouds/api";
