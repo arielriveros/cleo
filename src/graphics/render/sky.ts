@@ -6,7 +6,7 @@ import { Geometry } from '../../core/geometry';
 import { Logger } from '../../core/logger';
 import { SkyAtmosphereNode, DEFAULT_MOONLIGHT_INTENSITY } from '../../core/scene/nodes/skyAtmosphereNode';
 import { SkyboxNode } from '../../core/scene/nodes/skyboxNode';
-import { VolumetricCloudsNode } from '../../core/scene/nodes/volumetricCloudsNode';
+import type { VolumetricCloudsNode } from '../../core/scene/nodes/volumetricCloudsNode';
 import { Scene } from '../../core/scene/scene';
 import { CubeFramebuffer } from '../cubeFramebuffer';
 import { Framebuffer } from '../framebuffer';
@@ -20,8 +20,8 @@ import { projectEquirectToSH } from '../shProject';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { DirectionalLight, REFERENCE_ILLUMINANCE } from '../lighting';
-import { VolumetricCloudPasses } from './clouds';
-import { BRDFProgram, PrefilterProgram, SkyProjectProgram, SkyAtmosphereProgram, SkyFogProgram, SkyboxProgram, VolumetricCloudsProgram } from './programs';
+import type { CloudSubsystem } from './featureSubsystems';
+import { BRDFProgram, PrefilterProgram, SkyProjectProgram, SkyAtmosphereProgram, SkyFogProgram, SkyboxProgram } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -59,7 +59,7 @@ export class SkyPasses {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
-                private readonly _clouds: VolumetricCloudPasses,
+                private readonly _clouds: CloudSubsystem,
                 private readonly _lighting: LightingPasses,
                 private readonly _fullscreen: FullscreenPasses,
                 private readonly _sys: RenderSubsystems) {}
@@ -860,11 +860,7 @@ export class SkyPasses {
     } | null = null;
 
     private _cloudSkyWait = 0;
-    private readonly _cloudFaceView: mat4 = mat4.create();
-    private readonly _cloudFaceInv: mat4 = mat4.create();
 
-    /** `_captureProj` before its WebGPU Y flip: what a cloud-sky face's rays are rebuilt through. */
-    private static readonly _CLOUD_FACE_PROJ: mat4 = mat4.perspective(mat4.create(), Math.PI / 2, 1, 0.1, 10);
 
     /** How far (degrees) the sun may move in play before `autoRebake` starts a new bake. */
     private static readonly CLOUD_SKY_AUTO_DEGREES = 2;
@@ -960,10 +956,8 @@ export class SkyPasses {
     }
 
     /**
-     * Paint `faces` of the bake's cube: the atmosphere first, then the cloud raymarch over it, seen
-     * from the bake's eye through each face. No depth bound (nothing occludes a sky face), no temporal
-     * reconstruction and no dither (either would freeze into the texture as grain and face seams), and
-     * a step floor above the live pass, since this is paid once.
+     * Paint `faces` of the bake's cube: the atmosphere first, then the clouds over it (the clouds' own
+     * `paintSkyFaces`), seen from the bake's eye through each face.
      */
     private _bakeCloudSkyFaces(scene: Scene, node: VolumetricCloudsNode, atmo: SkyAtmosphereNode,
                                faces: readonly number[]): void {
@@ -971,48 +965,8 @@ export class SkyPasses {
         const cube = this._cloudSkyCubes[bake.cube]!;
         const res = this._cloudSkyRes[bake.cube];
         this._renderAtmosphereFaces(atmo, bake.sun, cube, res, faces);
-
-        this._clouds.bakeCloudNoise();
-        if (!this._clouds.cloudBaseNoise || !this._clouds.cloudDetailNoise || node.opacity <= 0) return;
-
-        this._shaderManager.bind('volumetricClouds');
-        const pipeline = this._pipelines.fullscreen('volumetricClouds', VolumetricCloudsProgram,
-                                                  VolumetricCloudPasses.CLOUD_BLEND, undefined,
-                                                  this.cubeFBO.targetFor(cube, faces[0] ?? 0, 0, false));
-        // The depth texture is bound only because the layout has a slot for it; `u_ignoreDepth` skips it.
-        const group = this._bindGroups.textureGroup(pipeline, 0, [this._targets.gBuffer.depth, this._clouds.cloudBaseNoise,
-                                                           this._clouds.cloudDetailNoise]);
-        this._clouds.setCloudUniforms(scene, node, this._cloudFaceInv, bake.eye, bake.wind);
-        this._shaderManager.setUniform('u_ignoreDepth', true);
-        // The cloud-sky cube is a bake: absolute, like the atmosphere cube it paints over.
-        this._shaderManager.setUniform('u_preExposure', 1);
-        this._shaderManager.setUniform('u_temporal', false);
-        this._shaderManager.setUniform('u_jitter', false);
-        this._shaderManager.setUniform('u_jitterSlot', 0);
-        this._shaderManager.setUniform('u_steps', Math.min(192, Math.max(node.steps, 96)));
-        this._shaderManager.setUniform('u_lightSteps', Math.min(12, Math.max(node.lightSteps, 8)));
-
-        this._passes.setViewport(res, res);
-        const eye = bake.eye;
-        for (const face of faces) {
-            // The face's view from the bake's eye, through the UNFLIPPED 90-degree projection on both
-            // backends. The ray is rebuilt from the screen quad's uv, and the quad already carries the
-            // backend difference (its V is inverted on WebGPU, see `_screenQuad`), which lands every uv
-            // row on the texel row the atmosphere's rasterized face put that direction in. Using
-            // `_captureProj`, whose Y is flipped on WebGPU for RASTERIZING into a cube, applied the
-            // flip twice: every side face traced the mirror image of its sky, so its clouds went below
-            // the horizon and only the zenith and nadir looked right.
-            mat4.translate(this._cloudFaceView, this._iblFaceViews[face], [-eye[0], -eye[1], -eye[2]]);
-            mat4.multiply(this._cloudFaceInv, SkyPasses._CLOUD_FACE_PROJ, this._cloudFaceView);
-            mat4.invert(this._cloudFaceInv, this._cloudFaceInv);
-            this._shaderManager.setUniform('u_invViewProj', this._cloudFaceInv);
-            const pass = this._passes.beginFullscreenPass(this.cubeFBO.targetFor(cube, face, 0, false),
-                                                   'cloudSkyBake', false, undefined, false);
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(0, group);
-            this._passes.drawFullscreenAndEnd(pass);
-        }
-        this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
+        this._clouds.paintSkyFaces(scene, node, face => this.cubeFBO.targetFor(cube, face, 0, false), res, faces,
+                                   this._iblFaceViews, bake.eye, bake.wind);
     }
 }
 

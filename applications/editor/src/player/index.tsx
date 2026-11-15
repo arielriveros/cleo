@@ -1,6 +1,8 @@
 import { hideLoadingWhenSmooth, showError } from './pageStatus';
 import { unpackGameBin } from './unpack';
 import { installShaderLibrary } from 'cleo/graphics/shaderLibrary';
+import { installFeatures } from 'cleo/core/features/registry';
+import { FEATURE_LOADERS } from 'cleo/modules/loaders';
 
 // The PUBLISHED player: the standalone, data-driven runtime for a published Cleo game. It loads game.bin
 // and runs it outside the editor, silent, its scripts precompiled into game.scripts.js. The boot itself is
@@ -46,6 +48,15 @@ function createPhysicsWorker(): Worker {
   return new Worker(url, { type: 'module', name: 'cleo-physics' });
 }
 
+/** Load the optional features the game was built with, each a chunk beside this one, and install them. */
+async function loadFeatures(ids: readonly string[]): Promise<void> {
+  const modules = await Promise.all(ids.filter(id => FEATURE_LOADERS[id]).map(async id => {
+    try { return (await FEATURE_LOADERS[id]()).default; }
+    catch (e) { throw new Error(`The game's ${id} feature could not be loaded (${(e as any)?.message || e}). Publish it again.`); }
+  }));
+  installFeatures(modules);
+}
+
 async function boot(): Promise<void> {
   const buffer = await loadGameBuffer();
   const pack = unpackGameBin(buffer);
@@ -54,6 +65,7 @@ async function boot(): Promise<void> {
   await bootPlayer({
     buffer,
     pack,
+    loadFeatures,
     // A shipped game runs silent.
     logging: false,
     physicsWorkerFactory: createPhysicsWorker,

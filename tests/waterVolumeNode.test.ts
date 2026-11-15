@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { makeBody, box } from './helpers/physicsBodies';
 import { Body, Box, Vec3 } from 'cannon-es';
+import './helpers/features';
 import { Scene } from '../src/core/scene/scene';
 import { Node } from '../src/core/scene/nodes/node';
 import { WaterVolumeNode, WATER_RIPPLE_SLOTS } from '../src/core/scene/nodes/waterVolumeNode';

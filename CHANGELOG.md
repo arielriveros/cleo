@@ -30,6 +30,13 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     is 6.1 MB in all. When the game still uses one, Publish lists every use and asks: turn it back on, publish
     without it, or cancel. A game without Input binds no input map and shows no touch controls.
   - *New project* asks for a name, a features preset and the addons; a 2D preset's first scene is 2D.
+  - *Their code* goes too, for the first eight: global illumination, volumetric fog, volumetric clouds, decals,
+    water, fire and smoke, cloth and cinematics are each a part of the published player of their own (210 KB
+    between them), loaded at boot only by a game built with it; the 2D preset's small game is now 5.96 MB. A
+    script that names a left-out feature's class (`DecalNode` in a game without Decals) gets an error naming the
+    feature instead of `undefined`, in a published game and in Play in window alike.
+  - *Detect from Project* also counts a trigger in a 2D scene as 2D physics, an AI-driven controller as AI
+    navigation, a model with cloth parts as Cloth, and any name a feature's module adds that a script uses.
 - **Addons.** Project ▸ Addons turns editor addons on or off per project; the choice travels with the project's
   bundle. The Claude Code panel is the first addon: with it off, its code is not even loaded (no panel, no
   toggle, no agent link). Projects from before addons have it on.

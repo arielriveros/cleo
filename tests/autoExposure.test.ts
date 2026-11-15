@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import './helpers/features';
 import { REFERENCE_ILLUMINANCE } from '../src/graphics/lighting';
 import { rendererSource, methodBody, expectAbsent } from './helpers/rendererSource';
 

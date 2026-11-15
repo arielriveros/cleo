@@ -30,12 +30,19 @@ export interface PlayerBuild {
   };
 }
 
-/** The parts a game needs, from its published config: today, the physics backend it was made with. */
-export function playerFeaturesFor(config: any): string[] {
+/**
+ * The parts a game needs, from its published config: the physics backend it was made with, and the engine's
+ * optional features it was built with (`config.features`) that have code of their own in this player. A feature
+ * with none (screen-space reflections, WebGL 2 fallback: shaders and data only) has no part.
+ */
+export function playerFeaturesFor(config: any, build?: Pick<PlayerBuild, 'features'>): string[] {
+  const out: string[] = [];
   const backend = config?.physics?.backend;
-  if (backend === 'rapier') return ['physics-rapier'];
-  if (backend === 'jolt') return ['physics-jolt'];
-  return [];
+  if (backend === 'rapier') out.push('physics-rapier');
+  if (backend === 'jolt') out.push('physics-jolt');
+  if (build && Array.isArray(config?.features))
+    for (const id of config.features) if (typeof id === 'string' && build.features[id]) out.push(id);
+  return out;
 }
 
 /** Each named part and every part it loads, in a stable order. Throws on a part the build does not have. */

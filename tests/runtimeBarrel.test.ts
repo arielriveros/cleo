@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import * as Core from '../src/cleoCore';
 import * as Full from '../src/cleo';
 import { buildFactoryBody, setScriptTranspiler } from '../src/core/scripting/scriptRuntime';
 import { sucraseTranspiler } from '../src/core/scripting/sucraseTranspiler';
 import { Model, setModelFileImporter } from '../src/graphics/model';
+import { ALL_FEATURE_MODULES } from '../src/modules/all';
 
 // A published game runs on src/cleoCore.ts, the engine without the editor's tools: the model importers
 // (assimp's WASM alone is 5 MB), the script compiler and the movie renderer. src/cleo.ts is the runtime plus
@@ -48,6 +49,31 @@ function reach(entry: string): Set<string> {
 
 const rel = (f: string) => path.relative(SRC, f).split(path.sep).join('/');
 
+/**
+ * The modules an optional feature brings (src/modules/<id>): its own folder and what its index and api import
+ * directly, less the core modules a feature registers through or hooks into (the sequencer's globals reach the
+ * engine and the game).
+ */
+function featureRoots(id: string): string[] {
+    const dir = path.join(SRC, 'modules', id);
+    const shared = new Set(['core/features/registry.ts', 'core/scene/sceneKinds.ts', 'graphics/render/featureSubsystems.ts',
+                            'core/engine.ts', 'core/game.ts']);
+    const roots = new Set<string>();
+    for (const file of ['index.ts', 'api.ts']) {
+        const own = path.join(dir, file);
+        roots.add(rel(own));
+        const text = readFileSync(own, 'utf8').replace(/\b(?:import|export)\s+type\s[^;]*;/g, '');
+        for (const m of text.matchAll(/\bfrom\s+['"](\.[^'"]+)['"]/g)) {
+            const base = path.resolve(dir, m[1]);
+            const found = [`${base}.ts`, path.join(base, 'index.ts')].find(existsSync);
+            if (found && !shared.has(rel(found)) && path.dirname(found) !== dir) roots.add(rel(found));
+        }
+    }
+    return [...roots];
+}
+
+const FEATURE_IDS = readdirSync(path.join(SRC, 'modules'), { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name);
+
 describe('the runtime barrel (cleoCore)', () => {
     it('reaches none of the editor tools', () => {
         const reached = [...reach(path.join(SRC, 'cleoCore.ts'))].map(f => f.startsWith('package:') ? f : rel(f));
@@ -60,8 +86,20 @@ describe('the runtime barrel (cleoCore)', () => {
         expect(reached).toContain('graphics/renderer.ts');
     });
 
+    it('reaches none of the optional features: a published game loads those it needs as chunks', () => {
+        const reached = new Set([...reach(path.join(SRC, 'cleoCore.ts'))].filter(f => !f.startsWith('package:')).map(rel));
+        expect(FEATURE_IDS.length).toBeGreaterThan(0);
+        for (const id of FEATURE_IDS) {
+            const roots = featureRoots(id);
+            expect(roots.length, id).toBeGreaterThan(2);
+            for (const root of roots) expect(reached.has(root), `the core reaches ${root} (feature ${id})`).toBe(false);
+        }
+        expect(reached.has('modules/all.ts')).toBe(false);
+        expect(reached.has('modules/loaders.ts')).toBe(false);
+    });
+
     it('exports the runtime, and the full engine adds only the tools', () => {
-        for (const name of ['CleoEngine', 'Scene', 'Node', 'Renderer', 'PhysicsSystem', 'SequenceNode', 'Vec'])
+        for (const name of ['CleoEngine', 'Scene', 'Node', 'Renderer', 'PhysicsSystem', 'Vec'])
             expect((Core as any)[name], name).toBeDefined();
         for (const name of ['Loader', 'GLTFLoader', 'parseAssimpFiles', 'readFbxTextures', 'renderMovie', 'beginMovieEngine']) {
             expect((Core as any)[name], name).toBeUndefined();
@@ -70,6 +108,20 @@ describe('the runtime barrel (cleoCore)', () => {
         const extra = Object.keys(Full).filter(k => !(k in Core)).sort();
         expect(extra.every(k => !(k in Core))).toBe(true);
         expect(Object.keys(Core).every(k => k in Full)).toBe(true);
+    });
+
+    it("leaves the features' names to them, and the full engine exports each as it is", () => {
+        expect(ALL_FEATURE_MODULES.map(m => m.id).sort()).toEqual([...FEATURE_IDS].sort());
+        for (const feature of ALL_FEATURE_MODULES) {
+            const names = Object.keys(feature.api);
+            expect(names.length, feature.id).toBeGreaterThan(0);
+            for (const name of names) {
+                expect(name in Core, `${name} (feature ${feature.id}) is in the runtime barrel`).toBe(false);
+                expect((Full as any)[name], `${name} (feature ${feature.id})`).toBe((feature.api as any)[name]);
+            }
+        }
+        expect((Full as any).SequenceNode).toBeDefined();
+        expect((Core as any).SequenceNode).toBeUndefined();
     });
 });
 

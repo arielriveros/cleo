@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import './helpers/features';
 import { parseInputMap } from '../src/input/actionMap';
 import { buildNavMesh, parseNavMeshData } from '../src/ai/navMesh';
 import { parseBehaviorMachine, createBehaviorRuntime, stepBehavior } from '../src/core/control/behavior';

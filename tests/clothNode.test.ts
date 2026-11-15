@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import './helpers/features';
 import { setGLContext } from '../src/graphics/rhi/webgl2/glContext';
 import { WebGL2Device } from '../src/graphics/rhi/webgl2/webgl2Device';
 import { setDevice } from '../src/graphics/rhi/deviceHandle';

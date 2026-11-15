@@ -10,6 +10,9 @@
 // Sucrase itself is installed, not imported (setScriptTranspiler): a published game runs its scripts
 // precompiled and never strips a type, so it does not carry the compiler.
 import { scriptSourceUrl, inlineScriptUrl } from './scriptUrls';
+// Leaves both: the optional features' registry and catalog, for what 'cleo' holds (see buildCleoModule).
+import { featuresVersion, liveFeatureApis, onFeaturesChanged, unavailableFeatureNames } from '../features/registry';
+import { featureById } from '../../modules/catalog';
 
 export type ScriptModule = Record<string, any>;
 
@@ -56,9 +59,57 @@ export const SCRIPT_HANDLERS = [
 /** Built-in modules: the engine API, registered by src/cleo.ts as 'cleo'. */
 const modules = new Map<string, ScriptModule>();
 
+/**
+ * What scripts see as 'cleo': the registered barrel, plus the names of the optional features installed since
+ * (src/core/features/registry.ts: a published game's player loads them after its runtime barrel registered
+ * itself), minus those of features the game goes without, which throw a clear error instead of reading
+ * `undefined`. Built on first use, and again after any change to the features or to the barrel.
+ */
+let cleoModule: ScriptModule | null = null;
+let cleoBuiltFor = -1;
+let moduleVersion = 0;
+onFeaturesChanged(() => { cleoModule = null; moduleVersion++; });
+
+/** Bumped whenever what 'cleo' resolves to may have changed: caches of its classes compare it. */
+export function scriptModulesVersion(): number {
+    return moduleVersion;
+}
+
+function buildCleoModule(base: ScriptModule): ScriptModule {
+    const out: ScriptModule = { ...base };
+    for (const api of liveFeatureApis())
+        for (const name of Object.keys(api)) if (name !== 'default') out[name] = api[name];
+    const labelOf = (id: string) => featureById(id)?.label ?? id;
+    const live = liveFeatureApis();
+    for (const [name, { label, owned }] of unavailableFeatureNames(labelOf)) {
+        // A live feature's name stays, and so does one the runtime itself exports that a game was only told
+        // was missing. A restricted feature's own name goes even when the barrel has it: the full engine's
+        // barrel (src/cleo.ts) carries every feature's names, which Play in window must still take away.
+        if (live.some(api => name in api)) continue;
+        if (!owned && name in base) continue;
+        delete out[name];
+        Object.defineProperty(out, name, {
+            enumerable: false, configurable: true,
+            get() { throw new Error(`'${name}' belongs to the ${label} feature, which this game was published without (Project ▸ Features).`); },
+        });
+    }
+    return out;
+}
+
+function builtinModule(specifier: string): ScriptModule | undefined {
+    const found = modules.get(specifier);
+    if (!found || specifier !== 'cleo') return found;
+    if (!cleoModule || cleoBuiltFor !== featuresVersion()) {
+        cleoModule = buildCleoModule(found);
+        cleoBuiltFor = featuresVersion();
+    }
+    return cleoModule;
+}
+
 /** Makes `exports` importable from scripts as `specifier`. src/cleo.ts registers itself as 'cleo'. */
 export function registerScriptModule(specifier: string, exports: ScriptModule): void {
     modules.set(specifier, exports);
+    if (specifier === 'cleo') { cleoModule = null; moduleVersion++; }
 }
 
 /**
@@ -67,7 +118,7 @@ export function registerScriptModule(specifier: string, exports: ScriptModule): 
  * on first import, and cached for the rest of the session.
  */
 export function resolveScriptModule(specifier: string): ScriptModule {
-    const found = modules.get(specifier);
+    const found = builtinModule(specifier);
     if (found) return found;
     return loadUserModule(specifier);
 }
@@ -301,23 +352,29 @@ const PUBLIC_ONLY = { isDescendantOf: () => false } as any;
  */
 export function createModuleImporter(): (specifier: string) => ScriptModule {
     let scoped: ScriptModule | null = null;
+    let scopedFor: ScriptModule | null = null;
     return (specifier: string) => {
         const module = resolveScriptModule(specifier);
         if (specifier !== 'cleo') return module;
-        if (scoped) return scoped;
+        if (scoped && scopedFor === module) return scoped;
         const { getData, setData, canAccessVariable } = module;
-        scoped = { ...module, unwrapScriptNode: (value: any) => value };
+        // Inherits rather than copies: a copy would drop the throwing getters of a left-out feature's names
+        // (they are not enumerable), and the script would read `undefined` instead of the reason.
+        const next: ScriptModule = Object.create(module);
+        scoped = next;
+        scopedFor = module;
+        next.unwrapScriptNode = (value: any) => value;
         if (typeof getData === 'function')
-            scoped.getData = (target: any, requester?: any) => getData(target, requester ?? PUBLIC_ONLY);
+            next.getData = (target: any, requester?: any) => getData(target, requester ?? PUBLIC_ONLY);
         if (typeof setData === 'function')
-            scoped.setData = (target: any, name: string, ...params: any[]) => {
+            next.setData = (target: any, name: string, ...params: any[]) => {
                 if (typeof canAccessVariable === 'function' && target && !canAccessVariable(target, PUBLIC_ONLY, name)) {
                     console.warn(`[Script] A shared script module cannot set non-public '${name}' on '${target.name}'. Call it from the node's own script instead.`);
                     return;
                 }
                 setData(target, name, ...params);
             };
-        return scoped;
+        return next;
     };
 }
 

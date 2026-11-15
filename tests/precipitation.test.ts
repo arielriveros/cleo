@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import './helpers/features';
 import { Scene } from '../src/core/scene/scene';
 import { Camera } from '../src/core/camera';
 import { CameraNode } from '../src/core/scene/nodes/cameraNode';

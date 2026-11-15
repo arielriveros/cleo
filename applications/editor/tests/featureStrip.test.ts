@@ -86,6 +86,27 @@ describe('what a game uses of the features', () => {
     expect(featureUsage({ scenes: { a: { name: 'A', scene, render, dimension: '2D' } } }).size).toBe(0)
   })
 
+  it('sees what a node uses beyond its type: 2D areas, AI-driven controllers, cloth on a model', () => {
+    const scene = node('node', 'root', { children: [
+      node('trigger', 'Pickup'),
+      node('controller', 'Guard', { controlSource: 'ai' }),
+      node('controller', 'Hero', { controlSource: 'player' }),
+      node('model', 'Knight', { model: { skinnedCloth: { vertices: [0], weights: [1] } } }),
+    ] })
+    const in2D = featureUsage({ scenes: { a: { name: 'A', scene, dimension: '2D' } } })
+    expect(in2D.get('physics2d')).toEqual([{ where: 'A ▸ Pickup', what: 'Trigger node in a 2D scene' }])
+    expect(in2D.get('ai')).toEqual([{ where: 'A ▸ Guard', what: 'AI-driven controller' }])
+    expect(in2D.get('cloth')).toEqual([{ where: 'A ▸ Knight', what: 'cloth parts on its model' }])
+    // A 3D trigger is the 3D physics', which is always shipped.
+    expect(featureUsage({ scenes: { a: { name: 'A', scene, dimension: '3D' } } }).has('physics2d')).toBe(false)
+  })
+
+  it("reads a script's use of any name a feature's module adds, not only its node class", () => {
+    const usage = featureUsage({ scenes: {}, modules: { '/Fx': "import { decalFlipbookFrame, VOLUMETRIC_FOG_PRESETS } from 'cleo'" } })
+    expect(usage.get('decals')).toEqual([{ where: 'script /Fx', what: 'uses decalFlipbookFrame' }])
+    expect(usage.get('volumetricFog')).toEqual([{ where: 'script /Fx', what: 'uses VOLUMETRIC_FOG_PRESETS' }])
+  })
+
   it('does not take a name for the feature in a script that never imports the engine', () => {
     const usage = featureUsage(game)
     expect(usage.get('landscape')?.some(u => u.where.includes('Plain'))).toBe(false)

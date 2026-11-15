@@ -2,7 +2,7 @@
 // templates and scripts: the Features panel's "Detect from project" and the check Publish runs when a project
 // has features turned off. Static, like Godot's detection: a node a script builds from a string, or a feature
 // reached through another, is not seen. Pure, over serialized JSON.
-import { FEATURES, type FeatureDef } from 'cleo'
+import { FEATURES, featureApiNames, type FeatureDef } from 'cleo'
 
 /** One use of a feature: where it is, and what there uses it. */
 export interface FeatureUse {
@@ -27,9 +27,33 @@ export interface UsageSource {
 
 const NODE_FEATURE = new Map<string, FeatureDef>()
 const MATERIAL_FEATURE = new Map<string, FeatureDef>()
+const FEATURE_BY_ID = new Map<string, FeatureDef>()
 for (const f of FEATURES) {
+  FEATURE_BY_ID.set(f.id, f)
   for (const t of f.nodeTypes ?? []) NODE_FEATURE.set(t, f)
   for (const m of f.materialTypes ?? []) MATERIAL_FEATURE.set(m, f)
+}
+
+/**
+ * What a node uses that its type alone does not say: a trigger in a 2D scene is a 2D area (the 2D physics
+ * steps it), an AI-driven controller thinks with the AI feature, and a model with cloth parts simulates them
+ * with the Cloth feature.
+ */
+function nodeUses(node: any, dimension: '2D' | '3D' | undefined): [string, string][] {
+  const out: [string, string][] = []
+  if (node.type === 'trigger' && dimension === '2D') out.push(['physics2d', 'Trigger node in a 2D scene'])
+  if (node.type === 'controller' && node.controlSource === 'ai') out.push(['ai', 'AI-driven controller'])
+  if (node.model?.skinnedCloth) out.push(['cloth', 'cloth parts on its model'])
+  return out
+}
+
+/**
+ * The script names of a feature: every name its module adds to the engine API (src/modules/<id>/api.ts) once
+ * it has code of its own, else the catalog's list.
+ */
+function namesOf(f: FeatureDef): readonly string[] {
+  const api = featureApiNames(f.id)
+  return api.length ? api : (f.apiNames ?? [])
 }
 
 const label = (type: string) => type.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase())
@@ -41,7 +65,7 @@ const importsCleo = (source: string) => /\bfrom\s*['"]cleo['"]|import\s*\(\s*['"
 function scriptUses(source: string): { feature: FeatureDef; name: string }[] {
   if (typeof source !== 'string' || !importsCleo(source)) return []
   const out: { feature: FeatureDef; name: string }[] = []
-  for (const f of FEATURES) for (const name of f.apiNames ?? [])
+  for (const f of FEATURES) for (const name of namesOf(f))
     if (new RegExp(`\\b${name}\\b`).test(source)) out.push({ feature: f, name })
   return out
 }
@@ -56,11 +80,16 @@ export function featureUsage(game: UsageSource): FeatureUsage {
   }
 
   // A path starts below the root: a scene's root is the scene itself, named by its entry.
-  const walk = (node: any, where: (path: string) => string, path: string[], root = false): void => {
+  const walk = (node: any, where: (path: string) => string, path: string[], dimension: '2D' | '3D' | undefined,
+                root = false): void => {
     if (!node || typeof node !== 'object') return
     const here = node.name && !root ? [...path, String(node.name)] : path
     const f = typeof node.type === 'string' ? NODE_FEATURE.get(node.type) : undefined
     if (f) add(f, where(here.join('/')), `${label(node.type)} node`)
+    for (const [id, what] of nodeUses(node, dimension)) {
+      const used = FEATURE_BY_ID.get(id)
+      if (used) add(used, where(here.join('/')), what)
+    }
     for (const m of [node.model?.material, ...(Array.isArray(node.model?.materials) ? node.model.materials : [])]) {
       const mf = typeof m?.type === 'string' ? MATERIAL_FEATURE.get(m.type) : undefined
       if (mf) add(mf, where(here.join('/')), `${m.type.replace('_', '-')} material`)
@@ -68,7 +97,7 @@ export function featureUsage(game: UsageSource): FeatureUsage {
     }
     if (typeof node.script === 'string')
       for (const { feature, name } of scriptUses(node.script)) add(feature, where(here.join('/')), `its script uses ${name}`)
-    for (const child of node.children ?? []) walk(child, where, here)
+    for (const child of node.children ?? []) walk(child, where, here, dimension)
   }
 
   // A render setting is a use only for a feature with nothing else to show for it (reflections, ambient
@@ -83,10 +112,12 @@ export function featureUsage(game: UsageSource): FeatureUsage {
   }
 
   for (const entry of Object.values(game.scenes ?? {})) {
-    walk(entry.scene, p => p ? `${entry.name} ▸ ${p}` : entry.name, [], true)
-    settings(entry.render, `${entry.name} render settings`, entry.dimension ?? (entry.scene?.dimension === '2D' ? '2D' : undefined))
+    const dimension = entry.dimension ?? (entry.scene?.dimension === '2D' ? '2D' : undefined)
+    walk(entry.scene, p => p ? `${entry.name} ▸ ${p}` : entry.name, [], dimension, true)
+    settings(entry.render, `${entry.name} render settings`, dimension)
   }
-  for (const t of game.templates ?? []) walk(t.node, p => `template ${t.name ?? p}${t.name && p && p !== t.name ? ' ▸ ' + p : ''}`, [])
+  // A template can land in a scene of either dimension: its triggers are not counted as 2D areas.
+  for (const t of game.templates ?? []) walk(t.node, p => `template ${t.name ?? p}${t.name && p && p !== t.name ? ' ▸ ' + p : ''}`, [], undefined)
   for (const [id, source] of Object.entries(game.modules ?? {}))
     for (const { feature, name } of scriptUses(source)) add(feature, `script ${id}`, `uses ${name}`)
   settings(game.config?.render, 'render settings')

@@ -32,6 +32,8 @@ import type { Visibility } from './visibility';
 import type { SsilPasses } from './ssil';
 import { ShaderManager } from '../systems/shaderManager';
 import type { RenderSubsystems } from './subsystems';
+import { skyAmbient } from '../particles/particleLighting';
+import type { ParticleLocalLight } from '../particles/particleLighting';
 import { CULL_OCCLUDED, CULL_OUTSIDE, type CullVerdict } from './cullGhosts';
 
 /** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
@@ -953,4 +955,81 @@ export class LightingPasses {
             }
         }
     }
+
+    /**
+     * The frame's light as lit particles and lit sprites (Sprite.lit) take it: the key directional light
+     * (the sun, or the moon at night) as a unit direction TOWARD it and its colour times its intensity, the
+     * ambient and sky fill surfaces get, and the punctual lights for `gatherParticleLocalLight` to pick a
+     * key from at each effect. Worked out once per scene and frame; the result is shared, not a copy.
+     */
+    public frameLight(scene: Scene): FrameLight {
+        const cached = this._frameLight;
+        if (cached && this._frameLightScene === scene && this._frameLightFrame === this._view.frameIndex) return cached;
+        let sun: LightNode | null = null;
+        for (const light of scene.lights) if (light.type === 'directional') { sun = light; break; }
+        const sunColor = [0, 0, 0];
+        const sunDirection = [0, 1, 0];
+        if (sun) {
+            const light = sun.light as DirectionalLight;
+            const key = sun === this.keyLightNode ? this.keyLight : null;
+            const k = key ? key.intensity : light.internalIntensity;
+            const c = key ? key.color : light.color;
+            sunColor[0] = c[0] * k; sunColor[1] = c[1] * k; sunColor[2] = c[2] * k;
+            const f = this.dirOf(sun);
+            sunDirection[0] = -f[0]; sunDirection[1] = -f[1]; sunDirection[2] = -f[2];
+        }
+        // The fallback indirect term surfaces get (deferredLighting `indirect.diffuse`): the scene ambient,
+        // as the sky light scales it, plus the sky light's mean irradiance. No invented floor: a scene with
+        // neither is dark, for particles as for everything else.
+        const ambient = this.internalAmbient(scene);
+        const skyNode = scene.skyLight;
+        if (skyNode && this._sys.sky.skySHValid) {
+            const grade = this.cloudGrade(scene);
+            const sky = skyAmbient(this._sys.sky.skySH, skyNode.intensity * grade.sky);
+            ambient[0] += sky[0]; ambient[1] += sky[1]; ambient[2] += sky[2];
+        }
+
+        // The punctual lights as the light grid has them, less those whose whole reach was hidden this frame
+        // and those inside an occlusion volume the camera cannot see.
+        const localLights = this._frameLocalLights;
+        localLights.length = 0;
+        for (const node of scene.lights) {
+            if (node.type === 'directional' || node.index < 0) continue;
+            if (this._sys.visibility.lightOccludedMemo.get(node) === true || this._sys.visibility.volumeCulled(node)) continue;
+            const light = node.light as PointLight | Spotlight;
+            const record: ParticleLocalLight = {
+                // Flickering with the light, as the light grid does, so torch smoke pulses with its torch.
+                position: node.worldPosition, intensity: light.internalIntensity * node.flickerFactor, color: light.color,
+                range: light.range, sourceRadius: light.sourceRadius,
+            };
+            if (node.type === 'spotlight') {
+                record.direction = node.worldForward;
+                record.cone = (light as Spotlight).coneScaleOffset;
+            } else if (node.type === 'area' && !(node.light as AreaLight).twoSided) {
+                // As its light record has it (render/lighting.ts): a one-sided panel lights its half-space.
+                record.direction = node.worldForward;
+                record.cone = [1, 0];
+            }
+            localLights.push(record);
+        }
+
+        const light: FrameLight = { ambient, sunDirection, sunColor, localLights };
+        this._frameLight = light;
+        this._frameLightScene = scene;
+        this._frameLightFrame = this._view.frameIndex;
+        return light;
+    }
+
+    private readonly _frameLocalLights: ParticleLocalLight[] = [];
+    private _frameLight: FrameLight | null = null;
+    private _frameLightScene: Scene | null = null;
+    private _frameLightFrame = -1;
+}
+
+/** See {@link LightingPasses.frameLight}. */
+export interface FrameLight {
+    readonly ambient: number[];
+    readonly sunDirection: number[];
+    readonly sunColor: number[];
+    readonly localLights: readonly ParticleLocalLight[];
 }

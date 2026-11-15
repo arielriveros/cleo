@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import './helpers/features';
 import { SequencePlayer } from '../src/sequencer/sequencePlayer';
 import { parseSequence } from '../src/sequencer/parse';
 import { registerSequencePresets, sequencePresetsFor, blendPresetValue } from '../src/sequencer/presetRegistry';

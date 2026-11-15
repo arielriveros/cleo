@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mat4, vec3 } from 'gl-matrix';
+import './helpers/features';
 import { GIVolumeNode } from '../src/core/scene/nodes/giVolumeNode';
 import { GI_PROBE_ACTIVE, GI_PROBE_INACTIVE } from '../src/graphics/render/gi/giClassify';
 import {

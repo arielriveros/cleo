@@ -11,7 +11,6 @@ import { TilemapNode } from "./tilemapNode";
 import { LightNode } from "./lightNode";
 import { LightProbeNode } from "./lightProbeNode";
 import { SkyboxNode } from "./skyboxNode";
-import { VolumetricCloudsNode } from "./volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./skyAtmosphereNode";
 import { SkyLightNode } from "./skyLightNode";
 import { WindNode } from "./windNode";
@@ -21,15 +20,9 @@ import { CameraNode } from "./cameraNode";
 import { SpriteNode } from "./spriteNode";
 import { AnimatedSpriteNode } from "./animatedSpriteNode";
 import { SoundNode } from "./soundNode";
-import { DecalNode } from "./decalNode";
 import { ParticleSystemNode } from "./particleSystemNode";
 import { ForceFieldNode } from "./forceFieldNode";
-import { ClothNode } from "./clothNode";
-import { WaterVolumeNode } from "./waterVolumeNode";
 import { ExposureVolumeNode } from "./exposureVolumeNode";
-import { GIVolumeNode } from "./giVolumeNode";
-import { VolumetricFogNode } from "./volumetricFogNode";
-import { SequenceNode } from "./sequenceNode";
 import { Camera2DNode } from "./camera2DNode";
 import { Room2DNode } from "./room2DNode";
 import { ParallaxLayerNode } from "./parallaxLayerNode";
@@ -39,6 +32,9 @@ import { Body2DNode } from "./body2DNode";
 import { ColliderNode } from "./colliderNode";
 import { TriggerNode } from "./triggerNode";
 import { migrateLegacyPhysicsJson } from "./physicsLegacy";
+import { featureNodeParser, isFeatureRestrictedOut } from "../../features/registry";
+import { featureOfNodeType } from "../../../modules/catalog";
+import { Logger } from "../../logger";
 import { UIRootNode } from "./ui/uiRoot";
 import { UIPanelNode, UIStackNode, UISpacerNode } from "./ui/uiContainers";
 import { UITextNode, UIImageNode } from "./ui/uiContent";
@@ -65,7 +61,6 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'sound': SoundNode.parse(parent, json); break;
     case 'landscape': LandscapeNode.parse(parent, json); break;
     case 'tilemap': TilemapNode.parse(parent, json); break;
-    case 'volumetricClouds': VolumetricCloudsNode.parse(parent, json); break;
     case 'skyAtmosphere': SkyAtmosphereNode.parse(parent, json); break;
     case 'skyLight': SkyLightNode.parse(parent, json); break;
     case 'wind': WindNode.parse(parent, json); break;
@@ -78,15 +73,9 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'character': CharacterNode.parse(parent, json); break;
     case 'controller': ControllerNode.parse(parent, json); break;
     case 'navMesh': NavMeshNode.parse(parent, json); break;
-    case 'decal': DecalNode.parse(parent, json); break;
     case 'particleSystem': ParticleSystemNode.parse(parent, json); break;
     case 'forceField': ForceFieldNode.parse(parent, json); break;
-    case 'cloth': ClothNode.parse(parent, json); break;
-    case 'waterVolume': WaterVolumeNode.parse(parent, json); break;
     case 'exposureVolume': ExposureVolumeNode.parse(parent, json); break;
-    case 'giVolume': GIVolumeNode.parse(parent, json); break;
-    case 'volumetricFog': VolumetricFogNode.parse(parent, json); break;
-    case 'sequence': SequenceNode.parse(parent, json); break;
     case 'camera2D': Camera2DNode.parse(parent, json); break;
     case 'room2D': Room2DNode.parse(parent, json); break;
     case 'parallaxLayer': ParallaxLayerNode.parse(parent, json); break;
@@ -105,8 +94,28 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'uiSlider': UISliderNode.parse(parent, json); break;
     case 'uiToggle': UIToggleNode.parse(parent, json); break;
     case 'uiTextInput': UITextInputNode.parse(parent, json); break;
-    default: Node.parse(parent, json);
+    default: parseOptionalNode(parent, json);
   }
+}
+
+/** Types already reported as belonging to a feature that is not installed (once each). */
+const reportedMissing = new Set<string>();
+
+/**
+ * A type no core case knows: an optional feature's (src/core/features/registry.ts), when that feature is
+ * installed; else a plain node, which keeps its children and transform. A published game built without the
+ * feature never meets one (publish strips them); anywhere else a feature's type with no feature installed is a
+ * build that forgot to install it, and says so.
+ */
+function parseOptionalNode(parent: Node, json: any): void {
+  const parser = featureNodeParser(json?.type);
+  if (parser) { parser.parse(parent, parser.migrate ? parser.migrate(json) : json); return; }
+  const feature = typeof json?.type === 'string' ? featureOfNodeType(json.type) : undefined;
+  if (feature && !isFeatureRestrictedOut(feature.id) && !reportedMissing.has(json.type)) {
+    reportedMissing.add(json.type);
+    Logger.error(`A '${json.type}' node needs the ${feature.label} feature, which is not installed: import src/modules/all (or the feature's module) before parsing.`, 'Scene');
+  }
+  Node.parse(parent, json);
 }
 
 setChildParser(parseNodeJson);

@@ -3,6 +3,16 @@
 // tests import this; the published player imports cleo/cleoCore and leaves these out (vite.player.config.ts
 // fails its build if anything there reaches this file).
 export * from "./cleoCore";
+// The optional features' names (src/modules/<id>/api.ts): the runtime barrel leaves them out, since a published
+// game loads each feature as a chunk of its own; the full engine has them all, and installs them all below.
+export * from "./modules/sequencer/api";
+export * from "./modules/volumetricFog/api";
+export * from "./modules/gi/api";
+export * from "./modules/volumetricClouds/api";
+export * from "./modules/fluids/api";
+export * from "./modules/decals/api";
+export * from "./modules/cloth/api";
+export * from "./modules/water/api";
 
 export { Loader } from "./graphics/loader";
 export type { TextureLoadReport, UnresolvedTexture } from "./graphics/loader";
@@ -14,6 +24,10 @@ export { readFbxTextures, isBinaryFbx, fbxBaseName } from "./graphics/utils/fbxE
 export type { FbxTextureInfo, FbxEmbeddedImage, FbxMaterialTextures } from "./graphics/utils/fbxEmbedded";
 export { GLTFLoader } from "./graphics/utils/gltfLoader";
 export type { GltfParseResult, GltfMeshDescriptor, GltfMaterialDescriptor, GltfImageSource } from "./graphics/utils/gltfLoader";
+// Which shader programs a game draws with, read off its scenes at publish (features/publish/collectProgramUsage.ts).
+export { createProgramUsage, usageFromSceneJson, usageFromRenderSettings, castsShadows, programsFor, PROGRAM_CLASS } from "./graphics/programUsage";
+export type { ProgramUsage } from "./graphics/programUsage";
+export { MAX_SORTED_PARTICLES } from "./graphics/particles/particleRenderer";
 // Rendering a sequence to video, offline (sequencer/movie/).
 export {
     renderMovie, type MovieEngine, type MovieRenderOptions, type MovieFrame, type MovieSink, type MovieProgress,
@@ -28,6 +42,8 @@ export {
 
 // The runtime reads model files and compiles script source through what is installed here, rather than
 // importing the tools itself (graphics/model.ts, core/scripting/scriptRuntime.ts).
+// Every optional feature, installed: the editor, Play in window and the tests run the whole engine.
+import "./modules/all";
 import { Loader as ModelFileLoader } from "./graphics/loader";
 import { setModelFileImporter } from "./graphics/model";
 import { setScriptTranspiler } from "./core/scripting/scriptRuntime";

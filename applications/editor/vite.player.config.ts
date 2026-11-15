@@ -42,6 +42,23 @@ const ENGINE_CORE = path.resolve(ENGINE_ROOT, 'src/cleoCore.ts')
 export const PLAYER_FEATURES: Record<string, (moduleId: string) => boolean> = {
   'physics-rapier': id => /[\\/]@dimforge[\\/]rapier3d-compat[\\/]/.test(id),
   'physics-jolt': id => /[\\/]jolt-physics[\\/]/.test(id),
+  // The engine's optional features (Project ▸ Features), one part each: src/modules/<id>/index.ts, reached only
+  // through src/modules/loaders.ts. Read off that file rather than imported: importing it here would bundle every
+  // feature into this config.
+  ...Object.fromEntries(featureLoaderIds().map(id => [id, (moduleId: string) =>
+    moduleId.replace(/\\/g, '/').endsWith(`/src/modules/${id}/index.ts`)])),
+}
+
+/** The feature ids src/modules/loaders.ts can load. */
+function featureLoaderIds(): string[] {
+  const text = readFileSync(path.resolve(ENGINE_ROOT, 'src/modules/loaders.ts'), 'utf8')
+  return [...text.matchAll(/^\s*([\w]+):\s*\(\)\s*=>\s*import\(/gm)].map(m => m[1])
+}
+
+/** The part a chunk is the entry of, for its file name: `chunks/<part>-<hash>.js`. */
+function partOfFacade(moduleId: string | null): string | undefined {
+  if (!moduleId) return undefined
+  return Object.entries(PLAYER_FEATURES).find(([, test]) => test(moduleId))?.[0]
 }
 
 export interface PlayerManifestFeature {
@@ -229,6 +246,8 @@ const EDITOR_ONLY: { test: RegExp; what: string }[] = [
   { test: /[\\/]src[\\/]sequencer[\\/]movie[\\/]/, what: 'the movie renderer' },
   { test: /[\\/]src[\\/]core[\\/]scripting[\\/]sucraseTranspiler\.ts$/, what: 'the script compiler' },
   { test: /[\\/]node_modules[\\/](sucrase|meshoptimizer|monaco-editor)[\\/]/, what: 'an editor-only library' },
+  // Every feature installed: one import of it and every optional feature is core again.
+  { test: /[\\/]src[\\/]modules[\\/]all\.ts$/, what: 'every optional feature at once (the player loads them through src/modules/loaders.ts)' },
 ]
 
 /**
@@ -306,7 +325,8 @@ export default defineConfig(() => withoutInlineShaders(mergeConfig(engineConfig,
       output: {
         format: 'es',
         entryFileNames: '[name].js',
-        chunkFileNames: 'chunks/[name]-[hash].js',
+        // A part's entry chunk is named by its part (a feature's entry would otherwise be one more `index-*.js`).
+        chunkFileNames: info => `chunks/${partOfFacade(info.facadeModuleId) ?? '[name]'}-[hash].js`,
       },
     },
   },

@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, addScriptModuleSources, registerTemplates, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles } from 'cleo';
+import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, addScriptModuleSources, registerTemplates, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles, restrictFeatures, setAbsentFeatureNames } from 'cleo';
 import type { BackendKind, LoadProgressListener } from 'cleo';
 import UILayer from '../features/gameUi/UILayer';
 import VirtualControlsLayer from '../features/gameUi/VirtualControlsLayer';
@@ -34,6 +34,12 @@ export interface PlayerBootOptions {
   graphicsBackend?: BackendKind;
   /** Makes the physics worker (PhysicsSystem.workerFactory), for the project's Physics thread option. */
   physicsWorkerFactory: () => Worker;
+  /**
+   * Loads and installs the engine's optional features the game was built with (`config.features`): the published
+   * player's, each a chunk of its own (src/modules/loaders.ts). Absent where the whole engine is already
+   * installed (Play in window), which then restricts itself to the game's features instead.
+   */
+  loadFeatures?: (ids: readonly string[]) => Promise<void>;
   /** Called after each scene has started: the entry scene and every Game.loadScene. */
   onSceneStarted?: (name: string) => void;
   /** A failure past boot: a scene switch that threw. Defaults to {@link showError}. */
@@ -84,6 +90,17 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   // A game published without its WebGL 2 shaders (Options ▸ Project ▸ WebGL 2 fallback off) needs WebGPU:
   // said here, before the engine would fall back to a WebGL 2 it has no shaders for.
   if (data?.config?.graphics?.webgl2 === false) await requireWebGPU();
+
+  // The engine's optional features this game was built with (Project ▸ Features), before anything parses or the
+  // engine is built: a feature's node types, scene lists and render subsystems come from them. Play in window runs
+  // the whole engine, restricted to the same set, so it plays what a publish ships.
+  const features: readonly string[] | undefined = Array.isArray(data?.config?.features) ? data.config.features : undefined;
+  if (features) {
+    if (options.loadFeatures) await options.loadFeatures(features);
+    else restrictFeatures(features);
+  }
+  // Script names of the features the game goes without, which then say so rather than read undefined.
+  setAbsentFeatureNames(data?.config?.absentApi ?? null);
 
   // Startup shader profile: every program's build time is recorded (shaderStats) and readable from
   // devtools as CLEO_SHADER_STATS. `?shaderProfile` (the desktop build: launch with --shader-profile)

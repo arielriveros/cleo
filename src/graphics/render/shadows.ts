@@ -32,7 +32,7 @@ import type { PassEncoder } from './passEncoder';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
-import type { VolumetricCloudPasses } from './clouds';
+import type { CloudSubsystem } from './featureSubsystems';
 import type { FoliagePasses } from './foliage';
 import { ShaderManager } from '../systems/shaderManager';
 import { DEPTH_WRITE } from './pipelineCache';
@@ -190,7 +190,7 @@ export class ShadowPasses {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
-                private readonly _clouds: VolumetricCloudPasses,
+                private readonly _clouds: CloudSubsystem,
                 private readonly _foliage: FoliagePasses,
                 private readonly _sys: RenderSubsystems) {}
 

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'fs';
 import path from 'path';
+import { FEATURES } from 'cleo';
+import { FEATURE_LOADERS } from 'cleo/modules/loaders';
 import { playerFeaturesFor, playerFilesFor, isSafePlayerPath, withModulePreloads, type PlayerBuild } from '../src/features/publish/playerManifest';
 
 // The published player is one ES-module build split into chunks (vite.player.config.ts): game.js, the physics
@@ -15,6 +17,18 @@ const built = existsSync(path.join(PLAYER, 'build.json')) && existsSync(path.joi
 interface ReportChunk { bytes: number; isEntry: boolean; isDynamicEntry: boolean; facade: string | null; imports: string[]; dynamicImports: string[]; modules: string[] }
 
 const BACKEND_PACKAGES = { 'physics-rapier': 'node_modules/@dimforge/rapier3d-compat/', 'physics-jolt': 'node_modules/jolt-physics/' } as const;
+
+/** Each optional feature with code of its own (src/modules/loaders.ts), and modules only it may bring. */
+const FEATURE_ROOTS: Record<string, string[]> = {
+  sequencer: ['src/core/scene/nodes/sequenceNode.ts'],
+  water: ['src/core/scene/nodes/waterVolumeNode.ts'],
+  cloth: ['src/core/scene/nodes/clothNode.ts', 'src/physics/cloth/skinnedCloth.ts'],
+  decals: ['src/core/scene/nodes/decalNode.ts', 'src/graphics/render/decals.ts'],
+  fluids: ['src/core/scene/nodes/fluidVolumeNode.ts', 'src/graphics/render/fluids.ts'],
+  volumetricClouds: ['src/core/scene/nodes/volumetricCloudsNode.ts', 'src/graphics/render/clouds.ts'],
+  gi: ['src/core/scene/nodes/giVolumeNode.ts', 'src/graphics/render/gi/giSystem.ts'],
+  volumetricFog: ['src/core/scene/nodes/volumetricFogNode.ts', 'src/graphics/render/volumetricFog.ts'],
+};
 
 describe.skipIf(!built)('the published player build', () => {
   const build: PlayerBuild = built ? JSON.parse(readFileSync(path.join(PLAYER, 'build.json'), 'utf8')) : null as any;
@@ -74,6 +88,25 @@ describe.skipIf(!built)('the published player build', () => {
     expect(library['wgsl/pbr.wgsl'].variants.pcf.wgsl).toMatch(/@fragment/);
   });
 
+  it('keeps each optional feature out of the core, in a part of its own', () => {
+    const core = new Set(modulesOf(build.core));
+    for (const [id, roots] of Object.entries(FEATURE_ROOTS)) {
+      expect(build.features[id], `no "${id}" part`).toBeDefined();
+      const part = new Set(modulesOf(build.features[id].files));
+      for (const root of [`src/modules/${id}/index.ts`, ...roots]) {
+        expect(core.has(root), `${root} is in the core`).toBe(false);
+        expect(part.has(root), `${root} is not in the ${id} part`).toBe(true);
+      }
+    }
+  });
+
+  it('gives each feature part only the parts its feature depends on', () => {
+    for (const id of Object.keys(FEATURE_ROOTS)) {
+      const allowed = new Set(FEATURES.find(f => f.id === id)?.dependsOn ?? []);
+      for (const dep of build.features[id].deps) expect(allowed.has(dep), `${id} loads ${dep}`).toBe(true);
+    }
+  });
+
   it('carries each backend once, in its own part, for the page and the worker alike', () => {
     for (const [feature, pkg] of Object.entries(BACKEND_PACKAGES)) {
       expect(modulesOf(build.features[feature].files).some(m => m.includes(pkg)), feature).toBe(true);
@@ -112,6 +145,20 @@ describe('choosing the player files a game ships', () => {
     expect(playerFeaturesFor({ physics: { backend: 'jolt' } })).toEqual(['physics-jolt']);
     expect(playerFeaturesFor({ physics: { backend: 'cannon' } })).toEqual([]);
     expect(playerFeaturesFor(undefined)).toEqual([]);
+  });
+
+  it('adds the parts of the features the game was built with that have code in this player', () => {
+    // `ssr` has no code of its own (shaders and settings only), so no part; `decals` is not in this build.
+    const withFeatures = { ...build, features: { ...build.features, sequencer: { files: ['chunks/sequencer-6.js'], bytes: 0, deps: [] } } };
+    expect(playerFeaturesFor({ physics: { backend: 'jolt' }, features: ['sequencer', 'ssr', 'decals'] }, withFeatures))
+      .toEqual(['physics-jolt', 'sequencer']);
+    // Without the build to check against, only the backend.
+    expect(playerFeaturesFor({ features: ['sequencer'] })).toEqual([]);
+  });
+
+  it('names a part for every feature the engine can load as a chunk', () => {
+    expect(Object.keys(FEATURE_LOADERS).sort()).toEqual(Object.keys(FEATURE_ROOTS).sort());
+    for (const id of Object.keys(FEATURE_LOADERS)) expect(FEATURES.some(f => f.id === id), id).toBe(true);
   });
 
   it('ships the core and each part with what it loads, once each', () => {

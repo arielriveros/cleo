@@ -70,6 +70,10 @@ async function run(c, port) {
         if (s.smoke.backend !== c.backend) why.push(`ran on ${s.smoke.backend} (${s.smoke.fallback ?? 'no reason'})`);
         if (s.smoke.executor !== (c.worker === 'on' ? 'worker' : 'inline')) why.push(`stepped ${s.smoke.executor}`);
         if (!(Math.abs(s.smoke.crateY - 0.5) < 0.1)) why.push(`crate at y=${s.smoke.crateY}`);
+        // Each optional feature's node came through its chunk; a left-out one's names tell a script why.
+        if (s.smoke.decals !== (c.decals ? 1 : 0)) why.push(`${s.smoke.decals} decals`);
+        if (s.smoke.fogVolumes !== (c.fog ? 1 : 0)) why.push(`${s.smoke.fogVolumes} fog volumes`);
+        if (c.decals ? s.smoke.absent !== null : !/Decals feature/.test(s.smoke.absent ?? '')) why.push(`DecalNode: ${s.smoke.absent ?? 'defined'}`);
         return { ok: why.length === 0, why: why.join('; '), ...s.smoke, firstFrame: s.firstFrame };
       }
     }
@@ -86,6 +90,7 @@ for (const c of cases) {
   if (!r.ok) failed++;
   const mb = (c.bytes / 1e6).toFixed(2);
   console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${c.name.padEnd(14)} ${String(c.files).padStart(2)} files + game.bin ${mb.padStart(6)} MB` +
-    (r.ok ? `  ${r.backend}/${r.executor} on ${r.graphics ?? '?'} crate y=${r.crateY.toFixed(3)} first frame ${Math.round(r.firstFrame)} ms` : `  ${r.why}`));
+    (r.ok ? `  ${r.backend}/${r.executor} on ${r.graphics ?? '?'} crate y=${r.crateY.toFixed(3)} first frame ${Math.round(r.firstFrame)} ms` : `  ${r.why}`) +
+    `  parts: ${c.parts.join(' ') || '-'}`);
 }
 process.exit(failed ? 1 : 0);

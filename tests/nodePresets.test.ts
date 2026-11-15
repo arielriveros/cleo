@@ -1,3 +1,4 @@
+import './helpers/features';
 import { WeatherNode } from '../src/core/scene/nodes/weatherNode';
 import { WEATHER_PRESETS } from '../src/core/scene/nodes/weatherPresets';
 import { describe, it, expect, afterEach, vi } from 'vitest';

@@ -13,6 +13,7 @@ import { selectShaders } from '../../applications/editor/src/features/publish/sh
 import { collectPrograms } from '../../applications/editor/src/features/publish/collectProgramUsage';
 import { programModules } from '../../src/graphics/render/programs';
 import { FEATURES, FEATURE_PRESETS, enabledFeatures } from '../../src/modules/catalog';
+import { featureApiNames } from 'cleo';
 
 const ROOT = path.resolve(__dirname, '../..');
 const PLAYER = path.join(ROOT, 'applications/editor/public/player');
@@ -37,6 +38,7 @@ export const CASES: SmokeCase[] = [
   { name: 'rapier-worker', backend: 'rapier', worker: 'on', programList: true, webgl2: true },
   { name: 'jolt-webgpu', backend: 'jolt', worker: 'on', programList: true, webgl2: false },
   { name: 'cannon-2d-preset', backend: 'cannon', worker: 'on', programList: true, webgl2: true, preset: '2d' },
+  { name: 'cannon-3d-preset', backend: 'cannon', worker: 'on', programList: true, webgl2: true, preset: '3d' },
 ];
 
 const box = (w: number, h: number, d: number) => ({ type: 'box', width: w, height: h, depth: d, offset: [0, 0, 0], rotation: [0, 0, 0] });
@@ -63,11 +65,16 @@ const probe = (wantWorker: boolean) => `function(__cleoImport, __cleoExports) {
       executor: physics.executor,
       crateY: crate ? crate.worldPosition[1] : null,
       graphics: engine.renderer && engine.renderer.backend ? engine.renderer.backend : null,
+      // The optional features' nodes, each parsed by its feature's chunk, and what a script reading a
+      // left-out feature's name gets.
+      decals: engine.scene.decals.size,
+      fogVolumes: engine.scene.volumetricFogs.size,
+      absent: (() => { try { void cleo.DecalNode; return null; } catch (e) { return String(e && e.message); } })(),
     };
   };
 }`;
 
-function gameData(c: SmokeCase) {
+function gameData(c: SmokeCase, enabled: ReadonlySet<string>) {
   return {
     version: 2,
     entry: 'main',
@@ -80,6 +87,9 @@ function gameData(c: SmokeCase) {
             node({ type: 'collider', name: 'Floor', id: 'floor', position: [0, -0.5, 0], collider: { mass: 0, shapes: [box(20, 1, 20)] } }),
             node({ type: 'collider', name: 'Crate', id: 'crate', position: [0, 3, 0], collider: { mass: 1, shapes: [box(1, 1, 1)] } }),
             node({ type: 'node', name: 'Probe', id: 'probe' }),
+            // As Publish strips them, only those of the features the game is built with.
+            ...(enabled.has('decals') ? [node({ type: 'decal', name: 'Scorch', id: 'scorch' })] : []),
+            ...(enabled.has('volumetricFog') ? [node({ type: 'volumetricFog', name: 'Mist', id: 'mist' })] : []),
           ],
         }),
       },
@@ -101,17 +111,21 @@ export function writeSmokeGames(out: string) {
   return CASES.map(c => {
     const dir = path.join(out, c.name);
     mkdirSync(dir, { recursive: true });
-    const data: any = gameData(c);
+    const enabled = enabledFeatures(FEATURE_PRESETS.find(p => p.id === c.preset)?.disabled ?? []);
+    const data: any = gameData(c, enabled);
     // What Publish does (buildMultiSceneGameData, publishClient): the program list, then the shaders for it.
     if (c.programList) data.config.graphics.programs = collectPrograms(data, data.config.render);
-    // What publishClient does with the features the game is built without.
-    const enabled = enabledFeatures(FEATURE_PRESETS.find(p => p.id === c.preset)?.disabled ?? []);
+    // What buildMultiSceneGameData and publishClient do with the features the game is built without.
     data.config.features = [...enabled].sort();
+    const absentApi: Record<string, string> = {};
+    for (const f of FEATURES) if (!enabled.has(f.id)) for (const name of featureApiNames(f.id)) absentApi[name] = f.label;
+    if (Object.keys(absentApi).length) data.config.absentApi = absentApi;
     const leaveOut = new Set(FEATURES.filter(f => !enabled.has(f.id)).flatMap(f => f.shaderModules ?? []));
     data.shaderLibrary = selectShaders(library, {
       programs: data.config.graphics.programs, programModules: programModules(), webgl2: c.webgl2, leaveOut,
     });
-    const files = playerFilesFor(build, playerFeaturesFor(data.config));
+    const parts = playerFeaturesFor(data.config, build);
+    const files = playerFilesFor(build, parts);
     let bytes = 0;
     for (const f of files) {
       const text = readFileSync(path.join(PLAYER, f));
@@ -129,7 +143,8 @@ export function writeSmokeGames(out: string) {
     writeFileSync(path.join(dir, 'preload.js'), templates.GAME_PRELOAD_JS);
     writeFileSync(path.join(dir, 'window.json'), JSON.stringify({ title: `smoke ${c.name}`, width: 640, height: 360 }));
     writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: `cleo-smoke-${c.name}`, version: '0.0.0', main: 'main.js' }));
-    return { ...c, dir, files: files.length, bytes };
+    return { ...c, dir, files: files.length, bytes, decals: enabled.has('decals'), fog: enabled.has('volumetricFog'),
+             parts: parts.filter(id => !id.startsWith('physics-')) };
   });
 }
 

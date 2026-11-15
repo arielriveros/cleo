@@ -3,7 +3,9 @@
 Project ▸ Features chooses which of the engine's optional features this project's games ship with. A
 2D game can leave out the landscape and global illumination; a cinematic that plays itself can leave out
 input and game UI. A published game then carries less engine: fewer shaders, no data for what was left out
-and, for the physics backends, less code.
+and less code. Global illumination, volumetric fog and clouds, decals, water, fire and smoke, cloth and
+cinematics are each a part of the player of their own, and a game ships only those it was built with; so do
+the physics backends.
 
 The choice is the project's: it is saved in its Project Settings and travels with its bundle. The editor
 itself keeps everything, so a feature left out still works while you edit; what changes is what you are
@@ -33,13 +35,17 @@ reads as *Custom*, and **Save as preset** keeps it on this computer for other pr
 - **When publishing**, its nodes are removed from every scene and template (a 2D body's children are kept
   in its place), the render settings that run it are turned off, and its shaders are left out of the game.
   A game without **Input** binds no input map and shows no touch controls.
+- **In the game's scripts**, a name of a feature the game was published without (`DecalNode` without Decals)
+  throws an error that names the feature, rather than reading `undefined`.
 
 Each row shows what leaving the feature out saves, and **in use** when the project uses it. Hover the mark
 for where. The estimate under the list is the engine a game downloads, before its own scenes, meshes and
 textures.
 
 **Detect from project** reads every scene, template and script and turns each feature on if the project uses
-it and off if not. Like Godot's, the detection is static: a node a script builds at runtime from a type
+it and off if not. Besides each feature's nodes it counts a trigger in a 2D scene as 2D physics, a controller
+driven by AI as AI navigation, a model with cloth parts as Cloth, and a script naming any of a feature's
+classes or functions as that feature. Like Godot's, the detection is static: a node a script builds at runtime from a type
 name, or a feature reached only through another, is not seen. Features it cannot see (Input, WebGL 2
 fallback) keep their state.
 

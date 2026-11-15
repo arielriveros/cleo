@@ -64,7 +64,7 @@ async function loadPlayerTemplates(config: any): Promise<PlayerTemplates & { bui
       `emits (terrain shape, animation fields). ${STALE_PLAYER_HINT}`
     );
 
-  const wanted = playerFilesFor(build, playerFeaturesFor(config));
+  const wanted = playerFilesFor(build, playerFeaturesFor(config, build));
   const unsafe = wanted.find(f => !isSafePlayerPath(f));
   if (unsafe) throw new Error(`The player's build.json names an unexpected file "${unsafe}". ${STALE_PLAYER_HINT}`);
   const texts = await Promise.all(wanted.map(async file => {

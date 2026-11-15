@@ -10,7 +10,8 @@ import { mat4, vec3 } from "gl-matrix";
 import { socketModelMatrix, socketNames } from "../../../animation/sockets";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
-import { SkinnedCloth } from "../../../physics/cloth/skinnedCloth";
+import type { SkinnedCloth } from "../../../physics/cloth/skinnedCloth";
+import { featureFactory } from "../../features/registry";
 import type { NodeType } from "./nodeType";
 
 /**
@@ -179,7 +180,10 @@ export class ModelNode extends Node {
         // Rebuilt when the data is replaced (an edit, a model rebuilt in place).
         if (!this._skinnedCloth || this._skinnedClothSource !== data) {
             this._skinnedCloth?.step(delta, false);
-            this._skinnedCloth = new SkinnedCloth(this, data);
+            // The Cloth feature simulates them (src/modules/cloth); a game built without it leaves them at rest.
+            const make = featureFactory<(model: ModelNode, data: unknown) => SkinnedCloth>('skinnedCloth');
+            if (!make) return;
+            this._skinnedCloth = make(this, data);
             this._skinnedClothSource = data;
         }
         this._skinnedCloth.step(delta, playing);

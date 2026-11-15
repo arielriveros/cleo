@@ -51,7 +51,12 @@ export interface FeatureDef {
     readonly materialTypes?: readonly string[];
     /** Render settings that run it, turned off in a game without it. */
     readonly renderSettingsOff?: readonly string[];
-    /** Engine names (scripts' `import { X } from 'cleo'`) that belong to it. */
+    /**
+     * Engine names (scripts' `import { X } from 'cleo'`) that belong to it, for a feature without code of its own
+     * yet: once it has a module (src/modules/<id>/api.ts), that module's names are the list. A core name may be
+     * here only as a feature's sole sign of use (`InputSystem`: input has no node); `TerrainMaterial` and
+     * `Area2DNode` (a trigger) are core and used without their features.
+     */
     readonly apiNames?: readonly string[];
     /**
      * Where the switch lives when it is not a strip: 'webgl2' is the publish option of that name, kept in step
@@ -133,7 +138,7 @@ export const FEATURES: readonly FeatureDef[] = [
         nodeTypes: ['landscape'],
         shaderModules: wgsl('terrainForward', 'geometryTerrain', 'geometryFoliageBillboard', 'geometryFoliageImpostor', 'shadowMapImpostor', 'foliageCull', 'foliageCullArgs'),
         materialTypes: ['terrain'],
-        apiNames: ['LandscapeNode', 'Terrain', 'TerrainMaterial'],
+        apiNames: ['LandscapeNode', 'Terrain'],
     },
     {
         id: 'water', label: 'Water volumes', group: 'world',
@@ -178,7 +183,7 @@ export const FEATURES: readonly FeatureDef[] = [
         description: '2D character and rigid bodies, and 2D areas.',
         nodeTypes: ['characterBody2D', 'body2D', 'area2D'],
         strip: 'node',
-        apiNames: ['CharacterBody2DNode', 'Body2DNode', 'Area2DNode'],
+        apiNames: ['CharacterBody2DNode', 'Body2DNode'],
     },
 
     // --- Simulation ------------------------------------------------------------------------------------------

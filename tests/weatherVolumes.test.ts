@@ -6,6 +6,7 @@ import { mat4, vec3 } from 'gl-matrix';
 import { translateWgsl } from '../tools/wgslTranslate.mjs';
 // @ts-expect-error -- same.
 import { resolveIncludes } from '../tools/shaderIncludes.mjs';
+import './helpers/features';
 import { Node } from '../src/core/scene/nodes/node';
 import { WeatherNode, MIN_WEATHER_VOLUME_SIZE } from '../src/core/scene/nodes/weatherNode';
 import { WEATHER_PRESETS } from '../src/core/scene/nodes/weatherPresets';

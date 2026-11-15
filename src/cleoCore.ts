@@ -68,29 +68,14 @@ export type { LightType, LightBakeSnapshot } from "./core/scene/nodes/lightNode"
 export { LightProbeNode } from "./core/scene/nodes/lightProbeNode";
 export { probeBakeStaleness, lightBakeChanges, describeLightChanges } from "./core/scene/probeBakeState";
 export type { StaleProbe, StaleLight, LightBakeChange } from "./core/scene/probeBakeState";
-export { GIVolumeNode, GI_RAY_COUNTS, GI_CAPTURE_RESOLUTIONS, MIN_GI_PROBES_PER_AXIS, MAX_GI_PROBES_PER_AXIS, MAX_GI_PROBE_INSET, DEFAULT_NEW_GI_PROBE_INSET } from "./core/scene/nodes/giVolumeNode";
-export type { GiRayCount, GiCaptureResolution, GiVolumeOptions } from "./core/scene/nodes/giVolumeNode";
 export { GiBakeRegistry, newGiBakeId } from "./graphics/render/gi/giBakeRegistry";
-export { encodeGiBake, decodeGiBake, GiBakeFormatError, GI_BAKE_VERSION, GI_BAKE_MIN_VERSION } from "./graphics/render/gi/giBakeFormat";
-export { FluidVolumeNode, FLUID_BRICK, OCCUPANCY_MARGIN, occupancyFromVolume, floatToHalf, floatsToHalves } from "./core/scene/nodes/fluidVolumeNode";
 export { ExposureVolumeNode, EXPOSURE_OVERRIDE_KEYS, MIN_EXPOSURE_VOLUME_SIZE } from "./core/scene/nodes/exposureVolumeNode";
 export type { ExposureOverrides } from "./core/scene/nodes/exposureVolumeNode";
-export { VolumetricFogNode, VOLUMETRIC_FOG_PRESETS, MIN_FOG_VOLUME_SIZE } from "./core/scene/nodes/volumetricFogNode";
-export type { VolumetricFogOptions, VolumetricFogPreset } from "./core/scene/nodes/volumetricFogNode";
-export { DecalNode, decalLocalToUV, radialDecalWeight, radialDecalT, DECAL_RADIAL_CURVES, decalFlipbookFrame, decalFlipbookFrom } from "./core/scene/nodes/decalNode";
 export { ParticleSystemNode } from "./core/scene/nodes/particleSystemNode";
 export type { ParticleSystemNodeOptions, ParticleCullingMode } from "./core/scene/nodes/particleSystemNode";
 export { ForceFieldNode, MAX_FORCE_FIELDS } from "./core/scene/nodes/forceFieldNode";
-export { ClothNode, CLOTH_DEFAULTS, jointOf as clothJointOf } from "./core/scene/nodes/clothNode";
-export type { ClothOptions, ClothPinEdge } from "./core/scene/nodes/clothNode";
-export { XpbdCloth, CLOTH_SOLVER_DEFAULTS, gridIndices, windGust } from "./physics/cloth/xpbdCloth";
-export type { ClothCapsule, ClothSettings } from "./physics/cloth/xpbdCloth";
-export { weightsFromCloth, clothFromWeights, settingsOf as clothSettingsOf, twinsOf as clothTwinsOf, neighboursOf as clothNeighboursOf, brushDab as clothBrushDab, fillPiece as clothFillPiece, fillRange as clothFillRange, DEFAULT_CLOTH_SETTINGS } from "./physics/cloth/clothPaint";
-export type { ClothSettings as SkinnedClothSettings, ClothBrushMode, ClothDab } from "./physics/cloth/clothPaint";
 export type { SkinnedClothData } from "./physics/cloth/skinnedClothData";
 export { parseSkinnedCloth } from "./physics/cloth/skinnedClothData";
-export { WaterVolumeNode, WATER_RIPPLE_SLOTS } from "./core/scene/nodes/waterVolumeNode";
-export type { WaterVolumeOptions } from "./core/scene/nodes/waterVolumeNode";
 export type { ForceFieldOptions, ForceFieldKind, ForceFieldShape } from "./core/scene/nodes/forceFieldNode";
 export * from "./particles/particleSystemAsset";
 export { selectParticleLod, particleLodDistance, particleLodFactors, PARTICLE_LOD_HYSTERESIS, type ParticleLodState } from "./particles/particleLod";
@@ -106,18 +91,11 @@ export type { ParticleMeshData, ParticleMeshKind } from "./particles/particleMes
 export { customCodeKey, composeCustomSim, validatedCustomCode } from "./particles/particleCustomCode";
 export type { CompiledCustomCode } from "./particles/particleCustomCode";
 export { setParticleGlslTranslator, hasParticleGlslTranslator, compileParticleCustomCode } from "./graphics/particles/particleCustom";
-export { MAX_SORTED_PARTICLES } from "./graphics/particles/particleRenderer";
-export type { DecalOptions, DecalAffects, DecalRadialPattern, DecalRadialCurve, DecalRadialShape, DecalReceivers, DecalPattern, DecalColor, DecalFlipbook, DecalFlipbookFrame } from "./core/scene/nodes/decalNode";
 export { SkyboxNode } from "./core/scene/nodes/skyboxNode";
-export { VolumetricCloudsNode } from "./core/scene/nodes/volumetricCloudsNode";
-export type { VolumetricCloudsOptions } from "./core/scene/nodes/volumetricCloudsNode";
-export { VOLUMETRIC_CLOUDS_PRESETS } from "./core/scene/nodes/volumetricCloudsPresets";
-export type { VolumetricCloudsPreset } from "./core/scene/nodes/volumetricCloudsPresets";
 // One-click presets: a table per node / render section, all applied through `applyPreset`.
 export { applyPreset, definePresets, type Preset } from "./core/presets";
 export { WIND_PRESETS, type WindPreset } from "./core/scene/nodes/windPresets";
 export { WEATHER_PRESETS, type WeatherPreset } from "./core/scene/nodes/weatherPresets";
-export { WATER_VOLUME_PRESETS, type WaterVolumePreset } from "./core/scene/nodes/waterVolumePresets";
 export { FORCE_FIELD_PRESETS, type ForceFieldPreset } from "./core/scene/nodes/forceFieldPresets";
 export { SKY_ATMOSPHERE_PRESETS, type SkyAtmospherePreset } from "./core/scene/nodes/skyAtmospherePresets";
 export { CAMERA_RIG_PRESETS, type CameraRigPreset, type CameraRigPresetOptions } from "./core/scene/nodes/cameraRigPresets";
@@ -500,11 +478,14 @@ export {
     shaderOptimizerStats, MaterialSync, DrawSortKeys, ProgramCompileQueue, parseRecipes, serializeRecipe,
 } from "./graphics/shaderOptimizer";
 export type { ShaderOptimizerStats, PipelineRecipe } from "./graphics/shaderOptimizer";
-export { createProgramUsage, usageFromSceneJson, usageFromRenderSettings, castsShadows, programsFor, PROGRAM_CLASS } from "./graphics/programUsage";
-export type { ProgramUsage } from "./graphics/programUsage";
 // A published game's shader library: which program needs which module, and the library the player installs.
 export { programModules } from "./graphics/render/programs";
 export { installShaderLibrary, shadersAreLibraryHandles } from "./graphics/shaderLibrary";
+// The optional features' registry: a published game's player installs the ones it was built with.
+export {
+    installFeature, installFeatures, restrictFeatures, setAbsentFeatureNames, isFeatureInstalled, featureApiNames,
+    type FeatureModule, type FeatureRegistrar,
+} from "./core/features/registry";
 export type { ShaderLibrary, ShaderLibraryEntry, ShaderModuleData } from "./graphics/shaderLibrary";
 // The optional features a project can leave out of its games (Project ▸ Features), as data.
 export { FEATURES, FEATURE_GROUPS, FEATURE_PRESETS, featureById, enabledFeatures, dependentsOf, featureOfNodeType, presetMatching } from "./modules/catalog";
@@ -608,41 +589,18 @@ export {
     shortestAngle, applyCurve, normalizeVec2, smoothToward, windPerlin, windPerlinGrad, cellNoise,
     rayTriangleIntersection,
 } from "./core/math";
-// The cinematic sequencer: a SequenceNode plays a sequence (tracks of timed sections) against the scene.
-export {
-    SequenceNode, resolveNodePath, sequenceGlobals, type SequencePlayOptions, type SequenceEndReason,
-} from "./core/scene/nodes/sequenceNode";
-export { SequencePlayer, type SequencePlayerHost, type SequenceEventListener, type SequencePose } from "./sequencer/sequencePlayer";
-export { parseSequence, emptySequence, parseSequenceCurve } from "./sequencer/parse";
-// A sequence's keys are core/math.ts's keyed curves and its paths are Spline3s.
+// The cinematic sequencer is an optional feature (src/modules/sequencer). A sequence's keys are core/math.ts's
+// keyed curves and its paths are Spline3s, which stay here.
 export {
     evaluateKeyedNumber, evaluateKeyedVector, evaluateKeyedStep, keyedCurveWidth, rampWeight, hermite, Spline3,
     type Vec3Tuple, type KeyInterp, type TimedKey, type KeyedCurve,
 } from "./core/math";
-export { compilePropertyPath, isTransformPath, captureVisibility, type PropertyAccessor } from "./sequencer/propertyPath";
-export { keyableProperties, sameKeyValue, type KeyableProperty } from "./sequencer/keyable";
-export { SEQUENCE_VERSION, FOLIAGE_CHANNELS } from "./sequencer/types";
-export { registerSequencePresets, sequencePresetsFor, presetFields, blendPresetValue } from "./sequencer/presetRegistry";
-export type {
-    SequenceData, SequenceSlot, SequenceTrack, SequenceTrackType, SequenceKey, SequenceCurve,
-    SectionBase, PathSection, PathTrack, PathLook, CameraCutSection, CameraCutTrack, PropertySection,
-    PropertyTrack, PropertyValueType, EventKey, EventTrack, SequenceMarker,
-    PresetSection, PresetTrack, FoliageSection, FoliageTrack, FoliageChannel,
-    ScriptSection, ScriptTrack, SequenceScriptContext, AnimationSection, AnimationTrack, AudioSection, AudioTrack,
-    SpawnSection, SpawnTrack, PossessSection, PossessTrack,
-} from "./sequencer/types";
 export { renderNow, setRenderClock } from "./graphics/render/renderClock";
 export {
     AudioRecorder, AudioMixdown, audioRecorder, buildAudioSchedule, mixAudioLog, keyValueAt,
     type AudioLog, type AudioLogSound, type AudioOp, type AudioSchedule, type VoicePlan, type VoicePiece,
     type AudioKey, type MixOptions,
 } from "./audio/movieAudio";
-import { sequenceGlobals as installSequenceGlobals } from "./core/scene/nodes/sequenceNode";
-import { CleoEngine as SequenceEngine } from "./core/engine";
-import { Game as SequenceGame } from "./core/game";
-// Property tracks aimed at 'renderer' or 'game' resolve here: the node module sits below both in the import graph.
-installSequenceGlobals.renderer = () => SequenceEngine.instance?.renderer ?? null;
-installSequenceGlobals.game = () => SequenceGame;
 
 // What a user script's `import { ... } from 'cleo'` resolves to in a published game: this module's own
 // namespace. ./cleo.ts registers the full engine over it. Must stay the LAST statement: the self-import only

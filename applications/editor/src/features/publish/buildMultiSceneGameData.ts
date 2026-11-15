@@ -1,4 +1,4 @@
-import { Scene, TextureManager, AudioManager, GiBakeRegistry } from 'cleo'
+import { Scene, TextureManager, AudioManager, GiBakeRegistry, FEATURES, featureApiNames } from 'cleo'
 import { sourceSkinFor } from '../../utils/rigAssets'
 import type { RenderSettings, InputMap } from 'cleo'
 import { isDefaultInputMap } from 'cleo'
@@ -289,6 +289,11 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   if (src.projectSettings) Object.assign(config, projectSettingsConfig(src.projectSettings))
   // The features the game was built with, for the player (and the shaders publish picks: see publishClient).
   config.features = [...rules.enabled].sort()
+  // The script names of the features it goes without (each a chunk the player does not load), with the feature's
+  // name: a script that imports one gets the reason rather than undefined.
+  const absentApi: Record<string, string> = {}
+  for (const f of FEATURES) if (!rules.enabled.has(f.id)) for (const name of featureApiNames(f.id)) absentApi[name] = f.label
+  if (Object.keys(absentApi).length) config.absentApi = absentApi
   // The shader programs the game uses: the player builds only these at boot (see collectPrograms).
   if (src.projectSettings?.publish.onlyUsedShaders !== false)
     (config.graphics ??= {}).programs = collectPrograms(out, config.render)

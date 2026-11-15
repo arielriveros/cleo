@@ -51,9 +51,12 @@ import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSetting
 import { TemporalPasses } from './render/temporal';
 import { AutoExposure } from './render/autoExposure';
 import { PostEffects } from './render/postEffects';
-import { VolumetricCloudPasses } from './render/clouds';
-import { DecalPasses } from './render/decals';
-import { FluidVolumePasses } from './render/fluids';
+import type { VolumetricCloudPasses } from './render/clouds';
+import type { DecalPasses } from './render/decals';
+import { createNullClouds, createNullDecals, createNullFluids, createNullFog, createNullGi, RENDER_FACTORY } from './render/featureSubsystems';
+import type { CloudSubsystem, DecalSubsystem, FluidSubsystem, FogSubsystem, GiSubsystem } from './render/featureSubsystems';
+import { featureFactory } from '../core/features/registry';
+import type { FluidVolumePasses } from './render/fluids';
 import { ParticlePasses } from './render/particlePasses';
 import { Sprite2DPasses } from './render/sprites2d';
 import { FoliagePasses } from './render/foliage';
@@ -64,7 +67,7 @@ import { SsrPasses } from './render/ssr';
 import { SceneRadianceCopy } from './render/sceneRadiance';
 import { ssrStepCount } from './ssrSettings';
 import { LightingPasses } from './render/lighting';
-import { VolumetricFogPasses } from './render/volumetricFog';
+import type { VolumetricFogPasses } from './render/volumetricFog';
 import { WeatherPasses } from './render/weather';
 import { snowForLandscape } from './render/weatherPack';
 import type { VolumetricFogNode } from '../core/scene/nodes/volumetricFogNode';
@@ -81,7 +84,7 @@ import { DebugViews } from './render/debugViews';
 import { Capture } from './render/capture';
 import { MovieCapture } from './render/movieCapture';
 import { TextureManager } from './systems/textureManager';
-import { GiSystem } from './render/gi/giSystem';
+import type { GiSystem } from './render/gi/giSystem';
 import { GI_TIERS, clampGiFillDrawsPerFrame, clampGiRaysPerFrame, clampGiResolutionScale } from './render/gi/giSettings';
 import { RenderStats } from './render/stats';
 import type { RenderSubsystems } from './render/subsystems';
@@ -166,15 +169,15 @@ export class Renderer {
     /** The post chain's effect passes and the display transform: bloom, DOF, lens, grading, present (render/postEffects.ts). */
     private readonly _post: PostEffects;
     /** Volumetric clouds: noise bake, raymarch, temporal reconstruction and composite (render/clouds.ts). */
-    private readonly _clouds: VolumetricCloudPasses;
+    private readonly _clouds: CloudSubsystem;
     /** Decal volumes: collection, the landscape receiver depth, DBuffer, emissive and overlay passes (render/decals.ts). */
-    private readonly _decals: DecalPasses;
+    private readonly _decals: DecalSubsystem;
     /** Smoke-and-fire volumes: the raymarch, its temporal history and the composite (render/fluids.ts). */
-    private readonly _fluids: FluidVolumePasses;
+    private readonly _fluids: FluidSubsystem;
     /** GPU particle simulation, sorting and drawing, and the per-frame data they are handed (render/particlePasses.ts). */
     private readonly _particlePasses: ParticlePasses;
     /** Froxel volumetric fog for VolumetricFogNode volumes (render/volumetricFog.ts). */
-    private readonly _fog: VolumetricFogPasses;
+    private readonly _fog: FogSubsystem;
     private readonly _weather: WeatherPasses;
     /** Sprites, tilemap chunks and the Y-sorted 2D pass (render/sprites2d.ts). */
     private readonly _sprites: Sprite2DPasses;
@@ -219,7 +222,7 @@ export class Renderer {
     /** What {@link beginMovie} changed, put back by {@link endMovie}. */
     private _movieRestore: { readInterval: number; admit: number; blocking: boolean } | null = null;
     /** GI Volumes: their capture, relight and per-pixel apply (render/gi/giSystem.ts). */
-    private readonly _gi: GiSystem;
+    private readonly _gi: GiSubsystem;
     /** Frame statistics for the performance HUD, the GPU memory estimate and the opt-in GL error check (render/stats.ts). */
     private readonly _stats: RenderStats;
     /** The subsystems, for the ones that reach each other while drawing (render/subsystems.ts). Filled at the end of the constructor. */
@@ -345,32 +348,38 @@ export class Renderer {
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._temporal, this._fullscreen, this._subsystems);
-        this._clouds = new VolumetricCloudPasses({
+        // Optional features' subsystems come from their factories (src/core/features/registry.ts), else a stand-in
+        // that draws nothing (render/featureSubsystems.ts).
+        this._clouds = featureFactory<(...a: ConstructorParameters<typeof VolumetricCloudPasses>) => VolumetricCloudPasses>(RENDER_FACTORY.clouds)?.({
             get quality() { return renderer._quality; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems);
-        this._decals = new DecalPasses({
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems)
+            ?? createNullClouds();
+        this._decals = featureFactory<(...a: ConstructorParameters<typeof DecalPasses>) => DecalPasses>(RENDER_FACTORY.decals)?.({
             get deferred() { return renderer._deferred; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._subsystems);
-        this._fluids = new FluidVolumePasses({
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._subsystems)
+            ?? createNullDecals();
+        this._fluids = featureFactory<(...a: ConstructorParameters<typeof FluidVolumePasses>) => FluidVolumePasses>(RENDER_FACTORY.fluids)?.({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems)
+            ?? createNullFluids();
         this._particlePasses = new ParticlePasses({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._projection, this._temporal, this._subsystems);
-        this._fog = new VolumetricFogPasses({
+        this._fog = featureFactory<(...a: ConstructorParameters<typeof VolumetricFogPasses>) => VolumetricFogPasses>(RENDER_FACTORY.volumetricFog)?.({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._bindGroups, this._fullscreen, this._projection, this._particlePasses, this._subsystems);
+        }, this._view, this._targets, this._passes, this._bindGroups, this._fullscreen, this._projection, this._subsystems)
+            ?? createNullFog();
         this._sprites = new Sprite2DPasses({
             get viewCssHeight() { return renderer._viewCssHeight; },
             get thumbnailMode() { return renderer._thumbnailMode; },
@@ -458,10 +467,11 @@ export class Renderer {
             get cutEpoch() { return renderer._cutEpoch; },
             present: (source, target) => renderer._post.presentPass(source, target),
         }, this._view, this._passes, this._fullscreen);
-        this._gi = new GiSystem({
+        this._gi = featureFactory<(...a: ConstructorParameters<typeof GiSystem>) => GiSystem>(RENDER_FACTORY.gi)?.({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._shadows, this._lighting, this._fullscreen, this._subsystems);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._shadows, this._lighting, this._fullscreen, this._subsystems)
+            ?? createNullGi();
         this._stats = new RenderStats({
             get canvas() { return renderer._canvas; },
             get deferred() { return renderer._deferred; },
@@ -567,10 +577,6 @@ export class Renderer {
         // ping-pong blur targets are float — an RGBA8 bloom would clamp and defeat the HDR bright-pass.
         for (let i = 0; i < PostEffects.BLOOM_MIP_COUNT; i++)
             this._post.bloomMips.push(new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }));
-        // Same config as the blur scratch buffers (LINEAR-filtered float) so the low-res clouds upsample smoothly.
-        this._clouds.cloudsFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
-        // Same float/LINEAR config: the resolve reads it with bilinear taps for its neighbourhood bounds.
-        this._clouds.cloudTraceFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // `mipMap: false` matters here more than anywhere else in this list, and it was the ONE
         // render target missing it.
         //
@@ -2659,7 +2665,7 @@ export class Renderer {
 
     /** See {@link RenderSettings.ssrEnabled}. A quality-tier field, like `ssaoEnabled`. */
     /** GI Volumes: state, counters and settings (render/gi/giSystem.ts). */
-    public get gi(): GiSystem { return this._gi; }
+    public get gi(): GiSubsystem { return this._gi; }
 
     /** See {@link RenderSettings.giEnabled}. A quality-tier field. */
     public get giEnabled(): boolean { return this._gi.enabled; }

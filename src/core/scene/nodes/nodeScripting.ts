@@ -3,7 +3,7 @@ import type { Scene } from "../scene";
 import { Logger } from "../../logger";
 import { logScriptError } from "../../scripting/scriptErrors";
 import { bindDataAccessors, canAccessVariable } from "./nodeVariables";
-import { createScriptImporter, resolveScriptModule, ScriptFactory, SCRIPT_HANDLERS } from "../../scripting/scriptRuntime";
+import { createScriptImporter, resolveScriptModule, scriptModulesVersion, ScriptFactory, SCRIPT_HANDLERS } from "../../scripting/scriptRuntime";
 
 /**
  * The bridge between a user script and a live node: the `this` proxy, and the two ways a compiled script
@@ -325,9 +325,12 @@ function applyFieldDefaults(node: Node, levels: any[]): void {
 
 /** Prototypes of every class the engine exports — where a script's prototype chain ends. */
 let engineProtos: WeakSet<object> | null = null;
+/** The 'cleo' they were read from: an optional feature installed since adds classes (scriptModulesVersion). */
+let engineProtosFor = -1;
 function isEngineProto(proto: any, node: Node): boolean {
     if (proto === Node.prototype || proto === Object.prototype || proto.isPrototypeOf(node)) return true;
-    if (!engineProtos) {
+    if (!engineProtos || engineProtosFor !== scriptModulesVersion()) {
+        engineProtosFor = scriptModulesVersion();
         engineProtos = new WeakSet();
         try {
             for (const value of Object.values(resolveScriptModule('cleo')))

@@ -1,14 +1,14 @@
 import { mat4 } from 'gl-matrix';
 import { Logger } from '../../core/logger';
-import { VolumetricCloudsNode } from '../../core/scene/nodes/volumetricCloudsNode';
-import { Scene } from '../../core/scene/scene';
+import type { VolumetricCloudsNode } from '../../core/scene/nodes/volumetricCloudsNode';
+import type { Scene } from '../../core/scene/scene';
 import { atmosphereTransmittance, shHemisphereMeans } from '../cloudLighting';
 import { Framebuffer } from '../framebuffer';
 import { TemporalHistory } from './temporalHistory';
 import { device } from '../rhi/deviceHandle';
-import type { RenderPipeline, BindGroup } from '../rhi/resources';
+import type { RenderPipeline, BindGroup, RenderTarget } from '../rhi/resources';
 import { ShaderStage, BufferUsage } from '../rhi/types';
-import type { BlendState } from '../rhi/types';
+import { CLOUD_BLEND } from './blendStates';
 import { keyLight } from '../skyNight';
 import { Texture } from '../texture';
 import { VolumetricCloudsProgram, CloudUpsampleProgram, CloudNoiseBakeProgram, CloudNoiseBakeComputeProgram, CloudTemporalResolveProgram } from './programs';
@@ -53,8 +53,9 @@ export class VolumetricCloudPasses {
                 private readonly _sys: RenderSubsystems) {}
 
     // Reduced-resolution volumetric-clouds raymarch target (lazily sized to the node's resolutionScale;
-    // upsampled + composited into the scene buffer). Only used when resolutionScale < 1.
-    public cloudsFBO!: Framebuffer;
+    // upsampled + composited into the scene buffer). Only used when resolutionScale < 1. Same config as the
+    // blur scratch buffers (LINEAR-filtered float) so the low-res clouds upsample smoothly.
+    public readonly cloudsFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
 
     // Baked tileable 3D noise for the cloud raymarch, built lazily on the first frame a scene has
     // clouds enabled — a project without them never pays the ~8MB or the bake.
@@ -76,7 +77,8 @@ export class VolumetricCloudPasses {
     // raymarch pipeline, built against the depth-bearing scene target, and WebGPU rejects a pipeline
     // with depth state in a pass that has no depth attachment.
     public readonly cloudHistory = new TemporalHistory({ colorTextureOptions: { mipMap: false, precision: 'high' } });
-    public cloudTraceFBO!: Framebuffer;
+    /** Same float/LINEAR config: the resolve reads it with bilinear taps for its neighbourhood bounds. */
+    public readonly cloudTraceFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
 
     /** Bayer subset traced this frame, and the size of the pattern (4x4). */
     private static readonly CLOUD_BAYER_SIZE = 4;
@@ -93,15 +95,6 @@ export class VolumetricCloudPasses {
          3, 11,  1,  9,
         15,  7, 13,  5,
     ];
-
-    /**
-     * Premultiplied "over", for the cloud composite. The bloom-mask ALPHA uses the same factors as the
-     * colour rather than DEFAULT_BLEND's mask-preserving pair — cloud coverage IS meant to reach the mask.
-     */
-    public static readonly CLOUD_BLEND: BlendState = {
-        color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-        alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-    };
 
     /** Cloud extinction per metre at unit density and `absorption` 1 — real cumulus is ~0.02-0.1. */
     private static readonly CLOUD_SIGMA_BASE = 0.05;
@@ -310,6 +303,61 @@ export class VolumetricCloudPasses {
         return this._sys.sky.cloudSkyActive(scene) ? node.bakedWindOffset : this.windOffset;
     }
 
+    /** `_captureProj` before its WebGPU Y flip: what a cloud-sky face's rays are rebuilt through. */
+    private static readonly _CLOUD_FACE_PROJ: mat4 = mat4.perspective(mat4.create(), Math.PI / 2, 1, 0.1, 10);
+    private readonly _cloudFaceView: mat4 = mat4.create();
+    private readonly _cloudFaceInv: mat4 = mat4.create();
+
+    /**
+     * The clouds of the sky's cloud-sky bake (SkyPasses.updateCloudSky): the raymarch over `faces` of the
+     * bake's cube, which already hold the atmosphere, from `eye` through each face (`faceViews`, the sky's
+     * capture views), with the bake's frozen `wind`. No depth bound (nothing occludes a sky face), no
+     * temporal reconstruction and no dither (either would freeze into the texture as grain and face seams),
+     * and a step floor above the live pass, since this is paid once.
+     */
+    public paintSkyFaces(scene: Scene, node: VolumetricCloudsNode, targetFor: (face: number) => RenderTarget,
+                         res: number, faces: readonly number[], faceViews: readonly mat4[],
+                         eye: ArrayLike<number>, wind: ArrayLike<number>): void {
+        this.bakeCloudNoise();
+        if (!this.cloudBaseNoise || !this.cloudDetailNoise || node.opacity <= 0) return;
+
+        this._shaderManager.bind('volumetricClouds');
+        const pipeline = this._pipelines.fullscreen('volumetricClouds', VolumetricCloudsProgram, CLOUD_BLEND, undefined,
+                                                  targetFor(faces[0] ?? 0));
+        // The depth texture is bound only because the layout has a slot for it; `u_ignoreDepth` skips it.
+        const group = this._bindGroups.textureGroup(pipeline, 0, [this._targets.gBuffer.depth, this.cloudBaseNoise,
+                                                           this.cloudDetailNoise]);
+        this.setCloudUniforms(scene, node, this._cloudFaceInv, eye, wind);
+        this._shaderManager.setUniform('u_ignoreDepth', true);
+        // The cloud-sky cube is a bake: absolute, like the atmosphere cube it paints over.
+        this._shaderManager.setUniform('u_preExposure', 1);
+        this._shaderManager.setUniform('u_temporal', false);
+        this._shaderManager.setUniform('u_jitter', false);
+        this._shaderManager.setUniform('u_jitterSlot', 0);
+        this._shaderManager.setUniform('u_steps', Math.min(192, Math.max(node.steps, 96)));
+        this._shaderManager.setUniform('u_lightSteps', Math.min(12, Math.max(node.lightSteps, 8)));
+
+        this._passes.setViewport(res, res);
+        for (const face of faces) {
+            // The face's view from the bake's eye, through the UNFLIPPED 90-degree projection on both
+            // backends. The ray is rebuilt from the screen quad's uv, and the quad already carries the
+            // backend difference (its V is inverted on WebGPU, see `_screenQuad`), which lands every uv
+            // row on the texel row the atmosphere's rasterized face put that direction in. Using
+            // `_captureProj`, whose Y is flipped on WebGPU for RASTERIZING into a cube, applied the
+            // flip twice: every side face traced the mirror image of its sky, so its clouds went below
+            // the horizon and only the zenith and nadir looked right.
+            mat4.translate(this._cloudFaceView, faceViews[face], [-eye[0], -eye[1], -eye[2]]);
+            mat4.multiply(this._cloudFaceInv, VolumetricCloudPasses._CLOUD_FACE_PROJ, this._cloudFaceView);
+            mat4.invert(this._cloudFaceInv, this._cloudFaceInv);
+            this._shaderManager.setUniform('u_invViewProj', this._cloudFaceInv);
+            const pass = this._passes.beginFullscreenPass(targetFor(face), 'cloudSkyBake', false, undefined, false);
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, group);
+            this._passes.drawFullscreenAndEnd(pass);
+        }
+        this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
+    }
+
     /**
      * Volumetric cloud layer: a fullscreen raymarch bounded by the G-buffer depth, composited over
      * the sky/scene. No-op unless the scene has an enabled VolumetricCloudsNode.
@@ -337,7 +385,7 @@ export class VolumetricCloudPasses {
         // reused across the full-res, reduced-res and Bayer trace targets, and it is built before any
         // of their passes open. They share the scene buffer's float format, so it speaks for all three.
         const rayPipeline = this._pipelines.fullscreen('volumetricClouds', VolumetricCloudsProgram,
-                                                     VolumetricCloudPasses.CLOUD_BLEND, undefined,
+                                                     CLOUD_BLEND, undefined,
                                                      this._targets.scene.renderTarget);
         const rayGroup = (pipe: RenderPipeline) => this._bindGroups.textureGroup(pipe, 0, [
             this._targets.gBuffer.depth, this.cloudBaseNoise!, this.cloudDetailNoise!,
@@ -373,7 +421,7 @@ export class VolumetricCloudPasses {
             // cloudUpsample.fs re-decides occlusion per full-resolution pixel, against the G-buffer
             // depth the raymarch bounded itself with, and uses the low-res buffer for colour only.
             const upPass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'cloudUpsample', false);
-            this._fullscreen.bind(upPass, 'cloudUpsample', CloudUpsampleProgram, [source, this._targets.gBuffer.depth], VolumetricCloudPasses.CLOUD_BLEND);
+            this._fullscreen.bind(upPass, 'cloudUpsample', CloudUpsampleProgram, [source, this._targets.gBuffer.depth], CLOUD_BLEND);
             this._shaderManager.bind('cloudUpsample');
             this._shaderManager.setUniform('u_cloudResolution', [w, h]);
             this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);

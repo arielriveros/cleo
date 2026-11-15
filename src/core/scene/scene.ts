@@ -12,18 +12,18 @@ import { LandscapeNode } from "./nodes/landscapeNode";
 import { TilemapNode } from "./nodes/tilemapNode";
 import { LightNode } from "./nodes/lightNode";
 import { LightProbeNode } from "./nodes/lightProbeNode";
-import { DecalNode } from "./nodes/decalNode";
-import { FluidVolumeNode } from "./nodes/fluidVolumeNode";
+import type { DecalNode } from "./nodes/decalNode";
+import type { FluidVolumeNode } from "./nodes/fluidVolumeNode";
 import { ParticleSystemNode } from "./nodes/particleSystemNode";
 import { ForceFieldNode } from "./nodes/forceFieldNode";
-import { ClothNode } from "./nodes/clothNode";
-import { WaterVolumeNode } from "./nodes/waterVolumeNode";
+import type { ClothNode } from "./nodes/clothNode";
+import type { WaterVolumeNode } from "./nodes/waterVolumeNode";
 import { ExposureVolumeNode } from "./nodes/exposureVolumeNode";
-import { GIVolumeNode } from "./nodes/giVolumeNode";
-import { VolumetricFogNode } from "./nodes/volumetricFogNode";
+import type { GIVolumeNode } from "./nodes/giVolumeNode";
+import type { VolumetricFogNode } from "./nodes/volumetricFogNode";
 import { OcclusionVolumeNode } from "./nodes/occlusionVolumeNode";
 import { SkyboxNode } from "./nodes/skyboxNode";
-import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
+import type { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./nodes/skyAtmosphereNode";
 import { SkyLightNode } from "./nodes/skyLightNode";
 import { WindNode } from "./nodes/windNode";
@@ -60,6 +60,8 @@ import type { CharacterBody2DNode } from "./nodes/characterBody2DNode";
 import type { Body2DNode } from "./nodes/body2DNode";
 import type { TriggerNode } from "./nodes/triggerNode";
 import { World2D } from "../../physics2d/world2d";
+import { K } from "./sceneKinds";
+import { featureNodeKinds, featureScenePasses, onFeaturesChanged, type ScenePassFrame } from "../features/registry";
 
 /** Object-space up, rotated by the camera's world orientation to give the audio listener its up axis. */
 const UP_AXIS: vec3 = vec3.fromValues(0, 1, 0);
@@ -113,17 +115,10 @@ export function sceneDimensionOf(sceneJson: { dimension?: unknown } | null | und
     return sceneJson?.dimension === '2D' ? '2D' : '3D';
 }
 
-/** The node kinds the scene's typed lists are built from, one bit each (see {@link kindsOf}). */
-const K = {
-    LIGHT: 1, MODEL: 2, SPRITE: 4, LANDSCAPE: 8, TILEMAP: 16, LOD_GROUP: 32, CAMERA_RIG: 64, CHARACTER: 128,
-    CONTROLLER: 256, NAV_MESH: 512, DECAL: 1024, FLUID: 2048, CLOTH: 4096, PARTICLES: 8192, FORCE_FIELD: 16384,
-    WATER: 32768, EXPOSURE: 65536, GI: 131072, FOG: 262144, OCCLUSION: 524288, SOUND: 1048576, PROBE: 2097152,
-    SKYBOX: 4194304, CLOUDS: 8388608, ATMOSPHERE: 16777216, SKY_LIGHT: 33554432, WIND: 67108864,
-    WEATHER: 134217728, CAMERA: 268435456, UI_NODE: 536870912, UI_ROOT: 1073741824,
-} as const;
-
 let kindTable: [number, Function][] | null = null;
 const kindsByConstructor = new Map<Function, number>();
+// An optional feature installed (or restricted out) since brings classes of its own: work the masks out again.
+onFeaturesChanged(() => { kindTable = null; kindsByConstructor.clear(); });
 
 /**
  * Which typed lists a node of this class belongs to, as a bitmask, worked out once per class. The class tests
@@ -137,12 +132,14 @@ function kindsOf(ctor: Function): number {
         [K.LIGHT, LightNode], [K.MODEL, ModelNode], [K.SPRITE, SpriteNode], [K.LANDSCAPE, LandscapeNode],
         [K.TILEMAP, TilemapNode], [K.LOD_GROUP, LodGroupNode], [K.CAMERA_RIG, CameraRigNode],
         [K.CHARACTER, CharacterNode], [K.CONTROLLER, ControllerNode], [K.NAV_MESH, NavMeshNode],
-        [K.DECAL, DecalNode], [K.FLUID, FluidVolumeNode], [K.CLOTH, ClothNode], [K.PARTICLES, ParticleSystemNode],
-        [K.FORCE_FIELD, ForceFieldNode], [K.WATER, WaterVolumeNode], [K.EXPOSURE, ExposureVolumeNode],
-        [K.GI, GIVolumeNode], [K.FOG, VolumetricFogNode], [K.OCCLUSION, OcclusionVolumeNode], [K.SOUND, SoundNode],
-        [K.PROBE, LightProbeNode], [K.SKYBOX, SkyboxNode], [K.CLOUDS, VolumetricCloudsNode],
+        [K.PARTICLES, ParticleSystemNode],
+        [K.FORCE_FIELD, ForceFieldNode], [K.EXPOSURE, ExposureVolumeNode],
+        [K.OCCLUSION, OcclusionVolumeNode], [K.SOUND, SoundNode],
+        [K.PROBE, LightProbeNode], [K.SKYBOX, SkyboxNode],
         [K.ATMOSPHERE, SkyAtmosphereNode], [K.SKY_LIGHT, SkyLightNode], [K.WIND, WindNode], [K.WEATHER, WeatherNode],
         [K.CAMERA, CameraNode], [K.UI_NODE, UINode], [K.UI_ROOT, UIRootNode],
+        // The optional features' node classes, each in the list of its kind (src/core/features/registry.ts).
+        ...featureNodeKinds().map(([cls, bit]) => [bit, cls] as [number, Function]),
     ];
     mask = 0;
     for (const [bit, cls] of kindTable) if (ctor === cls || ctor.prototype instanceof cls) mask |= bit;

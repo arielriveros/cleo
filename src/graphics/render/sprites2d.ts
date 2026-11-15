@@ -584,7 +584,7 @@ export class Sprite2DPasses {
         const key = this._litKeyLight, k = s * 6;
         for (let i = 0; i < 6; i++) key[k + i] = i === 1 ? 1 : 0;
         if (!scene) { out[0] = 0; out[1] = 0; out[2] = 0; return out; }
-        const light = this._particlePasses.frameLight(scene);
+        const light = this._sys.lighting.frameLight(scene);
         const m = this._spriteMatrices, at = s * 16;
         vec3.set(this._litPos, m[at + 12], m[at + 13], m[at + 14]);
         const ambient = this._sys.lighting.probeAmbientAt(scene, this._litPos, light.ambient, this._litScratch);
@@ -667,7 +667,7 @@ export class Sprite2DPasses {
             material.properties.set('keyColor', [0, 0, 0]);
             return;
         }
-        const light = this._particlePasses.frameLight(scene);
+        const light = this._sys.lighting.frameLight(scene);
         material.properties.set('sunDir', [light.sunDirection[0], light.sunDirection[1], light.sunDirection[2]]);
         material.properties.set('sunColor', [light.sunColor[0], light.sunColor[1], light.sunColor[2]]);
         const key = this._litKeyLight, k = s * 6;

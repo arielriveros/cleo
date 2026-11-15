@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
+import './helpers/features';
 import { defaultMaskResolution } from '../src/terrain/terrainLayerStack';
 import { MAX_INSTANCES } from '../src/terrain/foliage';
 import { decodePng } from '../src/terrain/heightmapIO';

@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mat4, vec3 } from 'gl-matrix';
+import './helpers/features';
 import { DecalNode, decalLocalToUV, radialDecalWeight, radialDecalT, DECAL_RADIAL_CURVES, decalFlipbookFrame } from '../src/core/scene/nodes/decalNode';
 import type { DecalOptions } from '../src/core/scene/nodes/decalNode';
 import { Node } from '../src/core/scene/nodes/node';

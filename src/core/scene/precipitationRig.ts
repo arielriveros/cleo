@@ -1,7 +1,8 @@
 import { vec3 } from 'gl-matrix';
 import type { Scene } from './scene';
 import { ParticleSystemNode } from './nodes/particleSystemNode';
-import { VolumetricFogNode } from './nodes/volumetricFogNode';
+import type { VolumetricFogNode, VolumetricFogOptions } from './nodes/volumetricFogNode';
+import { featureFactory } from '../features/registry';
 import { windFieldClock } from '../wind/windField';
 import type { WeatherNode } from './nodes/weatherNode';
 import { gatherWeather, WEATHER_CLOCK_WRAP } from '../../graphics/render/weatherPack';
@@ -140,7 +141,10 @@ export class PrecipitationRig {
             return;
         }
         if (!this._haze) {
-            const h = new VolumetricFogNode('Rain Haze', {
+            // The haze is a fog volume: a game built without volumetric fog rains without it.
+            const make = featureFactory<(name: string, options: VolumetricFogOptions, id: string) => VolumetricFogNode>('fogVolume');
+            if (!make) return;
+            const h = make('Rain Haze', {
                 size: RAIN_HAZE.size, blendDistance: 30, density: 0, albedo: RAIN_HAZE.albedo, anisotropy: RAIN_HAZE.anisotropy,
                 noiseStrength: RAIN_HAZE.noiseStrength, noiseScale: RAIN_HAZE.noiseScale, windVelocity: [0, 0, 0],
             }, '__precipitation__/haze');

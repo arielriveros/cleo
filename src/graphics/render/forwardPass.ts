@@ -26,9 +26,7 @@ import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
 import type { TemporalPasses } from './temporal';
-import type { VolumetricCloudPasses } from './clouds';
-import type { DecalPasses } from './decals';
-import type { FluidVolumePasses } from './fluids';
+import { sizedTarget, type CloudSubsystem, type DecalSubsystem, type FluidSubsystem } from './featureSubsystems';
 import type { ParticlePasses } from './particlePasses';
 import type { Sprite2DPasses } from './sprites2d';
 import type { Visibility } from './visibility';
@@ -82,9 +80,9 @@ export class ForwardPass {
                 private readonly _materials: MaterialBinder,
                 private readonly _projection: ViewProjection,
                 private readonly _temporal: TemporalPasses,
-                private readonly _clouds: VolumetricCloudPasses,
-                private readonly _decals: DecalPasses,
-                private readonly _fluids: FluidVolumePasses,
+                private readonly _clouds: CloudSubsystem,
+                private readonly _decals: DecalSubsystem,
+                private readonly _fluids: FluidSubsystem,
                 private readonly _particlePasses: ParticlePasses,
                 private readonly _sprites: Sprite2DPasses,
                 private readonly _visibility: Visibility,
@@ -301,8 +299,8 @@ export class ForwardPass {
     private _snapshotSceneColor(queue: readonly ModelNode[]): void {
         this.sceneBuffersLive = !this._host.thumbnailMode;
         if (this._host.thumbnailMode || !ForwardPass._readsSceneColor(queue)) return;
-        const fbo = this._targets.refraction = this._decals.decalTarget(this._targets.refraction, () => new Framebuffer({
-            colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
+        const fbo = this._targets.refraction = sizedTarget(this._targets.refraction, () => new Framebuffer({
+            colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }), this._host.renderWidth, this._host.renderHeight);
         this._passes.copyColors([this._targets.scene.colors[0]], [fbo.colors[0]], this._host.renderWidth, this._host.renderHeight);
     }
 

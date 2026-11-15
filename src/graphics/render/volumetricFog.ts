@@ -13,7 +13,6 @@ import type { PassEncoder } from './passEncoder';
 import type { BindGroupCache } from './bindGroups';
 import type { FullscreenPasses } from './fullscreenPasses';
 import type { ViewProjection } from './viewProjection';
-import type { ParticlePasses } from './particlePasses';
 import type { RenderSubsystems } from './subsystems';
 
 /** What the fog reads from the renderer that owns it. */
@@ -104,7 +103,6 @@ export class VolumetricFogPasses {
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _fullscreen: FullscreenPasses,
                 private readonly _projection: ViewProjection,
-                private readonly _particles: ParticlePasses,
                 private readonly _sys: RenderSubsystems) {}
 
     /** Forget the history (a camera cut, a resize, a settings change). */
@@ -229,7 +227,7 @@ export class VolumetricFogPasses {
         const v = cam.viewMatrix;
         vec3.set(this._forward, -v[2], -v[6], -v[10]);
         vec3.normalize(this._forward, this._forward);
-        const light = this._particles.frameLight(scene);
+        const light = this._sys.lighting.frameLight(scene);
         const k = this._view.preExposure;
         sm.setUniform('u_invViewProj', this._view.invViewProj);
         mat4.copy(this._prevViewProj, this._projection.uvProducing(this._view.prevViewProj));
