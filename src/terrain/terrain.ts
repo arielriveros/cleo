@@ -6,7 +6,7 @@ import { Geometry } from '../core/geometry';
 import { bytesToBase64, base64ToBytes } from '../core/base64';
 import { Model } from '../graphics/model';
 import { Material, TerrainMaterial, TerrainFoliageRule, foliageRuleKey } from '../graphics/material';
-import { Loader } from '../graphics/loader';
+import { imageToArray } from '../graphics/imageLoad';
 import { Logger } from '../core/logger';
 import { authoring } from '../core/eventBus';
 import { FoliageLayer } from './foliage';
@@ -721,7 +721,7 @@ export class Terrain {
 
     /** Replace the height field from a heightmap image's red channel, scaled to [0, amplitude]. */
     public async importHeightmap(path: string, amplitude: number): Promise<void> {
-        const image = await Loader.ImageToArray(path);
+        const image = await imageToArray(path);
         const R = this._R;
         for (let r = 0; r < R; r++) {
             for (let c = 0; c < R; c++) {

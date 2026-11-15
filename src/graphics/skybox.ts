@@ -1,6 +1,6 @@
 import { Mesh } from './mesh';
 import { Geometry } from '../core/geometry';
-import { Loader } from './loader';
+import { loadImage } from './imageLoad';
 import { CubemapFaces, Texture } from './texture';
 import { TextureManager } from './systems/textureManager';
 
@@ -26,12 +26,12 @@ export class Skybox {
     public static fromFiles(files: {posX: string, negX: string, posY: string, negY: string, posZ: string, negZ: string}): Promise<Skybox> {
         return new Promise((resolve, reject) => {
             const promises = [
-                Loader.loadImage(files.posX),
-                Loader.loadImage(files.negX),
-                Loader.loadImage(files.posY),
-                Loader.loadImage(files.negY),
-                Loader.loadImage(files.posZ),
-                Loader.loadImage(files.negZ)
+                loadImage(files.posX),
+                loadImage(files.negX),
+                loadImage(files.posY),
+                loadImage(files.negY),
+                loadImage(files.posZ),
+                loadImage(files.negZ)
             ];
             Promise.all(promises).then((images) => {
                 const cubemapFaces: CubemapFaces = {

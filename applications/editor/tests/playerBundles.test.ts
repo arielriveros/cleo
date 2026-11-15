@@ -44,6 +44,16 @@ describe.skipIf(!built)('the published player build', () => {
       expect(core.filter(m => m.includes(pkg)), pkg).toEqual([]);
   });
 
+  it('carries none of the editor tools: the full engine barrel, the model importers, the script compiler', () => {
+    const all = Object.values(report).flatMap(c => c.modules);
+    for (const tool of [
+      'src/cleo.ts', 'src/graphics/loader.ts', 'src/graphics/utils/assimpjs.js', 'src/graphics/utils/gltfLoader.ts',
+      'src/sequencer/movie/', 'src/core/scripting/sucraseTranspiler.ts', 'node_modules/sucrase/', 'node_modules/meshoptimizer/',
+    ]) expect(all.filter(m => m.includes(tool)), tool).toEqual([]);
+    // The runtime barrel is what the player's `cleo` resolves to.
+    expect(all).toContain('src/cleoCore.ts');
+  });
+
   it('carries each backend once, in its own part, for the page and the worker alike', () => {
     for (const [feature, pkg] of Object.entries(BACKEND_PACKAGES)) {
       expect(modulesOf(build.features[feature].files).some(m => m.includes(pkg)), feature).toBe(true);

@@ -29,6 +29,8 @@ import { contract } from './src/features/publish/playerContract.json'
  */
 const PLAYER_HTML = path.resolve(__dirname, 'src/player/index.html')
 const ENGINE_ROOT = path.resolve(__dirname, '../..')
+/** The engine a published game runs on: the runtime, without the editor's tools (see src/cleoCore.ts). */
+const ENGINE_CORE = path.resolve(ENGINE_ROOT, 'src/cleoCore.ts')
 
 /**
  * The optional parts of the player: a test on a dynamic chunk's facade module (the module its `import()`
@@ -155,6 +157,8 @@ function playerAssets(): Plugin {
         imports: c.imports,
         dynamicImports: c.dynamicImports,
         modules: Object.keys(c.modules).map(repoRelative).sort(),
+        // What each module adds to the chunk once minified: where the bytes are.
+        moduleBytes: Object.fromEntries(Object.entries(c.modules).map(([id, m]) => [repoRelative(id), m.renderedLength])),
       }]))
       this.emitFile({ type: 'asset', fileName: 'index.html', source: readFileSync(PLAYER_HTML) })
       this.emitFile({ type: 'asset', fileName: 'build.json', source: JSON.stringify(manifest, null, 2) })
@@ -167,10 +171,26 @@ function playerAssets(): Plugin {
 }
 
 /**
- * The retired webpack.player.config.js enforced "no Monaco, no CSS in a published game" by OMISSION: it had
- * no css-loader and no MonacoWebpackPlugin, so either import was a hard build error. Vite has both built in
- * and would silently emit an unreferenced style.css or a megabyte of editor instead, so the guardrail is
- * restored explicitly.
+ * Editor tools a published game never runs, by module: the full engine barrel (whose extra exports are those
+ * tools), the model importers (assimp alone is 5 MB of WASM), the script compiler and the script editor. The
+ * engine installs the importer and the compiler from src/cleo.ts rather than importing them, which is what
+ * keeps them out of here; this keeps it that way.
+ */
+const EDITOR_ONLY: { test: RegExp; what: string }[] = [
+  { test: /[\\/]src[\\/]cleo\.ts$/, what: 'the full engine barrel (the player runs on src/cleoCore.ts)' },
+  { test: /[\\/]src[\\/]graphics[\\/]loader\.ts$/, what: 'the model file loader' },
+  { test: /[\\/]src[\\/]graphics[\\/]utils[\\/](assimp|gltfLoader|fbxEmbedded)/, what: 'a model importer' },
+  { test: /[\\/]src[\\/]sequencer[\\/]movie[\\/]/, what: 'the movie renderer' },
+  { test: /[\\/]src[\\/]core[\\/]scripting[\\/]sucraseTranspiler\.ts$/, what: 'the script compiler' },
+  { test: /[\\/]node_modules[\\/](sucrase|meshoptimizer|monaco-editor)[\\/]/, what: 'an editor-only library' },
+]
+
+/**
+ * What a published game must not carry. The retired webpack.player.config.js enforced "no Monaco, no CSS" by
+ * OMISSION: it had no css-loader and no MonacoWebpackPlugin, so either import was a hard build error. Vite has
+ * both built in and would silently emit an unreferenced style.css or a megabyte of editor instead; and a
+ * stray import of the full engine would bring every editor tool back. So the build fails instead, naming the
+ * import.
  */
 function playerGraphGuard(): Plugin {
   return {
@@ -184,6 +204,12 @@ function playerGraphGuard(): Plugin {
         )
       return null
     },
+    moduleParsed(info) {
+      const hit = EDITOR_ONLY.find(e => e.test.test(info.id))
+      if (!hit) return
+      const by = info.importers.map(i => path.relative(ENGINE_ROOT, i)).join(', ') || '?'
+      this.error(`The player bundle must not carry ${hit.what}: ${path.relative(ENGINE_ROOT, info.id)}, imported by ${by}.`)
+    },
   }
 }
 
@@ -191,8 +217,11 @@ function playerGraphGuard(): Plugin {
 // alias -- the same source the editor dev server and both test suites use, so a published game is built from
 // exactly the engine the editor previewed it with.
 export default defineConfig(() => mergeConfig(engineConfig, defineConfig({
+  // `cleo` -> the engine's runtime barrel (src/cleoCore.ts) rather than the full one: everything in the player
+  // that imports 'cleo' gets the runtime, and a name only the editor's tools export fails the build. Vite puts
+  // an overriding config's aliases first, so this wins over the shared config's `cleo` -> src/cleo.ts.
   // `@cleo/app-kit/...` -> the shared app-kit's source (see ../app-kit/vite.preset.ts).
-  resolve: { alias: appKitAlias },
+  resolve: { alias: [{ find: /^cleo$/, replacement: ENGINE_CORE }, ...(appKitAlias as any[])] },
 
   // Nothing under src/player/ imports src/version.ts today. The define is here anyway because this is a
   // SEPARATE bundle that drifts silently -- without it, the first shared import to reach the player would be

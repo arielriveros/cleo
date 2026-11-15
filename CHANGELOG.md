@@ -16,6 +16,10 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Published games are 5.8 MB smaller.** The editor's tools no longer ship in a game: the model importers
+  (assimp's WASM alone was 5.5 MB), the script compiler and the movie renderer. A published game runs on the
+  engine's runtime (`cleoCore`); the editor installs the importers and the compiler into it. A cannon game's
+  player is 19.8 MB, was 25.7.
 - **Smaller published games on Rapier and Jolt.** The published player is ES modules split into chunks, one
   build for every game where it used to be one file per physics backend. A game ships only the chunks it
   needs: a Rapier or Jolt game carries its backend once, shared by the page and the physics worker, where it

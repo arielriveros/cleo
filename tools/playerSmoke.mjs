@@ -45,9 +45,12 @@ async function evaluate(port, expression) {
 }
 
 async function run(c, port) {
-  const child = spawn(electron, [c.dir, `--remote-debugging-port=${port}`], { env, stdio: 'ignore' });
+  // One profile for every case: the first compiles the shaders (tens of seconds with an empty GPU cache), the
+  // rest reuse them.
+  const profile = path.join(out, '..', 'electron-profile');
+  const child = spawn(electron, [c.dir, `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`], { env, stdio: 'ignore' });
   try {
-    const deadline = Date.now() + 60_000;
+    const deadline = Date.now() + 180_000;
     while (Date.now() < deadline) {
       await sleep(500);
       let state;

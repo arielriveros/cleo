@@ -7,10 +7,31 @@
 // Must import nothing from the engine: node.ts depends on this, so any engine import closes a cycle.
 // (scriptUrls.ts is a leaf of its own.)
 // The engine's public API reaches scripts through registerScriptModule(), which src/cleo.ts calls.
-import { transform } from 'sucrase';
+// Sucrase itself is installed, not imported (setScriptTranspiler): a published game runs its scripts
+// precompiled and never strips a type, so it does not carry the compiler.
 import { scriptSourceUrl, inlineScriptUrl } from './scriptUrls';
 
 export type ScriptModule = Record<string, any>;
+
+/**
+ * Strips a script's TypeScript syntax, keeping its lines and its `import`s: what turns script SOURCE into
+ * something the rewriter below can work on. src/cleo.ts installs Sucrase's (sucraseTranspiler.ts); a published
+ * game, whose scripts arrive compiled in game.scripts.js, has none.
+ */
+export type ScriptTranspiler = (source: string) => string;
+
+let transpiler: ScriptTranspiler | null = null;
+
+/** Install what compiles script source (src/cleo.ts installs Sucrase). */
+export function setScriptTranspiler(next: ScriptTranspiler | null): void {
+    transpiler = next;
+}
+
+function stripTypes(source: string): string {
+    if (!transpiler)
+        throw new Error('Scripts: this build compiles no script source (a published game runs its scripts precompiled)');
+    return transpiler(source);
+}
 
 /** Handlers a script may export. Anything else it exports is ignored. */
 export const SCRIPT_HANDLERS = [
@@ -728,10 +749,9 @@ export interface ScriptCompileOptions {
  */
 export function buildFactoryBody(source: string, options: ScriptCompileOptions = {}): string {
     const mode = options.mode ?? 'node';
-    // Sucrase's 'imports' transform stays off, so `import` statements survive for the rewriter. Its
-    // TypeScript transform already drops `import type`, `export type`, `export interface` and
-    // `export declare`, and turns `export enum` into `export var`.
-    const js = transform(source, { transforms: ['typescript'], preserveDynamicImport: true }).code;
+    // The transpiler leaves `import` statements for the rewriter; it already drops `import type`,
+    // `export type`, `export interface` and `export declare`, and turns `export enum` into `export var`.
+    const js = stripTypes(source);
     const { code, st } = runTransform(js, options.path);
     // Every header statement ends in `;`, so whatever the author's first line starts with, it stays a
     // separate statement.
@@ -750,7 +770,7 @@ export function buildFactoryBody(source: string, options: ScriptCompileOptions =
  */
 export function listScriptImports(source: string, path?: string): string[] {
     try {
-        const js = transform(source, { transforms: ['typescript'], preserveDynamicImport: true }).code;
+        const js = stripTypes(source);
         return runTransform(js, path).st.imports.filter(id => id.startsWith('/'));
     } catch {
         return [];

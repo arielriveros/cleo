@@ -33,6 +33,7 @@ are taken live from the renderer, the others as last saved.
 | Terrain data, DEFLATE-compressed | The authoring data for the **unused dimension** |
 | Scripts, obfuscated | |
 | The engine, as the player's modules the game needs | The physics backends the game does not run on |
+| | The editor's tools: the model importers, the script compiler and the movie renderer. A script in a published game cannot import them from `cleo` |
 
 Editor-only nodes are **structurally absent**, not merely hidden — there is no flag left to turn
 back on.

@@ -31,8 +31,8 @@ export const BOUNDARY_RULES: readonly { readonly id: string; readonly pattern: R
 export const BOUNDARY_ALLOWED: Readonly<Record<string, readonly string[]>> = {
     // The device factory: the one place that names both backends.
     'src/graphics/rhi/createDevice.ts': ['backendImport'],
-    // Public API re-exports (`setGLContext`, `WebGL2Device`, `acquireWebGPUDevice`, ...).
-    'src/cleo.ts': ['backendImport', 'setGLContext'],
+    // Public API re-exports (`setGLContext`, `WebGL2Device`, `acquireWebGPUDevice`, ...), in the runtime barrel.
+    'src/cleoCore.ts': ['backendImport', 'setGLContext'],
     // Ambient declarations branding WebGL's handle types.
     'src/webglHandles.d.ts': ['WebGLType'],
 };

@@ -17,6 +17,8 @@ export default mergeConfig(engineConfig, defineConfig({
     test: {
         include: ['tests/**/*.test.ts'],
         environment: 'node',
+        // What the engine barrel installs (the script compiler), for the tests that reach the runtime alone.
+        setupFiles: ['../../tests/helpers/engineTools.ts'],
         // bundleAssetsRealProject round-trips the shipped 3D example, and scriptWorkspaceTypes shells out
         // to tsc; both are slow by nature rather than hung.
         testTimeout: 30_000,
