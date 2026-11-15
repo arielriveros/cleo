@@ -12,6 +12,10 @@ import { playPackJob } from '../../workers/workerClient';
 import { scriptDebugger, setGamePing } from '../scriptDebugger/debugSession';
 import { getDebugPrefs } from '../scriptDebugger/debugPrefs';
 import { clearRuntimeErrors } from '../nodeInspector/scriptEditor/runtimeErrors';
+import {
+  forgetVsCodeSession, installVsCodeDebug, onVsCodeEvent, onVsCodeResumed, releaseVsCode, stoppedInVsCode,
+  vscodeDebugging, waitForVsCode,
+} from '../scriptDebugger/vscodeAttach';
 
 /** The URL of the game page for a session, on this origin (web only: the desktop shell builds its own). */
 export function playPageUrl(sessionId: string, base: string): string {
@@ -27,6 +31,10 @@ function browserEnv(): WindowPlayEnv {
   const oldShell = !desktop && typeof (window as any).cleoDesktop === 'object';
   const locks: LockManager | undefined = typeof navigator !== 'undefined' ? navigator.locks : undefined;
   let windowEvents: ((sessionId: string, event: 'closed' | 'crashed', detail?: string) => void) | null = null;
+  // Which debugger a session's window got, chosen as it opens: VS Code through the debug port (Options ▸
+  // Editor ▸ Scripts ▸ Debug scripts with), else Cleo's own. Never both: a window has one connection.
+  const viaVsCode = new Set<string>();
+  const cleo = (sessionId: string) => (debug && !viaVsCode.has(sessionId) ? debug : null);
 
   return {
     newSessionId,
@@ -37,7 +45,8 @@ function browserEnv(): WindowPlayEnv {
     },
     openWindow(sessionId, size) {
       if (desktop) {
-        const options = debug ? { debug: { pauseOnExceptions: getDebugPrefs().pauseOnExceptions } } : {};
+        if (vscodeDebugging()) viaVsCode.add(sessionId);
+        const options = cleo(sessionId) ? { debug: { pauseOnExceptions: getDebugPrefs().pauseOnExceptions } } : {};
         void desktop.open({ sessionId, ...size, ...options }).then(
           result => { if (!result.ok) windowEvents?.(sessionId, 'crashed', result.error ?? 'the window did not open'); },
           error => windowEvents?.(sessionId, 'crashed', String(error?.message ?? error)),
@@ -84,6 +93,14 @@ function browserEnv(): WindowPlayEnv {
           case 'debug': debug?.onProtocolEvent(event.sessionId, event.method, event.params); break;
           case 'debug-attached': debug?.onAttached(event.sessionId); break;
           case 'debug-detached': debug?.onDetached(event.sessionId, event.reason); break;
+          // VS Code's, through the debug port.
+          case 'vscode-status': case 'vscode-ready': case 'vscode-paused': case 'vscode-resumed':
+            onVsCodeEvent(event);
+            break;
+          // Continue in VS Code: its window is in front, and a covered game window draws no frames.
+          case 'vscode-continued':
+            void desktop?.focus(event.sessionId).catch(() => {});
+            break;
         }
       });
       return () => { windowEvents = null; off?.(); };
@@ -107,17 +124,28 @@ function browserEnv(): WindowPlayEnv {
       started(sessionId) {
         // The script editor's error marks are about the last run.
         clearRuntimeErrors();
-        debug?.started(sessionId);
+        cleo(sessionId)?.started(sessionId);
       },
-      built(sessionId) { debug?.built(sessionId); },
-      ready: sessionId => debug ? debug.ready(sessionId) : Promise.resolve(),
+      built(sessionId) { cleo(sessionId)?.built(sessionId); },
+      // The first boot waits for the debugger's breakpoints: Cleo's, or VS Code's when it is connected.
+      ready: sessionId => viaVsCode.has(sessionId) ? waitForVsCode(sessionId) : (debug ? debug.ready(sessionId) : Promise.resolve()),
       hello(sessionId) {
         // A page after Restart is a new run too.
         clearRuntimeErrors();
-        debug?.hello(sessionId);
+        cleo(sessionId)?.hello(sessionId);
       },
-      whenRunning(send, reloads) { if (debug) debug.whenRunning(send, reloads); else send(); },
-      ended(sessionId) { debug?.ended(sessionId); },
+      whenRunning(send, reloads) {
+        // A game stopped in a debugger drops what the channel brings it: let it go first.
+        const c = debug && !viaVsCode.size ? debug : null;
+        if (c) { c.whenRunning(send, reloads); return; }
+        const stopped = [...viaVsCode].find(id => stoppedInVsCode(id));
+        if (stopped) void releaseVsCode(stopped).then(send);
+        else send();
+      },
+      ended(sessionId) {
+        cleo(sessionId)?.ended(sessionId);
+        if (viaVsCode.delete(sessionId)) forgetVsCodeSession(sessionId);
+      },
     },
   };
 }
@@ -130,6 +158,10 @@ export function windowPlay(): WindowPlayController {
   controller = new WindowPlayController(browserEnv());
   const c = controller;
   setGamePing(() => c.ping());
+  // VS Code let a stopped game go: what the game said meanwhile never arrived. And the port follows the
+  // Debug-scripts-with preference from now on.
+  onVsCodeResumed(() => c.ping());
+  installVsCodeDebug();
   // The editor closing or reloading takes its game window along. The owner lock does the same on its own
   // when the page dies without running this (a crash), so this is the fast path, not the only one.
   window.addEventListener('pagehide', () => controller?.stopForUnload());

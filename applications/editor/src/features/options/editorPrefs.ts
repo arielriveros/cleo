@@ -10,6 +10,12 @@ import { useSyncExternalStore } from 'react';
 /** Where a script opens when you double-click it, press ✎ on a script slot, or create one. */
 export type ScriptOpener = 'builtin' | 'vscode';
 
+/** Which debugger drives a game playing in a window (desktop): Cleo's own, or VS Code through the debug port. */
+export type ScriptDebugger = 'cleo' | 'vscode';
+
+/** The VS Code debug port's default; written into the workspace's launch.json. */
+export const DEFAULT_VSCODE_DEBUG_PORT = 9339;
+
 export interface EditorPrefs {
   scriptOpenWith: ScriptOpener;
   /**
@@ -27,6 +33,10 @@ export interface EditorPrefs {
   snapScale: number;
   /** Keep Options ▸ Engine ▸ Performance docked beside the viewport in Play (the lock on that page). */
   pinPerformanceInPlay: boolean;
+  /** Options ▸ Editor ▸ Scripts ▸ Debug scripts with. VS Code turns Cleo's own debugger off. */
+  scriptDebugWith: ScriptDebugger;
+  /** The local port VS Code attaches to (Attach to the Cleo game). */
+  vscodeDebugPort: number;
 }
 
 export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
@@ -38,6 +48,8 @@ export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   snapRotateDeg: 15,
   snapScale: 0.1,
   pinPerformanceInPlay: false,
+  scriptDebugWith: 'cleo',
+  vscodeDebugPort: DEFAULT_VSCODE_DEBUG_PORT,
 };
 
 const KEY = 'cleo_editor_prefs_v1';
@@ -59,6 +71,9 @@ export function parseEditorPrefs(raw: unknown): EditorPrefs {
     snapRotateDeg: pos(o.snapRotateDeg, d.snapRotateDeg, 0.1, 180),
     snapScale: pos(o.snapScale, d.snapScale),
     pinPerformanceInPlay: o.pinPerformanceInPlay === true,
+    scriptDebugWith: o.scriptDebugWith === 'vscode' ? 'vscode' : 'cleo',
+    vscodeDebugPort: typeof o.vscodeDebugPort === 'number' && Number.isInteger(o.vscodeDebugPort) && o.vscodeDebugPort >= 1024 && o.vscodeDebugPort <= 65535
+      ? o.vscodeDebugPort : d.vscodeDebugPort,
   };
 }
 

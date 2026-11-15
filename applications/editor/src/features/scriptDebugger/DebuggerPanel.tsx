@@ -12,6 +12,9 @@ import { openScriptAt } from '../nodeInspector/scriptEditor/scriptReveal';
 import type { DebugFrame, DebugSnapshot, PauseReason } from './debugController';
 import type { CdpRemoteObject, CdpScope } from './cdp';
 import { VariableRow } from './VariablesTree';
+import { BrowserDebugging, VsCodeDebugging } from './DebuggerCards';
+import { useEditorPrefs } from '../options/editorPrefs';
+import { desktopDebugPort } from '../playWindow/desktopPlay';
 import { BreakpointIcon, BreakpointsOffIcon, ContinueIcon, PauseIcon, StepIntoIcon, StepOutIcon, StepOverIcon } from './debugIcons';
 
 const REASON: Record<PauseReason, string> = {
@@ -42,9 +45,6 @@ function Section({ title, right, children, className }: { title: string; right?:
 /** What the debugger is doing, or why it is not, in one line. */
 function StatusLine({ snapshot }: { snapshot: DebugSnapshot }) {
   const target = usePlayTarget();
-  if (!canDebugScripts()) {
-    return <span className='text-dim'>The debugger runs in the desktop app. In the browser, play in a window and press F12 in it to debug its scripts.</span>;
-  }
   switch (snapshot.phase) {
     case 'off':
       return target === 'editor'
@@ -200,10 +200,21 @@ function BreakpointRow({ b, state }: { b: ScriptBreakpoint; state?: string }) {
 }
 
 /**
- * The Debugger panel: stop, step and continue a game playing in a window; where it stopped (the call
- * stack), what the variables hold, and every breakpoint in the project.
+ * The Debugger panel. In the browser it says how to debug there (F12 in the game window); with VS Code as
+ * the debugger, how to attach it; otherwise it is Cleo's own debugger.
  */
 export default function DebuggerPanel() {
+  const prefs = useEditorPrefs();
+  if (!canDebugScripts()) return <BrowserDebugging />;
+  if (prefs.scriptDebugWith === 'vscode' && desktopDebugPort()) return <VsCodeDebugging />;
+  return <CleoDebugger />;
+}
+
+/**
+ * Cleo's own debugger: stop, step and continue a game playing in a window; where it stopped (the call
+ * stack), what the variables hold, and every breakpoint in the project.
+ */
+function CleoDebugger() {
   const snapshot = useScriptDebugger();
   const prefs = useDebugPrefs();
   const breakpoints = useBreakpoints();

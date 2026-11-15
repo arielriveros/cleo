@@ -305,13 +305,17 @@ async function apply(root, batch) {
  * SCAFFOLD_ALLOW so this channel can never be used to write a mirrored source file (or anything else).
  */
 async function writeScaffold(root, files) {
-  for (const { rel, content } of files) {
+  let written = 0;
+  for (const { rel, content, keep } of files) {
     if (!SCAFFOLD_ALLOW.some(re => re.test(rel))) throw new Error(`Not a scaffold path: ${rel}`);
     const abs = safeJoin(root, rel);
+    // `keep`: a file the user may have made their own (launch.json) is written only where there is none.
+    if (keep && fs.existsSync(abs)) continue;
     await fsp.mkdir(path.dirname(abs), { recursive: true });
     await fsp.writeFile(abs, content, 'utf-8');
+    written++;
   }
-  return { ok: true, written: files.length };
+  return { ok: true, written };
 }
 
 /* ------------------------------------------------------------------------- */

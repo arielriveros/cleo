@@ -193,6 +193,16 @@ window.addEventListener('pagehide', () => {
   send({ type: 'bye', reloading });
 });
 
+// In a browser this window's own developer tools are the script debugger (the editor cannot drive another
+// page's): say so while it loads. The desktop app's window is debugged from the editor or VS Code instead.
+if (!/\bElectron\//.test(navigator.userAgent)) {
+  const hint = document.createElement('div');
+  hint.id = 'cleo-debug-hint';
+  hint.textContent = 'To debug the scripts, press F12 in this window: they are under Sources ▸ cleo-script://';
+  hint.style.cssText = 'position:absolute;left:0;right:0;bottom:28px;text-align:center;font:12px system-ui,sans-serif;letter-spacing:0;color:#77736b';
+  document.getElementById('cleo-loading')?.appendChild(hint);
+}
+
 function announce(): void {
   setLoadingText('Building the game in the editor…');
   send({ type: 'hello', state });
@@ -202,15 +212,23 @@ function announce(): void {
 if (!session || !channel) {
   showError('This page runs a game started from the editor: Play ▸ Play in window.');
 } else if (navigator.locks) {
+  // A lock granted while this page is held by a debugger (VS Code's attach holds a fresh page with
+  // Page.waitForDebugger until its breakpoints are in) cannot call back: the request rejects with "the
+  // provided callback is no longer runnable", and the page would never say hello. So ask again, once it runs.
+  const request = (name: string, granted: () => Promise<void> | void, attempt = 0): void => {
+    navigator.locks.request(name, granted).catch(() => {
+      if (attempt < 20) setTimeout(() => request(name, granted, attempt + 1), 100);
+    });
+  };
   // Held for this page's whole life, and only then hello: the editor watches it to learn the page is gone
   // with no help from this page's JavaScript, which a breakpoint or a crash would have stopped.
-  void navigator.locks.request(gameLockName(session), () => {
+  request(gameLockName(session), () => {
     announce();
     return new Promise<void>(() => {});
   });
   // The editor holds this one for the session. It comes to us only when the editor has let go: it was
   // closed or reloaded, or it ended the session.
-  void navigator.locks.request(ownerLockName(session), () => { stop(); });
+  request(ownerLockName(session), () => { stop(); });
 } else {
   announce();
 }

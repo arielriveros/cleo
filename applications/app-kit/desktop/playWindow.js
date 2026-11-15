@@ -50,10 +50,15 @@ function centredBounds(area, width, height) {
 
 function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, icon }) {
   /**
-   * sessionId -> { win, ownerId, debug, debugOptions }: the play windows open now, which editor window asked
-   * for each, and the script debugger's session on it (null until attached, or when not asked for).
+   * sessionId -> { win, ownerId, owner, debug, debugOptions, navigated }: the play windows open now, which
+   * editor window asked for each, and the script debugger's session on it (null until attached, or when not
+   * asked for). `navigated`: the page has committed, so a debugger can attach to it.
    */
   const windows = new Map();
+  /** The VS Code debug port (debugPort.js), once main.js has made it. It holds a window's session instead of
+   *  Cleo's own debugger, never alongside it. */
+  let debugPort = null;
+  const targetsChanged = () => { if (debugPort) debugPort.targetsChanged(); };
 
   const boundsFile = () => path.join(app.getPath('userData'), 'play-window.json');
   function readSavedBounds() {
@@ -74,6 +79,7 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
   function destroy(entry) {
     // First: detaching resumes a page stopped at a breakpoint, which a window being torn down must not be.
     if (entry.debug) { entry.debug.detach(); entry.debug = null; }
+    if (debugPort) debugPort.detach(entry.sessionId);
     remember(entry.win);
     if (!entry.win.isDestroyed()) entry.win.destroy();
   }
@@ -133,11 +139,17 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     // On the first COMMITTED navigation, not before loadURL: a session attached earlier talks to the
     // about:blank renderer the navigation throws away, and every command but Debugger.enable is lost. Scripts
     // only run once the editor sends the game its data, well after this. A reload (Restart) keeps the session.
+    // The VS Code debug port lists the window from then on too.
     contents.once('did-navigate', () => {
       const entry = windows.get(sessionId);
-      if (!debugOptions || !entry || entry.win !== win || contents.isDestroyed()) return;
-      entry.debug = attachDebugger(contents, payload => send(owner, { sessionId, ...payload }), debugOptions);
+      if (!entry || entry.win !== win || contents.isDestroyed()) return;
+      entry.navigated = true;
+      if (debugOptions && !(debugPort && debugPort.holds(sessionId)))
+        entry.debug = attachDebugger(contents, payload => send(owner, { sessionId, ...payload }), debugOptions);
+      targetsChanged();
     });
+    // A reload (Restart) is a new page under the same target.
+    contents.on('did-navigate', () => { if (windows.get(sessionId)?.navigated) targetsChanged(); });
 
     contents.on('dom-ready', () => {
       if (contents.isDestroyed()) return;
@@ -149,10 +161,11 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     win.on('close', () => remember(win));
     win.on('closed', () => {
       if (windows.get(sessionId)?.win === win) windows.delete(sessionId);
+      targetsChanged();
       send(owner, { sessionId, type: 'closed' });
     });
 
-    windows.set(sessionId, { win, ownerId, debug: null, debugOptions });
+    windows.set(sessionId, { sessionId, win, ownerId, owner, debug: null, debugOptions, navigated: false });
     win.loadURL(`${page}?session=${sessionId}`);
     return { ok: true };
   });
@@ -168,6 +181,9 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     if (!entry || entry.ownerId !== event.sender.id || entry.win.isDestroyed()) return { ok: false };
     if (entry.win.isMinimized()) entry.win.restore();
     entry.win.show();
+    // On top even where Windows refuses a background app the focus (VS Code in front, after a Continue
+    // there): a game window that stays covered draws no frames.
+    entry.win.moveTop();
     entry.win.focus();
     return { ok: true };
   });
@@ -190,6 +206,7 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     const entry = windows.get(String(sessionId));
     if (!entry || entry.ownerId !== event.sender.id || entry.win.isDestroyed()) return { ok: false, error: 'No such game window' };
     if (entry.debug && entry.debug.attached) return { ok: true };
+    if (debugPort && debugPort.holds(String(sessionId))) return { ok: false, error: 'VS Code is attached to this game window' };
     const owner = event.sender;
     entry.debugOptions = { pauseOnExceptions: !!(options && options.pauseOnExceptions) };
     entry.debug = attachDebugger(entry.win.webContents, payload => send(owner, { sessionId: String(sessionId), ...payload }), entry.debugOptions);
@@ -212,7 +229,18 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     for (const entry of [...windows.values()]) if (entry.ownerId === ownerId) destroy(entry);
   }
 
-  return { closeOwnedBy };
+  /** The windows the VS Code debug port offers: committed pages, with who opened them. */
+  function debugTargets() {
+    const out = [];
+    for (const entry of windows.values()) {
+      if (!entry.navigated || entry.win.isDestroyed()) continue;
+      const contents = entry.win.webContents;
+      out.push({ id: entry.sessionId, title: entry.win.getTitle(), url: contents.getURL(), contents, owner: entry.owner, heldByCleo: !!entry.debug });
+    }
+    return out;
+  }
+
+  return { closeOwnedBy, debugTargets, setDebugPort: (port) => { debugPort = port; } };
 }
 
 module.exports = { registerIpc, fitSavedBounds, centredBounds, SESSION_ID };

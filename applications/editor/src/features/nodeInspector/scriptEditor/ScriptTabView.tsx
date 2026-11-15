@@ -6,7 +6,9 @@ import { useScriptWorkspace } from '../../scriptWorkspace/ScriptWorkspaceContext
 import { NOT_DESKTOP_REASON } from '../../scriptWorkspace/desktopScripts'
 import { Button } from '@cleo/app-kit/ui/Button'
 import { useBreakpoints } from '../../scriptDebugger/breakpoints'
-import { useScriptDebugger } from '../../scriptDebugger/debugSession'
+import { canDebugScripts, useScriptDebugger } from '../../scriptDebugger/debugSession'
+import { useEditorPrefs } from '../../options/editorPrefs'
+import { desktopDebugPort } from '../../playWindow/desktopPlay'
 import { usePlayTarget, writePlayTarget } from '../../playWindow/playTarget'
 
 // Monaco (and monaco-editor itself) is heavy, so it downloads only when a Script tab is actually opened.
@@ -21,6 +23,25 @@ function DebugHint({ moduleId }: { moduleId: string }) {
   const breakpoints = useBreakpoints()
   const target = usePlayTarget()
   const debug = useScriptDebugger()
+  const prefs = useEditorPrefs()
+  const hasBreakpoints = breakpoints.some(b => b.moduleId === moduleId && b.enabled)
+  // In the browser Cleo cannot drive the game's debugger: point at the one that can, prominently.
+  if (!canDebugScripts() && hasBreakpoints) {
+    return (
+      <span className='shrink-0 rounded px-1.5 text-ui-sm text-warning bg-warning/10'
+        title="A web page cannot drive another page's debugger. In the browser, Play in window, press F12 in the game window, and set breakpoints under Sources ▸ cleo-script://.">
+        Breakpoints here work in the desktop app. In the browser, press F12 in the game window
+      </span>
+    )
+  }
+  if (prefs.scriptDebugWith === 'vscode' && desktopDebugPort() && hasBreakpoints) {
+    return (
+      <span className='shrink-0 rounded px-1.5 text-ui-sm text-highlight bg-highlight/10'
+        title="Debug scripts with is set to VS Code (Options ▸ Editor ▸ Scripts), so Cleo's own debugger is off and these breakpoints wait for it.">
+        Debugging with VS Code: set breakpoints there
+      </span>
+    )
+  }
   if (debug.phase !== 'off' && debug.staleModules.includes(moduleId)) {
     return (
       <span className='shrink-0 rounded px-1.5 text-ui-sm text-warning bg-warning/10'
@@ -29,7 +50,7 @@ function DebugHint({ moduleId }: { moduleId: string }) {
       </span>
     )
   }
-  if (target !== 'editor' || debug.phase !== 'off' || !breakpoints.some(b => b.moduleId === moduleId && b.enabled)) return null
+  if (target !== 'editor' || debug.phase !== 'off' || !hasBreakpoints) return null
   return (
     <span className='shrink-0 flex items-center gap-1 text-ui-sm text-dim'>
       Breakpoints stop the game only when it plays in a window

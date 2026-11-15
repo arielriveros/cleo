@@ -32,6 +32,15 @@ export type PlayWindowEvent =
   | { sessionId: string; type: 'debug-attached' }
   /** The debugger session ended without the window closing (or could not start). */
   | { sessionId: string; type: 'debug-detached'; reason: string }
+  /** The VS Code debug port (debugPort.js): listening or not, and how many debuggers are connected. */
+  | { sessionId?: undefined; type: 'vscode-status'; listening: boolean; port: number; clients: number }
+  /** VS Code's debugger has its breakpoints in on this window (it sent Runtime.runIfWaitingForDebugger). */
+  | { sessionId: string; type: 'vscode-ready' }
+  /** The game stopped, or ran on, in VS Code's debugger. */
+  | { sessionId: string; type: 'vscode-paused' }
+  | { sessionId: string; type: 'vscode-resumed' }
+  /** VS Code's Continue (not a step): the player goes back to the game window. */
+  | { sessionId: string; type: 'vscode-continued' }
 
 export interface DesktopPlayBridge {
   open(options: PlayWindowOpenOptions): Promise<{ ok: boolean; error?: string }>
@@ -57,6 +66,21 @@ export function desktopPlay(): DesktopPlayBridge | undefined {
   if (!play || typeof play.open !== 'function' || typeof play.close !== 'function'
     || typeof play.focus !== 'function' || typeof play.onEvent !== 'function') return undefined
   return play
+}
+
+/** The VS Code debug port's half. A shell from before it has none of it. */
+export interface DesktopDebugPortBridge {
+  /** On (on `port`), off, or onto another port. Never rejects; `error` says why it could not listen. */
+  debugPort(options: { enabled: boolean; port?: number }): Promise<{ ok: boolean; port?: number; error?: string }>
+  /** Let a game stopped in VS Code go, so a command from the editor reaches it. */
+  vscodeRelease(sessionId: string): Promise<{ ok: boolean }>
+}
+
+/** The VS Code debug port half, when this shell has it. */
+export function desktopDebugPort(): DesktopDebugPortBridge | undefined {
+  const play = desktopPlay() as (DesktopPlayBridge & Partial<DesktopDebugPortBridge>) | undefined
+  if (!play || typeof play.debugPort !== 'function' || typeof play.vscodeRelease !== 'function') return undefined
+  return play as DesktopDebugPortBridge
 }
 
 /** The debugger half, when this shell has all of it (and the play window it drives). */

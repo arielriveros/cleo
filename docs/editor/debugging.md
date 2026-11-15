@@ -17,11 +17,24 @@ Line numbers are your own. A script runs under its path, `cleo-script:///Player/
 your file is line 42 at runtime. The browser's own developer tools (F12) use the same names, so in a
 browser you can find your scripts there by name.
 
+## Debugging in a browser
+
+A web page cannot drive another page's debugger, so in a browser the game window's own developer tools are the
+debugger:
+
+1. Play the game in a window: *Play ▸ Play in window*.
+2. In the game window, press **F12** (**Cmd + Option + I** on a Mac).
+3. Open **Sources**, then **cleo-script://**. Your scripts are listed by their path, with your own line
+   numbers: set breakpoints, step through them and read their variables there.
+
+The Debugger panel shows these steps in the browser, the game window's loading screen repeats the F12 hint,
+and a script whose breakpoints Cleo cannot use says so in its tab. Script errors still link to their line from
+the Console. Cleo's own debugger (below) and [debugging in VS Code](#debugging-in-vs-code) are in the desktop
+app.
+
 ## The debugger
 
-The debugger stops a game that plays **in a window** (*Play ▸ Play in window*). It needs the desktop app:
-a web page cannot drive another page's debugger. In a browser, press F12 in the game window instead: your
-scripts are listed there by name.
+Cleo's own debugger stops a game that plays **in a window** (*Play ▸ Play in window*) in the desktop app.
 
 A game playing in the editor's viewport runs on the editor's own thread, so a breakpoint cannot stop it
 without freezing the editor too. Breakpoints are kept, but they do nothing there. The Debugger panel and
@@ -99,6 +112,33 @@ internal fields are folded. The **Evaluate** box below runs an expression in the
 **Breakpoints** — every breakpoint in the project: click one to open its line, tick it to switch it on or
 off, or remove it. *not run yet* means the line has not run in this game; *after Restart*, that its
 script changed since the game was built.
+
+## Debugging in VS Code
+
+In the desktop app, VS Code's debugger can attach to a game playing in a window instead of Cleo's own.
+
+1. *Options ▸ Editor ▸ Scripts ▸ Debugging*: **Debug scripts with** — *VS Code*. The app opens a debug
+   port (**VS Code debug port**, 9339 unless you change it) that reaches only game windows, and only from
+   this computer.
+2. Set up the [script workspace](scripting-workflow.md#editing-in-vs-code) if you have not. It gets a
+   `.vscode/launch.json` with **Attach to the Cleo game** when it has none. If you already had a launch.json,
+   it is left alone: **Copy launch configuration** (in Options or the Debugger panel) and add it yourself.
+3. In VS Code, set breakpoints in your scripts and press **F5**. The Debugger panel shows *VS Code is
+   attached*.
+4. Press Play. The game plays in a window and stops at VS Code's breakpoints; step and inspect there. Cleo's
+   top bar reads *Stopped in VS Code*, and its Play continues the game too.
+
+Things to know:
+
+- **One debugger at a time.** A game window takes one debugger, so with VS Code chosen Cleo's own debugger,
+  its margin breakpoints and the Debugger panel's controls are off. Switch back with **Use Cleo's debugger**.
+- **Script errors** stop VS Code only with **Caught Exceptions** ticked in its Breakpoints view. The engine
+  catches every script's error so one script cannot stop the frame, so they are never "uncaught".
+- **Columns are approximate** where types were stripped, so a step can highlight a little off within the
+  line. Lines are exact.
+- A script whose workspace file had to be renamed (two scripts whose names differ only in a character a file
+  name cannot hold) does not bind breakpoints.
+- Restart keeps VS Code attached; Stop or closing the game window ends its session.
 
 ## See also
 

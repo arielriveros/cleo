@@ -304,10 +304,10 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     agreedRef.current = restored?.state ?? new Map()
 
     // The declaration payload only moves when the engine is rebuilt, so skip ~100 writes when it has not.
-    const scaffold = await buildScaffold()
+    const scaffold = await buildScaffold(getEditorPrefs().vscodeDebugPort)
     typesHashRef.current = scaffold.typesHash
     const stale = !restored || restored.typesHash !== scaffold.typesHash
-    const written = await bridge.writeScaffold(root, stale ? scaffold.files : staticScaffold())
+    const written = await bridge.writeScaffold(root, stale ? scaffold.files : staticScaffold(getEditorPrefs().vscodeDebugPort))
     if (!written.ok) { setStatusBoth('error', written.error ?? 'Could not write the workspace scaffolding.'); return }
 
     rootRef.current = root

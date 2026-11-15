@@ -8,6 +8,7 @@ const { GAME_MAIN_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, WEB_HEADERS, gamePack
 const scriptWorkspace = require('./scriptWorkspace');
 const movieFiles = require('./movieFiles');
 const playWindow = require('./playWindow');
+const debugPort = require('./debugPort');
 const windowControls = require('./windowControls');
 
 const isDev = process.env.CLEO_DEV === '1';
@@ -477,3 +478,5 @@ windowControls.registerIpc({ ipcMain, BrowserWindow, screen });
 // Registered before any window exists (this runs at load), so `play` is there for createWindow's handlers.
 
 const play = playWindow.registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, icon: APP_ICON });
+// Their debug port for VS Code (Options ▸ Editor ▸ Scripts ▸ Debug scripts with), only while the editor asks.
+debugPort.registerIpc({ ipcMain, play, product: `Cleo/${app.getVersion()}` });

@@ -69,6 +69,10 @@ contextBridge.exposeInMainWorld('cleoDesktop', {
     debug: (sessionId, method, params) => ipcRenderer.invoke('play:debug', sessionId, method, params),
     debugAttach: (sessionId, options) => ipcRenderer.invoke('play:debug-attach', sessionId, options),
     raiseEditor: () => ipcRenderer.invoke('play:raise-editor'),
+    // The VS Code debug port (debugPort.js): on, off or onto another port; its status and the game's stops in
+    // VS Code arrive through onEvent. `vscodeRelease` lets a game stopped in VS Code go.
+    debugPort: (options) => ipcRenderer.invoke('debugport:set', options),
+    vscodeRelease: (sessionId) => ipcRenderer.invoke('play:vscode-release', sessionId),
     onEvent: (cb) => {
       const listener = (_event, payload) => cb(payload);
       ipcRenderer.on('play:event', listener);

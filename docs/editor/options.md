@@ -82,6 +82,16 @@ status, with *Open*, *Disconnect*, and — when the sync needs attention — *Re
 *Apply deletions*. Desktop app only. See [Scripting workflow](scripting-workflow.md#editing-in-vs-code).
 The menu bar only shows a chip when the sync needs attention (paused or in error).
 
+**Debugging**
+
+Which debugger stops a game playing in a window (desktop app). See [Debugging scripts](debugging.md).
+
+- **Debug scripts with** — *Cleo* (breakpoints in the script editor, the Debugger panel) or *VS Code* (VS Code
+  attaches to the game window). One at a time: a game window takes one debugger.
+- **VS Code debug port** — the local port VS Code attaches to (9339), and whether VS Code is attached.
+  **Copy launch configuration** copies "Attach to the Cleo game" for a workspace that already has its own
+  launch.json.
+
 **Code editor**
 
 How the built-in code editor looks.

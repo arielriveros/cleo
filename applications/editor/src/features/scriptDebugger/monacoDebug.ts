@@ -4,7 +4,9 @@
 
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { getBreakpoints, relocate, subscribeBreakpoints, toggleAt, updateBreakpoints, type ScriptBreakpoint } from './breakpoints';
-import { scriptDebugger } from './debugSession';
+import { canDebugScripts, scriptDebugger } from './debugSession';
+import { getEditorPrefs } from '../options/editorPrefs';
+import { toast } from '@cleo/app-kit/feedback/toastStore';
 import type { BreakpointState, DebugSnapshot } from './debugController';
 import { describeRemote } from './cdp';
 
@@ -130,7 +132,11 @@ export function attachScriptDebugging(
   const onDown = editor.onMouseDown(e => {
     if (e.target.type !== MOUSE_GLYPH || !e.target.position || !e.event.leftButton) return;
     const id = options.moduleId();
-    if (id) updateBreakpoints(list => toggleAt(list, id, e.target.position!.lineNumber));
+    if (!id) return;
+    const line = e.target.position.lineNumber;
+    const adding = !getBreakpoints().some(b => b.moduleId === id && b.line === line);
+    updateBreakpoints(list => toggleAt(list, id, line));
+    if (adding) explainWhereBreakpointsWork();
   });
   // The menu opens on `contextmenu`, not on the right button's mousedown: on Windows the contextmenu
   // event comes after the button is released, and it would land on the menu's own outside-click catcher
@@ -166,6 +172,23 @@ export function attachScriptDebugging(
       hintDecorations.clear();
     },
   };
+}
+
+let explained = false;
+
+/**
+ * The first breakpoint set where Cleo's debugger cannot use it says so, once a session: in the browser
+ * (the game window's F12 is the debugger there), or with VS Code chosen as the debugger.
+ */
+function explainWhereBreakpointsWork(): void {
+  if (explained) return;
+  if (!canDebugScripts()) {
+    explained = true;
+    toast.info('Breakpoints stop the game in the Cleo desktop app. In the browser: Play in window, press F12 in the game window, and set breakpoints under Sources ▸ cleo-script://.');
+  } else if (getEditorPrefs().scriptDebugWith === 'vscode') {
+    explained = true;
+    toast.info("Debugging with VS Code (Options ▸ Editor ▸ Scripts): set breakpoints in VS Code. These are for Cleo's own debugger.");
+  }
 }
 
 // ---- Values under the mouse while the game is stopped -------------------------------------------------

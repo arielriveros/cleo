@@ -22,6 +22,7 @@
       "playWindow.js",
       "windowControls.js",
       "playDebugger.js",
+      "debugPort.js",
       "icons/**"
     ],
     "extraResources": [

@@ -114,7 +114,9 @@ What it sets up:
 
 - a **real TypeScript project**, with a `tsconfig.json` mirroring the in-editor compiler options
   exactly, and the engine's declaration files, so your IDE and the editor agree about types;
-- a hidden manifest mapping each script asset to its file.
+- a hidden manifest mapping each script asset to its file;
+- a `.vscode/launch.json` with **Attach to the Cleo game**, when the folder has none, for debugging the
+  game from VS Code: see [Debugging in VS Code](debugging.md#debugging-in-vs-code).
 
 **Two-way sync.** Editor changes are written out; changes on disk are pulled back in as renames,
 updates, creates and deletes.

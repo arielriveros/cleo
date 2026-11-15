@@ -3,7 +3,10 @@ import { Button, Field, Hint, NumberInput, SegmentedControl, Section, Slider, Te
 import { isDesktop } from '../publish/publishClient'
 import { useScriptWorkspace } from '../scriptWorkspace/ScriptWorkspaceContext'
 import { codeThemeStore, useCodeTheme, type CodeThemeName } from '@cleo/app-kit/code/codeThemeStore'
-import { DEFAULT_EDITOR_PREFS, editorPrefsStore, useEditorPrefs, type ScriptOpener } from './editorPrefs'
+import { DEFAULT_EDITOR_PREFS, editorPrefsStore, useEditorPrefs, type ScriptDebugger, type ScriptOpener } from './editorPrefs'
+import { desktopDebugPort } from '../playWindow/desktopPlay'
+import { useVsCodeDebug } from '../scriptDebugger/vscodeAttach'
+import { launchConfiguration } from '../scriptWorkspace/scaffold'
 import { OptionsPageBody, OptionsShell, OPTION_LABEL, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
 
 // Options ▸ Editor: how the editor behaves for YOU, on this machine, in every project. Nothing here
@@ -86,6 +89,8 @@ function ScriptOptions() {
 
       <WorkspaceSection desktop={desktop} />
 
+      <DebuggingSection desktop={isDesktop() && !!desktopDebugPort()} />
+
       <Section title='Code editor'>
         <Field label='Theme' labelClassName={OPTION_LABEL}>
           <SegmentedControl<CodeThemeName>
@@ -165,6 +170,81 @@ function WorkspaceSection({ desktop }: { desktop: boolean }) {
                 </Button>
               </>
             )}
+          </div>
+        </>
+      )}
+    </Section>
+  )
+}
+
+const DEBUG_DESKTOP_ONLY = 'Both debuggers drive a game playing in a window from the Cleo desktop app. '
+  + 'In the browser, press F12 in the game window instead.'
+
+/**
+ * Which debugger stops a game playing in a window: Cleo's own (the Debugger panel, breakpoints in the
+ * script editor), or VS Code attached to the desktop app's debug port. One at a time — a game window has one
+ * debugger connection.
+ */
+function DebuggingSection({ desktop }: { desktop: boolean }) {
+  const prefs = useEditorPrefs()
+  const vscode = useVsCodeDebug()
+  const debugWith: ScriptDebugger = desktop ? prefs.scriptDebugWith : 'cleo'
+  // Committed on blur / Enter: every keystroke would move the port.
+  const [port, setPort] = useState(String(prefs.vscodeDebugPort))
+  useEffect(() => setPort(String(prefs.vscodeDebugPort)), [prefs.vscodeDebugPort])
+  const portNumber = Number(port)
+  const portValid = Number.isInteger(portNumber) && portNumber >= 1024 && portNumber <= 65535
+  const commitPort = () => {
+    if (portValid) editorPrefsStore.set({ vscodeDebugPort: portNumber })
+    else setPort(String(prefs.vscodeDebugPort))
+  }
+  const [copied, setCopied] = useState(false)
+  const copyLaunch = () => {
+    void navigator.clipboard?.writeText(JSON.stringify(launchConfiguration(prefs.vscodeDebugPort), null, 2))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <Section title='Debugging'>
+      <Field label='Debug scripts with' labelClassName={OPTION_LABEL}>
+        <SegmentedControl<ScriptDebugger>
+          grow
+          className='flex-1'
+          value={debugWith}
+          onChange={v => editorPrefsStore.set({ scriptDebugWith: v })}
+          options={[
+            { value: 'cleo', label: 'Cleo', disabled: !desktop, title: desktop ? 'Breakpoints in the script editor, the Debugger panel' : DEBUG_DESKTOP_ONLY },
+            { value: 'vscode', label: 'VS Code', disabled: !desktop, title: desktop ? 'VS Code attaches to the game window (F5, "Attach to the Cleo game")' : DEBUG_DESKTOP_ONLY },
+          ]}
+        />
+      </Field>
+      {!desktop && <Hint className='mb-1 ml-[158px]'>{DEBUG_DESKTOP_ONLY}</Hint>}
+      {desktop && debugWith === 'vscode' && (
+        <>
+          <Field label='VS Code debug port' labelClassName={OPTION_LABEL}>
+            <TextInput
+              value={port}
+              onChange={setPort}
+              onBlur={commitPort}
+              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+              className={cn('w-[90px] flex-none tabular-nums', !portValid && 'border-danger')}
+              spellCheck={false}
+            />
+            <span className={cn('ml-2 flex items-center gap-1.5 text-ui-sm', vscode.error ? 'text-warning' : 'text-dim')}>
+              <span className={cn('h-1.5 w-1.5 rounded-full', vscode.error ? 'bg-warning' : vscode.clients > 0 ? 'bg-success' : vscode.listening ? 'bg-muted' : 'bg-danger')} />
+              {vscode.error ?? (vscode.clients > 0 ? 'VS Code attached' : vscode.listening ? 'Waiting for VS Code' : 'Not listening')}
+            </span>
+          </Field>
+          <Hint className='mb-1 ml-[158px]'>
+            Cleo's own debugger is off. In the script workspace, press F5 ("Attach to the Cleo game"), then Play in
+            window. The workspace gets that launch configuration when it is set up and has none; the port only
+            reaches game windows, and only from this computer.
+          </Hint>
+          <div className='ml-[158px] mb-1'>
+            <Button size='sm' onClick={copyLaunch} title='The launch.json configuration, for a workspace that already has its own launch.json'>
+              {copied ? 'Copied' : 'Copy launch configuration'}
+            </Button>
           </div>
         </>
       )}

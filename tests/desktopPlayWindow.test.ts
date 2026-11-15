@@ -104,7 +104,7 @@ describe('the desktop play window', () => {
   });
 
   it('parses — none of the desktop files is loadable outside Electron, so nothing else would catch a typo', () => {
-    for (const file of ['main.js', 'preload.js', 'playWindow.js', 'playDebugger.js']) {
+    for (const file of ['main.js', 'preload.js', 'playWindow.js', 'playDebugger.js', 'debugPort.js']) {
       expect(() => execFileSync(process.execPath, ['--check', join(DESKTOP, file)])).not.toThrow();
     }
   });
@@ -135,6 +135,26 @@ describe('the script debugger relay', () => {
       expect(WEB).toContain(`case '${type}'`);
     }
     expect(PKG.build.files).toContain('playDebugger.js');
+  });
+
+  it('wires the VS Code debug port the same way: preload, main, bridge, the events the editor routes', () => {
+    const PORT = read(DESKTOP, 'debugPort.js');
+    for (const channel of ['debugport:set', 'play:vscode-release']) {
+      expect(PRELOAD, `preload.js never invokes ${channel}`).toContain(`ipcRenderer.invoke('${channel}'`);
+      expect(PORT, `debugPort.js never handles ${channel}`).toContain(`ipcMain.handle('${channel}'`);
+    }
+    for (const method of ['debugPort', 'vscodeRelease']) expect(BRIDGE).toContain(`play.${method}`);
+    for (const type of ['vscode-status', 'vscode-ready', 'vscode-paused', 'vscode-resumed']) {
+      expect(PORT).toContain(`type: '${type}'`);
+      expect(WEB).toContain(`case '${type}'`);
+    }
+    expect(MAIN).toContain("require('./debugPort')");
+    expect(MAIN).toMatch(/debugPort\.registerIpc\(/);
+    expect(PKG.build.files).toContain('debugPort.js');
+    // One debugger connection per window: Cleo's own debugger never attaches to a window the port holds.
+    expect(PLAY).toMatch(/debugPort\.holds\(sessionId\)/);
+    // Only this machine.
+    expect(PORT).toContain("listen(p, '127.0.0.1'");
   });
 
   it('attaches on the first committed navigation, and detaches before a window is destroyed', () => {

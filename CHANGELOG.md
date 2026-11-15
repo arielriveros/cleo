@@ -26,8 +26,13 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     show when you hover a name in the stopped script.
   - *Stop on exceptions* (on by default) stops where a script throws, with **Don't stop here again** for an
     error that repeats every frame. Stepping and Pause skip engine code.
-  - Desktop app only: the editor drives the game window's debugger through the app. In a browser, press F12
-    in the game window instead; scripts are listed there by name.
+  - *Debug in VS Code.* Choose VS Code in *Options ▸ Editor ▸ Scripts ▸ Debugging*: the desktop app opens a
+    local debug port that reaches only game windows, the script workspace gets an "Attach to the Cleo game"
+    launch configuration, and VS Code's breakpoints, stepping and variables work on the running game. Cleo's
+    top bar shows a game stopped in VS Code, and Restart and Stop still reach it. One debugger at a time.
+  - Desktop app only: the editor drives the game window's debugger through the app. In a browser, the
+    Debugger panel walks you through the browser's own: Play in window, F12 in the game window, Sources ▸
+    cleo-script://. The game window's loading screen and a script tab with breakpoints say so too.
 - **Script errors point at their line.** Scripts run under their own names (`cleo-script:///Player/Hero.ts`)
   with the author's line numbers, so a stack, the browser's developer tools and the debugger all read
   `Hero.ts:42`. A script error in the Console links to its line (in VS Code too, if you open scripts there),

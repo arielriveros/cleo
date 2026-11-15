@@ -22,7 +22,8 @@ export type ScriptsBridge = {
   open(root: string): Promise<OpenResult>
   close(root: string): Promise<{ ok: boolean }>
   apply(root: string, batch: ScriptBatch): Promise<{ ok: boolean; error?: string }>
-  writeScaffold(root: string, files: { rel: string; content: string }[]): Promise<{ ok: boolean; error?: string }>
+  /** `keep`: write that file only where none exists (the user's launch.json). */
+  writeScaffold(root: string, files: { rel: string; content: string; keep?: boolean }[]): Promise<{ ok: boolean; error?: string }>
   /** `line` (1-based) puts the cursor there (`code -g file:line`). */
   launch(root: string, rel?: string, command?: string, line?: number): Promise<{ ok: boolean; via?: string; error?: string }>
   exists(root: string): Promise<{ ok: boolean; exists?: boolean }>
