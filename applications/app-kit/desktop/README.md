@@ -56,10 +56,11 @@ In the editor toolbar, use **Publish**:
 Each build is saved in a folder named after the game (Options ▸ Project ▸ Published game ▸ Title,
 else the project name) inside the location you pick.
 
-- **Web (HTML)** — writes four files: `index.html` (CSS embedded),
-  `game.js` (engine + runtime), `game.scripts.js` (your node scripts), and `game.bin` (all game
-  data — scenes, meshes and textures — packed into one binary). Serve the folder over HTTP to play.
-  In a plain browser (no desktop app) this downloads a `.zip` of the same files instead.
+- **Web (HTML)** — writes `index.html` (CSS embedded), the player (`game.js`, `physics-worker.js` and a
+  `chunks/` folder: the engine and runtime as ES modules), `game.scripts.js` (your node scripts), and
+  `game.bin` (all game data — scenes, meshes and textures — packed into one binary). Serve the folder
+  over HTTP to play; opened straight from disk, the page says so. In a plain browser (no desktop app)
+  this downloads a `.zip` of the same files instead.
 - **Desktop (Electron)** — scaffolds a runnable Electron game folder (the web files plus `main.js`,
   `preload.js`, `package.json`). `cd` in, then `npm install && npm start`.
 - **Desktop installer** — saves only the native installer (e.g. `<Game> Setup 1.0.0.exe`), built by

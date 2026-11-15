@@ -16,6 +16,11 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Smaller published games on Rapier and Jolt.** The published player is ES modules split into chunks, one
+  build for every game where it used to be one file per physics backend. A game ships only the chunks it
+  needs: a Rapier or Jolt game carries its backend once, shared by the page and the physics worker, where it
+  used to carry it twice (about 4.5 MB less for Rapier, 4 MB for Jolt), and a cannon game carries neither. A
+  published web build opened straight from its folder now says to serve it over HTTP.
 - **Debugging scripts.** A game playing in a window can be stopped at a line of a script and stepped through,
   while the editor stays live. See *Debugging scripts* in the editor docs.
   - *Breakpoints.* Click in the script editor's margin to set one. Right-click it for a conditional breakpoint

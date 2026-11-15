@@ -17,8 +17,8 @@ import { physicsBackendOverride, physicsWorkerOverride } from '../features/optio
 // It mirrors the editor's play lifecycle (Scene.parse -> setScene -> run -> scene.start). The UI is scene
 // nodes, painted into #ui-root.
 //
-// Must not import the physics worker itself: the published player inlines it (a published game may be
-// opened from file://), the editor's play window loads it as a module. Each page passes its own factory.
+// Must not import the physics worker itself: the published player starts physics-worker.js, its build's
+// second entry, and the editor's play window the editor's own worker module. Each page passes its factory.
 
 export interface PlayerBootOptions {
   /** The game.bin bytes. Mesh arrays and texture payloads stay views onto this buffer. */

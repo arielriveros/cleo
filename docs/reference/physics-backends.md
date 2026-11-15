@@ -153,9 +153,8 @@ A project picks Rapier in Options ▸ Engine ▸ Runtime. What differs from cann
   exactly as the main thread would: every position and velocity is identical, the golden scene's included
   (`tests/rapierWorker.test.ts`). A rotation written back into this thread's world reads one unit in the
   last place off, because Rapier renormalises what it is given.
-- **Published size.** A Rapier game's player is about 8.7 MB larger, since the player and its inlined
-  physics worker each carry Rapier. `npm run build:player` builds `game.js` (cannon) and `game-rapier.js`,
-  and Publish picks the one for the project.
+- **Published size.** A Rapier game ships about 4.3 MB more. Rapier is a chunk of the published player of
+  its own, which the page and the physics worker share, and Publish copies it only into a Rapier game.
 
 ## Jolt compared with cannon
 
@@ -177,15 +176,14 @@ A project picks Jolt in Options ▸ Engine ▸ Runtime. What differs from cannon
   the main thread would: every position, velocity and rotation of the golden scene is identical
   (`tests/joltWorker.test.ts`). In the Valley the worker steps in about 0.5 ms, and a step comes back in
   under a millisecond.
-- **Published size.** A Jolt game's player is about 7.5 MB larger, since the player and its inlined physics
-  worker each carry Jolt. `npm run build:player` builds `game-jolt.js` beside the others, and Publish picks
-  it for a Jolt project.
+- **Published size.** A Jolt game ships about 3.6 MB more. Jolt is a chunk of the published player of its
+  own, which the page and the physics worker share, and Publish copies it only into a Jolt game.
 
 ## Rapier: what the spike found
 
 Measured on `@dimforge/rapier3d-compat` 0.21.0, the package the engine uses: its WASM is embedded in the
-JavaScript (base64), the only form that runs in a published game, which is a single file with its physics
-worker inlined. The bundle is about 4.3 MB.
+JavaScript (base64), which a published game loads as one chunk with no file of its own to fetch. The
+bundle is about 4.3 MB.
 
 - **Sleep.** With automatic sleep off (`setCanSleep(false)`), a body put to sleep by hand stays asleep,
   `setLinvel(v, false)` does not wake it, and a body that hits it does. That is the engine's freeze.

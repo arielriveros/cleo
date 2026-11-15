@@ -1,8 +1,9 @@
 import type * as RapierModule from '@dimforge/rapier3d-compat';
 
 // The one place the Rapier package is loaded: on demand, through a dynamic import, so a build or a page that
-// never asks for Rapier never loads its ~4 MB (its WASM is embedded in the module, base64). A published
-// player built without Rapier aliases this file to a stub (see the editor's vite.player.config.ts).
+// never asks for Rapier never loads its ~4 MB (its WASM is embedded in the module, base64). In the published
+// player that import is a chunk of its own, shipped only by games on Rapier (the editor's
+// vite.player.config.ts); in a game without it the import fails, and the engine falls back to cannon.
 
 export type Rapier = typeof RapierModule;
 

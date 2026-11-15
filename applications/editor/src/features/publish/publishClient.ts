@@ -4,6 +4,7 @@ import { PLAYER_CONTRACT } from './pack';
 import { runPublishJob } from '../../workers/workerClient';
 import type { PublishFiles, PlayerTemplates } from '../../workers/projectJobs';
 import type { PublishWindowSettings } from '../options/projectSettings';
+import { isSafePlayerPath, playerFeaturesFor, playerFilesFor, withModulePreloads, type PlayerBuild } from './playerManifest';
 
 // Re-exported so callers keep importing the publish types from the publish module.
 export type { PublishFiles } from '../../workers/projectJobs';
@@ -34,37 +35,44 @@ const STALE_PLAYER_HINT =
   'Run "npm run build:player" (repo root), then reload the editor.';
 
 // Load the prebuilt player templates (`npm run build:player` into public/player/, served same-origin by
-// both the dev server and the production editor build): the player for the game's physics backend, since
-// only the Rapier one carries Rapier and only the Jolt one Jolt (see vite.player.config.ts). It ships as
-// game.js either way.
+// both the dev server and the production editor build): index.html and the player modules this game needs.
+// build.json says which those are -- the core every game ships, plus the chunks of each optional part it
+// uses (its physics backend: only a Rapier game carries Rapier, only a Jolt game Jolt). See
+// vite.player.config.ts and playerManifest.ts.
 // public/player/ is git-ignored and no build step depends on it, so a bundle can silently drift behind
 // the packer; the contract check stops the publish instead. See pack.ts PLAYER_CONTRACT.
-async function loadPlayerTemplates(physicsBackend: string | undefined): Promise<PlayerTemplates> {
-  let htmlRes: Response, jsRes: Response, buildRes: Response;
-  const gameJs = physicsBackend === 'rapier' || physicsBackend === 'jolt' ? `player/game-${physicsBackend}.js` : 'player/game.js';
+async function loadPlayerTemplates(config: any): Promise<PlayerTemplates> {
+  let htmlRes: Response, buildRes: Response;
   try {
-    [htmlRes, jsRes, buildRes] = await Promise.all([
-      fetch('player/index.html'), fetch(gameJs), fetch('player/build.json'),
-    ]);
+    [htmlRes, buildRes] = await Promise.all([fetch('player/index.html'), fetch('player/build.json')]);
   } catch (e) {
     throw new Error(`Player bundle not reachable. ${STALE_PLAYER_HINT}`);
   }
-  if (!htmlRes.ok || !jsRes.ok)
+  if (!htmlRes.ok)
     throw new Error(`Player bundle not found. ${STALE_PLAYER_HINT}`);
 
   // No build.json at all means a bundle built before the guard existed; treated as a mismatch.
-  let built: number | undefined;
+  let build: PlayerBuild | undefined;
   if (buildRes.ok) {
-    try { built = (await buildRes.json())?.contract; } catch { /* treat as unstamped */ }
+    try { build = await buildRes.json(); } catch { /* treat as unstamped */ }
   }
-  if (built !== PLAYER_CONTRACT)
+  if (build?.contract !== PLAYER_CONTRACT || !Array.isArray(build.core))
     throw new Error(
-      `Player bundle is out of date: it was built for game format v${built ?? 1}, but this editor ` +
+      `Player bundle is out of date: it was built for game format v${build?.contract ?? 1}, but this editor ` +
       `produces v${PLAYER_CONTRACT}. Publishing now would ship a game missing features the packer ` +
       `emits (terrain shape, animation fields). ${STALE_PLAYER_HINT}`
     );
 
-  return { indexHtml: await htmlRes.text(), gameJs: await jsRes.text() };
+  const wanted = playerFilesFor(build, playerFeaturesFor(config));
+  const unsafe = wanted.find(f => !isSafePlayerPath(f));
+  if (unsafe) throw new Error(`The player's build.json names an unexpected file "${unsafe}". ${STALE_PLAYER_HINT}`);
+  const texts = await Promise.all(wanted.map(async file => {
+    const res = await fetch(`player/${file}`).catch(() => null);
+    if (!res?.ok) throw new Error(`Player bundle is incomplete: player/${file} is missing. ${STALE_PLAYER_HINT}`);
+    return [file, await res.text()] as const;
+  }));
+
+  return { indexHtml: withModulePreloads(await htmlRes.text(), build, wanted), files: Object.fromEntries(texts) };
 }
 
 /**
@@ -74,7 +82,7 @@ async function loadPlayerTemplates(physicsBackend: string | undefined): Promise<
  * so the packer's mutations never reach the caller's object.
  */
 async function assemble(data: any, zip: boolean) {
-  const templates = await loadPlayerTemplates(data?.config?.physics?.backend);
+  const templates = await loadPlayerTemplates(data?.config);
   const { scripts, paths, modules } = extractScripts(data); // strips node scripts and modules out of `data`
   const scriptsSource = buildScriptsSource(scripts, paths, modules);
 

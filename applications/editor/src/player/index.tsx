@@ -1,6 +1,4 @@
 import { bootPlayer, hideLoadingWhenSmooth, showError } from './boot';
-// Inlined: a published game may be opened from file://, where a worker cannot load from a separate file.
-import PhysicsWorker from '../workers/physicsWorkerEntry?worker&inline';
 
 // The PUBLISHED player: the standalone, data-driven runtime for a published Cleo game. It loads game.bin
 // and runs it outside the editor, silent, its scripts precompiled into game.scripts.js. The boot itself is
@@ -31,12 +29,23 @@ async function loadGameBuffer(): Promise<ArrayBuffer> {
   }
 }
 
+/**
+ * The physics worker: physics-worker.js, the player build's second entry, beside this file (a published game
+ * ships both, and the chunks they share). Not written as `new Worker(new URL(...))`: Vite would take that for
+ * a worker of its own to bundle. A host that refuses the module worker leaves the step on the main thread
+ * (PhysicsSystem's onFailure).
+ */
+function createPhysicsWorker(): Worker {
+  const url = new URL(/* @vite-ignore */ './physics-worker.js', import.meta.url);
+  return new Worker(url, { type: 'module', name: 'cleo-physics' });
+}
+
 async function boot(): Promise<void> {
   await bootPlayer({
     buffer: await loadGameBuffer(),
     // A shipped game runs silent.
     logging: false,
-    physicsWorkerFactory: () => new PhysicsWorker(),
+    physicsWorkerFactory: createPhysicsWorker,
   });
   hideLoadingWhenSmooth();
 }

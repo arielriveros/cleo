@@ -59,6 +59,12 @@ jobs:
         run: npm ci
         working-directory: applications
 
+      # The published player (public/player/, git-ignored): tests/playerBundles.test.ts checks its chunk graph --
+      # which files every game ships, and that each physics backend sits in its own part -- and skips without it.
+      - name: Build the published player
+        run: npx vite build --config vite.player.config.ts
+        working-directory: applications/editor
+
       - name: Test
         run: npm run test:coverage
         working-directory: applications/editor

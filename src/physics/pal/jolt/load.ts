@@ -1,8 +1,9 @@
 import type JoltModule from 'jolt-physics';
 
 // The one place the Jolt package (JoltPhysics.js) is loaded: on demand, through a dynamic import, so a build
-// or a page that never asks for Jolt never loads its ~3 MB (its WASM is embedded in the module, base64). A
-// published player built without Jolt aliases this file to a stub (see the editor's vite.player.config.ts).
+// or a page that never asks for Jolt never loads its ~3 MB (its WASM is embedded in the module, base64). In
+// the published player that import is a chunk of its own, shipped only by games on Jolt (the editor's
+// vite.player.config.ts); in a game without it the import fails, and the engine falls back to cannon.
 //
 // The package's default is the single-threaded build (wasm-compat). The threaded one calls a contact listener
 // written in JavaScript from its job threads, where that JavaScript does not exist (see

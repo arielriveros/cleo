@@ -6,7 +6,7 @@
 
 | Target | Produces | Available |
 |---|---|---|
-| **Web (HTML)** | `index.html`, `game.js` and `game.bin` | Everywhere. In the desktop app it writes to a folder you choose; in the browser it downloads a `.zip`. |
+| **Web (HTML)** | `index.html`, the player's modules and `game.bin` | Everywhere. In the desktop app it writes to a folder you choose; in the browser it downloads a `.zip`. |
 | **Desktop (Electron)** | A runnable game folder | Desktop app only. |
 | **Desktop installer** | A native installer | Desktop app only. |
 
@@ -32,6 +32,7 @@ are taken live from the renderer, the others as last saved.
 | Audio sources and sound samples, with their loop points, fades, buses and effects | The AI brain library — brains are embedded on their controllers |
 | Terrain data, DEFLATE-compressed | The authoring data for the **unused dimension** |
 | Scripts, obfuscated | |
+| The engine, as the player's modules the game needs | The physics backends the game does not run on |
 
 Editor-only nodes are **structurally absent**, not merely hidden — there is no flag left to turn
 back on.
