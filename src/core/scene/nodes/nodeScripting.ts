@@ -4,6 +4,8 @@ import { Logger } from "../../logger";
 import { logScriptError } from "../../scripting/scriptErrors";
 import { bindDataAccessors, canAccessVariable } from "./nodeVariables";
 import { createScriptImporter, resolveScriptModule, scriptModulesVersion, ScriptFactory, SCRIPT_HANDLERS } from "../../scripting/scriptRuntime";
+import { membersOfNode, scriptMembersOf, setNodeScriptMembers } from "../../scripting/decorators";
+import { GameEvents } from "../../scripting/scriptEvents";
 
 /**
  * The bridge between a user script and a live node: the `this` proxy, and the two ways a compiled script
@@ -317,6 +319,67 @@ function attachClassScript(node: Node, Ctor: new (...args: any[]) => any): void 
         if ((SCRIPT_HANDLERS as readonly string[]).includes(name)) n[name] = guard(name, desc.value);
         else n[name] = desc.value; // helper method, runs on the node
     }
+
+    // What the class's decorators declared (`@child`, `@onAction`, ...): the node is not an instance of the
+    // class, so it is remembered for the node — fillScriptRefs and the scene's action dispatch read it.
+    setNodeScriptMembers(node, scriptMembersOf(Ctor));
+}
+
+/* -------------------------------------------------------------------------- */
+/* @child / @find                                                              */
+/* -------------------------------------------------------------------------- */
+
+/** The node named `name` nearest under `root`, breadth-first (so a direct child wins), not `root` itself. */
+function nearestNamed(root: Node, name: string): Node | undefined {
+    const queue: Node[] = root.children.slice();
+    for (let i = 0; i < queue.length; i++) {
+        const node = queue[i];
+        if (node.name === name) return node;
+        for (const child of node.children) queue.push(child);
+    }
+    return undefined;
+}
+
+/** `@child`'s lookup: each `/`-separated name is the nearest one under the previous match. */
+function descendantAt(root: Node, path: string): Node | undefined {
+    let at: Node | undefined = root;
+    for (const part of path.split('/')) {
+        if (!part) continue;
+        at = nearestNamed(at, part);
+        if (!at) return undefined;
+    }
+    return at === root ? undefined : at;
+}
+
+/** `kind:field:name` of each reference already reported missing: one warning per field per session. */
+const reportedMissing = new Set<string>();
+
+/**
+ * Fill a node's `@child` / `@find` fields that are still empty (`null` or `undefined`): a value already
+ * there — assigned by hand, or restored by a save — is kept.
+ *
+ * Runs before `onConstruct` (the whole tree is parsed and in the scene by then) and again, `final`, right
+ * before `onStart`, for what was spawned in between. A reference still missing at that point is reported
+ * once, unless the field is declared `name?:` — the author's "it may not be there".
+ */
+export function fillScriptRefs(node: Node, final: boolean): void {
+    const members = membersOfNode(node);
+    if (!members.length) return;
+    const n = node as any;
+    for (const m of members) {
+        if (m.kind !== 'child' && m.kind !== 'find') continue;
+        if (n[m.field] != null) continue;
+        const found = m.kind === 'child' ? descendantAt(node, m.name) : node.scene?.findNode(m.name);
+        if (found) { n[m.field] = found; continue; }
+        if (!final || m.optional) continue;
+        const key = `${m.kind}:${m.field}:${m.name}`;
+        if (reportedMissing.has(key)) continue;
+        reportedMissing.add(key);
+        Logger.warn(m.kind === 'child'
+            ? `'${node.name}': @child('${m.name}') found no '${m.name}' under it, so '${m.field}' stays empty. Declare it '${m.field}?:' if it may be missing.`
+            : `'${node.name}': @find('${m.name}') found no '${m.name}' in the scene, so '${m.field}' stays empty. Declare it '${m.field}?:' if it may be missing.`,
+            'Script');
+    }
 }
 
 /**
@@ -368,4 +431,71 @@ function scriptPrototypeChain(node: Node, proto: any): any[] {
     const levels: any[] = [];
     for (let p = proto; p && !isEngineProto(p, node); p = Object.getPrototypeOf(p)) levels.push(p);
     return levels;
+}
+
+/* -------------------------------------------------------------------------- */
+/* @onEvent / @every / @onEnter / @onExit / @onHold / @onTap                    */
+/* -------------------------------------------------------------------------- */
+
+/** Calls a decorated method, reporting a throw or a rejected promise instead of letting it escape. */
+function runDecorated(node: Node, method: string, label: string, arg?: unknown): void {
+    try {
+        const result = (node as any)[method]?.(arg);
+        if (result && typeof result.then === 'function')
+            result.catch((e: any) => logScriptError(`Error in ${method} (${label}) for node ${node.name}`, e, 'Script'));
+    }
+    catch (e) { logScriptError(`Error in ${method} (${label}) for node ${node.name}`, e, 'Script'); }
+}
+
+/** What undoes a node's `@onEvent` subscriptions, `@every` timers and input routing: run on despawn. */
+const lifeSubs = new WeakMap<Node, (() => void)[]>();
+
+/**
+ * Start what a script's decorators run for as long as the node is awake: `@onEvent` listeners, `@every`
+ * timers, and the scene's polling for `@onHold` / `@onTap`. Called when the node spawns; releaseScriptLife
+ * undoes it when the node despawns or is removed, so a gone node is never called.
+ */
+export function bindScriptLife(node: Node): void {
+    const members = membersOfNode(node);
+    if (!members.length) return;
+    releaseScriptLife(node);
+    const subs: (() => void)[] = [];
+    let timedInput = false;
+    for (const m of members) {
+        if (m.kind === 'event') subs.push(GameEvents.on(m.name, payload => runDecorated(node, m.method, `@onEvent '${m.name}'`, payload)));
+        else if (m.kind === 'every') subs.push(node.every(m.seconds, () => runDecorated(node, m.method, `@every ${m.seconds}`)));
+        else if (m.kind === 'hold' || m.kind === 'tap') timedInput = true;
+    }
+    const scene = node.scene;
+    if (timedInput && scene) {
+        scene.inputRouted.add(node);
+        subs.push(() => { scene.inputRouted.delete(node); });
+    }
+    if (subs.length) lifeSubs.set(node, subs);
+}
+
+/** Stop what bindScriptLife started. Safe to call on a node that never bound. */
+export function releaseScriptLife(node: Node): void {
+    const subs = lifeSubs.get(node);
+    if (!subs) return;
+    lifeSubs.delete(node);
+    for (const off of subs) off();
+}
+
+/** Whether `other` is what an `@onEnter` / `@onExit` filter names: by node name or by a variable it holds, on it or an ancestor. */
+function triggerMatches(other: Node, filter: string): boolean {
+    if (!filter) return true;
+    for (let n: Node | null = other; n; n = n.parent) {
+        if (n.name === filter || n.getVariable(filter)) return true;
+    }
+    return false;
+}
+
+/** Runs `self`'s `@onEnter` / `@onExit` methods for an overlap with `other`. Called wherever a trigger hook fires. */
+export function routeTrigger(self: Node, phase: 'enter' | 'exit', other: Node): void {
+    const members = membersOfNode(self);
+    if (!members.length) return;
+    for (const m of members)
+        if (m.kind === phase && triggerMatches(other, m.filter))
+            runDecorated(self, m.method, `@on${phase === 'enter' ? 'Enter' : 'Exit'}${m.filter ? ` '${m.filter}'` : ''}`, other);
 }

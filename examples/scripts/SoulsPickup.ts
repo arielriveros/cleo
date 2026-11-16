@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, save, find } from 'cleo'
 import type { TriggerName } from 'cleo'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
@@ -24,13 +24,13 @@ export default class SoulsPickupNode extends Node {
   public hiddenUntilRevealed: boolean = false
   /** The trigger of the player animator's gesture state played on taking it. */
   public pickupGesture: TriggerName = 'Pickup'
-  /** @save */
+  @save
   public taken: boolean = false
 
+  @find('GameManager')
   private _gm: Node = null
 
   onStart() {
-    this._gm = this.findNode('GameManager')
     // Taken before a save that was loaded: gone, and not offered again.
     if (this.taken) { this.visible = false; return }
     if (this.hiddenUntilRevealed) this.visible = false

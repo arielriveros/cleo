@@ -51,10 +51,10 @@ SaveGame.version: number             // the game's save version (Options ▸ Pro
 A checkpoint that saves, and a title screen that continues:
 
 ```ts
-import { Node, SaveGame } from 'cleo'
+import { Node, SaveGame, save } from 'cleo'
 
 export default class CheckpointNode extends Node {
-  /** @save */
+  @save
   public lit = false
 
   onTriggerEnter(other: Node) {

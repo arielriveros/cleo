@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, find } from 'cleo'
 import type { NodeName, SoundName, TemplateName } from 'cleo'
 import { num, statBonus } from '@/Core/Scripts/SoulsMath'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
@@ -76,10 +76,10 @@ export default class SoulsWeaponNode extends Node {
   /** Marker characters look for among the nodes they spawn (a script class is never `instanceof`). */
   public isWeapon: boolean = true
 
+  @find('GameManager')
   protected _gm: Node = null
 
   onStart() {
-    this._gm = this.findNode('GameManager')
   }
 
   /** The child SoulsMove named `name`, or null. */

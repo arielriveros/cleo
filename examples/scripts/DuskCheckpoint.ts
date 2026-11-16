@@ -1,4 +1,4 @@
-import { AnimatedSpriteNode, Logger, Node, SaveGame, TriggerNode } from 'cleo'
+import { AnimatedSpriteNode, Logger, Node, SaveGame, TriggerNode, save, child } from 'cleo'
 
 /**
  * Duskwell -- a checkpoint: a lamp the player lights by walking past it. Attach to an Area 2D that sees the
@@ -13,12 +13,14 @@ export default class DuskCheckpoint extends TriggerNode {
   public unlitTint: number[] = [0.35, 0.35, 0.45]
   public healTo: number = 99
 
-  /** @save Whether the lamp is lit: a loaded game keeps it lit. */
+  /** Whether the lamp is lit: a loaded game keeps it lit. */
+
+  @save
   private _lit: boolean = false
+  @child('Lamp')
   private _lamp: AnimatedSpriteNode = null
 
   onStart() {
-    this._lamp = this.getChildByName('Lamp')[0] as AnimatedSpriteNode
     // A lamp lit before a save comes back lit (the field is @save).
     if (this._lamp) this._lamp.tint = (this._lit ? this.litTint : this.unlitTint) as [number, number, number]
   }

@@ -42,10 +42,28 @@ export const VALLEY_SCRIPTS: [string, string, string, string][] = [
 ]
 
 let reflector: ((source: string) => any) | null = null
-export const scriptAsset = (file: string, name: string, baseType: string) => {
+
+/**
+ * A class script's fields INCLUDING those it inherits from base-class scripts (`extends SoulsCharacterNode`,
+ * imported from another file in examples/scripts), base first. Reflecting the class alone would drop the
+ * inherited ones, and `attach` would then trim every node's values for them.
+ */
+function resolveVariables(file: string, seen = new Set<string>()): any[] {
   reflector ??= loadScriptReflector(ROOT)
   const source = fs.readFileSync(path.join(SCRIPTS, `${file}.ts`), 'utf8')
-  return { id: id(`script:${file}`), name, baseType, source, kind: 'class', variables: reflector!(source) }
+  const own = reflector!(source)
+  const ext = /export\s+default\s+class\s+\w+\s+extends\s+(\w+)/.exec(source)
+  const imp = ext && new RegExp(`import\\s+${ext[1]}\\s+from\\s+['"](?:\\./|@/(?:[^'"]*/)?)(\\w+)['"]`).exec(source)
+  if (!imp || seen.has(imp[1]) || !fs.existsSync(path.join(SCRIPTS, `${imp[1]}.ts`))) return own
+  seen.add(file)
+  const merged = new Map<string, any>()
+  for (const v of [...resolveVariables(imp[1], seen), ...own]) merged.set(v.name, v)
+  return [...merged.values()]
+}
+
+export const scriptAsset = (file: string, name: string, baseType: string) => {
+  const source = fs.readFileSync(path.join(SCRIPTS, `${file}.ts`), 'utf8')
+  return { id: id(`script:${file}`), name, baseType, source, kind: 'class', variables: resolveVariables(file) }
 }
 
 /** Every node below `root` (itself included). */

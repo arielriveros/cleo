@@ -330,6 +330,54 @@ export default class Hero extends Node { ${wrong} }
     }
   }, 240000);
 
+  it('type-checks script decorators, and action names against the project\'s input map', async () => {
+    if (skip) return;
+    const typesFile = path.join(root, PROJECT_TYPES_REL);
+    await writeFile(typesFile, projectTypesDeclaration([], ['Jump', 'Gameplay/Jump']), 'utf-8');
+    try {
+      const head = `
+import { Node, child, find, onAction, onHold, onTap, onEvent, every, onEnter, onExit, save, options, pick } from 'cleo'
+import type { ActionState } from 'cleo'
+export default class Hero extends Node {
+`;
+      await writeScript('Player/Hero.ts', `${head}
+  @child('Muzzle') muzzle?: Node
+  @find('GameManager') gm: Node | null = null
+  @save hp = 100
+  names: string[] = ['a']
+  @options('names') choice = 'a'
+  @pick('sound') cue: string = ''
+  @onAction('Jump') jump(state: ActionState) {}
+  @onAction('Gameplay/Jump', 'released') land() {}
+  @onHold('Jump', 0.5) charge(state: ActionState) {}
+  @onTap('Jump') tap() {}
+  @onEvent('Died') died(info: any) {}
+  @every(2) think() {}
+  @onEnter('Player') hit(other: Node) {}
+  @onExit() leave(other: Node) {}
+}`);
+      const ok = await typecheck();
+      expect(ok.out).toBe('');
+      expect(ok.ok).toBe(true);
+
+      for (const wrong of [
+        `@child('Muzzle') muzzle: number = 0`,
+        `@options('nope') choice = 'a'`,
+        `@onAction('Jupm') jump() {}`,
+        `@onAction('Jump') jump(n: number) {}`,
+        `@onHold('Jupm') charge() {}`,
+        `@onTap('Jupm') tap() {}`,
+        `@every('x') think() {}`,
+        `@onEnter('P') hit(other: string) {}`,
+      ]) {
+        await writeScript('Player/Hero.ts', `${head}  ${wrong}\n}`);
+        expect((await typecheck()).ok, wrong).toBe(false);
+      }
+    } finally {
+      await rm(typesFile, { force: true });
+    }
+  }, 240000);
+
   it('does not let a bare project path type-check, since the game would reject it', async () => {
     if (skip) return;
     await writeScript('Player/Hero.ts', `

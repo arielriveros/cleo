@@ -1,4 +1,4 @@
-import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node } from 'cleo'
+import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node, find, child } from 'cleo'
 
 /**
  * Duskwell -- a Ruin Guard: the knight of the Pixel Platformer set, gone dark. Attach to a walking
@@ -29,8 +29,10 @@ export default class DuskGuard extends CharacterBody2DNode {
   /** Diamonds it drops. */
   public reward: number = 2
 
+  @child('Sprite')
   private _sprite: AnimatedSpriteNode = null
   private _brain: ControllerNode = null
+  @find('Player')
   private _player: Node = null
   private _home: [number, number] = [0, 0]
   private _attacking: boolean = false
@@ -41,9 +43,7 @@ export default class DuskGuard extends CharacterBody2DNode {
   private _deadLeft: number = 0
 
   onStart() {
-    this._sprite = this.getChildByName('Sprite')[0] as AnimatedSpriteNode
     this._brain = this.children.find(c => c instanceof ControllerNode) as ControllerNode ?? null
-    this._player = this.findNode('Player') ?? null
     this._home = [this.position[0], this.position[1]]
     // Where Return walks back to: the brain's goal point, read when a state targets 'point'.
     if (this._brain) this._brain.goalPoint = [this._home[0], this._home[1], 0]

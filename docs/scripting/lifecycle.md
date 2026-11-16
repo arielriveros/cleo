@@ -34,7 +34,9 @@ and the frame continues. An `async` hook's rejection is caught too.
 
 ## Order at scene start
 
-1. `onConstruct` on **every** node, dormant ones included.
+1. `onConstruct` on **every** node, dormant ones included. A script's `@child` and `@find` fields are
+   filled just before it (and again before `onStart`, for what was spawned in between): see
+   [Decorators](decorators.md#finding-nodes-child-and-find).
 2. `onRestore(data)` on every node a save or the scene's memory restored, dormant ones included.
 3. `onSpawn` on every awake node.
 4. `onStart` on every awake node.

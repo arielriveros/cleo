@@ -1,4 +1,4 @@
-import { CameraRigNode, Input, Node, dampTime } from 'cleo'
+import { CameraRigNode, Input, Node, dampTime, find, onAction } from 'cleo'
 import { angleDiff, planarDistance, yawTo } from '@/Core/Scripts/SoulsMath'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
@@ -61,6 +61,7 @@ export default class SoulsLockOnNode extends CameraRigNode {
   /** The locked enemy (a SoulsEnemy root), or null. SoulsPlayer reads this. */
   public lockTarget: Node = null
 
+  @find('GameManager')
   private _gm: Node = null
   private _player: Node = null
   private _reticle: Node = null
@@ -72,7 +73,6 @@ export default class SoulsLockOnNode extends CameraRigNode {
   private _freeSocket: [number, number, number] = [0, 0, 0]
 
   onStart() {
-    this._gm = this.findNode('GameManager')
     this._player = this.parent
     // The reticle is the player's (a sibling of this rig, inside the Player template).
     this._reticle = this._player?.getChildByName(this.reticleName)[0] ?? null
@@ -90,15 +90,19 @@ export default class SoulsLockOnNode extends CameraRigNode {
     }
   }
 
+  /** The lock-on press: release the target, or lock the best one, or recentre the camera behind the player. */
+  @onAction('LockOn')
+  private _onLockOn(): void {
+    if ((this._player as any)?.isDead) return
+    if (this.lockTarget) this.unlock()
+    else if (!this._lockBest()) this._recenter()
+  }
+
   onUpdate(delta: number) {
     this._switchWait = Math.max(0, this._switchWait - delta)
     const player = this._player as any
     if (player?.isDead) { if (this.lockTarget) this.unlock(); return }
 
-    if (Input.started('LockOn')) {
-      if (this.lockTarget) this.unlock()
-      else if (!this._lockBest()) this._recenter()
-    }
     // Every frame, locked or not, so a release eases back out rather than stopping where it was. Runs
     // before the rig's lateUpdate, so the boom it builds this frame already uses these values.
     this._frame(delta)

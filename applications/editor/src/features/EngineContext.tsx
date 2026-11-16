@@ -65,7 +65,7 @@ import { isWindowPlayActive } from "./playWindow/windowPlay";
 import { sequenceKeyingActive } from "./sequencer/previewRegistry";
 import type { AnimControllerAsset } from "../utils/animationControllers";
 import { instantiateController, reembedMachine, pickControllerForRig, machineIsEmpty, buildControllerAsset } from "../utils/animationControllers";
-import { machinesInNodeJson, projectTypesDeclaration, triggerNamesOf } from "../utils/projectTriggers";
+import { actionNamesOf, machinesInNodeJson, projectTypesDeclaration, triggerNamesOf } from "../utils/projectTriggers";
 import { setProjectTypes } from "@cleo/app-kit/code/projectTypes";
 import type { BoneMaskAsset } from "../utils/boneMasks";
 import type { PoseAsset } from "../utils/poseAssets";
@@ -1896,14 +1896,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       for (const scene of liveScenes()) {
         for (const n of Array.from(scene?.nodes ?? [])) if (n instanceof ModelNode && n.animator) machines.push(n.animator.getStateMachine());
       }
-      setProjectTypes(projectTypesDeclaration(triggerNamesOf(machines)));
+      setProjectTypes(projectTypesDeclaration(triggerNamesOf(machines), actionNamesOf(inputMap)));
     };
     const later = () => { timer ??= setTimeout(publish, 1000); };
     publish();
     const emitter = eventEmitter.current;
     emitter.on('SCENE_CHANGED', later);
     return () => { if (timer) clearTimeout(timer); emitter.off('SCENE_CHANGED', later); };
-  }, [animControllers, templates]);
+  }, [animControllers, templates, inputMap]);
 
   // Clips resolve `poseOffset` edits against pose assets too, so a pose edit must re-resolve every model
   // on the rig it belongs to — exactly what a rig edit does.

@@ -1,4 +1,4 @@
-import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode } from 'cleo'
+import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode, find } from 'cleo'
 
 /**
  * Hollow Keep — the pause menu. Attach to the `PauseMenu` node, a screen-space UI Root authored hidden,
@@ -28,7 +28,9 @@ export default class SoulsPauseMenuNode extends UIRootNode {
   public reopenGuard: number = 0.25
   public isOpen: boolean = false
 
+  @find('GameManager')
   private _gm: Node = null
+  @find('Player')
   private _player: Node = null
   private _menus: Node[] = []
   private _stopListening: (() => void) | null = null
@@ -39,8 +41,6 @@ export default class SoulsPauseMenuNode extends UIRootNode {
   onStart() {
     this.visible = false
     this.isOpen = false
-    this._gm = this.findNode('GameManager')
-    this._player = this.findNode('Player')
     // The other menus this must not open over: the bonfire menu and the yes/no dialog.
     this._menus = [
       this._player?.getChildByName('BonfireMenu')[0],

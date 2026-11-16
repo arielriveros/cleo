@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, save, find } from 'cleo'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
@@ -17,18 +17,18 @@ export default class SoulsDoorNode extends Node {
   /** Offset from the closed position when fully open, in world metres. */
   public openOffset: [number, number, number] = [0, 4.2, 0]
   public openSeconds: number = 1.6
-  /** @save */
+  @save
   public isOpen: boolean = false
   public lockedText: string = 'Opens from the other side'
   public lockedFromFront: boolean = false
 
+  @find('GameManager')
   private _gm: Node = null
   private _closed: number[] = [0, 0, 0]
   private _t: number = 0
   private _opening: boolean = false
 
   onStart() {
-    this._gm = this.findNode('GameManager')
     const p = this.position
     this._closed = [p[0], p[1], p[2]]
     if (this.isOpen) this._apply(1)

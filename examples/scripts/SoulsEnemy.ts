@@ -1,4 +1,4 @@
-import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
+import { Logger, ModelNode, Node, setMoveWorld, find, child } from 'cleo'
 import type { AnimationTriggerInfo, SocketName, TriggerName } from 'cleo'
 import { clamp, num, planarDistance } from '@/Core/Scripts/SoulsMath'
 import { Swing, bladeCapsule, closeSwing, hurtboxQuery, hurtboxTargets, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
@@ -138,12 +138,17 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   /** The enemy walks a navmesh route while it has no target (its spawn's `patrolRoute`). */
   public get hasPatrol(): boolean { return !!(this._brain as any)?.routeName }
 
+  @find('Player')
   protected _player: Node = null
   protected _brain: Node = null
-  protected _lockPoint: Node = null
-  protected _healthBar: Node = null
-  protected _healthFill: Node = null
-  protected _aura: Node = null
+  @child('LockPoint')
+  protected _lockPoint?: Node
+  @child('HealthBar')
+  protected _healthBar?: Node
+  @child('HealthBar/Fill')
+  protected _healthFill?: Node
+  @child('PhaseAura')
+  protected _aura?: Node
   private _attacks: Node[] = []
   private _offEvents: (() => void) | null = null
 
@@ -175,14 +180,8 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   onStart() {
     this.hearCollider()
     this.setVariable('isEnemy', true, 'boolean', 'public')
-    this._gm = this.findNode('GameManager')
-    this._player = this.findNode('Player')
     this._model = this._findModel()
     this._brain = this.children.find(c => c.nodeType === 'controller') ?? null
-    this._lockPoint = this.getChildByName('LockPoint')[0] ?? null
-    this._healthBar = this.getChildByName('HealthBar')[0] ?? null
-    this._healthFill = this._healthBar ? this._find(this._healthBar, 'Fill') : null
-    this._aura = this.getChildByName('PhaseAura')[0] ?? null
     this._spawnWeapons()
     const group = this.getChildByName('Attacks')[0]
     this._attacks = group ? group.children.filter(c => (c as any).isEnemyAttack) : []
@@ -683,15 +682,6 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   private _setBar(show: boolean): void {
     const bar = this._healthBar as any
     if (bar && bar.visible !== show) bar.visible = show
-  }
-
-  private _find(root: Node, name: string): Node {
-    for (const child of root.children) {
-      if (child.name === name) return child
-      const found = this._find(child, name)
-      if (found) return found
-    }
-    return null
   }
 
   /** The animated model, however deep: a swapped-in model may sit under a holder node. */

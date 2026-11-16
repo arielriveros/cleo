@@ -39,10 +39,12 @@ import { CharacterNode } from "./nodes/characterNode";
 import { ControllerNode } from "./nodes/controllerNode";
 import type { NavMeshNode } from './nodes/navMeshNode';
 import type { ActionChange } from "../../input/resolveActions";
+import type { ActionState } from "../../input/actionMap";
 import { mat4, vec3 } from "gl-matrix";
 import { DEFAULT_SCENE_AMBIENT_LUX, legacyAmbientFromSceneJson, MAX_LIGHTS } from "../../graphics/lighting";
 import { Logger } from '../logger'
 import { logScriptError } from '../scripting/scriptErrors'
+import { membersOfNode, type ScriptMember } from '../scripting/decorators'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
 import { sceneStats, resetSceneStats, SceneStats } from "./sceneStats";
 import { resetAIStats } from "../../ai/aiStats";
@@ -69,16 +71,103 @@ const UP_AXIS: vec3 = vec3.fromValues(0, 1, 0);
 
 const EMPTY_ACTIONS: readonly ActionChange[] = [];
 
+type ActionRoute = Extract<ScriptMember, { kind: 'action' }>;
+const NO_ROUTES: readonly ActionRoute[] = [];
+/** A script's `@onAction` methods, per decorated-members list (which is itself cached per class). */
+const routesOf = new WeakMap<readonly ScriptMember[], readonly ActionRoute[]>();
+
+function actionRoutes(node: Node): readonly ActionRoute[] {
+    const members = membersOfNode(node);
+    if (!members.length) return NO_ROUTES;
+    let routes = routesOf.get(members);
+    if (!routes) {
+        routes = members.filter((m): m is ActionRoute => m.kind === 'action');
+        routesOf.set(members, routes);
+    }
+    return routes;
+}
+
+/** Whether an `@onAction` route wants this change: the action by name (bare or map-qualified), then `when`. */
+function routeWants(route: ActionRoute, change: ActionChange): boolean {
+    if (route.action !== change.action && route.action !== `${change.map}/${change.action}`) return false;
+    switch (route.when) {
+        case 'started': return change.state.started;
+        case 'released': return change.state.released;
+        case 'performed': return change.state.phase === 'performed';
+        default: return true;
+    }
+}
+
+/** Where each node stands in its holds and taps: when a press began, and whether a hold already fired. */
+interface PressState { elapsed: number; down: number; fired: boolean }
+const pressStates = new WeakMap<Node, Map<string, PressState>>();
+
 /**
- * Deliver this frame's action changes to one node.
+ * `@onHold` and `@onTap` for one node. A hold fires once, on the frame a press reaches its seconds. A tap fires
+ * on the release of a press no longer than its max. Both read the press from the action's state, and keep
+ * their own clock (the frame's deltas), because `heldSeconds` is already 0 on the release frame.
+ */
+function runTimedInput(node: Node, actions: readonly ActionChange[], delta: number): void {
+    const members = membersOfNode(node);
+    let states = pressStates.get(node);
+    if (!states) { states = new Map(); pressStates.set(node, states); }
+    const input = InputSystem.instance;
+    for (const m of members) {
+        if (m.kind !== 'hold' && m.kind !== 'tap') continue;
+        const key = `${m.kind}:${m.method}:${m.action}`;
+        let st = states.get(key);
+        if (!st) { st = { elapsed: 0, down: -1, fired: false }; states.set(key, st); }
+        st.elapsed += delta;
+        const call = (state: ActionState) => {
+            try {
+                const result = (node as any)[m.method]?.(state);
+                if (result && typeof result.then === 'function')
+                    result.catch((e: any) => logScriptError(`Error in ${m.method} (@on${m.kind === 'hold' ? 'Hold' : 'Tap'} '${m.action}') for node ${node.name}`, e, 'Script'));
+            }
+            catch (error) { logScriptError(`Error in ${m.method} (@on${m.kind === 'hold' ? 'Hold' : 'Tap'} '${m.action}') for node ${node.name}`, error, 'Script'); }
+        };
+        const mine = (c: ActionChange) => c.action === m.action || `${c.map}/${c.action}` === m.action;
+        if (m.kind === 'hold') {
+            const state = input.state(m.action);
+            if (!state.pressed) st.fired = false;
+            else if (!st.fired && state.heldSeconds >= m.seconds) { st.fired = true; call(state); }
+        } else {
+            for (const c of actions) {
+                if (!mine(c)) continue;
+                if (c.state.started) st.down = st.elapsed;
+                else if (c.state.released && st.down >= 0) {
+                    const held = st.elapsed - st.down;
+                    st.down = -1;
+                    if (held <= m.maxSeconds) call(c.state);
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Deliver this frame's action changes to one node: to its `@onAction` methods, then to its `onAction`.
  *
- * Only nodes that actually OVERRIDE `onAction` are called: the base stub is a no-op, and skipping it
- * keeps a scene of hundreds of nodes from paying hundreds of empty calls on every frame an action
- * fires. The throw guard matches the one around `onUpdate` — a script handler must not escape the loop.
+ * Only nodes that have either are called: the base `onAction` stub is a no-op, and skipping it keeps a
+ * scene of hundreds of nodes from paying hundreds of empty calls on every frame an action fires. The throw
+ * guard matches the one around `onUpdate` — a script handler must not escape the loop.
  */
 function dispatchActions(node: Node, actions: readonly ActionChange[]): void {
-    if (node.onAction === Node.prototype.onAction) return;
+    if (!actions.length) return;
+    const routes = actionRoutes(node);
+    const handles = node.onAction !== Node.prototype.onAction;
+    if (!routes.length && !handles) return;
     for (const change of actions) {
+        for (const route of routes) {
+            if (!routeWants(route, change)) continue;
+            try {
+                const result = (node as any)[route.method]?.(change.state);
+                if (result && typeof result.then === 'function')
+                    result.catch((e: any) => logScriptError(`Error in ${route.method} (@onAction '${route.action}') for node ${node.name}`, e, 'Script'));
+            }
+            catch (error) { logScriptError(`Error in ${route.method} (@onAction '${route.action}') for node ${node.name}`, error, 'Script'); }
+        }
+        if (!handles) continue;
         try { node.onAction(change.action, change.state); }
         catch (error) { logScriptError(`Error in onAction function for node ${node.name}`, error, 'Script'); }
     }
@@ -299,6 +388,8 @@ export class Scene {
     // Backs this.wait/after/every. Ticked once per Scene.update and gated like node.update, so timers
     // pause with the game; cancelled per-node on despawn.
     private _timers: ScheduledTimer[] = [];
+    /** Nodes with `@onHold` / `@onTap` methods that are awake: polled for input every frame (see runTimedInput). */
+    public readonly inputRouted: Set<Node> = new Set();
 
     constructor() {
         this._root.scene = this;
@@ -698,6 +789,9 @@ export class Scene {
             // a script turning a windmill's sails in the editor marked the scene unsaved every frame.
             authoring.derived++;
             try {
+            // `@onHold` / `@onTap`: before the nodes update, so they see the frame's presses; only while playing.
+            if (this._hasStarted && !paused && this.inputRouted.size > 0)
+                for (const node of [...this.inputRouted]) runTimedInput(node, actions, delta);
             for (const node of this.nodes) {
                 if (!assignedLightIndices && node instanceof LightNode) {
                     this._asignLightIndices();

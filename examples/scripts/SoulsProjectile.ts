@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, find } from 'cleo'
 import type { TemplateName } from 'cleo'
 import { playDetached } from '@/Core/Scripts/SoulsAudio'
 import { hurtboxQuery, hurtboxTargets } from '@/Core/Scripts/SoulsHitbox'
@@ -35,10 +35,10 @@ export default class SoulsProjectileNode extends Node {
   private _age: number = 0
   private _live: boolean = false
   private _owner: string = ''
+  @find('GameManager')
   private _gm: Node = null
 
   onStart() {
-    this._gm = this.findNode('GameManager')
   }
 
   /** Fire along `dir` (normalised here). Called by SoulsEnemy right after instantiating. */

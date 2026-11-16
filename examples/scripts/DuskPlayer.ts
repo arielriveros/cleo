@@ -1,4 +1,4 @@
-import { AnimatedSpriteNode, CharacterBody2DNode, Game, Input, Node } from 'cleo'
+import { AnimatedSpriteNode, CharacterBody2DNode, Game, Input, Node, save, child } from 'cleo'
 
 /**
  * Duskwell -- the player: the warrior of the Medieval Warrior pack. Attach to the `Player` Character Body 2D;
@@ -21,7 +21,7 @@ import { AnimatedSpriteNode, CharacterBody2DNode, Game, Input, Node } from 'cleo
 export default class DuskPlayer extends CharacterBody2DNode {
   public maxHealth: number = 5
   public health: number = 5
-  /** @save */
+  @save
   public diamonds: number = 0
   /** Seconds of invulnerability after a hit, the sprite flickering. */
   public invulnerableSeconds: number = 1.1
@@ -43,11 +43,11 @@ export default class DuskPlayer extends CharacterBody2DNode {
   public deathSeconds: number = 1.8
 
   // --- the moves, found over the game (kept by a save) ---------------------------------------------------
-  /** @save */
+  @save
   public hasDoubleJump: boolean = false
-  /** @save */
+  @save
   public hasDash: boolean = false
-  /** @save */
+  @save
   public hasWallJump: boolean = false
   /** Jumps in the air before landing again, with the double jump, and their height as a share of a jump's. */
   public airJumps: number = 1
@@ -65,6 +65,7 @@ export default class DuskPlayer extends CharacterBody2DNode {
   public wallJumpY: number = 12
   public wallJumpLock: number = 0.16
 
+  @child('Sprite')
   private _sprite: AnimatedSpriteNode = null
   private _baseWalk: number = 8
   private _baseMaxFall: number = 24
@@ -77,7 +78,8 @@ export default class DuskPlayer extends CharacterBody2DNode {
   private _invulnLeft: number = 0
   private _dead: boolean = false
   private _deathLeft: number = 0
-  /** @save The last lamp's spot: where a death, and a loaded game, put the player. */
+  /** The last lamp's spot: where a death, and a loaded game, put the player. */
+  @save
   private _respawn: [number, number] = [0, 0]
   private _touching: Node[] = []
   private _notice: string = ''
@@ -97,7 +99,6 @@ export default class DuskPlayer extends CharacterBody2DNode {
   private _wallSliding: boolean = false
 
   onStart() {
-    this._sprite = this.getChildByName('Sprite')[0] as AnimatedSpriteNode
     this._baseWalk = this.walkSpeed
     this._baseMaxFall = this.maxFallSpeed
     // A loaded game starts at the last lamp the save knew (`_respawn` is @save); a new one where the

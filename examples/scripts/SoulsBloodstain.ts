@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, save, find } from 'cleo'
 
 /**
  * Hollow Keep — the bloodstain left where the player died, holding every soul they carried. Attach to
@@ -14,15 +14,15 @@ import { Node } from 'cleo'
  * The template's root is Saved: a save made after a death keeps the stain where it lies, with its souls.
  */
 export default class SoulsBloodstainNode extends Node {
-  /** @save */
+  @save
   public souls: number = 0
 
+  @find('GameManager')
   private _gm: Node = null
   private _taken: boolean = false
   private _shown: boolean = false
 
   onStart() {
-    this._gm = this.findNode('GameManager')
     ;(this._gm as any)?.registerInteractable?.(this)
   }
 

@@ -1,4 +1,4 @@
-import { Node, UIRootNode, UITextNode } from 'cleo'
+import { Node, UIRootNode, UITextNode, child } from 'cleo'
 
 /**
  * Duskwell -- the HUD. Attach to the `HUD` screen-space UI Root; it reads the `Player` node every frame and
@@ -12,25 +12,15 @@ export default class DuskHud extends UIRootNode {
   public playerName: string = 'Player'
 
   private _player: Node = null
+  @child('Health')
   private _health: UITextNode = null
+  @child('Diamonds')
   private _diamonds: UITextNode = null
+  @child('Notice')
   private _notice: UITextNode = null
 
   onStart() {
     this._player = this.findNode(this.playerName) ?? null
-    this._health = this._find('Health')
-    this._diamonds = this._find('Diamonds')
-    this._notice = this._find('Notice')
-  }
-
-  private _find(name: string): UITextNode {
-    const queue: Node[] = [...this.children]
-    while (queue.length) {
-      const n = queue.shift()
-      if (n.name === name && n instanceof UITextNode) return n
-      queue.push(...n.children)
-    }
-    return null
   }
 
   onUpdate() {

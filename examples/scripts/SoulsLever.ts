@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, save, find, child } from 'cleo'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
@@ -12,17 +12,17 @@ export default class SoulsLeverNode extends Node {
   public doorName: string = 'Shortcut Gate'
   public swingDegrees: number = 70
   public swingSeconds: number = 0.6
-  /** @save */
+  @save
   public pulled: boolean = false
 
+  @find('GameManager')
   private _gm: Node = null
-  private _handle: Node = null
+  @child('Handle')
+  private _handle?: Node
   private _t: number = -1
   private _rest: number[] = [0, 0, 0]
 
   onStart() {
-    this._gm = this.findNode('GameManager')
-    this._handle = this.getChildByName('Handle')[0] ?? null
     if (this._handle) { const r = this._handle.rotation; this._rest = [r[0], r[1], r[2]] }
     // Pulled before a save that was loaded: the handle down, and nothing left to offer.
     if (this.pulled) {

@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, save, find, child } from 'cleo'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
@@ -29,21 +29,19 @@ export default class SoulsFogGateNode extends Node {
   public walkDistance: number = 2.8
   public walkSeconds: number = 1.5
   public isFogGate: boolean = true
-  /**
-   * 'closed' | 'fight' | 'gone'
-   * @save
-   */
+  /** 'closed' | 'fight' | 'gone' */
+  @save
   public gateState: string = 'closed'
 
+  @find('GameManager')
   private _gm: Node = null
-  private _fog: Node = null
-  private _wall: Node = null
+  @child('Fog')
+  private _fog?: Node
+  @child('FogWall')
+  private _wall?: Node
   private _fade: number = -1
 
   onStart() {
-    this._gm = this.findNode('GameManager')
-    this._fog = this.getChildByName('Fog')[0] ?? null
-    this._wall = this.getChildByName('FogWall')[0] ?? null
     // A loaded game: the fog the boss's death dissolved stays gone; a fight is never resumed mid-way.
     if (this.gateState === 'fight') this.gateState = 'closed'
     if (this.gateState === 'gone') {

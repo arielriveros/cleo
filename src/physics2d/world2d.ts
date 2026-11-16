@@ -2,6 +2,7 @@ import { rects2DIntersect } from '../core/math';
 import { decayRequests } from '../core/control/intent';
 import { logScriptError } from '../core/scripting/scriptErrors';
 import { Node } from '../core/scene/nodes/node';
+import { routeTrigger } from '../core/scene/nodes/nodeScripting';
 import { SpriteNode } from '../core/scene/nodes/spriteNode';
 import { CharacterBody2DNode } from '../core/scene/nodes/characterBody2DNode';
 import type { Body2DNode } from '../core/scene/nodes/body2DNode';
@@ -254,8 +255,8 @@ export class World2D {
                     }
                 }
             }
-            for (const n of before) if (!now.has(n)) { area.onTriggerExit(n); n.onTriggerExit(area); }
-            for (const n of now) if (!before.has(n)) { area.onTriggerEnter(n); n.onTriggerEnter(area); }
+            for (const n of before) if (!now.has(n)) { area.onTriggerExit(n); n.onTriggerExit(area); routeTrigger(area, 'exit', n); routeTrigger(n, 'exit', area); }
+            for (const n of now) if (!before.has(n)) { area.onTriggerEnter(n); n.onTriggerEnter(area); routeTrigger(area, 'enter', n); routeTrigger(n, 'enter', area); }
             before.clear();
             for (const n of now) before.add(n);
         }
