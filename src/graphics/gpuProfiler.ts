@@ -66,6 +66,8 @@ export const RENDER_PASSES = [
     'grid',
     // Smoke-and-fire volumes (FluidVolumeNode), over the resolved image just before the transparents.
     'fluidVolumes',
+    // A Water node's surface (render/water.ts), just before the transparents.
+    'water',
     // Froxel fog for VolumetricFogNode: lit, integrated and composited over the opaque scene.
     'volumetricFog',
     'transparent',

@@ -51,10 +51,11 @@ import { AutoExposure } from './render/autoExposure';
 import { PostEffects } from './render/postEffects';
 import type { VolumetricCloudPasses } from './render/clouds';
 import type { DecalPasses } from './render/decals';
-import { createNullClouds, createNullDecals, createNullFluids, createNullFog, createNullFoliage, createNullGi, createNullParticles, RENDER_FACTORY } from './render/featureSubsystems';
+import { createNullClouds, createNullDecals, createNullFluids, createNullFog, createNullFoliage, createNullGi, createNullParticles, createNullWater, RENDER_FACTORY } from './render/featureSubsystems';
 import type { CloudSubsystem, DecalSubsystem, FluidSubsystem, FogSubsystem, FoliageSubsystem, GiSubsystem, ParticleSubsystem } from './render/featureSubsystems';
 import { featureFactory } from '../core/features/registry';
 import type { FluidVolumePasses } from './render/fluids';
+import type { WaterPasses } from './render/water';
 import type { ParticlePasses } from './render/particlePasses';
 import { Sprite2DPasses } from './render/sprites2d';
 import type { FoliagePasses } from './render/foliage';
@@ -502,6 +503,12 @@ export class Renderer {
             gi: this._gi,
             foliage: this._foliage,
             wind: this._wind,
+            water: featureFactory<(...a: ConstructorParameters<typeof WaterPasses>) => WaterPasses>(RENDER_FACTORY.water)?.({
+                get renderHeight() { return renderer._renderHeight; },
+                get renderWidth() { return renderer._renderWidth; },
+                ssrForward: () => this._ssrForwardParams(),
+            }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._subsystems)
+                ?? createNullWater(),
         } satisfies RenderSubsystems);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._shadows.shadowDistance = config.shadowDistance ?? 100;

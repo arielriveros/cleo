@@ -173,3 +173,39 @@ describe('carving', () => {
         expect(again === null || again.c0 >= 0).toBe(true);
     });
 });
+
+describe('water info and look', () => {
+    it('builds a grid with the shore where the ground rises, and tiles only where there is water', async () => {
+        const { buildWaterInfo } = await import('../src/water/waterInfo');
+        const lake = normaliseWaterShape({ type: 'lake', offset: [0, 0, 0] });
+        const shapes = resolveWaterShapes([lake], FRAME);
+        // Ground rising to the east: dry past x = 6.
+        const info = buildWaterInfo(shapes, (x) => (x - 6) * 0.5)!;
+        expect(info).not.toBeNull();
+        const at = (x: number, z: number) => {
+            const i = Math.round((z - info.originZ) / info.cell) * info.nx + Math.round((x - info.originX) / info.cell);
+            return { surface: info.info0[i * 4], edge: info.info0[i * 4 + 3], wet: info.info1[i * 4 + 3] };
+        };
+        expect(at(0, 0).wet).toBe(1);
+        expect(at(0, 0).surface).toBeCloseTo(0, 6);
+        expect(at(9, 0).wet).toBe(0);
+        expect(at(4, 0).edge).toBeLessThan(at(-4, 0).edge);   // nearer the eastern shore the ground made
+        expect(info.tileWet.some(t => t === 1)).toBe(true);
+        const ocean = buildWaterInfo(resolveWaterShapes([normaliseWaterShape({ type: 'ocean' })], FRAME), null);
+        expect(ocean).toBeNull();   // an endless ocean alone needs no grid
+    });
+
+    it('a Water material round-trips its look through Material.parse', async () => {
+        const { Material, WaterMaterial } = await import('../src/graphics/material');
+        const m = new WaterMaterial({ turbidity: 0.7, shallowColor: [0.2, 0.3, 0.1] });
+        const back = Material.parse(JSON.parse(JSON.stringify(m.serialize())));
+        expect(back).toBeInstanceOf(WaterMaterial);
+        expect((back as InstanceType<typeof WaterMaterial>).look.turbidity).toBe(0.7);
+        expect((back as InstanceType<typeof WaterMaterial>).look.shallowColor).toEqual([0.2, 0.3, 0.1]);
+        const w = new WaterVolumeNode('w', { waterMaterial: m.serialize(), waterMaterialId: 'abc' });
+        const json = JSON.parse(JSON.stringify(await w.serialize()));
+        const p = new Node('p'); parseNodeJson(p, json);
+        expect((p.children[0] as WaterVolumeNode).waterMaterial?.look.turbidity).toBe(0.7);
+        expect((p.children[0] as WaterVolumeNode).waterMaterialId).toBe('abc');
+    });
+});

@@ -72,6 +72,52 @@ surface: the river drops into the lake at its level, or joins the other river wh
 from** does the same for the river's start, for a river that drains a lake. Rivers that join rivers are
 worked out in the order they flow, wherever they are on the list.
 
+## Surface
+
+How the water looks, from a **Water material**: pick one from the library (or make one with **+ New
+material**), and edit it right here; a linked material's edits reach every Water node drawing with it.
+With none, the water takes the default clear-lake look. The menu beside the picker applies a look
+(clear lake, tropical lagoon, alpine river, murky swamp, open ocean, swimming pool).
+
+The surface is single-layer water: what is under it is seen through it, bent by the waves and dimmed and
+tinted by the water it crosses, with caustics on the bed; it reflects the scene (screen-space) over the sky;
+and foam gathers on the shore, on breaking crests and in rapids. Rain from a Weather volume rings it, snow
+settles on still water as slush and then ice, and the scene's wind roughens it. Seen from below, it
+reflects the water back outside Snell's window.
+
+| Field | What it does |
+|---|---|
+| **Shallow colour** | The tint of light scattered near the surface: what shallow water looks like. |
+| **Deep colour** | The colour deep water takes: light scattered back from far down. |
+| **Absorption** | How fast each colour dies with depth (brighter is absorbed faster). Clear water loses red first, so its depths turn blue-green. |
+| **Murkiness** | Suspended silt: murky water hides the bed a short way down. |
+| **Clarity** | Metres you can see down before the scattering hides the bed. |
+| **Reflectivity** | Reflectance looking straight down (water is 0.02); grazing reflection rises toward a mirror by Fresnel. |
+| **Roughness** | How blurred the reflections are: 0 a mirror. Wind adds to it. |
+| **Screen reflections** | How much the screen-space reflection of the scene is used over the sky. Needs Screen-Space Reflections on in the Renderer settings. |
+| **Refraction** | How far what is under the surface bends with the waves. |
+| **Ripples** | Strength of the small ripples on top of the waves. |
+| **Ripple size** | Metres across the small ripples. |
+| **Flow** | How far the ripples and foam ride the current, so a river visibly runs. |
+| **Foam colour** | The colour of the foam. |
+| **Shore foam** | Metres of foam along the shore and in thin water, with surf lines running in. |
+| **Crest foam** | Foam on breaking wave crests. |
+| **Rapids foam** | Foam where the water runs fast or drops: rapids, weirs, waterfalls. |
+| **Caustics** | Brightness of the light the waves focus on the bed. |
+| **Caustics size** | Metres between the caustic lines. |
+| **Rain rings** | How much rain from a Weather volume rings the surface. |
+| **Snow and ice** | How much snow from a Weather volume settles on still water, as slush and then ice. |
+| **Wind** | How much the scene's wind roughens the surface. |
+| **Underwater colour** | The colour of the water seen from inside it. |
+| **Underwater fog** | How thick the water is to see through from inside it, per metre. |
+
+### Level of detail
+
+The surface is drawn in tiles: each is as dense as its distance from the camera calls for, from 64
+quads across close up to 8 far away, and the waves, ripples and reflections fade out with distance. An
+endless ocean adds rings of ever larger tiles round the camera to the horizon. Tiles out of view, or past
+the node's **Draw distance**, are not drawn.
+
 ## Waves
 
 Gerstner waves shaped by the wind: the longer and stronger the wind blows over open water, the longer,

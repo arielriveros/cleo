@@ -1,17 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react'
 import {
   ModelNode, WaterVolumeNode, WATER_VOLUME_PRESETS, normaliseWaterShape, normaliseWaterPoint, newWaterShapeId, carveWater,
-  type LandscapeNode,
+  WaterMaterial, WATER_LOOK_PRESETS, DEFAULT_WATER_LOOK, type LandscapeNode, type WaterLook, type WaterLookPreset,
   type WaterVolumePreset, type WaterShape, type WaterShapeType, type WaterPoint,
 } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import {
   Button, Hint, MenuItem, NumberInput, Popover, PresetMenu, PropertyRow, PropertyTable, Section, SectionTitle, Select,
-  Slider, Toggle, VectorInput, DocScope, cn,
+  Slider, Toggle, VectorInput, DocScope, ColorInput, cn,
 } from '@cleo/app-kit/ui'
 import NodeRefInput from '../NodeRefInput'
 import { useCleoEngine } from '../../EngineContext'
 import { useHistory } from '../../HistoryContext'
+import MaterialPicker, { liveMaterial } from '../../terrainMaterials/MaterialPicker'
+import { buildMaterialAsset } from '../../../utils/materials'
 import { WaterVolumeIcon } from '../sectionIcons'
 import {
   WATER_SHAPE_FRAME, WATER_SHAPES_EDITED, setWaterShapeSelection, useWaterShapeSelection,
@@ -338,6 +340,86 @@ function WaterShapes({ node, changed }: { node: WaterVolumeNode; changed: () => 
   )
 }
 
+/** Linear RGB as the colour input's sRGB hex (it hands back sRGB 0..1, decoded on the way in). */
+const toHex = (c: readonly number[]) => '#' + c.slice(0, 3).map(v => Math.round(Math.pow(Math.min(1, Math.max(0, v)), 1 / 2.2) * 255).toString(16).padStart(2, '0')).join('')
+
+/**
+ * How the surface looks: the Water material (a library asset, embedded as a copy) and its parameters,
+ * edited here. Editing a linked material updates the library asset, and with it every Water node that
+ * draws with it.
+ */
+function WaterSurface({ node, changed }: { node: WaterVolumeNode; changed: () => void }) {
+  const { materials, updateMaterial, propagateMaterialAsset } = useCleoEngine()
+  const material = node.waterMaterial
+  const look: WaterLook = material?.look ?? DEFAULT_WATER_LOOK
+  const linked = node.waterMaterialId ? materials.find(m => m.id === node.waterMaterialId) : undefined
+  const setLook = (patch: Partial<WaterLook>) => {
+    const next = new WaterMaterial({ ...look, ...patch })
+    node.waterMaterial = next
+    if (linked) {
+      const asset = buildMaterialAsset(next, linked.name, linked.thumbnail ?? '', linked.id)
+      updateMaterial(linked.id, asset)
+      propagateMaterialAsset(asset)
+    }
+    changed()
+  }
+  const applyPreset = (p: WaterLookPreset) => setLook({ ...DEFAULT_WATER_LOOK, ...p.options })
+  const color = (key: keyof WaterLook, label: string, hint: string) => (
+    <PropertyRow label={label} hint={hint} divider>
+      <ColorInput color={toHex(look[key] as number[])} onChange={v => setLook({ [key]: v.map(x => Math.pow(x, 2.2)) } as Partial<WaterLook>)} />
+    </PropertyRow>
+  )
+  const slider = (key: keyof WaterLook, label: string, hint: string, min: number, max: number, step: number) => (
+    <PropertyRow label={label} hint={hint} divider>
+      <Slider value={look[key] as number} min={min} max={max} step={step} readout onChange={v => setLook({ [key]: v } as Partial<WaterLook>)} />
+    </PropertyRow>
+  )
+  return (
+    <Section title='Surface'>
+      <div className='flex items-start gap-1 mb-2'>
+        <div className='flex-1 min-w-0'>
+          <MaterialPicker value={node.waterMaterialId} placeholder={material ? '(unlinked water)' : '(default water)'}
+            newName={() => 'Water'} title='The Water material the surface is drawn with: drop one here too'
+            seed={() => new WaterMaterial(look)}
+            onPick={a => {
+              const m = liveMaterial(a)
+              if (!(m instanceof WaterMaterial)) return
+              node.waterMaterial = m
+              node.waterMaterialId = a.id
+              changed()
+            }} />
+        </div>
+        <PresetMenu presets={WATER_LOOK_PRESETS} onApply={applyPreset} title='Water looks' />
+      </div>
+      <PropertyTable columns={['45%', '55%']}>
+        {color('shallowColor', 'Shallow colour', 'The tint of light scattered near the surface: what shallow water looks like.')}
+        {color('deepColor', 'Deep colour', 'The colour deep water takes: light scattered back from far down.')}
+        {color('absorption', 'Absorption', 'How fast each colour dies with depth (brighter = absorbed faster). Clear water loses red first.')}
+        {slider('turbidity', 'Murkiness', 'Suspended silt: murky water hides the bed a short way down.', 0, 1, 0.01)}
+        {slider('clarity', 'Clarity', 'Metres you can see down before the scattering hides the bed.', 0.1, 50, 0.1)}
+        {slider('reflectivity', 'Reflectivity', 'Reflectance looking straight down (water is 0.02); grazing reflection follows Fresnel.', 0, 0.2, 0.005)}
+        {slider('roughness', 'Roughness', 'How blurred the reflections are: 0 a mirror.', 0, 1, 0.01)}
+        {slider('screenReflections', 'Screen reflections', 'How much the screen-space reflection of the scene is used over the sky.', 0, 1, 0.05)}
+        {slider('refraction', 'Refraction', 'How far what is under the surface bends with the waves.', 0, 2, 0.05)}
+        {slider('detailStrength', 'Ripples', 'Strength of the small ripples on top of the waves.', 0, 2, 0.05)}
+        {slider('detailScale', 'Ripple size', 'Metres across the small ripples.', 0.1, 10, 0.1)}
+        {slider('flowStrength', 'Flow', 'How far the ripples and foam ride the current.', 0, 2, 0.05)}
+        {color('foamColor', 'Foam colour', 'The colour of the foam.')}
+        {slider('shoreFoam', 'Shore foam', 'Metres of foam along the shore and in thin water.', 0, 10, 0.1)}
+        {slider('crestFoam', 'Crest foam', 'Foam on breaking wave crests.', 0, 1, 0.05)}
+        {slider('flowFoam', 'Rapids foam', 'Foam where the water runs fast or drops (rapids, weirs, waterfalls).', 0, 1, 0.05)}
+        {slider('caustics', 'Caustics', 'Brightness of the light the waves focus on the bed.', 0, 2, 0.05)}
+        {slider('causticsScale', 'Caustics size', 'Metres between the caustic lines.', 0.1, 10, 0.1)}
+        {slider('rainRipples', 'Rain rings', 'How much rain from a Weather volume rings the surface.', 0, 2, 0.05)}
+        {slider('snowCover', 'Snow and ice', 'How much snow settles on still water as slush, then ice.', 0, 1, 0.05)}
+        {slider('windResponse', 'Wind', 'How much the scene wind roughens the surface.', 0, 2, 0.05)}
+        {color('underwaterColor', 'Underwater colour', 'The colour of the water seen from inside it.')}
+        {slider('underwaterFog', 'Underwater fog', 'How thick the water is to see through from inside it, per metre.', 0, 2, 0.01)}
+      </PropertyTable>
+    </Section>
+  )
+}
+
 export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
   const { eventEmitter, editorScene, templates } = useCleoEngine()
   const [, setTick] = useState(0)
@@ -368,6 +450,8 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
         </PropertyTable>
 
         <WaterShapes node={node} changed={changed} />
+
+        <WaterSurface node={node} changed={changed} />
 
         <Section title='Waves'>
           <PropertyTable columns={['45%', '55%']}>

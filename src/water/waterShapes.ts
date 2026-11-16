@@ -1,6 +1,6 @@
 import { Spline3, closedSplineXZ, finiteOr, type Vec3Tuple } from '../core/math';
 import {
-    bucketKey, riverColumn, type ResolvedWaterShape, type WaterColumn,
+    bucketKey, closestOnSegmentXZ, pointInPolygonXZ, riverColumn, type ResolvedWaterShape, type WaterColumn,
 } from '../physics/water/waterColumn';
 
 export {
@@ -57,8 +57,6 @@ export interface WaterShape {
     points: WaterPoint[];
     depth: number;
     extent: number;
-    /** Water material asset (id); null = the node's own. */
-    materialId: string | null;
     /** Where two shapes overlap, the higher priority's water is the one there. */
     priority: number;
     carve: WaterCarve;
@@ -118,7 +116,6 @@ export function normaliseWaterShape(json: any, type?: WaterShapeType): WaterShap
             : t === 'lake' && points.length < 3 ? LAKE_POINTS.map(p => normaliseWaterPoint(p)) : points,
         depth: Math.max(0.05, finiteOr(json?.depth, t === 'ocean' ? 50 : 3)),
         extent: Math.max(0, finiteOr(json?.extent, 0)),
-        materialId: typeof json?.materialId === 'string' && json.materialId ? json.materialId : null,
         priority: Math.round(finiteOr(json?.priority, t === 'river' ? 1 : 0)),
         carve: {
             enabled: !!carve.enabled,
@@ -165,8 +162,43 @@ function levelOf(shape: WaterShape, frame: WaterFrame): number {
 
 /** The surface of shape `id` over (x, z), for a river end joining it; undefined when unknown. */
 type LevelOf = (id: string, x: number, z: number) => number | undefined;
+/** A resolved lake, box or ocean by id (rivers resolve after them), for a river end reaching into it. */
+type TargetOf = (id: string) => ResolvedWaterShape | undefined;
 
-function resolveRiver(shape: WaterShape, frame: WaterFrame, levelAt: LevelOf, out: ResolvedWaterShape): void {
+/** How far inside the shape a river's connected end reaches, metres. */
+const REACH_INSIDE = 2;
+
+/**
+ * Where a river end at world (x, z) meets the lake or box it connects to: (x, z) itself when it is already
+ * inside, else the nearest point of the shape's edge, `REACH_INSIDE` metres in. Null for anything else
+ * (another river, an endless ocean, which every end is already in).
+ */
+function reachInto(target: ResolvedWaterShape, x: number, z: number): [number, number] | null {
+    if (target.type === 'box' || (target.type === 'ocean' && !target.endless)) {
+        const m = REACH_INSIDE;
+        const cx = Math.min(target.max[0] - m, Math.max(target.min[0] + m, x));
+        const cz = Math.min(target.max[2] - m, Math.max(target.min[2] + m, z));
+        return cx === x && cz === z ? null : [cx, cz];
+    }
+    if (target.type !== 'lake' || target.outline.length < 6) return null;
+    if (pointInPolygonXZ(x, z, target.outline)) return null;
+    const o = target.outline, n = o.length >> 1;
+    let best = Infinity, bx = x, bz = z;
+    const tmp = [0, 0];
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+        closestOnSegmentXZ(x, z, o[j * 2], o[j * 2 + 1], o[i * 2], o[i * 2 + 1], tmp);
+        if (tmp[1] < best) {
+            best = tmp[1];
+            bx = o[j * 2] + (o[i * 2] - o[j * 2]) * tmp[0];
+            bz = o[j * 2 + 1] + (o[i * 2 + 1] - o[j * 2 + 1]) * tmp[0];
+        }
+    }
+    // In along the approach direction: the river carries on past the shore into the lake.
+    const dx = bx - x, dz = bz - z, l = Math.hypot(dx, dz) || 1;
+    return [bx + dx / l * REACH_INSIDE, bz + dz / l * REACH_INSIDE];
+}
+
+function resolveRiver(shape: WaterShape, frame: WaterFrame, levelAt: LevelOf, targetOf: TargetOf, out: ResolvedWaterShape): void {
     const sx = Math.abs(frame.scale[0]), sz = Math.abs(frame.scale[2]), sy = Math.abs(frame.scale[1]);
     const lateral = (sx + sz) / 2;
     const raw = shape.points.map(p => ({ ...p, pos: toWorld(frame, [p.pos[0] + shape.offset[0], p.pos[1] + shape.offset[1], p.pos[2] + shape.offset[2]]) }));
@@ -179,6 +211,20 @@ function resolveRiver(shape: WaterShape, frame: WaterFrame, levelAt: LevelOf, ou
         const q = raw[raw.length - 1].pos, l = levelAt(shape.connect.end, q[0], q[2]);
         if (l !== undefined) q[1] = l;
     }
+    // An end that stops short of the lake or box it connects to carries on into it: one more point, on
+    // the shape's surface just past its shore, so the river visibly flows in (and out of, for a start).
+    const reach = (id: string | null, end: boolean) => {
+        const target = id ? targetOf(id) : undefined;
+        if (!target || !raw.length) return;
+        const at = end ? raw[raw.length - 1] : raw[0];
+        const inside = reachInto(target, at.pos[0], at.pos[2]);
+        if (!inside) return;
+        const extra = { ...at, pos: [inside[0], target.level, inside[1]] as [number, number, number] };
+        at.pos[1] = target.level;
+        if (end) raw.push(extra); else raw.unshift(extra);
+    };
+    reach(shape.connect.end, true);
+    reach(shape.connect.start, false);
     // Spline3 drops consecutive duplicates; drop the same ones here so control indices line up.
     const kept = raw.filter((p, i) => i === 0 || Math.hypot(p.pos[0] - raw[i - 1].pos[0], p.pos[1] - raw[i - 1].pos[1], p.pos[2] - raw[i - 1].pos[2]) > 1e-6);
     if (kept.length < 2) return;
@@ -243,6 +289,7 @@ export function resolveWaterShapes(shapes: readonly WaterShape[], frame: WaterFr
     // dependency order: one whose target is a river not yet resolved waits for it (a cycle just ignores
     // the joins that close it).
     const rivers = new Map<string, ResolvedWaterShape>();
+    const targets = new Map<string, ResolvedWaterShape>();
     const col: WaterColumn = { shape: -1, surface: 0, floor: 0, flowX: 0, flowZ: 0, edge: 0, waveFactor: 1 };
     const levelAt: LevelOf = (id, x, z) => {
         const level = levels.get(id);
@@ -289,10 +336,11 @@ export function resolveWaterShapes(shapes: readonly WaterShape[], frame: WaterFr
             r.min = [c[0] - e * sx, r.floor, c[2] - e * sz];
             r.max = [c[0] + e * sx, r.level, c[2] + e * sz];
         } else {
-            resolveRiver(shape, frame, levelAt, r);
+            resolveRiver(shape, frame, levelAt, id => targets.get(id), r);
             if (!r.samples.length) return;
             rivers.set(shape.id, r);
         }
+        if (shape.type !== 'river') targets.set(shape.id, r);
         out[order] = r;
     };
     const ids = new Set(shapes.map(s => s.id));

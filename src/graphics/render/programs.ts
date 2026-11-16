@@ -50,6 +50,8 @@ import FluidVolumeCompositeProgram from '../shaders/wgsl/fluidVolumeComposite.wg
 // and carries the WGSL through for WebGPU. The `.vs`/`.fs` imports above are the unconverted ones.
 import ScreenProgram from '../shaders/wgsl/screen.wgsl';
 import PixelUpscaleProgram from '../shaders/wgsl/pixelUpscale.wgsl';
+// A Water node's surface (render/water.ts).
+import WaterProgram from '../shaders/wgsl/water.wgsl';
 import PresentProgram from '../shaders/wgsl/present.wgsl';
 import OverlayCompositeProgram from '../shaders/wgsl/overlayComposite.wgsl';
 import DebugViewProgram from '../shaders/wgsl/debugView.wgsl';
@@ -163,7 +165,7 @@ export {
     VolumetricFogInjectProgram, VolumetricFogIntegrateProgram, VolumetricFogApplyProgram,
     GiReduceProgram, GiVisibilityProgram, GiRadianceProgram, GiIntegrateProgram, GiResolveProgram,
     GiAmbientCubeProgram, GiRescaleProgram, GiProbeOverlayProgram, GiStateStampProgram,
-    MovieAccumulateProgram, SpriteProgram, PixelUpscaleProgram,
+    MovieAccumulateProgram, SpriteProgram, PixelUpscaleProgram, WaterProgram,
 };
 
 // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
@@ -343,6 +345,8 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['sprite',                       SpriteProgram],
         // A pixel-perfect 2D frame scaled up to the screen unfiltered (render/frame2d.ts). APPENDED.
         ['pixelUpscale',                 PixelUpscaleProgram],
+        // A Water node's surface tiles (render/water.ts). APPENDED.
+        ['water',                        WaterProgram],
     ];
 }
 

@@ -6,6 +6,7 @@ import { windFieldClock } from "../../wind/windField";
 /** What the water reads back from a body it buoyed: where it is and how it moves. */
 type FloatingBody = { position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number } };
 import { Node } from "./node";
+import { WaterMaterial } from "../../../graphics/material";
 import { WATER_VOLUME_PRESETS, type WaterVolumePreset } from "./waterVolumePresets";
 import { applyPreset } from "../../presets";
 import type { BuoyancyVolume } from "../../../physics/buoyancy";
@@ -47,8 +48,10 @@ export interface WaterVolumeOptions {
     shoreFade?: number;
     /** Whether flowing water (rivers) carries floating bodies along. */
     currents?: boolean;
-    /** Water material (asset id) the surface is drawn with; null = the engine default. */
-    materialId?: string | null;
+    /** The Water material the surface is drawn with (an embedded copy); null = the engine default look. */
+    waterMaterial?: any;
+    /** Editor-side link to the Material library asset that copy was taken from. */
+    waterMaterialId?: string | null;
     /** Whether character bodies are buoyed too. Off: a character capsule is mostly air and would launch. */
     affectCharacters?: boolean;
     /**
@@ -103,7 +106,8 @@ export class WaterVolumeNode extends Node {
     private _choppiness: number;
     private _shoreFade: number;
     private _currents: boolean;
-    private _materialId: string | null;
+    private _waterMaterial: WaterMaterial | null;
+    private _waterMaterialId: string | null;
     private _affectCharacters: boolean;
     private _surfaceNodeId: string | null;
     private _splashTemplate: string;
@@ -148,7 +152,8 @@ export class WaterVolumeNode extends Node {
         this._choppiness = Math.min(1, Math.max(0, finiteOr(options.choppiness, 0.5)));
         this._shoreFade = Math.max(0, finiteOr(options.shoreFade, 6));
         this._currents = options.currents !== false;
-        this._materialId = typeof options.materialId === 'string' && options.materialId ? options.materialId : null;
+        this._waterMaterial = WaterVolumeNode._parseMaterial(options.waterMaterial);
+        this._waterMaterialId = typeof options.waterMaterialId === 'string' && options.waterMaterialId ? options.waterMaterialId : null;
         this._affectCharacters = !!options.affectCharacters;
         this._surfaceNodeId = typeof options.surfaceNodeId === 'string' && options.surfaceNodeId ? options.surfaceNodeId : null;
         this._splashTemplate = typeof options.splashTemplate === 'string' ? options.splashTemplate : '';
@@ -225,8 +230,17 @@ export class WaterVolumeNode extends Node {
     public set shoreFade(v: number) { this._shoreFade = Math.max(0, finiteOr(v, this._shoreFade)); this._shapesChanged('shoreFade'); }
     public get currents(): boolean { return this._currents; }
     public set currents(v: boolean) { this._currents = !!v; this._notifyChange('component', 'currents'); }
-    public get materialId(): string | null { return this._materialId; }
-    public set materialId(v: string | null) { this._materialId = v || null; this._notifyChange('component', 'materialId'); }
+    /** The Water material drawing the surface, or null for the default look. */
+    public get waterMaterial(): WaterMaterial | null { return this._waterMaterial; }
+    public set waterMaterial(v: WaterMaterial | null) { this._waterMaterial = v instanceof WaterMaterial ? v : null; this._notifyChange('component', 'waterMaterial'); }
+    public get waterMaterialId(): string | null { return this._waterMaterialId; }
+    public set waterMaterialId(v: string | null) { this._waterMaterialId = v || null; this._notifyChange('component', 'waterMaterialId'); }
+
+    private static _parseMaterial(json: any): WaterMaterial | null {
+        if (!json) return null;
+        if (json instanceof WaterMaterial) return json;
+        try { return WaterMaterial.parse(json); } catch { return null; }
+    }
     public get affectCharacters(): boolean { return this._affectCharacters; }
     public set affectCharacters(v: boolean) { this._affectCharacters = !!v; this._notifyChange('component', 'affectCharacters'); }
     public get surfaceNodeId(): string | null { return this._surfaceNodeId; }
@@ -474,7 +488,8 @@ export class WaterVolumeNode extends Node {
                 waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
                 windSpeed: this._windSpeed, waveDirection: this._waveDirection, waveScale: this._waveScale,
                 choppiness: this._choppiness, shoreFade: this._shoreFade, currents: this._currents,
-                materialId: this._materialId,
+                ...(this._waterMaterial ? { waterMaterial: this._waterMaterial.serialize() } : {}),
+                ...(this._waterMaterialId ? { waterMaterialId: this._waterMaterialId } : {}),
                 affectCharacters: this._affectCharacters, surfaceNodeId: this._surfaceNodeId,
                 splashTemplate: this._splashTemplate, wadeSplashTemplate: this._wadeSplashTemplate, enabled: this._enabled,
             },

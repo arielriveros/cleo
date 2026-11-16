@@ -1044,6 +1044,39 @@ export function closedSplineXZ(points: readonly (readonly number[])[], spacing =
 }
 
 // =================================================================================================
+// Half floats
+// =================================================================================================
+
+const _halfF32 = new Float32Array(1);
+const _halfU32 = new Uint32Array(_halfF32.buffer);
+
+/** IEEE 754 binary16 bits of `v`, rounded to nearest; overflow saturates to infinity. */
+export function floatToHalf(v: number): number {
+    _halfF32[0] = v;
+    const x = _halfU32[0];
+    const sign = (x >>> 16) & 0x8000;
+    const exp = (x >>> 23) & 0xff;
+    let mant = x & 0x7fffff;
+    if (exp === 0xff) return sign | 0x7c00 | (mant ? 0x200 : 0);
+    let e = exp - 127 + 15;
+    if (e >= 0x1f) return sign | 0x7c00;
+    if (e <= 0) {
+        if (e < -10) return sign;
+        mant = (mant | 0x800000) >>> (1 - e);
+        return sign | ((mant + 0x1000) >>> 13);
+    }
+    const h = sign | (e << 10) | (mant >>> 13);
+    // Round to nearest: carries into the exponent correctly.
+    return (mant & 0x1000) ? h + 1 : h;
+}
+
+/** Convert a float array to binary16 bits, element for element. */
+export function floatsToHalves(src: Float32Array, dst: Uint16Array): void {
+    const n = Math.min(src.length, dst.length);
+    for (let i = 0; i < n; i++) dst[i] = floatToHalf(src[i]);
+}
+
+// =================================================================================================
 // Vector and quaternion helpers
 //
 // Plain-tuple arithmetic for code that works in `[x, y, z]` arrays rather than gl-matrix vectors (packed

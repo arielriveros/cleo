@@ -954,7 +954,7 @@ sharpened by `choppiness` and dying down within `shoreFade` metres of a shore. T
 
 Properties: `shapes`, `density` (kg/m³, default 1000), `linearDrag`, `angularDrag` (per second at full
 submersion), `waveAmplitude`, `waveFrequency`, `windSpeed`, `waveDirection`, `waveScale`, `choppiness`,
-`shoreFade`, `currents`, `materialId`, `affectCharacters`, `surfaceNodeId`, `splashTemplate`,
+`shoreFade`, `currents`, `waterMaterial`, `waterMaterialId`, `affectCharacters`, `surfaceNodeId`, `splashTemplate`,
 `wadeSplashTemplate`, `enabled`; `size` reads and writes the first box. Helpers: `addShape(type)`,
 `shape(id)`, `resolvedShapes()`, `waves()`, `columnAt(x, z, time?)` (resting or waved surface, floor, flow
 and distance to shore, or null), `worldBox()`, `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)`,

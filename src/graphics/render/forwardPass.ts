@@ -230,6 +230,11 @@ export class ForwardPass {
         if (!this._host.thumbnailMode && scene.fluidVolumes.size > 0 && !this._view.preview && this._passes.beginPass('fluidVolumes'))
             this._fluids.renderFluidVolumes(scene);
 
+        // Water surfaces, over the resolved image too, before the transparents: glass, particles and sprites
+        // still draw over (and under) the water, testing against the depth it writes.
+        if (!this._host.thumbnailMode && scene.waterVolumes.size > 0 && !this._view.preview && this._passes.beginPass('water'))
+            this._sys.water.renderWater(scene);
+
         // Transparent models: back-to-front, depth-tested against opaque, no depth writes. Thumbnails
         // are the exception — their coverage alpha comes from the scene depth, so they must write it.
         const camPos = this._view.camera.position;
