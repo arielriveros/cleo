@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Logger, isDefaultInputMap } from "cleo";
-import { isDefaultProjectSettings } from "./options/projectSettings";
+import { isDefaultProjectSettings, resolveSaveFolder } from "./options/projectSettings";
 import { useCleoEngine, KIND_LABEL } from "./EngineContext";
 import { useVfs } from "./assets/VfsContext";
 import { buildMultiSceneGameData, PublishCanceledError } from "./publish/buildMultiSceneGameData";
@@ -297,7 +297,10 @@ export default function MenuBar() {
 
   const onPublishDesktop = (installer: boolean) =>
     runPublish(installer ? 'Publishing desktop installer' : 'Publishing desktop build',
-      data => publishDesktop(data, { installer, name: gameName || undefined, window: projectSettings.publish }));
+      data => publishDesktop(data, {
+        installer, name: gameName || undefined, window: projectSettings.publish,
+        savesFolder: resolveSaveFolder(projectSettings, projectName),
+      }));
 
   // Play in window. The window opens inside this click (a web popup needs its user activation) and the
   // build follows; pressed while a window game runs, Play resumes it or brings its window forward.

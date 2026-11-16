@@ -123,6 +123,24 @@ because the game does not keep their files.
 > storage (`localStorage`, IndexedDB) belongs to that origin, so a player's data from such a build does
 > not carry over to a newer one.
 
+### Saves
+
+What a game saves with `SaveGame` (see [Saving and loading](../scripting/save-game.md)) is kept apart from
+the game itself, so an update or a reinstall keeps it:
+
+| Build | Where saves are kept |
+|---|---|
+| Desktop | One file per slot, `<slot>.cleosave`, in `<app data>/<save folder>/saves`: on Windows `%APPDATA%\<save folder>\saves`, on macOS `~/Library/Application Support/<save folder>/saves`, on Linux `~/.config/<save folder>/saves`. The save it replaced is kept beside it as `<slot>.cleosave.bak`. |
+| Web | The browser's storage for the site the game is served from, under the save folder's name. Clearing the site's data deletes them. |
+
+The **save folder** is set in Options ▸ Project ▸ General ▸ Saves; empty, it is the game's title. Set
+it before the first release and keep it: a game published under another one does not find its players'
+saves. Saves made while playing in the editor are the project's Play saves (the [Saves panel](saves.md)),
+and never ship.
+
+The desktop game's page is still sandboxed: its one preload, `gamePreload.js`, lends it the save folder
+through four calls that take slot names, never paths.
+
 ## See also
 
 [Projects](projects.md) · [File formats](../reference/file-formats.md) · [Scene and game (scripting)](../scripting/scene-and-game.md)

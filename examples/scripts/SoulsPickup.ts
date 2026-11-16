@@ -11,8 +11,9 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  *   kind = 'flaskShard'   +1 maximum Estus, and fills it
  *   kind = 'flaskCharge'  refills `amount` Estus, up to the maximum
  *
- * Pickups are one-shot for the whole session — resting does not bring them back. `hiddenUntilRevealed`
- * keeps one invisible and unreachable until something calls `reveal()` (the boss's reward does this).
+ * Pickups are one-shot for the whole game — resting does not bring them back, and neither does loading a
+ * save (`taken` is @save). `hiddenUntilRevealed` keeps one invisible and unreachable until something calls
+ * `reveal()` (the boss's reward does this).
  *
  * See SoulsBonfire for the interactable protocol.
  */
@@ -23,12 +24,15 @@ export default class SoulsPickupNode extends Node {
   public hiddenUntilRevealed: boolean = false
   /** The trigger of the player animator's gesture state played on taking it. */
   public pickupGesture: TriggerName = 'Pickup'
+  /** @save */
   public taken: boolean = false
 
   private _gm: Node = null
 
   onStart() {
     this._gm = this.findNode('GameManager')
+    // Taken before a save that was loaded: gone, and not offered again.
+    if (this.taken) { this.visible = false; return }
     if (this.hiddenUntilRevealed) this.visible = false
     else (this._gm as any)?.registerInteractable?.(this)
   }

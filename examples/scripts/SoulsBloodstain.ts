@@ -10,8 +10,11 @@ import { Node } from 'cleo'
  * It is also the pool of blood where the player last died: its decal children play their flipbook (a pool
  * spreading) when it appears. With no souls in it, it is only that: its `Glow` hides and there is nothing
  * to retrieve.
+ *
+ * The template's root is Saved: a save made after a death keeps the stain where it lies, with its souls.
  */
 export default class SoulsBloodstainNode extends Node {
+  /** @save */
   public souls: number = 0
 
   private _gm: Node = null

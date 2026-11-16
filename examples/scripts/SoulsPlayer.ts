@@ -64,11 +64,16 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   /** The weapons the player starts with, by template. F swaps between them. */
   public weaponTemplates: TemplateName[] = ['Longsword', 'Greatsword']
 
-  // ----- stats (level-up spends souls on these four) ---------------------------------------------
+  // ----- stats (level-up spends souls on these four) — a save keeps them, and the souls ------------
+  /** @save */
   public vigor: number = 10
+  /** @save */
   public endurance: number = 10
+  /** @save */
   public strength: number = 10
+  /** @save */
   public dexterity: number = 10
+  /** @save */
   public souls: number = 0
 
   // ----- resources (runtime; the HUD reads them) --------------------------------------------------
@@ -78,6 +83,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public stamina: number = 90
   public maxStamina: number = 90
   public estus: number = 3
+  /** @save Estus Shards raise it for good. */
   public estusMax: number = 3
   /** HP restored per flask, spread over `estusHealSeconds`. */
   public estusHeal: number = 250

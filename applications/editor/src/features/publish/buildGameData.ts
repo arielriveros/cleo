@@ -2,8 +2,8 @@ import type { Scene, RenderSettings, NodeTemplate, InputMap } from 'cleo';
 import { Logger, isDefaultInputMap, isEditorOwnedName } from 'cleo';
 import { projectSettingsConfig } from '../options/projectSettings';
 import type { ProjectSettings } from '../options/projectSettings';
-import { fanOutScripts, SCRIPT_ID_VAR, type ScriptAsset } from '../../utils/scripts';
-import { buildScriptGraphCtx, importClosure } from '../../utils/scriptGraph';
+import { fanOutScripts, parseScriptVariables, saveFieldNames, SCRIPT_ID_VAR, type ScriptAsset } from '../../utils/scripts';
+import { buildScriptGraphCtx, importClosure, resolveScriptVariables, type ScriptGraphCtx } from '../../utils/scriptGraph';
 import type { Template } from '../../utils/templates';
 import { resolveMaterialRefs, type MaterialAsset } from '../../utils/materials';
 import { deepClone } from '@cleo/app-kit/utils/deepClone';
@@ -231,6 +231,37 @@ export function attachScriptModules(json: any, scriptAssets: ScriptAsset[], scri
     Logger.warn(`A script imports '@${id}', but no script lives at ${id}.script — check the path in the Assets panel.`, 'Script');
 }
 
+/**
+ * List each scripted node's `@save` fields on it as `saveFields`, which the engine's save system reads (a
+ * published game ships no script schema). From the script's SOURCE, the one the node will run, so a script
+ * saved before `@save` existed, or one inheriting tagged fields from a base-class script, still counts. Once
+ * per distinct script. Must run after the scripts are inlined (`json.script`) and, for inherited fields,
+ * after their paths are stamped.
+ */
+export function injectSaveFields(tree: any, ctx?: ScriptGraphCtx): void {
+  const cache = new Map<string, string[]>();
+  const fieldsOf = (source: string, path: string | undefined): string[] => {
+    const key = `${path ?? ''}\u0000${source}`;
+    let fields = cache.get(key);
+    if (!fields) {
+      try { fields = saveFieldNames(ctx ? resolveScriptVariables(source, path, ctx) : parseScriptVariables(source)); }
+      catch { fields = []; }
+      cache.set(key, fields);
+    }
+    return fields;
+  };
+  const visit = (node: any) => {
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.script === 'string' && node.script) {
+      const fields = fieldsOf(node.script, typeof node.scriptPath === 'string' ? node.scriptPath : undefined);
+      if (fields.length) node.saveFields = fields;
+      else delete node.saveFields;
+    }
+    for (const child of node.children ?? []) visit(child);
+  };
+  visit(tree);
+}
+
 // Single source of truth for the runtime scene JSON, shared by editor play mode and publishing.
 // Produces the exact object shape Scene.parse consumes: { scene, textures?, ui }.
 export async function buildGameData(sources: GameDataSources): Promise<any> {
@@ -258,6 +289,13 @@ export async function buildGameData(sources: GameDataSources): Promise<any> {
   }
   if (sources.scriptPaths && sources.scriptAssets)
     attachScriptModules(json, sources.scriptAssets, sources.scriptPaths);
+  // What a save keeps of each script: its `@save` fields, scene and templates alike (a spawned copy saves
+  // too). Runtime builds only, like the script paths: a saved scene file never carries them.
+  if (sources.scriptPaths && sources.scriptAssets) {
+    const graph = buildScriptGraphCtx(sources.scriptPaths, sources.scriptAssets);
+    injectSaveFields(json.scene, graph);
+    for (const template of json.templates ?? []) injectSaveFields((template as any).node, graph);
+  }
   // `graphics` seeds the engine constructor (clear color from frame one); `render` is the full snapshot
   // the player re-applies to its renderer after boot; `input` is the action map the player installs
   // before the first frame. Scene.parse ignores `config`.

@@ -1,5 +1,5 @@
-import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, addScriptModuleSources, registerTemplates, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles, restrictFeatures, setAbsentFeatureNames } from 'cleo';
-import type { BackendKind, LoadProgressListener } from 'cleo';
+import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, addScriptModuleSources, registerTemplates, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles, restrictFeatures, setAbsentFeatureNames, parseRuntimeScene, setSaveStore, beginSaveSessionFrom, createBridgeSaveStore, createIndexedDbSaveStore } from 'cleo';
+import type { BackendKind, LoadProgressListener, SaveStore, SaveDocument } from 'cleo';
 import { mountVirtualControls } from './virtualControls';
 import { inflateSceneGeometry, inflateTerrainData, inflateTilemapData, readChunkSet, collectSceneRefs, collectUiTextureIds, type GameHeader, type SceneRefs } from './unpack';
 import type { GameSource } from './gameSource';
@@ -45,6 +45,14 @@ export interface PlayerBootOptions {
   loadFeatures?: (ids: readonly string[]) => Promise<void>;
   /** Called after each scene has started: the entry scene and every Game.loadScene. */
   onSceneStarted?: (name: string) => void;
+  /**
+   * Where the game's saves go. Defaults to the desktop shell's files (`window.cleoSaves`) when the page has
+   * them, else IndexedDB under the game's namespace (`config.saves`). Play in window passes the editor's Play
+   * store, which its Saves panel reads.
+   */
+  saveStore?: SaveStore;
+  /** A save to start from instead of a fresh game (Play from save): its scene is the one that starts. */
+  startFromSave?: () => Promise<SaveDocument | null>;
   /** A failure past boot: a scene switch that threw. Defaults to {@link showError}. */
   onError?: (err: unknown) => void;
 }
@@ -143,6 +151,16 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   if (typeof masterVolume === 'number') AudioManager.Instance.mixer.masterVolume = masterVolume;
   const title = data?.config?.window?.title;
   if (typeof title === 'string' && title.trim()) document.title = title.trim();
+
+  // Where SaveGame writes (Options ▸ Project ▸ General ▸ Saves). A desktop game's shell lends it a folder of
+  // files; a web game keeps them on its origin, under its own namespace, so two games served from one site
+  // do not read each other's.
+  const saves = data?.config?.saves ?? {};
+  const bridge = (window as any).cleoSaves;
+  const saveStore = options.saveStore ?? (bridge
+    ? createBridgeSaveStore(bridge)
+    : createIndexedDbSaveStore({ dbName: 'cleo-saves', namespace: String(saves.namespace || title || 'game') }));
+  setSaveStore(saveStore, { gameVersion: typeof saves.version === 'number' ? saves.version : 0 });
 
   // Everything below this line constructs or resizes GPU resources, so the device must exist first.
   // With a progress callback the engine takes the yielding boot path: shaders compile in parallel (when
@@ -302,7 +320,9 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     for (const b of chunks.giBakes) GiBakeRegistry.set(b.id, b.bytes);
     await stage(0.6, 'Building the scene');
     const scene = new Scene();
-    scene.parse({ scene: json, textures: [] }, true); // textures already registered
+    // Through the save session: a scene the player comes back to (or a loaded save's) has its Saved nodes
+    // and @save fields put back as it is built. Textures are already registered.
+    parseRuntimeScene(scene, { scene: json, textures: [] }, id, true);
     // Shared clips are not in the serialized scene by design; retarget after parse, before start.
     attachSharedAnimations(scene, data);
     Logger.info(`scene "${entry.name}" nodes=${[...scene.nodes].length}`, 'Player');
@@ -347,6 +367,17 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   const scriptCount = Object.keys((window as any).CLEO_GAME_SCRIPTS || {}).length;
   const moduleCount = Object.keys(data.modules ?? {}).length;
   Logger.info(`scenes=${Object.keys(table).length} textures=${data.textures?.length ?? 0} sounds=${data.sounds?.length ?? 0} geometries=${Object.keys(data.geometries ?? {}).length} scriptsInFile=${scriptCount} moduleSources=${moduleCount} source=${source.kind}`, 'Player');
+
+  // Play from save: the session is the save's, and its scene is the one that opens.
+  const startDoc = options.startFromSave
+    ? await options.startFromSave().catch(e => { Logger.error(`Play from save: ${(e as Error)?.message ?? e}`, 'Player'); return null; })
+    : null;
+  if (startDoc) {
+    beginSaveSessionFrom(startDoc);
+    const from = resolve(startDoc.scene.id) ?? resolve(startDoc.scene.name);
+    if (from) currentId = from;
+    else Logger.warn(`Play from save: the save's scene "${startDoc.scene.name || startDoc.scene.id}" is not in this game; starting at the entry scene.`, 'Player');
+  }
 
   // The entry scene is read while the textures are; the game starts once both are in, so it opens with every
   // texture on the GPU.

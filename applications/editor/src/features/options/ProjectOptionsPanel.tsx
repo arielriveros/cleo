@@ -5,7 +5,7 @@ import { Button, Field, NumberInput, Section, Select, TextInput, Toggle, cn } fr
 import { loadProjects, renameProject } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
 import { OptionsPageBody, OptionsShell, OPTION_LABEL, useMarkOptionPageShown, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
-import { DEFAULT_PROJECT_SETTINGS, type PublishWindowSettings } from './projectSettings'
+import { DEFAULT_PROJECT_SETTINGS, cleanSaveFolder, resolveSaveFolder, type ProjectSaveSettings, type PublishWindowSettings } from './projectSettings'
 
 // Options ▸ Project: what belongs to THIS game and travels with it — its name, the scene it starts in,
 // how a published build presents itself, and the input map. Carried in project bundles.
@@ -43,6 +43,8 @@ function GeneralOptions() {
   const setWindow = (patch: Partial<PublishWindowSettings>) =>
     setProjectSettings(prev => ({ ...prev, publish: { ...prev.publish, ...patch } }))
   const d = DEFAULT_PROJECT_SETTINGS.publish
+  const setSaves = (patch: Partial<ProjectSaveSettings>) =>
+    setProjectSettings(prev => ({ ...prev, saves: { ...prev.saves, ...patch } }))
 
   // The project's name lives on the project record (machine-local metadata), not in project storage.
   const projectId = activeProjectId()
@@ -113,6 +115,19 @@ function GeneralOptions() {
       <Button size='sm' variant='ghost' onClick={() => setWindow({ ...d })}>
         Reset publish options
       </Button>
+
+      <Section title='Saves'>
+        <Field label='Save version' labelClassName={OPTION_LABEL}>
+          <NumberInput value={projectSettings.saves.version} min={0} max={1_000_000} step={1}
+            onChange={v => setSaves({ version: clampInt(v, 0, 1_000_000) })} />
+        </Field>
+        <Field label='Save folder' labelClassName={OPTION_LABEL}>
+          <TextInput value={projectSettings.saves.folder} maxLength={64}
+            placeholder={resolveSaveFolder({ ...projectSettings, saves: { ...projectSettings.saves, folder: '' } }, name)}
+            onChange={v => setSaves({ folder: v })}
+            onBlur={() => setSaves({ folder: cleanSaveFolder(projectSettings.saves.folder) })} />
+        </Field>
+      </Section>
     </OptionsPageBody>
   )
 }

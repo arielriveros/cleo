@@ -160,19 +160,36 @@ describe('serveGame', () => {
 });
 
 describe('the desktop game folder', () => {
-  it('gives the page no preload and a sandbox, and serves game:// through gameProtocol.js', () => {
+  it('sandboxes the page with one preload (its save files), and serves game:// through gameProtocol.js', () => {
     expect(templates.GAME_MAIN_JS).toContain("require('./gameProtocol')");
-    expect(templates.GAME_MAIN_JS).not.toMatch(/^\s*preload\s*:/m);
+    // The only preload is the save bridge; the game data still comes over game://.
+    expect(templates.GAME_MAIN_JS).toContain("preload: path.join(__dirname, 'gamePreload.js')");
     expect(templates.GAME_MAIN_JS).toMatch(/sandbox:\s*true/);
-    expect(templates.GAME_PRELOAD_JS).toBeUndefined();
+    expect(templates.GAME_MAIN_JS).toMatch(/nodeIntegration:\s*false/);
     expect(templates.GAME_PROTOCOL_JS).toBe(readFileSync(join(DESKTOP, 'gameProtocol.js'), 'utf-8'));
+    expect(templates.GAME_PRELOAD_JS).toBe(readFileSync(join(DESKTOP, 'gamePreload.js'), 'utf-8'));
   });
 
   it('is written by Publish with gameProtocol.js, game.bin unpacked beside app.asar, and ships in the editor', () => {
     const main = readFileSync(join(DESKTOP, 'main.js'), 'utf-8');
-    expect(main).toContain("'gameProtocol.js'), GAME_PROTOCOL_JS");
+    expect(main).toContain('writeDesktopShell(stage');
     expect(main).toMatch(/asarUnpack:\s*\['game\.bin'\]/);
     const pkg = JSON.parse(readFileSync(join(DESKTOP, 'package.json'), 'utf-8'));
-    expect(pkg.build.files).toContain('gameProtocol.js');
+    // gameTemplates.js reads all three when it loads, so a packaged editor without one cannot publish at all.
+    for (const file of ['gameProtocol.js', 'gameSaves.js', 'gamePreload.js']) expect(pkg.build.files).toContain(file);
+  });
+
+  it('writes the shell: main.js and the files it requires, and window.json with the data folder', () => {
+    const out = mkdtempSync(join(tmpdir(), 'cleo-game-shell-'));
+    try {
+      templates.writeDesktopShell(out, { window: { title: 'Keep', width: 800, height: 600 }, savesFolder: 'Hollow Keep' });
+      expect(readFileSync(join(out, 'main.js'), 'utf-8')).toBe(templates.GAME_MAIN_JS);
+      for (const file of ['gameProtocol.js', 'gameSaves.js', 'gamePreload.js'])
+        expect(readFileSync(join(out, file), 'utf-8')).toBe(readFileSync(join(DESKTOP, file), 'utf-8'));
+      const win = JSON.parse(readFileSync(join(out, 'window.json'), 'utf-8'));
+      expect(win).toMatchObject({ title: 'Keep', width: 800, height: 600, resizable: true, savesFolder: 'Hollow Keep' });
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
   });
 });

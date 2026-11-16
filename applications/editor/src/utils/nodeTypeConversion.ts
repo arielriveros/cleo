@@ -22,7 +22,7 @@ import { stripDebug } from './nodeSubtree'
  * would never be updated in step with this file.
  */
 const BASE_KEYS: readonly string[] = [
-  'id', 'name', 'position', 'rotation', 'scale', 'children', 'variables', 'spawnOnStart', 'motionBlur',
+  'id', 'name', 'position', 'rotation', 'scale', 'children', 'variables', 'spawnOnStart', 'saved', 'motionBlur',
 ]
 
 /**

@@ -15,7 +15,8 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  *   fight     blocks both ways, no prompt — there is no leaving.
  *   gone      the boss is dead: the fog dissolves for good.
  *
- * A death mid-fight resets it to `closed` (the manager calls `resetGate`).
+ * A death mid-fight resets it to `closed` (the manager calls `resetGate`). A save keeps `gateState`, so a
+ * game loaded after the boss fell finds the way open.
  *
  * The prompt comes from the gate's TRIGGER volume (a box spanning both sides of the wall): standing in it
  * offers "Traverse", and `canInteract` only allows it from outside. A separate `Boss Arena` zone (a
@@ -28,7 +29,10 @@ export default class SoulsFogGateNode extends Node {
   public walkDistance: number = 2.8
   public walkSeconds: number = 1.5
   public isFogGate: boolean = true
-  /** 'closed' | 'fight' | 'gone' */
+  /**
+   * 'closed' | 'fight' | 'gone'
+   * @save
+   */
   public gateState: string = 'closed'
 
   private _gm: Node = null
@@ -40,7 +44,13 @@ export default class SoulsFogGateNode extends Node {
     this._gm = this.findNode('GameManager')
     this._fog = this.getChildByName('Fog')[0] ?? null
     this._wall = this.getChildByName('FogWall')[0] ?? null
-    this._solid(true)
+    // A loaded game: the fog the boss's death dissolved stays gone; a fight is never resumed mid-way.
+    if (this.gateState === 'fight') this.gateState = 'closed'
+    if (this.gateState === 'gone') {
+      this._solid(false)
+      ;(this._fog as any)?.stop?.()
+      if (this._wall) this._wall.visible = false
+    } else this._solid(true)
     ;(this._gm as any)?.registerInteractable?.(this)
   }
 

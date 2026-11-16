@@ -258,7 +258,7 @@ const EXAMPLE_JSON = {
   },
   dungeon: {
     name: 'Dungeon',
-    description: 'A souls-like in a three-level torch-lit dungeon: stamina combat, rolls, lock-on, a bonfire and Estus, Hollows, a sorcerer and an elite knight, breakable barrels, messages and pickups, and a boss behind a fog gate in its throne arena.',
+    description: 'A souls-like in a three-level torch-lit dungeon: stamina combat, rolls, lock-on, a bonfire that saves the game, Estus, Hollows, a sorcerer and an elite knight, breakable barrels, messages and pickups, and a boss behind a fog gate in its throne arena.',
     order: 1,
   },
 }

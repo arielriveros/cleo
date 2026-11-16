@@ -31,27 +31,42 @@ const DEEP_FEATURE_MODULES: Record<string, string[]> = {
 
 const SRC = path.resolve(__dirname, '../src');
 
+/**
+ * Each file's import specifiers and each specifier's file, read once: the checks below walk the same graph a
+ * dozen times (the core, then every feature), and re-reading and re-resolving it each time ran past the test
+ * timeout on a busy machine.
+ */
+const specsOf = new Map<string, string[]>();
+const resolved = new Map<string, string | null>();
+
 /** Every source module `entry` reaches through value imports and re-exports, dynamic imports included. */
 function reach(entry: string): Set<string> {
     const seen = new Set<string>();
     const resolve = (from: string, spec: string): string | null => {
         if (!spec.startsWith('.')) return null;
         const base = path.resolve(path.dirname(from), spec);
+        if (resolved.has(base)) return resolved.get(base)!;
+        let found: string | null = null;
         for (const candidate of [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`, path.join(base, 'index.ts')])
-            if (existsSync(candidate) && !candidate.endsWith(path.sep) && path.extname(candidate)) return candidate;
-        return null;
+            if (existsSync(candidate) && !candidate.endsWith(path.sep) && path.extname(candidate)) { found = candidate; break; }
+        resolved.set(base, found);
+        return found;
     };
     const visit = (file: string) => {
         if (seen.has(file)) return;
         seen.add(file);
-        // Comments out, then type-only statements: neither loads anything.
-        const text = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-            .replace(/\b(?:import|export)\s+type\s[^;]*;/g, '');
-        const specs: string[] = [
-            ...[...text.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)].map(m => m[1]),
-            ...[...text.matchAll(/\bimport\s+['"]([^'"]+)['"]/g)].map(m => m[1]),
-            ...[...text.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g)].map(m => m[1]),
-        ];
+        let specs = specsOf.get(file);
+        if (!specs) {
+            // Comments out, then type-only statements: neither loads anything.
+            const text = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+                .replace(/\b(?:import|export)\s+type\s[^;]*;/g, '');
+            specs = [
+                ...[...text.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)].map(m => m[1]),
+                ...[...text.matchAll(/\bimport\s+['"]([^'"]+)['"]/g)].map(m => m[1]),
+                ...[...text.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g)].map(m => m[1]),
+            ];
+            specsOf.set(file, specs);
+        }
         for (const spec of specs) {
             // Packages the runtime must not carry: the editor's tools', and the AI feature's yuka.
             if (spec === 'sucrase' || spec === 'meshoptimizer' || spec === 'yuka') seen.add(`package:${spec}`);

@@ -48,7 +48,7 @@ so what a variant adds stays apart from what it inherits:
 ```
 Scenes/            Dungeon.scene
 Core/Scripts/      shared modules: SoulsMath, SoulsHitbox, SoulsAudio, SoulsCharacter
-Game/              Game Manager, and UI/ (HUD, Boss Bar, Banner, Bonfire Menu, Pause Menu)
+Game/              Game Manager, and UI/ (HUD, Boss Bar, Banner, Bonfire Menu, Pause Menu, Title Menu)
 Characters/
   Shared/          mannequin model, rig, locomotion field, controller, textures, shared clips
   Player/          Player template, its scripts, its sword/greatsword/roll/drink clips
@@ -155,7 +155,8 @@ SoulsWeapon               stats, blade hitbox, moves, attackRating, strike
 | `SoulsFx` | effect templates | Bursts its particles, fades its lights, then removes itself. |
 | `SoulsBonfire`, `SoulsPickup`, `SoulsBloodstain`, `SoulsMessage`, `SoulsLever`, `SoulsDoor`, `SoulsFogGate` | interactables | Each one follows the **interactable protocol** below. |
 | `SoulsHud`, `SoulsBonfireMenu` | `Player/HUD`, `Player/BonfireMenu` | The player's HUD and level-up menu — children of the player, reading the player. |
-| `SoulsPauseMenu` | `Player/PauseMenu` | The pause menu (P, Escape, Start): `Game.pause()`, Resume and Return to Bonfire. Listens in a late update, which runs while paused. |
+| `SoulsPauseMenu` | `Player/PauseMenu` | The pause menu (P, Escape, Start): `Game.pause()`, Resume, Return to Bonfire and Load Last Rest. Listens in a late update, which runs while paused. |
+| `SoulsTitleMenu` | `Player/TitleMenu` | Continue (the last bonfire's save) or New Game, over the paused game, when there is a save to go back to. Lighting and resting at a bonfire save the game (`GameManager.saveGame`, SaveGame). |
 | `SoulsBossBar` | `Hollow Warden/BossBar` | The boss's health bar — a child of the boss, shown while its owner is awake and alive. |
 | `SoulsBanner` | `GameManager/Banner` | The big banners (YOU DIED, BONFIRE LIT, VICTORY) — the game flow's. |
 
@@ -657,7 +658,8 @@ stay. A missing widget is simply skipped.
 |---|---|
 | `Player/HUD` | **Bars:** `Health`, `HealthLag` (the yellow drain), `HealthBack`, `Stamina`, `StaminaBack`. Bars grow with max HP and stamina (`pxPerHp`, `pxPerStamina`).<br>**Text:** `Estus`, `Weapon`, `Souls`, `SoulsGain`, `Notice`.<br>**Prompt:** `Prompt` panel holding `PromptText`.<br>**Message panel:** `Message`, `MessageTitle`, `MessageBody`.<br>**Help:** `Controls` (static). |
 | `Player/BonfireMenu` | `Title`, `LevelText`, `SoulsText`, `CostText`, `Derived`, `Help`.<br>`Row_Vigor` / `Row_Endurance` / `Row_Strength` / `Row_Dexterity`, each containing `Label`, `Minus`, `Value` and `Plus`.<br>`Confirm`, `Leave`. |
-| `Player/PauseMenu` | `Title`, `Resume`, `Bonfire`, `Hint`. |
+| `Player/PauseMenu` | `Title`, `Resume`, `Bonfire`, `Load`, `Hint`. |
+| `Player/TitleMenu` | `Title`, `Continue`, `New Game`, `Hint`. |
 | `Player/LockReticle` | A world-space root with a `Dot`. Any widget works; it follows the target's `LockPoint`. |
 | `Hollow Warden/BossBar` | `Bar` group holding `BossName`, `BossHealth`, `BossLag`. Edit it in the **Hollow Warden** template. |
 | `<enemy>/HealthBar` | A world-space root with a `Fill` progress bar that follows `HealthAnchor`. In the base **Enemy** template. |

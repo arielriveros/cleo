@@ -135,6 +135,42 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         const warden = characterOf(templates().find((t: any) => t.name === 'Hollow Warden').nodeJson);
         const bossBar = new Set(allNodes(warden.children.find((c: any) => c.name === 'BossBar')).map((n: any) => n.name));
         for (const w of ['Bar', 'BossName', 'BossHealth', 'BossLag']) expect(bossBar.has(w), w).toBe(true);
+        const pause = under('PauseMenu');
+        for (const w of ['Resume', 'Bonfire', 'Load']) expect(pause.has(w), w).toBe(true);
+        const title = under('TitleMenu');
+        for (const w of ['Continue', 'New Game']) expect(title.has(w), w).toBe(true);
+    });
+
+    // ----- saving (SaveGame; tools/valley/saves.ts puts it in the shipped bundle) ----------------------
+
+    it('keeps what a bonfire save needs: the @save fields, a Saved bloodstain, the title menu', () => {
+        const scriptByClass = (cls: string) => library('scripts').find((s: any) => s.source.includes(`export default class ${cls}`));
+        const saved: [string, string[]][] = [
+            ['SoulsPlayerNode', ['vigor', 'endurance', 'strength', 'dexterity', 'souls', 'estusMax']],
+            ['SoulsGameManagerNode', ['bossDefeated', '_restBonfire', '_respawnPoint', '_respawnYaw', '_bloodstain']],
+            ['SoulsBonfireNode', ['lit']],
+            ['SoulsPickupNode', ['taken']],
+            ['SoulsFogGateNode', ['gateState']],
+            ['SoulsBloodstainNode', ['souls']],
+        ];
+        for (const [cls, fields] of saved) {
+            const asset = scriptByClass(cls);
+            expect(asset, cls).toBeDefined();
+            expect(asset.variables.filter((v: any) => v.save).map((v: any) => v.name), cls).toEqual(expect.arrayContaining(fields));
+        }
+        // Lighting and resting at a bonfire save; the title menu and the pause menu load.
+        expect(scriptByClass('SoulsGameManagerNode').source).toMatch(/SaveGame\.save\(/);
+        expect(scriptByClass('SoulsTitleMenuNode').source).toMatch(/SaveGame\.load\(/);
+        // A death's bloodstain is a Saved copy, so a save keeps it where it lies.
+        expect(templates().find((t: any) => t.name === 'Bloodstain').nodeJson.saved).toBe(true);
+        // The title menu is the Player's, in the template and its placed copy alike, and the controller stays last.
+        for (const root of [scene().scene, templates().find((t: any) => t.name === 'Player').nodeJson]) {
+            const player = allNodes(root).find((n: any) => n.name === 'Player' && n.type === 'character');
+            const title = player.children.find((c: any) => c.name === 'TitleMenu');
+            expect(scriptOf(title)?.name).toBe('Title Menu');
+            expect(title.visible).toBe(false);
+            expect(player.children[player.children.length - 1].type).toBe('controller');
+        }
     });
 
     // Every UI belongs to the entity it shows: the player's HUD, menu and reticle are the player's

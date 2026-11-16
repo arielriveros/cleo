@@ -650,6 +650,8 @@ const BLOODSTAIN_TEMPLATE = (() => {
   const rootId = id('template:bloodstain:root')
   const root = withScript(node('Bloodstain', 'node', {
     id: rootId,
+    // Saved: a game saved after a death keeps the stain where it lies, with its souls (SaveGame).
+    saved: true,
     children: [
       // Deeper than a hit's splat: the player falls on slopes and steps as well as on flat ground.
       creatorDecalNode('bloodstain:pool', BLOOD_POOL_DECAL, { scale: BLOODSTAIN_POOL_SCALE, depth: 0.8, name: 'Pool', sortOrder: 1 }),

@@ -147,6 +147,17 @@ build fills the page it is embedded in, so only the title applies there.
   does not. Off makes a WebGPU-only game, lighter by its GLSL shaders, which tells a player whose browser
   or graphics card has no WebGPU that it needs it.
 
+**Saves**
+
+How the game's saves are kept (see [Saving and loading](../scripting/save-game.md)). Every build of the
+game must agree on these, or a player's saves would vanish with an update.
+
+- **Save version** — the game's own save version, written into every save. Raise it when what the game
+  saves changes shape; `SaveGame.onMigrate` then upgrades older saves as they load. 0 by default.
+- **Save folder** — where a published game keeps its saves: `<app data>/<folder>/saves` on the desktop
+  (`%APPDATA%` on Windows), the storage namespace on the web. Empty = the title, or the project name.
+  Set it before the first release and keep it: renaming it loses the saves players already have.
+
 ### Input
 
 The action map editor; see [Input](input.md). While this page is open the viewport previews the

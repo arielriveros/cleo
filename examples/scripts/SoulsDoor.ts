@@ -9,12 +9,15 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  * will not open — the souls convention that tells the player a shortcut exists. "Locked side" is the
  * side the node's local +Z points AWAY from when `lockedFromFront` is false, and toward when true.
  *
- * The slide moves the whole node, body included, so nothing else needs to know the door moved.
+ * The slide moves the whole node, body included, so nothing else needs to know the door moved. A save keeps
+ * `isOpen`, and the door opens itself as the scene starts; the door must NOT be marked Saved as well, or its
+ * saved position would be opened a second time.
  */
 export default class SoulsDoorNode extends Node {
   /** Offset from the closed position when fully open, in world metres. */
   public openOffset: [number, number, number] = [0, 4.2, 0]
   public openSeconds: number = 1.6
+  /** @save */
   public isOpen: boolean = false
   public lockedText: string = 'Opens from the other side'
   public lockedFromFront: boolean = false

@@ -21,6 +21,7 @@ import { AnimatedSpriteNode, CharacterBody2DNode, Game, Input, Node } from 'cleo
 export default class DuskPlayer extends CharacterBody2DNode {
   public maxHealth: number = 5
   public health: number = 5
+  /** @save */
   public diamonds: number = 0
   /** Seconds of invulnerability after a hit, the sprite flickering. */
   public invulnerableSeconds: number = 1.1
@@ -41,9 +42,12 @@ export default class DuskPlayer extends CharacterBody2DNode {
   /** Seconds the death plays before the respawn. */
   public deathSeconds: number = 1.8
 
-  // --- the moves, found over the game ------------------------------------------------------------------
+  // --- the moves, found over the game (kept by a save) ---------------------------------------------------
+  /** @save */
   public hasDoubleJump: boolean = false
+  /** @save */
   public hasDash: boolean = false
+  /** @save */
   public hasWallJump: boolean = false
   /** Jumps in the air before landing again, with the double jump, and their height as a share of a jump's. */
   public airJumps: number = 1
@@ -73,6 +77,7 @@ export default class DuskPlayer extends CharacterBody2DNode {
   private _invulnLeft: number = 0
   private _dead: boolean = false
   private _deathLeft: number = 0
+  /** @save The last lamp's spot: where a death, and a loaded game, put the player. */
   private _respawn: [number, number] = [0, 0]
   private _touching: Node[] = []
   private _notice: string = ''
@@ -95,7 +100,15 @@ export default class DuskPlayer extends CharacterBody2DNode {
     this._sprite = this.getChildByName('Sprite')[0] as AnimatedSpriteNode
     this._baseWalk = this.walkSpeed
     this._baseMaxFall = this.maxFallSpeed
-    this._respawn = [this.position[0], this.position[1]]
+    // A loaded game starts at the last lamp the save knew (`_respawn` is @save); a new one where the
+    // player stands, which is then the first respawn point.
+    if (this.wasRestored) {
+      this.teleport(this._respawn[0], this._respawn[1])
+      const cam = this.findNode('Camera') as any
+      cam?.snapToTarget?.()
+    } else {
+      this._respawn = [this.position[0], this.position[1]]
+    }
     this.health = this.maxHealth
   }
 

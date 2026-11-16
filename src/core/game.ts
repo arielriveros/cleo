@@ -7,6 +7,7 @@ import { showLoadingOverlay, whenFramesSmooth } from "./loadingOverlay";
 import { Logger } from "./logger";
 import type { RenderSettings } from "../graphics/renderer";
 import type { SequenceNode, SequencePlayOptions } from "./scene/nodes/sequenceNode";
+import { captureOutgoing } from "./save/session";
 
 /** Progress of a scene load: 0..1, and a short name for the stage it is in. */
 export type LoadProgressListener = (fraction: number, stage: string) => void;
@@ -62,6 +63,19 @@ export interface LoadSceneOptions {
   loadingScreen?: boolean | { title?: string };
 }
 
+/**
+ * @internal Game.loadScene, with the choice of recording the scene being left into the save session's memory
+ * (Game.loadScene does; SaveGame.load does not: the scene it leaves is the past being undone).
+ */
+export function loadSceneInternal(nameOrId: string, options: LoadSceneOptions, opts: { capture: boolean }): Promise<void> {
+  // Checked synchronously: a script that guards the call with try/catch (no host outside play) must see the
+  // throw, not an unhandled rejection.
+  const h = requireHost();
+  // Before anything else, synchronously: the scene keeps running while the next one loads.
+  if (opts.capture) captureOutgoing(h.currentSceneName());
+  return runLoad(h, nameOrId, options);
+}
+
 async function runLoad(h: GameHost, nameOrId: string, options: LoadSceneOptions): Promise<void> {
   const screen = options.loadingScreen;
   const overlay = screen
@@ -91,11 +105,12 @@ export const Game = {
    *   await Game.loadScene('Crypt', { loadingScreen: { title: 'The Crypt' } });
    *
    * The loading screen belongs to the host, not to either scene, so it stays up across the swap.
+   *
+   * The scene being left is remembered: its Saved nodes and `@save` fields come back as they were when the
+   * player returns to it (see SaveGame).
    */
   loadScene(nameOrId: string, options: LoadSceneOptions = {}): Promise<void> {
-    // Checked synchronously: a script that guards the call with try/catch (no host outside play) must
-    // see the throw, not an unhandled rejection.
-    return runLoad(requireHost(), nameOrId, options);
+    return loadSceneInternal(nameOrId, options, { capture: true });
   },
   /**
    * Listen to scene-load progress (0..1 and a stage name), for a loading UI of your own. Returns the

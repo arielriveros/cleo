@@ -1,4 +1,4 @@
-import { Game, Input, Node, UIButtonNode, UIRootNode } from 'cleo'
+import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode } from 'cleo'
 
 /**
  * Hollow Keep — the pause menu. Attach to the `PauseMenu` node, a screen-space UI Root authored hidden,
@@ -8,6 +8,7 @@ import { Game, Input, Node, UIButtonNode, UIRootNode } from 'cleo'
  *     Title                "PAUSED"                                 uiText
  *     Resume               back to the game                          uiButton
  *     Bonfire              return to the last bonfire rested at      uiButton
+ *     Load                 load the game saved at the last rest      uiButton (disabled with no save)
  *     Hint                 the controls line                         uiText
  *
  * Pause (P, Escape, or Start on a pad — the UI map) opens it: the game is paused with `Game.pause()`, so
@@ -50,6 +51,8 @@ export default class SoulsPauseMenuNode extends UIRootNode {
     if (resume) resume.onPress = () => this.close()
     const bonfire = this._find('Bonfire') as UIButtonNode
     if (bonfire) bonfire.onPress = () => this._toBonfire()
+    const load = this._find('Load') as UIButtonNode
+    if (load) load.onPress = () => this._loadLastRest()
     this._stopListening = this.scene?.addLateUpdate((_delta, unscaled) => this._listen(unscaled)) ?? null
   }
 
@@ -68,6 +71,12 @@ export default class SoulsPauseMenuNode extends UIRootNode {
     Game.pause()
     Input.disableMap('Gameplay')
     Input.releaseMouse()
+    // Load last rest only when there is a save to load.
+    const load = this._find('Load') as UIButtonNode
+    if (load) {
+      load.disabled = true
+      if (SaveGame.available) SaveGame.exists('auto').then(ok => { load.disabled = !ok }).catch(() => {})
+    }
   }
 
   /** Hide the menu and carry on. */
@@ -109,6 +118,16 @@ export default class SoulsPauseMenuNode extends UIRootNode {
   private _toBonfire(): void {
     this.close()
     ;(this._gm as any)?.respawnAtBonfire?.()
+  }
+
+  /** Load the game as it was saved at the last bonfire: the world, and the player at that bonfire. */
+  private _loadLastRest(): void {
+    this.close()
+    const gm = this._gm as any
+    if (!gm?.loadLastRest) return
+    gm.loadLastRest()
+      .then((loaded: boolean) => { if (!loaded) gm.notice?.('Nothing saved yet: rest at a bonfire') })
+      .catch((e: any) => Logger.warn(`Hollow Keep: the save could not be loaded: ${e?.message ?? e}`, 'Script'))
   }
 
   private _find(name: string, under: Node = this): Node {

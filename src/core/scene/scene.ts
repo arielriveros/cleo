@@ -50,6 +50,7 @@ import type { AISystem } from "../../ai/aiSystem";
 import type { SceneChange } from "../eventBus";
 import { authoring } from "../eventBus";
 import { cloneNodeJson, regenerateNodeIds } from "./nodeJson";
+import { v4 as uuidv4 } from 'uuid';
 import { getTemplate, templateNames } from "./templates";
 import { followSocket, resolveSocketOwner } from "./socketFollow";
 import { createNullPrecipitation, type ScenePrecipitation } from "./scenePrecipitation";
@@ -87,12 +88,31 @@ function dispatchActions(node: Node, actions: readonly ActionChange[]): void {
 export interface InstantiateOptions {
     /** Parent for the new node. Defaults to the scene root. */
     parent?: Node;
+    /**
+     * Id for the new root, instead of a fresh one; ignored (with a warning) when a node already has it. A save
+     * restores an instantiated node under the id it had, so references to it keep working.
+     */
+    id?: string;
     /** Name for the new node. Defaults to the template's own. */
     name?: string;
     /** Local position, rotation (Euler DEGREES) and scale, each defaulting to the template's. */
     position?: number[];
     rotation?: number[];
     scale?: number[];
+}
+
+/** @internal What the save system (src/core/save) keeps on a scene. */
+export interface SceneSaveState {
+    /** The scene's key in the game's scene table (its id) when a save host built it; null otherwise. */
+    key: string | null;
+    /** Every node taking part in saves (see Node.refreshSaveParticipation): what a capture visits. */
+    participants: Set<Node>;
+    /** The authored participants' ids, with their name paths, recorded as the scene was entered. */
+    authored: Map<string, string | null>;
+    /** The scene memory applied when it was entered, which a capture carries forward. */
+    memoryIn: unknown;
+    /** Restored nodes waiting for their onRestore, with what their onSave returned. */
+    pendingRestore: Map<Node, unknown>;
 }
 
 /** One scheduled `this.after`/`this.every` call. `interval === null` means one-shot. */
@@ -237,6 +257,11 @@ export class Scene {
     // list, so they reach no consumer; held here only so the removal sweep can still free one.
     private _dormant: Set<Node> = new Set();
 
+    /** @internal Save-system bookkeeping, see {@link SceneSaveState}. */
+    public readonly saveState: SceneSaveState = {
+        key: null, participants: new Set(), authored: new Map(), memoryIn: null, pendingRestore: new Map(),
+    };
+
     /** The physics system driving this scene (set by PhysicsSystem.set scene). Reachable from a script
      *  as `scene.physics`. */
     public physics!: PhysicsSystem;
@@ -324,9 +349,11 @@ export class Scene {
         // Three separate passes over the finished tree, in the order a script sees them, so a node's
         // onConstruct can spawn a node declared anywhere and still have it get its own onSpawn/onStart:
         //   onConstruct — EVERY node, dormant included (the only handler a dormant node gets)
+        //   onRestore   — the nodes a save or the scene's memory restored, dormant included
         //   onSpawn     — the awake ones
         //   onStart     — the awake ones (Node.start)
         this._root.runConstructHandlers();
+        this._runRestoreHandlers();
         this._root.runSpawnHandlers();
         this._root.start();
 
@@ -334,6 +361,18 @@ export class Scene {
         // first agent asks for a path (see AISystem.prewarm). Never while authoring: the editor's own
         // scene starts too, and nothing paths there.
         if (!CleoEngine.authoringMode) this.ai?.prewarm();
+    }
+
+    /** onRestore for every node the save system restored as this scene was built, then forget them. */
+    private _runRestoreHandlers(): void {
+        const pending = this.saveState.pendingRestore;
+        if (pending.size === 0) return;
+        for (const [node, data] of [...pending]) {
+            if (node.scene !== this) continue;
+            try { node.onRestore(data); }
+            catch (e) { logScriptError(`Error in onRestore for node ${node.name}`, e, 'Runtime'); }
+        }
+        pending.clear();
     }
 
     public stop(): void {
@@ -357,6 +396,11 @@ export class Scene {
     public dispose(): void {
         CleoEngine.eventEmitter.off('SCENE_CHANGED', this._onSceneChanged);
         this.stop();
+        // Nodes, held by the save index: a disposed scene must not keep its tree through them.
+        this.saveState.participants.clear();
+        this.saveState.pendingRestore.clear();
+        this.saveState.authored.clear();
+        this.saveState.memoryIn = null;
         this.precipitation.dispose();
 
         // Both are idempotent, and each falls back to the World it registered with, so no world argument
@@ -482,9 +526,10 @@ export class Scene {
      *
      * @param nameOrId Template name (what you called it in the editor) or its id.
      * @param options  Parent/name/transform overrides for the new root.
+     * @param prepare  @internal A last edit to the copy's JSON before it is parsed (the save system's restore).
      * @returns The new node, or `null` if there is no such template — which is also logged.
      */
-    public instantiate(nameOrId: string, options: InstantiateOptions = {}): Node | null {
+    public instantiate(nameOrId: string, options: InstantiateOptions = {}, prepare?: (json: any) => void): Node | null {
         const template = getTemplate(nameOrId);
         if (!template) {
             Logger.error(`instantiate: no template "${nameOrId}". Available: ${templateNames().map(n => `'${n}'`).join(', ') || 'none'}`, 'Scene');
@@ -494,7 +539,18 @@ export class Scene {
         // Deep copy first: the registry entry is the shared master, and regenerateNodeIds and the parse
         // below both mutate what they are handed. Not via JSON — geometry is typed arrays, see cloneNodeJson.
         const json = cloneNodeJson(template.node);
-        regenerateNodeIds(json, new Map());
+        // Ids are handed out root first, so a requested one goes to the root alone.
+        let rootId = options.id;
+        if (rootId !== undefined && (typeof rootId !== 'string' || !rootId || this.getNodeById(rootId))) {
+            Logger.warn(`instantiate: id "${rootId}" is already in use; '${template.name}' gets a fresh one.`, 'Scene');
+            rootId = undefined;
+        }
+        regenerateNodeIds(json, new Map(), () => {
+            if (rootId === undefined) return uuidv4();
+            const id = rootId;
+            rootId = undefined;
+            return id;
+        });
 
         if (options.name !== undefined) json.name = options.name;
         if (options.position) json.position = [...options.position];
@@ -502,6 +558,7 @@ export class Scene {
         if (options.scale) json.scale = [...options.scale];
         // An explicit instantiate always spawns, even from a template flagged dormant.
         json.spawnOnStart = true;
+        prepare?.(json);
 
         const parent = options.parent ?? this._root;
         parseNodeJson(parent, json);
@@ -509,8 +566,10 @@ export class Scene {
         // Found under its parent, not through getNodeById: that lookup forces the full-tree rebuild the
         // structural change just scheduled, once per spawn — a hit spawning four effects rebuilt every
         // node list four times. Left alone, the rebuild runs once, when the next frame reads the lists.
-        const made = parent.children.find(c => c.id === json.id);
-        return made ?? this.getNodeById(json.id) ?? null;
+        const made = parent.children.find(c => c.id === json.id) ?? this.getNodeById(json.id) ?? null;
+        // What a save records a Saved copy by, to make it again after a load.
+        if (made) made._saveInfo().instanceOf = template.id;
+        return made;
     }
 
     public removeNodesByName(name: string): void {

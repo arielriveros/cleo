@@ -107,6 +107,8 @@ export function reinstantiate(
   // Per-instance node state the rebuild would otherwise drop: the subtree comes back from the ASSET, which
   // knows nothing about how this placement was configured.
   const spawnOnStart = inst.spawnOnStart
+  // Saved (the Save card): a placement's choice, which the asset's copy knows nothing about.
+  const saved = inst.saved
   const animation = captureAnimationState(inst)
   // `instantiateModelAsset` overwrites the clone's `variables` wholesale, taking the placement's
   // `__scriptId`, `__templateId` and every authored variable with it.
@@ -130,6 +132,7 @@ export function reinstantiate(
   if (newNode) {
     newNode.setPosition(pos).setRotation(rot).setScale(scl)
     newNode.spawnOnStart = spawnOnStart
+    newNode.saved = saved
     // Only what the rebuild did NOT already set: the freshly stamped `__modelId`/`__templateId` must win.
     for (const [name, v] of variables) {
       if (newNode.variables.has(name)) continue

@@ -79,6 +79,12 @@ Layout helpers: `uiSetRect`, `uiSolveRect`, `uiRootScale`, `uiProjectToScreen`, 
 | `setScriptProvider`, `resolveNodeScript` | The no-eval path a published build uses. |
 | `attachScriptFactory`, `unwrapScriptNode` | Bind a factory to a node. |
 | `getData`, `setData`, `bindDataAccessors`, `canAccessVariable` | The variable access boundary. |
+| `SaveGame` | Save slots, globals, loading and migrations. See [Saving and loading](../scripting/save-game.md). |
+| `setSaveStore`, `getSaveStore` | Install where saves go (hosts: the player, the editor's Play). |
+| `createIndexedDbSaveStore`, `createBridgeSaveStore`, `createMemorySaveStore`, `createTextSaveStore` | The stores: browser storage, a desktop game's files, memory, any text backend. |
+| `parseRuntimeScene`, `resetSaveSession`, `beginSaveSessionFrom`, `captureOutgoing`, `captureScene` | How a host builds runtime scenes through the save session. |
+| `validateSaveDocument`, `migrateSaveDocument`, `isValidSlot`, `SAVE_FORMAT_VERSION` | Reading and checking `.cleosave` documents. |
+| `SaveDocument` / `SaveSlotInfo` / `SceneMemory` / `SaveStore` *(types)* | |
 | `NodeVariable` / `NodeVariableType` / `NodeVariableAccess` *(types)* | |
 | `ScriptModule` / `ScriptFactory` *(types)* | |
 

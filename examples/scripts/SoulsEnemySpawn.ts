@@ -49,6 +49,8 @@ export default class SoulsEnemySpawnNode extends Node {
       try { (this._live.collider ?? this._live).remove() } catch { /* already gone */ }
     }
     this._live = null
+    // A boss already defeated (in this game, or in the save it was loaded from) is never made again.
+    if (this.isBossSpawn && (this._gm as any)?.bossDefeated) return
     if (!(this.spawnables ?? []).includes(this.templateName))
       Logger.warn('Hollow Keep: spawn "' + this.name + '" makes "' + this.templateName + '", which is not in its spawnables.', 'Script')
     const p = this.worldPosition

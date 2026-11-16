@@ -1,4 +1,4 @@
-import { Game, Logger, Node } from 'cleo'
+import { Game, Logger, Node, SaveGame } from 'cleo'
 
 /**
  * A way into another scene: the skull cave's mouth, the dungeon's way back out. Attach to a node with a
@@ -10,7 +10,8 @@ import { Game, Logger, Node } from 'cleo'
  *
  * `exitTo` names the door in the target scene the player comes out of: that door puts the player
  * `arrivalDistance` in front of itself, facing out, instead of at the scene's start. The skull cave and the
- * dungeon's way out name each other, so a trip down and back up ends where it began.
+ * dungeon's way out name each other, so a trip down and back up ends where it began. The door to come out
+ * of is a SaveGame global (`arrival`): it outlives the scene switch, which a field of either scene does not.
  */
 export default class SoulsSceneDoorNode extends Node {
   /** The scene to load, by name or id. */
@@ -29,12 +30,11 @@ export default class SoulsSceneDoorNode extends Node {
   private _busy: boolean = false
 
   onStart() {
-    const g = globalThis as any
-    if (!this.name || g.__soulsArrival !== this.name) return
+    if (!this.name || SaveGame.get<string>('arrival') !== this.name) return
     // A frame later: the player has run its own start (and placed its body) by then. The arrival is
     // cleared then too, so anything else starting in this scene can tell it was arrived at through a door.
     this.after(0, () => {
-      g.__soulsArrival = undefined
+      SaveGame.unset('arrival')
       const player = this.findNode('Player') as any
       if (!player) return
       const me = this.worldPosition, f = this.worldForward
@@ -64,7 +64,7 @@ export default class SoulsSceneDoorNode extends Node {
   public go(): void {
     if (this._busy) return
     this._busy = true
-    ;(globalThis as any).__soulsArrival = this.exitTo || undefined
+    SaveGame.set('arrival', this.exitTo || undefined)
     try {
       Game.loadScene(this.targetScene, { loadingScreen: { title: this.loadingTitle || this.targetScene } })
         .catch(e => { this._busy = false; Logger.error(`Could not load "${this.targetScene}": ${e}`, 'Script') })

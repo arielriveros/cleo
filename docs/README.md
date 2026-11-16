@@ -74,6 +74,7 @@ After that the two halves are independent, and you can read either first:
 | [Rendering](editor/rendering.md) | Every render setting, debug channels, the performance HUD |
 | [Scripting workflow](editor/scripting-workflow.md) | Script assets, the code editor, editing in VS Code |
 | [Debugging scripts](editor/debugging.md) | Script errors that link to their line; breakpoints, stepping and variables for a game playing in a window |
+| [Saves](editor/saves.md) | The Saves panel: a project's Play saves, to inspect, export, import and play from |
 | [Publishing](editor/publishing.md) | Exporting a playable game |
 | [Project features](editor/project-features.md) | Which engine features a project's games ship: presets for 2D, 3D and more |
 | [Addons](editor/addons.md) | Editor addons a project turns on, such as Claude Code |
@@ -92,6 +93,7 @@ After that the two halves are independent, and you can read either first:
 | [Animation](scripting/animation.md) | Driving the animator from code: parameters, layers, actions, sockets |
 | [UI](scripting/ui.md) | Building and updating interfaces |
 | [Scene and game](scripting/scene-and-game.md) | Spawning, templates, switching scenes, the event bus |
+| [Saving and loading](scripting/save-game.md) | Save slots, checkpoints, Continue, and scenes that remember the player |
 | [Audio](scripting/audio.md) | Playing sound |
 | [Rendering](scripting/rendering.md) | Materials, lights, cameras, post-processing from code |
 | [Terrain and tilemaps](scripting/terrain-tilemap.md) | Querying and editing at runtime |

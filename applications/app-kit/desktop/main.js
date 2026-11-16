@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const fsp = fs.promises;
 const { pathToFileURL } = require('url');
-const { GAME_MAIN_JS, GAME_PROTOCOL_JS, GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme } = require('./gameTemplates');
+const { GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme, writeDesktopShell } = require('./gameTemplates');
 const scriptWorkspace = require('./scriptWorkspace');
 const movieFiles = require('./movieFiles');
 const playWindow = require('./playWindow');
@@ -383,21 +383,17 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
     const stage = installer ? await fsp.mkdtemp(path.join(os.tmpdir(), 'cleo-publish-')) : dir;
     try {
       // 1) The web files + Electron scaffold. main.js serves the folder over game:// (gameProtocol.js), game.bin
-      // a byte range at a time; the page needs no preload.
+      // a byte range at a time; its preload (gamePreload.js) only lends the page its save files (gameSaves.js).
       await writeWebFiles(stage, files);
       const electronVersion = require('electron/package.json').version;
       const win0 = (options && options.window) || {};
       const title = typeof win0.title === 'string' && win0.title.trim() ? win0.title.trim().slice(0, 120) : '';
-      // The project's window options (size, fullscreen, title); the game's main.js reads them at launch.
-      await fsp.writeFile(path.join(stage, 'window.json'), JSON.stringify({
-        title,
-        width: Number(win0.width) || 1280,
-        height: Number(win0.height) || 720,
-        fullscreen: !!win0.fullscreen,
-        resizable: win0.resizable !== false,
-      }, null, 2), 'utf-8');
-      await fsp.writeFile(path.join(stage, 'main.js'), GAME_MAIN_JS, 'utf-8');
-      await fsp.writeFile(path.join(stage, 'gameProtocol.js'), GAME_PROTOCOL_JS, 'utf-8');
+      // The project's window options (size, fullscreen, title), and the data folder its saves go in
+      // (Options ▸ Project ▸ Saves); the game's main.js reads them at launch.
+      writeDesktopShell(stage, {
+        window: { ...win0, title },
+        savesFolder: safeFolderName((options && options.savesFolder) || title || name),
+      });
       // A folder published before had a preload that read all of game.bin into the page; nothing loads it now.
       await fsp.rm(path.join(stage, 'preload.js'), { force: true });
       await fsp.writeFile(path.join(stage, 'package.json'), gamePackageJson(name, electronVersion), 'utf-8');

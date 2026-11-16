@@ -16,6 +16,22 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Saving and loading.** `SaveGame` saves a game to slots and loads it back, from scripts: `SaveGame.save('auto')`,
+  `SaveGame.load('auto')`, `list`, `mostRecent` for a Continue, and `set`/`get` globals for progress. What a save
+  keeps is opt-in: a node marked **Saved** (its transform, spawned state, body motion and variables, and that it
+  was removed), script fields tagged `/** @save */`, and whatever a script's `onSave()` returns to its
+  `onRestore(data)`. A loaded scene is built from its authored data with the state put back, and `wasRestored`
+  tells a script not to redo first-time setup. Scenes also remember: leave one with `Game.loadScene` and come
+  back, and its Saved nodes and `@save` fields are as they were.
+  - *Published games* keep their saves out of the game's folder: one `.cleosave` file per slot in
+    `<app data>/<save folder>/saves` on the desktop, the browser's storage on the web. Options ▸ Project ▸ General
+    ▸ Saves names the folder and the game's save version, which `SaveGame.onMigrate` upgrades older saves from.
+  - *In the editor*, a Save card in Properties sets **Saved** and lists a script's saved fields; the Scripts
+    panel marks `@save` fields; the new **Saves** panel lists the project's Play saves as the game writes them,
+    shows each one's document, and plays from, exports, imports or deletes them.
+  - *Examples*: Duskwell's lamps and the Dungeon's bonfires save the game, and both open on a title screen with
+    Continue when there is a save; the Dungeon's pause menu can load the last rest.
+
 - **Project features.** Project ▸ Features chooses which of the engine's optional features a project's games ship
   with, from presets (2D, 2.5D, 3D, High-fidelity 3D, Cinematic, Everything) that every box stays free to
   change, and Save as preset keeps a set on this computer. Twenty features: global illumination, screen-space

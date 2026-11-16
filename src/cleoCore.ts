@@ -436,6 +436,10 @@ export { TimeDilation, type DilateOptions } from "./core/timeDilation";
 export { showLoadingOverlay, nextFrame, whenFramesSmooth } from "./core/loadingOverlay";
 export type { LoadingOverlay, LoadingOverlayOptions } from "./core/loadingOverlay";
 export type { GameHost, LoadProgressListener, LoadSceneOptions } from "./core/game";
+// Saving and loading game state: `SaveGame` for scripts; the store and runtime-scene parse for hosts.
+export * from "./core/save";
+export type { NodeSaveInfo } from "./core/scene/nodes/node";
+export type { SceneSaveState } from "./core/scene/scene";
 export * as Vec from "gl-matrix";
 export * as MathUtils from "./core/math";
 // The most used of MathUtils by name as well. Each was once exported from the module that first needed it

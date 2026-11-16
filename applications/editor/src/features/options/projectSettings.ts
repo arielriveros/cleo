@@ -81,6 +81,24 @@ export interface ProjectAddonSettings {
   settings: Record<string, unknown>;
 }
 
+/**
+ * How the game's saves are kept (`SaveGame`, src/core/save). Per project: every build of the game must agree,
+ * or a player's saves would vanish on an update.
+ */
+export interface ProjectSaveSettings {
+  /**
+   * The game's own save version, written into every save. Raise it when the game's saved data changes shape;
+   * `SaveGame.onMigrate` then upgrades older saves as they load.
+   */
+  version: number;
+  /**
+   * Where a published game keeps its saves: the folder under the player's app data on the desktop
+   * (`<app data>/<folder>/saves`), the storage namespace on the web. Empty: the game's title, or the
+   * project's name. Set it before the first release and keep it: changing it loses players' saves.
+   */
+  folder: string;
+}
+
 export interface ProjectSettings {
   /**
    * The settings' format. 2: the physics worker became the default. A stored 'off' from before that is the
@@ -92,6 +110,8 @@ export interface ProjectSettings {
   publish: PublishWindowSettings;
   features: ProjectFeatureSettings;
   addons: ProjectAddonSettings;
+  /** Read tolerantly: a project from before saves existed reads as version 0 and the derived folder. */
+  saves: ProjectSaveSettings;
 }
 
 export const PROJECT_SETTINGS_VERSION = 3;
@@ -105,7 +125,18 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true, webgl2Fallback: true },
   features: { disabled: [] },
   addons: { enabled: [...LEGACY_ADDONS], settings: {} },
+  saves: { version: 0, folder: '' },
 };
+
+/** What a save folder may be called: no path separators, nothing Windows refuses in a folder name. */
+export function cleanSaveFolder(raw: string): string {
+  return raw.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '').slice(0, 64);
+}
+
+/** The folder a published game's saves go in (see ProjectSaveSettings.folder), never empty. */
+export function resolveSaveFolder(s: ProjectSettings, projectName: string): string {
+  return cleanSaveFolder(s.saves.folder) || cleanSaveFolder(s.publish.title) || cleanSaveFolder(projectName) || 'Cleo Game';
+}
 
 const ID = /^[\w.-]{1,64}$/;
 const idList = (v: unknown): string[] | null =>
@@ -117,7 +148,7 @@ const num = (v: unknown, d: number, min: number, max: number) =>
 /** A stored blob read tolerantly: anything missing or malformed falls back to the default. */
 export function parseProjectSettings(raw: unknown): ProjectSettings {
   const o = (raw && typeof raw === 'object' ? raw : {}) as any;
-  const e = o.engine ?? {}, p = o.publish ?? {}, f = o.features ?? {}, a = o.addons ?? {};
+  const e = o.engine ?? {}, p = o.publish ?? {}, f = o.features ?? {}, a = o.addons ?? {}, sv = o.saves ?? {};
   const d = DEFAULT_PROJECT_SETTINGS;
   const version = typeof o.version === 'number' && Number.isFinite(o.version) ? o.version : 1;
   // Before version 2 every project stored 'off' whether or not anyone chose it: it was the default.
@@ -153,6 +184,10 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       enabled: version < 3 ? [...LEGACY_ADDONS] : idList(a.enabled) ?? [...d.addons.enabled],
       settings: a.settings && typeof a.settings === 'object' && !Array.isArray(a.settings) ? { ...a.settings } : {},
     },
+    saves: {
+      version: Math.round(num(sv.version, d.saves.version, 0, 1_000_000)),
+      folder: typeof sv.folder === 'string' ? cleanSaveFolder(sv.folder) : d.saves.folder,
+    },
   };
 }
 
@@ -174,6 +209,9 @@ export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
     },
     runtime: { maxFrameDelta: s.engine.maxFrameDelta },
     audio: { masterVolume: s.engine.masterVolume },
+    // SaveGame: the version every save records, and (web) the namespace saves are kept under. An empty one
+    // falls back to the window title in the player.
+    saves: { version: s.saves.version, namespace: cleanSaveFolder(s.saves.folder) },
     // Publish-time switches, not something the running game reads (the WebGL 2 one reaches it through
     // config.graphics, see buildMultiSceneGameData).
     window: (({ onlyUsedShaders: _shaders, webgl2Fallback: _webgl2, ...w }) => w)(s.publish),

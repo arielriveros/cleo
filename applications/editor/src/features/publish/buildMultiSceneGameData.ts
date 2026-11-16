@@ -4,7 +4,8 @@ import type { RenderSettings, InputMap } from 'cleo'
 import { isDefaultInputMap } from 'cleo'
 import { projectSettingsConfig } from '../options/projectSettings'
 import type { ProjectSettings } from '../options/projectSettings'
-import { buildGameData, bakeTemplates, attachScriptModules } from './buildGameData'
+import { buildGameData, bakeTemplates, attachScriptModules, injectSaveFields } from './buildGameData'
+import { buildScriptGraphCtx } from '../../utils/scriptGraph'
 import { compressTerrainData, compressTilemapData } from './terrainImages'
 import { stripDimensionData, stampSceneDimension } from './stripDimensionData'
 import { featureStripRules, stripFeatureNodes, stripFeatureSettings } from './featureStrip'
@@ -118,6 +119,11 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     attachScriptModules(all, src.scriptAssets, src.scriptPaths)
     if (all.modules) modules = all.modules
   }
+  // Each script's `@save` fields, which the game's saves keep: after the paths above, so fields a script
+  // inherits from a base-class script count too.
+  const graph = src.scriptPaths && src.scriptAssets ? buildScriptGraphCtx(src.scriptPaths, src.scriptAssets) : undefined
+  for (const entry of Object.values(scenes)) injectSaveFields(entry.scene, graph)
+  for (const template of templates) injectSaveFields(template.node, graph)
 
   // The features the project leaves out (Project ▸ Features, src/modules/catalog.ts in the engine). A game
   // that still uses one is asked about first: turn it back on, or publish without it.

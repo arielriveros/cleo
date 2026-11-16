@@ -294,6 +294,10 @@ Treat `serialize()` as final; a node subclass adds its own data by overriding th
 `_serializePayload()`. On the parse side, `finishParse` is what actually attaches the node — never
 call `addChild` after it.
 
+`serialize()` describes the AUTHORED node, not a running game's state: it is what the editor saves. To
+keep game state, mark nodes **Saved**, tag fields `@save`, and use `SaveGame`: see
+[Saving and loading](save-game.md).
+
 ## See also
 
 [Lifecycle](lifecycle.md) · [Motion and physics](motion-and-physics.md) · [Node types](../reference/node-types.md)

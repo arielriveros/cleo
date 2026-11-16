@@ -156,7 +156,7 @@ script (`Souls*.ts`), or the scene.
 | Event bus | ✗ | The GameManager is the hub instead (SOULS_DEMO §4). |
 | Game pause | ✅ | The pause menu (`SoulsPauseMenu`) listens in a late update, which runs while paused. |
 | Engine time scale | ✅ | `Game.hitStop` on every landed blow (`GameManager.hitStop`). |
-| Save / load API | ✗ (not in engine) | |
+| Save / load API | ✅ | `SaveGame`: bonfires save, the title menu's Continue and the pause menu's Load Last Rest load. |
 
 ### Terrain, 2D, publishing
 
@@ -217,7 +217,7 @@ script (`Souls*.ts`), or the scene.
 | | **Blood:** spray, splat and spatter decals | ✅ | `GameManager.bleed`, `SoulsBloodSplat` | |
 | | Hit-stop | ✅ | `GameManager.hitStop`: game time at 20% for 0.15 s (light), 0.22 s (heavy), 0.3 s (kill), at least two frames, with a camera kick; 0.08/0.14 s when the player is hit | |
 | | Controller rumble | ✗ | | **Engine gap:** no haptics API. |
-| Persistence | Save and load (souls, level, opened shortcuts, defeated boss) | ✗ | Everything resets on reload | **Engine gap:** no save API. Scripts would have to use `localStorage` directly, which is unavailable in desktop builds without a bridge. |
+| Persistence | Save and load (souls, level, opened shortcuts, defeated boss) | ✅ | Lighting and resting at a bonfire save (`GameManager.saveGame`): the player's stats, souls and flasks, the bonfire, the pickups taken, the fog gate, the boss, the bloodstain (a Saved template), and the bonfire to stand up at | `SaveGame`, `@save` fields; files on the desktop, browser storage on the web. |
 
 ## 3. Gaps worth filling next
 
@@ -225,8 +225,8 @@ Ranked by what they add against what they cost.
 
 1. **A boss.** The Warden, its fog gate and boss bar are finished templates; the dungeon is the obvious arena.
 2. **Settings.** The pause menu exists; a settings page needs UI widgets and the engine's rebinding.
-3. **Save and load.** High value, medium cost. Needs an **engine save API** (key/value storage that works
-   in web and desktop builds). Then a script persists souls, stats, shortcuts and boss state.
+3. ~~**Save and load.**~~ Done: `SaveGame` (see docs/scripting/save-game.md). Save slots beyond `auto` and a
+   slot menu are what remain.
 4. **Guard, parry, riposte and backstab.** The defining combat verbs, script-only. Parry windows ride on
    the existing animation events.
 5. **Keys and keyed doors.** Trivial with `SoulsDoor` and a new pickup `kind`.

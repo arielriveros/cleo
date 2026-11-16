@@ -6,7 +6,7 @@
       "name": "Valley",
       "description": "A 2 km mountain valley to fly through, with a day and night cycle: landscape layers for ground, rock, snow, forest floor, roads and trails; meadow grass, spruce forest, oaks about the hamlet and bushes made with the Foliage Creator; a torch-lit hamlet with enterable houses, a windmill, a campfire, a pond with floating crates, mist and god rays, all lit by baked GI volumes and light probes. Play opens a menu: a cinematic tour of the valley (made with the sequencer) or a free camera to fly.",
       "order": 0,
-      "bytes": 136561115,
+      "bytes": 136564732,
       "sceneCount": 1,
       "textureCount": 170,
       "createdAt": 1790000000000
@@ -14,9 +14,9 @@
     {
       "slug": "dungeon",
       "name": "Dungeon",
-      "description": "A souls-like in a three-level torch-lit dungeon: stamina combat, rolls, lock-on, a bonfire and Estus, Hollows, a sorcerer and an elite knight, breakable barrels, messages and pickups, and a boss behind a fog gate in its throne arena.",
+      "description": "A souls-like in a three-level torch-lit dungeon: stamina combat, rolls, lock-on, a bonfire that saves the game, Estus, Hollows, a sorcerer and an elite knight, breakable barrels, messages and pickups, and a boss behind a fog gate in its throne arena.",
       "order": 1,
-      "bytes": 203532753,
+      "bytes": 203602284,
       "sceneCount": 1,
       "textureCount": 131,
       "createdAt": 1790000000000
@@ -26,7 +26,7 @@
       "name": "Firing Line",
       "description": "A first-person shooter: walk, sprint, crouch, aim down sights, hip and aimed fire, reloads and three weapons against bots that search, take cover, retreat when hurt and call for reinforcements. One scene, one Game Manager with a game-type list (one against all, team deathmatch, free for all): put the manager and some fighters in any scene and it plays.",
       "order": 2,
-      "bytes": 314988387,
+      "bytes": 315042098,
       "sceneCount": 1,
       "textureCount": 149,
       "createdAt": 1794173811120
@@ -34,9 +34,9 @@
     {
       "slug": "duskwell",
       "name": "Duskwell",
-      "description": "A small 2D metroidvania on the flat 2D renderer: a warrior with a three-hit combo, bats that wake as you pass, two rooms the camera slides between, one-way platforms, checkpoints, diamonds, and the dash relic that carries you over the pit. Pixel-perfect at 480 x 270, with parallax backdrops and glowing torches.",
+      "description": "A small 2D metroidvania on the flat 2D renderer: a warrior with a three-hit combo, bats that wake as you pass, two rooms the camera slides between, one-way platforms, checkpoints that save the game, diamonds, and the dash relic that carries you over the pit. Pixel-perfect at 480 x 270, with parallax backdrops and glowing torches.",
       "order": 3,
-      "bytes": 541609,
+      "bytes": 562532,
       "sceneCount": 1,
       "textureCount": 12,
       "createdAt": 1795000000000

@@ -4,9 +4,10 @@ import { join } from 'path';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
 import { COLS, ROWS, GRID, ROOMS, roomBounds } from '../tools/duskwell/level';
 // The whole engine: it registers itself as the scripts' 'cleo' module, so the demo's scripts run headless.
-import { Scene, CleoEngine, ControllerNode, AISystem, NavGraph2D, parseNavGraph2D, EDGE_JUMP } from '../src/cleo';
+import { Scene, CleoEngine, ControllerNode, AISystem, NavGraph2D, parseNavGraph2D, EDGE_JUMP, setGameHost, SaveGame, setSaveStore, createMemorySaveStore, parseRuntimeScene, resetSaveSession } from '../src/cleo';
 import type { CharacterBody2DNode } from '../src/cleo';
 import { fakeInput } from './helpers/fakeInput';
+import { injectSaveFields } from '../applications/editor/src/features/publish/buildGameData';
 import type { FakeInput } from './helpers/fakeInput';
 
 // The Duskwell example: the 2D metroidvania slice built by tools/duskwell/build.ts on the flat 2D frame,
@@ -326,6 +327,76 @@ describe.skipIf(!present)('the Duskwell example project', { timeout: 60_000 }, (
         expect(p.diamonds).toBe(1);
         expect(p.isDead).toBe(false);
         scene.stop?.();
+    });
+
+    it('saves at a lamp: a load puts back the diamonds, the dash and the lamp, without what was taken, at the lamp', async () => {
+        // The host a running game has: every visit is built from the authored scene through the save session.
+        const store = createMemorySaveStore();
+        resetSaveSession();
+        setSaveStore(store, { gameVersion: 0 });
+        const prevEngine = (CleoEngine as any)._instance;
+        const engine: any = { scene: null, timeSinceStart: 0 };
+        (CleoEngine as any)._instance = engine;
+        const sceneId = manifest().mainSceneId;
+        const build = () => {
+            const scene = new Scene();
+            // What Play and Publish add to the scene file: each script's @save fields (a game ships no schema).
+            const json = structuredClone(sceneFile());
+            injectSaveFields(json.scene);
+            parseRuntimeScene(scene, json, sceneId, true);
+            scene.ai = new AISystem();
+            scene.ai.setScene(scene);
+            for (const name of ['Ruin Guard 1', 'Bat 1', 'Bat 2']) { const n = scene.findNode(name); if (n) scene.removeNode(n); }
+            engine.scene = scene;
+            scene.start();
+            return scene;
+        };
+        setGameHost({ loadScene: () => { build(); }, currentSceneName: () => 'Duskwell', sceneNames: () => ['Duskwell'] });
+        const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+        const take = (scene: Scene, player: any, name: string) => {
+            const at = scene.findNode(name)!.worldPosition;
+            player.teleport(at[0], at[1]);
+            run(scene, 0.2);
+        };
+        try {
+            let scene = build();
+            let player = scene.findNode('Player') as any;
+            await settle();   // the title screen looks for a save (there is none: it lets the game start)
+            run(scene, 0.3);
+            take(scene, player, 'Diamond 1');
+            take(scene, player, 'Dash Relic');
+            expect([player.diamonds, player.hasDash]).toEqual([1, true]);
+            // The Long Hall's lamp: lit, the respawn point, and a save.
+            player.teleport(40.5, 2);
+            run(scene, 0.3);
+            await settle();
+            expect((await store.list()).map(s => s.slot)).toEqual(['auto']);
+            // After the save: another diamond, which the load takes back.
+            take(scene, player, 'Diamond 2');
+            expect(player.diamonds).toBe(2);
+
+            await SaveGame.load('auto');
+            scene = engine.scene;
+            player = scene.findNode('Player') as any;
+            run(scene, 0.1);
+            expect(player.wasRestored).toBe(true);
+            expect([player.diamonds, player.hasDash]).toEqual([1, true]);
+            expect(scene.findNode('Diamond 1')).toBeFalsy();
+            expect(scene.findNode('Dash Relic')).toBeFalsy();
+            expect(scene.findNode('Diamond 2')).toBeTruthy();
+            expect(player.position[0]).toBeCloseTo(40.5, 1);
+            // The Long Hall's lamp (the second checkpoint marker) came back lit; the first was never reached.
+            expect((scene.findNode('Checkpoint 2') as any)._lit).toBe(true);
+            expect((scene.findNode('Checkpoint 1') as any)._lit).toBe(false);
+            // Loaded from a save: the title screen stays away.
+            expect((scene.findNode('Title') as any).isOpen).toBe(false);
+            scene.stop?.();
+        } finally {
+            setGameHost(null);
+            setSaveStore(null);
+            resetSaveSession();
+            (CleoEngine as any)._instance = prevEngine;
+        }
     });
 
     it('respawns a player who fell out of the world, whole, at the last checkpoint', () => {

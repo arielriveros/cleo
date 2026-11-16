@@ -84,7 +84,19 @@ const probe = (wantWorker: boolean) => `function(__cleoImport, __cleoExports) {
     // (Scene.dispose cuts its node graph), keeping only this node.
     leaving = true;
     window.CLEO_SMOKE_KEEP = this;
-    window.CLEO_SMOKE_WATCH(new WeakRef(engine.scene), smoke, cleo.Game.loadScene('Second'));
+    // First a save, through the desktop shell's bridge into a file (gamePreload.js, gameSaves.js). \`before\` is
+    // what the slots were when this game started: a case after the first finds the save an earlier game wrote.
+    const saves = cleo.SaveGame;
+    (async () => {
+      try {
+        const before = (await saves.list()).map(s => s.slot);
+        saves.set('smokeRun', Date.now());
+        const info = await saves.save('smoke', { label: 'Smoke' });
+        const listed = (await saves.list()).map(s => s.slot);
+        smoke.saves = { bridge: !!window.cleoSaves, before, slot: info.slot, size: info.size, listed };
+      } catch (e) { smoke.saves = { error: String((e && e.message) || e) }; }
+      window.CLEO_SMOKE_WATCH(new WeakRef(engine.scene), smoke, cleo.Game.loadScene('Second'));
+    })();
   };
 }`;
 
@@ -213,9 +225,9 @@ export function writeSmokeGames(out: string) {
     writeFileSync(path.join(dir, 'game.bin'), bin);
     writeFileSync(path.join(dir, 'game.scripts.js'),
       `window.CLEO_GAME_SCRIPTS = {};\nwindow.CLEO_GAME_MODULES = {};\n${SCENE_WATCH}\nwindow.CLEO_GAME_SCRIPTS['probe'] = ${probe(c.worker === 'on')};\n`);
-    writeFileSync(path.join(dir, 'main.js'), templates.GAME_MAIN_JS);
-    writeFileSync(path.join(dir, 'gameProtocol.js'), templates.GAME_PROTOCOL_JS);
-    writeFileSync(path.join(dir, 'window.json'), JSON.stringify({ title: `smoke ${c.name}`, width: 640, height: 360 }));
+    // The shell Publish writes. The harness passes --user-data-dir, which wins over the data folder, so every case
+    // shares one profile (and its shader cache) and its saves land in <profile>/saves.
+    templates.writeDesktopShell(dir, { window: { title: `smoke ${c.name}`, width: 640, height: 360 }, savesFolder: 'Cleo Smoke' });
     writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: `cleo-smoke-${c.name}`, version: '0.0.0', main: 'main.js' }));
     return { ...c, dir, files: files.length, bytes, decals: enabled.has('decals'), fog: enabled.has('volumetricFog'),
              parts: parts.filter(id => !id.startsWith('physics-')) };

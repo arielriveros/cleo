@@ -22,6 +22,26 @@ import { eulerFromQuatDeg } from "../../math";
 // Type-only: actionMap is a pure leaf with no imports of its own, so this closes no cycle.
 import type { ActionState } from "../../../input/actionMap";
 
+/**
+ * @internal What the save system (src/core/save) keeps on a node. One property, allocated the first time
+ * anything about saving applies, so a node that never takes part pays a single null field and a script field
+ * of any likely name cannot collide with it.
+ */
+export interface NodeSaveInfo {
+  /** Authored {@link Node.saved}: transform, dormancy, velocity and variables go into a save. */
+  saved: boolean;
+  /** The script fields tagged `@save`, shipped by the editor's build as `saveFields`. */
+  fields: string[];
+  /** Whether the node is in its scene's participant index: saved, `@save` fields, or an `onSave`. */
+  participant: boolean;
+  /** Its name path in the AUTHORED tree, set when its scene was entered (save keys fall back to it). */
+  path: string | null;
+  /** The template it was instantiated from (template id), on an instantiated root. */
+  instanceOf: string | null;
+  /** Whether a save or the scene's memory restored it ({@link Node.wasRestored}). */
+  restored: boolean;
+}
+
 /** How {@link Node.remove} and {@link Node.despawn} go. */
 export interface DespawnOptions {
   /** Skip the dissolve and act now. Always the case in the editor's edit mode. */
@@ -208,6 +228,9 @@ export class Node {
   // readable from scripts via getData(node) and writable via setData(node, name, value).
   protected _variables: Map<string, NodeVariable> = new Map();
 
+  /** @internal Save-system bookkeeping, see {@link NodeSaveInfo}. Null on a node saving never touched. */
+  public _cleoSave: NodeSaveInfo | null = null;
+
   // Script handlers, declared as overridable methods so a class-based script can override them with
   // matching signatures. `this` IS the node, so there is no `node` self-parameter.
 
@@ -337,6 +360,25 @@ export class Node {
    * to release anything the node owns. Re-parenting does NOT fire this.
    */
   public onDespawn(): void {}
+
+  /**
+   * Called when the game is saved (`SaveGame.save`) and when the player leaves this node's scene: return
+   * whatever this node needs back later, as plain data (numbers, strings, booleans, arrays, plain objects,
+   * other nodes). It comes back to {@link onRestore}. Implementing it makes the node take part in saves.
+   *
+   *   onSave() { return { opened: this.opened, timer: this.timer } }
+   *
+   * Must return its value directly: an `async onSave` hands back a promise, which is not saved.
+   */
+  public onSave(): unknown { return undefined; }
+
+  /**
+   * Called on a node a save (or the scene's memory, when the player comes back to a scene) restored: after
+   * {@link onConstruct} and before {@link onSpawn} and {@link onStart}, dormant nodes included. Its `@save`
+   * fields and, on a {@link saved} node, its transform are already back; `data` is what {@link onSave}
+   * returned, or `undefined`. The place to put visuals in line with restored state (a lever's pose).
+   */
+  public onRestore(data: unknown): void {}
 
   constructor(name: string, type: NodeType = 'node', id: string = uuidv4()) {
     this._name = name;
@@ -955,6 +997,7 @@ export class Node {
       children: children,
       variables: this._serializeVariables(),
       spawnOnStart: this._spawnOnStart,
+      ...(this._cleoSave?.saved ? { saved: true } : {}),
       ...(this._motionBlur !== 'full' ? { motionBlur: this._motionBlur } : {}),
       ...(this._cameraDither ? { cameraDither: true } : {}),
       ...(this._viewmodel ? { viewmodel: true } : {}),
@@ -1046,9 +1089,20 @@ export class Node {
     // the node's world position/orientation, collider shapes are sized by its world scale, and children
     // compound their world transforms from this node's.
     if (json.position) node.setPosition(json.position);
-    if (json.rotation) node.setRotation(json.rotation);
+    // A save writes the exact quaternion (src/core/save): Euler degrees would not round-trip through the
+    // yaw gimbal at +/-90. Authored scenes only ever carry `rotation`.
+    if (Array.isArray(json.quaternion) && json.quaternion.length === 4) node.setQuaternion(json.quaternion as any);
+    else if (json.rotation) node.setRotation(json.rotation);
     if (json.scale) node.setScale(json.scale);
     node.updateTransforms(parent.worldTransform);
+
+    // Opt-ins to saving: the authored flag, and the `@save` fields the editor's build lists for the script.
+    if (json.saved === true || Array.isArray(json.saveFields)) {
+      const info = node._saveInfo();
+      if (json.saved === true) info.saved = true;
+      if (Array.isArray(json.saveFields))
+        info.fields = json.saveFields.filter((f: unknown): f is string => typeof f === 'string' && f.length > 0);
+    }
 
     // Absent in older saves, which is exactly the `true` default. Must land before the trailing addChild,
     // which may immediately start() the node.
@@ -1086,6 +1140,9 @@ export class Node {
         catch (e) { logScriptError(`Failed to attach script for node ${node.name}`, e, 'Script'); }
       }
     }
+    // After the script: an `onSave` it defines is one of the ways in. Before the trailing addChild, whose
+    // scene assignment is what puts the node in its scene's participant index.
+    node.refreshSaveParticipation();
 
     if (json.body) {
       // setBody/setTrigger return the body they just created, so the shapes go straight onto that rather
@@ -1297,9 +1354,65 @@ export class Node {
 
   public get scene(): Scene | null { return this._scene; }
   public set scene(scene: Scene | null) {
+    // A save takes part through its scene's index, so capture never walks the whole tree.
+    if (this._cleoSave?.participant && this._scene !== scene) {
+      this._scene?.saveState.participants.delete(this);
+      scene?.saveState.participants.add(this);
+    }
     this._scene = scene;
     for (const child of this._children)
       child.scene = scene;
+  }
+
+  /**
+   * Whether this node is SAVED: a save (`SaveGame.save`), and the scene's memory when the player leaves and
+   * comes back, keep its local transform, whether it is spawned, its body's velocity and its node variables,
+   * and remember it if it is removed. A Saved node instantiated from a template comes back after a load.
+   * Off by default; the inspector's Save card sets it. Script fields tagged `@save` and an {@link onSave}
+   * take part without it.
+   */
+  public get saved(): boolean { return this._cleoSave?.saved ?? false; }
+  public set saved(value: boolean) {
+    const prev = this.saved;
+    if (prev === !!value) return;
+    this._saveInfo().saved = !!value;
+    this.refreshSaveParticipation();
+    this._notifyChange('component', 'saved', prev, !!value);
+  }
+
+  /**
+   * True when a save, or the scene's memory, restored this node's state as the scene was built. Read it in
+   * {@link onStart} to skip first-time setup that would overwrite what came back:
+   *
+   *   onStart() { if (!this.wasRestored) this.lit = this.startLit }
+   */
+  public get wasRestored(): boolean { return this._cleoSave?.restored ?? false; }
+
+  /** The script fields a save keeps for this node: the ones its script tags `@save`. */
+  public get saveFields(): readonly string[] { return this._cleoSave?.fields ?? []; }
+
+  /** @internal The save bookkeeping, made on first use. */
+  public _saveInfo(): NodeSaveInfo {
+    return this._cleoSave ??= { saved: false, fields: [], participant: false, path: null, instanceOf: null, restored: false };
+  }
+
+  /**
+   * @internal Re-decide whether this node takes part in saves (saved, `@save` fields, or a script `onSave`)
+   * and keep its scene's participant index in step.
+   */
+  public refreshSaveParticipation(): void {
+    const info = this._cleoSave;
+    const wants = !!info?.saved || (info?.fields.length ?? 0) > 0 || this.onSave !== Node.prototype.onSave;
+    if ((info?.participant ?? false) === wants) return;
+    this._saveInfo().participant = wants;
+    if (!this._scene) return;
+    if (wants) this._scene.saveState.participants.add(this);
+    else this._scene.saveState.participants.delete(this);
+  }
+
+  /** Whether this node is going away for good: removed, or dissolving toward a removal. */
+  public get isBeingRemoved(): boolean {
+    return this._markForRemoval || this._despawnFading?.then === 'remove';
   }
   public get hasStarted(): boolean { return this._hasStarted; }
   public get markForRemoval(): boolean { return this._markForRemoval; }

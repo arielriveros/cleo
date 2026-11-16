@@ -21,7 +21,7 @@ export interface PublishResult {
 export interface DesktopBridge {
   // `name` is the game's name: the shell saves the build in a folder of that name inside the one picked.
   publishWeb: (files: PublishFiles, options?: { name?: string }) => Promise<PublishResult>;
-  publishDesktop: (files: PublishFiles, options: { installer: boolean; name?: string; window?: PublishWindowSettings }) => Promise<PublishResult>;
+  publishDesktop: (files: PublishFiles, options: { installer: boolean; name?: string; window?: PublishWindowSettings; savesFolder?: string }) => Promise<PublishResult>;
 }
 
 export function getDesktopBridge(): DesktopBridge | undefined {
@@ -154,14 +154,15 @@ export async function publishWeb(data: any, name?: string): Promise<string> {
 // a native installer via electron-builder.
 export async function publishDesktop(
   data: any,
-  options: { installer: boolean; name?: string; window?: PublishWindowSettings },
+  /** savesFolder: the game's data folder under the player's app data (Options ▸ Project ▸ Saves). */
+  options: { installer: boolean; name?: string; window?: PublishWindowSettings; savesFolder?: string },
 ): Promise<string> {
   const bridge = getDesktopBridge();
   if (!bridge) throw new Error('Desktop publishing is only available in the Cleo desktop app.');
   const files = await assemblePublishFiles(data);
   // The window settings travel to the desktop shell, which writes them next to the game's main.js
   // (window size, fullscreen, title) and names the installer after the title.
-  const res = await bridge.publishDesktop(files, { installer: options.installer, name: options.name, window: options.window });
+  const res = await bridge.publishDesktop(files, { installer: options.installer, name: options.name, window: options.window, savesFolder: options.savesFolder });
   if (res.canceled) return 'Publish canceled';
   if (!res.ok) throw new Error(res.error || 'Publish failed');
   return `Published desktop build to ${res.path}`;

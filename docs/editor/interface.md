@@ -173,7 +173,7 @@ disturb your layout.
 | Centre | **Viewport** (locked) |
 | Left rail (20%) | The *Scene Elements* or *UI Elements* palette (both in a template) above the *Scene* tree |
 | Right rail (25%) | *Properties*, *Scripts*, plus any mode-specific panels |
-| Bottom strip (30%) | *Logger*, *Assets*, the *Debugger*, the *Sequencer* (Sequencer mode), and in animation-field mode the *Blend Space* plot |
+| Bottom strip (30%) | *Logger*, *Assets*, the *Debugger*, *Saves*, the *Sequencer* (Sequencer mode), and in animation-field mode the *Blend Space* plot |
 
 ### Every panel
 
@@ -196,6 +196,7 @@ disturb your layout.
 | **Logger** | The console. |
 | **Assets** | The asset explorer. |
 | **Debugger** | Stop, step and continue a game playing in a window; its call stack, variables and every breakpoint. Desktop app. See [Debugging scripts](debugging.md). |
+| **Saves** | The saves the game wrote while it played in the editor, newest first: inspect one, play from it, export, import or delete. See [Saves](saves.md). |
 | **Sequencer** | The timeline of the sequence asset the tab edits: tracks, sections and keys, a scrubbable preview over the open scene. Sequencer mode only. See [Sequencer](sequencer.md). |
 | **Clips** | The animator's clips (animator mode). |
 | **Parameters** | The animator's parameters, events and action slots (animator mode). |

@@ -48,6 +48,7 @@ import { useSelectedNode } from '../nodeInspector/useSelectedNode';
 import ConsolePanel from '@cleo/app-kit/feedback/ConsolePanel';
 import { ScriptSourceLinksProvider } from '../logger/ScriptSourceLinks';
 import DebuggerPanel from '../scriptDebugger/DebuggerPanel';
+import SavesPanel from '../saves/SavesPanel';
 import EngineOptionsPanel from '../options/EngineOptionsPanel';
 import EditorOptionsPanel from '../options/EditorOptionsPanel';
 import ProjectOptionsPanel, { INPUT_PAGE_ID } from '../options/ProjectOptionsPanel';
@@ -224,6 +225,15 @@ function DebuggerDockPanel(_: IDockviewPanelProps) {
   );
 }
 
+// The project's Play saves (features/saves/): what SaveGame wrote while the game played here.
+function SavesDockPanel(_: IDockviewPanelProps) {
+  return (
+    <div className="flex flex-col h-full w-full overflow-hidden">
+      <SavesPanel />
+    </div>
+  );
+}
+
 /**
  * Is this panel the SELECTED tab of its group?
  *
@@ -362,6 +372,7 @@ const panelComponents = {
   logger: LoggerPanel,
   assets: AssetsPanel,
   debugger: DebuggerDockPanel,
+  saves: SavesDockPanel,
   animClips: AnimClipsPanel,
   animVariables: AnimVariablesPanel,
   animStateMachine: AnimStateMachinePanel,

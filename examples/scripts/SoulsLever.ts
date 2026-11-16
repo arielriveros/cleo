@@ -6,11 +6,13 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  * lever's root; a child named `Handle` is swung through `swingDegrees` about X when pulled.
  *
  * One use. `doorName` names a node carrying SoulsDoor. See SoulsBonfire for the interactable protocol.
+ * A save keeps `pulled` (the door keeps its own `isOpen`), so a loaded game finds the lever down.
  */
 export default class SoulsLeverNode extends Node {
   public doorName: string = 'Shortcut Gate'
   public swingDegrees: number = 70
   public swingSeconds: number = 0.6
+  /** @save */
   public pulled: boolean = false
 
   private _gm: Node = null
@@ -22,6 +24,11 @@ export default class SoulsLeverNode extends Node {
     this._gm = this.findNode('GameManager')
     this._handle = this.getChildByName('Handle')[0] ?? null
     if (this._handle) { const r = this._handle.rotation; this._rest = [r[0], r[1], r[2]] }
+    // Pulled before a save that was loaded: the handle down, and nothing left to offer.
+    if (this.pulled) {
+      this._handle?.setRotation([this._rest[0] + this.swingDegrees, this._rest[1], this._rest[2]])
+      return
+    }
     ;(this._gm as any)?.registerInteractable?.(this)
   }
 

@@ -54,7 +54,8 @@ const OLD_DOCK_LAYOUT_KEYS = [
 // 25: the Physics tab went: a rigid body and a trigger are nodes (Collider, Trigger), edited in
 // Properties, and a ragdoll is its model's. A tree stored at 24 names a panel that no longer exists.
 // 26: the script Debugger arrived in the bottom strip beside Logger; a tree stored at 25 has nowhere for it.
-const LAYOUT_VERSION = 26;
+// 27: the Saves panel (the project's Play saves) joined the bottom strip; a tree stored at 26 has nowhere for it.
+const LAYOUT_VERSION = 27;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -67,7 +68,7 @@ type LayoutStore = { version: typeof LAYOUT_VERSION; layouts: Partial<Record<Edi
  * survives a restricted mode's discarded arrangement, the buildDefaultLayout fallback, and a reload.
  */
 const bottomTabKey = () => lsKey(LS_KEYS.dockBottomTab);
-const BOTTOM_PANELS = ['logger', 'assets', 'sequencer', 'debugger'] as const;
+const BOTTOM_PANELS = ['logger', 'assets', 'sequencer', 'debugger', 'saves'] as const;
 type BottomPanel = (typeof BOTTOM_PANELS)[number];
 
 function loadBottomTab(): BottomPanel {
@@ -142,7 +143,7 @@ const SEQUENCER_PANELS = ['sequencer'] as const;
 
 
 const CHROME_PANELS = [
-  'scene', 'properties', 'scripts', 'logger', 'assets', 'debugger',
+  'scene', 'properties', 'scripts', 'logger', 'assets', 'debugger', 'saves',
   ...STATE_MACHINE_PANELS, ...ANIMATION_FIELD_PANELS, ...CLIP_PANELS, ...PARTICLE_PANELS, ...TILEMAP_PANELS, ...LANDSCAPE_PANELS,
   ...RIG_PANELS, ...ADD_PANELS, ...SEQUENCER_PANELS,
 ] as const;
@@ -227,6 +228,11 @@ function buildDefaultLayout(api: DockviewApi) {
     id: 'debugger', component: 'debugger', title: PANEL_TITLES['debugger'],
     position: { referencePanel: 'logger', direction: 'within' },
   });
+  // The project's Play saves: what a game saved while it played, to inspect, export or play from.
+  const savesPanel = api.addPanel({
+    id: 'saves', component: 'saves', title: PANEL_TITLES['saves'],
+    position: { referencePanel: 'logger', direction: 'within' },
+  });
   // The blend-space plot belongs with Logger/Assets, not on the right rail: it is a work surface. Also
   // renderer:'always', so its transport keeps driving the animator while another bottom tab is up.
   api.addPanel({
@@ -253,7 +259,8 @@ function buildDefaultLayout(api: DockviewApi) {
   // Honour the remembered bottom tab; this is also the fallback when restoring a stashed layout fails.
   // animationField mode overrides this in restoreBottomTab, which runs after every layout build.
   const remembered = loadBottomTab();
-  (remembered === 'assets' ? assets : remembered === 'sequencer' ? sequencer : remembered === 'debugger' ? debuggerPanel : logger).api.setActive();
+  (remembered === 'assets' ? assets : remembered === 'sequencer' ? sequencer : remembered === 'debugger' ? debuggerPanel
+    : remembered === 'saves' ? savesPanel : logger).api.setActive();
   assertViewportLock(api);
 }
 
@@ -603,7 +610,7 @@ export default function DockLayout() {
     if (!api) return;
     const onFocus = (tab: unknown) => {
       // A programmatic focus is still the tab the user ends up on, so it becomes the remembered one.
-      const id: BottomPanel = tab === 'Logger' ? 'logger' : tab === 'Sequencer' ? 'sequencer' : tab === 'Debugger' ? 'debugger' : 'assets';
+      const id: BottomPanel = tab === 'Logger' ? 'logger' : tab === 'Sequencer' ? 'sequencer' : tab === 'Debugger' ? 'debugger' : tab === 'Saves' ? 'saves' : 'assets';
       bottomTabRef.current = id;
       try { localStorage.setItem(bottomTabKey(), id); } catch { /* ignore */ }
       api.getPanel(id)?.api.setActive();

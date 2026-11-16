@@ -12,6 +12,7 @@ import { bootPlayer, hideLoadingWhenSmooth, setLoadingText, showError, type Play
 import { createPhysicsWorker } from '../workers/physicsWorkerHost';
 import { PLAY_CHANNEL, SESSION_PARAM, encodeLogEntry, gameLockName, isMessageFor, ownerLockName, type GameEvent, type GameState, type RemoteLogOp } from '../features/playWindow/protocol';
 import { getPlaySession } from '../features/playWindow/sessionStore';
+import { playSaveStore, type PlaySavesConfig } from '../features/saves/playSaves';
 import { blobSource, bufferSource } from './gameSource';
 import { readGameHeader } from './unpack';
 
@@ -96,10 +97,17 @@ async function boot(stored: Blob | ArrayBuffer): Promise<void> {
   try {
     const source = stored instanceof Blob ? blobSource(stored) : bufferSource(stored);
     const header = await readGameHeader(source);
+    // Saves go where in-editor Play's do, the project's Play saves (the editor's Saves panel lists them), and
+    // Saves ▸ Play from save names the one to start from.
+    const playSaves: PlaySavesConfig | undefined = header.manifest?.config?.playSaves;
+    const saveStore = playSaves?.namespace ? playSaveStore(playSaves.namespace) : undefined;
+    const fromSlot = playSaves?.fromSlot;
     handle = await bootPlayer({
       source,
       header,
       logging: true,
+      saveStore,
+      startFromSave: saveStore && fromSlot ? () => saveStore.read(fromSlot) : undefined,
       // The editor's own graphics API, so the game draws as it does in the editor's viewport.
       graphicsBackend: readBackendPreference(),
       physicsWorkerFactory: createPhysicsWorker,

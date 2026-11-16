@@ -42,6 +42,8 @@ import LandscapeEditor from './LandscapeEditor'
 import SceneSettings from './SceneSettings'
 import UIEditor from './UIEditor'
 import { isRootNode } from '../useSelectedNode'
+import SaveEditor from './SaveEditor'
+import { TEMPLATE_ID_VAR } from '../../../utils/templates'
 import { useCleoEngine } from '../../EngineContext'
 import { DocScope } from '@cleo/app-kit/ui'
 import { useInspectorLock } from '../inspectorLock'
@@ -71,6 +73,11 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
         {/* NodeInfo (name locked, Delete kept) and Transform stay editable for instances. */}
         <NodeInfo node={props.node} readOnly={ro} allowTypeChange={allowTypeChange} />
         {showTransform && <TransformEditor node={props.node} />}
+        {/* What a save keeps of this node. Editable on a template instance's root, like its name: whether a
+            placement is Saved is the placement's choice (sceneResync carries it across a rebuild). On a
+            template's own root it makes every copy a script instantiates a Saved one. */}
+        {!root && !isUI &&
+          <SaveEditor node={props.node} readOnly={ro && !props.node.getVariable(TEMPLATE_ID_VAR)} />}
 
         {/* Which model asset this subtree came from. Outside the fieldset below on purpose: it is a label
             and a navigation button, not an edit, and jumping to the asset is exactly what you want from a

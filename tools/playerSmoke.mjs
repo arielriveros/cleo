@@ -9,7 +9,7 @@
 //
 // Prints what each game ships (files, bytes) beside the result; exits 1 if any case failed.
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +29,11 @@ const only = process.env.SMOKE_ONLY ? new Set(process.env.SMOKE_ONLY.split(','))
 const cases = JSON.parse(readFileSync(path.join(out, '..', 'smoke-cases.json'), 'utf8')).filter(c => !only || only.has(c.name));
 
 // 2. Run each one and read its result over the DevTools protocol.
+// Every case shares one Electron profile; its saves start empty, so the first case writes the first one.
+const profile = path.join(out, '..', 'electron-profile');
+const savesDir = path.join(profile, 'saves');
+rmSync(savesDir, { recursive: true, force: true });
+let casesRun = 0;
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE; // set by VS Code-hosted shells: Electron would start as plain Node
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -52,9 +57,8 @@ async function evaluate(port, expression) {
 }
 
 async function run(c, port) {
-  // One profile for every case: the first compiles the shaders (tens of seconds with an empty GPU cache), the
-  // rest reuse them.
-  const profile = path.join(out, '..', 'electron-profile');
+  // One profile for every case (above): the first compiles the shaders (tens of seconds with an empty GPU cache),
+  // the rest reuse them.
   // A window another one covers draws no frames on Windows (native occlusion), so a game launched behind the
   // terminal never reaches its first frame and the case times out: keep it drawing however it is stacked.
   // --expose-gc: the probe collects after leaving its scene, to show nothing still holds it.
@@ -92,6 +96,16 @@ async function run(c, port) {
         if (s.smoke.sceneFreed !== true) why.push(`the scene it left is still in memory after ${s.smoke.sceneFreedFrames} frames (${s.smoke.sceneFreed})`);
         if (s.smoke.fogVolumes !== (c.fog ? 1 : 0)) why.push(`${s.smoke.fogVolumes} fog volumes`);
         if (c.decals ? s.smoke.absent !== null : !/Decals feature/.test(s.smoke.absent ?? '')) why.push(`DecalNode: ${s.smoke.absent ?? 'defined'}`);
+        // SaveGame through the shell: a file in <profile>/saves, and, from the second game on, the one an
+        // earlier game (another process) wrote, already listed when this one started.
+        const sv = s.smoke.saves;
+        if (!sv || sv.error) why.push(`save failed: ${sv?.error ?? 'no report'}`);
+        else {
+          if (!sv.bridge) why.push('no window.cleoSaves: the save went to browser storage, not to a file');
+          if (!sv.listed?.includes('smoke')) why.push(`saved, but the slots are ${JSON.stringify(sv.listed)}`);
+          if (!existsSync(path.join(savesDir, 'smoke.cleosave'))) why.push(`no ${path.join(savesDir, 'smoke.cleosave')}`);
+          if (casesRun > 0 && !sv.before?.includes('smoke')) why.push(`the save an earlier game wrote is not listed (${JSON.stringify(sv.before)})`);
+        }
         return { ok: why.length === 0, why: why.join('; '), ...s.smoke, firstFrame: s.firstFrame };
       }
     }
@@ -106,12 +120,13 @@ let failed = 0;
 let port = 9420;
 for (const c of cases) {
   const r = await run(c, port++);
+  casesRun++;
   if (!r.ok) failed++;
   const mb = (c.bytes / 1e6).toFixed(2);
   console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${c.name.padEnd(14)} ${String(c.files).padStart(2)} files + game.bin ${mb.padStart(6)} MB` +
     (r.ok ? `  ${r.backend}/${r.executor} on ${r.graphics ?? '?'} crate y=${r.crateY.toFixed(3)} first frame ${Math.round(r.firstFrame)} ms` +
             ` read ${(r.source.bytesRead / 1e6).toFixed(2)} of ${(r.source.size / 1e6).toFixed(2)} MB in ${r.source.requests} requests` +
-            ` left scene freed after ${r.sceneFreedFrames} frames` : `  ${r.why}`) +
+            ` left scene freed after ${r.sceneFreedFrames} frames saved ${r.saves.size} chars to a file` : `  ${r.why}`) +
     `  parts: ${c.parts.join(' ') || '-'}`);
 }
 process.exit(failed ? 1 : 0);

@@ -16,7 +16,9 @@ import { EditorSessionsContext, type EditorSessionsContextValue } from "./Editor
 import { useStableActions } from "@cleo/app-kit/utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
-import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, setMovieRender, engineEventBus } from "cleo";
+import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, setMovieRender, engineEventBus, parseRuntimeScene, setSaveStore, resetSaveSession, beginSaveSessionFrom } from "cleo";
+import type { SaveDocument } from "cleo";
+import { playSaveStore, type PlaySavesConfig } from "./saves/playSaves";
 import { dimensionLookPatch, overlayDimensionOf } from "../utils/sceneDimension";
 import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, FOLIAGE_STARTER, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener, RenderSettings } from "cleo";
@@ -309,6 +311,11 @@ const EngineContext = createContext<{
    * with `stopPlay`.
    */
   startMovieSession: () => Promise<Scene | null>;
+  /**
+   * Play in the editor from one of this project's Play saves (the Saves panel): the session is the save's,
+   * and its scene is the one that starts. Logs and does nothing when the slot cannot be read.
+   */
+  startPlayFromSave: (slot: string) => Promise<void>;
   stopPlay: () => void;
   pausePlay: () => void;
   /**
@@ -318,7 +325,7 @@ const EngineContext = createContext<{
    * makes first, and puts the open Sequencer tabs' working copies in, as Play does. Never touches the
    * running engine: the game runs in another window.
    */
-  buildWindowPlayData: () => Promise<any>;
+  buildWindowPlayData: (options?: { fromSlot?: string }) => Promise<any>;
   /**
    * The project's input action map. Project-wide rather than per-scene: two scenes disagreeing about
    * what `Jump` is bound to would be inexplicable to a player. Persisted under its own storage key and
@@ -723,6 +730,7 @@ const EngineContext = createContext<{
     scripts: new Map(),
     startPlay: () => {},
     startSimulate: () => {},
+    startPlayFromSave: async () => {},
     startMovieSession: async () => null,
     stopPlay: () => {},
     pausePlay: () => {},
@@ -983,6 +991,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const pendingSimulateRef = useRef(false);
   /** A movie render waiting on the same switch: what to hand the play scene to (see startMovieSession). */
   const pendingMovieRef = useRef<((scene: Scene | null) => void) | null>(null);
+  /** A Play from save waiting on the same switch: the save it starts from. */
+  const pendingFromSaveRef = useRef<SaveDocument | null>(null);
   // Mirrored during RENDER, like tabsRef: startPlay reads it from an async/event path where the render-scoped
   // value would be a commit behind.
   const mainModeRef = useRef(mainMode);
@@ -4166,6 +4176,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // Per-instance node state the rebuild would otherwise drop — the subtree is reconstructed from the
         // ASSET, which knows nothing about how this particular placement was configured.
         const spawnOnStart = inst.spawnOnStart;
+        const saved = inst.saved;
         // The animation state machine is authored onto the PLACED node and never stored in the asset, so a
         // rebuild would replace a configured character with a bare one. Same reasoning as spawnOnStart above.
         const animation = captureAnimationState(inst);
@@ -4193,6 +4204,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         if (newNode) {
           newNode.setPosition(pos).setRotation(rot).setScale(scl);
           newNode.spawnOnStart = spawnOnStart;
+          newNode.saved = saved;
           restoreAnimationState(newNode, animation);
           reattachForeignChildren(newNode, foreign);
           // A LOD-wrapped asset keeps its root transform on the wrapper's child 0, so the edit already
@@ -6723,7 +6735,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     registerTemplates(json.templates);
     // Before parse: a node's script imports its modules while it is being attached.
     addScriptModuleSources(json.modules);
-    newScene.parse(json, true);
+    // Through the save session, keyed by the scene's id: coming back to it (or loading a save made in it)
+    // puts its Saved nodes and @save fields back as it is built.
+    parseRuntimeScene(newScene, json, playEntrySceneIdRef.current || null, true);
     return newScene;
   };
 
@@ -6762,7 +6776,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const scene = new Scene();
     registerTemplates(gd.templates);
     addScriptModuleSources(gd.modules); // adds what is new; an already-evaluated module keeps its state
-    scene.parse(gd, true); // gd injects scripts into nodes → compiled here
+    parseRuntimeScene(scene, gd, id, true); // gd injects scripts into nodes → compiled here
     // From the project's record: a scene saved before the engine knew its dimension does not carry it.
     scene.dimension = dimensionOfScene(id);
     return { scene, render: data.config?.render ?? null };
@@ -6801,12 +6815,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     await new Promise<void>(resolve => setTimeout(() => { instance.scene.start(); resolve(); }, 50));
   };
 
-  const installGameHost = () => setGameHost({
-    loadScene: (nameOrId: string, options?: { onProgress?: LoadProgressListener }) =>
-      playLoadScene(nameOrId, options?.onProgress),
-    currentSceneName: () => projectMetaRef.current?.scenes.find(s => s.id === currentPlaySceneIdRef.current)?.name ?? '',
-    sceneNames: () => (projectMetaRef.current?.scenes ?? []).map(s => s.name),
-  });
+  const installGameHost = () => {
+    setGameHost({
+      loadScene: (nameOrId: string, options?: { onProgress?: LoadProgressListener }) =>
+        playLoadScene(nameOrId, options?.onProgress),
+      currentSceneName: () => projectMetaRef.current?.scenes.find(s => s.id === currentPlaySceneIdRef.current)?.name ?? '',
+      sceneNames: () => (projectMetaRef.current?.scenes ?? []).map(s => s.name),
+    });
+    // SaveGame writes to the project's Play saves, which the Saves panel lists.
+    setSaveStore(playSaveStore(activeProjectId()), { gameVersion: projectSettingsRef.current.saves.version });
+  };
 
   /**
    * Refresh every animation state's embedded Animation Field from the library. A state stores a COPY of the
@@ -6855,7 +6873,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Play in window's build. From the AUTHORED scene and the refs, never `activeScene`: the game is the scene
   // tab's, whichever tab is in front. The open scene leads (it is the entry, as Play starts there), and it
   // gets the refreshes startSession makes before it builds.
-  const buildWindowPlayData = async (): Promise<any> => {
+  const buildWindowPlayData = async (options: { fromSlot?: string } = {}): Promise<any> => {
     const scene = editorSceneRef.current;
     const instance = instanceRef.current;
     if (!scene || !instance) throw new Error('No scene to play');
@@ -6882,10 +6900,21 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     });
     const entry = data?.scenes?.[openId]?.scene;
     if (entry) applySequenceWorkingCopiesToJson(entry);
+    // The game window saves where in-editor Play does (the project's Play saves), and may start from one.
+    const playSaves: PlaySavesConfig = { namespace: activeProjectId(), ...(options.fromSlot ? { fromSlot: options.fromSlot } : {}) };
+    data.config = { ...(data.config ?? {}), playSaves };
     return data;
   };
   const startMovieSession = () => new Promise<Scene | null>(resolve => { void startSession(false, resolve); });
-  const startSession = async (simulate: boolean, movie?: (scene: Scene | null) => void) => {
+  const startPlayFromSave = async (slot: string) => {
+    if (startedRef.current || isWindowPlayActive()) { Logger.warn('Stop the game first, then play from a save', 'Editor'); return; }
+    let doc: SaveDocument | null = null;
+    try { doc = await playSaveStore(activeProjectId()).read(slot); }
+    catch (e) { Logger.error(`Play from save: "${slot}" cannot be read: ${(e as Error)?.message ?? e}`, 'Editor'); return; }
+    if (!doc) { Logger.warn(`Play from save: there is no save in "${slot}"`, 'Editor'); return; }
+    await startSession(false, undefined, doc);
+  };
+  const startSession = async (simulate: boolean, movie?: (scene: Scene | null) => void, fromSave?: SaveDocument) => {
     const instance = instanceRef.current;
     if (!instance) { movie?.(null); return; }
     // One game at a time: while one runs in its own window (Play in window), Play, Simulate and a movie
@@ -6923,6 +6952,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       pendingPlayRef.current = true;
       pendingSimulateRef.current = simulate;
       pendingMovieRef.current = movie ?? null;
+      pendingFromSaveRef.current = fromSave ?? null;
       return;
     }
 
@@ -6935,9 +6965,24 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // A fresh session evaluates every script module afresh: edits made since the last Play apply, and no
     // module state leaks from one session into the next.
     resetScriptModules();
+    // A fresh save session too: no globals or scene memory carried from the last run. Play from save begins
+    // it from the save, and starts in the scene the save was made in.
+    resetSaveSession();
+    if (fromSave) beginSaveSessionFrom(fromSave);
     // The script editor's error marks are about the last run.
     clearRuntimeErrors();
-    const newScene = await buildPlayScene();
+    const savedSceneId = fromSave && fromSave.scene.id !== openSceneIdRef.current
+      ? projectMetaRef.current?.scenes.find(s => s.id === fromSave.scene.id || s.name === fromSave.scene.name)?.id
+      : undefined;
+    let newScene: Scene;
+    if (savedSceneId && savedSceneId !== openSceneIdRef.current) {
+      const built = await buildPlaySceneById(savedSceneId);
+      newScene = built.scene;
+      currentPlaySceneIdRef.current = savedSceneId;
+      instance.renderer.applyRenderSettings(built.render);
+    } else {
+      newScene = await buildPlayScene();
+    }
     // ...and in the play scene only, the open Sequencer tabs' unsaved working copies.
     applySequenceWorkingCopies(newScene);
     isSimulatingRef.current = simulate;
@@ -6984,6 +7029,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     instance.physics.clear();
     releasePlayScene();
     resetScriptModules();
+    // The session's globals and scene memory end with it; its saves stay, in the project's Play saves.
+    setSaveStore(null);
+    resetSaveSession();
     showBindPoseForSkinnedModels(editorSceneRef.current); // back to the default pose in the editor
     eventEmitter.current.emit('SET_PLAY_STATE', 'stop');
   };
@@ -6999,6 +7047,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Reset returns to the play-session entry scene (where Play was pressed), not the last-loaded one.
     currentPlaySceneIdRef.current = playEntrySceneIdRef.current;
     resetScriptModules();
+    resetSaveSession();
     const newScene = await buildPlayScene();
     if (isSimulatingRef.current) carryEditorCamera(instance.scene, newScene);
     instance.renderer.applyRenderSettings(playRenderRef.current);
@@ -7022,7 +7071,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     pendingPlayRef.current = false;
     const movie = pendingMovieRef.current;
     pendingMovieRef.current = null;
-    void startSession(pendingSimulateRef.current, movie ?? undefined);
+    const fromSave = pendingFromSaveRef.current;
+    pendingFromSaveRef.current = null;
+    void startSession(pendingSimulateRef.current, movie ?? undefined, fromSave ?? undefined);
   }, [activeTabId, mainMode]);
 
   // Return to wherever Play was pressed from. Deliberately an effect on isPlayMode rather than a call inside
@@ -7287,6 +7338,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       startPlay,
       startSimulate,
       startMovieSession,
+      startPlayFromSave,
       stopPlay,
       pausePlay,
       buildWindowPlayData,

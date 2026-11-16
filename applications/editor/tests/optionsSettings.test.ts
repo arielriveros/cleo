@@ -12,6 +12,7 @@ const mem = new Map<string, string>();
 import {
   DEFAULT_PROJECT_SETTINGS, applyEngineRuntime, isDefaultProjectSettings, parseProjectSettings, projectSettingsConfig,
   physicsWorkerOverride, physicsWorkerOverrideSource, storePhysicsWorkerOverride, physicsBackendOverride,
+  cleanSaveFolder, resolveSaveFolder,
 } from '../src/features/options/projectSettings';
 import { DEFAULT_EDITOR_PREFS, editorPrefsStore, getEditorPrefs, parseEditorPrefs } from '../src/features/options/editorPrefs';
 import { loadTabState, saveTabState } from '../src/utils/tabState';
@@ -50,8 +51,25 @@ describe('project settings', () => {
       physics: { gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0, worker: 'on', backend: 'cannon' },
       runtime: { maxFrameDelta: 0.05 },
       audio: { masterVolume: 0.5 },
+      saves: { version: 0, namespace: '' },
       window: { title: 'Hollow Keep', width: 1920, height: 1080, fullscreen: true, resizable: false },
     });
+  });
+
+  it('reads the saves settings tolerantly, a project from before them as version 0 and no folder', () => {
+    expect(parseProjectSettings({ version: 3 }).saves).toEqual({ version: 0, folder: '' });
+    expect(parseProjectSettings({ saves: { version: 3.6, folder: '  My/Game: Saves.  ' } }).saves).toEqual({ version: 4, folder: 'MyGame Saves' });
+    expect(parseProjectSettings({ saves: { version: -2, folder: 7 } }).saves).toEqual({ version: 0, folder: '' });
+    expect(projectSettingsConfig(parseProjectSettings({ saves: { version: 2, folder: 'Keep' } })).saves).toEqual({ version: 2, namespace: 'Keep' });
+  });
+
+  it('names the save folder: its own, else the title, else the project', () => {
+    const s = parseProjectSettings({ publish: { title: 'Hollow Keep' } });
+    expect(resolveSaveFolder(s, 'proj')).toBe('Hollow Keep');
+    expect(resolveSaveFolder({ ...s, saves: { version: 0, folder: 'HK Saves' } }, 'proj')).toBe('HK Saves');
+    expect(resolveSaveFolder(parseProjectSettings(null), 'My <Project>')).toBe('My Project');
+    expect(resolveSaveFolder(parseProjectSettings(null), '')).toBe('Cleo Game');
+    expect(cleanSaveFolder('a\\b|c?.')).toBe('abc');
   });
 
   it('reads the physics thread, defaulting to the worker', () => {

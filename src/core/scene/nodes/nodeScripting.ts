@@ -231,6 +231,24 @@ export function attachScriptFactory(node: Node, factory: ScriptFactory): void {
     node.onRoomExit = guard('onRoomExit');
     node.onAnimationEvent = guard('onAnimationEvent');
     node.onAnimationFinished = guard('onAnimationFinished');
+    node.onRestore = guard('onRestore');
+    // Only when the script has one: defining `onSave` is what makes a node take part in saves, and its
+    // return value IS the point, so unlike the guard above it is passed back (a promise is not).
+    if (typeof handlers.onSave === 'function') {
+        const fn = handlers.onSave;
+        node.onSave = () => {
+            try {
+                const result = fn.apply(context, [context]);
+                if (result && typeof result.then === 'function') {
+                    result.catch((e: any) => logScriptError(`Error in onSave for node ${node.name}`, e, 'Script'));
+                    return result;   // the save system warns that a promise is not saved
+                }
+                return result;
+            }
+            catch (e) { logScriptError(`Error in onSave for node ${node.name}`, e, 'Script'); }
+            return undefined;
+        };
+    }
 
     // The UI handlers exist only on the UI classes that declare them, so a legacy script on the wrong
     // node type cannot bind a handler nothing will ever call.
@@ -258,7 +276,8 @@ function attachClassScript(node: Node, Ctor: new (...args: any[]) => any): void 
             const result = fn.apply(node, args); // engine calls with the handler's own args; self is `this`
             if (result && typeof result.then === 'function') {
                 result.catch((e: any) => logScriptError(`Error in ${name} for node ${node.name}`, e, 'Script'));
-                return undefined;
+                // An `async onSave` is a mistake the save system reports (a promise is not saved), so it gets it.
+                return name === 'onSave' ? result : undefined;
             }
             return result;
         }

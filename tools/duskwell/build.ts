@@ -18,7 +18,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import {
     Scene, Node, Tilemap, TilemapNode, Tileset, Sprite, SpriteNode, AnimatedSpriteNode, CharacterBody2DNode,
-    TriggerNode, Room2DNode, Camera2DNode, ParallaxLayerNode, UIRootNode, UITextNode, RENDER_2D_DEFAULTS,
+    TriggerNode, Room2DNode, Camera2DNode, ParallaxLayerNode, UIRootNode, UITextNode, UIPanelNode, UIButtonNode, RENDER_2D_DEFAULTS,
     ControllerNode, NavMeshNode, World2D, bakeNavGraph2D, navGraph2DSourceHash, parseBehaviorMachine, steeringTuning,
 } from '../../src/cleo'
 import type { NavAgent2D } from '../../src/cleo'
@@ -515,6 +515,56 @@ function buildHud(): UIRootNode {
     return hud
 }
 
+/**
+ * The title screen (DuskTitle.ts): Continue or New Game, over the paused game, when there is a checkpoint save
+ * to go back to. Authored hidden; the script shows it.
+ */
+function buildTitle(): UIRootNode {
+    const title = named(new UIRootNode('Title', 'screen'))
+    title.zOrder = 50
+    title.visible = false
+    const place = (n: any, anchor: [number, number], offsetMin: [number, number], offsetMax: [number, number]) => {
+        n.anchorMin = anchor; n.anchorMax = anchor
+        n.offsetMin = offsetMin; n.offsetMax = offsetMax
+        return n
+    }
+    // The whole screen, dimmed, and taking the clicks that would otherwise reach the game.
+    const backdrop = named(new UIPanelNode('Backdrop'))
+    backdrop.anchorMin = [0, 0]; backdrop.anchorMax = [1, 1]
+    backdrop.offsetMin = [0, 0]; backdrop.offsetMax = [0, 0]
+    backdrop.tint = [0.02, 0.02, 0.05, 0.72]
+    backdrop.interactive = true
+    title.addChild(backdrop)
+    const card = place(named(new UIPanelNode('Card')), [0.5, 0.5], [-340, -210], [340, 210])
+    card.tint = [0.07, 0.07, 0.12, 0.95]
+    card.borderRadius = 10
+    backdrop.addChild(card)
+    const text = (name: string, value: string, offsetMin: [number, number], offsetMax: [number, number], size: number, tint: [number, number, number, number]) => {
+        const t = named(new UITextNode(name))
+        t.anchorMin = [0, 0]; t.anchorMax = [1, 0]
+        t.offsetMin = offsetMin; t.offsetMax = offsetMax
+        ;(t as any).fontSize = size
+        ;(t as any).align = 'center'
+        t.text = value
+        t.tint = tint
+        card.addChild(t)
+        return t
+    }
+    const button = (name: string, label: string, top: number) => {
+        const b = place(named(new UIButtonNode(name)), [0.5, 0], [-220, top], [220, top + 56])
+        b.label = label
+        b.tint = [0.16, 0.18, 0.3, 1]
+        b.borderRadius = 6
+        card.addChild(b)
+        return b
+    }
+    text('Heading', 'Duskwell', [0, 34], [0, 110], 64, [0.95, 0.85, 0.6, 1])
+    button('Continue', 'Continue', 150)
+    button('New Game', 'New game', 222)
+    text('Hint', 'Space  Continue   ·   Shift  New game', [24, 330], [-24, 370], 20, [0.7, 0.7, 0.78, 1])
+    return title
+}
+
 function buildScene(): Scene {
     const scene = new Scene()
     scene.dimension = '2D'
@@ -600,6 +650,7 @@ function buildScene(): Scene {
     world.addChild(camera)
 
     scene.addNode(buildHud())
+    scene.addNode(buildTitle())
     return scene
 }
 
@@ -614,6 +665,7 @@ const SCRIPT_FILES: [string, string, string][] = [
     ['DuskPickup', 'DuskPickup.ts', 'trigger'],
     ['DuskCheckpoint', 'DuskCheckpoint.ts', 'trigger'],
     ['DuskHud', 'DuskHud.ts', 'uiRoot'],
+    ['DuskTitle', 'DuskTitle.ts', 'uiRoot'],
 ]
 const scriptAssets = SCRIPT_FILES.map(([name, file, baseType]) => {
     const source = fs.readFileSync(path.join(SCRIPTS, file), 'utf8')
@@ -683,8 +735,13 @@ async function main() {
         else if (n.type === 'characterBody2D' && /^Bat /.test(n.name)) withScript(n, 'DuskBat')
         else if (n.type === 'characterBody2D' && /^Ruin Guard /.test(n.name)) withScript(n, 'DuskGuard')
         else if (n.type === 'trigger' && /^Checkpoint /.test(n.name)) withScript(n, 'DuskCheckpoint')
-        else if (n.type === 'trigger' && pickupKinds.has(n.id)) withScript(n, 'DuskPickup', { kind: pickupKinds.get(n.id), amount: 1 })
+        else if (n.type === 'trigger' && pickupKinds.has(n.id)) {
+            withScript(n, 'DuskPickup', { kind: pickupKinds.get(n.id), amount: 1 })
+            // Saved: a pickup taken before a save stays taken when the game is loaded.
+            n.saved = true
+        }
         else if (n.type === 'uiRoot' && n.name === 'HUD') withScript(n, 'DuskHud')
+        else if (n.type === 'uiRoot' && n.name === 'Title') withScript(n, 'DuskTitle')
     })
     root.id = id('node:root')
     stableIds(root)
@@ -762,7 +819,7 @@ async function main() {
     const scriptFolder: Record<string, string> = {
         DuskPlayer: '/Characters/Warrior/Scripts', DuskBat: '/Characters/Bat/Scripts', DuskGuard: '/Characters/Ruin Guard/Scripts',
         DuskPickup: '/Props/Scripts',
-        DuskCheckpoint: '/Props/Checkpoint/Scripts', DuskHud: '/UI/Scripts',
+        DuskCheckpoint: '/Props/Checkpoint/Scripts', DuskHud: '/UI/Scripts', DuskTitle: '/UI/Scripts',
     }
     for (const s of scriptAssets) add(scriptFolder[s.name], s.name, 'script', s.id)
     add('/Characters/Ruin Guard', GUARD_BRAIN.name, 'aiBrain', GUARD_BRAIN.id)
@@ -785,7 +842,7 @@ async function main() {
     writeJson(path.join(OUT, 'vfs.json'), { version: 1, folders: [...dirs].sort(), entries })
     writeJson(path.join(OUT, 'example.json'), {
         name: PROJECT,
-        description: 'A small 2D metroidvania on the flat 2D renderer: a warrior with a three-hit combo, bats that wake as you pass, two rooms the camera slides between, one-way platforms, checkpoints, diamonds, and the dash relic that carries you over the pit. Pixel-perfect at 480 x 270, with parallax backdrops and glowing torches.',
+        description: 'A small 2D metroidvania on the flat 2D renderer: a warrior with a three-hit combo, bats that wake as you pass, two rooms the camera slides between, one-way platforms, checkpoints that save the game, diamonds, and the dash relic that carries you over the pit. Pixel-perfect at 480 x 270, with parallax backdrops and glowing torches.',
         order: 3,
     })
 

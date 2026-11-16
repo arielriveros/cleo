@@ -163,6 +163,33 @@ Scripts are extracted and obfuscated, and terrain data is DEFLATE-compressed.
 
 ---
 
+## Save files — `.cleosave`
+
+What `SaveGame.save` writes, and what the Saves panel exports: one JSON document per slot (see
+[Saving and loading](../scripting/save-game.md)).
+
+```
+{ format: 'cleo-save', formatVersion: 1, gameVersion, slot, label, savedAt, playTime,
+  scene: { id, name },                 // where a load starts
+  globals: { ... },                    // SaveGame.set values
+  scenes: { [sceneId]: {               // every scene visited
+    name,
+    nodes:   { [nodeId]: { path, p?, q?, s?, sleep?, v?, w?, fields?, vars?, custom? } },
+    removed: [ { id, path } ],
+    spawned: [ { template, templateName, name, id, parent: { id, path } | null, state, sub? } ] } } }
+```
+
+- `formatVersion` is the engine's: a newer one is refused. `gameVersion` is the game's own save version,
+  which `SaveGame.onMigrate` upgrades from.
+- A node is keyed by id, and found by `path` (its name path in the authored scene, `#k` for the k-th later
+  namesake) when the id has changed.
+- `p`, `q`, `s` are the local position, quaternion and scale; `sleep` is dormancy where it differs from the
+  parent's; `v` and `w` are the body's velocities; `vars` are node variables as serialized.
+- In `fields`, `custom` and `globals`, a typed array is `{ "$ta": "Float32Array", "v": [...] }` and a node is
+  `{ "$node": id, "path": ... }`.
+
+---
+
 ## Version numbering
 
 The product version is `1.x.y.z`:

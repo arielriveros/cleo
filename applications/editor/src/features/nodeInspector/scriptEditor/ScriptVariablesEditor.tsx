@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { NumberInput, TextInput, Toggle, VectorInput, Select, StringListInput, ComboSelect, cn, labelClass, ACCESS_META } from '@cleo/app-kit/ui'
-import { VariablesIcon } from '../sectionIcons'
+import { SaveIcon, VariablesIcon } from '../sectionIcons'
 import type { ScriptVarSchema } from '../../../utils/scripts'
 import { isOverridden, setFieldOverride } from '../../../utils/templateOverrides'
 import OverrideMark from '../OverrideMark'
@@ -28,6 +28,8 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
   const inherited = origin && origin.baseNode !== 'added' ? origin.baseNode : null
 
   const visible: ScriptVarSchema[] = (asset?.variables ?? []).filter(v => !v.hidden)
+  // Internal (`_`) fields are never shown, but one tagged @save is still part of what a save keeps: named.
+  const hiddenSaved = (asset?.variables ?? []).filter(v => v.hidden && v.save).map(v => v.name)
 
   const sync = () => {
     const n = props.node as any
@@ -131,6 +133,12 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
                   {access.icon}
                 </span>
               )}
+              {v.save && (
+                <span className='inline-flex items-center shrink-0 text-dim'
+                  title='Saved: the game keeps this field in its saves (@save in the script)'>
+                  <SaveIcon />
+                </span>
+              )}
               <div className='flex-1 min-w-0'>{renderValue(v)}</div>
               {props.overridable && isOverridden(props.node, v.name) &&
                 <OverrideMark onRevert={() => revertTemplateOverride(props.node, v.name)} />}
@@ -140,6 +148,8 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
             </div>
           )
         })}
+        {hiddenSaved.length > 0 &&
+          <p className='text-ui-sm text-dim' title='Internal fields the script tags @save'>Also saved: {hiddenSaved.join(', ')}</p>}
       </div>
     </Collapsable>
   )

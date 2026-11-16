@@ -20,6 +20,8 @@ onRoomExit(other: Node): void
 onAnimationEvent(event: string, clip: string): void // a sprite clip's frame event (sprite and parent)
 onAnimationFinished(clip: string): void           // a once-clip ended (sprite and parent)
 onDespawn(): void
+onSave(): unknown                                 // what a save keeps of this node (see Saving and loading)
+onRestore(data: unknown): void                    // a save or the scene's memory restored this node
 ```
 
 `onRoomEnter` / `onRoomExit` come from a [Camera 2D](../editor/tilemap-2d.md#2d-cameras-and-rooms): when the
@@ -33,8 +35,12 @@ and the frame continues. An `async` hook's rejection is caught too.
 ## Order at scene start
 
 1. `onConstruct` on **every** node, dormant ones included.
-2. `onSpawn` on every awake node.
-3. `onStart` on every awake node.
+2. `onRestore(data)` on every node a save or the scene's memory restored, dormant ones included.
+3. `onSpawn` on every awake node.
+4. `onStart` on every awake node.
+
+A restored node's saved fields and transform are already back before step 1, and `wasRestored` is true on
+it: guard first-time setup in `onStart` with it. See [Saving and loading](save-game.md).
 
 `onConstruct` replaces a constructor. Use it for anything that must exist before other nodes look
 at this one, including on nodes that have not spawned yet.

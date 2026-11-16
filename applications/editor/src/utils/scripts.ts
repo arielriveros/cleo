@@ -107,6 +107,11 @@ export type ScriptVarSchema = {
   pick?: ScriptPickKind
   /** A fixed set of values, from a string-literal union type (`mode: 'melee' | 'ranged'`). */
   choices?: string[]
+  /**
+   * Kept by saves (`SaveGame`, and a scene's memory between visits): declared with a `@save` tag in the
+   * field's doc comment. The build lists these per node as `saveFields`.
+   */
+  save?: true
 }
 
 /** The kinds of name a `pick` field can hold. Mirrors the engine's ClipName / SoundName / ... types. */
@@ -184,14 +189,15 @@ function stripComments(src: string): string {
 }
 
 /**
- * Turn a block comment carrying field tags (`@options <field>`, `@pick <kind>`) into bare tokens
- * (`@options:<field>`, `@pick:<kind>`), so the tags survive stripComments and reach the field declared
- * after them. Every other comment is left as is.
+ * Turn a block comment carrying field tags (`@options <field>`, `@pick <kind>`, `@save`) into bare tokens
+ * (`@options:<field>`, `@pick:<kind>`, `@save:`), so the tags survive stripComments and reach the field
+ * declared after them. Every other comment is left as is.
  */
 function keepFieldTags(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, c => {
     const tags: string[] = []
     for (const m of c.matchAll(/@(options|pick)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)) tags.push(`@${m[1]}:${m[2]}`)
+    if (/(^|[\s*])@save(?![\w$])/.test(c)) tags.push('@save:')
     return tags.length ? `${tags.join(' ')} ` : c
   })
 }
@@ -353,6 +359,7 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
   // Tags read from the doc comment above the next field (see keepFieldTags).
   let pendingOptions: string | undefined
   let pendingPick: string | undefined
+  let pendingSave = false
 
   // Walk statements at class-body depth 0, tracking brace/paren depth so method bodies and
   // object/array initializers are skipped as single units.
@@ -363,15 +370,18 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
     let stmt = body.slice(stmtStart, end).trim()
     stmtStart = end + 1
     // A comment ending on the field's own line leaves its tags in front of the declaration.
-    for (let tag; (tag = /^@(options|pick):([A-Za-z_$][A-Za-z0-9_$]*)\s*/.exec(stmt));) {
-      if (tag[1] === 'options') pendingOptions = tag[2]
-      else pendingPick = tag[2]
+    for (let tag; (tag = /^@(options|pick|save):([A-Za-z_$][A-Za-z0-9_$]*)?\s*/.exec(stmt));) {
+      if (tag[1] === 'options' && tag[2]) pendingOptions = tag[2]
+      else if (tag[1] === 'pick' && tag[2]) pendingPick = tag[2]
+      else if (tag[1] === 'save') pendingSave = true
       stmt = stmt.slice(tag[0].length)
     }
     if (!stmt) return
     const options = pendingOptions
     const tagPick = pendingPick
+    const save = pendingSave
     pendingOptions = pendingPick = undefined
+    pendingSave = false
 
     // A call/parameter list before '=' means a method or getter/setter, not a field.
     const eq = stmt.indexOf('=')
@@ -412,6 +422,7 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
       ...(options && type === 'string' ? { options } : {}),
       ...(pick && isText ? { pick } : {}),
       ...(choices ? { choices } : {}),
+      ...(save ? { save: true as const } : {}),
     })
   }
 
@@ -426,6 +437,11 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
   }
   flush(body.length)
   return out
+}
+
+/** The fields a save keeps: the ones tagged `@save`, in declaration order. */
+export function saveFieldNames(vars: readonly ScriptVarSchema[] | null | undefined): string[] {
+  return (vars ?? []).filter(v => v.save).map(v => v.name)
 }
 
 /* -------------------------------------------------------------------------- */

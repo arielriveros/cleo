@@ -1,4 +1,4 @@
-import { Game, Input, Logger, Node } from 'cleo'
+import { Game, Input, Logger, Node, SaveGame } from 'cleo'
 import type { TemplateName } from 'cleo'
 import { clamp, forwardYaw, num } from '@/Core/Scripts/SoulsMath'
 import { playSound, stopSound } from '@/Core/Scripts/SoulsAudio'
@@ -26,10 +26,18 @@ import { playSound, stopSound } from '@/Core/Scripts/SoulsAudio'
  *
  * ## Game flow it owns
  *
- *   rest(bonfire)          heal, refill flasks, respawn the non-boss enemies, set the respawn point
+ *   rest(bonfire)          heal, refill flasks, respawn the non-boss enemies, set the respawn point, save
  *   onPlayerDied()         drop a bloodstain, YOU DIED, then respawnAtBonfire()
  *   startBossFight(gate)   wake the boss, show its bar, start the music
  *   onBossDefeated(boss)   dissolve the fog, banner, reward
+ *
+ * ## Saving
+ *
+ * Lighting a bonfire and resting at one save the game to the `auto` slot (SaveGame). What a save keeps is
+ * tagged `@save` across the scripts: the player's stats, souls and flasks; each bonfire, pickup and the fog
+ * gate; and here, whether the boss fell, the bonfire rested at and the bloodstain. A game loaded from it
+ * starts with the player at that bonfire (see onStart), as after a death. The title menu's Continue and the
+ * pause menu's Load last rest load it.
  *
  * ## Hit-stop
  *
@@ -87,7 +95,10 @@ export default class SoulsGameManagerNode extends Node {
 
   // ----- runtime state (read by the HUD, which reads the boss's own name and health off `boss`) ----
   public bossActive: boolean = false
+  /** @save */
   public bossDefeated: boolean = false
+  /** The slot a bonfire saves to, and Continue loads. */
+  public saveSlot: string = 'auto'
 
   private _player: Node = null
   private _hud: Node = null
@@ -98,9 +109,13 @@ export default class SoulsGameManagerNode extends Node {
   private _interactables: Node[] = []
   private _spawns: Node[] = []
   private _bonfires: Node[] = []
+  /** @save The bonfire last rested at (or lit). */
   private _restBonfire: Node = null
+  /** @save Where, and facing where, the player stands up again. */
   private _respawnPoint: number[] = null
+  /** @save */
   private _respawnYaw: number = 0
+  /** @save The stain of the last death, until its souls are taken back. */
   private _bloodstain: Node = null
   private _bloodDecals: Node[] = []
   private _boss: Node = null
@@ -114,7 +129,14 @@ export default class SoulsGameManagerNode extends Node {
     this._hud = this._player?.getChildByName('HUD')[0] ?? null
     this._menu = this._player?.getChildByName('BonfireMenu')[0] ?? null
     this._banner = this.getChildByName('Banner')[0] ?? null
-    if (this._player) {
+    if (this.wasRestored && this._respawnPoint) {
+      // A loaded game: the player stands up at the bonfire the save was made at, a frame from now, once the
+      // player's own start has placed its body. Then whatever the boss's fall left behind is shown again.
+      this.after(0, () => {
+        ;(this._player as any)?.respawnAt?.(this._respawnPoint, this._respawnYaw)
+        if (this.bossDefeated) this._revealBossRewards()
+      })
+    } else if (this._player) {
       const p = this._player.worldPosition
       this._respawnPoint = [p[0], p[1], p[2]]
       const f = this._player.worldForward
@@ -183,6 +205,7 @@ export default class SoulsGameManagerNode extends Node {
     this.showBanner('BONFIRE LIT', 'gold')
     this.sfx('Bonfire Lit')
     this._setRespawn(bonfire)
+    this.saveGame(bonfire)
   }
 
   /**
@@ -198,6 +221,24 @@ export default class SoulsGameManagerNode extends Node {
     this._lockOnNode()?.unlock?.()
     this.sfx('Rest')
     ;(this._menu as any)?.open?.(this, player, bonfire)
+    this.saveGame(bonfire)
+  }
+
+  /**
+   * Save the game to `saveSlot`, labelled with the bonfire's name. Quietly nothing where the game cannot save
+   * (a test with no store); a failure is logged, never thrown into the rest.
+   */
+  public saveGame(at: Node = this._restBonfire): void {
+    if (!SaveGame.available) return
+    SaveGame.save(this.saveSlot, { label: at?.name ?? 'Bonfire' })
+      .catch(e => Logger.warn(`Hollow Keep: the game could not be saved: ${e?.message ?? e}`, 'Script'))
+  }
+
+  /** Load the last bonfire save, behind a loading screen. False when there is none to load. */
+  public async loadLastRest(): Promise<boolean> {
+    if (!SaveGame.available || !await SaveGame.exists(this.saveSlot)) return false
+    await SaveGame.load(this.saveSlot, { loadingScreen: { title: 'Hollow Keep' } })
+    return true
   }
 
   /** Called by the menu when the player stands up again. */
@@ -305,6 +346,11 @@ export default class SoulsGameManagerNode extends Node {
       this.showBanner('VICTORY ACHIEVED', 'gold')
       this.sfx('Victory')
     })
+    this._revealBossRewards()
+  }
+
+  /** What the boss's fall leaves: the reward (unless taken) and the epilogue message. */
+  private _revealBossRewards(): void {
     for (const name of [this.bossRewardName, this.bossEpilogueName]) {
       const node = this.findNode(name) as any
       if (node?.reveal) node.reveal()

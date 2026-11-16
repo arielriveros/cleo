@@ -25,12 +25,13 @@ import { Node } from 'cleo'
  *   interact(player): void          do it
  *
  * First use lights it (BONFIRE LIT, and it becomes the respawn point). After that, Interact rests:
- * heal, refill flasks, respawn enemies, open the level-up menu.
+ * heal, refill flasks, respawn enemies, open the level-up menu. Both save the game (the manager does).
  */
 export default class SoulsBonfireNode extends Node {
   public startLit: boolean = false
   public lightIntensity: number = 900
   public isBonfire: boolean = true
+  /** @save A bonfire lit before a save is still lit when it loads. */
   public lit: boolean = false
 
   private _gm: Node = null
@@ -41,7 +42,8 @@ export default class SoulsBonfireNode extends Node {
     this._gm = this.findNode('GameManager')
     this._fire = this.getChildByName('Fire')[0] ?? null
     this._light = this.getChildByName('Fire Light')[0] ?? null
-    this.lit = this.startLit
+    // A loaded game keeps the bonfire as it was (`lit` is @save); a new one starts as authored.
+    if (!this.wasRestored) this.lit = this.startLit
     this._applyLit()
     ;(this._gm as any)?.registerInteractable?.(this)
   }

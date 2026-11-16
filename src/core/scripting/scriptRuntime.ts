@@ -54,6 +54,9 @@ export const SCRIPT_HANDLERS = [
     'onRoomEnter', 'onRoomExit',
     // A sprite clip's frame events and a once-clip's end (AnimatedSpriteNode), on the sprite and its parent.
     'onAnimationEvent', 'onAnimationFinished',
+    // Saving (src/core/save): what a node keeps, and getting it back. onSave's return value is the point, so
+    // like onMove2D it goes through the class-script guard's plain-result pass.
+    'onSave', 'onRestore',
 ] as const;
 
 /** Built-in modules: the engine API, registered by src/cleo.ts as 'cleo'. */

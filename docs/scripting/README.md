@@ -20,6 +20,7 @@ Read [Getting started](getting-started.md) first — it is short and everything 
 | [Animation](animation.md) | Driving the animator, parameters, layers, actions, events, sockets, blend spaces, IK |
 | [UI](ui.md) | Building and updating interfaces from code |
 | [Scene and game](scene-and-game.md) | Spawning, templates, switching scenes, the event bus |
+| [Saving and loading](save-game.md) | Save slots, checkpoints, Continue, and scenes that remember the player |
 | [Audio](audio.md) | Playing sound |
 | [Rendering](rendering.md) | Materials, lights, cameras, post-processing |
 | [Terrain and tilemaps](terrain-tilemap.md) | Querying and editing at runtime |

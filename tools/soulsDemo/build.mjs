@@ -104,6 +104,7 @@ const SCRIPT_FILES = [
   ['Bonfire Menu', 'SoulsBonfireMenu', 'uiRoot'],
   ['Confirm Dialog', 'SoulsConfirmDialog', 'uiRoot'],
   ['Pause Menu', 'SoulsPauseMenu', 'uiRoot'],
+  ['Title Menu', 'SoulsTitleMenu', 'uiRoot'],
   // A script MODULE (shared helpers, no class). Named after its FILE: the explorer path is the import
   // path, so the scripts' `import … from './SoulsMath'` resolves to /Scripts/SoulsMath.script.
   ['SoulsMath', 'SoulsMath', 'node'],
@@ -1599,7 +1600,7 @@ function playerNode(model = null) {
   // ORDER: the camera rig before the controller (the controller finds the first rig in the subtree).
   // `Weapons` starts empty: SoulsPlayer spawns its `weaponTemplates` into it on start. The player's UI —
   // its HUD, its level-up menu, its lock-on reticle — is the PLAYER's: children of it, in its template.
-  player.children = [rigNode, model, group('player:weapons', 'Weapons', []), hurtboxNode('player', 'player', 0.3, 1.78), hud(), bonfireMenu(), confirmDialog(), pauseMenu(), lockReticle(), soundsGroup('player', SOUNDS.player), controller]
+  player.children = [rigNode, model, group('player:weapons', 'Weapons', []), hurtboxNode('player', 'player', 0.3, 1.78), hud(), bonfireMenu(), confirmDialog(), pauseMenu(), titleMenu(), lockReticle(), soundsGroup('player', SOUNDS.player), controller]
   return player
 }
 
@@ -1887,7 +1888,8 @@ function boltTemplate() {
 function bloodstainTemplate() {
   const id = stableId('template:bloodstain:root')
   const root = withScript(node('Bloodstain', 'node', {
-    id, children: [
+    // Saved: a game saved after a death keeps the stain where it lies, with its souls (SaveGame).
+    id, saved: true, children: [
       // A decal, so the stain follows the floor (ramps included) instead of floating as a disc.
       decalNode('bloodstain:pool', 'Pool', BLOOD.stain, { size: [1.8, 0.8, 1.8], position: [0, 0.2, 0], emissive: true, sortOrder: 1 }),
       particles('bloodstain:glow', 'Glow', VFX.bloodstain),
@@ -2418,14 +2420,32 @@ function pauseMenu() {
     ...r, label, disabled: false, tint: [0.18, 0.15, 0.12, 1], hoverTint: [1, 1, 1, 0.16], pressedTint: [0, 0, 0, 0.22],
     disabledTint: [0.5, 0.5, 0.5, 0.4], interactive: true, borderRadius: 4,
   }, { id: stableId(`ui:${key}`) })
-  const card = panel('pause:card', 'Card', rect([0.5, 0.5], [-300, -190], [300, 190]), [0.05, 0.045, 0.04, 0.94], [
+  const card = panel('pause:card', 'Card', rect([0.5, 0.5], [-300, -230], [300, 230]), [0.05, 0.045, 0.04, 0.94], [
     text('pause:title', 'Title', 'PAUSED', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [0, 28], offsetMax: [0, 88] }, { size: 44, align: 'center', tint: GOLD }),
     button('pause:resume', 'Resume', 'Resume', { anchorMin: [0.5, 0], anchorMax: [0.5, 0], offsetMin: [-180, 120], offsetMax: [180, 172] }),
     button('pause:bonfire', 'Bonfire', 'Return to Bonfire', { anchorMin: [0.5, 0], anchorMax: [0.5, 0], offsetMin: [-180, 188], offsetMax: [180, 240] }),
+    // The game as it was saved at the last bonfire (SaveGame): disabled until a bonfire has saved.
+    button('pause:load', 'Load', 'Load Last Rest', { anchorMin: [0.5, 0], anchorMax: [0.5, 0], offsetMin: [-180, 256], offsetMax: [180, 308] }),
     text('pause:hint', 'Hint', 'P / Esc / Start resume · enemies respawn when you return to the bonfire', { anchorMin: [0, 1], anchorMax: [1, 1], offsetMin: [24, -96], offsetMax: [-24, -24] }, { size: 17, align: 'center', tint: DIM, vAlign: 'top' }),
   ], { radius: 8 })
   const backdrop = panel('pause:backdrop', 'Backdrop', stretch(0), [0, 0, 0, 0.55], [card], { interactive: true })
   return withScript(screenRoot('PauseMenu', 'pause', [backdrop], { visible: false }, { zOrder: 60 }), 'SoulsPauseMenu')
+}
+
+/** The title menu: Continue from the last bonfire save, or a new game. See SoulsTitleMenu. Above the pause menu. */
+function titleMenu() {
+  const button = (key, name, label, r) => uiNode(name, 'uiButton', {
+    ...r, label, disabled: false, tint: [0.18, 0.15, 0.12, 1], hoverTint: [1, 1, 1, 0.16], pressedTint: [0, 0, 0, 0.22],
+    disabledTint: [0.5, 0.5, 0.5, 0.4], interactive: true, borderRadius: 4,
+  }, { id: stableId(`ui:${key}`) })
+  const card = panel('title:card', 'Card', rect([0.5, 0.5], [-300, -190], [300, 190]), [0.05, 0.045, 0.04, 0.94], [
+    text('title:title', 'Title', 'HOLLOW KEEP', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [0, 28], offsetMax: [0, 88] }, { size: 44, align: 'center', tint: GOLD }),
+    button('title:continue', 'Continue', 'Continue', { anchorMin: [0.5, 0], anchorMax: [0.5, 0], offsetMin: [-180, 120], offsetMax: [180, 172] }),
+    button('title:new', 'New Game', 'New Game', { anchorMin: [0.5, 0], anchorMax: [0.5, 0], offsetMin: [-180, 188], offsetMax: [180, 240] }),
+    text('title:hint', 'Hint', 'Up / Down choose · Enter or A confirm · the game saves at every bonfire', { anchorMin: [0, 1], anchorMax: [1, 1], offsetMin: [24, -96], offsetMax: [-24, -24] }, { size: 17, align: 'center', tint: DIM, vAlign: 'top' }),
+  ], { radius: 8 })
+  const backdrop = panel('title:backdrop', 'Backdrop', stretch(0), [0, 0, 0, 0.7], [card], { interactive: true })
+  return withScript(screenRoot('TitleMenu', 'title', [backdrop], { visible: false }, { zOrder: 70 }), 'SoulsTitleMenu')
 }
 
 function lockReticle() {
@@ -2624,7 +2644,7 @@ const FOLDERS = {
     SoulsMath: '/Core/Scripts', SoulsHitbox: '/Core/Scripts', SoulsAudio: '/Core/Scripts', SoulsCharacter: '/Core/Scripts',
     'Game Manager': '/Game/Scripts',
     HUD: '/Game/UI/Scripts', 'Boss Bar': '/Game/UI/Scripts', Banner: '/Game/UI/Scripts', 'Bonfire Menu': '/Game/UI/Scripts',
-    'Confirm Dialog': '/Game/UI/Scripts', 'Pause Menu': '/Game/UI/Scripts',
+    'Confirm Dialog': '/Game/UI/Scripts', 'Pause Menu': '/Game/UI/Scripts', 'Title Menu': '/Game/UI/Scripts',
     'Scene Door': `${PROP('Scene Door')}/Scripts`, Breakable: `${PROP('Breakable Barrel')}/Scripts`, Debris: `${PROP('Breakable Barrel')}/Scripts`,
     Player: `${PLAYER}/Scripts`, 'Lock-On Camera': `${PLAYER}/Scripts`,
     SoulsEnemy: `${ENEMY('Base Enemy')}/Scripts`, 'Enemy Attack': `${ENEMY('Base Enemy')}/Scripts`,
