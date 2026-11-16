@@ -18,10 +18,10 @@ Engine conventions
 - Metres; +Y is up; a node faces +Z. Rotations are Euler DEGREES [x, y, z]; positive x pitch tilts the view down.
 - Lights are physical: directional in lux (sun about 100000), point/spot in lumens (about 1500 for a lamp). Exposure is the art control, so do not dim the sun to fix a bright image.
 - A script is one TypeScript class, default-exported, extending the type of the node it sits on:
-  import { Node, Logger } from 'cleo'
+  import { Node, Logger, attribute } from 'cleo'
   export default class SpinnerNode extends Node {
-    public speed = 90            // public fields = per-node inspector values
-    private _t = 0               // _fields are internal
+    @attribute speed = 90        // @attribute = a per-node inspector value
+    private t = 0                // anything else is internal
     onUpdate(delta: number, time: number) { this.rotateY(this.speed * delta) }
   }
   Handlers: onStart, onUpdate(delta, time), onCollision(other), onTriggerEnter(other), onTriggerExit(other), onSpawn, onDespawn. Import everything from 'cleo' (Input, Logger, Game, Vec...); there is no global object. Other scripts are imported by their asset path ('@/Shared/Math').

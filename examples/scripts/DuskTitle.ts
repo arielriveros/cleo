@@ -1,4 +1,4 @@
-import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode } from 'cleo'
+import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode, attribute } from 'cleo'
 
 /**
  * Duskwell -- the title screen. Attach to the `Title` screen-space UI Root, authored hidden:
@@ -18,9 +18,13 @@ import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode } from 'c
  */
 export default class DuskTitle extends UIRootNode {
   /** The slot Continue loads: the one the checkpoints save to. */
+  @attribute
   public slot: string = 'auto'
+  @attribute
   public continueAction: string = 'Jump'
+  @attribute
   public newGameAction: string = 'Dash'
+  @attribute
   public isOpen: boolean = false
 
   private _stopListening: (() => void) | null = null

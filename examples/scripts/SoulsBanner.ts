@@ -1,4 +1,4 @@
-import { Node, UIRootNode, UITextNode, child } from 'cleo'
+import { Node, UIRootNode, UITextNode, child, attribute } from 'cleo'
 
 /**
  * Hollow Keep — the big centre-screen banners: YOU DIED, BONFIRE LIT, VICTORY ACHIEVED. Attach to the
@@ -11,10 +11,15 @@ import { Node, UIRootNode, UITextNode, child } from 'cleo'
  * until `hideBanner`, which the respawn calls) or `gold`.
  */
 export default class SoulsBannerNode extends UIRootNode {
+  @attribute
   public fadeIn: number = 0.6
+  @attribute
   public hold: number = 2.2
+  @attribute
   public fadeOut: number = 1
+  @attribute
   public redColor: [number, number, number] = [0.72, 0.08, 0.06]
+  @attribute
   public goldColor: [number, number, number] = [0.96, 0.82, 0.46]
 
   @child('BannerText')

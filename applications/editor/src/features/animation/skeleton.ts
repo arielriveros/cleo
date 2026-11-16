@@ -211,7 +211,9 @@ export function accessibleNodeVariables(
     const seen = new Set<string>()
     // Class-script fields.
     for (const v of assetOf(owner)?.variables ?? []) {
-      if (v.hidden || !usable(v.type)) continue
+      // Any non-internal field, @attribute or not: an animator reads a script's runtime state (speed, isDead),
+      // which is rarely something to tune per node.
+      if (v.name.startsWith('_') || v.ref || !usable(v.type)) continue
       if (owner !== requester && !canAccessScriptField(v.access, owner, requester)) continue
       seen.add(v.name)
       out.push({ nodeRef, group, nodeLabel: label, varName: v.name, varType: v.type as 'number' | 'boolean', source: 'variable' })

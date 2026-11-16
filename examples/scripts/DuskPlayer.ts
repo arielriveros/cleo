@@ -1,4 +1,4 @@
-import { AnimatedSpriteNode, CharacterBody2DNode, Game, Input, Node, save, child } from 'cleo'
+import { AnimatedSpriteNode, CharacterBody2DNode, Game, Input, Node, save, child, attribute } from 'cleo'
 
 /**
  * Duskwell -- the player: the warrior of the Medieval Warrior pack. Attach to the `Player` Character Body 2D;
@@ -19,50 +19,78 @@ import { AnimatedSpriteNode, CharacterBody2DNode, Game, Input, Node, save, child
  * `contactDamage` field (a bat's `Bite`, a guard's `Blade`). Falling below `killY` costs the whole health.
  */
 export default class DuskPlayer extends CharacterBody2DNode {
+  @attribute
   public maxHealth: number = 5
+  @attribute
   public health: number = 5
   @save
+  @attribute
   public diamonds: number = 0
   /** Seconds of invulnerability after a hit, the sprite flickering. */
+  @attribute
   public invulnerableSeconds: number = 1.1
   /** Seconds the controls are taken away by a hit. */
+  @attribute
   public hurtSeconds: number = 0.3
   /** The knock-back of a hit: away, and up. */
+  @attribute
   public knockback: number = 9
+  @attribute
   public knockup: number = 7
   /** Running speed while a swing is on: a swing commits. */
+  @attribute
   public attackRunSpeed: number = 1.5
   /** Seconds after a swing ends in which a press still chains the next one. */
+  @attribute
   public comboWindow: number = 0.35
+  @attribute
   public attackAction: string = 'Attack'
+  @attribute
   public jumpAction: string = 'Jump'
+  @attribute
   public dashAction: string = 'Dash'
   /** Below this the player has fallen out of the world (the map's bottom edge is y = 0). */
+  @attribute
   public killY: number = -4
   /** Seconds the death plays before the respawn. */
+  @attribute
   public deathSeconds: number = 1.8
 
   // --- the moves, found over the game (kept by a save) ---------------------------------------------------
   @save
+  @attribute('Moves')
   public hasDoubleJump: boolean = false
   @save
+  @attribute('Moves')
   public hasDash: boolean = false
   @save
+  @attribute('Moves')
   public hasWallJump: boolean = false
   /** Jumps in the air before landing again, with the double jump, and their height as a share of a jump's. */
+  @attribute('Moves')
   public airJumps: number = 1
+  @attribute('Moves')
   public airJumpHeight: number = 0.85
   /** Letting go of jump while still rising keeps this share of the speed: a tap is a hop. */
+  @attribute('Moves')
   public jumpCut: number = 0.45
   /** The dash: speed, seconds, seconds before the next, and dashes in the air before landing. */
+  @attribute('Moves')
   public dashSpeed: number = 22
+  @attribute('Moves')
   public dashTime: number = 0.2
+  @attribute('Moves')
   public dashCooldown: number = 0.35
+  @attribute('Moves')
   public airDashes: number = 1
   /** The fastest slide down a wall pressed into; a wall jump's push away and up; seconds the push holds. */
+  @attribute('Moves')
   public wallSlideSpeed: number = 3
+  @attribute('Moves')
   public wallJumpX: number = 9
+  @attribute('Moves')
   public wallJumpY: number = 12
+  @attribute('Moves')
   public wallJumpLock: number = 0.16
 
   @child('Sprite')

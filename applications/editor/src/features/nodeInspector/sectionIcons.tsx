@@ -30,6 +30,10 @@ export const DecalIcon = () => (<S><path d='M4 3.5h16v10H4Z' strokeDasharray='2.
 export const SkyboxIcon = () => (<S><rect x='4' y='4' width='16' height='16' rx='1.5' /><path d='M4 9h16M9 4v16' /></S>);
 export const AnimationIcon = () => (<S><path d='M5 12a7 7 0 1 1 2 5' /><path d='M5 21v-4h4' /></S>);
 export const ScriptIcon = () => (<S><path d='M8 6 3 12l5 6' /><path d='M16 6l5 6-5 6' /></S>);
+// Slider rows: the values a script exposes with @attribute.
+export const AttributesIcon = () => (<S><path d='M4 7h16M4 12h16M4 17h16' /><circle cx='9' cy='7' r='1.8' fill='currentColor' /><circle cx='15' cy='12' r='1.8' fill='currentColor' /><circle cx='7' cy='17' r='1.8' fill='currentColor' /></S>);
+// A group of attributes: a folder tab over rows.
+export const AttributeGroupIcon = () => (<S><path d='M3.5 7.5V5.5A1.5 1.5 0 0 1 5 4h4l2 2h8a1.5 1.5 0 0 1 1.5 1.5V18A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18Z' /><path d='M7.5 11.5h9M7.5 15h6' /></S>);
 export const SoundIcon = () => (<S><path d='M4 9.5h3.2L12 5.5v13L7.2 14.5H4z' /><path d='M15.4 9a4.2 4.2 0 0 1 0 6M18.2 6.6a7.8 7.8 0 0 1 0 10.8' /></S>);
 export const FalloffIcon = () => (<S><circle cx='12' cy='12' r='2.2' fill='currentColor' stroke='none' /><circle cx='12' cy='12' r='5.5' strokeDasharray='2 3' /><circle cx='12' cy='12' r='9' strokeDasharray='2 3' /></S>);
 // A walking figure: the pawn, as opposed to the brain driving it.

@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 import type { NodeName, TriggerName } from 'cleo'
 
 /**
@@ -35,28 +35,43 @@ import type { NodeName, TriggerName } from 'cleo'
  */
 export default class SoulsMoveNode extends Node {
   /** The animator trigger that plays this move, e.g. "Longsword Light1". Empty: the node's name. */
+  @attribute
   public animTrigger: TriggerName = ''
   /** Multipliers on the weapon's attack rating and poise damage. */
+  @attribute
   public damageMul: number = 1
+  @attribute
   public poiseMul: number = 1
+  @attribute
   public staminaCost: number = 16
   /**
    * The swing bounces off walls (`blocksSwings` bodies) it reaches before any enemy: sparks, a recoil, no
    * damage. Heavy slams turn it off and plough through.
    */
+  @attribute
   public bounceOff: boolean = true
   /** Forward drive: from `lungeStart` (clip seconds) for `lungeSeconds`, at `lungeSpeed` m/s. */
+  @attribute
   public lungeStart: number = 0.1
+  @attribute
   public lungeSeconds: number = 0.15
+  @attribute
   public lungeSpeed: number = 2.5
   /** Seconds after the swing starts during which the player can still turn toward the target. */
+  @attribute
   public trackSeconds: number = 0.2
   /** Fallback timings, used only when the clip carries no `hit` event. Clip seconds. */
+  @attribute
   public hitTime: number = 0.38
+  @attribute
   public activeSeconds: number = 0.15
+  @attribute
   public comboTime: number = 0.45
+  @attribute
   public recoverTime: number = 0.62
   /** Name of the move a buffered light attack chains into. Empty restarts the chain. */
+  @attribute
   public next: NodeName = 'Light2'
+  @attribute
   public isMove: boolean = true
 }

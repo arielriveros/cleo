@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 
 /**
  * Hollow Keep — a fire-and-forget effect. Attach to the root of an effect template (hit spark, bolt
@@ -8,8 +8,10 @@ import { Node } from 'cleo'
  * Swap the look by editing the template's particle systems; this script only owns the lifetime.
  */
 export default class SoulsFxNode extends Node {
+  @attribute
   public lifetime: number = 1.2
   /** Particles per child system on start. 0 leaves them to their own spawn rate / bursts. */
+  @attribute
   public burstCount: number = 0
 
   private _age: number = 0

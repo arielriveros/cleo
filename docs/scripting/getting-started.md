@@ -97,17 +97,24 @@ export default class Hollow extends EnemyBase { … }
 ## Fields, and how they reach the inspector
 
 ```ts
+import { Node, attribute } from 'cleo'
+
 export default class SpawnerNode extends Node {
   /** Template to instantiate. */
-  public templateName: string = 'Zombie'
+  @attribute public templateName: string = 'Zombie'
   /** Seconds between spawns. */
-  public interval: number = 6
+  @attribute('Timing') public interval: number = 6
   /** Hard cap on live instances. */
-  public maxAlive: number = 14
+  @attribute('Timing') private maxAlive: number = 14
 
-  private _live: Node[] = []      // hidden from the inspector
+  private live: Node[] = []       // not an attribute: not in the inspector
 }
 ```
+
+Only fields marked `@attribute` reach the inspector (the **Behaviors** panel), whatever their access.
+`@attribute('Timing')` puts a field in a section of its own; options add a range, a label, a colour
+picker and more — see [Decorators](decorators.md#inspector-attributes-attribute). Each field's doc comment
+is its tooltip.
 
 The defaults you write are harvested once and used as the starting value; a per-node value edited
 in the inspector overrides it and is saved with the scene. Changing a default in code changes only
@@ -116,8 +123,8 @@ the nodes that have never had that field edited.
 Decorators (`@save`, `@options`, `@pick`) mark fields for saves and pickers, and `@child` / `@find` fill a field
 with a node: see [Decorators](decorators.md).
 
-Supported field types are `number`, `string`, `boolean` and `vec3`. Anything else is fine as
-private state but will not appear in the inspector.
+Supported attribute types are `number`, `string`, `boolean`, `vec3` and `string[]`. Anything else is fine as
+the script's own state, but cannot be an attribute.
 
 ## Node variables versus script fields
 

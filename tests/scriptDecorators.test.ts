@@ -5,7 +5,7 @@ import { attachScriptFactory, routeTrigger } from '../src/core/scene/nodes/nodeS
 import { GameEvents } from '../src/core/scripting/scriptEvents';
 import { buildFactoryBody, compileScript, listScriptImports } from '../src/core/scripting/scriptRuntime';
 import { lowerScriptDecorators } from '../src/core/scripting/scriptDecoratorLowering';
-import { child, find, onAction, save, options, pick, scriptMembersOf, membersOfNode } from '../src/core/scripting/decorators';
+import { child, find, onAction, save, options, pick, attribute, scriptMembersOf, membersOfNode } from '../src/core/scripting/decorators';
 import { Logger } from '../src/core/logger';
 import '../src/cleo';   // registers the 'cleo' module a script's `import ... from 'cleo'` resolves to
 import { InputSystem } from '../src/input/inputSystem';
@@ -471,5 +471,31 @@ describe('@onHold and @onTap', () => {
         vi.spyOn(input(), 'state').mockReturnValue({ ...idleState('button'), pressed: true, heldSeconds: 2 } as any);
         node.scene.update(0.1, 0, true);
         expect(node.log).toEqual([]);
+    });
+});
+
+describe('@attribute', () => {
+    it('records its group and options, bare or called, through the script compile', () => {
+        const node = new Node('n');
+        attachScriptFactory(node, compileScript(`
+            import { Node, attribute } from 'cleo'
+            export default class A extends Node {
+              @attribute speed = 1
+              @attribute('Combat') damage = 2
+              @attribute('Combat', { min: 0, max: 1 }) crit = 0.1
+              @attribute({ readonly: true }) private _hp = 3
+            }`));
+        const attrs = membersOfNode(node).filter(m => m.kind === 'attribute') as any[];
+        const byField = Object.fromEntries(attrs.map(a => [a.field, a]));
+        expect(byField.speed).toMatchObject({ group: undefined, options: {} });
+        expect(byField.damage).toMatchObject({ group: 'Combat' });
+        expect(byField.crit).toMatchObject({ group: 'Combat', options: { min: 0, max: 1 } });
+        expect(byField._hp).toMatchObject({ options: { readonly: true } });
+    });
+
+    it('works bare under a standard compiler too', () => {
+        class Native extends Node { @attribute speed = 1; @attribute('Combat') damage = 2; }
+        expect(scriptMembersOf(Native).filter(m => m.kind === 'attribute').map((m: any) => `${m.field}:${m.group ?? ''}`).sort())
+            .toEqual(['damage:Combat', 'speed:']);
     });
 });

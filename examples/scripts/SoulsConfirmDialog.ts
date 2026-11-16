@@ -1,4 +1,4 @@
-import { Input, Node, UIButtonNode, UIRootNode, UITextNode } from 'cleo'
+import { Input, Node, UIButtonNode, UIRootNode, UITextNode, attribute } from 'cleo'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
@@ -16,6 +16,7 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  * off would leave the next scene unable to move.
  */
 export default class SoulsConfirmDialogNode extends UIRootNode {
+  @attribute
   public isOpen: boolean = false
 
   private _onYes: () => void = null

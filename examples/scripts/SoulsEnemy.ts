@@ -1,4 +1,4 @@
-import { Logger, ModelNode, Node, setMoveWorld, find, child } from 'cleo'
+import { Logger, ModelNode, Node, setMoveWorld, find, child, attribute } from 'cleo'
 import type { AnimationTriggerInfo, SocketName, TriggerName } from 'cleo'
 import { clamp, num, planarDistance } from '@/Core/Scripts/SoulsMath'
 import { Swing, bladeCapsule, closeSwing, hurtboxQuery, hurtboxTargets, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
@@ -44,13 +44,20 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  * script's business — see SoulsHollowWarden, which overrides `_onDamaged` for its phase two.
  */
 export default class SoulsEnemyNode extends SoulsCharacterNode {
+  @attribute
   public displayName: string = 'Enemy'
+  @attribute
   public team: string = 'enemy'
+  @attribute
   public maxPoise: number = 25
+  @attribute
   public poiseRegenDelay: number = 3
+  @attribute
   public soulsReward: number = 120
+  @attribute
   public isBoss: boolean = false
   /** A dead enemy lets its weapon fall (a physics body); it lies there until the corpse goes. */
+  @attribute
   public dropWeaponOnDeath: boolean = true
 
   // ----- movement --------------------------------------------------------------------------------
@@ -58,38 +65,57 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   // the Brain controller): the engage distance, the spacing band and the leash are numbers in ITS
   // transitions. This script only carries out the state the graph is in — see `_ai`.
   /** Chase / approach speed. Patrol and return run slower through the brain's speed scales. */
+  @attribute('Movement')
   public moveSpeed: number = 3
   /** Degrees per second the body turns toward the player while engaged. */
+  @attribute('Movement')
   public engageTurnRate: number = 300
+  @attribute('Movement')
   public strafeSpeedScale: number = 0.35
+  @attribute('Movement')
   public retreatSpeedScale: number = 0.7
 
   // ----- fighting --------------------------------------------------------------------------------
   /** Seconds of breathing room between attacks (a random value in this range). */
+  @attribute('Fighting')
   public attackGapMin: number = 0.6
+  @attribute('Fighting')
   public attackGapMax: number = 1.2
+  @attribute('Fighting')
   public flinchOnHit: boolean = true
   /** Animator triggers of the reactions' Actions states; the seconds are how long each holds the enemy. */
+  @attribute('Fighting')
   public flinchTrigger: TriggerName = 'Flinch'
+  @attribute('Fighting')
   public flinchSeconds: number = 0.4
+  @attribute('Fighting')
   public staggerTrigger: TriggerName = 'Stagger'
+  @attribute('Fighting')
   public staggerSeconds: number = 1.2
   /**
    * A BOSS's battle cry, played once the first time it spots the player each life. Regular enemies
    * never taunt -- a shout from every Hollow in the room is noise, not menace.
    */
+  @attribute('Fighting')
   public tauntTrigger: TriggerName = 'Taunt'
+  @attribute('Fighting')
   public tauntOnAggro: boolean = true
   /** Seconds the death clip plays before the ragdoll takes over (0 = no ragdoll). */
+  @attribute('Fighting')
   public deathSeconds: number = 2
+  @attribute('Fighting')
   public useRagdoll: boolean = true
   /** Seconds the body lies there before it is removed. */
+  @attribute('Fighting')
   public corpseSeconds: number = 6
   /** Seconds the body then takes to dissolve away. */
+  @attribute('Fighting')
   public corpseFadeSeconds: number = 1.5
   /** Socket projectiles leave from. */
+  @attribute('Fighting')
   public castSocket: SocketName = 'LeftHand'
   /** Seconds the health bar stays up after the last hit. */
+  @attribute('Fighting')
   public healthBarSeconds: number = 4
 
   // ----- runtime, read by others -------------------------------------------------------------------

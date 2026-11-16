@@ -1,4 +1,4 @@
-import { Node, TriggerNode } from 'cleo'
+import { Node, TriggerNode, attribute } from 'cleo'
 
 /**
  * Duskwell -- something lying in the world for the player to take. Attach to an Area 2D that sees the
@@ -11,9 +11,13 @@ import { Node, TriggerNode } from 'cleo'
  * The player decides what a kind does (DuskPlayer.collect); this only hands it over and goes.
  */
 export default class DuskPickup extends TriggerNode {
+  @attribute
   public kind: string = 'diamond'
+  @attribute
   public amount: number = 1
+  @attribute
   public bobHeight: number = 0.12
+  @attribute
   public bobSpeed: number = 3
 
   private _time: number = 0

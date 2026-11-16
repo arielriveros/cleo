@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 
 /**
  * FPS example — a tracer round. The shooter instantiates one at the muzzle, turned along the shot, and sets
@@ -8,9 +8,12 @@ import { Node } from 'cleo'
  */
 export default class FpsTracerNode extends Node {
   /** Set by the shooter: distance from the muzzle to the end of the shot. */
+  @attribute
   public tracerLength: number = 0
+  @attribute
   public speed: number = 420
   /** Length of the streak, metres. */
+  @attribute
   public trail: number = 6
 
   private _flown: number = 0

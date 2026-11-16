@@ -1,4 +1,4 @@
-import { CharacterNode, Logger } from 'cleo'
+import { CharacterNode, Logger, attribute } from 'cleo'
 import type { Node, TemplateName } from 'cleo'
 import { WEAPONS, aimDirection, canDamage, clamp, combatantOf, manager, rotationOntoNormal, spreadDirection } from '@/FPS/Scripts/FpsShared'
 import type { WeaponSpec } from '@/FPS/Scripts/FpsShared'
@@ -28,27 +28,41 @@ import type { WeaponSpec } from '@/FPS/Scripts/FpsShared'
  * the scene it is whatever the template says, and two combatants are hostile when their teams differ.
  */
 export default class FpsCombatantNode extends CharacterNode {
+  @attribute
   public displayName: string = 'Combatant'
+  @attribute
   public team: string = 'red'
+  @attribute
   public maxHp: number = 100
+  @attribute
   public hp: number = 100
   /** Which WEAPONS entry this fighter uses. */
+  @attribute
   public weapon: string = 'ak47'
   /** The template the Game Manager respawns this fighter from (blank: this node itself is reset instead). */
+  @attribute
   public respawnTemplate: TemplateName = '' as TemplateName
 
   /** Damage multiplier for a head shot. */
+  @attribute
   public headMultiplier: number = 2.2
   /** Height of the body standing and crouching, metres (hit zones, the eye, the target). */
+  @attribute
   public standHeight: number = 1.78
+  @attribute
   public crouchHeight: number = 1.2
   /** A hit above this share of the body's height is the head. */
+  @attribute
   public headLine: number = 0.84
 
   // ----- effects: templates this fighter spawns --------------------------------------------------------
+  @attribute('Effects')
   public impactTemplate: TemplateName = 'FPS Impact' as TemplateName
+  @attribute('Effects')
   public bloodTemplate: TemplateName = 'FPS Blood Hit' as TemplateName
+  @attribute('Effects')
   public holeTemplate: TemplateName = 'FPS Bullet Hole' as TemplateName
+  @attribute('Effects')
   public tracerTemplate: TemplateName = 'FPS Tracer' as TemplateName
 
   // ----- runtime, read by others -----------------------------------------------------------------------

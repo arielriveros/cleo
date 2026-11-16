@@ -1,4 +1,4 @@
-import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node, TriggerNode, find, child } from 'cleo'
+import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node, TriggerNode, find, child, attribute } from 'cleo'
 
 /**
  * Duskwell -- a bat. Attach to a flying Character Body 2D (no gravity, through one-way platforms) whose
@@ -13,13 +13,19 @@ import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node, TriggerN
  * `isSwooping`, `isHurt`, `isDead`, `distanceFromHome`.
  */
 export default class DuskBat extends CharacterBody2DNode {
+  @attribute
   public health: number = 3
+  @attribute
   public contactDamage: number = 1
+  @attribute
   public swoopSpeed: number = 7.5
   /** Seconds between swoops. */
+  @attribute
   public swoopCooldown: number = 1.2
+  @attribute
   public knockback: number = 8
   /** The bat's art faces left: its sprite is mirrored to face right. */
+  @attribute
   public artFacesLeft: boolean = false
 
   @child('Sprite')

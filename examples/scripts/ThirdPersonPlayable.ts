@@ -1,4 +1,4 @@
-import { CharacterNode, Logger, onAction } from 'cleo'
+import { CharacterNode, Logger, onAction, attribute } from 'cleo'
 
 /**
  * Third-person STRAFE character — attach to the "Playable" root, on a **Character** node.
@@ -38,6 +38,7 @@ import { CharacterNode, Logger, onAction } from 'cleo'
  */
 export default class ThirdPersonPlayableNode extends CharacterNode {
   /** Health, as an example of what a script on a Character IS for: game state, not movement. */
+  @attribute
   public health: number = 100
 
   onStart() {

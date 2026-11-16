@@ -34,7 +34,7 @@ so a node spawned by another script's `onConstruct` is found too. By `onStart` (
 - A field that already holds a node is left alone: a value you assigned, or one a save restored.
 - A node that is not there leaves the field empty and logs one warning naming the field. Declare it
   `muzzle?: Node` when its absence is fine, and the warning is not raised.
-- These fields are not inspector values: the Scripts panel shows them as `Finds: muzzle → Muzzle`.
+- These fields are not inspector values: the Behaviors panel shows them as `Finds: muzzle → Muzzle`.
 
 Use plain fields for state you compute, and `@child` / `@find` only for a **literal name**. A name that
 comes from a field (`this.findNode(this.targetName)`), or a lookup repeated every call, stays code.
@@ -99,6 +99,30 @@ cleanup in `onDespawn`.
 The method runs for an overlap that `onTriggerEnter` / `onTriggerExit` would report, in 3D and 2D. The
 filter is a node name or the name of a variable the other node holds, and matches on the other node or any
 of its ancestors — so a Player inside "Player Collider" matches either way. No filter means anything.
+
+## Inspector attributes: `@attribute`
+
+Only a field marked `@attribute` shows in the inspector's **Behaviors** panel, whatever its access —
+`public`, `protected` or `private`. Every other field is the script's own state: not shown, not stored per
+node, not overridden by templates.
+
+```ts
+/** Hit points at full health. */
+@attribute maxHp = 100                                   // the Attributes section
+@attribute('Combat') damage = 10                         // a "Combat" section
+@attribute('Combat', { min: 0, max: 1, step: 0.05 }) crit = 0.1
+@attribute({ label: 'Tint', color: true }) private _tint: [number, number, number] = [1, 1, 1]
+@attribute({ showIf: ['mode', 'ranged'] }) range = 8
+@attribute({ readonly: true }) kills = 0
+@attribute({ multiline: true }) bark = ''
+```
+
+- A **group** (the first argument, a string) gives the field a collapsible section of its own, titled with
+  it; without one it goes in **Attributes**. Groups appear in the order their first field is declared.
+- **Options**: `label`, `min` / `max` / `step` (a slider, values clamped), `readonly`, `showIf` (`'flag'`
+  or `['field', value]`), `color` (an `[r, g, b]` colour picker), `multiline` (a text area).
+- The field's **doc comment** is the row's tooltip.
+- Arguments must be literals: the editor reads them without running the script, and ignores one it can't.
 
 ## Fields for the inspector and saves
 

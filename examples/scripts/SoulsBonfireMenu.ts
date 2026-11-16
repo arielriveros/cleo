@@ -1,4 +1,4 @@
-import { Input, Node, UIButtonNode, UIRootNode, UITextNode } from 'cleo'
+import { Input, Node, UIButtonNode, UIRootNode, UITextNode, attribute } from 'cleo'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
@@ -23,10 +23,13 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
 const STATS = ['vigor', 'endurance', 'strength', 'dexterity']
 
 export default class SoulsBonfireMenuNode extends UIRootNode {
+  @attribute
   public repeatDelay: number = 0.35
+  @attribute
   public repeatRate: number = 0.09
   public selectedTint: [number, number, number, number] = [0.85, 0.65, 0.3, 0.35]
   public rowTint: [number, number, number, number] = [1, 1, 1, 0.04]
+  @attribute
   public isOpen: boolean = false
 
   private _gm: Node = null

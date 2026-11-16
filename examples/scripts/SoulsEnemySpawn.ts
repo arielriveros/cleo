@@ -1,4 +1,4 @@
-import { Logger, Node, options, find } from 'cleo'
+import { Logger, Node, options, find, attribute } from 'cleo'
 import type { TemplateName } from 'cleo'
 
 /**
@@ -18,17 +18,22 @@ import type { TemplateName } from 'cleo'
  */
 export default class SoulsEnemySpawnNode extends Node {
   /** The templates a spawn may create. Edit the list in the Enemy Spawn template. */
+  @attribute
   public spawnables: TemplateName[] = ['Hollow', 'Hollow Sorcerer', 'Elite Knight', 'Hollow Warden']
   /** Which of `spawnables` this spawn creates. */
   @options('spawnables')
+  @attribute
   public templateName: string = 'Hollow'
+  @attribute
   public isBossSpawn: boolean = false
   /**
    * A patrol route on the scene's Nav Mesh, by name: the enemy walks it, looping, until it sees someone,
    * and goes back to it after giving up a chase. Empty: it stands where it spawned.
    */
+  @attribute
   public patrolRoute: string = ''
   /** Seconds after the scene starts before the first spawn — lets the level settle first. */
+  @attribute
   public initialDelay: number = 0.1
 
   @find('GameManager')

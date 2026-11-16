@@ -1,4 +1,4 @@
-import { Node, UIProgressBarNode, UIRootNode, UITextNode } from 'cleo'
+import { Node, UIProgressBarNode, UIRootNode, UITextNode, attribute } from 'cleo'
 import { WEAPONS, angleDiff, clamp, manager, yawTo } from '@/FPS/Scripts/FpsShared'
 
 /**
@@ -18,12 +18,18 @@ import { WEAPONS, angleDiff, clamp, manager, yawTo } from '@/FPS/Scripts/FpsShar
  */
 export default class FpsHudNode extends UIRootNode {
   /** Pixels of crosshair gap per degree of spread, at the hip field of view. */
+  @attribute
   public pixelsPerDegree: number = 11
+  @attribute
   public crosshairGap: number = 5
+  @attribute
   public crosshairLength: number = 9
+  @attribute
   public hitMarkerSeconds: number = 0.22
+  @attribute
   public indicatorSeconds: number = 1.4
   /** Hide the crosshair while aimed (the sights are the aim). */
+  @attribute
   public hideCrosshairAimed: boolean = true
 
   private _player: any = null

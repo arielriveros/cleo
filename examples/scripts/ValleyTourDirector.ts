@@ -1,4 +1,4 @@
-import { SequenceNode } from 'cleo'
+import { SequenceNode, attribute } from 'cleo'
 import type { SequenceScriptContext } from 'cleo'
 
 /**
@@ -16,10 +16,13 @@ import type { SequenceScriptContext } from 'cleo'
  */
 export default class ValleyTourDirectorNode extends SequenceNode {
   /** The light the strikes flash, by name. */
+  @attribute
   public lightningLight: string = 'Lightning'
   /** Lumens at a pulse's peak (written out in full: the editor's field reader takes no exponents). */
+  @attribute
   public lightningLumens: number = 600000000000
   /** How much the clouds' ambient light rises at a peak, over its own. */
+  @attribute
   public lightningClouds: number = 5
 
   private _light: any = null

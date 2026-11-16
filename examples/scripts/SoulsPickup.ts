@@ -1,4 +1,4 @@
-import { Node, save, find } from 'cleo'
+import { Node, save, find, attribute } from 'cleo'
 import type { TriggerName } from 'cleo'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
@@ -18,13 +18,19 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  * See SoulsBonfire for the interactable protocol.
  */
 export default class SoulsPickupNode extends Node {
+  @attribute
   public kind: string = 'souls'
+  @attribute
   public amount: number = 200
+  @attribute
   public itemName: string = 'Soul of a Lost Undead'
+  @attribute
   public hiddenUntilRevealed: boolean = false
   /** The trigger of the player animator's gesture state played on taking it. */
+  @attribute
   public pickupGesture: TriggerName = 'Pickup'
   @save
+  @attribute
   public taken: boolean = false
 
   @find('GameManager')

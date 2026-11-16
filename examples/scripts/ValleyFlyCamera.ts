@@ -1,4 +1,4 @@
-import { CameraRigNode, Input } from 'cleo'
+import { CameraRigNode, Input, attribute } from 'cleo'
 
 /**
  * Valley — a free-flying camera for looking round the scenery in Play. Attach to a Camera Rig with a
@@ -17,15 +17,21 @@ import { CameraRigNode, Input } from 'cleo'
  */
 export default class ValleyFlyCameraNode extends CameraRigNode {
   /** Cruising speed, metres per second. */
+  @attribute
   public speed: number = 8
   /** Slowest and fastest cruising speed the wheel can set. */
+  @attribute
   public minSpeed: number = 1
+  @attribute
   public maxSpeed: number = 80
   /** Multiplier while Sprint is held. */
+  @attribute
   public sprintScale: number = 4
   /** Seconds to reach the speed being asked for. 0 is instant. */
+  @attribute
   public smoothing: number = 0.15
   /** Metres kept between the eye and the landscape below. */
+  @attribute
   public groundClearance: number = 1.2
 
   private _velocity: number[] = [0, 0, 0]

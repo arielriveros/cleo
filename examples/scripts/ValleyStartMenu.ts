@@ -1,4 +1,4 @@
-import { Game, Input, InputSystem, Node, SequenceNode, UIButtonNode, UIRootNode } from 'cleo'
+import { Game, Input, InputSystem, Node, SequenceNode, UIButtonNode, UIRootNode, attribute } from 'cleo'
 
 /**
  * The Valley — the start menu. Attach to the `Start Menu` node, a screen-space UI Root that is shown when
@@ -27,13 +27,18 @@ import { Game, Input, InputSystem, Node, SequenceNode, UIButtonNode, UIRootNode 
  */
 export default class ValleyStartMenuNode extends UIRootNode {
   /** The Sequence node the Cinematic button plays. */
+  @attribute
   public tourName: string = 'Valley Tour'
   /** The Sequence node that runs the valley's day (paused while the tour has the sun). */
+  @attribute
   public dayName: string = 'Day Cycle'
   /** Real seconds after the menu opens during which a confirm is ignored (the press that opened it). */
+  @attribute
   public openGuard: number = 0.25
+  @attribute
   public isOpen: boolean = false
   /** 'menu', 'cinematic' or 'free'. */
+  @attribute
   public mode: string = 'menu'
 
   private _tour: SequenceNode = null

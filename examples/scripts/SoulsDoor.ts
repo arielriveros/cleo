@@ -1,4 +1,4 @@
-import { Node, save, find } from 'cleo'
+import { Node, save, find, attribute } from 'cleo'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
@@ -15,11 +15,16 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  */
 export default class SoulsDoorNode extends Node {
   /** Offset from the closed position when fully open, in world metres. */
+  @attribute
   public openOffset: [number, number, number] = [0, 4.2, 0]
+  @attribute
   public openSeconds: number = 1.6
   @save
+  @attribute
   public isOpen: boolean = false
+  @attribute
   public lockedText: string = 'Opens from the other side'
+  @attribute
   public lockedFromFront: boolean = false
 
   @find('GameManager')

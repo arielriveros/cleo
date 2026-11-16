@@ -302,7 +302,7 @@ Every trap in these docs, in one place.
 ### Scripts
 
 - **Only the class may be exported.**
-- **Public fields become inspector values;** `_`-prefixed ones stay hidden.
+- **Only `@attribute` fields become inspector values;** every other field is the script's own.
 - **Script methods land as own properties on the node**, so engine work lives in `update()` and
   yours in `onUpdate()`.
 

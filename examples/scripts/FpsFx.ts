@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 
 /**
  * FPS example — a fire-and-forget effect (muzzle flash, impact, blood). Attach to the root of an effect
@@ -12,10 +12,13 @@ const MAX_LIVE_LIGHTS = 3
 let liveLights = 0
 
 export default class FpsFxNode extends Node {
+  @attribute
   public lifetime: number = 0.6
   /** Particles per child system on start. 0 leaves them to their own spawn rate and bursts. */
+  @attribute
   public burstCount: number = 0
   /** Fade the lights to nothing over `lifetime` (a flash's light falls off fast: this squares it). */
+  @attribute
   public lightFalloff: number = 2
 
   private _age: number = 0

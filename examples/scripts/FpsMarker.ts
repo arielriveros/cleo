@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 
 /**
  * FPS example — a marker the Game Manager reads. Attach to a Spawn Point or Cover Point template:
@@ -10,6 +10,7 @@ import { Node } from 'cleo'
  * play; the template draws a small gizmo for the editor.
  */
 export default class FpsMarkerNode extends Node {
+  @attribute
   public kind: 'spawn' | 'cover' = 'spawn'
 
   onStart() {

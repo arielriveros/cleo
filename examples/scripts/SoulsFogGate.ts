@@ -1,4 +1,4 @@
-import { Node, save, find, child } from 'cleo'
+import { Node, save, find, child, attribute } from 'cleo'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
@@ -25,12 +25,17 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  */
 export default class SoulsFogGateNode extends Node {
   /** Metres in front of the gate (outside) the player is lined up at before walking. */
+  @attribute
   public entryDistance: number = 1.1
+  @attribute
   public walkDistance: number = 2.8
+  @attribute
   public walkSeconds: number = 1.5
+  @attribute
   public isFogGate: boolean = true
   /** 'closed' | 'fight' | 'gone' */
   @save
+  @attribute
   public gateState: string = 'closed'
 
   @find('GameManager')

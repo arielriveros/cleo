@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 import type { TemplateName } from 'cleo'
 import { playDetached } from '@/Core/Scripts/SoulsAudio'
 
@@ -17,15 +17,23 @@ import { playDetached } from '@/Core/Scripts/SoulsAudio'
  */
 export default class SoulsBreakableNode extends Node {
   /** The template spawned in its place, one physics body per piece. See SoulsDebris. */
+  @attribute
   public debrisTemplate: TemplateName = 'Barrel Debris'
   /** Metres per second the pieces leave at, along the blow. */
+  @attribute
   public breakSpeed: number = 3.5
   /** A roll breaks it only this fast or faster (metres per second). */
+  @attribute
   public rollBreakSpeed: number = 2
+  @attribute
   public breakSound: string = 'Break'
+  @attribute
   public team: string = 'enemy'
+  @attribute
   public isBreakable: boolean = true
+  @attribute
   public isBroken: boolean = false
+  @attribute
   public hurtboxActive: boolean = true
 
   private _inside: Node[] = []

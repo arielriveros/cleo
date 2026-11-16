@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 import { clamp } from '@/FPS/Scripts/FpsShared'
 
 /**
@@ -8,9 +8,13 @@ import { clamp } from '@/FPS/Scripts/FpsShared'
  * `fadeSeconds` and the template removes itself. The Game Manager also removes the oldest past its limit.
  */
 export default class FpsDecalNode extends Node {
+  @attribute
   public lifetime: number = 45
+  @attribute
   public fadeSeconds: number = 6
+  @attribute
   public minSize: number = 0.8
+  @attribute
   public maxSize: number = 1.2
 
   private _age: number = 0

@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 
 /**
  * Valley — a fire's light: torches, braziers, fire pits, candles, the bonfire. Attach to the fire's root;
@@ -27,12 +27,16 @@ import { Node } from 'cleo'
  */
 export default class ValleyFireLightNode extends Node {
   /** Burning or not. */
+  @attribute
   public lit: boolean = true
   /** Seconds, at the end of the ignition, over which the burning flames take over from it. */
+  @attribute
   public ignitionBlend: number = 0.5
   /** The light's peak as the fire catches, over its full intensity. */
+  @attribute
   public ignitionFlare: number = 1.4
   /** Seconds into the ignition the flare peaks. */
+  @attribute
   public ignitionFlareTime: number = 0.25
 
   private _lights: { node: any, intensity: number }[] = []

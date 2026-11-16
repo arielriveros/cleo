@@ -1,4 +1,4 @@
-import { ControllerNode, Node } from 'cleo'
+import { ControllerNode, Node, attribute } from 'cleo'
 
 /**
  * Hollow Keep — an enemy's brain script. Attach to the `Brain` child (the LAST child) of every enemy
@@ -18,6 +18,7 @@ import { ControllerNode, Node } from 'cleo'
  * 2. **Home.** `goalPoint` is where the enemy spawned, which the graph's Return state paths back to.
  */
 export default class SoulsEnemyBrainNode extends ControllerNode {
+  @attribute
   public targetMarker: string = 'isPlayer'
 
   onThink(delta: number) {

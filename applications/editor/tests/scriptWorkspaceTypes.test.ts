@@ -336,7 +336,7 @@ export default class Hero extends Node { ${wrong} }
     await writeFile(typesFile, projectTypesDeclaration([], ['Jump', 'Gameplay/Jump']), 'utf-8');
     try {
       const head = `
-import { Node, child, find, onAction, onHold, onTap, onEvent, every, onEnter, onExit, save, options, pick } from 'cleo'
+import { Node, child, find, onAction, onHold, onTap, onEvent, every, onEnter, onExit, attribute, save, options, pick } from 'cleo'
 import type { ActionState } from 'cleo'
 export default class Hero extends Node {
 `;
@@ -355,6 +355,11 @@ export default class Hero extends Node {
   @every(2) think() {}
   @onEnter('Player') hit(other: Node) {}
   @onExit() leave(other: Node) {}
+  @attribute plain = 1
+  @attribute('Combat') damage = 10
+  @attribute('Combat', { min: 0, max: 1, step: 0.05, label: 'Crit' }) crit = 0.1
+  @attribute({ readonly: true, showIf: ['mode', 'ranged'] }) private hidden2 = 2
+  @attribute({ color: true }) tint: [number, number, number] = [1, 1, 1]
 }`);
       const ok = await typecheck();
       expect(ok.out).toBe('');
@@ -369,6 +374,7 @@ export default class Hero extends Node {
         `@onTap('Jupm') tap() {}`,
         `@every('x') think() {}`,
         `@onEnter('P') hit(other: string) {}`,
+        `@attribute({ min: 'x' }) n = 1`,
       ]) {
         await writeScript('Player/Hero.ts', `${head}  ${wrong}\n}`);
         expect((await typecheck()).ok, wrong).toBe(false);

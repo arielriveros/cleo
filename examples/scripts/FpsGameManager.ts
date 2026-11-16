@@ -1,4 +1,4 @@
-import { Game, Logger, Node } from 'cleo'
+import { Game, Logger, Node, attribute } from 'cleo'
 import type { TemplateName } from 'cleo'
 import { GAME_TYPES, GAME_TYPE_ALIASES, combatantOf, distance3, fps, findByVariable, planarDistance } from '@/FPS/Scripts/FpsShared'
 
@@ -34,31 +34,44 @@ import { GAME_TYPES, GAME_TYPE_ALIASES, combatantOf, distance3, fps, findByVaria
  */
 export default class FpsGameManagerNode extends Node {
   /** The game type: how the scene's fighters are dealt into teams (the dropdown lists GAME_TYPES in FpsShared). */
+  @attribute
   public gameType: 'oneVsAll' | 'teamDeathmatch' | 'ffa' = 'oneVsAll'
   /**
    * Bot templates the manager spawns when the scene holds fewer fighters than the game type needs, cycling
    * through the list, at spawn points. A scene with enough bots of its own never uses it.
    */
+  @attribute
   public botTemplates: TemplateName[] = ['FPS Bot', 'FPS Vanguard', 'FPS Raider', 'FPS Swat'] as TemplateName[]
   /** Team kills that win the match (0: none). */
+  @attribute
   public scoreLimit: number = 20
   /** Minutes (0: none). */
+  @attribute
   public timeLimit: number = 0
+  @attribute
   public friendlyFire: boolean = false
   /** Seconds a fighter lies dead before it comes back. */
+  @attribute
   public playerRespawnSeconds: number = 4
+  @attribute
   public botRespawnSeconds: number = 6
   /** How long a bot's body stays before it fades. */
+  @attribute
   public corpseSeconds: number = 9
   /** Seconds the match-over banner shows before the scene reloads. */
+  @attribute
   public restartSeconds: number = 9
   /** Move every fighter onto a spawn point when the match starts (when the scene has spawn points). */
+  @attribute
   public spawnAtStart: boolean = true
   /** Bullet holes kept in the world; older ones are removed. */
+  @attribute
   public maxDecals: number = 90
   /** Bots of a team this close to a call for reinforcements answer it. */
+  @attribute
   public reinforcementRadius: number = 55
   /** A spawn point this near a living enemy is passed over. */
+  @attribute
   public spawnSafeDistance: number = 14
 
   // ----- runtime, read by the HUD ----------------------------------------------------------------------

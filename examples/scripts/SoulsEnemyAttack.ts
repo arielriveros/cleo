@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 import type { NodeName, SoundName, TemplateName, TriggerName } from 'cleo'
 
 /**
@@ -35,38 +35,64 @@ import type { NodeName, SoundName, TemplateName, TriggerName } from 'cleo'
  */
 export default class SoulsEnemyAttackNode extends Node {
   /** The animator trigger that plays this attack. Empty: the node's name. */
+  @attribute
   public animTrigger: TriggerName = ''
+  @attribute
   public damage: number = 70
+  @attribute
   public poiseDamage: number = 20
+  @attribute
   public minRange: number = 0
+  @attribute
   public maxRange: number = 2.2
+  @attribute
   public weight: number = 1
+  @attribute
   public cooldown: number = 0
+  @attribute
   public phase: number = 0
+  @attribute
   public trackSeconds: number = 0.45
+  @attribute
   public lungeStart: number = 0
+  @attribute
   public lungeSeconds: number = 0
+  @attribute
   public lungeSpeed: number = 0
+  @attribute
   public lungeToTarget: boolean = false
   /** No flinch while this attack plays (poise breaks still stagger). */
+  @attribute
   public hyperArmor: boolean = false
   /** Attack that follows immediately, without a gap, when the player is still in its range. */
+  @attribute
   public comboNext: NodeName = ''
   /** Fallback active window (clip seconds) for a clip without `hit`/`hitEnd` events. */
+  @attribute
   public hitTime: number = 0.6
+  @attribute
   public activeSeconds: number = 0.15
   /** The swing bounces off walls (`blocksSwings` bodies). Off by default: AI swings beside walls a lot. */
+  @attribute
   public bounceOff: boolean = false
   /** Ground-slam radius. 0 is an ordinary swing. */
+  @attribute
   public aoeRadius: number = 0
   /** Effect template spawned at the enemy's feet on a slam. */
+  @attribute
   public impactTemplate: TemplateName = ''
   /** Projectile template; non-empty makes this a ranged attack. */
+  @attribute
   public projectileTemplate: TemplateName = ''
+  @attribute
   public projectileSpeed: number = 12
+  @attribute
   public projectileCount: number = 1
+  @attribute
   public spreadDeg: number = 0
   /** Sound cue played when the attack starts (a SoundNode name under Sounds). */
+  @attribute
   public sound: SoundName = 'Enemy Swing'
+  @attribute
   public isEnemyAttack: boolean = true
 }
