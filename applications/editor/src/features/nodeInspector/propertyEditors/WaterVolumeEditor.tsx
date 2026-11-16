@@ -533,6 +533,9 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
             <PropertyRow label='Choppiness' hint='Rounded swells (0) to sharp crests (1).' divider>
               <Slider value={node.choppiness} min={0} max={1} step={0.05} onChange={v => set('choppiness', v)} />
             </PropertyRow>
+            <PropertyRow label='Follow wind' hint='The scene’s Wind node raises and calms the waves: their height follows its speed against Wind speed.' divider>
+              <Toggle checked={node.followWind} onChange={v => set('followWind', v)} />
+            </PropertyRow>
             <PropertyRow label='Shore fade' hint='Metres from a shore over which the waves die down.' divider>
               <NumberInput value={node.shoreFade} min={0} step={0.5} onChange={v => set('shoreFade', v)} />
             </PropertyRow>

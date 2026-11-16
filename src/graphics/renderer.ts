@@ -507,7 +507,7 @@ export class Renderer {
                 get renderHeight() { return renderer._renderHeight; },
                 get renderWidth() { return renderer._renderWidth; },
                 ssrForward: () => this._ssrForwardParams(),
-            }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._subsystems)
+            }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems)
                 ?? createNullWater(),
         } satisfies RenderSubsystems);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on

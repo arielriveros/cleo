@@ -148,6 +148,7 @@ surface draws.
 | **Direction** | Degrees the waves travel toward: 0 is +Z, 90 is +X. |
 | **Height** | Multiplies the wave height the wind gives. |
 | **Choppiness** | Rounded swells (0) to sharp crests (1). |
+| **Follow wind** | The scene's Wind node raises and calms the waves: their height follows its speed against **Wind speed**, squared as a sea's does, up to twice as tall. Their length and direction stay as shaped. |
 | **Shore fade** | Metres from a shore over which the waves die down. |
 | **Swell** | Metres the whole surface rises and falls, so floating bodies bob even with no wind. 0: none. |
 | **Swell rate** | How many times a second the swell rises and falls. |

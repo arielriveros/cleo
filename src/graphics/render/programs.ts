@@ -52,6 +52,7 @@ import ScreenProgram from '../shaders/wgsl/screen.wgsl';
 import PixelUpscaleProgram from '../shaders/wgsl/pixelUpscale.wgsl';
 // A Water node's surface (render/water.ts).
 import WaterProgram from '../shaders/wgsl/water.wgsl';
+import WaterUnderwaterProgram from '../shaders/wgsl/waterUnderwater.wgsl';
 import PresentProgram from '../shaders/wgsl/present.wgsl';
 import OverlayCompositeProgram from '../shaders/wgsl/overlayComposite.wgsl';
 import DebugViewProgram from '../shaders/wgsl/debugView.wgsl';
@@ -165,7 +166,7 @@ export {
     VolumetricFogInjectProgram, VolumetricFogIntegrateProgram, VolumetricFogApplyProgram,
     GiReduceProgram, GiVisibilityProgram, GiRadianceProgram, GiIntegrateProgram, GiResolveProgram,
     GiAmbientCubeProgram, GiRescaleProgram, GiProbeOverlayProgram, GiStateStampProgram,
-    MovieAccumulateProgram, SpriteProgram, PixelUpscaleProgram, WaterProgram,
+    MovieAccumulateProgram, SpriteProgram, PixelUpscaleProgram, WaterProgram, WaterUnderwaterProgram,
 };
 
 // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
@@ -347,6 +348,8 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['pixelUpscale',                 PixelUpscaleProgram],
         // A Water node's surface tiles (render/water.ts). APPENDED.
         ['water',                        WaterProgram],
+        // The view from inside a Water node's water (render/water.ts). APPENDED.
+        ['waterUnderwater',              WaterUnderwaterProgram],
     ];
 }
 

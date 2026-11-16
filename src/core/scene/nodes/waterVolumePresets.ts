@@ -10,7 +10,7 @@ export type WaterVolumePreset = Preset<WaterVolumeOptions>;
 
 const BASE: WaterVolumeOptions = {
     density: 1000, linearDrag: 2.5, angularDrag: 1.5, waveAmplitude: 0.03, waveFrequency: 0.6,
-    windSpeed: 0, waveScale: 1, choppiness: 0.5, shoreFade: 6, currents: true,
+    windSpeed: 0, waveScale: 1, choppiness: 0.5, shoreFade: 6, currents: true, followWind: false,
 };
 
 export const WATER_VOLUME_PRESETS: WaterVolumePreset[] = definePresets(BASE, [

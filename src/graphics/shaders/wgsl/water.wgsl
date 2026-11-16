@@ -102,6 +102,8 @@ struct VertexOutput {
     @location(2) rest: vec3<f32>,
     /** 1 on the tile's skirt, 0 on its surface. */
     @location(3) skirt: f32,
+    /** The resting surface's slope (rise over run): steep is a waterfall. */
+    @location(4) slope: f32,
 };
 
 // ---- the water info --------------------------------------------------------------------------------
@@ -158,6 +160,7 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
     var surface = u_wv.u_vOcean.x;
     var edge = 1e4;
     var share = 1.0;
+    var grad = vec2<f32>(0.0);
     let uvw = infoUvw(xz, u_wv.u_vInfoOrigin, u_wv.u_vInfoSize);
     if (u_wv.u_vInfoOrigin.w > 0.5 && (insideInfo(uvw) || u_wv.u_vOcean.y < 0.5)) {
         let i0 = textureSampleLevel(u_info0_texture, u_info0_sampler, clamp(uvw, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0);
@@ -165,6 +168,16 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
         surface = i0.x + u_wv.u_vInfoSize.z;
         edge = i0.w;
         share = i1.x;
+        // The resting surface's own slope, a cell either way: a river runs downhill, a waterfall drops.
+        let cell = u_wv.u_vInfoOrigin.z;
+        let du = vec3<f32>(1.0 / u_wv.u_vInfoSize.x, 0.0, 0.0);
+        let dv = vec3<f32>(0.0, 1.0 / u_wv.u_vInfoSize.y, 0.0);
+        let c = clamp(uvw, vec3<f32>(0.0), vec3<f32>(1.0));
+        let hx = textureSampleLevel(u_info0_texture, u_info0_sampler, clamp(c + du, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0).x
+               - textureSampleLevel(u_info0_texture, u_info0_sampler, clamp(c - du, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0).x;
+        let hz = textureSampleLevel(u_info0_texture, u_info0_sampler, clamp(c + dv, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0).x
+               - textureSampleLevel(u_info0_texture, u_info0_sampler, clamp(c - dv, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0).x;
+        grad = vec2<f32>(hx, hz) / (2.0 * cell);
     }
     // Shoaling: the waves die down toward the shore, as the CPU's waveHeight fades them.
     let fade = select(1.0, clamp(edge / max(u_wv.u_waveParams.w, 1e-3), 0.0, 1.0), u_wv.u_waveParams.w > 0.0);
@@ -181,7 +194,8 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
     // The skirt hangs straight down from the edge.
     p.y -= max(0.0, -position.y) * tile.w;
     out.worldPos = p;
-    out.normal = wave.normal;
+    out.normal = normalize(wave.normal + vec3<f32>(-grad.x, 0.0, -grad.y));
+    out.slope = length(grad);
     out.rest = vec3<f32>(xz, wave.compress);
     out.skirt = max(0.0, -position.y);
     out.position = u_wv.u_projection * u_wv.u_view * vec4<f32>(p, 1.0);
@@ -509,6 +523,17 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     foam = max(foam, smoothstep(0.35, 0.9, in.rest.z) * u_wf.u_foamParams.x);
     foam = max(foam, foamBake * u_wf.u_foamParams.y);
     foam = clamp(foam * foamTex * 1.2, 0.0, 1.0);
+    // A waterfall: where the surface drops steeply the water tumbles white, in streaks that run down the
+    // fall (along the flow, fast), thinning to clear sheets between them.
+    let fall = smoothstep(0.6, 1.6, in.slope) * u_wf.u_foamParams.y;
+    if (fall > 0.0) {
+        let along = select(vec2<f32>(0.0, 1.0), normalize(flow), length(flow) > 1e-3);
+        let across = vec2<f32>(-along.y, along.x);
+        let sx = dot(in.rest.xy, across);
+        let sy = dot(in.rest.xy, along);
+        let streak = valueNoise(vec2<f32>(sx * 3.0, sy * 0.6 - t * 3.5)) * 0.65 + valueNoise(vec2<f32>(sx * 9.0, sy * 1.5 - t * 6.0)) * 0.35;
+        foam = max(foam, fall * smoothstep(0.3, 0.7, streak));
+    }
     let foamLit = u_wf.u_foamColor.rgb * (u_wf.u_ambient.rgb + u_wf.u_sunColor.rgb * NoL) * pre * 0.32;
     color = mix(color, foamLit, foam * select(0.0, 1.0, front));
 

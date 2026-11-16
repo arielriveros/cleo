@@ -9,7 +9,8 @@ import { device } from '../rhi/deviceHandle';
 import { DirectionalLight } from '../lighting';
 import { skyAmbient } from '../particles/particleLighting';
 import { ShaderManager } from '../systems/shaderManager';
-import { WaterProgram } from './programs';
+import { WaterProgram, WaterUnderwaterProgram } from './programs';
+import type { FullscreenPasses } from './fullscreenPasses';
 import { sizedTarget } from './featureSubsystems';
 import { ViewProjection } from './viewProjection';
 import { buildWaterInfo, type GroundSampler, type WaterInfo } from '../../water/waterInfo';
@@ -85,6 +86,7 @@ export class WaterPasses {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
+                private readonly _fullscreen: FullscreenPasses,
                 private readonly _sys: RenderSubsystems) {}
 
     /** Draw every enabled, visible Water node's surface into the scene buffer. */
@@ -136,6 +138,7 @@ export class WaterPasses {
         sm.setUniform('u_envScale', env.scale);
         void viewProj;
 
+        let under: { node: WaterVolumeNode; level: number; look: WaterLook } | null = null;
         for (const node of nodes) {
             const water = this._waterOf(node, ground);
             const info = water.info;
@@ -146,6 +149,10 @@ export class WaterPasses {
             const tiles = this._tilesOf(node, info, oceanLevel, waves.reduce((s, w) => s + w.amplitude, 0) + node.waveAmplitude);
             if (!tiles.length) continue;
             this._nodeUniforms(node, info, oceanLevel, look, waves, t, scene);
+            if (!under) {
+                const c = cam.position, col = node.columnAt(c[0], c[2], t);
+                if (col && c[1] < col.surface && c[1] > col.floor - 1) under = { node, level: col.surface, look };
+            }
             pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
                 this._targets.sceneDepth.depth, fbo.colors[0], env.cube ?? this._bindGroups.fallbackCube,
                 water.tex0 ?? this._fallbackInfo(), water.tex1 ?? this._fallbackInfo(),
@@ -158,7 +165,37 @@ export class WaterPasses {
             }
         }
         this._passes.endFullscreenPass(pass);
+        if (under) this._underwater(under.level, under.look, scene);
     }
+
+    /**
+     * The camera is in the water: fog, tint and caustics over everything drawn so far, the surface seen
+     * from below included (so its depth is copied in first).
+     */
+    private _underwater(level: number, look: WaterLook, scene: Scene): void {
+        const w = this._host.renderWidth, h = this._host.renderHeight;
+        this._passes.copyDepth(this._targets.scene.depth, this._targets.sceneDepth.depth, w, h);
+        const fbo = this._targets.refraction!;
+        this._passes.copyColors([this._targets.scene.colors[0]], [fbo.colors[0]], w, h);
+        const { sunColor, ambient, sunDir } = this._light(scene);
+        const k = this._view.preExposure;
+        const sunUp = Math.max(0, sunDir[1]);
+        const light = [0, 1, 2].map(i => (ambient[i] + sunColor[i] * sunUp * 0.5) * k);
+        const sm = this._shaderManager;
+        const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'water.underwater', false, undefined, false);
+        this._fullscreen.bind(pass, 'waterUnderwater', WaterUnderwaterProgram, [fbo.colors[0], this._targets.sceneDepth.depth]);
+        sm.bind('waterUnderwater');
+        const cam = this._view.camera.position;
+        sm.setUniform('u_invViewProj', this._projection.uvConsuming(this._invScratch, this._view.invViewProjStable));
+        sm.setUniform('u_camera', [cam[0], cam[1], cam[2], level]);
+        sm.setUniform('u_fog', [look.underwaterColor[0] * light[0], look.underwaterColor[1] * light[1], look.underwaterColor[2] * light[2], look.underwaterFog]);
+        sm.setUniform('u_absorb', [look.absorption[0] * 0.5, look.absorption[1] * 0.5, look.absorption[2] * 0.5, this._view.windTime]);
+        sm.setUniform('u_sun', [sunDir[0], sunDir[1], sunDir[2], look.caustics]);
+        sm.setUniform('u_causticScale', [look.causticsScale, Math.min(this._view.camera.far, 500), 0, 0]);
+        this._passes.drawFullscreenAndEnd(pass);
+    }
+
+    private readonly _invScratch = mat4.create();
 
     // ---- per node ---------------------------------------------------------------------------------
 
@@ -181,7 +218,7 @@ export class WaterPasses {
         }
         sm.setUniform('u_waveDir', dir);
         sm.setUniform('u_wavePhase', phase);
-        sm.setUniform('u_waveParams', [n, t, 1, node.shoreFade]);
+        sm.setUniform('u_waveParams', [n, t, node.waveWindScale(), node.shoreFade]);
         sm.setUniform('u_swell', [node.waveAmplitude, node.waveFrequency, 0, 0]);
         const cam = this._view.camera.position;
         sm.setUniform('u_vCamera', [cam[0], cam[1], cam[2], 1500]);

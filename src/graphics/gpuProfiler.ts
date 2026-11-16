@@ -68,6 +68,7 @@ export const RENDER_PASSES = [
     'fluidVolumes',
     // A Water node's surface (render/water.ts), just before the transparents.
     'water',
+    'water.underwater',
     // Froxel fog for VolumetricFogNode: lit, integrated and composited over the opaque scene.
     'volumetricFog',
     'transparent',

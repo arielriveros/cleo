@@ -2,7 +2,7 @@ import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { finiteOr } from "../../math";
 import { gerstnerWavesForWind, type GerstnerWave } from "../../../physics/water/gerstner";
-import { windFieldClock } from "../../wind/windField";
+import { windFieldClock, WIND_REFERENCE_SPEED } from "../../wind/windField";
 /** What the water reads back from a body it buoyed: where it is and how it moves. */
 type FloatingBody = { position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number } };
 import { Node } from "./node";
@@ -48,6 +48,11 @@ export interface WaterVolumeOptions {
     shoreFade?: number;
     /** Whether flowing water (rivers) carries floating bodies along. */
     currents?: boolean;
+    /**
+     * Whether the scene's Wind node raises and calms the waves: their height follows the wind's speed
+     * against {@link windSpeed} (squared, as a sea's does), 0..2x. Their length and direction stay.
+     */
+    followWind?: boolean;
     /** The Water material the surface is drawn with (an embedded copy); null = the engine default look. */
     waterMaterial?: any;
     /** Editor-side link to the Material library asset that copy was taken from. */
@@ -108,6 +113,7 @@ export class WaterVolumeNode extends Node {
     private _choppiness: number;
     private _shoreFade: number;
     private _currents: boolean;
+    private _followWind: boolean;
     private _waterMaterial: WaterMaterial | null;
     private _waterMaterialId: string | null;
     private _bakeId: string | null;
@@ -155,6 +161,7 @@ export class WaterVolumeNode extends Node {
         this._choppiness = Math.min(1, Math.max(0, finiteOr(options.choppiness, 0.5)));
         this._shoreFade = Math.max(0, finiteOr(options.shoreFade, 6));
         this._currents = options.currents !== false;
+        this._followWind = !!options.followWind;
         this._waterMaterial = WaterVolumeNode._parseMaterial(options.waterMaterial);
         this._waterMaterialId = typeof options.waterMaterialId === 'string' && options.waterMaterialId ? options.waterMaterialId : null;
         this._bakeId = typeof options.bakeId === 'string' && options.bakeId ? options.bakeId : null;
@@ -232,6 +239,23 @@ export class WaterVolumeNode extends Node {
     public set choppiness(v: number) { this._choppiness = Math.min(1, Math.max(0, finiteOr(v, this._choppiness))); this._shapesChanged('choppiness'); }
     public get shoreFade(): number { return this._shoreFade; }
     public set shoreFade(v: number) { this._shoreFade = Math.max(0, finiteOr(v, this._shoreFade)); this._shapesChanged('shoreFade'); }
+    public get followWind(): boolean { return this._followWind; }
+    public set followWind(v: boolean) { this._followWind = !!v; this._notifyChange('component', 'followWind'); }
+
+    /**
+     * What the waves' height is multiplied by right now: 1, or with {@link followWind} the scene wind's
+     * speed against the wind the waves were shaped for, squared, 0..2. The renderer and the physics both
+     * read it, so a calm that flattens the drawn sea flattens the one bodies ride too.
+     */
+    public waveWindScale(): number {
+        if (!this._followWind || !(this._windSpeed > 0)) return 1;
+        const wind = (this._scene as any)?.wind;
+        if (!wind || wind.enabled === false) return 0;
+        const speed = Math.max(0, Number(wind.strength) || 0) * WIND_REFERENCE_SPEED;
+        const r = speed / this._windSpeed;
+        return Math.min(2, r * r);
+    }
+
     public get currents(): boolean { return this._currents; }
     public set currents(v: boolean) { this._currents = !!v; this._notifyChange('component', 'currents'); }
     /** The Water material drawing the surface, or null for the default look. */
@@ -368,7 +392,7 @@ export class WaterVolumeNode extends Node {
             linearDrag: this._linearDrag, angularDrag: this._angularDrag, affectCharacters: this._affectCharacters,
             waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
             shapes: plainBox ? undefined : shapes,
-            waves, waveScale: 1, shoreFade: this._shoreFade, currents: this._currents,
+            waves, waveScale: this.waveWindScale(), shoreFade: this._shoreFade, currents: this._currents,
         };
     }
 
@@ -506,6 +530,7 @@ export class WaterVolumeNode extends Node {
                 waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
                 windSpeed: this._windSpeed, waveDirection: this._waveDirection, waveScale: this._waveScale,
                 choppiness: this._choppiness, shoreFade: this._shoreFade, currents: this._currents,
+                ...(this._followWind ? { followWind: true } : {}),
                 ...(this._waterMaterial ? { waterMaterial: this._waterMaterial.serialize() } : {}),
                 ...(this._waterMaterialId ? { waterMaterialId: this._waterMaterialId } : {}),
                 ...(this._bakeId ? { bakeId: this._bakeId } : {}),
