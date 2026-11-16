@@ -1,4 +1,4 @@
-import { CameraRigNode, Game, Input, ModelNode, Node } from 'cleo'
+import { CameraRigNode, Game, Input, ModelNode, Node, onAction } from 'cleo'
 import type { Animator } from 'cleo'
 import FpsCombatantNode from '@/FPS/Scripts/FpsCombatant'
 import { WEAPONS, aimDirection, approach, clamp, combatantOf, findByVariable, findDescendant, lerp, manager, playCue } from '@/FPS/Scripts/FpsShared'
@@ -167,7 +167,6 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     this._rig.pitchSensitivity = this._basePitchSens * sens
 
     // ----- weapons
-    this._switching()
     this._reloadInput()
     this._fireInput()
     this._recover(delta)
@@ -220,22 +219,34 @@ export default class FpsPlayerNode extends FpsCombatantNode {
 
   private _equipUntil(): number { return this._busyUntil }
 
-  private _switching(): void {
-    let to = -1
-    if (Input.started('Slot1')) to = 0
-    else if (Input.started('Slot2')) to = 1
-    else if (Input.started('Slot3')) to = 2
-    else if (Input.started('NextWeapon')) to = this.weaponIndex + 1
-    else if (Input.started('PrevWeapon')) to = this.weaponIndex - 1
+  @onAction('Slot1')
+  private _slot1(): void { this._switchTo(0) }
+  @onAction('Slot2')
+  private _slot2(): void { this._switchTo(1) }
+  @onAction('Slot3')
+  private _slot3(): void { this._switchTo(2) }
+  @onAction('NextWeapon')
+  private _nextWeapon(): void { this._switchTo(this.weaponIndex + 1) }
+  @onAction('PrevWeapon')
+  private _prevWeapon(): void { this._switchTo(this.weaponIndex - 1) }
+
+  private _switchTo(to: number): void {
     if (to < 0 || to >= 99) return
     to = ((to % this._slots.length) + this._slots.length) % this._slots.length
     if (to !== this.weaponIndex && this._slots[to]) this._select(to)
   }
 
+  @onAction('Reload')
+  private _onReload(): void { this._tryReload(true) }
+
+  /** Reload on the press of Reload, or on a trigger pull with an empty magazine. */
   private _reloadInput(): void {
+    this._tryReload(this.ammo <= 0 && Input.started('Fire'))
+  }
+
+  private _tryReload(want: boolean): void {
     const spec = this.spec
     if (this.reloading || this._time < this._busyUntil) return
-    const want = Input.started('Reload') || (this.ammo <= 0 && Input.started('Fire'))
     if (want && this.ammo < spec.mag && this.reserve > 0) this._reload()
   }
 

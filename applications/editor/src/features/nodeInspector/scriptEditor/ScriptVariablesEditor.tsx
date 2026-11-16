@@ -30,6 +30,8 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
   const visible: ScriptVarSchema[] = (asset?.variables ?? []).filter(v => !v.hidden)
   // Internal (`_`) fields are never shown, but one tagged @save is still part of what a save keeps: named.
   const hiddenSaved = (asset?.variables ?? []).filter(v => v.hidden && v.save).map(v => v.name)
+  // @child / @find fields: filled with a node by the engine, so shown as what they look for, not as values.
+  const refs = (asset?.variables ?? []).filter(v => v.ref)
 
   const sync = () => {
     const n = props.node as any
@@ -150,6 +152,8 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
         })}
         {hiddenSaved.length > 0 &&
           <p className='text-ui-sm text-dim' title='Internal fields the script tags @save'>Also saved: {hiddenSaved.join(', ')}</p>}
+        {refs.length > 0 &&
+          <p className='text-ui-sm text-dim' title='Fields the script marks @child or @find: the engine fills each with that node before the script starts'>Finds: {refs.map(v => v.name.replace(/^_/, '') + ' → ' + v.ref!.name).join(', ')}</p>}
       </div>
     </Collapsable>
   )

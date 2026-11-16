@@ -47,6 +47,19 @@ export type TriggerName = [keyof ProjectTriggers] extends [never]
     : Extract<keyof ProjectTriggers, string> | '';
 
 /**
+ * The input actions a project's input map declares, one key each: bare (`Jump`) and qualified by their map
+ * (`Gameplay/Jump`). Empty here, so an action is any string; the editor augments it for a project's scripts
+ * (the generated `.cleo/types/project.d.ts`), which turns {@link ActionName} into exactly those names.
+ */
+export interface ProjectActions {}
+
+/** An input action's name, as `@onAction` and `Input` take it. In a project's scripts, one its input map declares. */
+export type ActionName = [keyof ProjectActions] extends [never] ? string : Extract<keyof ProjectActions, string>;
+
+/** What a `@pick` field names, so the inspector offers that node's valid names (see the name types above). */
+export type ScriptPickKind = 'clip' | 'sound' | 'socket' | 'template' | 'node' | 'trigger' | 'spriteClip';
+
+/**
  * Name of the group, directly under an owner (a character, a prop, a weapon), that holds its SoundNodes.
  * A {@link SoundName} field picks from the nearest such group at or above the node.
  */

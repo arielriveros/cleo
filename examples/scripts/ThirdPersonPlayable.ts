@@ -1,5 +1,4 @@
-import { CharacterNode, Logger } from 'cleo'
-import type { ActionState } from 'cleo'
+import { CharacterNode, Logger, onAction } from 'cleo'
 
 /**
  * Third-person STRAFE character — attach to the "Playable" root, on a **Character** node.
@@ -45,10 +44,11 @@ export default class ThirdPersonPlayableNode extends CharacterNode {
     Logger.log(this.name + ' ready', 'Script')
   }
 
-  onAction(action: string, state: ActionState) {
-    // `Jump` is handled by the Character itself - the Controller raises it as a buffered request and
-    // locomotion consumes it, which is what gives it coyote time and jump buffering for free. This
-    // handler is for the game's own verbs.
-    if (action === 'Interact' && state.started) Logger.log(this.name + ' interacted', 'Script')
+  // `Jump` is handled by the Character itself - the Controller raises it as a buffered request and
+  // locomotion consumes it, which is what gives it coyote time and jump buffering for free. A method
+  // like this one is for the game's own verbs: it runs when the action is pressed.
+  @onAction('Interact')
+  interact() {
+    Logger.log(this.name + ' interacted', 'Script')
   }
 }

@@ -1,4 +1,4 @@
-import { Logger, Node } from 'cleo'
+import { Logger, Node, options, find } from 'cleo'
 import type { TemplateName } from 'cleo'
 
 /**
@@ -6,7 +6,7 @@ import type { TemplateName } from 'cleo'
  * rotate it) where the enemy should stand, and it instantiates `templateName` there.
  *
  * `spawnables` is the list of templates a spawn may make, edited once in the template; each placed copy
- * picks one of them for `templateName` from a dropdown in the inspector (its `@options` tag).
+ * picks one of them for `templateName` from a dropdown in the inspector (its `@options` decorator).
  *
  * Enemies are TEMPLATES spawned at runtime rather than placed nodes, because resting at a bonfire must
  * bring every one of them back fresh — a placed node would need every field it ever changed restored by
@@ -19,10 +19,8 @@ import type { TemplateName } from 'cleo'
 export default class SoulsEnemySpawnNode extends Node {
   /** The templates a spawn may create. Edit the list in the Enemy Spawn template. */
   public spawnables: TemplateName[] = ['Hollow', 'Hollow Sorcerer', 'Elite Knight', 'Hollow Warden']
-  /**
-   * Which of `spawnables` this spawn creates.
-   * @options spawnables
-   */
+  /** Which of `spawnables` this spawn creates. */
+  @options('spawnables')
   public templateName: string = 'Hollow'
   public isBossSpawn: boolean = false
   /**
@@ -33,11 +31,11 @@ export default class SoulsEnemySpawnNode extends Node {
   /** Seconds after the scene starts before the first spawn — lets the level settle first. */
   public initialDelay: number = 0.1
 
+  @find('GameManager')
   private _gm: Node = null
   private _live: Node = null
 
   onStart() {
-    this._gm = this.findNode('GameManager')
     ;(this._gm as any)?.registerSpawn?.(this)
     this.after(this.initialDelay, () => this.respawnEnemy())
   }

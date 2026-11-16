@@ -79,6 +79,10 @@ Layout helpers: `uiSetRect`, `uiSolveRect`, `uiRootScale`, `uiProjectToScreen`, 
 | `setScriptProvider`, `resolveNodeScript` | The no-eval path a published build uses. |
 | `attachScriptFactory`, `unwrapScriptNode` | Bind a factory to a node. |
 | `getData`, `setData`, `bindDataAccessors`, `canAccessVariable` | The variable access boundary. |
+| `child`, `find`, `onAction`, `onHold`, `onTap`, `onEvent`, `every`, `onEnter`, `onExit`, `save`, `options`, `pick` | Script decorators. See [Decorators](../scripting/decorators.md). |
+| `GameEvents` | Named messages between scripts: `emit`, `on`, `off`. What `@onEvent` listens to. |
+| `applyScriptDecorators`, `scriptMembersOf`, `membersOfNode` | What the script compile calls, and how the engine reads a class's decorators back. |
+| `ActionName` / `ProjectActions` / `ScriptPickKind` *(types)* | An input action's name, checked against the project's input map. |
 | `SaveGame` | Save slots, globals, loading and migrations. See [Saving and loading](../scripting/save-game.md). |
 | `setSaveStore`, `getSaveStore` | Install where saves go (hosts: the player, the editor's Play). |
 | `createIndexedDbSaveStore`, `createBridgeSaveStore`, `createMemorySaveStore`, `createTextSaveStore` | The stores: browser storage, a desktop game's files, memory, any text backend. |

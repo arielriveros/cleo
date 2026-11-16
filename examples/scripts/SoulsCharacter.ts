@@ -1,4 +1,4 @@
-import { CharacterNode, Logger, ModelNode, Node, Shape, moveWorldDirection, resolveSocketOwner, setMoveWorld } from 'cleo'
+import { CharacterNode, Logger, ModelNode, Node, Shape, moveWorldDirection, resolveSocketOwner, setMoveWorld, find } from 'cleo'
 import type { AnimationTriggerInfo, Animator, SocketName, TemplateName, TriggerName } from 'cleo'
 import { clamp } from '@/Core/Scripts/SoulsMath'
 import { bladeCapsule, disarmHitbox, ensureHurtbox, setHurtboxEnabled } from '@/Core/Scripts/SoulsHitbox'
@@ -91,6 +91,7 @@ export default class SoulsCharacterNode extends CharacterNode {
    */
   public hurtboxActive: boolean = true
 
+  @find('GameManager')
   protected _gm: Node = null
   /** The skinned model whose animator plays this character (the subclass finds it on start). */
   protected _model: ModelNode = null

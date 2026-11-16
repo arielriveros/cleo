@@ -75,7 +75,11 @@ field can be picked rather than typed:
   picked, never typed. The script and VS Code editors check every `TriggerName` (and `setTrigger`'s
   argument) against the triggers the project's animators declare, so a misspelt one is an error;
 - typed as a literal union (`'a' | 'b'`), it offers those choices;
-- tagged `/** @options listField */`, it offers the entries of that list field.
+- decorated `@options('listField')` (or tagged `/** @options listField */`), it offers the entries of that list field;
+- decorated `@pick('clip')` (or tagged `/** @pick clip */`), it offers the names of that kind.
+
+See [Decorators](../scripting/decorators.md). Fields decorated `@child` or `@find` are filled with a node by the
+engine and shown as `Finds: field → Name`, not as values.
 
 A leading `_` keeps a field internal and out of the panel. Give any other state that prefix: a field
 of another type would be shown as one of these.

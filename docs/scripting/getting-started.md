@@ -113,6 +113,9 @@ The defaults you write are harvested once and used as the starting value; a per-
 in the inspector overrides it and is saved with the scene. Changing a default in code changes only
 the nodes that have never had that field edited.
 
+Decorators (`@save`, `@options`, `@pick`) mark fields for saves and pickers, and `@child` / `@find` fill a field
+with a node: see [Decorators](decorators.md).
+
 Supported field types are `number`, `string`, `boolean` and `vec3`. Anything else is fine as
 private state but will not appear in the inspector.
 

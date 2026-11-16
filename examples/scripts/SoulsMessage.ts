@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, find } from 'cleo'
 
 /**
  * Hollow Keep — a readable message on the ground: tutorial hints and lore. Attach to the message's root
@@ -12,10 +12,10 @@ export default class SoulsMessageNode extends Node {
   public text: string = 'Try rolling.'
   public hiddenUntilRevealed: boolean = false
 
+  @find('GameManager')
   private _gm: Node = null
 
   onStart() {
-    this._gm = this.findNode('GameManager')
     if (this.hiddenUntilRevealed) this.visible = false
     else (this._gm as any)?.registerInteractable?.(this)
   }

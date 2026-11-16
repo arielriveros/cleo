@@ -1,4 +1,4 @@
-import { Game, Input, Logger, Node, SaveGame } from 'cleo'
+import { Game, Input, Logger, Node, SaveGame, save, find, child } from 'cleo'
 import type { TemplateName } from 'cleo'
 import { clamp, forwardYaw, num } from '@/Core/Scripts/SoulsMath'
 import { playSound, stopSound } from '@/Core/Scripts/SoulsAudio'
@@ -95,27 +95,32 @@ export default class SoulsGameManagerNode extends Node {
 
   // ----- runtime state (read by the HUD, which reads the boss's own name and health off `boss`) ----
   public bossActive: boolean = false
-  /** @save */
+  @save
   public bossDefeated: boolean = false
   /** The slot a bonfire saves to, and Continue loads. */
   public saveSlot: string = 'auto'
 
+  @find('Player')
   private _player: Node = null
   private _hud: Node = null
-  private _banner: Node = null
+  @child('Banner')
+  private _banner?: Node
   private _menu: Node = null
   private _lockOn: Node = null
   private _enemies: Node[] = []
   private _interactables: Node[] = []
   private _spawns: Node[] = []
   private _bonfires: Node[] = []
-  /** @save The bonfire last rested at (or lit). */
+  /** The bonfire last rested at (or lit). */
+  @save
   private _restBonfire: Node = null
-  /** @save Where, and facing where, the player stands up again. */
+  /** Where, and facing where, the player stands up again. */
+  @save
   private _respawnPoint: number[] = null
-  /** @save */
+  @save
   private _respawnYaw: number = 0
-  /** @save The stain of the last death, until its souls are taken back. */
+  /** The stain of the last death, until its souls are taken back. */
+  @save
   private _bloodstain: Node = null
   private _bloodDecals: Node[] = []
   private _boss: Node = null
@@ -123,12 +128,10 @@ export default class SoulsGameManagerNode extends Node {
   private _dying: boolean = false
 
   onStart() {
-    this._player = this.findNode('Player')
     // Every UI belongs to someone: the player's HUD and level-up menu are the PLAYER's children, the
     // world banners (YOU DIED, BONFIRE LIT, VICTORY) are this manager's own — the game flow it runs.
     this._hud = this._player?.getChildByName('HUD')[0] ?? null
     this._menu = this._player?.getChildByName('BonfireMenu')[0] ?? null
-    this._banner = this.getChildByName('Banner')[0] ?? null
     if (this.wasRestored && this._respawnPoint) {
       // A loaded game: the player stands up at the bonfire the save was made at, a frame from now, once the
       // player's own start has placed its body. Then whatever the boss's fall left behind is shown again.

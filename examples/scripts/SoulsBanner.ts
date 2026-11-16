@@ -1,4 +1,4 @@
-import { Node, UIRootNode, UITextNode } from 'cleo'
+import { Node, UIRootNode, UITextNode, child } from 'cleo'
 
 /**
  * Hollow Keep — the big centre-screen banners: YOU DIED, BONFIRE LIT, VICTORY ACHIEVED. Attach to the
@@ -17,12 +17,12 @@ export default class SoulsBannerNode extends UIRootNode {
   public redColor: [number, number, number] = [0.72, 0.08, 0.06]
   public goldColor: [number, number, number] = [0.96, 0.82, 0.46]
 
+  @child('BannerText')
   private _text: UITextNode = null
   private _age: number = -1
   private _sticky: boolean = false
 
   onStart() {
-    this._text = this._find('BannerText') as UITextNode
     this.visible = false
   }
 
@@ -58,17 +58,5 @@ export default class SoulsBannerNode extends UIRootNode {
       this._age = -1
       this.visible = false
     }
-  }
-
-  private _find(name: string): Node {
-    const walk = (node: Node): Node => {
-      for (const child of node.children) {
-        if (child.name === name) return child
-        const found = walk(child)
-        if (found) return found
-      }
-      return null
-    }
-    return walk(this)
   }
 }

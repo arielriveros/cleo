@@ -112,6 +112,11 @@ export type ScriptVarSchema = {
    * field's doc comment. The build lists these per node as `saveFields`.
    */
   save?: true
+  /**
+   * A `@child('Name')` / `@find('Name')` field: the engine fills it with a node before `onStart`. Never an
+   * inspector value, so it is hidden (and so never seeded or saved).
+   */
+  ref?: { kind: 'child' | 'find'; name: string }
 }
 
 /** The kinds of name a `pick` field can hold. Mirrors the engine's ClipName / SoundName / ... types. */
@@ -200,6 +205,61 @@ function keepFieldTags(src: string): string {
     if (/(^|[\s*])@save(?![\w$])/.test(c)) tags.push('@save:')
     return tags.length ? `${tags.join(' ')} ` : c
   })
+}
+
+type FieldRef = { kind: 'child' | 'find'; name: string }
+
+// `@name`, optionally with a call whose first argument is a string literal: `@pick('clip')`, `@options("list")`.
+const DECORATOR = /(?<![\w$'"`])@([A-Za-z_$][\w$]*)(?![\w$:])/g
+
+/** Index just past the `(...)` group opening at `open`, stepping over string literals; -1 if it never closes. */
+function endOfCall(src: string, open: number): number {
+  let depth = 0
+  for (let i = open; i < src.length; i++) {
+    const c = src[i]
+    if (c === '"' || c === "'" || c === '`') {
+      for (i++; i < src.length && src[i] !== c; i++) if (src[i] === '\\') i++
+      continue
+    }
+    if (c === '(') depth++
+    else if (c === ')' && --depth === 0) return i + 1
+  }
+  return -1
+}
+
+/**
+ * Turn the member decorators (`@save`, `@options('list')`, `@pick('clip')`, `@child('Muzzle')`, `@find('GM')`)
+ * into the same bare tokens keepFieldTags writes, so the field they decorate is reflected like one carrying
+ * the doc-comment tags. Run on comment-stripped source. `@child` / `@find` names go in `refs`, the token
+ * holding an index (a name may hold spaces). Any other decorator (`@onAction`, a user one) is dropped.
+ */
+function keepDecorators(src: string, refs: FieldRef[]): string {
+  if (!src.includes('@')) return src
+  let out = ''
+  let last = 0
+  DECORATOR.lastIndex = 0
+  for (let m: RegExpExecArray | null; (m = DECORATOR.exec(src));) {
+    let end = m.index + m[0].length
+    let args = ''
+    let open = end
+    while (/\s/.test(src[open] ?? '')) open++
+    if (src[open] === '(') {
+      const close = endOfCall(src, open)
+      if (close < 0) continue
+      args = src.slice(open + 1, close - 1)
+      end = close
+    }
+    const name = m[1]
+    const arg = /^\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/.exec(args)?.[2]
+    let token = ' '
+    if (name === 'save') token = '@save: '
+    else if ((name === 'options' || name === 'pick') && arg && /^[A-Za-z_$][\w$]*$/.test(arg)) token = `@${name}:${arg} `
+    else if ((name === 'child' || name === 'find') && arg) { refs.push({ kind: name, name: arg }); token = `@ref:r${refs.length - 1} ` }
+    out += src.slice(last, m.index) + token
+    last = end
+    DECORATOR.lastIndex = end
+  }
+  return out + src.slice(last)
 }
 
 /**
@@ -351,7 +411,8 @@ const MODIFIER_KEYWORDS = new Set(['public', 'private', 'protected', 'readonly',
  * simply not reflected.
  */
 export function parseScriptVariables(source: string): ScriptVarSchema[] {
-  const body = classBody(stripComments(keepFieldTags(source)))
+  const refs: FieldRef[] = []
+  const body = classBody(keepDecorators(stripComments(keepFieldTags(source)), refs))
   if (!body) return []
 
   const out: ScriptVarSchema[] = []
@@ -360,6 +421,7 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
   let pendingOptions: string | undefined
   let pendingPick: string | undefined
   let pendingSave = false
+  let pendingRef: FieldRef | undefined
 
   // Walk statements at class-body depth 0, tracking brace/paren depth so method bodies and
   // object/array initializers are skipped as single units.
@@ -370,16 +432,19 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
     let stmt = body.slice(stmtStart, end).trim()
     stmtStart = end + 1
     // A comment ending on the field's own line leaves its tags in front of the declaration.
-    for (let tag; (tag = /^@(options|pick|save):([A-Za-z_$][A-Za-z0-9_$]*)?\s*/.exec(stmt));) {
+    for (let tag; (tag = /^@(options|pick|save|ref):([A-Za-z_$][A-Za-z0-9_$]*)?\s*/.exec(stmt));) {
       if (tag[1] === 'options' && tag[2]) pendingOptions = tag[2]
       else if (tag[1] === 'pick' && tag[2]) pendingPick = tag[2]
       else if (tag[1] === 'save') pendingSave = true
+      else if (tag[1] === 'ref' && tag[2]) pendingRef = refs[Number(tag[2].slice(1))]
       stmt = stmt.slice(tag[0].length)
     }
     if (!stmt) return
     const options = pendingOptions
     const tagPick = pendingPick
     const save = pendingSave
+    const ref = pendingRef
+    pendingRef = undefined
     pendingOptions = pendingPick = undefined
     pendingSave = false
 
@@ -417,12 +482,13 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
       type,
       access,
       default: def ?? (choices?.length ? choices[0] : typeDefault(type)),
-      hidden: name.startsWith('_'),
+      hidden: name.startsWith('_') || !!ref,
       // Only a string can be picked from a list.
       ...(options && type === 'string' ? { options } : {}),
       ...(pick && isText ? { pick } : {}),
       ...(choices ? { choices } : {}),
       ...(save ? { save: true as const } : {}),
+      ...(ref ? { ref } : {}),
     })
   }
 
@@ -464,8 +530,7 @@ export function scriptClassName(name: string): string {
  * Controller one shows `onThink` writing intent, which is the whole extension point for custom AI.
  */
 const CONTROL_STARTERS: Partial<Record<ScriptBaseType, (className: string, base: string) => string>> = {
-  character: (className, base) => `import { Logger, ${base} } from 'cleo'
-import type { ActionState } from 'cleo'
+  character: (className, base) => `import { Logger, onAction, ${base} } from 'cleo'
 
 // ${className} runs on a Character — a pawn whose walking, turning and jumping the ENGINE owns.
 //
@@ -484,8 +549,10 @@ export default class ${className} extends ${base} {
     if (this.planarSpeed > 0.1 && !this.isGrounded) Logger.log(this.name + ' is airborne', 'Script')
   }
 
-  onAction(action: string, state: ActionState) {
-    if (action === 'Interact' && state.started) Logger.log(this.name + ' interacted', 'Script')
+  // Runs when the Interact action is pressed (an action authored in the Input panel).
+  @onAction('Interact')
+  interact() {
+    Logger.log(this.name + ' interacted', 'Script')
   }
 }
 `,
@@ -617,9 +684,9 @@ ${body}
 `
   }
 
-  const imports = base === 'Node' ? 'Input, Logger, Node' : `Input, Logger, Node, ${base}`
+  const imports = base === 'Node' ? 'Input, Logger, Node, onAction' : `Input, Logger, Node, onAction, ${base}`
   return `import { ${imports} } from 'cleo'
-import type { ActionState } from 'cleo'
+
 
 // ${className} runs on every node this script is attached to. Handlers are method overrides; class fields are
 // the node's variables — public/private/protected controls inspector visibility & cross-node access, and a
@@ -648,9 +715,10 @@ export default class ${className} extends ${base} {
     this._elapsed += delta
   }
 
-  // Fires when an action changes phase. state.started is true on exactly the frame of the press.
-  onAction(action: string, state: ActionState) {
-    if (action === 'Jump' && state.started) Logger.log(this.name + ' jumped', 'Script')
+  // Runs on the frame the Jump action is pressed. Pass 'released' as a second argument for the release.
+  @onAction('Jump')
+  jump() {
+    Logger.log(this.name + ' jumped', 'Script')
   }
 
   onCollision(other: Node) {

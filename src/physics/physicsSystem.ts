@@ -3,7 +3,7 @@ import { logScriptError } from "../core/scripting/scriptErrors";
 import { Scene } from "../core/scene/scene";
 import { Node } from "../core/scene/nodes/node";
 import { ModelNode } from "../core/scene/nodes/modelNode";
-import { unwrapScriptNode } from "../core/scene/nodes/nodeScripting";
+import { unwrapScriptNode, routeTrigger } from "../core/scene/nodes/nodeScripting";
 import { quat, vec3 } from "gl-matrix";
 import { authoring } from "../core/eventBus";
 import { RigidBody, Trigger, triggerState } from "./body";
@@ -769,6 +769,7 @@ export class PhysicsSystem {
       for (const [self, other] of [[na, nb], [nb, na]] as [Node, Node][]) {
         try { self[hook](other); }
         catch (e) { logScriptError(`Error in ${hook} for node ${self.name}`, e, 'Script'); }
+        routeTrigger(self, phase, other);   // @onEnter / @onExit methods
       }
     }
     // Each Trigger side: its overlap count (the overlay's highlight) and its own listeners, which also hear

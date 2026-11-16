@@ -51,6 +51,15 @@ onAction(action: string, state: ActionState) {
 `onAction` fires just before that frame's `onUpdate`, only on nodes that actually override it, and
 there is nothing to unregister when the node despawns.
 
+To run one method per action instead of branching inside `onAction`, decorate it:
+
+```ts
+@onAction('Interact') interact() { … }                 // pressed
+@onAction('Interact', 'released') letGo() { … }        // released
+```
+
+See [Decorators](decorators.md#input-onaction).
+
 ```ts
 interface ActionState {
   kind: ActionKind          // 'button' | 'axis' | 'vector'

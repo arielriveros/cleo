@@ -14,7 +14,7 @@ import { logScriptError } from "../../scripting/scriptErrors";
 import { compileScript, resolveNodeScript } from "../../scripting/scriptRuntime";
 import { NodeType } from "./nodeType";
 import type { NodeVariable, NodeVariableType, NodeVariableAccess } from "./nodeVariables";
-import { attachScriptFactory } from "./nodeScripting";
+import { attachScriptFactory, fillScriptRefs, bindScriptLife, releaseScriptLife } from "./nodeScripting";
 import { parseChild } from "./childParser";
 import type { BVH } from "../../bvh";
 import type { ChangeKind } from "../../eventBus";
@@ -481,6 +481,7 @@ export class Node {
       // Before onDespawn, and before `scene` is cleared below: a pending this.after/this.every must not
       // fire against a node no longer in the tree.
       node.scene?.cancelTimers(node);
+      releaseScriptLife(node);
       try { node.onDespawn(); } catch (e) { logScriptError(`Error in onDespawn for node ${node.name}`, e, 'Runtime'); }
     }
     // Looked up AFTER onDespawn, never before it: a handler may remove or insert a sibling, and a slot read
@@ -789,6 +790,7 @@ export class Node {
         node._body.angularVelocity.set(0, 0, 0);
       }
       node._spawnNotified = true;
+      bindScriptLife(node);
       try { node.onSpawn(); } catch (e) { logScriptError(`Error in onSpawn for node ${node.name}`, e, 'Runtime'); }
     }
 
@@ -798,6 +800,7 @@ export class Node {
         if (node._hasStarted) continue;
         try {
           node._hasStarted = true;
+          fillScriptRefs(node, true);
           node.onStart();
         } catch (e) { logScriptError(`Error in onStart function for node ${node.name}`, e, 'Runtime'); }
       }
@@ -827,6 +830,7 @@ export class Node {
 
       // Before onDespawn: a pending this.after/this.every must not fire against a node that is going away.
       n._scene?.cancelTimers(n);
+      releaseScriptLife(n);
       try { n.onDespawn(); } catch (e) { logScriptError(`Error in onDespawn function for node ${n.name}`, e, 'Runtime'); }
 
       // PhysicsSystem walks scene.nodes, which no longer contains this node once the flag is cleared below,
@@ -882,7 +886,8 @@ export class Node {
     this._forEachInSubtree(n => {
       if (n._hasConstructed) return;
       n._hasConstructed = true;
-      try { n.onConstruct(); } catch (e) { logScriptError(`Error in onConstruct for node ${n.name}`, e, 'Runtime'); }
+      // `@child` / `@find` fields: the tree is complete and in the scene by now.
+      try { fillScriptRefs(n, false); n.onConstruct(); } catch (e) { logScriptError(`Error in onConstruct for node ${n.name}`, e, 'Runtime'); }
     });
   }
 
@@ -891,6 +896,7 @@ export class Node {
     this._forEachInSubtree(n => {
       if (!n._spawned || n._spawnNotified) return;
       n._spawnNotified = true;
+      bindScriptLife(n);   // @onEvent / @every / @onHold / @onTap, for as long as it is awake
       try { n.onSpawn(); } catch (e) { logScriptError(`Error in onSpawn for node ${n.name}`, e, 'Runtime'); }
     });
   }
@@ -935,6 +941,7 @@ export class Node {
       // Guarded so start() is idempotent — onStart is once per node lifetime.
       if (!this._hasStarted) {
         this._hasStarted = true;
+        fillScriptRefs(this, true);   // what was spawned since onConstruct; reports what is still missing
         this.onStart();
       }
       for (const child of this._children)

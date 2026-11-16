@@ -13,6 +13,9 @@ import { scriptSourceUrl, inlineScriptUrl } from './scriptUrls';
 // Leaves both: the optional features' registry and catalog, for what 'cleo' holds (see buildCleoModule).
 import { featuresVersion, liveFeatureApis, onFeaturesChanged, unavailableFeatureNames } from '../features/registry';
 import { featureById } from '../../modules/catalog';
+// Leaves too: the shared lexing, and the pass that turns decorators into a call the class runs on itself.
+import { IDENT_PART, IDENT_START, isValuePosition, skipRegex, skipString, skipTrivia } from './scriptLexer';
+import { lowerScriptDecorators } from './scriptDecoratorLowering';
 
 export type ScriptModule = Record<string, any>;
 
@@ -30,10 +33,14 @@ export function setScriptTranspiler(next: ScriptTranspiler | null): void {
     transpiler = next;
 }
 
+/**
+ * Script source to plain JS, imports kept. Decorators are lowered first (scriptDecoratorLowering.ts): the
+ * transpiler cannot handle them, and the JS engines scripts run on cannot parse them.
+ */
 function stripTypes(source: string): string {
     if (!transpiler)
         throw new Error('Scripts: this build compiles no script source (a published game runs its scripts precompiled)');
-    return transpiler(source);
+    return transpiler(lowerScriptDecorators(source));
 }
 
 /** Handlers a script may export. Anything else it exports is ignored. */
@@ -384,76 +391,6 @@ export function createModuleImporter(): (specifier: string) => ScriptModule {
 /* -------------------------------------------------------------------------- */
 /* Source transform                                                            */
 /* -------------------------------------------------------------------------- */
-
-const IDENT_START = /[A-Za-z_$]/;
-const IDENT_PART = /[A-Za-z0-9_$]/;
-
-// A `/` opens a regex literal only where a value is expected; after a value it is division. Judged by
-// the previous token: a keyword like `return` expects a value, an identifier or a closing bracket is one.
-const ENDS_A_VALUE = /[A-Za-z0-9_$)\]}`'"]/;
-const EXPECTS_A_VALUE = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await']);
-
-function isValuePosition(prevToken: string): boolean {
-    if (!prevToken) return true;
-    if (EXPECTS_A_VALUE.has(prevToken)) return true;
-    return !ENDS_A_VALUE.test(prevToken[prevToken.length - 1]);
-}
-
-/** Index just past the string/template literal starting at `start`. Templates may nest `${...}`. */
-function skipString(source: string, start: number): number {
-    const quote = source[start];
-    let i = start + 1;
-    while (i < source.length) {
-        const c = source[i];
-        if (c === '\\') { i += 2; continue; }
-        if (c === quote) return i + 1;
-        if (quote === '`' && c === '$' && source[i + 1] === '{') {
-            let depth = 1;
-            i += 2;
-            while (i < source.length && depth > 0) {
-                const inner = source[i];
-                if (inner === '{') depth++;
-                else if (inner === '}') depth--;
-                else if (inner === '"' || inner === "'" || inner === '`') { i = skipString(source, i); continue; }
-                i++;
-            }
-            continue;
-        }
-        i++;
-    }
-    return source.length;
-}
-
-/** Index just past the regex literal starting at `start` (a `/` already known to be in value position). */
-function skipRegex(source: string, start: number): number {
-    let i = start + 1;
-    let inClass = false;
-    while (i < source.length) {
-        const c = source[i];
-        if (c === '\\') { i += 2; continue; }
-        if (c === '\n') return start + 1;      // unterminated: it was division after all
-        if (c === '[') inClass = true;
-        else if (c === ']') inClass = false;
-        else if (c === '/' && !inClass) {
-            i++;
-            while (i < source.length && IDENT_PART.test(source[i])) i++;  // flags
-            return i;
-        }
-        i++;
-    }
-    return source.length;
-}
-
-function skipTrivia(source: string, i: number): number {
-    while (i < source.length) {
-        const c = source[i];
-        if (c === '/' && source[i + 1] === '/') { const nl = source.indexOf('\n', i); i = nl === -1 ? source.length : nl; continue; }
-        if (c === '/' && source[i + 1] === '*') { const end = source.indexOf('*/', i + 2); i = end === -1 ? source.length : end + 2; continue; }
-        if (/\s/.test(c)) { i++; continue; }
-        return i;
-    }
-    return i;
-}
 
 /** Keeps the rewritten source line-aligned with the author's, so error line numbers still mean something. */
 function padLines(original: string): string {

@@ -1,4 +1,4 @@
-import { Input, Logger, ModelNode, Node, moveWorldDirection, setMoveWorld } from 'cleo'
+import { Input, Logger, ModelNode, Node, moveWorldDirection, setMoveWorld, save, onAction } from 'cleo'
 import type { AnimationTriggerInfo, TemplateName, TriggerName } from 'cleo'
 import { clamp, num } from '@/Core/Scripts/SoulsMath'
 import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
@@ -65,15 +65,15 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public weaponTemplates: TemplateName[] = ['Longsword', 'Greatsword']
 
   // ----- stats (level-up spends souls on these four) — a save keeps them, and the souls ------------
-  /** @save */
+  @save
   public vigor: number = 10
-  /** @save */
+  @save
   public endurance: number = 10
-  /** @save */
+  @save
   public strength: number = 10
-  /** @save */
+  @save
   public dexterity: number = 10
-  /** @save */
+  @save
   public souls: number = 0
 
   // ----- resources (runtime; the HUD reads them) --------------------------------------------------
@@ -83,7 +83,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public stamina: number = 90
   public maxStamina: number = 90
   public estus: number = 3
-  /** @save Estus Shards raise it for good. */
+  /** Estus Shards raise it for good. */
+  @save
   public estusMax: number = 3
   /** HP restored per flask, spread over `estusHealSeconds`. */
   public estusHeal: number = 250
@@ -278,7 +279,6 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   onStart() {
     this.hearCollider()
     this.setVariable('isPlayer', true, 'boolean', 'public')
-    this._gm = this.findNode('GameManager')
     this._model = this._findModel()
     this._rig = this.children.find(c => c.nodeType === 'cameraRig') ?? null
     this._spawnWeapons()
@@ -1083,12 +1083,20 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   // ----- per-frame helpers -------------------------------------------------------------------------
 
+  // The presses that queue an action. They arrive just before this frame's onUpdate, and a dead player
+  // takes none (onUpdate would have ignored them too).
+  @onAction('LightAttack')
+  private _onLight(): void { if (!this.isDead) this._buffer('light') }
+  @onAction('HeavyAttack')
+  private _onHeavy(): void { if (!this.isDead) this._buffer('heavy') }
+  @onAction('UseItem')
+  private _onItem(): void { if (!this.isDead) this._buffer('item') }
+  @onAction('SwapWeapon')
+  private _onSwap(): void { if (!this.isDead) this._buffer('swap') }
+  @onAction('Interact')
+  private _onInteract(): void { if (!this.isDead && this._interactTarget) this._buffer('interact') }
+
   private _readInput(): void {
-    if (Input.started('LightAttack')) this._buffer('light')
-    if (Input.started('HeavyAttack')) this._buffer('heavy')
-    if (Input.started('UseItem')) this._buffer('item')
-    if (Input.started('SwapWeapon')) this._buffer('swap')
-    if (Input.started('Interact') && this._interactTarget) this._buffer('interact')
 
     // Roll is a TAP; holding it is sprint. So the roll fires on RELEASE, and only if this press never
     // turned into a sprint. `heldSeconds` reads 0 on the release frame, hence the copy kept while held.
