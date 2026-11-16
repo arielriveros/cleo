@@ -2,15 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { decodePng } from 'cleo/terrain/heightmapIO';
 import { fnv1a } from '../src/core/generator';
 import { inflateIdat } from '../src/core/png';
-import { applyLayer, blend } from '../src/world/features';
+import { applyLayer, blend, LAYER_DEFAULTS } from '../src/world/features';
 import { pipeErosion, thermalErosion, dropletErosion, type WorldFrame } from '../src/world/erosion';
 import { slopeMask, curvatureMask, d8FlowMask } from '../src/world/masks';
 import { exportWorld, generateWorld } from '../src/world/generateWorld';
 import { coastalRange, WORLD_PRESETS } from '../src/world/presets';
-import { defaultErosion, defaultLayer, type WorldDoc } from '../src/world/worldDoc';
+import { nodeType } from '../src/world/graph/nodeRegistry';
+import type { WorldDoc } from '../src/world/worldDoc';
 
 const small = (doc: WorldDoc, resolution = 65): WorldDoc => ({ ...doc, settings: { ...doc.settings, resolution } });
 const sum = (a: Float32Array) => a.reduce((s, v) => s + v, 0);
+/** `doc` with its erosion nodes switched off (they pass their input through). */
+const withoutErosion = (doc: WorldDoc): WorldDoc => ({
+  ...doc, graph: { ...doc.graph, nodes: doc.graph.nodes.map(n => (nodeType(n.type)?.category === 'erosion' ? { ...n, enabled: false } : n)) },
+});
 
 describe('World Creator generation', () => {
   it('is a deterministic function of the document and its seed', async () => {
@@ -33,8 +38,7 @@ describe('World Creator generation', () => {
   });
 
   it('carves the coastal preset into land, beach and sea', async () => {
-    const doc = small(coastalRange(), 97);
-    doc.erosion = [];
+    const doc = withoutErosion(small(coastalRange(), 97));
     const out = await generateWorld(doc);
     const res = out.frame.resolution;
     const sea = doc.settings.seaLevel;
@@ -57,13 +61,13 @@ describe('landform layers', () => {
 
   it('skips disabled layers', () => {
     const h = new Float32Array(33 * 33);
-    applyLayer(h, grid, { ...defaultLayer('mountain'), enabled: false });
+    applyLayer(h, grid, { ...LAYER_DEFAULTS.mountain(), enabled: false });
     expect(sum(h)).toBe(0);
   });
 
   it('raises a mountain at its centre and leaves the corners alone', () => {
     const h = new Float32Array(33 * 33);
-    applyLayer(h, grid, { ...defaultLayer('mountain'), ridges: 0, radius: 0.3 });
+    applyLayer(h, grid, { ...LAYER_DEFAULTS.mountain(), ridges: 0, radius: 0.3 });
     expect(h[16 * 33 + 16]).toBeGreaterThan(0.5);
     expect(h[0]).toBe(0);
   });
@@ -71,14 +75,14 @@ describe('landform layers', () => {
   it('never lets a river raise the ground', () => {
     const h = new Float32Array(33 * 33).fill(0.5);
     const before = h.slice();
-    applyLayer(h, grid, defaultLayer('river'));
+    applyLayer(h, grid, LAYER_DEFAULTS.river());
     expect(h.every((v, i) => v <= before[i] + 1e-7)).toBe(true);
     expect(Math.min(...h)).toBeLessThan(0.5);
   });
 
   it('flattens terraces only inside their band', () => {
     const h = Float32Array.from({ length: 33 * 33 }, (_, i) => i / (33 * 33));
-    const t = { ...defaultLayer('terrace'), minHeight: 0.2, maxHeight: 0.8 } as const;
+    const t = { ...LAYER_DEFAULTS.terrace(), minHeight: 0.2, maxHeight: 0.8 } as const;
     const out = h.slice();
     applyLayer(out, grid, t);
     for (let i = 0; i < h.length; i++) if (h[i] < 0.2 || h[i] > 0.8) expect(out[i]).toBe(h[i]);
@@ -103,7 +107,7 @@ describe('erosion', () => {
   });
 
   it('droplet erosion is seeded and deterministic', async () => {
-    const p = { ...defaultErosion('droplet').params, density: 400 } as any;
+    const p = { ...nodeType('droplet')!.defaults(), density: 400 } as any;
     const a = cone(), b = cone();
     await dropletErosion(a, frame, p);
     await dropletErosion(b, frame, p);
@@ -114,7 +118,7 @@ describe('erosion', () => {
   it('pipe erosion moves material downhill and reports flow where water ran', async () => {
     const h = cone();
     const peak = h[16 * 33 + 16];
-    const masks = await pipeErosion(h, frame, { ...(defaultErosion('pipe').params as any), iterations: 60 });
+    const masks = await pipeErosion(h, frame, { ...(nodeType('pipe')!.defaults() as any), iterations: 60 });
     expect(h.every(Number.isFinite)).toBe(true);
     expect(h[16 * 33 + 16]).toBeLessThanOrEqual(peak + 1e-6);
     expect(Math.max(...masks.flow)).toBeGreaterThan(0);
@@ -146,8 +150,7 @@ describe('masks', () => {
 
 describe('world export', () => {
   it('writes a 16-bit heightmap the engine decodes back to the same samples, plus masks and a sidecar', async () => {
-    const doc = small(coastalRange(), 33);
-    doc.erosion = [];
+    const doc = withoutErosion(small(coastalRange(), 33));
     const out = await generateWorld(doc);
     const files = await exportWorld(out, doc);
     const names = files.map(f => f.name);

@@ -541,9 +541,29 @@ export function windPcg(v: number): number {
     return ((word >>> 22) ^ word) >>> 0;
 }
 
-/** Hash of an integer lattice point. */
+/** Hash of an integer lattice point (latticeHash2 with seed 0). */
 export function windLatticeHash(ix: number, iy: number): number {
-    return windPcg((Math.imul(ix, 1597334677) ^ Math.imul(iy, 3812015801)) >>> 0);
+    return latticeHash2(ix, iy, 0);
+}
+
+/**
+ * Hash of an integer lattice point under an integer `seed`; seed 0 is windLatticeHash. The WGSL twin is
+ * the Creator's world/shaders/worldNoiseCommon.wgsl `latticeHash2` (u32 arithmetic, identical bits).
+ */
+export function latticeHash2(ix: number, iy: number, seed: number): number {
+    return windPcg((Math.imul(ix, 1597334677) ^ Math.imul(iy, 3812015801) ^ Math.imul(seed, 2654435761)) >>> 0);
+}
+
+/**
+ * Two numbers in [-1, 1) from a lattice point's hash, written into `out`. 24-bit, so they are exact in
+ * f32 and a shader computing `f32(h >> 8u) / 16777216.0 * 2.0 - 1.0` gets the same bits.
+ */
+export function latticeUnit2(ix: number, iy: number, seed: number, out: number[]): number[] {
+    const a = latticeHash2(ix, iy, seed);
+    const b = windPcg(a);
+    out[0] = (a >>> 8) / 16777216 * 2 - 1;
+    out[1] = (b >>> 8) / 16777216 * 2 - 1;
+    return out;
 }
 
 /** The WGSL's literal, not `Math.SQRT1_2`: the diagonal gradients must round as the shader's do. */
@@ -580,12 +600,21 @@ export function windPerlin(x: number, y: number): number {
  * curl is divergence-free.
  */
 export function windPerlinGrad(x: number, y: number, out: number[] = [0, 0, 0]): number[] {
+    return perlinGrad2(x, y, 0, out);
+}
+
+/**
+ * Seeded 2D gradient (Perlin) noise with its analytic gradient: `out` = [value, d/dx, d/dy], value
+ * roughly -0.7..0.7. Seed 0 is windPerlinGrad. The WGSL twin is world/shaders/worldNoiseCommon.wgsl
+ * `perlinGrad2` in the Creator, operation for operation.
+ */
+export function perlinGrad2(x: number, y: number, seed: number, out: number[] = [0, 0, 0]): number[] {
     const ix = Math.floor(x), iy = Math.floor(y);
     const fx = x - ix, fy = y - iy;
     const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10), uy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
     const dux = 30 * fx * fx * (fx * (fx - 2) + 1), duy = 30 * fy * fy * (fy * (fy - 2) + 1);
-    const ga = windGradient(windLatticeHash(ix, iy), _ga), gb = windGradient(windLatticeHash(ix + 1, iy), _gb);
-    const gc = windGradient(windLatticeHash(ix, iy + 1), _gc), gd = windGradient(windLatticeHash(ix + 1, iy + 1), _gd);
+    const ga = windGradient(latticeHash2(ix, iy, seed), _ga), gb = windGradient(latticeHash2(ix + 1, iy, seed), _gb);
+    const gc = windGradient(latticeHash2(ix, iy + 1, seed), _gc), gd = windGradient(latticeHash2(ix + 1, iy + 1, seed), _gd);
     const a = ga[0] * fx + ga[1] * fy;
     const b = gb[0] * (fx - 1) + gb[1] * fy;
     const c = gc[0] * fx + gc[1] * (fy - 1);
@@ -597,6 +626,29 @@ export function windPerlinGrad(x: number, y: number, out: number[] = [0, 0, 0]):
     out[2] = ga[1] + (gb[1] - ga[1]) * ux + (gc[1] - ga[1]) * uy + (ga[1] - gb[1] - gc[1] + gd[1]) * ux * uy
            + duy * ((c - a) + k * ux);
     return out;
+}
+
+// Shaping curves on 0..1 (the erosion filter's mask shaping, after Rune Skovbo Johansen). Each clamps its
+// input to 0..1 first.
+
+/** 1 - (1 - t)^2: fast out of 0, flat into 1. */
+export function easeOut(t: number): number {
+    const v = 1 - (t < 0 ? 0 : t > 1 ? 1 : t);
+    return 1 - v * v;
+}
+
+/** 1 - (1 - t)^power: an ease-out of any strength (power 1 is the identity on 0..1). */
+export function powInv(t: number, power: number): number {
+    return 1 - Math.pow(1 - (t < 0 ? 0 : t > 1 ? 1 : t), power);
+}
+
+/**
+ * `t` with its start rounded off over `smoothing`: a parabola below it, the line `t - smoothing / 2`
+ * above, meeting with matching slope. Smoothing 0 is the identity. Not clamped.
+ */
+export function smoothStart(t: number, smoothing: number): number {
+    if (t >= smoothing) return t - 0.5 * smoothing;
+    return 0.5 * t * t / smoothing;
 }
 
 // =================================================================================================

@@ -1,26 +1,28 @@
 # World Creator
 
-Build a landscape from a stack of landform layers, erode it, texture it with a stack of rule-placed
-surfaces, and export it in the formats every engine reads. Nothing is baked: every change re-evaluates
-what it affects. The live preview runs on a real engine landscape in the viewport (257² or 513², see
+Build a landscape as a node **Graph**, erode it, texture it with a stack of rule-placed surfaces, and
+export it in the formats every engine reads. Nothing is baked: every change re-runs only the nodes it
+affects. The preview runs on a real engine landscape in the viewport (257² or 513², see
 [Preview quality](#preview-quality)) and on the **Map**; **File ▸ Generate & export** runs the full
-resolution. **Layers** is the left dock; **Parameters** (world settings, lakes and the selected layer,
-pass or surface, with the world presets in its header) and **Export** are the right dock.
+resolution. The **Graph** and the **Map** sit side by side below the viewport; **Node** (the selected
+node), **World** (settings, lakes and the world presets), **Surfaces** and **Export** are the right dock.
+**Edit ▸ Undo** (Ctrl+Z) and **Redo** (Ctrl+Shift+Z or Ctrl+Y) step back and forth through every edit,
+paint strokes included.
 
-Heights are a fraction of the **Height scale** (0 the lowest ground, 1 a full-height peak; layers may
+Heights are a fraction of the **Height scale** (0 the lowest ground, 1 a full-height peak; nodes may
 overshoot and erosion may cut below 0). Positions are map coordinates, 0 to 1 across the world, with
 (0, 0) the -X/-Z corner, the same orientation the engine's heightmap import uses. North is -Z (the top
 of the Map).
 
 ## World settings
 
-The frame every layer and pass works in.
+The frame every node works in.
 
 | Field | Meaning |
 |---|---|
 | **World size** | World units across the map. |
 | **Height scale** | World units of a height of 1. |
-| **Seed** | The world's seed. Every layer, erosion pass and surface noise derives its randomness from it; change it for a new variation of the same design. |
+| **Seed** | The world's seed. Every node and surface noise derives its randomness from it; change it for a new variation of the same design. |
 | **Sea level** | Normalised height of the sea. The sea fills in from the map's edges up to it; the water rules measure from it. |
 
 ## Lakes
@@ -39,18 +41,43 @@ et al. 2014).
 Lake levels and the sea level travel in the manifest as plain numbers. The water itself is
 [preview only](#water-preview).
 
-## Layers
+## Graph
 
-The left dock: the **Landforms**, the **Erosion** passes and the **Surfaces**. Click one to edit it in
-Parameters; the toggle switches it off without removing it.
+The terrain is a graph of nodes wired output to input; the **Output** node's height is the world.
+Ports are typed: **heights** (blue) and **masks** (amber, 0 to 1). Drag from an output to an input to
+wire them (an input takes one wire; a wire that would close a loop is refused). Right-click or
+double-click the canvas, or use **+**, to add a node; right-click a node to duplicate, switch off or
+delete it; Delete removes the selection. The dot on a node's title switches it off: it then passes its
+input through. **Tidy** lays the graph out in columns.
 
-## Landforms
+Each node shows a thumbnail of its output and a badge: how long it took, **Pending** while a live edit
+skips it, **Not connected** when nothing the Output reads comes from it (it does not run), or
+**Finer than preview** when an erosion filter's finest gullies are smaller than the preview grid shows.
 
-Applied top to bottom: each reads the height the ones above it made.
+Moving and renaming nodes is layout: it re-runs nothing and never changes the export.
 
-| Layer | What it does |
+Documents from before the graph open as one chain (each landform, then each erosion pass, into the
+Output) that produces exactly the same world.
+
+### Shapes
+
+Base terrains made from nothing. Each carries its exact slope, which the erosion filter steers by.
+
+| Node | What it does |
 |---|---|
-| **Noise** | Fractal gradient noise, blended in by its **Blend** mode. *fBm* rolls, *Ridged* makes sharp crests, *Billow* makes rounded hills. **Warp** folds the pattern. |
+| **Fractal noise** | fBm, ridged or billowed gradient noise. *fBm* rolls, *Ridged* makes sharp crests, *Billow* rounded hills. **Warp** folds the pattern. |
+| **Continent** | Ocean floor, a coast, plains and highlands from one low-frequency field. **Coast at** decides how much is sea. |
+| **Ramp** | A straight ramp across the map, or a round dome whose centre you drag on the Map. |
+| **Constant** | One height everywhere. |
+
+### Landforms
+
+Hand-placed features, each changing the height wired into it. Their **Change** output is a mask of
+where they changed the ground. **Strength** fades any of them from off (0) to full (1).
+
+| Node | What it does |
+|---|---|
+| **Noise blend** | Fractal noise blended into the height by its **Blend** mode. |
 | **Mountain** | A peak with ridged flanks around a centre you drag on the map. |
 | **Ridge** | Raised ground along a spline. |
 | **Valley** | Lowered ground along a spline. |
@@ -61,23 +88,90 @@ Applied top to bottom: each reads the height the ones above it made.
 | **Crater / lake** | A bowl with a raised rim. |
 | **Coast / beach** | Sinks the land beyond a shoreline to a shelf under the sea, with a flattened beach just above sea level. |
 
-**Strength** fades any layer from off (0) to full (1).
-
-Splines and centres are edited on the **Map**: select the layer, drag its handles, double-click to add a
+Splines and centres are edited on the **Map**: select the node, drag its handles, double-click to add a
 spline point, Alt+click to remove one.
 
-## Erosion
+### Combine
 
-Run after the landforms, in order.
+**Combine** joins a **Base** and a **Layer** height: *Add*, *Subtract*, *Max*, *Min*, *Multiply* or
+*Replace*, at a **Strength**, and through a **Mask** when one is wired (the operation applies where the
+mask is 1).
 
-| Pass | What it does |
+### Masks
+
+| Node | What it does |
 |---|---|
-| **Thermal** | Material slumps off any slope steeper than the **Talus angle**, softening cliffs into scree. Conserves material. What it piles up is the surfaces' **Talus**. |
-| **Hydraulic (droplets)** | Many single raindrops roll downhill, eroding where they speed up and depositing where they slow: gullies and alluvial fans. What they lay down is **Deposits**, what they cut is **Wear**. |
-| **Hydraulic (virtual pipes)** | A shallow-water simulation (Mei et al. 2007): rain flows between cells through virtual pipes and carries sediment. Runs on the GPU when available. Also produces the flow and wetness masks, and Deposits and Wear. |
+| **Remap** | Maps a height range onto another, with a **Curve** (above 1 flattens lowlands and steepens peaks). |
+| **Height mask** | 1 inside a band of heights, fading over **Falloff**. |
+| **Slope mask** | 1 inside a range of steepness, degrees. |
+| **Invert** | 1 minus the mask. |
+| **Blur** | Softens a height or a mask over a radius in metres. |
+| **Mask combine** | Joins two masks: multiply (both), add, subtract, max (either), min. |
+| **Normalize** | Stretches a height to 0..1 (lowest to highest): any height as a mask. |
 
-Erosion works in grid cells, so the same settings erode a 2049 export more finely than the 257 preview;
-check the full-resolution result before committing to a look.
+### Erosion filter
+
+Branching gullies and sharp ridges, after Rune Skovbo Johansen's erosion filter
+([blog](https://blog.runevision.com/2026/03/fast-and-gorgeous-erosion-filter.html), MPL 2.0). It
+simulates no water: every point is worked out on its own from the slope wired into it, layering
+octaves of stripes that run downhill (Phacelle noise), each octave branching off the one before. That
+makes it fast enough to drag live, and the same at any resolution. Its **Ridges** output is the ridge
+map (0 in creases, 1 on crests); **Gullies** is how deep it cut. The last filter before the Output feeds
+the surfaces' **Ridges** and **Gullies** inputs, and the export masks of those names.
+
+| Field | Meaning |
+|---|---|
+| **Look** | Presets: *Balanced*, *Soft hills*, *Alpine*, *Badlands*, *Fine detail*. |
+| **Gully spacing** | Width of the largest gullies, metres. |
+| **Depth** | Gully depth relative to their spacing. |
+| **Detail** | How readily finer gullies cut into the ridges and creases of coarser ones. |
+| **Octaves** | Levels of ever finer gullies. |
+| **Gully shape** | How much of the gullies' rounded shape shows; lower keeps peaks pointy. |
+| **Ridge rounding** / **Crease rounding** | Soften the crests between gullies and the gully floors. |
+| **Valley level** / **Peak level** | Heights (fractions of the height scale) the filter treats as valley floor and summit: it fades its gullies toward valleys there and toward peaks here. |
+| **Seed offset** | A different arrangement of gullies. |
+
+Under **Advanced**: **Persistence** and **Lacunarity** (depth and spacing from one octave to the next),
+**Input rounding**, **Rounding per octave**, the **Onset** steepness for gullies to start (and per
+octave, and for the ridge map), **Assumed slope** and **Straighten** (how cleanly gullies branch),
+**Cell size**, **Normalization**, **Height bias** and **Keep altitude** (cancels the filter's net raise of
+peaks and drop of valleys).
+
+Wire masks into **Depth mask**, **Detail mask** or **Peak/valley mask** to vary it across the map: a
+painted depth mask erodes only where you paint.
+
+### Simulations
+
+| Node | What it does |
+|---|---|
+| **Thermal erosion** | Material slumps off any slope steeper than the **Talus angle**, softening cliffs into scree. Conserves material. What it piles up is the surfaces' **Talus**. |
+| **Hydraulic (droplets)** | Many single raindrops roll downhill, eroding where they speed up and depositing where they slow: gullies and alluvial fans. What they lay down is **Deposits**, what they cut is **Wear**. |
+| **Hydraulic (pipes)** | A shallow-water simulation (Mei et al. 2007): rain flows between cells through virtual pipes and carries sediment. Runs on the GPU for the export when available. Also produces the flow and wetness masks, and Deposits and Wear. |
+
+Simulations work in grid cells, so the same settings erode a 2049 export more finely than the 257
+preview; check the full-resolution result before committing to a look.
+
+### Paint mask
+
+A mask you brush on. **New** makes a blank 0..1 mask, **Signed** a -1..1 one; its **Mask** output is the
+painted value, its **Height** output the value times **Height amount** (metres): wire it into a Combine
+*Add* to raise and lower ground by hand. Switch **Paint** on and brush on the **Map** or straight on the
+landscape (the camera stops orbiting while you paint): *Add*, *Erase*, *Smooth* or *Set* to a
+**Value**, with **Radius**, **Strength** and **Falloff**; **[** and **]** change the size. **Clear** and
+**Fill** cover the whole mask. Masks save with the asset (or, on Scratch, in the browser).
+
+### Output
+
+The world's heights. There is always exactly one.
+
+## Live preview
+
+Dragging a parameter of a shape, a Combine or an erosion filter, or painting a mask, updates the
+landscape every frame: with GPU compute (WebGPU) those nodes and everything after them run as compute
+kernels at 257², from the outputs of the nodes before them; without it (WebGL 2) the graph's heights
+re-run at 129². Simulations and landforms after the edited node are skipped while you drag (their
+badge reads **Pending**). When the edit pauses the full preview follows: every node, the fields, the
+surfaces and the water. The CPU result is always what the Map, the surfaces and the export use.
 
 ## Surfaces
 
@@ -95,11 +189,11 @@ Creator shows are generated for the preview and never exported.
 | Biome | Surfaces |
 |---|---|
 | **Temperate** | Grass, dirt, forest floor, seabed, beach sand, mud, riverbed, rock slopes, scree, snow. |
-| **Alpine** | Alpine meadow, seabed, riverbed, scree, rock slopes, cliff, shaded snow, snow. |
-| **Desert** | Hardpan, desert sand, gravel washes, scree, rock slopes, banded cliffs. |
+| **Alpine** | Alpine meadow, seabed, riverbed, scree, gully floors, rock slopes, ridge rock, cliff, shaded snow, snow. |
+| **Desert** | Hardpan, desert sand, gravel washes, gully floors, scree, rock slopes, ridge rock, banded cliffs. |
 | **Tropical coast** | Lush grass, forest floor, seabed, beach sand, wet sand, mud, rock slopes. |
 
-A world preset (Parameters header) replaces the terrain but keeps the surfaces.
+A world preset (the World tab's header) replaces the terrain but keeps the surfaces.
 
 Each row's caption is the share of the map the surface covers in the preview.
 
@@ -133,6 +227,8 @@ each value. The first condition starts the mask; each next one joins it by its m
 | **Deposits** | Where hydraulic erosion laid sediment down: fans, valley floors, river bars. 0 to 1 of the map's 98th percentile. |
 | **Wear** | Where hydraulic erosion cut the ground away: channels, gullies, scoured rock. |
 | **Talus** | Where thermal erosion piled loose material at the foot of slopes: scree. |
+| **Ridges** | The erosion filter's ridge map: 1 on the crests between its gullies, 0 in their creases, 0.5 elsewhere. |
+| **Gullies** | How deep an erosion filter cut the ground: its gully floors. 0 to 1 of the map's 98th percentile. |
 | **Layer** | The coverage of a surface below this one: require it, or with **Not**, avoid it. |
 | **Noise** | Seeded fractal noise in world space, with its own **Scale (m)**, **Octaves**, **Warp** and **Seed**: patches, clearings, variety. |
 
@@ -209,7 +305,8 @@ exported. The **Stage** menu (top right of the viewport) holds it:
 The top-down view. **Height** (a hillshade with the water), **Surfaces** (each surface in its colour,
 composited as the export weights them), **Selected surface** (its coverage), **Water** (sea and lake
 depths), the four classic masks and the fields: **Aspect**, **Cavity**, **Flow area**, **Shore distance**,
-**Deposits**, **Wear**, **Talus**.
+**Deposits**, **Wear**, **Talus**, **Ridges**, **Gullies**, and **Selected node** (the selected node's
+output). With a Paint mask node selected and **Paint** on, the Map is a canvas: brush on it.
 
 ## Export
 
@@ -253,6 +350,8 @@ Splat and weight maps are texel-centred over the map square; row 0 is the -Z edg
 | **Deposits** | Sediment hydraulic erosion laid down. |
 | **Wear** | Ground hydraulic erosion cut away. |
 | **Talus** | Material thermal erosion piled at slope feet. |
+| **Ridges** | The erosion filter's ridge map: 0 creases, 0.5 neutral, 1 crests. |
+| **Gullies** | How deep erosion filters cut. |
 | **Water** | 1 under the sea or a lake, 0 on land. |
 
 ### Package

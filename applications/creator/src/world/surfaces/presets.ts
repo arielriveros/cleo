@@ -10,7 +10,7 @@ const look = (kind: SurfaceKind, tint: [number, number, number] = [1, 1, 1], hei
 
 export type SurfacePresetId =
   | 'grass' | 'meadow' | 'seabed' | 'beach' | 'wetSand' | 'riverbed' | 'mud' | 'dirt' | 'forest' | 'rock' | 'cliff' | 'scree' | 'gravel'
-  | 'snow' | 'shadedSnow' | 'desertSand' | 'custom';
+  | 'snow' | 'shadedSnow' | 'desertSand' | 'gullyGravel' | 'ridgeRock' | 'custom';
 
 export const SURFACE_PRESETS: { id: SurfacePresetId; label: string; description: string }[] = [
   { id: 'grass', label: 'Grass', description: 'Ground cover: the usual base.' },
@@ -29,6 +29,8 @@ export const SURFACE_PRESETS: { id: SurfacePresetId; label: string; description:
   { id: 'snow', label: 'Snow', description: 'High ground that is not too steep for snow to hold.' },
   { id: 'shadedSnow', label: 'Shaded snow', description: 'Snow lower down on north-facing slopes.' },
   { id: 'desertSand', label: 'Desert sand', description: 'Sand on low, gentle ground.' },
+  { id: 'gullyGravel', label: 'Gully floors', description: 'Gravel in the gullies an erosion filter cut.' },
+  { id: 'ridgeRock', label: 'Ridge rock', description: 'Bare rock along the crests an erosion filter left between its gullies.' },
   { id: 'custom', label: 'Custom', description: 'No rules: covers everything until you add conditions.' },
 ];
 
@@ -96,6 +98,14 @@ export function surfacePreset(id: SurfacePresetId): SurfaceLayer {
       c('relativeHeight', { min: 0, max: 0.45, falloffLow: 0, falloffHigh: 0.1 }),
       c('slope', { min: 0, max: 14, falloffLow: 0, falloffHigh: 6 }),
     ]);
+    case 'gullyGravel': return newSurface('Gully floors', look('gravel', [0.9, 0.86, 0.8]), [
+      c('gullies', { min: 0.3, max: 1, falloffLow: 0.2 }),
+      c('ridges', { min: 0, max: 0.4, falloffLow: 0, falloffHigh: 0.1 }),
+    ]);
+    case 'ridgeRock': return newSurface('Ridge rock', look('rock', [0.78, 0.75, 0.72]), [
+      c('ridges', { min: 0.72, max: 1, falloffLow: 0.08, falloffHigh: 0 }),
+      c('slope', { min: 22, max: 90, falloffLow: 6, falloffHigh: 0 }),
+    ], { breakup: { amount: 0.5, scale: 14, octaves: 3, seed: 9, warp: 0.3 } });
     case 'custom': return newSurface('Surface', look('dirt'));
   }
 }
@@ -109,10 +119,10 @@ export const BIOME_SETS: { id: BiomeId; label: string; description: string; make
     make: () => stack(surfacePreset('grass'), 'dirt', 'forest', 'seabed', 'beach', 'mud', 'riverbed', 'rock', 'scree', 'snow') },
   { id: 'alpine', label: 'Alpine', description: 'Meadows under scree, rock, cliffs and snow that lingers on north faces.',
     make: () => stack({ ...surfacePreset('grass'), name: 'Alpine meadow', preview: { ...surfacePreset('grass').preview, tint: [0.95, 1, 0.8] } },
-                      'seabed', 'riverbed', 'scree', 'rock', 'cliff', 'shadedSnow', 'snow') },
+                      'seabed', 'riverbed', 'scree', 'gullyGravel', 'rock', 'ridgeRock', 'cliff', 'shadedSnow', 'snow') },
   { id: 'desert', label: 'Desert', description: 'Sand, gravel washes, dry dirt fans, rock and banded cliffs.',
     make: () => stack({ ...surfacePreset('dirt'), name: 'Hardpan', conditions: [], preview: { ...surfacePreset('dirt').preview, tint: [1.1, 0.95, 0.78] } },
-                      'desertSand', 'gravel', 'scree', 'rock', 'cliff') },
+                      'desertSand', 'gravel', 'gullyGravel', 'scree', 'rock', 'ridgeRock', 'cliff') },
   { id: 'tropical', label: 'Tropical coast', description: 'Lush grass and forest down to wide beaches, wet sand and mud.',
     make: () => stack({ ...surfacePreset('grass'), preview: { ...surfacePreset('grass').preview, tint: [0.85, 1.1, 0.75] } },
                       'forest', 'seabed', 'beach', 'wetSand', 'mud', 'rock') },

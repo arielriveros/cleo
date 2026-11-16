@@ -20,6 +20,10 @@ export interface ErosionHistory {
   wear: Float32Array;
   /** Raised by thermal passes (material slumped to the foot of a slope). */
   talus: Float32Array;
+  /** The last erosion filter's ridge map: 0 creases .. 0.5 neutral .. 1 ridges. */
+  ridges?: Float32Array;
+  /** Cut by erosion filters, metres. */
+  gullies?: Float32Array;
 }
 
 export interface WorldFields {
@@ -46,6 +50,10 @@ export interface WorldFields {
   deposits: Float32Array;
   wear: Float32Array;
   talus: Float32Array;
+  /** 0 creases .. 0.5 neutral .. 1 ridges, from the erosion filter (0.5 everywhere without one). */
+  ridges: Float32Array;
+  /** Where erosion filters cut, 0..1 of the map's 98th percentile. */
+  gullies: Float32Array;
 }
 
 export interface FieldNeeds {
@@ -127,6 +135,8 @@ export function computeFields(input: FieldInputs, needs: FieldNeeds): WorldField
     deposits: h ? normalisePositive(h.deposits) : new Float32Array(N),
     wear: h ? normalisePositive(h.wear) : new Float32Array(N),
     talus: h ? normalisePositive(h.talus) : new Float32Array(N),
+    ridges: h?.ridges ?? new Float32Array(N).fill(0.5),
+    gullies: h?.gullies ? normalisePositive(h.gullies) : new Float32Array(N),
   };
 }
 

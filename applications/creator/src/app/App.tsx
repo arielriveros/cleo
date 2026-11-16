@@ -136,10 +136,12 @@ function CreatorMenus({ tool }: { tool: Tool }) {
     },
     {
       id: 'edit', label: 'Edit', items: [
-        { kind: 'item', label: 'Undo', icon: glyph('M9 14 4 9l5-5 M4 9h9a7 7 0 0 1 0 14h-3'), shortcut: 'Ctrl+Z', disabled: true,
-          title: 'Cleo Creator keeps no undo history yet', onSelect: () => {} },
-        { kind: 'item', label: 'Redo', icon: glyph('m15 14 5-5-5-5 M20 9h-9a7 7 0 0 0 0 14h3'), shortcut: 'Ctrl+Shift+Z', disabled: true,
-          title: 'Cleo Creator keeps no undo history yet', onSelect: () => {} },
+        { kind: 'item', label: 'Undo', icon: glyph('M9 14 4 9l5-5 M4 9h9a7 7 0 0 1 0 14h-3'), shortcut: 'Ctrl+Z', disabled: !source?.undo?.canUndo,
+          title: source?.undo ? (source.undo.undoLabel ? `Undo ${source.undo.undoLabel}` : 'Nothing to undo') : 'This app keeps no undo history yet',
+          onSelect: () => source?.undo?.undo() },
+        { kind: 'item', label: 'Redo', icon: glyph('m15 14 5-5-5-5 M20 9h-9a7 7 0 0 0 0 14h3'), shortcut: 'Ctrl+Shift+Z', disabled: !source?.undo?.canRedo,
+          title: source?.undo ? (source.undo.redoLabel ? `Redo ${source.undo.redoLabel}` : 'Nothing to redo') : 'This app keeps no undo history yet',
+          onSelect: () => source?.undo?.redo() },
       ],
     },
     {
