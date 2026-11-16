@@ -381,3 +381,26 @@ export function sampleBilinear(h: Float32Array, res: number, x: number, y: numbe
   const bottom = h[i + res] + (h[i + res + 1] - h[i + res]) * tx;
   return top + (bottom - top) * ty;
 }
+
+export const LAYER_LABELS: Record<LayerKind, string> = {
+  noise: 'Noise', mountain: 'Mountain', ridge: 'Ridge', valley: 'Valley', river: 'River', road: 'Road',
+  plateau: 'Plateau / cliff', terrace: 'Terraces', crater: 'Crater / lake', coast: 'Coast / beach',
+};
+
+/** Each kind's defaults, centred on the map (id and name are the caller's to replace). */
+export const LAYER_DEFAULTS: { [K in LayerKind]: () => Extract<WorldLayer, { kind: K }> } = {
+  noise: () => ({ ...base('noise'), kind: 'noise', op: 'add', fractal: 'fbm', scale: 4, octaves: 6, lacunarity: 2, gain: 0.5, warp: 0.4, amplitude: 0.3, offset: 0, seed: 1 }),
+  mountain: () => ({ ...base('mountain'), kind: 'mountain', center: [0.5, 0.5], radius: 0.3, height: 0.6, sharpness: 1.4, ridges: 0.6, seed: 2 }),
+  ridge: () => ({ ...base('ridge'), kind: 'ridge', points: [[0.2, 0.3], [0.5, 0.4], [0.8, 0.35]], width: 0.08, height: 0.25, sharpness: 1.5 }),
+  valley: () => ({ ...base('valley'), kind: 'valley', points: [[0.15, 0.7], [0.5, 0.6], [0.85, 0.72]], width: 0.12, depth: 0.15 }),
+  river: () => ({ ...base('river'), kind: 'river', points: [[0.3, 0.05], [0.45, 0.4], [0.55, 0.7], [0.6, 0.98]], width: 0.015, bank: 0.03, bedStart: 0.22, bedEnd: 0.08 }),
+  road: () => ({ ...base('road'), kind: 'road', points: [[0.05, 0.55], [0.35, 0.5], [0.65, 0.58], [0.95, 0.5]], width: 0.012, shoulder: 0.02, smoothing: 0.4 }),
+  plateau: () => ({ ...base('plateau'), kind: 'plateau', center: [0.7, 0.3], radius: 0.12, level: 0.45, falloff: 0.015 }),
+  terrace: () => ({ ...base('terrace'), kind: 'terrace', steps: 8, sharpness: 0.6, minHeight: 0.2, maxHeight: 0.8 }),
+  crater: () => ({ ...base('crater'), kind: 'crater', center: [0.3, 0.7], radius: 0.08, depth: 0.12, rim: 0.04 }),
+  coast: () => ({ ...base('coast'), kind: 'coast', direction: 90, shoreline: 0.8, beach: 0.04, beachHeight: 0.015, seaLevel: 0.1, shelfDepth: 0.08, irregularity: 0.04, seed: 3 }),
+};
+
+function base(kind: LayerKind): LayerBase {
+  return { id: kind, name: LAYER_LABELS[kind], enabled: true, strength: 1 };
+}

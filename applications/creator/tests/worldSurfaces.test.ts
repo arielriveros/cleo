@@ -14,6 +14,8 @@ import { newCondition, newSurface } from '../src/world/surfaces/surfaceDoc';
 import { alphasToWeights, packSplat } from '../src/world/surfaces/weights';
 import { BIOME_SETS } from '../src/world/surfaces/presets';
 import { coastalRange } from '../src/world/presets';
+import { LAYER_DEFAULTS } from '../src/world/features';
+import { nodeType } from '../src/world/graph/nodeRegistry';
 import { normaliseWorld, type WorldDoc } from '../src/world/worldDoc';
 import type { WorldMasks } from '../src/world/masks';
 
@@ -95,12 +97,27 @@ describe('fields', () => {
   });
 
   it('measures the erosion history', async () => {
-    const out = await generateWorld(small(coastalRange(), 49));
+    // A version-2 stack with a hydraulic pass: a mountain, eroded by droplets.
+    const legacy = normaliseWorld({
+      settings: { ...coastalRange().settings, resolution: 49 },
+      layers: [LAYER_DEFAULTS.mountain()],
+      erosion: [{ id: 'drops', kind: 'droplet', enabled: true, params: nodeType('droplet')!.defaults() }],
+    });
+    const out = await generateWorld(legacy);
     const dep = out.history.deposits.reduce((s, v) => s + v, 0);
     const wear = out.history.wear.reduce((s, v) => s + v, 0);
     expect(dep).toBeGreaterThan(0);
     expect(wear).toBeGreaterThan(0);
     expect(out.history.talus.every(v => v >= 0)).toBe(true);
+  });
+
+  it('measures the erosion filter: ridges and gullies', async () => {
+    const out = await generateWorld(small(coastalRange(), 65));
+    const f = buildFields(out, coastalRange());
+    expect(f.gullies.some(v => v > 0.5)).toBe(true);
+    expect(f.ridges.some(v => v > 0.8)).toBe(true);
+    expect(f.ridges.some(v => v < 0.2)).toBe(true);
+    expect(f.ridges.every(v => v >= 0 && v <= 1)).toBe(true);
   });
 
   it('asks only for the fields the enabled rules read', () => {
@@ -285,7 +302,8 @@ describe('world export v2', () => {
   it('migrates a version-1 document', () => {
     const v1 = { settings: { resolution: 257, size: 1000, heightScale: 300, seed: 3, seaLevel: 0.2 }, layers: [], erosion: [] };
     const doc = normaliseWorld(v1);
-    expect(doc.version).toBe(2);
+    expect(doc.version).toBe(3);
+    expect(doc.graph.nodes.map(n => n.type)).toEqual(['output']);
     expect(doc.surfaces.length).toBeGreaterThan(3);
     expect(doc.settings.size).toBe(1000);
     expect(doc.preview.quality).toBe('draft');

@@ -255,7 +255,12 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
         expect(inside.filter(n => n.type === 'exposureVolume').length).toBeGreaterThanOrEqual(3);
         for (const e of inside.filter(n => n.type === 'exposureVolume')) expect(e.exposureVolume.overrides.exposureMinEV, e.name).toBeLessThan(8);
         expect(inside.filter(n => n.type === 'light').length).toBeGreaterThanOrEqual(8);
-        expect(inside.filter(n => n.type === 'collider' && n.collider?.shapes?.length && n.collider.mass === 0).length).toBeGreaterThanOrEqual(25);
+        // Its static collision: what stays a Collider of its own in it (template instances), plus the shapes folded
+        // into the scene's Static Collision (mergeStaticColliders.ts) under its Warehouse group.
+        const ownColliders = inside.filter(n => n.type === 'collider' && n.collider?.shapes?.length && n.collider.mass === 0).length;
+        const staticCollision = nodes.find(n => n.type === 'collider' && n.name === 'Static Collision');
+        const mergedHere = allNodes(staticCollision?.children.find((c: any) => c.name === 'Warehouse') ?? { children: [] }).length - 1;
+        expect(ownColliders + mergedHere).toBeGreaterThanOrEqual(25);
         const models = library('models').map((m: any) => m.name);
         for (const m of ['abandoned_warehouse', 'cement_bags_low-poly', 'propane_and_gas_tanks', 'utility_shelves']) expect(models, m).toContain(m);
         const nav = nodes.find(n => n.type === 'navMesh');

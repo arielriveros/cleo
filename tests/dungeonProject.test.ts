@@ -192,8 +192,10 @@ describe.skipIf(!present)('the Dungeon example project', { timeout: 60_000 }, ()
     });
 
     it('gives the dungeon box colliders over its floors, walls, ramps and steps', () => {
-        const all = nodes();
-        const bodies = allNodes(all.find(n => n.name === 'Collision')).filter(n => n.type === 'collider');
+        // The level's collision is folded into the scene's Static Collision colliders, one per way of colliding
+        // (mergeStaticColliders.ts): walls, see-through pillars, and floors.
+        const bodies = nodes().filter(n => n.type === 'collider' && n.name.startsWith('Static Collision ('));
+        expect(bodies.map(n => n.name).sort()).toEqual(['Static Collision (blocksSwings)', 'Static Collision (blocksSwings, see-through)', 'Static Collision (navObstacle false)']);
         const shapes = bodies.flatMap(n => n.collider.shapes);
         // Merged hard (dungeon/collision.mjs: tolerances, pillars one box, diagonals one turned box): it
         // was over 3000 boxes before.
@@ -207,11 +209,10 @@ describe.skipIf(!present)('the Dungeon example project', { timeout: 60_000 }, ()
         // Walls and pillars are what swings bounce off; floors are walked on, never carved out of the navmesh.
         // The pillars' colliders are see-through to the player camera, like the pillars; the walls' are not.
         for (const n of bodies) {
-            if (n.name.startsWith('Walls') || n.name.startsWith('Pillars')) expect(n.variables.blocksSwings?.value, n.name).toBe(true);
+            if (/blocksSwings/.test(n.name)) expect(n.variables.blocksSwings?.value, n.name).toBe(true);
             else expect(n.variables.navObstacle?.value, n.name).toBe(false);
-            expect(!!n.cameraDither, n.name).toBe(n.name.startsWith('Pillars'));
+            expect(!!n.cameraDither, n.name).toBe(/see-through/.test(n.name));
         }
-        expect(bodies.some(n => n.name.startsWith('Pillars'))).toBe(true);
     });
 
     it('hangs wall torches at the light rig sconces, spaced apart, and lights the dungeon with fire', () => {

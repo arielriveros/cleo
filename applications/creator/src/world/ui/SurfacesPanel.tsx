@@ -129,6 +129,8 @@ function fieldOf(c: SurfaceCondition, f: PreviewFields | null, surfaces: Surface
     case 'deposits': return f.deposits;
     case 'wear': return f.wear;
     case 'talus': return f.talus;
+    case 'ridges': return f.ridges;
+    case 'gullies': return f.gullies;
     case 'layer': {
       const i = c.layerId ? layerIndex.get(c.layerId) : undefined;
       const a = i !== undefined ? surfaces?.alphas[i] : null;

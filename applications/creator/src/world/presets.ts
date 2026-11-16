@@ -1,17 +1,32 @@
-// World Creator presets. Each is a whole document; picking one replaces the terrain (landforms, erosion,
-// settings) but keeps the artist's seed and surfaces, which is how a preset becomes a family of
-// variations. A fresh document of a preset starts with the surfaces that suit it.
+// World Creator presets. Each is a whole document built as a graph; picking one replaces the terrain
+// (the graph and the settings) but keeps the artist's seed and surfaces, which is how a preset becomes a
+// family of variations. A fresh document of a preset starts with the surfaces that suit it.
+//
+// The terrain under an erosion filter is kept smooth (few octaves): the filter steers each gully by the
+// slope it is given, so fine bumps there turn the gullies cell by cell into noise. The filter adds the
+// detail.
+//
+// The erosion filter sits where the realtime preview can drag it: after the base shapes, the big
+// landforms and any simulation (a simulation after it would be skipped while dragging, and its settling
+// would visibly change the look), before the roads and rivers (which belong on the eroded ground, and
+// which the drag skips until it settles).
 
 import type { Preset } from '../core/generator';
-import { defaultErosion, defaultLayer, DEFAULT_SETTINGS, worldExtras, type ErosionPass, type WorldDoc } from './worldDoc';
+import { GraphBuilder } from './graph/build';
+import { FILTER_PRESETS } from './graph/nodes/erosionNodes';
+import { OUTPUT_PORT } from './graph/nodeTypes';
 import { BIOME_SETS, type BiomeId } from './surfaces/presets';
-import type { WorldLayer } from './features';
+import { DEFAULT_SETTINGS, worldExtras, type WorldDoc, type WorldSettings } from './worldDoc';
 
-/** The version-2 parts with the surfaces of `biome` (what a fresh document of this preset starts with). */
+/** The document parts besides the graph, with the surfaces of `biome`. */
 const extras = (biome: BiomeId) => ({ ...worldExtras(), surfaces: BIOME_SETS.find(b => b.id === biome)!.make() });
 
-function layer<K extends WorldLayer['kind']>(kind: K, patch: Partial<Extract<WorldLayer, { kind: K }>>): WorldLayer {
-  return { ...(defaultLayer(kind) as Extract<WorldLayer, { kind: K }>), ...patch };
+const filter = (id: string, over: Record<string, unknown> = {}) => ({ ...FILTER_PRESETS.find(p => p.id === id)!.params, ...over });
+
+function doc(biome: BiomeId, settings: Partial<WorldSettings>, build: (g: GraphBuilder) => void): WorldDoc {
+  const g = new GraphBuilder();
+  build(g);
+  return { ...extras(biome), settings: { ...DEFAULT_SETTINGS, ...settings }, graph: g.build() };
 }
 
 /**
@@ -19,61 +34,89 @@ function layer<K extends WorldLayer['kind']>(kind: K, patch: Partial<Extract<Wor
  * map, eroded, ready to hand to the Editor's landscape import.
  */
 export function coastalRange(): WorldDoc {
-  return {
-    ...extras('temperate'),
-    settings: { ...DEFAULT_SETTINGS },
-    layers: [
-      layer('noise', { name: 'Base relief', fractal: 'fbm', scale: 3, octaves: 6, amplitude: 0.22, offset: 0.12, warp: 0.6 }),
-      layer('mountain', { name: 'Main peak', center: [0.35, 0.35], radius: 0.32, height: 0.62, sharpness: 1.6, ridges: 0.7 }),
-      layer('ridge', { name: 'Spur', points: [[0.35, 0.35], [0.6, 0.25], [0.88, 0.18]], width: 0.07, height: 0.18 }),
-      layer('plateau', { name: 'Sea cliff', center: [0.78, 0.62], radius: 0.13, level: 0.28, falloff: 0.012 }),
-      layer('river', { name: 'River', points: [[0.42, 0.55], [0.5, 0.7], [0.45, 0.85], [0.5, 1.0]], bedStart: 0.2, bedEnd: 0.07 }),
-      layer('coast', { name: 'Coast', direction: 90, shoreline: 0.82, beach: 0.05, seaLevel: 0.1 }),
-      layer('road', { name: 'Coast road', points: [[0.05, 0.7], [0.3, 0.68], [0.6, 0.74], [0.95, 0.7]], width: 0.01, shoulder: 0.025, smoothing: 0.5 }),
-    ],
-    erosion: [defaultErosion('thermal'), defaultErosion('pipe')],
-  };
+  return doc('temperate', {}, g => {
+    const base = g.add('fractal', { fractal: 'fbm', scale: 3, octaves: 3, gain: 0.35, amplitude: 0.22, offset: 0.12, warp: 0.6 }, 'Base relief');
+    const peak = g.add('mountain', { center: [0.35, 0.35], radius: 0.32, height: 0.62, sharpness: 1.6, ridges: 0.15 }, 'Main peak');
+    const spur = g.add('ridge', { points: [[0.35, 0.35], [0.6, 0.25], [0.88, 0.18]], width: 0.07, height: 0.18 }, 'Spur');
+    const cliff = g.add('plateau', { center: [0.78, 0.62], radius: 0.13, level: 0.28, falloff: 0.012 }, 'Sea cliff');
+    const coast = g.add('coast', { direction: 90, shoreline: 0.82, beach: 0.05, seaLevel: 0.1 }, 'Coast');
+    const erode = g.add('erosionFilter', filter('default', { valleyLevel: 0.1, peakLevel: 0.65 }), 'Erosion');
+    const scree = g.add('thermal', { iterations: 30, talus: 40, rate: 0.5 }, 'Scree');
+    const river = g.add('river', { points: [[0.42, 0.55], [0.5, 0.7], [0.45, 0.85], [0.5, 1.0]], bedStart: 0.2, bedEnd: 0.07 }, 'River');
+    const road = g.add('road', { points: [[0.05, 0.7], [0.3, 0.68], [0.6, 0.74], [0.95, 0.7]], width: 0.01, shoulder: 0.025, smoothing: 0.5 }, 'Coast road');
+    const out = g.add('output');
+    g.chain(base, peak, spur, cliff, coast, scree, erode, river, road);
+    g.link(road, out, OUTPUT_PORT);
+  });
 }
 
 export function rollingHills(): WorldDoc {
-  return {
-    ...extras('temperate'),
-    settings: { ...DEFAULT_SETTINGS, heightScale: 220 },
-    layers: [
-      layer('noise', { name: 'Hills', fractal: 'billow', scale: 3.5, octaves: 5, gain: 0.45, amplitude: 0.55, warp: 0.8 }),
-      layer('noise', { name: 'Detail', fractal: 'fbm', scale: 16, octaves: 4, amplitude: 0.06, offset: -0.03, seed: 9 }),
-      layer('valley', { name: 'Vale', points: [[0.0, 0.4], [0.4, 0.55], [1.0, 0.45]], width: 0.18, depth: 0.2 }),
-    ],
-    erosion: [defaultErosion('droplet'), defaultErosion('thermal')],
-  };
+  return doc('temperate', { heightScale: 220 }, g => {
+    const hills = g.add('fractal', { fractal: 'billow', scale: 3.5, octaves: 3, gain: 0.35, amplitude: 0.55, warp: 0.8 }, 'Hills');
+    const detail = g.add('fractal', { fractal: 'fbm', scale: 8, octaves: 2, amplitude: 0.06, offset: -0.03, seed: 9 }, 'Detail');
+    const sum = g.add('combine', { op: 'add', strength: 1 }, 'Hills + detail');
+    const vale = g.add('valley', { points: [[0.0, 0.4], [0.4, 0.55], [1.0, 0.45]], width: 0.18, depth: 0.2 }, 'Vale');
+    const erode = g.add('erosionFilter', filter('soft', { valleyLevel: 0.05, peakLevel: 0.5 }), 'Erosion');
+    const out = g.add('output');
+    g.link(hills, sum, 'a').link(detail, sum, 'b');
+    g.chain(sum, vale, erode);
+    g.link(erode, out, OUTPUT_PORT);
+  });
 }
 
 export function alpineMassif(): WorldDoc {
-  return {
-    ...extras('alpine'),
-    settings: { ...DEFAULT_SETTINGS, heightScale: 1800 },
-    layers: [
-      layer('noise', { name: 'Ranges', fractal: 'ridged', scale: 2.5, octaves: 8, gain: 0.55, amplitude: 0.85, warp: 0.5 }),
-      layer('mountain', { name: 'Summit', center: [0.55, 0.45], radius: 0.25, height: 0.35, sharpness: 2.2, ridges: 0.9 }),
-      layer('valley', { name: 'Glacial valley', points: [[0.1, 0.9], [0.4, 0.65], [0.6, 0.6], [0.95, 0.75]], width: 0.16, depth: 0.3 }),
-    ],
-    erosion: [defaultErosion('pipe'), { ...defaultErosion('thermal'), params: { iterations: 60, talus: 42, rate: 0.5 } } as ErosionPass],
-  };
+  return doc('alpine', { heightScale: 1800 }, g => {
+    const ranges = g.add('fractal', { fractal: 'ridged', scale: 2.5, octaves: 3, gain: 0.4, amplitude: 0.85, warp: 0.5 }, 'Ranges');
+    const summit = g.add('mountain', { center: [0.55, 0.45], radius: 0.25, height: 0.35, sharpness: 2.2, ridges: 0.2 }, 'Summit');
+    const valley = g.add('valley', { points: [[0.1, 0.9], [0.4, 0.65], [0.6, 0.6], [0.95, 0.75]], width: 0.16, depth: 0.3 }, 'Glacial valley');
+    const erode = g.add('erosionFilter', filter('alpine', { valleyLevel: 0.15, peakLevel: 0.9 }), 'Erosion');
+    const scree = g.add('thermal', { iterations: 60, talus: 42, rate: 0.5 }, 'Scree');
+    const out = g.add('output');
+    g.chain(ranges, summit, valley, scree, erode);
+    g.link(erode, out, OUTPUT_PORT);
+  });
 }
 
 export function mesaDesert(): WorldDoc {
-  return {
-    ...extras('desert'),
-    settings: { ...DEFAULT_SETTINGS, heightScale: 350, seaLevel: 0 },
-    layers: [
-      layer('noise', { name: 'Ground', fractal: 'fbm', scale: 2, octaves: 5, amplitude: 0.25, warp: 1.2 }),
-      layer('plateau', { name: 'Mesa', center: [0.35, 0.4], radius: 0.16, level: 0.6, falloff: 0.02 }),
-      layer('plateau', { name: 'Butte', center: [0.7, 0.65], radius: 0.07, level: 0.5, falloff: 0.012 }),
-      layer('terrace', { name: 'Strata', steps: 10, sharpness: 0.8, minHeight: 0.15, maxHeight: 0.65 }),
-      layer('crater', { name: 'Dry lake', center: [0.75, 0.25], radius: 0.1, depth: 0.08, rim: 0.01 }),
-    ],
-    erosion: [defaultErosion('thermal'), defaultErosion('droplet')],
-  };
+  return doc('desert', { heightScale: 350, seaLevel: 0 }, g => {
+    const ground = g.add('fractal', { fractal: 'fbm', scale: 2, octaves: 3, gain: 0.35, amplitude: 0.25, warp: 1.2 }, 'Ground');
+    const mesa = g.add('plateau', { center: [0.35, 0.4], radius: 0.16, level: 0.6, falloff: 0.02 }, 'Mesa');
+    const butte = g.add('plateau', { center: [0.7, 0.65], radius: 0.07, level: 0.5, falloff: 0.012 }, 'Butte');
+    const strata = g.add('terrace', { steps: 10, sharpness: 0.8, minHeight: 0.15, maxHeight: 0.65 }, 'Strata');
+    const erode = g.add('erosionFilter', filter('badlands', { spacing: 160, depth: 0.18, valleyLevel: 0.1, peakLevel: 0.6 }), 'Erosion');
+    const lake = g.add('crater', { center: [0.75, 0.25], radius: 0.1, depth: 0.08, rim: 0.01 }, 'Dry lake');
+    const out = g.add('output');
+    g.chain(ground, mesa, butte, strata, erode, lake);
+    g.link(lake, out, OUTPUT_PORT);
+  });
+}
+
+/** A continent's worth of coast and highlands, eroded twice: broad drainage, then fine gullies. */
+export function erodedHighlands(): WorldDoc {
+  return doc('temperate', { size: 4096, heightScale: 900 }, g => {
+    const land = g.add('continental', { scale: 1.6, coast: 0.42, highlands: 0.75, mountainStart: 0.55 }, 'Continent');
+    const ranges = g.add('fractal', { fractal: 'ridged', scale: 4, octaves: 3, gain: 0.35, amplitude: 0.35, warp: 0.3, seed: 12 }, 'Ranges');
+    const high = g.add('heightMask', { min: 0.25, max: 2, falloff: 0.2 }, 'Highlands');
+    const sum = g.add('combine', { op: 'add', strength: 1 }, 'Ranges on highlands');
+    const broad = g.add('erosionFilter', filter('default', { spacing: 700, depth: 0.14, octaves: 4, valleyLevel: 0.05, peakLevel: 0.9 }), 'Broad drainage');
+    const fine = g.add('erosionFilter', filter('fine', { spacing: 120, valleyLevel: 0.05, peakLevel: 0.9, seed: 3 }), 'Fine gullies');
+    const out = g.add('output');
+    g.link(land, high).link(land, sum, 'a').link(ranges, sum, 'b').link(high, sum, 'mask', 'mask');
+    g.chain(sum, broad, fine);
+    g.link(fine, out, OUTPUT_PORT);
+  });
+}
+
+/** Soft rock cut to ribbons: dense, deep rills over gentle swells. */
+export function badlands(): WorldDoc {
+  return doc('desert', { size: 1024, heightScale: 180, seaLevel: 0 }, g => {
+    const swell = g.add('fractal', { fractal: 'fbm', scale: 2.5, octaves: 4, amplitude: 0.7, warp: 0.8 }, 'Swells');
+    const shape = g.add('remap', { inMin: 0.2, inMax: 0.8, outMin: 0, outMax: 1, power: 1.6 }, 'Steepen');
+    const erode = g.add('erosionFilter', filter('badlands', { valleyLevel: 0.1, peakLevel: 0.85 }), 'Rills');
+    const out = g.add('output');
+    g.chain(swell, shape, erode);
+    g.link(erode, out, OUTPUT_PORT);
+  });
 }
 
 export const WORLD_PRESETS: readonly Preset<() => WorldDoc>[] = [
@@ -81,4 +124,6 @@ export const WORLD_PRESETS: readonly Preset<() => WorldDoc>[] = [
   { id: 'alpine', label: 'Alpine massif', params: alpineMassif },
   { id: 'hills', label: 'Rolling hills', params: rollingHills },
   { id: 'mesa', label: 'Mesa desert', params: mesaDesert },
+  { id: 'highlands', label: 'Eroded highlands (two erosion filters)', params: erodedHighlands },
+  { id: 'badlands', label: 'Badlands', params: badlands },
 ];

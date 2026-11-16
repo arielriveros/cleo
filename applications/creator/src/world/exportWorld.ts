@@ -39,6 +39,8 @@ export const EXPORT_MASKS: { id: string; label: string; meaning: string }[] = [
   { id: 'deposits', label: 'Deposits', meaning: 'sediment hydraulic erosion laid down, 0..1 of the map\'s 98th percentile' },
   { id: 'wear', label: 'Wear', meaning: 'ground hydraulic erosion cut away, 0..1 of the map\'s 98th percentile' },
   { id: 'talus', label: 'Talus', meaning: 'material thermal erosion piled at slope feet, 0..1 of the map\'s 98th percentile' },
+  { id: 'ridges', label: 'Ridges', meaning: 'the erosion filter ridge map: 0 creases .. 0.5 neutral .. 1 crests' },
+  { id: 'gullies', label: 'Gullies', meaning: 'how deep erosion filters cut, 0..1 of the map 98th percentile' },
   { id: 'water', label: 'Water', meaning: '1 under the sea or a lake, 0 on land' },
 ];
 
@@ -67,6 +69,8 @@ function maskPlane(id: string, out: WorldOutput, fields: WorldFields): Float32Ar
     case 'deposits': return fields.deposits;
     case 'wear': return fields.wear;
     case 'talus': return fields.talus;
+    case 'ridges': return fields.ridges;
+    case 'gullies': return fields.gullies;
     case 'water': { const p = new Float32Array(N); for (let i = 0; i < N; i++) p[i] = fields.water.kind[i] !== WATER_DRY ? 1 : 0; return p; }
     default: return null;
   }
