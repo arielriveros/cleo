@@ -6,6 +6,7 @@ import { DEFAULT_PROJECT_SETTINGS, parseProjectSettings, PROJECT_SETTINGS_VERSIO
 import FeaturePicker, { presetChoice, type FeatureChoice } from '../projectFeatures/FeaturePicker'
 import { useFeatureSizes } from '../projectFeatures/featureSizes'
 import { BUILT_IN_ADDONS } from '../addons/registry'
+import { missingRequirements, withAddon, withoutAddon } from '../addons/dependencies'
 
 // The new-project dialog: a name, the engine features its games ship (a preset to start from, every box
 // changeable here and later in Project ▸ Features) and the editor addons it turns on. Creating switches to it.
@@ -51,16 +52,22 @@ export default function NewProjectModal({ onClose, onCreated }: { onClose: () =>
           <FeaturePicker value={choice} onChange={setChoice} sizes={sizes} compact />
           <div className='flex flex-col gap-1'>
             <SectionTitle title='Addons' doc='editor/addons' />
-            {BUILT_IN_ADDONS.map(a => (
-              <div key={a.id} className='flex items-start gap-2'>
-                <Toggle checked={addons.includes(a.id)} doc={false} title={a.description}
-                  onChange={on => setAddons(list => on ? [...new Set([...list, a.id])] : list.filter(id => id !== a.id))} />
-                <div className='min-w-0'>
-                  <div className='text-ui text-fg'>{a.name}</div>
-                  <div className='text-ui-xs text-muted'>{a.description}</div>
+            {BUILT_IN_ADDONS.map(a => {
+              // One whose requirement is off is off too, and greyed until that one is on (addons/dependencies.ts).
+              const missing = missingRequirements(a.id, addons)
+              return (
+                <div key={a.id} className='flex items-start gap-2'>
+                  <Toggle checked={addons.includes(a.id) && missing.length === 0} disabled={missing.length > 0} doc={false}
+                    title={missing.length > 0 ? `Needs the ${missing.map(m => m.name).join(' and ')} addon` : a.description}
+                    onChange={on => setAddons(list => on ? withAddon(list, a.id) : withoutAddon(list, a.id))} />
+                  <div className='min-w-0'>
+                    <div className='text-ui text-fg'>{a.name}</div>
+                    <div className='text-ui-xs text-muted'>{a.description}</div>
+                    {missing.length > 0 && <div className='text-ui-xs text-dim'>Needs the {missing.map(m => m.name).join(' and ')} addon.</div>}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
         <ModalFooter>

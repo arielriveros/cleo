@@ -141,7 +141,8 @@ export function agentBridgeDiscoveryPlugin(): Plugin {
 const MCP_DIR = fileURLToPath(new URL('../mcp/', import.meta.url));
 
 /**
- * Start the Cleo agent host (applications/mcp/src/host.mjs) unless one runs: the Claude panel's backend. The
+ * Start the Cleo agent host (applications/mcp/src/host.mjs) unless one runs: what the editor's MCP server addon links to,
+ * and the Claude panel's backend. The
  * finding and starting live in the MCP package (ensureHost.mjs) so the stdio server and this agree on them.
  */
 async function startAgentHost(): Promise<{ port: number }> {

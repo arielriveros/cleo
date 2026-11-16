@@ -54,5 +54,10 @@ export interface AddonManifest {
   readonly defaultOn: boolean
   /** Asked before turning it off while it runs, when that ends something the user would notice. */
   readonly confirmDisable?: string
+  /**
+   * The addons it runs on (their ids). It is off while any of them is off, and turning one of them off turns it
+   * off too (dependencies.ts).
+   */
+  readonly requires?: readonly string[]
   load(): Promise<AddonModule>
 }

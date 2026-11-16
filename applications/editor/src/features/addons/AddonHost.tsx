@@ -3,6 +3,7 @@ import { Logger } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { activeProjectId } from '../../utils/projectScope'
 import { addonById } from './registry'
+import { activeAddons } from './dependencies'
 import type { AddonContributions, AddonModule, AddonSlotName } from './types'
 
 // Runs the project's addons (Project ▸ Addons): loads each one it turns on, activates it, and lays its
@@ -26,7 +27,8 @@ export function AddonHost({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!projectSettingsReady) return
-    const want = new Set(enabled.filter(id => addonById(id)))
+    // Only the addons that can run: one whose requirement is off stays off with it (dependencies.ts).
+    const want = new Set(activeAddons(enabled).map(a => a.id))
     wanted.current = want
     for (const id of want) {
       if (modules.current.has(id) || loading.current.has(id)) continue

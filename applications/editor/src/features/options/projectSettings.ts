@@ -103,7 +103,8 @@ export interface ProjectSettings {
   /**
    * The settings' format. 2: the physics worker became the default. A stored 'off' from before that is the
    * old default rather than a choice, so it reads as 'on'. 3: features and addons. A project from before
-   * reads as every feature on and the Claude Code addon on, which is what it had.
+   * reads as every feature on and the Claude Code addon on, which is what it had. 4: the MCP server is an addon of
+   * its own, which Claude Code needs; a version-3 project with Claude Code on gets it, as the link was part of it.
    */
   version: number;
   engine: EngineRuntimeSettings;
@@ -114,10 +115,10 @@ export interface ProjectSettings {
   saves: ProjectSaveSettings;
 }
 
-export const PROJECT_SETTINGS_VERSION = 3;
+export const PROJECT_SETTINGS_VERSION = 4;
 
-/** The addons a project from before addons had: the Claude Code panel was always there. */
-export const LEGACY_ADDONS: readonly string[] = ['claude-code'];
+/** The addons a project from before addons had: the Claude Code panel and its agent link were always there. */
+export const LEGACY_ADDONS: readonly string[] = ['mcp-server', 'claude-code'];
 
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   version: PROJECT_SETTINGS_VERSION,
@@ -180,8 +181,9 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
     },
     features: { disabled: idList(f.disabled) ?? [] },
     addons: {
-      // Before version 3 there were no addons, and the Claude Code panel was always on.
-      enabled: version < 3 ? [...LEGACY_ADDONS] : idList(a.enabled) ?? [...d.addons.enabled],
+      // Before version 3 there were no addons, and the Claude Code panel was always on. In version 3 the agent link
+      // was part of Claude Code; since 4 it is the MCP server addon, which Claude Code needs.
+      enabled: version < 3 ? [...LEGACY_ADDONS] : withLinkOf3(version, idList(a.enabled) ?? [...d.addons.enabled]),
       settings: a.settings && typeof a.settings === 'object' && !Array.isArray(a.settings) ? { ...a.settings } : {},
     },
     saves: {
@@ -189,6 +191,11 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       folder: typeof sv.folder === 'string' ? cleanSaveFolder(sv.folder) : d.saves.folder,
     },
   };
+}
+
+/** A version-3 addon list: Claude Code then carried the agent link, the MCP server addon's since version 4. */
+function withLinkOf3(version: number, enabled: string[]): string[] {
+  return version === 3 && enabled.includes('claude-code') && !enabled.includes('mcp-server') ? ['mcp-server', ...enabled] : enabled;
 }
 
 export function isDefaultProjectSettings(s: ProjectSettings): boolean {

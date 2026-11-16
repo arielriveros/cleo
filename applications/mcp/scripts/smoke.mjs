@@ -5,7 +5,7 @@
 // run driven by WASD and checked by its numbers, a cancelled run, a template made and placed -- undoes it
 // all, and saves what it saw.
 //
-//   1. start an editor:  npm run editor:dev   (open a project you do not mind changing, and its Claude panel)
+//   1. start an editor:  npm run editor:dev   (open a project you do not mind changing, with the MCP server addon on)
 //   2. node applications/mcp/scripts/smoke.mjs [--out <dir>] [--keep] [--workspace]
 //
 // Everything it adds to the scene and the libraries is undone at the end unless --keep is given.

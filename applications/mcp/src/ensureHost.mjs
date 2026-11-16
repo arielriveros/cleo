@@ -1,6 +1,6 @@
 // @ts-check
 // Find the Cleo agent host, or start it. Shared by the stdio MCP server (index.mjs) and the editor's dev
-// server (app-kit vite.preset.ts imports this module to start the host when the Claude panel opens), so both
+// server (app-kit vite.preset.ts imports this module to start the host for the editor's MCP server addon), so both
 // agree on what "running" means: the discovery file names a host whose process is alive and whose port
 // answers.
 

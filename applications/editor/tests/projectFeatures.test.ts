@@ -16,12 +16,21 @@ import type { PlayerBuild } from '../src/features/publish/playerManifest';
 
 const DOCS = path.resolve(__dirname, '../../../docs');
 
-describe('project settings v3: features and addons', () => {
-  it('reads an older project as every feature on and the Claude Code addon on', () => {
+describe('project settings v3 and v4: features and addons', () => {
+  it('reads an older project as every feature on and the MCP server and Claude Code addons on', () => {
     const old = parseProjectSettings({ version: 2, engine: {}, publish: {} });
     expect(old.features.disabled).toEqual([]);
     expect(old.addons.enabled).toEqual([...LEGACY_ADDONS]);
-    expect(old.version).toBe(3);
+    expect(LEGACY_ADDONS).toEqual(['mcp-server', 'claude-code']);
+    expect(old.version).toBe(4);
+  });
+
+  it('gives a v3 project with Claude Code on the MCP server addon its link was part of', () => {
+    expect(parseProjectSettings({ version: 3, addons: { enabled: ['claude-code'] } }).addons.enabled).toEqual(['mcp-server', 'claude-code']);
+    expect(parseProjectSettings({ version: 3, addons: { enabled: [] } }).addons.enabled).toEqual([]);
+    // From version 4 the list is the user's own: Claude Code without the MCP server stays so (and does not run).
+    expect(parseProjectSettings({ version: 4, addons: { enabled: ['claude-code'] } }).addons.enabled).toEqual(['claude-code']);
+    expect(parseProjectSettings({ version: 4, addons: { enabled: ['mcp-server'] } }).addons.enabled).toEqual(['mcp-server']);
   });
 
   it('keeps a v3 choice, tolerantly', () => {
@@ -105,5 +114,8 @@ describe('the built-in addons', () => {
       expect(a.id).toMatch(/^[\w.-]+$/);
     }
     expect(BUILT_IN_ADDONS.map(a => a.id)).toEqual(expect.arrayContaining([...LEGACY_ADDONS]));
+    // Every requirement names a built-in addon.
+    for (const a of BUILT_IN_ADDONS) for (const r of a.requires ?? []) expect(BUILT_IN_ADDONS.some(b => b.id === r), `${a.id} requires ${r}`).toBe(true);
+    expect(BUILT_IN_ADDONS.find(a => a.id === 'claude-code')?.requires).toEqual(['mcp-server']);
   });
 });

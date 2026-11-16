@@ -43,8 +43,8 @@ For Claude Desktop, put the same command in `claude_desktop_config.json` under `
 ```
 
 - **The agent host** (`src/host.mjs`) is one long-lived background process that owns the editor link.
-  - It is started on demand by `ensureHost.mjs`: when the Claude panel opens (via the editor's dev server),
-    or when a stdio MCP server starts.
+  - It is started on demand by `ensureHost.mjs`: when the editor opens a project with the MCP server addon on
+    (via the editor's dev server), or when a stdio MCP server starts.
   - It exits after 15 minutes with nothing connected.
   - Its log is `~/.cleo/agent-host.log`.
 - **The stdio MCP server** (`src/index.mjs`) is what Claude Code launches. It serves the tool catalog and
@@ -161,7 +161,7 @@ Resources: `cleo://docs/...` (all of `docs/`) and `cleo://examples/scripts/...`.
 
 ```sh
 npm test                    # bridge security, peer relay and cancel, the stdio server through the SDK v2 client (strict inputs), the catalog's size budget, hosted terminal (node:test, real sockets, a real pty)
-node scripts/smoke.mjs      # end to end through the host against a running editor (its Claude panel open): an atomic failure, a quad capture, a cel material, a script patched, a WASD run checked by its numbers, a cancelled run, makeTemplate, undo of all of it (--keep leaves the result, --workspace also makes a scene)
+node scripts/smoke.mjs      # end to end through the host against a running editor (its MCP server addon on): an atomic failure, a quad capture, a cel material, a script patched, a WASD run checked by its numbers, a cancelled run, makeTemplate, undo of all of it (--keep leaves the result, --workspace also makes a scene)
 ```
 
 The editor half is tested by `applications/editor/tests/agentBridge.test.ts` (refs, props, materials, op

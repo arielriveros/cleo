@@ -314,7 +314,6 @@ export function describeClient(c) {
 }
 
 const NOT_CONNECTED = 'No Cleo editor is connected to this MCP server. Start the editor '
-    + '(`npm run editor:dev` from the engine root, or `npm run desktop:dev`), open a project, and open its Claude '
-    + 'panel (the Claude button at the right of the menu bar): the editor links to agents only while that panel '
-    + 'is open. Once it has started, an "Agent" chip with a green dot appears in the menu bar. If the chip says '
-    + '"Agent off", click it and choose Connect.';
+    + '(`npm run editor:dev` from the engine root, or `npm run desktop:dev`) and open a project with the MCP server '
+    + 'addon on (Project > Addons): the editor links to agents while that addon is on. Its "Agent" chip in the menu '
+    + 'bar shows a green dot once linked. If the chip says "Agent off", click it and choose Connect (or Retry).';

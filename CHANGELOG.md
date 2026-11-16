@@ -61,8 +61,17 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     navigation, a model with cloth parts as Cloth, a script that reaches `scene.physics2D` as 2D physics, and any
     name a feature's module adds that a script uses.
 - **Addons.** Project ▸ Addons turns editor addons on or off per project; the choice travels with the project's
-  bundle. The Claude Code panel is the first addon: with it off, its code is not even loaded (no panel, no
-  toggle, no agent link). Projects from before addons have it on.
+  bundle. An addon that is off is not even loaded. Two come built in:
+  - *MCP server*: the agent link and its **Agent** chip. While it is on, the editor starts the agent host and
+    links to it as the project opens, Claude panel or not, so Claude Code in a terminal or an IDE reaches the
+    project without the panel open. The chip shows whenever the addon is on and can always be clicked: it
+    says what the link is doing (starting, linked, off, or why the host could not start) and offers Connect
+    or Retry.
+  - *Claude Code*: the Claude panel and its **Claude** button, which now wears the Claude mark. It needs the
+    MCP server addon: with that off, its switch is greyed, and turning the MCP server off turns Claude Code
+    off with it, after asking.
+  Projects from before addons, and those whose Claude Code was on before the MCP server became an addon of
+  its own, have both on.
 - **Published games carry only the shaders they use: about 10 MB smaller.** The player no longer holds every
   shader's every variant for both graphics APIs (17 MB of it): the shaders travel in the game's game.bin, each
   one's general version plus the variants the game draws with (Options ▸ Project ▸ Only used shaders). A small
@@ -177,8 +186,7 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     splash screen's pixel scan.
   - *Creator.* File holds the asset's Save as / Rename / Close and the app's export. View holds Frame,
     Reset Layout and the WebGL 2 / WebGPU switch. Project opens the editor.
-  - *Agent link.* The editor talks to the agent host only while the Claude panel is open, so the Agent
-    chip no longer comes and goes before you open it.
+  - *Agent link.* The Agent chip sits in the menu bar while the MCP server addon is on (see Addons).
   - *Gizmo axes.* World and local show as a globe and a box rather than W and L.
   - *Desktop title bar.* In the desktop app on Windows and Linux the menu bar is the window's title bar, in
     the editor and in Cleo Creator: the OS frame is gone, and **Minimize**, **Maximize** / **Restore** and

@@ -12,9 +12,12 @@ An AI agent such as Claude Code or Claude Desktop can work in the editor alongsi
 - take screenshots of the viewport, from up to four angles at once
 - play the game, press its keys, and read back how things moved and what the console said
 
-The panel and the agent link are the **Claude Code** addon: Project ▸ Addons turns them on or off for the
-project ([Addons](addons.md)). With it off there is no Claude button and no agent link, for the panel and
-for an external agent alike.
+Two addons make this up ([Addons](addons.md)), each turned on or off for the project in Project ▸ Addons:
+
+- **MCP server**: the agent link, and the **Agent** chip that shows it. With it off, no agent reaches the
+  project, in the editor or outside it, and there is no chip.
+- **Claude Code**: the **Claude** button and the Claude panel. It needs the MCP server: with that off,
+  Claude Code is off too and its switch is greyed.
 
 **Claude** at the right end of the menu bar opens the Claude panel at the right edge of the editor: your own
 Claude Code, running in a terminal inside the panel. It signs in with your Claude account, so it runs on
@@ -33,7 +36,7 @@ The panel stays open in every mode and during Play. Drag its left edge to resize
 1. Install the agent package once: `cd applications/mcp && npm install`.
 2. Start the editor (`npm run editor:dev`) and open a project.
 
-That is enough for the panel: opening it starts the agent host. The panel also needs Claude Code installed
+That is enough: with the MCP server addon on, the editor starts the agent host as it opens the project. The panel also needs Claude Code installed
 on this machine (`claude` on the PATH); see the Claude Code setup guide at
 https://code.claude.com/docs/en/setup.
 
@@ -62,9 +65,8 @@ same Claude Code you would run in a terminal yourself, with the Cleo tools alrea
 - **Copy and paste.** Select text and press Ctrl+C to copy it; without a selection, Ctrl+C is Claude Code's
   own interrupt. Ctrl+V pastes. Every other key, such as Esc, goes to Claude Code.
 - **It keeps running.** Closing the panel, switching tabs or reloading the editor leaves the session
-  running: the screen comes back as it was. It stops 15 minutes after the last editor window closes.
-  While the panel is closed, though, the editor is not linked: Claude's requests to the editor fail
-  until you open the panel again.
+  running: the screen comes back as it was, and Claude can go on working on the project while the panel is
+  closed. It stops 15 minutes after the last editor window closes.
 - **The header** names what the session is about, once Claude Code has given it a title, and its dot is
   green while Claude Code runs. Hover over the title for the version and where it started. **New session**
   (+) ends the running session and starts a fresh one; **Stop** ends it and keeps the conversation. When
@@ -73,18 +75,19 @@ same Claude Code you would run in a terminal yourself, with the Cleo tools alrea
 
 ## The Agent chip
 
-The editor links to agents only while the Claude panel is open. Until you open it, the editor makes no
-call to the agent host at all, and closing the panel unlinks it. That holds for any agent: Claude Code
-running in a terminal or an IDE with the Cleo MCP server also reaches the editor only while the panel is
-open.
+The editor links to agents while the **MCP server** addon is on, whether or not the Claude panel is open:
+it starts the agent host when the project opens, and starts it again if it stops. Claude Code running in a
+terminal or an IDE with the Cleo MCP server reaches the editor the same way. With the addon off, the editor
+makes no call to the agent host at all.
 
-**Agent** sits in the menu bar once the panel is open and has started. Its dot shows the state of the
-link:
+**Agent** sits in the menu bar whenever the MCP server addon is on, and you can always click it. Its dot
+shows the state of the link:
 
 | State | Meaning |
 |---|---|
 | Green dot | Linked. The agent's commands run in this editor. The dot pulses while one is running. |
-| **Agent off** | You disconnected. Click the chip, then **Connect**. |
+| **Agent…** | Starting the agent host, or linking to it. |
+| **Agent off** | You disconnected: click the chip, then **Connect**. With a red dot, the agent host could not start: the chip's menu says why and has **Retry**. A build without the dev server has no agent host. |
 | **Agent (other tab)** | Another editor tab holds the link. Click the chip, then **Use this tab**. |
 | **Agent refused** | The server did not accept this editor, usually because the server was restarted. Click the chip, then **Connect**. |
 

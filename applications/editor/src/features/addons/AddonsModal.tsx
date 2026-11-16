@@ -4,6 +4,7 @@ import { openDocs } from '@cleo/app-kit/docs/viewer/docsViewerStore'
 import { BookIcon } from '@cleo/app-kit/ui'
 import { useCleoEngine } from '../EngineContext'
 import { BUILT_IN_ADDONS } from './registry'
+import { addonOffPrompt, dependentsOf, missingRequirements, withAddon, withoutAddon } from './dependencies'
 import type { AddonManifest } from './types'
 
 // Project ▸ Addons: the editor addons this project turns on (Project Settings ▸ addons, so the choice travels
@@ -14,13 +15,15 @@ export default function AddonsModal({ onClose }: { onClose: () => void }) {
   const enabled = projectSettings.addons.enabled
 
   const set = async (addon: AddonManifest, on: boolean) => {
-    if (!on && addon.confirmDisable && !await confirmDialog({
-      title: `Turn ${addon.name} off?`, message: addon.confirmDisable, confirmLabel: 'Turn off', tone: 'warning',
+    // Turning one off turns off what runs on it: say so, with what each of them ends.
+    const prompt = on ? null : addonOffPrompt(addon, dependentsOf(addon.id).filter(d => enabled.includes(d.id)))
+    if (prompt && !await confirmDialog({
+      title: `Turn ${addon.name} off?`, message: prompt, confirmLabel: 'Turn off', tone: 'warning',
     })) return
-    setProjectSettings(prev => {
-      const list = prev.addons.enabled.filter(id => id !== addon.id)
-      return { ...prev, addons: { ...prev.addons, enabled: on ? [...list, addon.id] : list } }
-    })
+    setProjectSettings(prev => ({
+      ...prev,
+      addons: { ...prev.addons, enabled: on ? withAddon(prev.addons.enabled, addon.id) : withoutAddon(prev.addons.enabled, addon.id) },
+    }))
   }
 
   return (
@@ -28,23 +31,30 @@ export default function AddonsModal({ onClose }: { onClose: () => void }) {
       <DocScope page='editor/addons'>
         <ModalHeader title='Addons' doc='editor/addons#built-in-addons' />
         <div className='px-4 py-3 flex flex-col gap-3'>
-          {BUILT_IN_ADDONS.map(addon => (
-            <div key={addon.id} className='flex items-start gap-3 min-w-0'>
-              <Toggle checked={enabled.includes(addon.id)} onChange={on => void set(addon, on)} doc={false}
-                title={enabled.includes(addon.id) ? `Turn ${addon.name} off for this project` : `Turn ${addon.name} on for this project`} />
-              <div className='flex-1 min-w-0'>
-                <div className='flex items-baseline gap-2'>
-                  <span className='text-ui font-semibold text-fg'>{addon.name}</span>
-                  <span className='text-ui-xs text-dim'>{addon.version} · {addon.author}</span>
+          {BUILT_IN_ADDONS.map(addon => {
+            // An addon whose requirement is off is off, and cannot be turned on until that one is.
+            const missing = missingRequirements(addon.id, enabled)
+            const on = enabled.includes(addon.id) && missing.length === 0
+            return (
+              <div key={addon.id} className='flex items-start gap-3 min-w-0'>
+                <Toggle checked={on} disabled={missing.length > 0} onChange={next => void set(addon, next)} doc={false}
+                  title={missing.length > 0 ? `Needs the ${missing.map(m => m.name).join(' and ')} addon`
+                    : on ? `Turn ${addon.name} off for this project` : `Turn ${addon.name} on for this project`} />
+                <div className='flex-1 min-w-0'>
+                  <div className='flex items-baseline gap-2'>
+                    <span className='text-ui font-semibold text-fg'>{addon.name}</span>
+                    <span className='text-ui-xs text-dim'>{addon.version} · {addon.author}</span>
+                  </div>
+                  <div className='text-ui-sm text-muted'>{addon.description}</div>
+                  {missing.length > 0 && <div className='text-ui-xs text-dim'>Needs the {missing.map(m => m.name).join(' and ')} addon.</div>}
                 </div>
-                <div className='text-ui-sm text-muted'>{addon.description}</div>
+                <Button size='sm' variant='ghost' title={`Open the ${addon.name} documentation`} aria-label={`${addon.name} documentation`}
+                  onClick={() => openDocs({ page: addon.docPage })}>
+                  <span className='inline-block w-3.5 h-3.5'><BookIcon /></span>
+                </Button>
               </div>
-              <Button size='sm' variant='ghost' title={`Open the ${addon.name} documentation`} aria-label={`${addon.name} documentation`}
-                onClick={() => openDocs({ page: addon.docPage })}>
-                <span className='inline-block w-3.5 h-3.5'><BookIcon /></span>
-              </Button>
-            </div>
-          ))}
+            )
+          })}
         </div>
         <ModalFooter>
           <Button onClick={onClose}>Close</Button>

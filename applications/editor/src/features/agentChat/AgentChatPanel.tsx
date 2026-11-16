@@ -6,7 +6,7 @@ import { JOINED_DIVIDER_CLASS, JOINED_GROUP_CLASS } from '@cleo/app-kit/ui/Segme
 import ClaudeCodeView from './ClaudeCodeView'
 import { panelActions, panelStore, PANEL_MIN_WIDTH } from './panelStore'
 import { terminalActions, terminalStore } from './terminalStore'
-import { ChatIcon, NewChatIcon, StopSessionIcon } from './chatIcons'
+import { ClaudeIcon, NewChatIcon, StopSessionIcon } from './chatIcons'
 
 // The Claude panel, docked at the right edge of the editor (like an IDE's assistant panel), outside dockview
 // so it stays up in every mode and during Play. It shows the user's own Claude Code CLI, hosted in a terminal
@@ -49,7 +49,7 @@ export default function AgentChatPanel() {
       <div onPointerDown={onResizeStart} className='absolute left-0 top-0 bottom-0 w-1 -ml-0.5 cursor-col-resize hover:bg-primary/40 z-10' title='Drag to resize' />
 
       <div className='flex items-center gap-2 h-[32px] pl-2.5 pr-1.5 border-b border-border-subtle bg-surface-sunken shrink-0'>
-        <span className='w-4 h-4 text-highlight shrink-0'><ChatIcon /></span>
+        <span className='w-4 h-4 shrink-0'><ClaudeIcon /></span>
         <div className='min-w-0 flex items-baseline gap-1.5 cursor-default' title={about}>
           <span className='font-semibold text-fg truncate'>{t.title ?? 'Claude Code'}</span>
           {t.title && <span className='text-ui-xs text-dim shrink-0'>Claude Code</span>}
@@ -83,7 +83,7 @@ export function AgentChatToggle() {
   return (
     <Button variant='subtle' size='sm' className='h-[25px]' active={s.open} title='Claude Code: build, script and test with Claude'
       onClick={() => panelActions.toggle()}>
-      <span className='w-3.5 h-3.5'><ChatIcon /></span> Claude
+      <span className='w-3.5 h-3.5'><ClaudeIcon /></span> Claude
     </Button>
   )
 }

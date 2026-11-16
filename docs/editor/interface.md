@@ -33,7 +33,7 @@ screen's pixel scan across it, and its tooltip names the open project.
 | **File** | **Save** (Ctrl+S) the active tab, **Save All** (Ctrl+Shift+S) every tab with unsaved changes, **New Scene**. |
 | **Edit** | **Undo** and **Redo** (named after what they undo), **Delete** the selected node. |
 | **View** | **Frame Selected** (F) and **Reset Layout**. |
-| **Project** | **Import Project…** (a project `.zip`), **Export Project** (the whole project to a `.zip`), **Features…** (the engine features the games ship, see [Project features](project-features.md)), **Addons…** (editor addons such as Claude Code, see [Addons](addons.md)), and **Publish ▸** Web (HTML), Desktop (Electron) or Desktop installer. See [Projects](projects.md) and [Publishing](publishing.md). |
+| **Project** | **Import Project…** (a project `.zip`), **Export Project** (the whole project to a `.zip`), **Features…** (the engine features the games ship, see [Project features](project-features.md)), **Addons…** (editor addons: the MCP server and Claude Code, see [Addons](addons.md)), and **Publish ▸** Web (HTML), Desktop (Electron) or Desktop installer. See [Projects](projects.md) and [Publishing](publishing.md). |
 | **Help** | **Documentation** (F1), **What's This?** (Shift+F1), **Keyboard Shortcuts…** (the table below) and **About Cleo Engine…** (the version). See [Help and the docs](#help-and-the-docs). |
 
 Click a menu to open it; while one is open, pointing at another opens that one instead. The arrow keys move
@@ -50,7 +50,7 @@ After the menus come, when there is something to say:
 |---|---|
 | **Status** | What Save, Save All or Publish did last: *Saving…*, *Saved*, *Save failed*, *Publishing web build…*. |
 | **Script sync chip** | Appears only when the VS Code workspace needs attention (sync paused or in error). Its setup lives in [Options ▸ Editor ▸ Scripts](options.md#editor). |
-| **Agent chip** | Appears once the Claude panel is open and has started. See [The AI agent link](ai-agent-link.md). |
+| **Agent chip** | The agent link: shown while the MCP server addon is on. See [The AI agent link](ai-agent-link.md). |
 
 **Centre** — the transport.
 
@@ -67,7 +67,7 @@ Play, Simulate and Restart wait while a project, a scene or an import is still o
 editor's scene is not the project's yet. Their tooltips say what they are waiting for. A game that is
 already running is never held.
 
-**Right** — the [mode selector](modes.md), then **Claude**, which opens the [Claude panel](ai-agent-link.md).
+**Right** — the [mode selector](modes.md), then **Claude** (the Claude mark), which opens the [Claude panel](ai-agent-link.md). It is there while the Claude Code addon is on.
 
 In the desktop app on Windows and Linux the menu bar is also the window's title bar, and **Minimize**,
 **Maximize** (**Restore** while maximized) and **Close** come last.

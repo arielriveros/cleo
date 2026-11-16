@@ -1,12 +1,12 @@
 import { agentBridge } from '../agentBridge/bridgeClient'
+import { agentHostStore, ensureHost } from '../agentBridge/agentHost'
 
-// The Claude panel's own state: whether it is open, how wide, and the link to the agent host
-// (applications/mcp/src/host.mjs), which runs Claude Code for it. What runs IN the panel is terminalStore.
+// The Claude panel's own state: whether it is open, how wide, and how its link to the agent host
+// (applications/mcp/src/host.mjs), which runs Claude Code for it, is doing. What runs IN the panel is
+// terminalStore.
 //
-// Opening the panel makes sure the host runs: the dev server starts it (POST /__cleo/agent-host/start,
-// app-kit/vite.preset.ts), and the bridge then connects to it.
-// The bridge runs only while the panel is open: AgentBridgeHost starts it on open and stops it on close. A link to something that cannot host Claude
-// Code (an older host, a standalone MCP server) goes through the same start, which replaces it.
+// The link itself belongs to the MCP server addon (agentBridge/agentHost.ts), which keeps the host running while
+// it is on. Opening the panel asks for the host as well, and links even if the user had turned the link off.
 
 export type PanelLink = 'idle' | 'starting' | 'connecting' | 'ready' | 'error'
 
@@ -43,55 +43,27 @@ export const panelStore = {
   getSnapshot(): PanelState { return state },
 }
 
-agentBridge.subscribe(() => {
+/** The panel's view of the link, from the bridge and the agent host's start. */
+function syncLink() {
   const b = agentBridge.getSnapshot()
-  if (b.state === 'connected') {
-    if (state.link !== 'ready') set({ link: 'ready', linkError: null })
-  } else if (state.link === 'ready' || state.link === 'connecting') {
-    // The host went away (it idled out, or was replaced): bring one back while the panel is open.
-    set({ link: 'idle' })
-    if (state.open) void ensureHost()
-  }
-})
-
-let starting: Promise<void> | null = null
-
-/** Make sure the agent host runs and the bridge is linked to it: what opening the panel does. */
-export function ensureHost(): Promise<void> {
-  if (starting) return starting
-  const b = agentBridge.getSnapshot()
-  if (b.state === 'connected' && b.capabilities.includes('terminal')) return Promise.resolve()
-  if (!agentBridge.supported) {
-    set({ link: 'error', linkError: 'The Claude panel needs the editor dev server (npm run editor:dev); the packaged app has no agent host yet.' })
-    return Promise.resolve()
-  }
-  set({ link: 'starting', linkError: null })
-  starting = (async () => {
-    try {
-      const res = await fetch('/__cleo/agent-host/start', { method: 'POST' })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok || !body.ok) throw new Error(body.error || `The dev server answered ${res.status}.`)
-      // A link to an older or standalone server would block the host's: drop it and connect afresh.
-      if (agentBridge.getSnapshot().state === 'connected') agentBridge.disconnect()
-      // Only while the panel is still open: the link to the agent host lives as long as the panel does
-      // (agentBridge/AgentBridgeHost.tsx), and a panel closed while the host started stays unlinked.
-      if (!state.open) { set({ link: 'idle' }); return }
-      agentBridge.connect()
-      set({ link: 'connecting' })
-    } catch (err) {
-      set({ link: 'error', linkError: err instanceof Error ? err.message : String(err) })
-    } finally {
-      starting = null
-    }
-  })()
-  return starting
+  const host = agentHostStore.getSnapshot()
+  const link: PanelLink = b.state === 'connected' ? 'ready'
+    : host.state === 'error' ? 'error'
+    : host.state === 'starting' ? 'starting'
+    : b.state === 'connecting' ? 'connecting'
+    : 'idle'
+  const linkError = link === 'error' ? host.error : null
+  if (link !== state.link || linkError !== state.linkError) set({ link, linkError })
 }
+agentBridge.subscribe(syncLink)
+agentHostStore.subscribe(syncLink)
+syncLink()
 
 export const panelActions = {
   setOpen(open: boolean) {
     writeLs(OPEN_KEY, open ? '1' : '0')
     set({ open })
-    if (open) void ensureHost()
+    if (open) void ensureHost({ connect: true })
   },
   toggle() { panelActions.setOpen(!state.open) },
   setWidth(width: number) {
@@ -99,8 +71,8 @@ export const panelActions = {
     writeLs(WIDTH_KEY, String(w))
     set({ width: w })
   },
-  retry() { void ensureHost() },
+  retry() { void ensureHost({ connect: true }) },
 }
 
-// Opened at boot (remembered from last time): start the host right away.
-if (state.open) queueMicrotask(() => { void ensureHost() })
+// Opened at boot (remembered from last time): ask for the host right away.
+if (state.open) queueMicrotask(() => { void ensureHost({ connect: true }) })
