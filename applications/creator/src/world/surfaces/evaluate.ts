@@ -95,6 +95,8 @@ function inputReader(c: SurfaceCondition, f: WorldFields, M: number, layers: Map
     case 'deposits': return field(f.deposits);
     case 'wear': return field(f.wear);
     case 'talus': return field(f.talus);
+    case 'ridges': return field(f.ridges);
+    case 'gullies': return field(f.gullies);
     case 'aspect': {
       const aspect = f.aspect;
       if (!aspect) return null;

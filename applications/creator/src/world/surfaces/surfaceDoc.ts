@@ -17,7 +17,7 @@ export type SurfaceInput =
   | 'height' | 'heightAboveWater' | 'relativeHeight'
   | 'slope' | 'aspect' | 'curvature' | 'cavity'
   | 'flowArea' | 'wetness' | 'waterDepth' | 'shoreDistance'
-  | 'deposits' | 'wear' | 'talus'
+  | 'deposits' | 'wear' | 'talus' | 'ridges' | 'gullies'
   | 'layer' | 'noise';
 
 /** How a condition joins the mask built by the conditions above it. */
@@ -132,6 +132,8 @@ export const INPUT_INFO: Record<SurfaceInput, InputInfo> = {
   deposits: { label: 'Deposits', unit: '', domain: [0, 1], defaults: { min: 0.2, max: 1, falloffLow: 0.1, falloffHigh: 0 }, step: 0.01, hint: 'Where hydraulic erosion laid sediment down: fans, valley floors, river bars.' },
   wear: { label: 'Wear', unit: '', domain: [0, 1], defaults: { min: 0.2, max: 1, falloffLow: 0.1, falloffHigh: 0 }, step: 0.01, hint: 'Where hydraulic erosion cut the ground away: channels, gullies, scoured rock.' },
   talus: { label: 'Talus', unit: '', domain: [0, 1], defaults: { min: 0.15, max: 1, falloffLow: 0.1, falloffHigh: 0 }, step: 0.01, hint: 'Where thermal erosion piled loose material at the foot of slopes: scree.' },
+  ridges: { label: 'Ridges', unit: '', domain: [0, 1], defaults: { min: 0.7, max: 1, falloffLow: 0.1, falloffHigh: 0 }, step: 0.01, hint: 'The erosion filter ridge map: 1 on the crests between gullies, 0 in their creases, 0.5 elsewhere.' },
+  gullies: { label: 'Gullies', unit: '', domain: [0, 1], defaults: { min: 0.3, max: 1, falloffLow: 0.2, falloffHigh: 0 }, step: 0.01, hint: 'How deep an erosion filter cut the ground: its gully floors.' },
   layer: { label: 'Layer', unit: '', domain: [0, 1], defaults: { min: 0.5, max: 1, falloffLow: 0.3, falloffHigh: 0 }, step: 0.01, hint: 'The coverage of a surface below this one: require it, or (inverted) avoid it.' },
   noise: { label: 'Noise', unit: '', domain: [0, 1], defaults: { min: 0.5, max: 1, falloffLow: 0.15, falloffHigh: 0 }, step: 0.01, hint: 'Seeded fractal noise in world space: patches, clearings, variety.' },
 };

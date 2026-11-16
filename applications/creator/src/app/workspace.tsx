@@ -13,7 +13,7 @@ import {
 import type { GenerationStatus } from '../core/useGeneration';
 import { GenerationBar } from './StatusBar';
 import { AssetsPanel } from './AssetsPanel';
-import { creatorMenu } from './menuStore';
+import { creatorMenu, type UndoSource } from './menuStore';
 import { AssetStatus, type CreatorAssetState } from '../core/useCreatorAsset';
 
 // The one layout every Creator mode is built from, so World, FX and Foliage read the same:
@@ -35,6 +35,8 @@ export interface WorkspacePanel {
   id: string;
   title: string;
   render: () => ReactNode;
+  /** A bottom panel beside the first bottom group rather than a tab in it (the World's Map beside its Graph). */
+  split?: 'right';
 }
 
 export interface PrimaryAction {
@@ -75,6 +77,12 @@ export interface CreatorWorkspaceProps {
   onFrame?: () => void;
   /** Extra single-key shortcuts (lower case), not while typing into a field. */
   hotkeys?: Record<string, () => void>;
+  /** The bottom dock's starting height, px (default 300 with mode tabs, 220 without). */
+  bottomHeight?: number;
+  /** Bumped when this mode's default layout changes, so only its stored layout is rebuilt. */
+  layoutVersion?: number;
+  /** The mode's undo history: Edit ▸ Undo / Redo and Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y. */
+  undo?: UndoSource;
 }
 
 /** Bumped when the default layout changes, so stored layouts are rebuilt. */
@@ -114,11 +122,14 @@ export function CreatorWorkspace(props: CreatorWorkspaceProps) {
       id: p.id, component: p.id, title: p.title, initialWidth: RIGHT_WIDTH,
       position: i === 0 ? { referencePanel: 'viewport', direction: 'right' } : { referencePanel: right[0].id, direction: 'within' },
     }));
-    const below = [...bottom, { id: 'assets', title: 'Assets' }, { id: 'console', title: 'Console' }];
+    const below = [...bottom.filter(p => !p.split), { id: 'assets', title: 'Assets' }, { id: 'console', title: 'Console' }];
     below.forEach((p, i) => api.addPanel({
-      id: p.id, component: p.id, title: p.title, initialHeight: bottom.length ? 300 : 220,
+      id: p.id, component: p.id, title: p.title, initialHeight: props.bottomHeight ?? (bottom.length ? 300 : 220),
       position: i === 0 ? { referencePanel: 'viewport', direction: 'below' } : { referencePanel: below[0].id, direction: 'within' },
     }));
+    for (const p of bottom.filter(b => b.split === 'right')) {
+      api.addPanel({ id: p.id, component: p.id, title: p.title, position: { referencePanel: below[0].id, direction: 'right' } });
+    }
     if (right[0]) api.getPanel(right[0].id)?.api.setActive();
     if (below[0]) api.getPanel(below[0].id)?.api.setActive();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -138,9 +149,25 @@ export function CreatorWorkspace(props: CreatorWorkspaceProps) {
   // What the menu bar offers for this mode (App.tsx): re-published every render, so it always holds the
   // asset's and the action's current state; cleared when the mode closes.
   useLayoutEffect(() => {
-    creatorMenu.set({ asset: assetState, primaryAction, onFrame: props.onFrame, resetLayout });
+    creatorMenu.set({ asset: assetState, primaryAction, onFrame: props.onFrame, resetLayout, undo: props.undo });
   });
   useEffect(() => () => creatorMenu.set(null), []);
+
+  // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y, when the mode keeps a history. Not while typing into a field (the
+  // field's own undo wins there).
+  const undoRef = useRef(props.undo);
+  undoRef.current = props.undo;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const u = undoRef.current;
+      if (!u || !(e.ctrlKey || e.metaKey) || e.altKey || isTextEntryEvent(e)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { u.undo(); e.preventDefault(); }
+      else if ((k === 'z' && e.shiftKey) || k === 'y') { u.redo(); e.preventDefault(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // F frames, plus the mode's own keys. Not while typing into a field.
   const keys = useRef<Record<string, () => void>>({});
@@ -173,7 +200,7 @@ export function CreatorWorkspace(props: CreatorWorkspaceProps) {
             {toolbarStatus && <span className='text-dim'>{toolbarStatus}</span>}
           </div>
           <div className='flex-1 min-h-0'>
-            <DockShell components={components} storageKey={`cleo_creator_${id}_layout`} version={LAYOUT_VERSION} buildDefault={buildDefault} anchorPanel='viewport' onReady={onDockReady} />
+            <DockShell components={components} storageKey={`cleo_creator_${id}_layout`} version={LAYOUT_VERSION + (props.layoutVersion ?? 0) * 1000} buildDefault={buildDefault} anchorPanel='viewport' onReady={onDockReady} />
           </div>
           <GenerationBar status={generation.status} onCancel={generation.onCancel} idle={generation.idle} />
         </div>

@@ -129,6 +129,24 @@ export class WorldStage {
     this.updateWater(result, doc);
   }
 
+  /**
+   * The realtime preview's heights (normalised, `resolution`²) on the landscape, nothing else: the
+   * surfaces and the water keep the last settled preview's until the next one arrives. Only once a
+   * settled preview has built the landscape.
+   */
+  showHeights(heights: Float32Array, resolution: number, heightScale: number): void {
+    if (this.disposed || !this.landscape) return;
+    const R = this.landscape.terrain.resolution;
+    const out = new Float32Array(R * R);
+    if (R === resolution) for (let i = 0; i < out.length; i++) out[i] = heights[i] * heightScale;
+    else for (let r = 0; r < R; r++) for (let c = 0; c < R; c++)
+      out[r * R + c] = sampleBilinear(heights, resolution, c / (R - 1), r / (R - 1)) * heightScale;
+    this.landscape.terrain.setHeights(out);
+  }
+
+  /** The preview landscape, for brushing on it (null until a preview has been shown). */
+  get landscapeNode(): LandscapeNode | null { return this.landscape; }
+
   /** The look of the water changed (no new terrain). */
   setWaterLook(look: WaterLook): void {
     if (this.waterMaterial) writeLook(this.waterMaterial, look);

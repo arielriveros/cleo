@@ -9,7 +9,7 @@ import { MASK_KINDS, type MaskKind } from '../masks';
 import type { PreviewResult } from '../worldWorker';
 import type { WorldDoc } from '../worldDoc';
 
-export type MapLayerView = 'height' | 'surfaces' | 'selected' | 'water' | MaskKind | 'aspect' | 'cavity' | 'flowArea' | 'shore' | 'deposits' | 'wear' | 'talus';
+export type MapLayerView = 'height' | 'surfaces' | 'selected' | 'water' | MaskKind | 'aspect' | 'cavity' | 'flowArea' | 'shore' | 'deposits' | 'wear' | 'talus' | 'ridges' | 'gullies' | 'node';
 
 export const MAP_VIEWS: { value: MapLayerView; label: string }[] = [
   { value: 'height', label: 'Height' },
@@ -24,6 +24,9 @@ export const MAP_VIEWS: { value: MapLayerView; label: string }[] = [
   { value: 'deposits', label: 'Deposits' },
   { value: 'wear', label: 'Wear' },
   { value: 'talus', label: 'Talus' },
+  { value: 'ridges', label: 'Ridges' },
+  { value: 'gullies', label: 'Gullies' },
+  { value: 'node', label: 'Selected node' },
 ];
 
 export interface MapPicture { width: number; height: number; rgba: Uint8ClampedArray }
@@ -128,7 +131,7 @@ export function mapPicture(view: MapLayerView, r: PreviewResult, doc: WorldDoc, 
         let v = 0;
         if (view === 'cavity') v = (f.cavity.medium?.[i] ?? 0) * 2.5;
         else if (view === 'flowArea') v = f.flowArea ? (f.flowArea[i] - 1) / 8 : 0;
-        else if (view === 'deposits' || view === 'wear' || view === 'talus') v = f[view][i];
+        else if (view === 'deposits' || view === 'wear' || view === 'talus' || view === 'ridges' || view === 'gullies') v = f[view][i];
         else v = r.out.masks[view as MaskKind][i];
         const g = Math.min(1, Math.max(0, v)) * 255;
         rgb = [g, g, g];
