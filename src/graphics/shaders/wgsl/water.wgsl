@@ -37,7 +37,7 @@ struct WaterVertexUniforms {
     u_projection: mat4x4<f32>,
     u_tile: vec4<f32>,            // x0, z0, size (m), skirt depth (m)
     u_vInfoOrigin: vec4<f32>,     // origin x, origin z, cell (m), 1 = has an info grid
-    u_vInfoSize: vec4<f32>,       // cells x, cells z
+    u_vInfoSize: vec4<f32>,       // cells x, cells z, height base (m: the grid's heights are stored above it)
     u_vOcean: vec4<f32>,          // level, 1 = an endless ocean covers what the grid does not
     u_waveDir: array<vec4<f32>, 8>,    // dir x, dir z, amplitude (m), wavelength (m)
     u_wavePhase: array<vec4<f32>, 8>,  // steepness, phase
@@ -162,7 +162,7 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
     if (u_wv.u_vInfoOrigin.w > 0.5 && (insideInfo(uvw) || u_wv.u_vOcean.y < 0.5)) {
         let i0 = textureSampleLevel(u_info0_texture, u_info0_sampler, clamp(uvw, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0);
         let i1 = textureSampleLevel(u_info1_texture, u_info1_sampler, clamp(uvw, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0);
-        surface = i0.x;
+        surface = i0.x + u_wv.u_vInfoSize.z;
         edge = i0.w;
         share = i1.x;
     }
@@ -395,7 +395,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
         let c = clamp(uvw, vec3<f32>(0.0), vec3<f32>(1.0));
         let i0 = textureSampleLevel(u_info0_texture, u_info0_sampler, c, 0.0);
         let i1 = textureSampleLevel(u_info1_texture, u_info1_sampler, c, 0.0);
-        surface = i0.x;
+        surface = i0.x + u_wf.u_fInfoSize.z;
         flow = i0.yz;
         edge = i0.w;
         foamBake = i1.y;

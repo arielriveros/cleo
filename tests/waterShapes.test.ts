@@ -209,3 +209,33 @@ describe('water info and look', () => {
         expect((p.children[0] as WaterVolumeNode).waterMaterialId).toBe('abc');
     });
 });
+
+describe('the shallow-water bake', () => {
+    it('settles a river running downhill into its lake, flowing downstream, and round-trips its bytes', async () => {
+        const { bakeShallowWater } = await import('../src/water/bake/shallowWater');
+        const { encodeWaterBake, decodeWaterBake } = await import('../src/water/bake/waterBakeFormat');
+        const lake = normaliseWaterShape({ type: 'lake', id: 'L', offset: [0, -1.5, 30] });
+        const river = normaliseWaterShape({ type: 'river', connect: { start: null, end: 'L' } });
+        const shapes = resolveWaterShapes([river, lake], FRAME);
+        const t0 = performance.now();
+        const info = bakeShallowWater(shapes, null, { maxRes: 96, duration: 25 });
+        const ms = performance.now() - t0;
+        const at = (x: number, z: number) => {
+            const i = Math.round((z - info.originZ) / info.cell) * info.nx + Math.round((x - info.originX) / info.cell);
+            return { surface: info.info0[i * 4], u: info.info0[i * 4 + 1], v: info.info0[i * 4 + 2], wet: info.info1[i * 4 + 3] };
+        };
+        const mid = at(0, 0);
+        expect(mid.wet).toBe(1);
+        expect(mid.v).toBeGreaterThan(0.05);          // downstream is +z
+        expect(Math.abs(mid.u)).toBeLessThan(mid.v);
+        expect(at(0, -10).surface).toBeGreaterThan(at(0, 10).surface);
+        expect(at(8, 32).wet).toBe(1);                // the lake kept its water
+        expect(ms).toBeLessThan(20000);
+        const bytes = encodeWaterBake(info, 'sig');
+        const back = decodeWaterBake(bytes)!;
+        expect(back.signature).toBe('sig');
+        expect(back.info.nx).toBe(info.nx);
+        expect(Array.from(back.info.info0.subarray(0, 64))).toEqual(Array.from(info.info0.subarray(0, 64)));
+        expect(decodeWaterBake(new Uint8Array(80))).toBeNull();
+    });
+});

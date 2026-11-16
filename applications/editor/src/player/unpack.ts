@@ -340,7 +340,8 @@ export function collectSceneRefs(node: any, manifest: PackManifest, options: { d
         }
       }
     }
-    const bakeId = n.giVolume?.bakeId;
+    // A Water node's flow bake rides the GI bake chain (same registry, same game data).
+    const bakeId = n.giVolume?.bakeId ?? n.waterVolume?.bakeId;
     if (typeof bakeId === 'string' && bakeId) refs.giBakeIds.push(bakeId);
     for (const child of (n.children ?? [])) walk(child);
   };

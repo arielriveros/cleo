@@ -118,6 +118,23 @@ quads across close up to 8 far away, and the waves, ripples and reflections fade
 endless ocean adds rings of ever larger tiles round the camera to the horizon. Tiles out of view, or past
 the node's **Draw distance**, are not drawn.
 
+## Flow bake
+
+A simulation of the water itself: **Bake flow** runs shallow water over the shapes and the landscape
+under them until it settles, and the surface then draws what it found: currents that bend round the
+banks and swirl behind a bend, water piling up and speeding over a drop, foam where it tumbles. It takes
+a few seconds, the editor keeps drawing meanwhile, and **Cancel** stops it. Without a bake the surface
+draws the analytic flow along each river. The bake is saved with the project and published with the game.
+
+While a river's first metres feed it, lakes, boxes and the ocean keep their levels and take what the
+rivers bring, and outside the shapes is dry: the shapes say where water may be, the landscape how deep
+it is. Moving or editing a shape makes the bake stale, and the analytic flow draws again until the next
+bake; carving or sculpting the landscape does not, so bake again after it.
+
+| Field | What it does |
+|---|---|
+| **Bake resolution** | Cells along the longest side of the water: finer catches narrower channels and takes longer. |
+
 ## Waves
 
 Gerstner waves shaped by the wind: the longer and stronger the wind blows over open water, the longer,

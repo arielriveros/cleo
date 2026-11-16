@@ -13,6 +13,9 @@ import { WaterProgram } from './programs';
 import { sizedTarget } from './featureSubsystems';
 import { ViewProjection } from './viewProjection';
 import { buildWaterInfo, type GroundSampler, type WaterInfo } from '../../water/waterInfo';
+import { sceneGround } from '../../water/ground';
+import { decodeWaterBake } from '../../water/bake/waterBakeFormat';
+import { GiBakeRegistry } from './gi/giBakeRegistry';
 import { DEFAULT_WATER_LOOK, type WaterLook } from '../../water/waterLook';
 import { GERSTNER_MAX_WAVES } from '../../physics/water/gerstner';
 import { createWindSample, sampleWindField } from '../../core/wind/windField';
@@ -93,7 +96,7 @@ export class WaterPasses {
         this.tilesDrawn = 0;
         if (!nodes.length) return;
         const meshes = this._ensureMeshes();
-        const ground = WaterPasses._groundOf(scene);
+        const ground = sceneGround(scene);
 
         // The opaque scene's colour, for refraction: the transparents' copy, taken earlier here.
         const w = this._host.renderWidth, h = this._host.renderHeight;
@@ -163,7 +166,7 @@ export class WaterPasses {
                           waves: ReturnType<WaterVolumeNode['waves']>, t: number, scene: Scene): void {
         const sm = this._shaderManager;
         const origin = info ? [info.originX, info.originZ, info.cell, 1] : [0, 0, 1, 0];
-        const size = info ? [info.nx, info.nz, 0, 0] : [1, 1, 0, 0];
+        const size = info ? [info.nx, info.nz, info.minY, 0] : [1, 1, 0, 0];
         sm.setUniform('u_vInfoOrigin', origin);
         sm.setUniform('u_vInfoSize', size);
         sm.setUniform('u_fInfoOrigin', origin);
@@ -221,21 +224,40 @@ export class WaterPasses {
         const m = node.worldTransform;
         const key = `${node.version}|${m[12]},${m[13]},${m[14]},${m[0]},${m[5]},${m[10]}|${ground.key}`;
         const now = performance.now() / 1000;
-        if (water && water.key === key) return water;
-        if (water && water.info && now - water.builtAt < REBUILD_INTERVAL) return water;
-        const info = buildWaterInfo(node.resolvedShapes(), ground.sample);
+        // A current bake replaces the analytic grid; a stale one (the shapes changed since) is ignored.
+        const bake = node.bakeId ? this._bakeOf(node.bakeId) : null;
+        const baked = bake && bake.signature === node.bakeSignature() ? bake : null;
+        const fullKey = baked ? `bake:${node.bakeId}|${GiBakeRegistry.generation}` : key;
+        if (water && water.key === fullKey) return water;
+        if (!baked && water && water.info && water.info.source === 'analytic' && now - water.builtAt < REBUILD_INTERVAL) return water;
+        const info = baked ? baked.info : buildWaterInfo(node.resolvedShapes(), ground.sample);
+        const keyNow = fullKey;
         if (!water) { water = { key, info: null, tex0: null, tex1: null, builtAt: now }; this._nodes.set(node, water); }
-        water.key = key;
+        water.key = keyNow;
         water.builtAt = now;
         water.info = info;
         if (info) {
             const fit = (tex: Texture | null) => tex && tex.width === info.nx && tex.height === info.nz;
             if (!fit(water.tex0)) { water.tex0?.delete(); water.tex0 = WaterPasses._infoTexture(info.nx, info.nz); }
             if (!fit(water.tex1)) { water.tex1?.delete(); water.tex1 = WaterPasses._infoTexture(info.nx, info.nz); }
-            WaterPasses._upload(water.tex0!, info.info0, info.nx, info.nz);
-            WaterPasses._upload(water.tex1!, info.info1, info.nx, info.nz);
+            // Heights above the grid's lowest surface: half floats keep centimetres there, not at 100 m up.
+            const rel0 = info.info0.slice(), rel1 = info.info1.slice();
+            for (let i = 0; i < rel0.length; i += 4) { rel0[i] -= info.minY; rel1[i + 2] -= info.minY; }
+            WaterPasses._upload(water.tex0!, rel0, info.nx, info.nz);
+            WaterPasses._upload(water.tex1!, rel1, info.nx, info.nz);
         }
         return water;
+    }
+
+    private readonly _bakes = new Map<string, { generation: number; decoded: ReturnType<typeof decodeWaterBake> }>();
+    /** A bake's grid by id, decoded once per registry change. */
+    private _bakeOf(id: string): ReturnType<typeof decodeWaterBake> {
+        const cached = this._bakes.get(id);
+        if (cached && cached.generation === GiBakeRegistry.generation) return cached.decoded;
+        const bytes = GiBakeRegistry.get(id);
+        const decoded = bytes ? decodeWaterBake(bytes, id) : null;
+        this._bakes.set(id, { generation: GiBakeRegistry.generation, decoded });
+        return decoded;
     }
 
     /** Drop the GPU side of nodes no longer in the scene. */
@@ -409,24 +431,6 @@ export class WaterPasses {
             return { cube: sky, scale: [s * tint[0], s * tint[1], s * tint[2], 2] };
         }
         return { cube: null, scale: [0, 0, 0, 0] };
-    }
-
-    /** The ground under the water: every landscape's height, and a key that changes when any is sculpted. */
-    private static _groundOf(scene: Scene): { sample: GroundSampler | null; key: string } {
-        const terrains = [...scene.landscapes].map(l => l.terrain).filter(t => !!t);
-        if (!terrains.length) return { sample: null, key: '' };
-        const key = terrains.map(t => `${t.heightsVersion}@${t.origin[0]},${t.origin[1]},${t.origin[2]}`).join(';');
-        const sample: GroundSampler = (x, z) => {
-            let best: number | null = null;
-            for (const t of terrains) {
-                const lx = x - t.origin[0], lz = z - t.origin[2], half = t.size / 2;
-                if (lx < -half || lx > half || lz < -half || lz > half) continue;
-                const hgt = t.heightAt(lx, lz) + t.origin[1];
-                if (best === null || hgt > best) best = hgt;
-            }
-            return best;
-        };
-        return { sample, key };
     }
 
     /** The node's Water material look, or the default. */

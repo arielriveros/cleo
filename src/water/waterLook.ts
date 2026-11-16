@@ -70,7 +70,7 @@ export const DEFAULT_WATER_LOOK: WaterLook = {
     foamColor: [0.9, 0.93, 0.95],
     shoreFoam: 0.6,
     crestFoam: 0.5,
-    flowFoam: 0.6,
+    flowFoam: 0.4,
     caustics: 1,
     causticsScale: 1.4,
     rainRipples: 1,

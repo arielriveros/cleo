@@ -52,6 +52,8 @@ export interface WaterVolumeOptions {
     waterMaterial?: any;
     /** Editor-side link to the Material library asset that copy was taken from. */
     waterMaterialId?: string | null;
+    /** The baked shallow-water flow (water/bake/), by id in the bake registry; null = analytic flow. */
+    bakeId?: string | null;
     /** Whether character bodies are buoyed too. Off: a character capsule is mostly air and would launch. */
     affectCharacters?: boolean;
     /**
@@ -108,6 +110,7 @@ export class WaterVolumeNode extends Node {
     private _currents: boolean;
     private _waterMaterial: WaterMaterial | null;
     private _waterMaterialId: string | null;
+    private _bakeId: string | null;
     private _affectCharacters: boolean;
     private _surfaceNodeId: string | null;
     private _splashTemplate: string;
@@ -154,6 +157,7 @@ export class WaterVolumeNode extends Node {
         this._currents = options.currents !== false;
         this._waterMaterial = WaterVolumeNode._parseMaterial(options.waterMaterial);
         this._waterMaterialId = typeof options.waterMaterialId === 'string' && options.waterMaterialId ? options.waterMaterialId : null;
+        this._bakeId = typeof options.bakeId === 'string' && options.bakeId ? options.bakeId : null;
         this._affectCharacters = !!options.affectCharacters;
         this._surfaceNodeId = typeof options.surfaceNodeId === 'string' && options.surfaceNodeId ? options.surfaceNodeId : null;
         this._splashTemplate = typeof options.splashTemplate === 'string' ? options.splashTemplate : '';
@@ -235,6 +239,20 @@ export class WaterVolumeNode extends Node {
     public set waterMaterial(v: WaterMaterial | null) { this._waterMaterial = v instanceof WaterMaterial ? v : null; this._notifyChange('component', 'waterMaterial'); }
     public get waterMaterialId(): string | null { return this._waterMaterialId; }
     public set waterMaterialId(v: string | null) { this._waterMaterialId = v || null; this._notifyChange('component', 'waterMaterialId'); }
+
+    /** The bake drawing the surface's flow, or null for the analytic flow. */
+    public get bakeId(): string | null { return this._bakeId; }
+    public set bakeId(v: string | null) { this._bakeId = v || null; this._notifyChange('component', 'bakeId'); }
+
+    /**
+     * What a bake of this water depends on: the shapes and where the node puts them. A bake whose signature
+     * no longer matches is STALE, and the surface falls back to the analytic flow until it is baked again.
+     */
+    public bakeSignature(): string {
+        const m = this.worldTransform;
+        const r = (v: number) => Math.round(v * 1000) / 1000;
+        return JSON.stringify([this._shapes, [m[12], m[13], m[14], Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10])].map(r)]);
+    }
 
     private static _parseMaterial(json: any): WaterMaterial | null {
         if (!json) return null;
@@ -490,6 +508,7 @@ export class WaterVolumeNode extends Node {
                 choppiness: this._choppiness, shoreFade: this._shoreFade, currents: this._currents,
                 ...(this._waterMaterial ? { waterMaterial: this._waterMaterial.serialize() } : {}),
                 ...(this._waterMaterialId ? { waterMaterialId: this._waterMaterialId } : {}),
+                ...(this._bakeId ? { bakeId: this._bakeId } : {}),
                 affectCharacters: this._affectCharacters, surfaceNodeId: this._surfaceNodeId,
                 splashTemplate: this._splashTemplate, wadeSplashTemplate: this._wadeSplashTemplate, enabled: this._enabled,
             },

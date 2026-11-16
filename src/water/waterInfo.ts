@@ -42,7 +42,7 @@ const SQRT2 = Math.SQRT2;
  * Chamfer distance (metres) from every cell to the nearest cell where `mask` differs from its own, plus,
  * for every cell, the index of the nearest cell whose mask is set (−1 if none). Two passes, 3x3 kernel.
  */
-function chamfer(mask: Uint8Array, nx: number, nz: number, cell: number): { dist: Float32Array; nearestSet: Int32Array } {
+export function chamferDistance(mask: Uint8Array, nx: number, nz: number, cell: number): { dist: Float32Array; nearestSet: Int32Array } {
     const n = nx * nz;
     const toSet = new Float32Array(n), toClear = new Float32Array(n);
     const nearestSet = new Int32Array(n);
@@ -120,7 +120,7 @@ export function buildWaterInfo(shapes: readonly ResolvedWaterShape[], ground: Gr
         info1[i * 4 + 2] = g !== null ? Math.max(g, c.floor) : c.floor;
         info1[i * 4 + 3] = 1;
     }
-    const { dist, nearestSet } = chamfer(wet, nx, nz, cell);
+    const { dist, nearestSet } = chamferDistance(wet, nx, nz, cell);
     let minY = Infinity, maxY = -Infinity;
     for (let i = 0; i < n; i++) {
         if (wet[i]) {
@@ -153,9 +153,20 @@ export function buildWaterInfo(shapes: readonly ResolvedWaterShape[], ground: Gr
         // Shear across a channel is normal and stays smooth; foam comes from drops and from fast water.
         info1[i * 4 + 1] = Math.min(1, (du + dv) * 0.12 + Math.max(0, slope - 0.05) * 3 + Math.max(0, speed - 1.5) * 0.25);
     }
-    // Tiles.
+    const info: WaterInfo = {
+        originX, originZ, cell, nx, nz, info0, info1, minY, maxY,
+        tileCells: 0, tilesX: 0, tilesZ: 0, tileWet: new Uint8Array(0), tileMinY: new Float32Array(0), tileMaxY: new Float32Array(0),
+        oceanLevel: endless ? endless.level : null, source: 'analytic',
+    };
+    tileWaterInfo(info);
+    return info;
+}
+
+/** Fill `info`'s surface tiles from its grid: which hold water, and their lowest and highest surface. */
+export function tileWaterInfo(info: WaterInfo): void {
+    const { nx, nz, info0, info1 } = info;
     const tileCells = WATER_TILE_CELLS;
-    const tilesX = Math.ceil((nx - 1) / tileCells), tilesZ = Math.ceil((nz - 1) / tileCells);
+    const tilesX = Math.max(1, Math.ceil((nx - 1) / tileCells)), tilesZ = Math.max(1, Math.ceil((nz - 1) / tileCells));
     const tileWet = new Uint8Array(tilesX * tilesZ);
     const tileMinY = new Float32Array(tilesX * tilesZ).fill(Infinity), tileMaxY = new Float32Array(tilesX * tilesZ).fill(-Infinity);
     for (let tz = 0; tz < tilesZ; tz++) for (let tx = 0; tx < tilesX; tx++) {
@@ -163,15 +174,12 @@ export function buildWaterInfo(shapes: readonly ResolvedWaterShape[], ground: Gr
         for (let z = tz * tileCells; z <= Math.min(nz - 1, (tz + 1) * tileCells); z++)
             for (let x = tx * tileCells; x <= Math.min(nx - 1, (tx + 1) * tileCells); x++) {
                 const i = z * nx + x;
-                if (!wet[i]) continue;
+                if (info1[i * 4 + 3] < 0.5) continue;
                 tileWet[t] = 1;
                 tileMinY[t] = Math.min(tileMinY[t], info0[i * 4]);
                 tileMaxY[t] = Math.max(tileMaxY[t], info0[i * 4]);
             }
     }
-    return {
-        originX, originZ, cell, nx, nz, info0, info1, minY, maxY,
-        tileCells, tilesX, tilesZ, tileWet, tileMinY, tileMaxY,
-        oceanLevel: endless ? endless.level : null, source: 'analytic',
-    };
+    info.tileCells = tileCells; info.tilesX = tilesX; info.tilesZ = tilesZ;
+    info.tileWet = tileWet; info.tileMinY = tileMinY; info.tileMaxY = tileMaxY;
 }

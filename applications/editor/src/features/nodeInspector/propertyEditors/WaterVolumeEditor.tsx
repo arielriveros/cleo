@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import {
   ModelNode, WaterVolumeNode, WATER_VOLUME_PRESETS, normaliseWaterShape, normaliseWaterPoint, newWaterShapeId, carveWater,
-  WaterMaterial, WATER_LOOK_PRESETS, DEFAULT_WATER_LOOK, type LandscapeNode, type WaterLook, type WaterLookPreset,
+  WaterMaterial, WATER_LOOK_PRESETS, DEFAULT_WATER_LOOK, ShallowWaterBake, sceneGround, encodeWaterBake, decodeWaterBake,
+  newWaterBakeId, GiBakeRegistry, Logger, type LandscapeNode, type WaterLook, type WaterLookPreset,
   type WaterVolumePreset, type WaterShape, type WaterShapeType, type WaterPoint,
 } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
@@ -14,6 +15,7 @@ import { useCleoEngine } from '../../EngineContext'
 import { useHistory } from '../../HistoryContext'
 import MaterialPicker, { liveMaterial } from '../../terrainMaterials/MaterialPicker'
 import { buildMaterialAsset } from '../../../utils/materials'
+import { saveGiBake } from '../../../utils/giBakeStore'
 import { WaterVolumeIcon } from '../sectionIcons'
 import {
   WATER_SHAPE_FRAME, WATER_SHAPES_EDITED, setWaterShapeSelection, useWaterShapeSelection,
@@ -420,6 +422,68 @@ function WaterSurface({ node, changed }: { node: WaterVolumeNode; changed: () =>
   )
 }
 
+const BAKE_RESOLUTIONS = [{ value: 128, label: 'Draft (128)' }, { value: 256, label: 'Standard (256)' }, { value: 384, label: 'Fine (384)' }]
+
+/**
+ * The flow bake: a shallow-water simulation over the shapes and the landscape under them, run here in
+ * slices (it takes a few seconds), its settled currents, heights and foam stored as a bake the surface then
+ * draws. Without one the surface draws the analytic flow along each river.
+ */
+function WaterBake({ node, changed }: { node: WaterVolumeNode; changed: () => void }) {
+  const { editorScene } = useCleoEngine()
+  const [res, setRes] = useState(256)
+  const [progress, setProgress] = useState<number | null>(null)
+  const cancelRef = useRef(false)
+  useEffect(() => () => { cancelRef.current = true }, [])
+  const id = node.bakeId
+  const decoded = id && GiBakeRegistry.has(id) ? decodeWaterBake(GiBakeRegistry.get(id)!, id) : null
+  const status = !id ? 'none' : !decoded ? 'missing' : decoded.signature === node.bakeSignature() ? 'current' : 'stale'
+  const bake = async () => {
+    if (!editorScene || progress !== null) return
+    let job: ShallowWaterBake
+    try { job = new ShallowWaterBake(node.resolvedShapes(), sceneGround(editorScene).sample, { maxRes: res }) }
+    catch (e) { Logger.warn(String((e as Error).message ?? e), 'Water'); return }
+    cancelRef.current = false
+    setProgress(0)
+    const signature = node.bakeSignature()
+    // Slices of ~30 ms, so the editor keeps drawing while it runs.
+    while (!job.done && !cancelRef.current) {
+      const t0 = performance.now()
+      while (!job.done && performance.now() - t0 < 30) job.step(4)
+      setProgress(job.progress)
+      await new Promise(r => setTimeout(r, 0))
+    }
+    if (cancelRef.current) { setProgress(null); return }
+    const bakeId = newWaterBakeId()
+    await saveGiBake(bakeId, encodeWaterBake(job.result(bakeId), signature), node.bakeId)
+    node.bakeId = bakeId
+    setProgress(null)
+    Logger.info(`Water "${node.name}" baked: ${job.nx} x ${job.nz} cells, ${job.steps} steps`, 'Water')
+    changed()
+  }
+  return (
+    <Section title='Flow bake'>
+      <PropertyTable columns={['45%', '55%']}>
+        <PropertyRow label='Bake resolution' hint='Cells along the longest side of the water: finer catches narrower channels and takes longer.' divider>
+          <Select value={String(res)} onChange={e => setRes(Number(e.target.value))}>
+            {BAKE_RESOLUTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+          </Select>
+        </PropertyRow>
+      </PropertyTable>
+      <div className='flex items-center gap-1.5 mt-2'>
+        {progress === null
+          ? <Button size='sm' onClick={bake} title='Simulate the water over the shapes and the landscape until it settles, and draw the surface with its currents and foam.'>Bake flow</Button>
+          : <Button size='sm' onClick={() => { cancelRef.current = true }} title='Stop the bake; the surface keeps what it drew before.'>Cancel ({Math.round(progress * 100)}%)</Button>}
+        {id && progress === null && <Button size='sm' variant='ghost' onClick={() => { node.bakeId = null; changed() }}
+          title='Draw the analytic flow again (the bake stays in the project until replaced).'>Clear</Button>}
+      </div>
+      {status === 'current' && <Hint className='mt-1'>Drawing the baked flow.</Hint>}
+      {status === 'stale' && <Hint className='mt-1 text-warning'>The shapes changed since the bake: drawing the analytic flow until it is baked again.</Hint>}
+      {status === 'missing' && <Hint className='mt-1 text-warning'>The bake is missing from the project: drawing the analytic flow.</Hint>}
+    </Section>
+  )
+}
+
 export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
   const { eventEmitter, editorScene, templates } = useCleoEngine()
   const [, setTick] = useState(0)
@@ -452,6 +516,8 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
         <WaterShapes node={node} changed={changed} />
 
         <WaterSurface node={node} changed={changed} />
+
+        <WaterBake node={node} changed={changed} />
 
         <Section title='Waves'>
           <PropertyTable columns={['45%', '55%']}>

@@ -10,3 +10,7 @@ export {
     type ResolvedWaterShape, type WaterColumn,
 } from "../../water/waterShapes";
 export { carveWater, type CarveGrid, type CarveRegion } from "../../water/carve";
+export { buildWaterInfo, type WaterInfo, type GroundSampler } from "../../water/waterInfo";
+export { sceneGround } from "../../water/ground";
+export { ShallowWaterBake, bakeShallowWater, type ShallowWaterOptions } from "../../water/bake/shallowWater";
+export { encodeWaterBake, decodeWaterBake, newWaterBakeId } from "../../water/bake/waterBakeFormat";
