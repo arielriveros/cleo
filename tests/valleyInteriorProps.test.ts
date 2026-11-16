@@ -87,11 +87,26 @@ function cast(tris: Float64Array, o: number[], d: number[]): number {
 const pointToBox = (p: number[], min: number[], max: number[]) =>
     Math.hypot(...[0, 1, 2].map(a => Math.max(min[a] - p[a], 0, p[a] - max[a])));
 
+
+/**
+ * The scenery's static collision is one Collider, Static Collision (mergeStaticColliders.ts), its props under it
+ * at their own transforms. These checks were written against a Collider per prop placing an unmoved linked copy:
+ * `placement` gives a prop that shape back (its transform as the frame, the copy unmoved in it, the shared
+ * Collider's settings and shapes), so the geometry they measure is the same.
+ */
+const staticCollisionOf = (root: any) => root.children.find((c: any) => c.type === 'collider' && c.name === 'Static Collision');
+const placement = (copy: any, collision: any) => copy && ({
+    type: 'collider', name: `${copy.name} Collider`, position: copy.position, rotation: copy.rotation, scale: copy.scale,
+    collider: collision.collider, children: [{ ...copy, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }],
+});
+
 describe.skipIf(!present)('the furniture in the Valley\'s houses', { timeout: 120_000 }, () => {
     const bundle = valley!.bundle;
     const manifest = bundle.manifest;
     const root = bundle.scenes[manifest.mainSceneId].scene;
-    const buildings = root.children.find((c: any) => c.name === 'Buildings');
+    const collision = staticCollisionOf(root);
+    const buildingsGroup = collision?.children.find((c: any) => c.name === 'Buildings');
+    const buildings = { children: (buildingsGroup?.children ?? []).map((b: any) => placement(b, collision)) };
     const furniture = root.children.find((c: any) => c.name === 'Furniture');
     const models = new Map<string, any>(bundle.libraries.models.map((m: any) => [m.id, m]));
     const materials = new Map<string, any>(bundle.libraries.materials.map((m: any) => [m.id, m]));
@@ -131,7 +146,7 @@ describe.skipIf(!present)('the furniture in the Valley\'s houses', { timeout: 12
 
     it('stands a group per house where the house stands, beside the buildings, its pieces linked copies of library models', () => {
         expect(furniture).toBeDefined();
-        expect(root.children.indexOf(furniture)).toBe(root.children.indexOf(buildings) + 1);
+        expect(root.children).toContain(furniture);
         expect(furniture.children.map((g: any) => g.name)).toEqual(LAYOUT.map(l => l.group));
         const refs = manifest.sceneMetas.find((m: any) => m.id === manifest.mainSceneId).refs;
         for (const { layout, house, lod, group, pieces } of houses) {

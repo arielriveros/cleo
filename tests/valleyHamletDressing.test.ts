@@ -69,6 +69,19 @@ function triangleOverlapsBox(t: ArrayLike<number>, o: number, c: number[], h: nu
 const toFootprint = (x: number, z: number, min: number[], max: number[]) =>
     Math.hypot(Math.max(min[0] - x, 0, x - max[0]), Math.max(min[2] - z, 0, z - max[2]));
 
+
+/**
+ * The scenery's static collision is one Collider, Static Collision (mergeStaticColliders.ts), its props under it
+ * at their own transforms. These checks were written against a Collider per prop placing an unmoved linked copy:
+ * `placement` gives a prop that shape back (its transform as the frame, the copy unmoved in it, the shared
+ * Collider's settings and shapes), so the geometry they measure is the same.
+ */
+const staticCollisionOf = (root: any) => root.children.find((c: any) => c.type === 'collider' && c.name === 'Static Collision');
+const placement = (copy: any, collision: any) => copy && ({
+    type: 'collider', name: `${copy.name} Collider`, position: copy.position, rotation: copy.rotation, scale: copy.scale,
+    collider: collision.collider, children: [{ ...copy, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }],
+});
+
 describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_000 }, () => {
     const bundle = valley!.bundle;
     const manifest = bundle.manifest;
@@ -83,9 +96,11 @@ describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_0
     // Each pole and the well stand in a static Collider that places them (and is their body); the linked copy of
     // the library model -- a placed model's root, rebuilt from its asset -- sits under it, unmoved.
     const copyOf = (placement: any) => placement?.children?.[0];
-    const group = root.children.find((c: any) => c.name === 'Light Poles');
-    const well = root.children.find((c: any) => c.type === 'collider' && copyOf(c)?.name === 'Well');
-    const poles: any[] = group?.children ?? [];
+    const collision = staticCollisionOf(root);
+    const group = collision?.children.find((c: any) => c.name === 'Light Poles');
+    const wellCopy = collision?.children.find((c: any) => c.name === 'Well');
+    const well = placement(wellCopy, collision);
+    const poles: any[] = (group?.children ?? []).map((p: any) => placement(p, collision));
     const roadPoles = poles.filter(p => copyOf(p)?.name.startsWith('Light Pole'));
     const squarePoles = poles.filter(p => copyOf(p)?.name.startsWith('Square Light Pole'));
     const placed = [...poles, ...(well ? [well] : [])].map(node => ({ node, ...worldVertices(node) }));
@@ -94,7 +109,7 @@ describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_0
     const houseTriangles = (() => {
         const out: number[] = [];
         // Each building is a Collider placing its lodGroup; level 0 is the lodGroup's first child.
-        for (const building of root.children.find((c: any) => c.name === 'Buildings').children) {
+        for (const building of collision.children.find((c: any) => c.name === 'Buildings').children.map((b: any) => placement(b, collision))) {
             const lod = copyOf(building);
             const walk = (n: any, parent: mat4) => {
                 const m = mat4.multiply(mat4.create(), parent, trs(n));
@@ -117,7 +132,9 @@ describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_0
     it('replaces the standing torches with light poles beside them, and keeps the wall torches', () => {
         const torches = root.children.find((c: any) => c.name === 'Torches');
         expect(group).toBeDefined();
-        expect(root.children.indexOf(group)).toBe(root.children.indexOf(torches) + 1);
+        // The poles stand in the scene's Static Collision now, the wall torches where they were.
+        expect(collision.children).toContain(group);
+        expect(root.children).toContain(torches);
         expect(allNodes(root).filter(n => n.name === 'Torch')).toHaveLength(0);
         expect(torches.children.map((c: any) => c.name)).toEqual(['Wall Torch', 'Wall Torch', 'Wall Torch', 'Wall Torch']);
         // Their template went with them, and its material and maps: nothing else used them.
@@ -198,7 +215,7 @@ describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_0
             const yaw = node.rotation[1] * Math.PI / 180;
             expect((Math.sin(yaw) * (HAMLET.x - x) + Math.cos(yaw) * (HAMLET.z - z)) / d, `${node.name}: lantern toward the well`).toBeGreaterThan(0.95);
         }
-        const campfire = root.children.find((c: any) => c.name === 'Campfire');
+        const campfire = collision.children.find((c: any) => c.name === 'Campfire');
         for (const { node, min, max } of placed) {
             expect(distanceToPolyline(node.position[0], node.position[2], road), `${node.name}: off the road's core`).toBeGreaterThanOrEqual(3.0);
             expect(toFootprint(campfire.position[0], campfire.position[2], min, max), `${node.name}: from the campfire`).toBeGreaterThanOrEqual(2.5);
@@ -251,7 +268,7 @@ describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_0
 
     it('stands the well on the ground at the hamlet\'s centre, a linked copy in a Collider', () => {
         expect(well).toBeDefined();
-        expect(root.children.indexOf(well)).toBe(root.children.indexOf(group) + 1);
+        expect(collision.children.indexOf(wellCopy)).toBe(collision.children.indexOf(group) + 1);
         const asset = models.get(modelIdOf('well'));
         expect(asset?.name).toBe('Well');
         const copy = copyOf(well);
