@@ -31,6 +31,7 @@ import { KIND_EXT } from '../../applications/editor/src/utils/vfs'
 import { SCENE_REFS_VERSION } from '../../applications/editor/src/utils/references'
 import { TextureSet, stableId, writeJson, vars } from '../exampleKit/bundle.mjs'
 import { packFormat2 } from '../exampleKit/packFormat2.mjs'
+import { folderFor, templatizeScene } from '../exampleKit/templatize'
 import { blankImage, blit, decodePng, encodePng } from '../exampleKit/png.mjs'
 import { COLS, ROWS, ROOMS, cellCentre, cellFeet, isRock, markers, roomBounds, GRID, GUARD_ROUTE, GUARD_ROUTE_NAME } from './level'
 import { BAT_BRAIN, GUARD_BRAIN } from './brains'
@@ -754,6 +755,12 @@ async function main() {
     }
     possessParents(root)
 
+    // Every group the level places more than once is a template, and each copy an instance of it: the
+    // diamonds, the checkpoints, the bats; the dash relic is a variant of the diamond.
+    const made = templatizeScene(root, { takenNames: new Set(), idFor: key => id('template:' + key) })
+    for (const line of made.log) console.log('template: ' + line)
+    const templates = made.templates.map(m => m.template)
+
     const tilesetAssets: TilesetAsset[] = [
         { ...fromRuntimeTileset(ruins, 'Ruins'), },
         fromRuntimeTileset(warrior.tileset, 'Warrior'),
@@ -781,14 +788,14 @@ async function main() {
     }
     const libraries: Record<string, unknown[]> = {
         models: [], materials: [], terrainMaterials: [], animationFields: [], animControllers: [], boneMasks: [],
-        animations: [], rigs: [], tilesets: tilesetAssets, scripts: scriptAssets, templates: [], particleSystems: [],
+        animations: [], rigs: [], tilesets: tilesetAssets, scripts: scriptAssets, templates, particleSystems: [],
         aiBrains: [GUARD_BRAIN, BAT_BRAIN],
     }
     for (const [name, value] of Object.entries(libraries)) writeJson(path.join(OUT, 'libraries', `${name}.json`), value)
     writeJson(path.join(OUT, 'libraries', 'inputMap.json'), DUSK_INPUT_MAP)
 
     const hashes: Record<string, string> = {}
-    for (const [kind, list] of [['tileset', tilesetAssets], ['script', scriptAssets], ['aiBrain', [GUARD_BRAIN, BAT_BRAIN]]] as const)
+    for (const [kind, list] of [['tileset', tilesetAssets], ['script', scriptAssets], ['template', templates], ['aiBrain', [GUARD_BRAIN, BAT_BRAIN]]] as const)
         for (const asset of list as any[]) hashes[assetHashKey(kind as any, asset.id)] = hashAsset(asset as any)
     writeJson(path.join(OUT, 'scenes', `${SCENE_ID}.json`), {
         scene: root, textures: [], ui: { version: 1, elements: [] },
@@ -804,7 +811,7 @@ async function main() {
             id: SCENE_ID, name: PROJECT, updatedAt: CREATED_AT, dimension: '2D',
             refs: {
                 version: SCENE_REFS_VERSION,
-                materialIds: [], modelIds: [], templateIds: [], terrainMaterialIds: [], aiBrainIds: [GUARD_BRAIN.id, BAT_BRAIN.id], animationFieldIds: [],
+                materialIds: [], modelIds: [], templateIds: templates.map(t => t.id), terrainMaterialIds: [], aiBrainIds: [GUARD_BRAIN.id, BAT_BRAIN.id], animationFieldIds: [],
                 foliageModelIds: [], soundSampleIds: [], audioSourceIds: [], animationIds: [], particleSystemIds: [],
                 tilesetIds: tilesetAssets.map(t => t.id), textureIds: textures.included, scriptIds: scriptAssets.map(s => s.id),
             },
@@ -830,6 +837,9 @@ async function main() {
         Diamond: '/Props/Diamond',
     }
     for (const t of tilesetAssets) add(tilesetFolder[t.name] ?? '/Level/Backdrop', t.name, 'tileset', t.id)
+    // A template beside the things it is made of.
+    const folderOfAsset = new Map<string, string>(entries.map(e => [e.assetId, path.posix.dirname(e.path)]))
+    for (const m of made.templates) add(folderFor(m, folderOfAsset), m.template.name, 'template', m.template.id)
     for (const t of textureFolders) {
         add(t.folder, t.name, 'texture', t.id)
         entries.push({ path: `${t.folder}/Source/${t.name}.png`, kind: 'image', assetId: t.id, created: CREATED_AT })

@@ -15,6 +15,9 @@ import { UITextNode } from '../src/core/scene/nodes/ui/uiContent';
 import { UIButtonNode, UIProgressBarNode } from '../src/core/scene/nodes/ui/uiWidgets';
 import { LAYER } from '../examples/scripts/SoulsHitbox';
 
+/** Text with its line endings as LF. */
+const lf = (s: string) => s.replace(/\r\n/g, '\n');
+
 // The Dungeon example was AUTHORED BY CODE (tools/valley/build.mjs, on the souls content of
 // tools/soulsDemo/build.mjs; split out of the Valley by tools/valley/split.ts) and is wired together by NAME:
 // scripts find nodes with findNode('HUD'), moves name their clips, spawns name their templates, sounds
@@ -84,7 +87,8 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         }
         const names = readdirSync(SCRIPTS).filter(f => /^(Souls|Valley)/.test(f));
         for (const asset of library('scripts'))
-            expect(names.some(f => readFileSync(join(SCRIPTS, f), 'utf8') === asset.source), `${asset.name} is stale — re-run the generator`).toBe(true);
+            // Line endings aside: git's autocrlf checks the files out CRLF on Windows, and the bundles hold whichever the tool read.
+            expect(names.some(f => lf(readFileSync(join(SCRIPTS, f), 'utf8')) === lf(asset.source)), `${asset.name} is stale — re-run the generator`).toBe(true);
     });
 
     // A script imports another by its PROJECT PATH (the explorer path without `.script`). A base class or

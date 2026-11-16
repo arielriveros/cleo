@@ -7,6 +7,9 @@ import { MAX_INSTANCES } from '../src/terrain/foliage';
 import { decodePng } from '../src/terrain/heightmapIO';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
 
+/** Text with its line endings as LF. */
+const lf = (s: string) => s.replace(/\r\n/g, '\n');
+
 // The Valley example: the generated landscape (tools/valley/build.mjs) as scenery, its gameplay split off
 // into the Dungeon example (tools/valley/split.ts; dungeonProject.test.ts, dungeonSouls.test.ts). This suite
 // checks the valley itself — the landscape blob, its material and trail mask, the pre-baked foliage, the
@@ -249,7 +252,11 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         for (const s of library('scripts')) expect(s.source, s.name).not.toMatch(/class Souls\w*Node/);
         expect(library('scripts').map((s: any) => s.name).sort()).toEqual(['Fire Light', 'Fly Camera', 'Splash', 'Start Menu', 'Tour Director', 'Windmill Sails']);
         // The standing Torch went with the torches the hamlet's light poles replaced (hamletDressing.ts).
-        expect(library('templates').map((t: any) => t.name).sort()).toEqual(['Wall Torch', 'Water Splash', 'Water Step']);
+        // The game's templates, plus the scenery the scene places more than once (templatizeExamples.ts).
+        const templateNames = library('templates').map((t: any) => t.name);
+        for (const name of ['Wall Torch', 'Water Splash', 'Water Step', 'Light Pole', 'Candle'])
+            expect(templateNames, name).toContain(name);
+        expect(templateNames.some((n: string) => /Souls|Hollow|Enemy|Player|Bonfire|Weapon/.test(n))).toBe(false);
         for (const lib of ['animations', 'animControllers', 'animationFields', 'rigs', 'aiBrains', 'boneMasks'])
             expect(library(lib) ?? [], lib).toHaveLength(0);
         expect(library('models').some((m: any) => /Knight|Hollow|mannequin/i.test(m.name))).toBe(false);
@@ -728,7 +735,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const script = library('scripts').find((s: any) => s.id === menu.variables.__scriptId.value);
         expect(script.name).toBe('Start Menu');
         expect(menu.script).toBe(script.source);
-        expect(script.source).toBe(readFileSync(join(__dirname, '..', 'examples', 'scripts', 'ValleyStartMenu.ts'), 'utf8'));
+        expect(lf(script.source)).toBe(lf(readFileSync(join(__dirname, '..', 'examples', 'scripts', 'ValleyStartMenu.ts'), 'utf8')));
         expect(allNodes(menu).filter(n => n.type === 'uiButton').map(n => n.name)).toEqual(['Cinematic', 'Free']);
         // The tour it plays is in the scene, under the name the script looks for.
         expect(tourNode().name).toBe(menu.scriptVars?.tourName ?? 'Valley Tour');
@@ -748,7 +755,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const script = library('scripts').find((s: any) => s.id === tour.variables.__scriptId.value);
         expect(script.name).toBe('Tour Director');
         expect(tour.script).toBe(script.source);
-        expect(script.source).toBe(readFileSync(join(__dirname, '..', 'examples', 'scripts', 'ValleyTourDirector.ts'), 'utf8'));
+        expect(lf(script.source)).toBe(lf(readFileSync(join(__dirname, '..', 'examples', 'scripts', 'ValleyTourDirector.ts'), 'utf8')));
         const lightning = tour.sequence.tracks.find((t: any) => t.type === 'script');
         expect(lightning.slot).toBeUndefined();
         expect(lightning.sections).toHaveLength(1);
