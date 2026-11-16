@@ -239,3 +239,26 @@ describe('the shallow-water bake', () => {
         expect(decodeWaterBake(new Uint8Array(80))).toBeNull();
     });
 });
+
+describe('physics on a baked flow', () => {
+    it('reads the bake surface and currents, and drops a stale bake', async () => {
+        const { bakeShallowWater } = await import('../src/water/bake/shallowWater');
+        const { encodeWaterBake } = await import('../src/water/bake/waterBakeFormat');
+        const { GiBakeRegistry } = await import('../src/graphics/render/gi/giBakeRegistry');
+        const w = new WaterVolumeNode('river', { shapes: [
+            { type: 'river', id: 'R', connect: { start: null, end: 'L' } }, { type: 'lake', id: 'L', offset: [0, -1.5, 30] },
+        ], waveAmplitude: 0 });
+        w.updateTransforms?.();
+        const info = bakeShallowWater(w.resolvedShapes(), null, { maxRes: 96, duration: 25 });
+        GiBakeRegistry.set('wb-test', encodeWaterBake(info, w.bakeSignature()));
+        w.bakeId = 'wb-test';
+        const grid = w.bakedFlowGrid()!;
+        expect(grid).not.toBeNull();
+        const col = w.columnAt(0, 0, 0)!;
+        expect(col.flowZ).toBeGreaterThan(0.05);
+        // Edit a shape: the bake is stale and physics goes back to the shapes.
+        w.shapes = w.shapes.map(s => s.type === 'lake' ? { ...s, offset: [0, -1, 30] as [number, number, number] } : s);
+        expect(w.bakedFlowGrid()).toBeNull();
+        GiBakeRegistry.delete('wb-test');
+    });
+});

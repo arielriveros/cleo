@@ -10,7 +10,9 @@ import { WaterMaterial } from "../../../graphics/material";
 import { WATER_VOLUME_PRESETS, type WaterVolumePreset } from "./waterVolumePresets";
 import { applyPreset } from "../../presets";
 import type { BuoyancyVolume } from "../../../physics/buoyancy";
-import { buoyancyVolumeFromSpec, waterSpecColumn, type WaterSpec } from "../../../physics/waterSurface";
+import { buoyancyVolumeFromSpec, waterSpecColumn, type WaterFlowGrid, type WaterSpec } from "../../../physics/waterSurface";
+import { GiBakeRegistry } from "../../../graphics/render/gi/giBakeRegistry";
+import { decodeWaterBake } from "../../../water/bake/waterBakeFormat";
 import {
     normaliseWaterShape, resolveWaterShapes, waterColumnAt, waterShapeFetch, waterShapesBounds,
     type ResolvedWaterShape, type WaterColumn, type WaterShape, type WaterShapeType,
@@ -393,7 +395,38 @@ export class WaterVolumeNode extends Node {
             waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
             shapes: plainBox ? undefined : shapes,
             waves, waveScale: this.waveWindScale(), shoreFade: this._shoreFade, currents: this._currents,
+            flowGrid: plainBox ? undefined : this.bakedFlowGrid() ?? undefined,
         };
+    }
+
+    private _flowGrid: { key: string; grid: WaterFlowGrid | null } | null = null;
+
+    /**
+     * The current bake (if any, and not stale) as physics reads it, at most 96 cells a side: what floats
+     * follows the baked currents. Cached per bake and registry change.
+     */
+    public bakedFlowGrid(): WaterFlowGrid | null {
+        if (!this._bakeId || !GiBakeRegistry.has(this._bakeId)) return null;
+        const key = `${this._bakeId}|${GiBakeRegistry.generation}|${this.bakeSignature()}`;
+        if (this._flowGrid && this._flowGrid.key === key) return this._flowGrid.grid;
+        const decoded = decodeWaterBake(GiBakeRegistry.get(this._bakeId)!, this._bakeId);
+        let grid: WaterFlowGrid | null = null;
+        if (decoded && decoded.signature === this.bakeSignature()) {
+            const info = decoded.info;
+            const step = Math.max(1, Math.ceil(Math.max(info.nx, info.nz) / 96));
+            const nx = Math.ceil(info.nx / step), nz = Math.ceil(info.nz / step);
+            const data = new Float32Array(nx * nz * 3);
+            for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
+                const i = Math.min(info.nz - 1, z * step) * info.nx + Math.min(info.nx - 1, x * step), o = (z * nx + x) * 3;
+                const wet = info.info1[i * 4 + 3] > 0.5;
+                data[o] = wet ? info.info0[i * 4] : NaN;
+                data[o + 1] = wet ? info.info0[i * 4 + 1] : 0;
+                data[o + 2] = wet ? info.info0[i * 4 + 2] : 0;
+            }
+            grid = { originX: info.originX, originZ: info.originZ, cell: info.cell * step, nx, nz, data };
+        }
+        this._flowGrid = { key, grid };
+        return grid;
     }
 
     /** Called by the physics step for every body it buoyed. */

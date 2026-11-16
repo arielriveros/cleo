@@ -28,6 +28,38 @@ export interface WaterSpec {
     shoreFade?: number;
     /** Whether flowing water drags bodies along with it (river currents). */
     currents?: boolean;
+    /** A bake's settled water, coarse: where it is given it replaces the shapes' surface and flow. */
+    flowGrid?: WaterFlowGrid;
+}
+
+/**
+ * The flow bake as physics reads it (water/bake/): `nx` x `nz` cells `cell` metres apart from
+ * (originX, originZ), three floats each: resting surface (NaN = dry), flow x, flow z. Plain data, so it
+ * crosses to the worker with the rest of the spec.
+ */
+export interface WaterFlowGrid {
+    originX: number; originZ: number; cell: number; nx: number; nz: number;
+    data: Float32Array;
+}
+
+/** Bilinear lookup of the grid at (x, z) into `col`; false where it is dry or outside. */
+function sampleFlowGrid(g: WaterFlowGrid, x: number, z: number, col: WaterColumn): boolean {
+    const fx = (x - g.originX) / g.cell, fz = (z - g.originZ) / g.cell;
+    if (fx < 0 || fz < 0 || fx > g.nx - 1 || fz > g.nz - 1) return false;
+    const x0 = Math.min(g.nx - 2, Math.floor(fx)), z0 = Math.min(g.nz - 2, Math.floor(fz));
+    const tx = fx - x0, tz = fz - z0;
+    let s = 0, u = 0, v = 0, w = 0;
+    for (let k = 0; k < 4; k++) {
+        const ix = x0 + (k & 1), iz = z0 + (k >> 1);
+        const o = (iz * g.nx + ix) * 3;
+        const surf = g.data[o];
+        if (!Number.isFinite(surf)) continue;
+        const wk = ((k & 1) ? tx : 1 - tx) * ((k >> 1) ? tz : 1 - tz);
+        s += surf * wk; u += g.data[o + 1] * wk; v += g.data[o + 2] * wk; w += wk;
+    }
+    if (w < 0.5) return false;
+    col.surface = s / w; col.flowX = u / w; col.flowZ = v / w;
+    return true;
 }
 
 /** The swell alone: a gentle bob at a world x/z at `time` seconds. */
@@ -69,6 +101,12 @@ export function waterSpecColumn(spec: WaterSpec, x: number, z: number, time: num
         col.shape = -1; col.surface = spec.max[1]; col.floor = spec.min[1];
         col.flowX = 0; col.flowZ = 0; col.waveFactor = 1;
         col.edge = Math.min(x - spec.min[0], spec.max[0] - x, z - spec.min[2], spec.max[2] - z);
+    }
+    // A bake knows where the water really runs: its surface and currents over the shapes' own.
+    if (spec.flowGrid && spec.shapes && spec.shapes.length) {
+        const keepFloor = col.floor;
+        if (!sampleFlowGrid(spec.flowGrid, x, z, col)) return null;
+        col.floor = Math.min(keepFloor, col.surface);
     }
     col.surface += waveHeight(spec, x, z, time, col.edge, col.waveFactor);
     if (!spec.currents) { col.flowX = 0; col.flowZ = 0; }

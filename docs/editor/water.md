@@ -124,7 +124,8 @@ A simulation of the water itself: **Bake flow** runs shallow water over the shap
 under them until it settles, and the surface then draws what it found: currents that bend round the
 banks and swirl behind a bend, water piling up and speeding over a drop, foam where it tumbles. It takes
 a few seconds, the editor keeps drawing meanwhile, and **Cancel** stops it. Without a bake the surface
-draws the analytic flow along each river. The bake is saved with the project and published with the game.
+draws the analytic flow along each river. Floating bodies ride the baked water too: its surface and its
+currents carry them. The bake is saved with the project and published with the game.
 
 While a river's first metres feed it, lakes, boxes and the ocean keep their levels and take what the
 rivers bring, and outside the shapes is dry: the shapes say where water may be, the landscape how deep
