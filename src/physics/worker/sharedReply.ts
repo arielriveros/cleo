@@ -77,7 +77,12 @@ export class SharedReplyReader {
     constructor(public readonly buffer: SharedArrayBuffer) {
         this._header = new Int32Array(buffer, 0, HEADER_INTS);
         this._scalars = new Float64Array(buffer, HEADER_INTS * 4, SCALARS);
-        this._read = Atomics.load(this._header, READY);
+        // From nothing read, never from what is already there: a channel is a fresh buffer (READY starts at 0),
+        // and the worker may write its next reply into it before this thread has even handled the message
+        // announcing it — when a reset leaves two steps in flight during the warm-up, it does. Starting at the
+        // current count would take that reply for one already read, and the warm-up would wait for it forever.
+        // Anything in a new channel is newer than what came by message (the worker sends those first).
+        this._read = 0;
     }
 
     public read(): (Snapshot & { doneAt: number }) | null {

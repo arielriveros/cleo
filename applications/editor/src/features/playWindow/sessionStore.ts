@@ -6,7 +6,9 @@
 // database at an older version than another page's blocks that page's upgrade, and the game window has no
 // business holding the project's database open at all.
 //
-// Two stores, so housekeeping never reads a game: 'bytes' (id -> ArrayBuffer) and 'meta' (id -> written-at).
+// Two stores, so housekeeping never reads a game: 'bytes' (id -> Blob) and 'meta' (id -> written-at). A Blob,
+// not an ArrayBuffer: IndexedDB keeps it as a file of its own, and the game window reads it a range at a time
+// (player/gameSource.ts blobSource), so the packed game is never all in the window's memory.
 // IndexedDB has no projection, and walking records that hold the buffers would deserialize every one.
 //
 // No DOM, no engine, no React: the project worker writes here (workers/projectJobs.ts 'playPack').
@@ -54,17 +56,20 @@ async function run<T>(stores: string[], mode: IDBTransactionMode, body: (tx: IDB
 }
 
 /** Store a session's packed game (replacing what was there: Restart reuses the id). */
-export async function putPlaySession(id: string, buffer: ArrayBuffer, now: number = Date.now()): Promise<void> {
+export async function putPlaySession(id: string, game: Blob, now: number = Date.now()): Promise<void> {
   await run([BYTES, META], 'readwrite', tx => {
-    tx.objectStore(BYTES).put(buffer, id);
+    tx.objectStore(BYTES).put(game, id);
     tx.objectStore(META).put(now, id);
   });
 }
 
-/** A session's packed game, or null when there is none (not built yet, or already dropped). */
-export async function getPlaySession(id: string): Promise<ArrayBuffer | null> {
-  const buffer = await run<unknown>([BYTES], 'readonly', tx => tx.objectStore(BYTES).get(id));
-  return buffer instanceof ArrayBuffer ? buffer : null;
+/**
+ * A session's packed game, or null when there is none (not built yet, or already dropped). An ArrayBuffer
+ * only from a record an older editor wrote.
+ */
+export async function getPlaySession(id: string): Promise<Blob | ArrayBuffer | null> {
+  const stored = await run<unknown>([BYTES], 'readonly', tx => tx.objectStore(BYTES).get(id));
+  return stored instanceof Blob || stored instanceof ArrayBuffer ? stored : null;
 }
 
 export async function deletePlaySession(id: string): Promise<void> {

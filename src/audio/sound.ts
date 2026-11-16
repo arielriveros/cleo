@@ -60,9 +60,11 @@ const REGION_SPRITE = '__cleoLoopRegion';
 
 export class Sound {
     private readonly _id: string;
-    private readonly _bytes: Uint8Array;
+    /** The compressed bytes, or null for a sample that keeps none (see the constructor's `retainSource`). */
+    private readonly _bytes: Uint8Array | null;
     private readonly _mime: string;
-    private readonly _objectUrl: string;
+    /** The blob: URL howler decodes from; let go once it has, when the bytes are not kept. */
+    private _objectUrl: string | null;
     private readonly _howl: Howl;
     private readonly _mixer: Mixer | null;
 
@@ -73,19 +75,35 @@ export class Sound {
     /** The bus the rack output is currently wired to, so a settings change knows whether to rewire. */
     private _connectedBus: string | null = null;
 
-    constructor(id: string, bytes: Uint8Array, mime: string, settings: SoundSettings, mixer: Mixer | null = null) {
+    /**
+     * @param bytes The encoded sample: its bytes, or a Blob of them (a published game reads each sound from
+     *   game.bin as a Blob, which never brings the bytes into the page).
+     * @param options.retainSource Keep the bytes for {@link source} (default): the editor saves and publishes
+     *   them. A published game passes false: nothing is kept but howler's decoded buffer, and the blob: URL is
+     *   let go as soon as howler has read it. A Blob is never kept as a source.
+     */
+    constructor(id: string, bytes: Uint8Array | Blob, mime: string, settings: SoundSettings, mixer: Mixer | null = null,
+                options: { retainSource?: boolean } = {}) {
+        const retain = options.retainSource !== false && !(bytes instanceof Blob);
         this._id = id;
-        this._bytes = bytes;
+        this._bytes = retain ? bytes as Uint8Array : null;
         this._mime = mime;
         this._settings = settings;
         this._mixer = mixer;
 
-        // Cast: a Uint8Array is a valid BlobPart at runtime, but lib.dom's type is narrower.
+        // Cast: a Uint8Array is a valid BlobPart at runtime, but lib.dom's type is narrower. A Blob is re-wrapped
+        // for its type (howler is told the codec, but the URL should say it too); wrapping a Blob copies nothing.
         const blob = new Blob([bytes as unknown as BlobPart], { type: mime });
-        this._objectUrl = URL.createObjectURL(blob);
+        const url = URL.createObjectURL(blob);
+        this._objectUrl = url;
+        const letGo = retain ? undefined : () => {
+            if (this._objectUrl !== url) return;
+            URL.revokeObjectURL(url);
+            this._objectUrl = null;
+        };
 
         this._howl = new Howl({
-            src: [this._objectUrl],
+            src: [url],
             // A blob URL has no extension, so howler cannot sniff the codec without being told.
             format: formatOf(mime) ? [formatOf(mime) as string] : undefined,
             // Web Audio, not an <audio> element: the rack, the buses and the spatial panner all need a
@@ -96,9 +114,10 @@ export class Sound {
             rate: settings.rate,
             loop: settings.loop,
             sprite: this._spriteFor(settings),
-            onload: () => { this._duration = this._howl.duration() || 0; },
+            onload: () => { this._duration = this._howl.duration() || 0; letGo?.(); },
             onloaderror: (_voice, err) => {
                 Logger.print('warn', ['Failed to decode sound', id, err], 'Audio');
+                letGo?.();
             },
         });
 
@@ -113,10 +132,11 @@ export class Sound {
     /** Seconds. 0 until the sample has decoded — a caller polls it or waits on `onLoad`. */
     public get duration(): number { return this._duration; }
     public get settings(): SoundSettings { return this._settings; }
-    public get objectUrl(): string { return this._objectUrl; }
-    /** The compressed bytes, retained so persistence and publish never re-encode. */
+    /** The blob: URL howler decodes from; null once let go (a sample that keeps no source, after it decoded). */
+    public get objectUrl(): string | null { return this._objectUrl; }
+    /** The compressed bytes, retained so persistence and publish never re-encode; null for one that keeps none. */
     public get source(): { bytes: Uint8Array; mime: string } | null {
-        return this._deleted ? null : { bytes: this._bytes, mime: this._mime };
+        return this._deleted || !this._bytes ? null : { bytes: this._bytes, mime: this._mime };
     }
     /** The underlying Howl. For the editor's transport and for scripts that want howler directly. */
     public get howl(): Howl { return this._howl; }
@@ -321,7 +341,8 @@ export class Sound {
         try { this._howl.unload(); } catch { /* already unloaded */ }
         this._rack?.dispose();
         this._rack = null;
-        URL.revokeObjectURL(this._objectUrl);
+        if (this._objectUrl) URL.revokeObjectURL(this._objectUrl);
+        this._objectUrl = null;
     }
 
     // -----------------------------------------------------------------------------------------------

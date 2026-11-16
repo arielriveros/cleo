@@ -25,6 +25,8 @@ export interface UIBinding {
     input?: HTMLInputElement | null;
     lastLayout: number;
     lastRevision: number;
+    /** An image node whose texture had no image to show at its last sync (loading, or released after upload). */
+    waitingImage?: boolean;
 }
 
 export type UIRegistry = Map<string, UIBinding>;
@@ -43,6 +45,9 @@ export function cssColor(c: UIColor | undefined): string {
 export function textureSrc(id: string | null): string {
     if (!id) return '';
     const texture = TextureManager.Instance.getTexture(id);
+    // A published game lets go of images nothing showed (TextureManager.setRetention): decode it again. The
+    // binding re-syncs when it arrives (syncUI, imageRevision).
+    if (texture?.released) { void TextureManager.Instance.ensureImage(id); return ''; }
     const data = texture?.data as HTMLImageElement | undefined;
     return data && typeof data.src === 'string' ? data.src : '';
 }
@@ -165,6 +170,7 @@ function syncContent(binding: UIBinding): void {
         if (binding.image) {
             const src = textureSrc(node.textureId);
             if (binding.image.getAttribute('src') !== src) binding.image.setAttribute('src', src);
+            binding.waitingImage = !!node.textureId && src === '';
             binding.image.style.objectFit = node.fit === 'tile' ? 'fill' : node.fit;
             binding.image.style.width = '100%';
             binding.image.style.height = '100%';
@@ -283,6 +289,9 @@ function syncContent(binding: UIBinding): void {
 /** Reused across frames so the batched measure pass allocates nothing. */
 const pendingMeasure: UIBinding[] = [];
 
+/** The TextureManager.imageRevision each registry last synced against. */
+const seenImageRevision = new WeakMap<UIRegistry, number>();
+
 /**
  * Push one frame of resolved layout and content into the DOM.
  *
@@ -295,6 +304,11 @@ export function syncUI(
     force: boolean = false,
     editorPick: boolean = false,
 ): void {
+    // An image that arrived since the last frame: content re-syncs for the bindings that were waiting on one.
+    // Nothing else moves their revision, so without this a texture that loads late would never show.
+    const imageRevision = TextureManager.Instance.imageRevision;
+    const imagesMoved = seenImageRevision.get(registry) !== imageRevision;
+    seenImageRevision.set(registry, imageRevision);
     for (const binding of registry.values()) {
         const { node } = binding;
         // A node removed from the scene between the last React commit and this frame still has a binding.
@@ -313,6 +327,8 @@ export function syncUI(
         if (authored) {
             syncContent(binding);
             binding.lastRevision = revision;
+        } else if (imagesMoved && binding.waitingImage) {
+            syncContent(binding);
         }
 
         if (node.sizing === 'content') pendingMeasure.push(binding);

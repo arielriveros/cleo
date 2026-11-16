@@ -43,6 +43,11 @@ export default class PlayButtonNode extends UIButtonNode {
 and the published player, so in practice it always works. The promise resolves once the new scene
 has started.
 
+The scene left behind is taken apart: each of its nodes loses its parent, its children and its scene,
+so anything still holding one keeps that node, not the whole scene. A script that awaits
+`Game.loadScene` resumes on a node of the scene it left. There, `this.scene` is null, finders find
+nothing and timers do not run. Do the work for the new scene in that scene's own scripts.
+
 The new scene brings its own render settings: what its scene saved, applied before it starts. So a
 scene's scripts can still change them in `onStart`, and what the last scene's scripts changed does
 not follow the player into the next.

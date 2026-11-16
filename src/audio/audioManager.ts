@@ -74,6 +74,25 @@ export class AudioManager {
     }
 
     /**
+     * Register a sample from a Blob of its compressed bytes, keeping no copy of them: howler decodes it and
+     * the blob: URL is let go. What a published game does with the sounds it reads from game.bin; such a
+     * sample has no {@link Sound.source}, so it cannot be saved or published again.
+     */
+    public addSoundFromBlob(blob: Blob, mime: string, settings?: SoundSettings, id?: string): string | undefined {
+        if (!blob || blob.size === 0) return undefined;
+        const identifier = id || uuidv4();
+        this._sounds.get(identifier)?.delete();
+        try {
+            const sound = new Sound(identifier, blob, mime, settings ?? { ...DEFAULT_SOUND_SETTINGS }, this._mixer, { retainSource: false });
+            this._sounds.set(identifier, sound);
+            return identifier;
+        } catch (err) {
+            Logger.print('warn', ['Failed to create sound', identifier, err], 'Audio');
+            return undefined;
+        }
+    }
+
+    /**
      * Register a sample from a picked or dropped file. Returns the id SYNCHRONOUSLY so a caller can
      * assign it straight away, but the sample itself only exists once the file has been read.
      *

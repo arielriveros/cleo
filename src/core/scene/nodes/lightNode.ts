@@ -267,7 +267,8 @@ export class FollowedLight {
     /** The light named `name` that `owner` follows, or null. */
     public resolve(owner: Node, name: string | null): LightNode | null {
         if (!name) return null;
-        if (name !== this._name || this._owner !== owner || !this._node || this._node.scene !== owner.scene || this._node.name !== name) {
+        // `!owner.scene`: an owner cut from a disposed scene compares null with null, and would keep its light.
+        if (name !== this._name || this._owner !== owner || !this._node || !owner.scene || this._node.scene !== owner.scene || this._node.name !== name) {
             this._name = name;
             this._owner = owner;
             this._node = findFollowedLight(owner, name);

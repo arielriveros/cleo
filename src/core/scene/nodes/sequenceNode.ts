@@ -292,7 +292,9 @@ export class SequenceNode extends Node {
         const override = this._overrides.get(slotId);
         if (override) return override.scene ? override : null;
         const cached = this._slotCache.get(slotId);
-        if (cached && cached.scene === this.scene && !cached.markForRemoval) return cached;
+        // A scene to compare: on a sequence cut from a disposed scene both sides are null, which would hand back
+        // a node of the scene it left.
+        if (cached && cached.scene && cached.scene === this.scene && !cached.markForRemoval) return cached;
         const scene = this.scene;
         if (!scene) return null;
         let node: Node | null = null;

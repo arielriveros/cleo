@@ -1,7 +1,9 @@
 import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, addScriptModuleSources, registerTemplates, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles, restrictFeatures, setAbsentFeatureNames } from 'cleo';
 import type { BackendKind, LoadProgressListener } from 'cleo';
 import { mountVirtualControls } from './virtualControls';
-import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData, type UnpackedGame } from './unpack';
+import { inflateSceneGeometry, inflateTerrainData, inflateTilemapData, readChunkSet, collectSceneRefs, collectUiTextureIds, type GameHeader, type SceneRefs } from './unpack';
+import type { GameSource } from './gameSource';
+import { pool } from './byteSpans';
 import { showError, setLoadingText } from './pageStatus';
 // The page status helpers, for the pages that import them from here (session.tsx).
 export { showError, setLoadingText, hideLoadingWhenSmooth } from './pageStatus';
@@ -10,7 +12,11 @@ import { PLAYER_CONTRACT } from '../features/publish/pack';
 import { physicsBackendOverride, physicsWorkerOverride } from '../features/options/projectSettings';
 
 // The data-driven runtime for a packed Cleo game (game.bin: every scene, mesh and texture), shared by the
-// two pages that run one:
+// two pages that run one. game.bin is read a range at a time from a GameSource (gameSource.ts): the header and
+// manifest before boot, every texture and sound once, each scene's chunks as it loads. Nothing here holds the
+// whole file, and what is read is let go once the engine has it (TextureManager.setRetention, a fresh copy of
+// a scene's JSON per visit).
+//
 //   - index.tsx, the PUBLISHED player (public/player/game.js), silent, its scripts precompiled;
 //   - session.tsx, Play in window (play.html), which runs the editor's game in a process of its own, with
 //     the Logger on and scripts compiled from source.
@@ -21,10 +27,10 @@ import { physicsBackendOverride, physicsWorkerOverride } from '../features/optio
 // second entry, and the editor's play window the editor's own worker module. Each page passes its factory.
 
 export interface PlayerBootOptions {
-  /** The game.bin bytes. Mesh arrays and texture payloads stay views onto this buffer. */
-  buffer: ArrayBuffer;
-  /** `buffer` already unpacked, by a page that read it before loading the engine (index.tsx). */
-  pack?: UnpackedGame;
+  /** Where game.bin is read from. */
+  source: GameSource;
+  /** Its header and manifest, read before the engine loads (the shaders are installed from it). */
+  header: GameHeader;
   /** Keep the engine Logger on. A shipped game runs silent; Play in window forwards it to the editor. */
   logging?: boolean;
   /** The graphics API to ask for, over the pack's. Play in window passes the editor's own preference. */
@@ -49,6 +55,14 @@ export interface PlayerHandle {
   currentSceneName(): string;
 }
 
+/** Texture and sound reads in flight at once: enough to keep the decoders busy, few enough not to hold them all. */
+const ASSET_READS = 6;
+
+/** A colour-grading LUT strip (N tiles of N x N, see colorGrading.lutSizeOf), whose image the grading pass reads. */
+function isLutShaped(width: number, height: number): boolean {
+  return height >= 2 && height <= 64 && width === height * height;
+}
+
 const NEEDS_WEBGPU =
   'This game needs WebGPU, which this browser or graphics card does not provide.\n\n' +
   'Try a current Chrome or Edge, or update the graphics driver. (The game was published without its\n' +
@@ -68,8 +82,11 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   Logger.setEnabled(!!options.logging);
   const fail = options.onError ?? showError;
 
-  const pack = options.pack ?? unpackGameBin(options.buffer);
-  const data = pack.manifest;
+  const { source, header } = options;
+  const data = header.manifest;
+  // The buffer source's reads are views onto the one resident file: which geometries a scene has had, so a
+  // later reader copies (readChunkSet). Owning sources start afresh per read and ignore it.
+  const claimed = new Set<string>();
 
   // Refuse a game.bin from a packer newer than this bundle. Only a NEWER pack is fatal; an older one
   // carries no `contract` field at all. A throw, not Logger: Logger is off by now in a shipped game.
@@ -178,28 +195,63 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   engine.isPaused = false;
   engine.run();
 
-  // Textures are global and referenced by id, so every one is registered once here.
-  for (const t of pack.textures) {
-    try { if (!TextureManager.Instance.getTexture(t.id)) TextureManager.Instance.addTextureFromBytes(t.bytes, t.mime, t.config, t.id); } catch { /* skip a bad texture */ }
+  // What a texture keeps once its image is on the GPU: neither its encoded bytes nor, mostly, its decoded image.
+  // Kept: the images something reads after upload — a UI image shows its texture's (as an <img>), the colour
+  // grading pass reads a LUT strip's. Anything else asked for later (a script pointing a UI image elsewhere)
+  // is read from game.bin and decoded again (TextureManager.ensureImage).
+  const packedTextures = new Map((data.textures ?? []).map(t => [t.id, t]));
+  const readTexture = (t: { o: number; l: number; mime: string }) => source.readBlob(header.blobStart + t.o, t.l, t.mime);
+  const uiTextures = new Set<string>();
+  for (const entry of Object.values(data.scenes ?? {})) collectUiTextureIds(entry.scene, uiTextures);
+  for (const t of (data.templates ?? [])) collectUiTextureIds(t.node, uiTextures);
+  TextureManager.Instance.setRetention({
+    keep: (id, width, height) => uiTextures.has(id) || isLutShaped(width, height),
+    reload: async id => { const t = packedTextures.get(id); return t ? readTexture(t) : null; },
+  });
+
+  // Textures are global and referenced by id, so every one is registered here, at once, so a scene parsed
+  // while they load finds them; their images are read and decoded a few at a time.
+  const textureJobs: { t: { o: number; l: number; mime: string }; give: (b: Blob) => void; fail: (e: unknown) => void; loaded: Promise<boolean> }[] = [];
+  for (const t of (data.textures ?? [])) {
+    if (TextureManager.Instance.getTexture(t.id)) continue;
+    let give!: (b: Blob) => void, fail!: (e: unknown) => void;
+    const blob = new Promise<Blob>((resolve, reject) => { give = resolve; fail = reject; });
+    try { textureJobs.push({ t, give, fail, loaded: TextureManager.Instance.addTextureFromBlob(blob, t.config, t.id).loaded }); }
+    catch { /* skip a bad texture */ }
   }
+  let texturesDone = 0;
+  const texturesLoaded = pool(textureJobs, ASSET_READS, async job => {
+    try { job.give(await readTexture(job.t)); } catch (e) { job.fail(e); }
+    await job.loaded;
+    setLoadingText(`Loading textures ${++texturesDone} / ${textureJobs.length}`);
+  });
 
   // Sounds are global and referenced by id, exactly like textures — and registered BEFORE any scene is
-  // parsed, so a SoundNode resolving `sampleId` on the entry scene finds its sample present.
-  for (const a of pack.sounds) {
+  // parsed, so a SoundNode resolving `sampleId` on the entry scene finds its sample present. Each keeps no
+  // copy of its bytes: howler decodes it and lets it go.
+  await pool(data.sounds ?? [], ASSET_READS, async a => {
     try {
       if (!AudioManager.Instance.getSound(a.id)) {
-        AudioManager.Instance.addSoundFromBytes(a.bytes, a.mime, parseSoundSettings(a.settings), a.id);
+        const blob = await source.readBlob(header.blobStart + a.o, a.l, a.mime);
+        AudioManager.Instance.addSoundFromBlob(blob, a.mime, parseSoundSettings(a.settings), a.id);
       }
     } catch { /* skip a sound the browser cannot take */ }
-  }
-
-  // GI Volume bakes, before any scene parses, as the sounds are: a volume loads its capture instead of
-  // capturing again.
-  for (const b of pack.giBakes ?? []) GiBakeRegistry.set(b.id, b.bytes);
+  });
 
   // Templates once, globally: the registry backs scene.instantiate and must survive a Game.loadScene
-  // switch. Geometry is inflated eagerly — a script may instantiate one at any moment.
-  for (const t of (data.templates ?? [])) inflateSceneGeometry(t.node, pack);
+  // switch. Geometry is inflated eagerly — a script may instantiate one at any moment. A template's GI
+  // bakes stay registered for the session; a scene's come and go with it (startScene).
+  const templateRefs: SceneRefs = { chunks: [], giBakeIds: [] };
+  for (const t of (data.templates ?? [])) {
+    const refs = collectSceneRefs(t.node, data, { data: false });
+    templateRefs.chunks.push(...refs.chunks);
+    templateRefs.giBakeIds.push(...refs.giBakeIds);
+  }
+  const templateChunks = await readChunkSet(source, header, templateRefs, claimed);
+  for (const t of (data.templates ?? [])) inflateSceneGeometry(t.node, templateChunks);
+  const permanentBakes = new Set<string>();
+  for (const b of templateChunks.giBakes) { GiBakeRegistry.set(b.id, b.bytes); permanentBakes.add(b.id); }
+  let sceneBakes: string[] = [];
   // Shared clips are baked into the template subtrees BEFORE they are registered: the registry entry is
   // the master `Scene.instantiate` deep-copies, and nothing revisits it after a spawn.
   attachTemplateAnimations(data.templates, data);
@@ -235,15 +287,22 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
       onProgress(fraction, name);
       await nextFrame();
     };
-    // Deferred to immediately before parse, so an unvisited scene's meshes are never touched.
-    await stage(0.15, 'Unpacking models');
-    inflateSceneGeometry(entry.scene, pack);
-    await stage(0.35, 'Unpacking terrain');
-    await inflateTerrainData(entry.scene, pack);
-    await inflateTilemapData(entry.scene, pack);
+    // Read when the scene loads, so an unvisited scene's meshes are never touched. Into a fresh copy of its
+    // JSON, every visit: the manifest's stays refs only, and what this one is inflated with goes with it once
+    // the engine has parsed it (and with the engine's objects, once the scene is disposed).
+    await stage(0.1, 'Loading scene data');
+    const json = structuredClone(entry.scene);
+    const chunks = await readChunkSet(source, header, collectSceneRefs(json, data), claimed);
+    await stage(0.3, 'Unpacking models');
+    inflateSceneGeometry(json, chunks);
+    await stage(0.45, 'Unpacking terrain');
+    await inflateTerrainData(json, chunks);
+    await inflateTilemapData(json, chunks);
+    // This scene's GI captures, before its volumes parse: a volume loads its capture instead of capturing again.
+    for (const b of chunks.giBakes) GiBakeRegistry.set(b.id, b.bytes);
     await stage(0.6, 'Building the scene');
     const scene = new Scene();
-    scene.parse({ scene: entry.scene, textures: [] }, true); // textures already registered
+    scene.parse({ scene: json, textures: [] }, true); // textures already registered
     // Shared clips are not in the serialized scene by design; retarget after parse, before start.
     attachSharedAnimations(scene, data);
     Logger.info(`scene "${entry.name}" nodes=${[...scene.nodes].length}`, 'Player');
@@ -256,6 +315,10 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     // permanent SCENE_CHANGED subscription. Without this a game that switches scenes leaks a full set
     // every time.
     if (outgoing && outgoing !== scene) outgoing.dispose();
+    // The captures of the scene just left go with it, unless this one or a template uses them too.
+    const bakesNow = chunks.giBakes.map(b => b.id);
+    for (const bakeId of sceneBakes) if (!permanentBakes.has(bakeId) && !bakesNow.includes(bakeId)) GiBakeRegistry.delete(bakeId);
+    sceneBakes = bakesNow;
     // The new scene needs the viewport before its first layout, or the HUD resolves against the
     // previous scene's box for one frame.
     const uiBox = document.getElementById('ui-root')?.getBoundingClientRect();
@@ -283,8 +346,10 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
 
   const scriptCount = Object.keys((window as any).CLEO_GAME_SCRIPTS || {}).length;
   const moduleCount = Object.keys(data.modules ?? {}).length;
-  Logger.info(`scenes=${Object.keys(table).length} textures=${pack.textures.length} sounds=${pack.sounds.length} geometries=${Object.keys(data.geometries ?? {}).length} scriptsInFile=${scriptCount} moduleSources=${moduleCount}`, 'Player');
+  Logger.info(`scenes=${Object.keys(table).length} textures=${data.textures?.length ?? 0} sounds=${data.sounds?.length ?? 0} geometries=${Object.keys(data.geometries ?? {}).length} scriptsInFile=${scriptCount} moduleSources=${moduleCount} source=${source.kind}`, 'Player');
 
-  await startScene(currentId);
+  // The entry scene is read while the textures are; the game starts once both are in, so it opens with every
+  // texture on the GPU.
+  await Promise.all([texturesLoaded, startScene(currentId)]);
   return { engine, currentSceneName: () => table[currentId]?.name ?? '' };
 }

@@ -55,7 +55,11 @@ async function run(c, port) {
   // One profile for every case: the first compiles the shaders (tens of seconds with an empty GPU cache), the
   // rest reuse them.
   const profile = path.join(out, '..', 'electron-profile');
-  const child = spawn(electron, [c.dir, `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`], { env, stdio: 'ignore' });
+  // A window another one covers draws no frames on Windows (native occlusion), so a game launched behind the
+  // terminal never reaches its first frame and the case times out: keep it drawing however it is stacked.
+  // --expose-gc: the probe collects after leaving its scene, to show nothing still holds it.
+  const child = spawn(electron, [c.dir, `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
+    '--disable-features=CalculateNativeWinOcclusion', '--js-flags=--expose-gc'], { env, stdio: 'ignore' });
   try {
     const deadline = Date.now() + 180_000;
     let last = null;
@@ -76,6 +80,16 @@ async function run(c, port) {
         if (!(Math.abs(s.smoke.crateY - 0.5) < 0.1)) why.push(`crate at y=${s.smoke.crateY}`);
         // Each optional feature's node came through its chunk; a left-out one's names tell a script why.
         if (s.smoke.decals !== (c.decals ? 1 : 0)) why.push(`${s.smoke.decals} decals`);
+        // game.bin read by range over game:// (gameProtocol.js), never whole; the texture on the GPU with its
+        // decoded image let go, the sound decoded with no bytes kept (TextureManager.setRetention, Sound).
+        if (s.smoke.source?.kind !== 'range') why.push(`game.bin read as ${s.smoke.source?.kind ?? 'nothing'}`);
+        const t = s.smoke.texture;
+        if (!t || t.width !== 2 || t.height !== 2 || !t.released) why.push(`texture ${JSON.stringify(t)}`);
+        if (s.smoke.pendingTextures !== 0) why.push(`${s.smoke.pendingTextures} textures still loading`);
+        if (!s.smoke.sound || s.smoke.sound.kept) why.push(`sound ${JSON.stringify(s.smoke.sound)}`);
+        // Game.loadScene to an empty scene, then a collection: the scene left must be gone, or every mesh of a
+        // level stays in memory after the game moves on from it.
+        if (s.smoke.sceneFreed !== true) why.push(`the scene it left is still in memory after ${s.smoke.sceneFreedFrames} frames (${s.smoke.sceneFreed})`);
         if (s.smoke.fogVolumes !== (c.fog ? 1 : 0)) why.push(`${s.smoke.fogVolumes} fog volumes`);
         if (c.decals ? s.smoke.absent !== null : !/Decals feature/.test(s.smoke.absent ?? '')) why.push(`DecalNode: ${s.smoke.absent ?? 'defined'}`);
         return { ok: why.length === 0, why: why.join('; '), ...s.smoke, firstFrame: s.firstFrame };
@@ -95,7 +109,9 @@ for (const c of cases) {
   if (!r.ok) failed++;
   const mb = (c.bytes / 1e6).toFixed(2);
   console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${c.name.padEnd(14)} ${String(c.files).padStart(2)} files + game.bin ${mb.padStart(6)} MB` +
-    (r.ok ? `  ${r.backend}/${r.executor} on ${r.graphics ?? '?'} crate y=${r.crateY.toFixed(3)} first frame ${Math.round(r.firstFrame)} ms` : `  ${r.why}`) +
+    (r.ok ? `  ${r.backend}/${r.executor} on ${r.graphics ?? '?'} crate y=${r.crateY.toFixed(3)} first frame ${Math.round(r.firstFrame)} ms` +
+            ` read ${(r.source.bytesRead / 1e6).toFixed(2)} of ${(r.source.size / 1e6).toFixed(2)} MB in ${r.source.requests} requests` +
+            ` left scene freed after ${r.sceneFreedFrames} frames` : `  ${r.why}`) +
     `  parts: ${c.parts.join(' ') || '-'}`);
 }
 process.exit(failed ? 1 : 0);

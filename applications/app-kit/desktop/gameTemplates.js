@@ -1,35 +1,19 @@
 // Static templates for a published desktop (Electron) game folder.
-// The game renderer (game.js) reads window.CLEO_GAME_BUFFER, which the preload injects from game.bin.
-// main.js serves the folder over game://app with the two cross-origin isolation headers, so the page has
-// SharedArrayBuffer (the physics worker's results come back through shared memory) without an HTTP server.
+// main.js serves the folder over game://app with the two cross-origin isolation headers (gameProtocol.js,
+// copied beside it), so the page has SharedArrayBuffer (the physics worker's results come back through
+// shared memory) without an HTTP server. The page reads game.bin over the same scheme, a byte range at a
+// time (applications/editor/src/player/gameSource.ts): there is no preload, and the page is sandboxed.
+
+const fs = require('fs');
+const path = require('path');
 
 const GAME_MAIN_JS = `const { app, BrowserWindow, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { pathToFileURL } = require('url');
+// The game:// scheme: this folder, cross-origin isolated, game.bin readable a range at a time.
+const gameProtocol = require('./gameProtocol');
 
-// The game is served from its own folder over game://app rather than opened from file://. A page with an
-// origin of its own can be cross-origin isolated (these headers), which gives it SharedArrayBuffer: the
-// physics worker then hands each step back through shared memory, not a message the busy main thread only
-// reads between frames. Browser storage (localStorage, IndexedDB) belongs to that origin.
-const ISOLATION_HEADERS = { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'credentialless' };
-protocol.registerSchemesAsPrivileged([
-  { scheme: 'game', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
-]);
-
-function serveGame() {
-  protocol.handle('game', async (request) => {
-    let pathname = decodeURIComponent(new URL(request.url).pathname);
-    if (!pathname || pathname === '/') pathname = '/index.html';
-    // Within the game's folder only.
-    const file = path.join(__dirname, pathname);
-    if (!file.startsWith(__dirname + path.sep)) return new Response('Forbidden', { status: 403 });
-    const response = await net.fetch(pathToFileURL(file).toString());
-    const headers = new Headers(response.headers);
-    for (const [name, value] of Object.entries(ISOLATION_HEADERS)) headers.set(name, value);
-    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
-  });
-}
+gameProtocol.registerGameScheme(protocol);
 
 // Window options from the project (Options ▸ Project ▸ General), written at publish time.
 function windowOptions() {
@@ -47,12 +31,10 @@ function createWindow() {
     title: opts.title || undefined,
     backgroundColor: '#000000',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      // No preload: the page fetches everything it needs over game://, so it needs no Node at all.
       contextIsolation: true,
       nodeIntegration: false,
-      // The preload reads game.bin with fs. Electron sandboxes preloads by default (no Node modules), which
-      // left CLEO_GAME_BUFFER unset and the game black. The page itself still has no Node access.
-      sandbox: false
+      sandbox: true
     }
   });
   win.setMenuBarVisibility(false);
@@ -63,7 +45,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  serveGame();
+  gameProtocol.serveGame({ protocol, net }, __dirname);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -75,24 +57,9 @@ app.on('window-all-closed', () => {
 });
 `;
 
-const GAME_PRELOAD_JS = `const { contextBridge } = require('electron');
-const fs = require('fs');
-const path = require('path');
-
-// Load the packed game data from disk and expose it to the page before game.js runs.
-try {
-  const buf = fs.readFileSync(path.join(__dirname, 'game.bin'));
-  // Hand over a standalone ArrayBuffer, not buf.buffer: readFileSync can return a view into a larger
-  // pooled buffer, so buf.buffer would carry unrelated bytes and a nonzero start offset — the player
-  // reads the header at offset 0 and would see garbage.
-  contextBridge.exposeInMainWorld(
-    'CLEO_GAME_BUFFER',
-    buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
-  );
-} catch (e) {
-  console.error('Failed to load game.bin:', e);
-}
-`;
+// The game:// handler main.js requires, written beside it as gameProtocol.js. Read once, here, so Publish
+// writes the very file the editor ships (and its tests load).
+const GAME_PROTOCOL_JS = fs.readFileSync(path.join(__dirname, 'gameProtocol.js'), 'utf-8');
 
 // npm (and electron-builder, which validates package.json) only accepts lowercase URL-safe names, so a
 // folder like "New folder" or "My Game!" has to be slugged. The original stays as productName.
@@ -131,7 +98,7 @@ function gameReadme(name) {
     '```',
     '',
     'This opens the game in an Electron window. All game data — scenes, meshes and textures —',
-    'is packed into `game.bin`, loaded by `preload.js` and rendered by `game.js`.',
+    'is packed into `game.bin`, which `game.js` reads over the `game://` scheme `main.js` serves.',
     ''
   ].join('\n');
 }
@@ -201,4 +168,4 @@ const WEB_HEADERS = `/*
   Cross-Origin-Embedder-Policy: credentialless
 `;
 
-module.exports = { GAME_MAIN_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme };
+module.exports = { GAME_MAIN_JS, GAME_PROTOCOL_JS, GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme };

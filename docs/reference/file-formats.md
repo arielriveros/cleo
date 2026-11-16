@@ -97,7 +97,11 @@ What **Publish** writes alongside `index.html` and `game.js`.
 
 - Magic `CLEOPAK1`, `PACK_VERSION = 1`.
 - A 4-byte-aligned chunk blob with a JSON manifest.
-- Typed arrays map straight onto the downloaded buffer with no parse step.
+- Every chunk sits at a 4-byte-aligned offset, so a typed array maps straight onto the bytes read, with no parse
+  step.
+- A running game never holds the whole file. It reads the header and manifest, then the byte ranges it needs:
+  each texture and sound once, a scene's chunks when that scene loads. A scene's chunks are named by the refs in
+  its own JSON (`geometryRef`, `*Chunk`, `giVolume.bakeId`), so the manifest carries no per-scene index.
 
 `PACK_VERSION` governs the **container layout** and stays at 1 so old bundles keep loading.
 

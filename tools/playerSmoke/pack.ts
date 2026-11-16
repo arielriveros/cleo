@@ -1,10 +1,12 @@
 // Writes the smoke games tools/playerSmoke.mjs runs: one runnable desktop game folder per case, made the way
 // Publish makes one (the prebuilt player's files for the game's parts, index.html with its preload links,
 // game.bin from packGameBin, the desktop shell from app-kit/desktop/gameTemplates.js), around a tiny scene:
-// a floor, a falling crate and a probe node whose script reports what ran to window.CLEO_SMOKE.
+// a floor, a falling crate and a probe node whose script reports what ran to window.CLEO_SMOKE, plus a
+// texture and a sound, to show the game read them from game.bin and kept none of their bytes.
 //
 // Run through vite-node with the editor's vitest config (its aliases): see playerSmoke.mjs.
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { deflateSync } from 'node:zlib';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { packGameBin } from '../../applications/editor/src/features/publish/pack';
@@ -52,30 +54,100 @@ const node = (extra: any) => ({ position: [0, 0, 0], rotation: [0, 0, 0], scale:
 const probe = (wantWorker: boolean) => `function(__cleoImport, __cleoExports) {
   const cleo = __cleoImport('cleo');
   let frames = 0;
+  let leaving = false;
   this.onUpdate = function () {
-    if (window.CLEO_SMOKE || ++frames < 90) return;
+    if (leaving || ++frames < 90) return;
     const engine = cleo.CleoEngine.instance;
     const physics = engine.physics;
     if (${wantWorker} && physics.executor !== 'worker' && frames < 900) return;
     const crate = engine.scene.root.getChildByName('Crate')[0];
-    window.CLEO_SMOKE = {
+    const smoke = {
       frames,
       backend: physics.backend,
       fallback: physics.backendFallbackReason,
       executor: physics.executor,
       crateY: crate ? crate.worldPosition[1] : null,
       graphics: engine.renderer && engine.renderer.backend ? engine.renderer.backend : null,
+      // The texture and sound the game read from game.bin, and how it read it (gameSource.ts).
+      texture: (() => { const t = cleo.TextureManager.Instance.getTexture("smoke-checker.png"); return t ? { width: t.width, height: t.height, released: t.released } : null; })(),
+      pendingTextures: cleo.TextureManager.Instance.pendingLoads,
+      sound: (() => { const s = cleo.AudioManager.Instance.getSound("smoke-tone.wav"); return s ? { kept: !!s.source } : null; })(),
+      source: window.CLEO_GAME_SOURCE ? { ...window.CLEO_GAME_SOURCE } : null,
       // The optional features' nodes, each parsed by its feature's chunk, and what a script reading a
       // left-out feature's name gets.
       decals: engine.scene.decals.size,
       fogVolumes: engine.scene.volumetricFogs.size,
       absent: (() => { try { void cleo.DecalNode; return null; } catch (e) { return String(e && e.message); } })(),
     };
+    // Then leave this scene for an empty one, and report once it is collected (see SCENE_WATCH). This node
+    // stays referenced on purpose, as a script callback never removed keeps its node: the scene must go anyway
+    // (Scene.dispose cuts its node graph), keeping only this node.
+    leaving = true;
+    window.CLEO_SMOKE_KEEP = this;
+    window.CLEO_SMOKE_WATCH(new WeakRef(engine.scene), smoke, cleo.Game.loadScene('Second'));
   };
 }`;
 
+/**
+ * Watches the scene the probe left: once collected, nothing may still hold it (a closure the game UI made, a
+ * React fiber, an engine list), or every mesh of a level stays in memory after the game moves on. Top-level in
+ * game.scripts.js, not inside the probe: a closure made in a node script keeps that script's `cleo` import,
+ * which keeps its node (and so the scene) alive. A frame at a time for up to two seconds, since the switch
+ * itself holds the old scene for a few frames. `sceneFreed` is null when the page cannot collect on demand.
+ */
+const SCENE_WATCH = `window.CLEO_SMOKE_WATCH = function (left, smoke, loading) {
+  // deref() only here, never in the async function below: a suspended async function keeps its temporaries,
+  // and one holding deref()'s result would keep the scene alive across every await.
+  const stillThere = () => left.deref() !== undefined;
+  const nextFrame = () => new Promise(resolve => requestAnimationFrame(() => resolve()));
+  loading.then(async () => {
+    let waited = 0;
+    if (typeof gc === 'function') while (waited < 120 && stillThere()) { await nextFrame(); gc(); waited++; }
+    smoke.sceneFreed = typeof gc === 'function' ? !stillThere() : null;
+    smoke.sceneFreedFrames = waited;
+    window.CLEO_SMOKE = smoke;
+  }, e => { smoke.sceneFreed = 'loadScene failed: ' + (e && e.message); window.CLEO_SMOKE = smoke; });
+};`;
+
+/** A PNG of `w` x `h` RGBA pixels, built by hand (signature, IHDR, IDAT, IEND). */
+function png(w: number, h: number): Uint8Array {
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (bytes: Uint8Array) => { let c = 0xffffffff; for (const b of bytes) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type: string, data: Uint8Array) => {
+    const out = new Uint8Array(12 + data.length);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, data.length);
+    out.set(Buffer.from(type, 'ascii'), 4);
+    out.set(data, 8);
+    view.setUint32(8 + data.length, crc(out.subarray(4, 8 + data.length)));
+    return out;
+  };
+  const ihdr = new Uint8Array(13);
+  new DataView(ihdr.buffer).setUint32(0, w);
+  new DataView(ihdr.buffer).setUint32(4, h);
+  ihdr.set([8, 6, 0, 0, 0], 8); // 8-bit RGBA, no interlace
+  const rows = new Uint8Array(h * (1 + w * 4));
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) rows.set((x + y) % 2 ? [255, 255, 255, 255] : [200, 30, 30, 255], y * (1 + w * 4) + 1 + x * 4);
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(rows)), chunk('IEND', new Uint8Array(0))]);
+}
+
+/** A tenth of a second of an 8-bit mono 8 kHz tone, as a WAV file. */
+function wav(): Uint8Array {
+  const samples = 800;
+  const out = new Uint8Array(44 + samples);
+  const v = new DataView(out.buffer);
+  out.set(Buffer.from('RIFF'), 0); v.setUint32(4, 36 + samples, true); out.set(Buffer.from('WAVEfmt '), 8);
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  out.set(Buffer.from('data'), 36); v.setUint32(40, samples, true);
+  for (let i = 0; i < samples; i++) out[44 + i] = 128 + Math.round(60 * Math.sin(i / 4));
+  return out;
+}
+
 function gameData(c: SmokeCase, enabled: ReadonlySet<string>) {
   return {
+    textureBytes: [{ id: 'smoke-checker.png', bytes: png(2, 2), mime: 'image/png', config: {} }],
+    soundBytes: [{ id: 'smoke-tone.wav', bytes: wav(), mime: 'audio/wav', settings: { preload: true } }],
     version: 2,
     entry: 'main',
     scenes: {
@@ -93,6 +165,8 @@ function gameData(c: SmokeCase, enabled: ReadonlySet<string>) {
           ],
         }),
       },
+      // Where the probe goes once it has reported, to show the scene it left is freed.
+      second: { name: 'Second', scene: node({ name: 'root', type: 'node', id: 'root-second', children: [node({ type: 'node', name: 'Empty', id: 'empty' })] }) },
     },
     config: {
       graphics: { clearColor: [0.1, 0.1, 0.12, 1], ...(c.webgl2 ? {} : { webgl2: false }) } as Record<string, any>,
@@ -138,9 +212,9 @@ export function writeSmokeGames(out: string) {
     bytes += bin.byteLength;
     writeFileSync(path.join(dir, 'game.bin'), bin);
     writeFileSync(path.join(dir, 'game.scripts.js'),
-      `window.CLEO_GAME_SCRIPTS = {};\nwindow.CLEO_GAME_MODULES = {};\nwindow.CLEO_GAME_SCRIPTS['probe'] = ${probe(c.worker === 'on')};\n`);
+      `window.CLEO_GAME_SCRIPTS = {};\nwindow.CLEO_GAME_MODULES = {};\n${SCENE_WATCH}\nwindow.CLEO_GAME_SCRIPTS['probe'] = ${probe(c.worker === 'on')};\n`);
     writeFileSync(path.join(dir, 'main.js'), templates.GAME_MAIN_JS);
-    writeFileSync(path.join(dir, 'preload.js'), templates.GAME_PRELOAD_JS);
+    writeFileSync(path.join(dir, 'gameProtocol.js'), templates.GAME_PROTOCOL_JS);
     writeFileSync(path.join(dir, 'window.json'), JSON.stringify({ title: `smoke ${c.name}`, width: 640, height: 360 }));
     writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: `cleo-smoke-${c.name}`, version: '0.0.0', main: 'main.js' }));
     return { ...c, dir, files: files.length, bytes, decals: enabled.has('decals'), fog: enabled.has('volumetricFog'),

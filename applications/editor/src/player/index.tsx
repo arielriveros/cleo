@@ -1,41 +1,18 @@
-import { hideLoadingWhenSmooth, showError } from './pageStatus';
-import { unpackGameBin } from './unpack';
+import { hideLoadingWhenSmooth, setLoadingText, showError } from './pageStatus';
+import { readGameHeader } from './unpack';
+import { openGameUrl } from './gameSource';
 import { installShaderLibrary } from 'cleo/graphics/shaderLibrary';
 import { installFeatures } from 'cleo/core/features/registry';
 import { FEATURE_LOADERS } from 'cleo/modules/loaders';
 
-// The PUBLISHED player: the standalone, data-driven runtime for a published Cleo game. It loads game.bin
-// and runs it outside the editor, silent, its scripts precompiled into game.scripts.js. The boot itself is
-// shared with the editor's Play-in-window page (see boot.tsx).
+// The PUBLISHED player: the standalone, data-driven runtime for a published Cleo game. It reads game.bin
+// (beside it: over HTTP for a web build, over game:// for a desktop one, a range at a time where the host
+// allows it) and runs it outside the editor, silent, its scripts precompiled into game.scripts.js. The boot
+// itself is shared with the editor's Play-in-window page (see boot.tsx).
 //
 // This entry imports next to nothing, and loads the engine only once the game's shaders are installed: the
 // player's shader imports are handles onto the library game.bin carries (src/graphics/shaderLibrary.ts),
 // and some engine modules read theirs as they load.
-
-// Bytes are either injected on window (desktop build, via preload) or fetched next to index.html (web).
-async function loadGameBuffer(): Promise<ArrayBuffer> {
-  const injected = (window as any).CLEO_GAME_BUFFER;
-  if (injected) return injected;
-
-  try {
-    const res = await fetch('./game.bin');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.arrayBuffer();
-  } catch (e) {
-    // Browsers block reading a local file over file:// — the web build must be served over HTTP.
-    if (window.location.protocol === 'file:') {
-      throw new Error(
-        'This web build must be served over HTTP.\n' +
-        'Browsers block reading game.bin when index.html is opened directly (file://).\n\n' +
-        'Run one of these inside this folder, then open the URL it prints:\n' +
-        '    npx http-server .\n' +
-        '    python -m http.server\n\n' +
-        'Tip: to get a double-click game instead, use Publish → Desktop in the editor.'
-      );
-    }
-    throw new Error(`Could not load game.bin (${(e as any)?.message || e}).`);
-  }
-}
 
 /**
  * The physics worker: physics-worker.js, the player build's second entry, beside this file (a published game
@@ -58,13 +35,15 @@ async function loadFeatures(ids: readonly string[]): Promise<void> {
 }
 
 async function boot(): Promise<void> {
-  const buffer = await loadGameBuffer();
-  const pack = unpackGameBin(buffer);
-  if (pack.manifest.shaders) installShaderLibrary(pack.manifest.shaders);
+  // A host that ignores Range sends the whole file at once: the only wait worth a percentage.
+  const { source, prefix } = await openGameUrl('./game.bin', (done, total) =>
+    setLoadingText(`Downloading game data ${Math.floor((done / total) * 100)} %`));
+  const header = await readGameHeader(source, prefix);
+  if (header.manifest.shaders) installShaderLibrary(header.manifest.shaders);
   const { bootPlayer } = await import('./boot');
   await bootPlayer({
-    buffer,
-    pack,
+    source,
+    header,
     loadFeatures,
     // A shipped game runs silent.
     logging: false,

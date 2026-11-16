@@ -98,6 +98,27 @@ Cross-Origin-Embedder-Policy: credentialless
 The build includes a `_headers` file with them, which Netlify and Cloudflare Pages read. Without them the
 game runs all the same.
 
+### How a game reads its data
+
+A running game never holds all of `game.bin`. It reads the parts it needs when it needs them: the manifest
+first, every texture and sound once, and a scene's meshes and landscape when that scene loads. What it reads
+goes once the engine has it. A texture keeps its decoded picture only when a UI image shows it or it is a
+colour-grading LUT.
+
+| Where it runs | How `game.bin` is read |
+|---|---|
+| Desktop build | A part at a time, from the game's folder. An installer puts `game.bin` beside `app.asar`. |
+| Play in window | A part at a time, from the copy the editor leaves in the browser's storage. |
+| Web build, on a host that serves byte ranges | A part at a time. Most static hosts and dev servers do, `npx http-server` among them. |
+| Web build, on a host that does not | Whole, once, with a percentage on the loading screen. `python -m http.server` is one. |
+
+A script can still point a UI image at any texture: the game reads that picture again and shows it a few
+frames later. Textures in a published game cannot be saved back out (`serializeTexture` returns nothing),
+because the game does not keep their files.
+
+> **Desktop builds before this one** had a `preload.js` that read the whole file into the game. A new
+> publish into the same folder deletes it.
+
 > **Desktop builds before this one** opened the game from `file://`. Anything a game kept in browser
 > storage (`localStorage`, IndexedDB) belongs to that origin, so a player's data from such a build does
 > not carry over to a newer one.

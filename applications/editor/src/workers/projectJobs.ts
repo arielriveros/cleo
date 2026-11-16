@@ -184,7 +184,7 @@ export async function runJob(job: ProjectJob): Promise<JobOutcome> {
       // Play does. packGameBin mutates `data`, which is safe on the worker's own structured-clone copy; on
       // the inline fallback it is the caller's throwaway build.
       const { buffer } = packGameBin(job.data);
-      await putPlaySession(job.sessionId, buffer);
+      await putPlaySession(job.sessionId, new Blob([buffer]));
       return { result: { kind: 'playPack', bytes: buffer.byteLength }, transfer: [] };
     }
   }

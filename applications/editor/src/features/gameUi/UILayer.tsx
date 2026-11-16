@@ -175,6 +175,50 @@ function UIElementView({ node, registry, onSelect, interactive, selectedId, forc
     return <div {...common}>{children}</div>;
 }
 
+/**
+ * A number per scene, for keys and effect dependencies that must change when the scene does. Not the scene:
+ * React keeps a render's hook dependencies, its effect closures and its previous fiber (the alternate) after
+ * the render, so a Scene held in any of them outlives a `Game.loadScene` — and with it every mesh array of
+ * the scene that was left. A WeakMap holds no scene.
+ */
+const sceneSerials = new WeakMap<Scene, number>();
+let nextSceneSerial = 1;
+function sceneSerial(scene: Scene | null): number {
+    if (!scene) return 0;
+    let serial = sceneSerials.get(scene);
+    if (serial === undefined) { serial = nextSceneSerial++; sceneSerials.set(scene, serial); }
+    return serial;
+}
+
+/** The scene's top-level UI roots (a nested root is already rendered by its parent's subtree walk). */
+function topLevelRoots(scene: Scene | null): UINode[] {
+    if (!scene) return [];
+    return Array.from(scene.uiRoots).filter(root => {
+        for (let p = root.parent; p; p = p.parent) if (isUI(p, 'uiRoot')) return false;
+        return true;
+    });
+}
+
+/**
+ * The per-frame sync, registered after mount so it runs after the engine's own rAF has solved this frame's
+ * layout. A hook of its own, not inline in UILayer: the loop's closure lives as long as the layer does, and
+ * V8 gives every closure made in one call the same scope — inline, it kept whatever scene UILayer's FIRST
+ * render saw for the rest of the session.
+ */
+function useSyncLoop(registry: UIRegistry, interactive: boolean, editorPick: boolean): void {
+    useEffect(() => {
+        let raf = 0;
+        let forceNext = true;
+        const tick = () => {
+            syncUI(registry, interactive, forceNext, editorPick);
+            forceNext = false;
+            raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+    }, [registry, interactive, editorPick]);
+}
+
 export default function UILayer({ getScene, interactive, onSelect, forceVisibleIds, selectedId }: UILayerProps) {
     const registry = useMemo<UIRegistry>(() => new Map(), []);
     // Editor picking: clicks select instead of activating, and every element becomes hit-testable.
@@ -182,7 +226,12 @@ export default function UILayer({ getScene, interactive, onSelect, forceVisibleI
     // Bumped to force React to rebuild the element tree; the actual tree is read from the scene.
     const [structureTick, setStructureTick] = useState(0);
 
-    const scene = getScene();
+    // Read afresh every render and held by nothing React keeps: no closure here may name the scene or its
+    // roots (see sceneSerial). The roots are computed per render rather than memoized, since a memo keeps
+    // its dependencies — the scene — and the scan is a handful of nodes.
+    const serial = sceneSerial(getScene());
+    const roots = topLevelRoots(getScene());
+    const rootsKey = roots.map(root => root.id).join('|');
 
     // Structure only: a transform or component change must not re-render here, or the imperative sync
     // is pointless.
@@ -198,31 +247,10 @@ export default function UILayer({ getScene, interactive, onSelect, forceVisibleI
         return () => { cancelAnimationFrame(frame); CleoEngine.eventEmitter.off('SCENE_CHANGED', onChanged); };
     }, []);
 
-    // Top-level roots only: a nested root is already rendered by its parent's subtree walk.
-    const roots = useMemo(() => {
-        if (!scene) return [];
-        const all = Array.from(scene.uiRoots);
-        return all.filter(root => {
-            for (let p = root.parent; p; p = p.parent) if (isUI(p, 'uiRoot')) return false;
-            return true;
-        });
-    }, [scene, structureTick]);
-
-    // Registered after mount so it runs after the engine's own rAF has solved this frame's layout.
-    useEffect(() => {
-        let raf = 0;
-        let forceNext = true;
-        const tick = () => {
-            syncUI(registry, interactive, forceNext, editorPick);
-            forceNext = false;
-            raf = requestAnimationFrame(tick);
-        };
-        raf = requestAnimationFrame(tick);
-        return () => cancelAnimationFrame(raf);
-    }, [registry, interactive, editorPick]);
+    useSyncLoop(registry, interactive, editorPick);
 
     // A structural change produces elements with no styles; force one full write immediately.
-    useEffect(() => { syncUI(registry, interactive, true, editorPick); }, [structureTick, registry, interactive, editorPick, roots]);
+    useEffect(() => { syncUI(registry, interactive, true, editorPick); }, [structureTick, registry, interactive, editorPick, serial, rootsKey]);
 
     return (
         <div
@@ -234,8 +262,10 @@ export default function UILayer({ getScene, interactive, onSelect, forceVisibleI
             }}
             onClick={editorPick ? () => onSelect!(null) : undefined}
         >
+            {/* Keyed by scene too: a new scene's root with an old one's id must mount afresh, not update the old
+                element, whose previous fiber would keep the old node (and its scene) a render longer. */}
             {roots.map(root => (
-                <UIElementView key={root.id} node={root} registry={registry} onSelect={onSelect}
+                <UIElementView key={`${serial}:${root.id}`} node={root} registry={registry} onSelect={onSelect}
                     interactive={interactive} selectedId={selectedId} forceVisibleIds={forceVisibleIds} />
             ))}
         </div>

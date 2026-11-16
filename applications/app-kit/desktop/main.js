@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const fsp = fs.promises;
 const { pathToFileURL } = require('url');
-const { GAME_MAIN_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme } = require('./gameTemplates');
+const { GAME_MAIN_JS, GAME_PROTOCOL_JS, GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme } = require('./gameTemplates');
 const scriptWorkspace = require('./scriptWorkspace');
 const movieFiles = require('./movieFiles');
 const playWindow = require('./playWindow');
@@ -382,7 +382,8 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
     // only the installer — nothing electron-builder needed along the way (scaffold, win-unpacked, logs).
     const stage = installer ? await fsp.mkdtemp(path.join(os.tmpdir(), 'cleo-publish-')) : dir;
     try {
-      // 1) The web files + Electron scaffold. preload injects game.bin; main.js serves the folder over game://.
+      // 1) The web files + Electron scaffold. main.js serves the folder over game:// (gameProtocol.js), game.bin
+      // a byte range at a time; the page needs no preload.
       await writeWebFiles(stage, files);
       const electronVersion = require('electron/package.json').version;
       const win0 = (options && options.window) || {};
@@ -396,7 +397,9 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
         resizable: win0.resizable !== false,
       }, null, 2), 'utf-8');
       await fsp.writeFile(path.join(stage, 'main.js'), GAME_MAIN_JS, 'utf-8');
-      await fsp.writeFile(path.join(stage, 'preload.js'), GAME_PRELOAD_JS, 'utf-8');
+      await fsp.writeFile(path.join(stage, 'gameProtocol.js'), GAME_PROTOCOL_JS, 'utf-8');
+      // A folder published before had a preload that read all of game.bin into the page; nothing loads it now.
+      await fsp.rm(path.join(stage, 'preload.js'), { force: true });
       await fsp.writeFile(path.join(stage, 'package.json'), gamePackageJson(name, electronVersion), 'utf-8');
 
       // The runnable folder is played with `npm install && npm start`, which its README explains.
@@ -425,6 +428,9 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
             npmRebuild: false,
             directories: { output: outDir },
             files: ['**/*', '!installer/**', '!installer.nsh', '!node_modules/**'],
+            // A plain file beside app.asar, not an entry inside it: gameProtocol.js reads byte ranges of it, which
+            // a file inside the archive does not reliably give.
+            asarUnpack: ['game.bin'],
             // Windows: a wizard, not one-click — the player picks the install folder, then which shortcuts
             // to create (installer.nsh). electron-builder creates both; the page's choice prunes them.
             nsis: {

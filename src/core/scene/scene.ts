@@ -350,6 +350,9 @@ export class Scene {
      * `markForRemoval` path that reaches `Terrain.dispose` is per NODE, and a dropped scene never takes
      * it — so without this call every play session leaks its heightfield body, its foliage collider pool,
      * its chunk meshes, its splat texture and every model mesh in the tree. Safe to call twice.
+     *
+     * Last, it cuts the scene's node graph apart (see {@link _severNodeGraph}): whatever still holds one of
+     * its nodes afterwards keeps that node, not the scene.
      */
     public dispose(): void {
         CleoEngine.eventEmitter.off('SCENE_CHANGED', this._onSceneChanged);
@@ -369,6 +372,48 @@ export class Scene {
         // scene: it re-parsed its own geometry, and Model.dispose touches only the mesh, never the
         // shared TextureManager textures.
         disposeModelSubtree(this._root);
+
+        // After everything above: each of those walks the tree.
+        this._severNodeGraph();
+    }
+
+    /**
+     * Cut a disposed scene apart: every node loses its parent, its children and its scene, and the scene's own
+     * lists are emptied. Anything that outlives the scene and still holds one node — a script callback that was
+     * never removed (every closure a node script makes holds that script's node), a leftover listener, a cache —
+     * then keeps that node and its own data, not its parent, its siblings, this Scene and every mesh in the tree.
+     *
+     * Silent on purpose: plain setters, never removeChild/removeNode, which would run onDespawn handlers and emit
+     * a SCENE_CHANGED per node to listeners that only know the scene being played now. `root` stays, childless,
+     * for whatever still reads `scene.root` of a scene it held on to. Running it again finds nothing to cut.
+     */
+    private _severNodeGraph(): void {
+        // As parse does: a fade still running would never finish, and Node's count of fading nodes with it.
+        for (const node of Array.from(this._fadingNodes)) node.cancelFade();
+        this._fadingNodes.clear();
+
+        // The whole tree, dormant nodes included: walked from the root, not from the cached lists.
+        const all: Node[] = [];
+        const queue: Node[] = [this._root];
+        for (let head = 0; head < queue.length; head++) {
+            const node = queue[head];
+            all.push(node);
+            for (const child of node.children) queue.push(child);
+        }
+        this._root.scene = null; // recurses through the whole tree, emitting nothing
+        for (const node of all) {
+            node.parent = null;
+            node.children.length = 0;
+        }
+
+        this._timers.length = 0;
+        this._lateUpdates.clear();
+        this.foliageInteractors.clear();
+        this._pinnedCamera = null;
+        this._physics2D = null;
+        // Every typed list, the singletons and the name/id maps, rebuilt from the now childless root.
+        this._dirty = true;
+        this._breadthFirstTraversal();
     }
 
     /** When false, skinned-model animators are not driven by scene.update (they hold bind pose). */

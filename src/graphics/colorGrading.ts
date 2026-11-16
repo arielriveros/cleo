@@ -138,7 +138,11 @@ export class ColorGradingLut {
 
     /** The decoded image behind a texture id, or null while it is still loading (or is a cubemap). */
     private _imageFor(id: string): HTMLImageElement | null {
-        const data = TextureManager.Instance.getTexture(id)?.data;
+        const texture = TextureManager.Instance.getTexture(id);
+        // A published game lets decoded images go after upload, keeping LUT-shaped ones: a LUT pointed at
+        // anything else is decoded again, and the identity stands in meanwhile, as while it loads.
+        if (texture?.released) { void TextureManager.Instance.ensureImage(id); return null; }
+        const data = texture?.data;
         if (typeof HTMLImageElement === 'undefined' || !(data instanceof HTMLImageElement)) return null;
         return data.complete && data.naturalWidth > 0 ? data : null;
     }

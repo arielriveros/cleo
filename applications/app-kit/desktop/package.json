@@ -17,6 +17,7 @@
       "main.js",
       "preload.js",
       "gameTemplates.js",
+      "gameProtocol.js",
       "scriptWorkspace.js",
       "movieFiles.js",
       "playWindow.js",

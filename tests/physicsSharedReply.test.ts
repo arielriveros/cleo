@@ -35,6 +35,18 @@ describe('physics replies through shared memory', () => {
         expect(reader.read()!.seq).toBe(8);
     });
 
+    it('reads a reply the worker wrote before this thread had the channel', () => {
+        // A reset during the warm-up leaves two steps in flight: the worker answers the first by message with the
+        // channel announcement, and writes the second into the channel at once — before the main thread has
+        // handled that announcement and made its reader. That reply is the one the warm-up waits for.
+        const buffer = new SharedArrayBuffer(64 * 1024);
+        const writer = new SharedReplyWriter(buffer);
+        writer.write(snapshot(2, 4));
+        const reader = new SharedReplyReader(buffer);
+        expect(reader.read()?.seq).toBe(2);
+        expect(reader.read()).toBeNull();
+    });
+
     it('says when a snapshot outgrows the channel', () => {
         const small = new SharedReplyWriter(new SharedArrayBuffer(1024));
         const big = snapshot(1, 200);

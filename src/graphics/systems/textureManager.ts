@@ -4,12 +4,41 @@ import { parseBase64DataUri } from "../../core/base64";
 import { Logger } from "../../core/logger";
 import { v4 as uuidv4 } from 'uuid';
 
+/**
+ * Decode an encoded image through a blob: URL into an `HTMLImageElement` (never an ImageBitmap: see
+ * addTextureFromBytes). The URL comes back with it, owned by the caller; revoked here only on failure.
+ */
+function decodeBlob(blob: Blob): Promise<{ image: HTMLImageElement; url: string }> {
+    const url = URL.createObjectURL(blob);
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve({ image, url });
+        image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('the image did not decode')); };
+        image.src = url;
+    });
+}
+
+/**
+ * What a published game keeps of a texture once its image is on the GPU (see {@link TextureManager.setRetention}).
+ * The editor sets none and keeps everything: it saves, publishes and previews from what it kept.
+ */
+export interface TextureRetention {
+    /** Keep the decoded image of `id` (`width` x `height`) after upload, because something reads it. */
+    keep(id: string, width: number, height: number): boolean;
+    /** The encoded image of `id` once more, for {@link TextureManager.ensureImage}; null when it cannot be had. */
+    reload(id: string): Promise<Blob | null>;
+}
+
 export class TextureManager {
     private static _instance: TextureManager | null = null;
     private _textures: Map<string, Texture>;
     /** Images still decoding into a registered texture. See {@link pendingLoads}. */
     private _pending = 0;
     private _idle: (() => void)[] = [];
+    private _retention: TextureRetention | null = null;
+    /** ensureImage decodes in flight, by id, so concurrent askers share one. */
+    private _reloading = new Map<string, Promise<boolean>>();
+    private _imageRevision = 0;
 
     private constructor() {
         this._textures = new Map<string, Texture>();
@@ -43,6 +72,19 @@ export class TextureManager {
         return new Promise(resolve => this._idle.push(resolve));
     }
 
+    /**
+     * Moves whenever a texture's decoded image arrives ({@link Texture.data}): a reader that found an image
+     * missing (still loading, or released) knows to look again.
+     */
+    public get imageRevision(): number { return this._imageRevision; }
+
+    /**
+     * What to keep of each texture after upload. A published game sets one, so a texture read from game.bin
+     * keeps neither its encoded bytes nor, unless `keep` says so, its decoded image; null (the editor's)
+     * keeps both, as always.
+     */
+    public setRetention(retention: TextureRetention | null): void { this._retention = retention; }
+
     private _beginLoad(): void { this._pending++; }
 
     private _endLoad(): void {
@@ -60,6 +102,7 @@ export class TextureManager {
         this._beginLoad();
         loadImage(path).then((image: HTMLImageElement) => {
             texture.create(image, image.width, image.height);
+            this._imageRevision++;
         }).catch((err) => {
             // Drop the texture rather than let the load promise surface as an unhandled rejection.
             Logger.print('warn', ['Failed to load texture from path:', path, err], 'Texture');
@@ -80,6 +123,7 @@ export class TextureManager {
     ): string {
         const texture = new Texture(config);
         texture.create(data, data.width, data.height);
+        this._imageRevision++;
         if (source) texture.setSource(source.bytes, source.mime);
         const identifier = id || uuidv4();
         return this.addTexture(texture, identifier);
@@ -108,10 +152,12 @@ export class TextureManager {
             this._endLoad();
         };
         image.onload = () => {
-            if (image.width > 0 && image.height > 0 && image.complete)
+            if (image.width > 0 && image.height > 0 && image.complete) {
                 texture.create(image, image.width, image.height);
-            else
+                this._imageRevision++;
+            } else {
                 this.createFallbackTexture(texture, identifier);
+            }
             this._endLoad();
         };
         image.src = base64;
@@ -186,12 +232,83 @@ export class TextureManager {
         const image = new Image();
         this._beginLoad();
         image.onload = () => {
-            if (image.width > 0 && image.height > 0) texture.create(image, image.width, image.height);
-            else drop(`Invalid image dimensions from bytes: ${image.width}x${image.height}`);
+            if (image.width > 0 && image.height > 0) {
+                texture.create(image, image.width, image.height);
+                this._imageRevision++;
+            } else {
+                drop(`Invalid image dimensions from bytes: ${image.width}x${image.height}`);
+            }
             this._endLoad();
         };
         image.onerror = () => { drop('Failed to decode texture bytes'); this._endLoad(); };
         image.src = url;
+    }
+
+    /**
+     * Register a texture whose encoded image arrives as `blob` (or a promise of one) and is decoded and
+     * uploaded when it does. Keeps no copy of the encoded bytes, so such a texture cannot be serialized: what a
+     * published game does with the textures it reads from game.bin. The id is usable at once, as with
+     * {@link addTextureFromBytes}; `loaded` resolves true once the image is on the GPU (false if it never gets
+     * there, the texture then being dropped). With a {@link setRetention} policy the decoded image is let go
+     * after upload unless the policy keeps it.
+     */
+    public addTextureFromBlob(blob: Blob | Promise<Blob>, config?: TextureConfig, id?: string): { id: string; loaded: Promise<boolean> } {
+        const identifier = id || uuidv4();
+        const texture = new Texture(config);
+        this._textures.set(identifier, texture);
+        this._beginLoad();
+        const loaded = Promise.resolve(blob)
+            .then(b => decodeBlob(b))
+            .then(({ image, url }) => {
+                // Removed or replaced while it decoded: nothing to upload into.
+                if (this._textures.get(identifier) !== texture) { URL.revokeObjectURL(url); return false; }
+                texture.setObjectUrl(url);
+                if (!(image.width > 0 && image.height > 0)) throw new Error(`invalid image dimensions ${image.width}x${image.height}`);
+                texture.create(image, image.width, image.height);
+                this._imageRevision++;
+                if (this._retention && !this._retention.keep(identifier, image.naturalWidth, image.naturalHeight)) texture.releaseImage();
+                return true;
+            })
+            .catch(err => {
+                Logger.warn(`Failed to decode texture "${identifier}": ${err?.message ?? err}`, 'Texture');
+                texture.revokeObjectUrl();
+                if (this._textures.get(identifier) === texture) this._textures.delete(identifier);
+                return false;
+            })
+            .finally(() => this._endLoad());
+        return { id: identifier, loaded };
+    }
+
+    /**
+     * Decode a released texture's image again (see {@link setRetention}) for a reader of {@link Texture.data}:
+     * a UI image a script pointed at a texture nothing showed before, say. Resolves true once `data` is there
+     * (at once when it never left); concurrent calls share one decode. Never re-uploads: the GPU copy is
+     * already right.
+     */
+    public ensureImage(id: string): Promise<boolean> {
+        const texture = this._textures.get(id);
+        if (!texture) return Promise.resolve(false);
+        if (!texture.released) return Promise.resolve(!!texture.data);
+        const pending = this._reloading.get(id);
+        if (pending) return pending;
+        const retention = this._retention;
+        if (!retention) return Promise.resolve(false);
+        const job = retention.reload(id)
+            .then(blob => (blob ? decodeBlob(blob) : null))
+            .then(decoded => {
+                if (!decoded) return false;
+                if (this._textures.get(id) !== texture) { URL.revokeObjectURL(decoded.url); return false; }
+                texture.adoptImage(decoded.image, decoded.url);
+                this._imageRevision++;
+                return true;
+            })
+            .catch(err => {
+                Logger.warn(`Could not decode texture "${id}" again: ${err?.message ?? err}`, 'Texture');
+                return false;
+            })
+            .finally(() => this._reloading.delete(id));
+        this._reloading.set(id, job);
+        return job;
     }
 
     public addTextureFromFile(file: File, config?: TextureConfig, id?: string): string | undefined {

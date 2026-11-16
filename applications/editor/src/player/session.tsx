@@ -12,6 +12,8 @@ import { bootPlayer, hideLoadingWhenSmooth, setLoadingText, showError, type Play
 import { createPhysicsWorker } from '../workers/physicsWorkerHost';
 import { PLAY_CHANNEL, SESSION_PARAM, encodeLogEntry, gameLockName, isMessageFor, ownerLockName, type GameEvent, type GameState, type RemoteLogOp } from '../features/playWindow/protocol';
 import { getPlaySession } from '../features/playWindow/sessionStore';
+import { blobSource, bufferSource } from './gameSource';
+import { readGameHeader } from './unpack';
 
 const session = new URLSearchParams(location.search).get(SESSION_PARAM) ?? '';
 const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(PLAY_CHANNEL);
@@ -86,13 +88,17 @@ function fail(err: unknown): void {
   showError(err);
 }
 
-async function boot(buffer: ArrayBuffer): Promise<void> {
+/** The stored game: a Blob, read a range at a time from IndexedDB's copy (an ArrayBuffer from an older editor). */
+async function boot(stored: Blob | ArrayBuffer): Promise<void> {
   booting = true;
   setState({ phase: 'booting' });
   setLoadingText('Starting…');
   try {
+    const source = stored instanceof Blob ? blobSource(stored) : bufferSource(stored);
+    const header = await readGameHeader(source);
     handle = await bootPlayer({
-      buffer,
+      source,
+      header,
       logging: true,
       // The editor's own graphics API, so the game draws as it does in the editor's viewport.
       graphicsBackend: readBackendPreference(),
@@ -121,8 +127,8 @@ async function tryBoot(): Promise<void> {
   try {
     do {
       checkAgain = false;
-      const buffer = await getPlaySession(session).catch(() => null);
-      if (buffer) { await boot(buffer); return; }
+      const stored = await getPlaySession(session).catch(() => null);
+      if (stored) { await boot(stored); return; }
     } while (checkAgain);
   } finally {
     checking = false;

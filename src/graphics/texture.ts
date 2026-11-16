@@ -133,6 +133,7 @@ export class Texture {
     private _source: { bytes: Uint8Array; mime: string } | null = null;
     private _sourceUri: string | null = null; // memoized data URL for _source
     private _objectUrl: string | null = null; // blob: URL backing _data's src; revoked on delete()
+    private _released = false; // the decoded image was let go after upload (releaseImage)
     private _flipY: boolean;
     private _addressU!: AddressMode;
     private _addressV!: AddressMode;
@@ -496,6 +497,29 @@ export class Texture {
     /** Release the blob: URL without touching the GL texture (for drop paths that don't own its lifetime). */
     public revokeObjectUrl(): void {
         if (this._objectUrl) { URL.revokeObjectURL(this._objectUrl); this._objectUrl = null; }
+    }
+
+    /**
+     * Let go of the decoded image (and the blob: URL it was decoded from) once it is on the GPU. Nothing
+     * uploads from it again — mipmaps are rebuilt on the device — so only a reader of {@link data} misses it:
+     * a published game releases the images nothing reads (TextureManager.setRetention) and asks for one back
+     * with TextureManager.ensureImage. The size stays.
+     */
+    public releaseImage(): void {
+        if (this._gpu.dimension !== '2d' || !this._data) return;
+        this._data = null;
+        this._released = true;
+        this.revokeObjectUrl();
+    }
+
+    /** Whether {@link releaseImage} let the decoded image go (and it has not been adopted back). */
+    public get released(): boolean { return this._released; }
+
+    /** Take a decoded image back as {@link data} WITHOUT uploading it: what ensureImage hands a released texture. */
+    public adoptImage(image: HTMLImageElement, objectUrl: string | null): void {
+        this._data = image;
+        this._released = false;
+        if (objectUrl) this.setObjectUrl(objectUrl);
     }
 
     /** The original bytes as a data URL, or null if not created from bytes. Encoded once, then memoized. */

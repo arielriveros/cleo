@@ -886,6 +886,22 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Fixes & refactors
 
+- **Leaving a scene frees it.** A game that moved on with `Game.loadScene` kept the scene it left in memory, every mesh
+  of it: the first scene for the rest of the session, and the one before the current one too. The game UI layer
+  held them, through a frame loop and React's record of its last render. Back in a small scene after one with
+  160 MB of meshes, a published game now holds 114 MB instead of 598 MB. Play in the editor had the same leak.
+  The scene left behind is now also taken apart, so anything still holding one of its nodes (a script
+  callback never removed, say) keeps that node, not the scene. That also frees a left scene's light-probe atlases.
+  A script that awaits `Game.loadScene` resumes on a node of the scene it left, where `this.scene` is null, and a
+  movie render ends when the scene holding its sequence is left.
+- **A published game reads its game.bin a part at a time.** It used to hold the whole file for as long as it
+  ran, and a desktop game held up to four copies of it while loading: 1.6 GB for a 400 MB game. Now it reads
+  the manifest, each texture and sound once, and each scene's meshes and landscape when the scene loads, and
+  keeps none of it once the engine has it. A texture keeps its decoded image only when a UI image shows it or
+  it is a colour-grading LUT. A desktop game, Play in window and a web host that serves byte ranges read this
+  way; a host that does not (`python -m http.server`) sends the whole file once, with a percentage on the
+  loading screen. A desktop game no longer has a `preload.js`, and installs `game.bin` beside `app.asar`.
+  Visiting a scene again also reads it afresh, instead of reusing arrays the last visit may have changed.
 - **Play waits for the project to open.** Pressing Play (or Simulate) while a project was still opening
   played an empty scene called "Scene", and during a scene switch it played the scene being left. Play,
   Simulate and Restart now wait until the project, the scene or the import has opened, and their tooltips
