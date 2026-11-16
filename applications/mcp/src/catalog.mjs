@@ -14,7 +14,7 @@ export const ADD_TYPES = {
     complex: ['ramp', 'cornerRamp', 'stairs', 'spiralStairs', 'arch', 'tube', 'hollowBox'],
     environment: ['skybox', 'skyAtmosphere', 'lightProbe', 'exposureVolume', 'giVolume', 'volumetricFog', 'occlusionVolume', 'volumetricClouds', 'landscape'],
     effects: ['decal', 'particleSystem', 'forceField'],
-    simulation: ['collider', 'body2D', 'trigger', 'waterVolume', 'wind', 'weather', 'cloth'],
+    simulation: ['collider', 'body2D', 'trigger', 'waterVolume', 'waterRiver', 'waterLake', 'waterOcean', 'wind', 'weather', 'cloth'],
     ui: ['uiCanvas', 'uiWorldRoot', 'uiStackColumn', 'uiStackRow', 'uiSpacer', 'uiPanel', 'uiText', 'uiImage', 'uiButton', 'uiProgressBar', 'uiSlider', 'uiToggle', 'uiTextInput'],
 };
 

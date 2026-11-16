@@ -22,6 +22,17 @@ import { rotateVec } from './pal/math';
  * drive it against a bare world.
  */
 
+/** The water over one XZ point, as {@link BuoyancyVolume.columnAt} reports it. */
+export interface WaterColumnSample {
+    /** Surface height there, waves included. */
+    surface: number;
+    /** Bed height: a point below it is under the water's floor, not in it. */
+    floor: number;
+    /** Water velocity (m/s) in world XZ: bodies are dragged toward it, so a river carries them. */
+    flowX: number;
+    flowZ: number;
+}
+
 /** What one water volume tells the solver. Axis-aligned in world space. */
 export interface BuoyancyVolume {
     /** World-space box of the water body: `max[1]` is the resting surface, `min[1]` its floor. */
@@ -37,6 +48,12 @@ export interface BuoyancyVolume {
     surfaceAt?: (x: number, z: number) => number;
     /** Whether bodies owned by characters are affected. Off: a character capsule is mostly air. */
     affectCharacters?: boolean;
+    /**
+     * Water of any shape inside the box: the column over a world x/z, or null where there is no water.
+     * When set it replaces `surfaceAt` and the box's own top and floor (the box stays the cheap reject).
+     * The returned object may be reused by the next call.
+     */
+    columnAt?: (x: number, z: number) => WaterColumnSample | null;
 }
 
 /**
@@ -214,6 +231,9 @@ export function applyBuoyancy(world: BuoyancyWorld, h: BodyHandle, mass: number,
     // would need the offset between the two added here.
     world.getColliderFrame(h, _frame);
     let total = 0, submerged = 0;
+    // Flow of the water the body is in, weighted by how much of it is wet: what drag pulls it toward.
+    let flowX = 0, flowZ = 0;
+    const columnAt = volume.columnAt;
     for (const part of world.colliderParts(h)) {
         const samples = shapeSamples(part.shape);
         if (!samples) continue;
@@ -227,7 +247,14 @@ export function applyBuoyancy(world: BuoyancyWorld, h: BodyHandle, mass: number,
             const wx = _rel[0] + _frame[0], wy = _rel[1] + _frame[1], wz = _rel[2] + _frame[2];
             if (wx < volume.min[0] || wx > volume.max[0] || wz < volume.min[2] || wz > volume.max[2]) continue;
             if (wy < volume.min[1]) continue;
-            const surface = volume.surfaceAt ? volume.surfaceAt(wx, wz) : volume.max[1];
+            let surface: number, fx = 0, fz = 0;
+            if (columnAt) {
+                const col = columnAt(wx, wz);
+                if (!col || wy < col.floor) continue;
+                surface = col.surface; fx = col.flowX; fz = col.flowZ;
+            } else {
+                surface = volume.surfaceAt ? volume.surfaceAt(wx, wz) : volume.max[1];
+            }
             // Each point stands for a slab `cell` thick, so it goes under GRADUALLY as the surface crosses
             // it. A point that switched on and off at the surface made the force a staircase in depth —
             // a floating body never found a level, it chattered between two steps for ever.
@@ -235,6 +262,7 @@ export function applyBuoyancy(world: BuoyancyWorld, h: BodyHandle, mass: number,
             if (wet <= 0) continue;
             const displaced = samples.weight * wet;
             submerged += displaced;
+            flowX += fx * displaced; flowZ += fz * displaced;
             _force[0] = 0; _force[1] = volume.density * gravity * displaced; _force[2] = 0;
             world.applyForce(h, _force, _rel);
         }
@@ -247,7 +275,10 @@ export function applyBuoyancy(world: BuoyancyWorld, h: BodyHandle, mass: number,
     // factor on the velocity — clamped so a long substep can never reverse a spin.
     world.getVelocity(h, _velocity);
     const k = volume.linearDrag * fraction * mass;
-    _force[0] = -_velocity[0] * k; _force[1] = -_velocity[1] * k; _force[2] = -_velocity[2] * k;
+    // Relative to the water: still water slows a body, a current carries it along at the water's speed.
+    const vx = flowX !== 0 ? _velocity[0] - flowX / submerged : _velocity[0];
+    const vz = flowZ !== 0 ? _velocity[2] - flowZ / submerged : _velocity[2];
+    _force[0] = -vx * k; _force[1] = -_velocity[1] * k; _force[2] = -vz * k;
     world.applyForce(h, _force);
     const spin = Math.max(0, 1 - volume.angularDrag * fraction * dt);
     world.setAngularVelocity(h, spin * _velocity[3], spin * _velocity[4], spin * _velocity[5]);

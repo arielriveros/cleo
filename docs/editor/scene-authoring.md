@@ -139,6 +139,9 @@ and the volumes and cloth they act on.
 | **Collider 2D** | A 2D box: static, or falling onto the tilemaps and other colliders when it has mass. See [2D physics](tilemap-2d.md). |
 | **Trigger** | A sensor: a 1 m sphere in a 3D scene, a 1 × 1 box in a 2D one. The same node acts as either, by the scene it is in. See [Trigger](physics.md#trigger). |
 | **Water Volume** | A `10 × 2 × 10` box of water: what is inside floats, and what moves through it ripples the surface. |
+| **River** | A [Water](water.md) node holding one 30 m river with a light current. Add a lake or the ocean to the same node and set the river's **Flows into**, and it runs into it. |
+| **Lake** | A [Water](water.md) node holding one oval lake, 24 × 16 m. |
+| **Ocean** | A [Water](water.md) node holding an endless ocean at the node's height, with waves from a steady breeze. |
 | **Wind** | Not placeable: one wind for the whole scene. Plants sway only where their material asks for it. |
 | **Weather** | A `40 × 20 × 40` box of rain or snow on the landscape and the plants inside it, and falling through it if you ask (**Falling**). Size it with the face handles; the presets set the weather. |
 | **Cloth** | A banner, 0.9 × 1.2 m, held along its top edge. Under a character, set **Ride On** to make it a cape. *(unreleased)* |

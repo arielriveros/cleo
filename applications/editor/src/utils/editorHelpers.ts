@@ -741,12 +741,92 @@ function lineGeometry(lines: { positions: [number, number, number][]; indices: n
     lines.positions.map(() => [0, 0] as [number, number]), undefined, undefined, lines.indices, false);
 }
 
+/** What a Water node's outline wireframe was built from: rebuilt when the shapes or the node move. */
+function waterShapeKey(node: WaterVolumeNode): string {
+  const p = node.worldPosition, m = node.worldTransform;
+  const r = (v: number) => Math.round(v * 1000);
+  return `w${node.version}_${r(p[0])}_${r(p[1])}_${r(p[2])}_${r(Math.hypot(m[0], m[1], m[2]))}_${r(Math.hypot(m[4], m[5], m[6]))}_${r(Math.hypot(m[8], m[9], m[10]))}`;
+}
+
+/**
+ * Line pairs, in world space, outlining every shape of a Water node: a box's edges, a lake's shore at its
+ * level and its floor, a river's banks and centre line with a rung every ten metres, an ocean's square
+ * (an endless one, 250 m of it around the node).
+ */
+export function waterShapeLines(node: WaterVolumeNode): { positions: [number, number, number][]; indices: number[] } {
+  const positions: [number, number, number][] = [];
+  const indices: number[] = [];
+  const line = (a: [number, number, number], b: [number, number, number]) => {
+    indices.push(positions.length, positions.length + 1);
+    positions.push(a, b);
+  };
+  const loop = (xz: number[], y: number) => {
+    const n = xz.length >> 1;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      line([xz[i * 2], y, xz[i * 2 + 1]], [xz[j * 2], y, xz[j * 2 + 1]]);
+    }
+  };
+  const p = node.worldPosition;
+  for (const r of node.resolvedShapes()) {
+    if (r.type === 'box') {
+      const { min, max } = r;
+      for (let i = 0; i < 8; i++) for (const bit of [1, 2, 4]) if (!(i & bit)) {
+        const c = (k: number): [number, number, number] => [(k & 1) ? max[0] : min[0], (k & 2) ? max[1] : min[1], (k & 4) ? max[2] : min[2]];
+        line(c(i), c(i | bit));
+      }
+    } else if (r.type === 'lake') {
+      loop(r.outline, r.level);
+      loop(r.outline, r.floor);
+      const n = r.outline.length >> 1;
+      for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 8)))
+        line([r.outline[i * 2], r.level, r.outline[i * 2 + 1]], [r.outline[i * 2], r.floor, r.outline[i * 2 + 1]]);
+    } else if (r.type === 'ocean') {
+      const e = r.endless ? 250 : Math.max(1, (r.max[0] - r.min[0]) / 2);
+      const cx = r.endless ? p[0] : (r.min[0] + r.max[0]) / 2, cz = r.endless ? p[2] : (r.min[2] + r.max[2]) / 2;
+      loop([cx - e, cz - e, cx + e, cz - e, cx + e, cz + e, cx - e, cz + e], r.level);
+      for (let k = -4; k <= 4; k++) {
+        line([cx - e, r.level, cz + e * k / 5], [cx + e, r.level, cz + e * k / 5]);
+        line([cx + e * k / 5, r.level, cz - e], [cx + e * k / 5, r.level, cz + e]);
+      }
+    } else {
+      const ss = r.samples;
+      let lastRung = -Infinity;
+      for (let i = 0; i < ss.length; i++) {
+        const q = ss[i];
+        const h = q.width / 2;
+        const left: [number, number, number] = [q.x - q.tz * h, q.y, q.z + q.tx * h];
+        const right: [number, number, number] = [q.x + q.tz * h, q.y, q.z - q.tx * h];
+        if (i + 1 < ss.length) {
+          const n = ss[i + 1], hn = n.width / 2;
+          line(left, [n.x - n.tz * hn, n.y, n.z + n.tx * hn]);
+          line(right, [n.x + n.tz * hn, n.y, n.z - n.tx * hn]);
+          line([q.x, q.y, q.z], [n.x, n.y, n.z]);
+        }
+        if (q.dist - lastRung >= 10 || i === ss.length - 1) {
+          lastRung = q.dist;
+          line(left, right);
+          line([q.x, q.y, q.z], [q.x, q.y - q.depth, q.z]);
+        }
+      }
+    }
+  }
+  return { positions, indices };
+}
+
 /**
  * The SELECTED effect's extent: a particle system's fixed bounds (what culling and selection use — the
  * one thing an author must size by eye), or a force field's sphere or box. Top-level and re-placed every
  * frame, like the decal box, so the transform gizmo and inspector edits are followed.
  */
 function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode | WaterVolumeNode | OcclusionVolumeNode | ExposureVolumeNode | VolumetricFogNode | WeatherNode | LightProbeNode | GIVolumeNode) {
+  if (node instanceof WaterVolumeNode) {
+    // The outline of every shape, in world space; its name carries what it was built from, so an edit
+    // drops it (the sweep below) and the next frame builds the new one.
+    const name = `${EFFECTSHAPE_PREFIX}${node.id}:${waterShapeKey(node)}`;
+    if (!scene.getNodesByName(name)[0]) scene.addNode(wireModel(name, waterShapeLines(node), [0.3, 0.6, 1]));
+    return;
+  }
   const sphere = node instanceof ForceFieldNode && node.shape === 'sphere';
   const name = `${EFFECTSHAPE_PREFIX}${node.id}:${sphere ? 's' : 'b'}`;
   let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
@@ -760,8 +840,7 @@ function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNo
   }
   const helper = existing;
   const place = () => {
-    // A water volume's box is world-aligned whatever the node's rotation; its top face is the water.
-    if (node instanceof ParticleSystemNode || node instanceof WaterVolumeNode) {
+    if (node instanceof ParticleSystemNode) {
       const { min, max } = node.getBoundingBox();
       helper.setPosition([(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2])
             .setScale([max[0] - min[0], max[1] - min[1], max[2] - min[2]]);
@@ -1645,8 +1724,8 @@ export function reconcileEditorHelpers(
       // sphere and box drops its old wireframe instead of rescaling the wrong one.
       const [id, kind] = node.name.slice(EFFECTSHAPE_PREFIX.length).split(':');
       const owner = scene.getNodeById(id);
-      const want = owner instanceof ParticleSystemNode || owner instanceof WaterVolumeNode
-        || isOrientedVolume(owner) ? 'b'
+      const want = owner instanceof WaterVolumeNode ? waterShapeKey(owner)
+        : owner instanceof ParticleSystemNode || isOrientedVolume(owner) ? 'b'
         : owner instanceof ForceFieldNode && owner.shape !== 'global' ? (owner.shape === 'sphere' ? 's' : 'b') : null;
       if (id !== selectedId || want !== kind) drop();
     } else if (node.name.startsWith(NAVMESH_PREFIX)) {

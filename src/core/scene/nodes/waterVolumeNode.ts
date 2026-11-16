@@ -1,6 +1,7 @@
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { finiteOr } from "../../math";
+import { gerstnerWavesForWind, type GerstnerWave } from "../../../physics/water/gerstner";
 import { windFieldClock } from "../../wind/windField";
 /** What the water reads back from a body it buoyed: where it is and how it moves. */
 type FloatingBody = { position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number } };
@@ -8,10 +9,19 @@ import { Node } from "./node";
 import { WATER_VOLUME_PRESETS, type WaterVolumePreset } from "./waterVolumePresets";
 import { applyPreset } from "../../presets";
 import type { BuoyancyVolume } from "../../../physics/buoyancy";
-import { buoyancyVolumeFromSpec, waterSurfaceHeight, type WaterSpec } from "../../../physics/waterSurface";
+import { buoyancyVolumeFromSpec, waterSpecColumn, type WaterSpec } from "../../../physics/waterSurface";
+import {
+    normaliseWaterShape, resolveWaterShapes, waterColumnAt, waterShapeFetch, waterShapesBounds,
+    type ResolvedWaterShape, type WaterColumn, type WaterShape, type WaterShapeType,
+} from "../../../water/waterShapes";
 
 export interface WaterVolumeOptions {
-    /** Full extents [x, depth, z] in metres, before the node's scale. The TOP face is the water surface. */
+    /**
+     * The water's shapes (water/waterShapes.ts): rivers, lakes, boxes and oceans, joined where a river's
+     * end is connected to another shape. Missing: one box of `size`.
+     */
+    shapes?: Partial<WaterShape>[];
+    /** Legacy, and the size of a new node's single box: full extents [x, depth, z] in metres. */
     size?: [number, number, number];
     /** kg/m³. Fresh water 1000. */
     density?: number;
@@ -22,6 +32,23 @@ export interface WaterVolumeOptions {
     waveAmplitude?: number;
     /** Hz of that bob. */
     waveFrequency?: number;
+    /**
+     * Wind (m/s) the Gerstner waves are shaped for: their length, height and speed grow with it and with
+     * how much open water the shapes give it. 0 = no waves, only the swell.
+     */
+    windSpeed?: number;
+    /** Degrees the waves travel toward (0 = +Z, 90 = +X). */
+    waveDirection?: number;
+    /** Multiplies wave height. */
+    waveScale?: number;
+    /** 0..1: rounded swells to sharp crests. */
+    choppiness?: number;
+    /** Metres from a shore over which waves die down (shoaling). */
+    shoreFade?: number;
+    /** Whether flowing water (rivers) carries floating bodies along. */
+    currents?: boolean;
+    /** Water material (asset id) the surface is drawn with; null = the engine default. */
+    materialId?: string | null;
     /** Whether character bodies are buoyed too. Off: a character capsule is mostly air and would launch. */
     affectCharacters?: boolean;
     /**
@@ -64,17 +91,31 @@ interface SourceState { inWater: boolean; nextWake: number; nextSplash: number; 
  * multiplies `size`. The top face is the water level.
  */
 export class WaterVolumeNode extends Node {
-    private _size: [number, number, number];
+    private _shapes: WaterShape[];
     private _density: number;
     private _linearDrag: number;
     private _angularDrag: number;
     private _waveAmplitude: number;
     private _waveFrequency: number;
+    private _windSpeed: number;
+    private _waveDirection: number;
+    private _waveScale: number;
+    private _choppiness: number;
+    private _shoreFade: number;
+    private _currents: boolean;
+    private _materialId: string | null;
     private _affectCharacters: boolean;
     private _surfaceNodeId: string | null;
     private _splashTemplate: string;
     private _wadeSplashTemplate: string;
     private _enabled: boolean;
+
+    // ---- derived (cached) ----
+    /** Bumped on every shape or wave edit: what renderers and the bake compare against. */
+    private _version = 0;
+    private _resolved: ResolvedWaterShape[] | null = null;
+    private _resolvedKey = '';
+    private _waves: GerstnerWave[] | null = null;
 
     // ---- runtime ----
     /** The submerged fraction of every body the physics buoyed since the last update (max over substeps). */
@@ -88,13 +129,26 @@ export class WaterVolumeNode extends Node {
 
     constructor(name: string, options: WaterVolumeOptions = {}, id: string = uuidv4()) {
         super(name, 'waterVolume', id);
-        const s = options.size;
-        this._size = Array.isArray(s) ? [Math.abs(finiteOr(s[0], 10)), Math.abs(finiteOr(s[1], 2)), Math.abs(finiteOr(s[2], 10))] : [10, 2, 10];
+        if (Array.isArray(options.shapes)) {
+            this._shapes = options.shapes.map(sh => normaliseWaterShape(sh));
+        } else {
+            // A legacy (or new) node: one box, centred on the node, its top the surface.
+            const s = options.size;
+            const size: [number, number, number] = Array.isArray(s) ? [Math.abs(finiteOr(s[0], 10)), Math.abs(finiteOr(s[1], 2)), Math.abs(finiteOr(s[2], 10))] : [10, 2, 10];
+            this._shapes = [normaliseWaterShape({ type: 'box', size, name: 'Water' })];
+        }
         this._density = Math.max(1, finiteOr(options.density, 1000));
         this._linearDrag = Math.max(0, finiteOr(options.linearDrag, 2.5));
         this._angularDrag = Math.max(0, finiteOr(options.angularDrag, 1.5));
         this._waveAmplitude = Math.max(0, finiteOr(options.waveAmplitude, 0.03));
         this._waveFrequency = Math.max(0, finiteOr(options.waveFrequency, 0.6));
+        this._windSpeed = Math.max(0, finiteOr(options.windSpeed, 0));
+        this._waveDirection = finiteOr(options.waveDirection, 0);
+        this._waveScale = Math.max(0, finiteOr(options.waveScale, 1));
+        this._choppiness = Math.min(1, Math.max(0, finiteOr(options.choppiness, 0.5)));
+        this._shoreFade = Math.max(0, finiteOr(options.shoreFade, 6));
+        this._currents = options.currents !== false;
+        this._materialId = typeof options.materialId === 'string' && options.materialId ? options.materialId : null;
         this._affectCharacters = !!options.affectCharacters;
         this._surfaceNodeId = typeof options.surfaceNodeId === 'string' && options.surfaceNodeId ? options.surfaceNodeId : null;
         this._splashTemplate = typeof options.splashTemplate === 'string' ? options.splashTemplate : '';
@@ -103,10 +157,51 @@ export class WaterVolumeNode extends Node {
     }
 
     // ---- properties ----
-    public get size(): [number, number, number] { return this._size; }
+    /**
+     * The shapes the water is made of. Replace the whole list to edit it (as a Collider's shapes): every
+     * entry is normalised, so a partial shape takes the defaults for what it leaves out.
+     */
+    public get shapes(): readonly WaterShape[] { return this._shapes; }
+    public set shapes(v: readonly Partial<WaterShape>[]) {
+        this._shapes = (Array.isArray(v) ? v : []).map(sh => normaliseWaterShape(sh));
+        this._shapesChanged('shapes');
+    }
+
+    /** Adds a shape of `type` (defaults filled in) and returns it. */
+    public addShape(type: WaterShapeType, init: Partial<WaterShape> = {}): WaterShape {
+        const shape = normaliseWaterShape({ ...init, type });
+        this._shapes = [...this._shapes, shape];
+        this._shapesChanged('shapes');
+        return shape;
+    }
+
+    /** A shape by id. */
+    public shape(id: string): WaterShape | undefined { return this._shapes.find(s => s.id === id); }
+
+    /**
+     * The first box's size (the whole of a legacy water volume). Setting it resizes that box, or adds one
+     * when there is none.
+     */
+    public get size(): [number, number, number] {
+        const box = this._shapes.find(s => s.type === 'box');
+        return box ? box.size : [0, 0, 0];
+    }
     public set size(v: [number, number, number]) {
-        this._size = [Math.abs(finiteOr(v?.[0], 10)), Math.abs(finiteOr(v?.[1], 2)), Math.abs(finiteOr(v?.[2], 10))];
-        this._notifyChange('component', 'size');
+        const size: [number, number, number] = [Math.abs(finiteOr(v?.[0], 10)), Math.abs(finiteOr(v?.[1], 2)), Math.abs(finiteOr(v?.[2], 10))];
+        const i = this._shapes.findIndex(s => s.type === 'box');
+        if (i < 0) this._shapes = [...this._shapes, normaliseWaterShape({ type: 'box', size })];
+        else this._shapes = this._shapes.map((s, k) => k === i ? normaliseWaterShape({ ...s, size }) : s);
+        this._shapesChanged('size');
+    }
+
+    /** Changes with every edit to the shapes or waves: compare it to know when to rebuild what they feed. */
+    public get version(): number { return this._version; }
+
+    private _shapesChanged(key: string): void {
+        this._version++;
+        this._resolved = null;
+        this._waves = null;
+        this._notifyChange('component', key);
     }
     public get density(): number { return this._density; }
     public set density(v: number) { this._density = Math.max(1, finiteOr(v, this._density)); this._notifyChange('component', 'density'); }
@@ -118,6 +213,20 @@ export class WaterVolumeNode extends Node {
     public set waveAmplitude(v: number) { this._waveAmplitude = Math.max(0, finiteOr(v, this._waveAmplitude)); this._notifyChange('component', 'waveAmplitude'); }
     public get waveFrequency(): number { return this._waveFrequency; }
     public set waveFrequency(v: number) { this._waveFrequency = Math.max(0, finiteOr(v, this._waveFrequency)); this._notifyChange('component', 'waveFrequency'); }
+    public get windSpeed(): number { return this._windSpeed; }
+    public set windSpeed(v: number) { this._windSpeed = Math.max(0, finiteOr(v, this._windSpeed)); this._shapesChanged('windSpeed'); }
+    public get waveDirection(): number { return this._waveDirection; }
+    public set waveDirection(v: number) { this._waveDirection = finiteOr(v, this._waveDirection); this._shapesChanged('waveDirection'); }
+    public get waveScale(): number { return this._waveScale; }
+    public set waveScale(v: number) { this._waveScale = Math.max(0, finiteOr(v, this._waveScale)); this._shapesChanged('waveScale'); }
+    public get choppiness(): number { return this._choppiness; }
+    public set choppiness(v: number) { this._choppiness = Math.min(1, Math.max(0, finiteOr(v, this._choppiness))); this._shapesChanged('choppiness'); }
+    public get shoreFade(): number { return this._shoreFade; }
+    public set shoreFade(v: number) { this._shoreFade = Math.max(0, finiteOr(v, this._shoreFade)); this._shapesChanged('shoreFade'); }
+    public get currents(): boolean { return this._currents; }
+    public set currents(v: boolean) { this._currents = !!v; this._notifyChange('component', 'currents'); }
+    public get materialId(): string | null { return this._materialId; }
+    public set materialId(v: string | null) { this._materialId = v || null; this._notifyChange('component', 'materialId'); }
     public get affectCharacters(): boolean { return this._affectCharacters; }
     public set affectCharacters(v: boolean) { this._affectCharacters = !!v; this._notifyChange('component', 'affectCharacters'); }
     public get surfaceNodeId(): string | null { return this._surfaceNodeId; }
@@ -131,34 +240,82 @@ export class WaterVolumeNode extends Node {
 
     // ---- geometry ----
 
-    /** World-space box of the water, `max[1]` being the resting surface. Rotation is ignored. */
-    public worldBox(): { min: [number, number, number]; max: [number, number, number] } {
+    /**
+     * The shapes in world space, connections applied (water/waterShapes.ts). Cached until the shapes or
+     * the node's world placement change.
+     */
+    public resolvedShapes(): ResolvedWaterShape[] {
         const m = this.worldTransform;
         const sx = Math.hypot(m[0], m[1], m[2]), sy = Math.hypot(m[4], m[5], m[6]), sz = Math.hypot(m[8], m[9], m[10]);
-        const h = [this._size[0] * sx / 2, this._size[1] * sy / 2, this._size[2] * sz / 2];
-        return {
-            min: [m[12] - h[0], m[13] - h[1], m[14] - h[2]],
-            max: [m[12] + h[0], m[13] + h[1], m[14] + h[2]],
-        };
+        const key = `${this._version}|${m[12]},${m[13]},${m[14]}|${sx},${sy},${sz}`;
+        if (!this._resolved || key !== this._resolvedKey) {
+            this._resolved = resolveWaterShapes(this._shapes, { position: [m[12], m[13], m[14]], scale: [sx, sy, sz] });
+            this._resolvedKey = key;
+            this._waves = null;
+        }
+        return this._resolved;
     }
 
-    /** The water surface height at a world x/z at `time` seconds: the resting level plus a gentle swell. */
+    /**
+     * The Gerstner waves the surface is drawn with and bodies ride: shaped by {@link windSpeed} over the
+     * largest open water the shapes give (fetch). Empty when the wind is 0.
+     */
+    public waves(): GerstnerWave[] {
+        const shapes = this.resolvedShapes();
+        if (!this._waves) {
+            let fetch = 0;
+            for (const r of shapes) fetch = Math.max(fetch, waterShapeFetch(r));
+            this._waves = this._windSpeed > 0 && this._waveScale > 0
+                ? gerstnerWavesForWind(this._windSpeed, this._waveDirection, fetch || 10,
+                    { scale: this._waveScale, choppiness: this._choppiness, seed: 0 })
+                : [];
+        }
+        return this._waves;
+    }
+
+    /**
+     * World-space box around the water, `max[1]` being the highest resting surface. Rotation is ignored.
+     * An endless ocean makes it very large.
+     */
+    public worldBox(): { min: [number, number, number]; max: [number, number, number] } {
+        const b = waterShapesBounds(this.resolvedShapes());
+        if (b) return b;
+        const p = this.worldPosition;
+        return { min: [p[0], p[1], p[2]], max: [p[0], p[1], p[2]] };
+    }
+
+    /**
+     * The water over a world x/z: resting surface (no waves unless `time` is given), bed and flow. Null
+     * where there is none.
+     */
+    public columnAt(x: number, z: number, time?: number, out?: WaterColumn): WaterColumn | null {
+        if (time === undefined) return waterColumnAt(this.resolvedShapes(), x, z, out);
+        return waterSpecColumn(this.buoyancySpec(), x, z, time, out);
+    }
+
+    /**
+     * The water surface height at a world x/z at `time` seconds: the resting level plus the swell and
+     * waves. Outside every shape, the highest resting level (plus the swell): where the water would be.
+     */
     public surfaceHeightAt(x: number, z: number, time: number): number {
-        return waterSurfaceHeight({ max: this.worldBox().max, waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency }, x, z, time);
+        const col = this.columnAt(x, z, time);
+        if (col) return col.surface;
+        const spec = this.buoyancySpec();
+        const level = spec.max[1];
+        if (!(spec.waveAmplitude > 0)) return level;
+        return level + spec.waveAmplitude * Math.sin(time * spec.waveFrequency * Math.PI * 2 + x * 0.37 + z * 0.29);
     }
 
-    /** Whether a world point is in the water (below the resting surface, inside the box). */
+    /** Whether a world point is in the water (below the resting surface, above the bed). */
     public contains(p: ArrayLike<number>): boolean {
-        const b = this.worldBox();
-        return p[0] >= b.min[0] && p[0] <= b.max[0] && p[2] >= b.min[2] && p[2] <= b.max[2]
-            && p[1] >= b.min[1] && p[1] <= b.max[1];
+        const col = this.columnAt(p[0], p[2]);
+        return !!col && p[1] >= col.floor && p[1] <= col.surface;
     }
 
-    /** Depth of a world point below the resting surface (negative above it); -Infinity outside the box's xz. */
+    /** Depth of a world point below the resting surface (negative above it); -Infinity where there is no water. */
     public depthAt(p: ArrayLike<number>): number {
-        const b = this.worldBox();
-        if (p[0] < b.min[0] || p[0] > b.max[0] || p[2] < b.min[2] || p[2] > b.max[2]) return -Infinity;
-        return b.max[1] - p[1];
+        const col = this.columnAt(p[0], p[2]);
+        return col ? col.surface - p[1] : -Infinity;
     }
 
     /** What the physics step buoys with, at physics time `time`. */
@@ -169,10 +326,17 @@ export class WaterVolumeNode extends Node {
     /** The water as plain data (see physics/waterSurface.ts): what the physics worker buoys with. */
     public buoyancySpec(): WaterSpec {
         const box = this.worldBox();
+        const shapes = this.resolvedShapes();
+        const waves = this.waves();
+        // A single box with nothing but the swell is the original water volume: buoyed by its box alone,
+        // the cheapest path (and the one every existing scene was tuned on).
+        const plainBox = shapes.length === 1 && shapes[0].type === 'box' && !waves.length;
         return {
             min: box.min, max: box.max, density: this._density,
             linearDrag: this._linearDrag, angularDrag: this._angularDrag, affectCharacters: this._affectCharacters,
             waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
+            shapes: plainBox ? undefined : shapes,
+            waves, waveScale: 1, shoreFade: this._shoreFade, currents: this._currents,
         };
     }
 
@@ -204,16 +368,17 @@ export class WaterVolumeNode extends Node {
         if (!scene) return;
         const now = WaterVolumeNode._now();
         this._splashBudget = Math.min(MAX_SPLASHES_PER_SECOND, this._splashBudget + delta * MAX_SPLASHES_PER_SECOND);
-        const level = this.worldBox().max[1];
         const seen = new Set<object>();
+        const col: WaterColumn = { shape: -1, surface: 0, floor: 0, flowX: 0, flowZ: 0, edge: 0, waveFactor: 1 };
 
         // Characters wading: feet below the surface, inside the box.
         for (const c of scene.characters) {
             const p = c.worldPosition;
-            const box = this.worldBox();
-            const depth = this.depthAt(p);
+            const here = this.columnAt(p[0], p[2], undefined, col);
+            const depth = here ? here.surface - p[1] : -Infinity;
+            const level = here ? here.surface : 0;
             // Feet below the surface and not below the floor (a character under the volume is not in it).
-            const wading = depth > 0.02 && p[1] >= box.min[1] - 0.5;
+            const wading = !!here && depth > 0.02 && p[1] >= here.floor - 0.5;
             const state = this._state(c);
             seen.add(c);
             const v = c.currentVelocity;
@@ -242,6 +407,7 @@ export class WaterVolumeNode extends Node {
             const state = this._state(body);
             const vy = body.velocity.y;
             const x = body.position.x, z = body.position.z;
+            const level = this.columnAt(x, z, undefined, col)?.surface ?? body.position.y;
             if (!state.inWater) {
                 this._ripple(x, z, now, Math.min(1, 0.4 + Math.abs(vy) * 0.15));
                 if (Math.abs(vy) > ENTRY_SPLASH_SPEED) this._splash(x, level, z, this._splashTemplate);
@@ -303,9 +469,12 @@ export class WaterVolumeNode extends Node {
     protected _serializePayload(): any {
         return {
             waterVolume: {
-                size: [...this._size], density: this._density,
+                shapes: JSON.parse(JSON.stringify(this._shapes)), density: this._density,
                 linearDrag: this._linearDrag, angularDrag: this._angularDrag,
                 waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
+                windSpeed: this._windSpeed, waveDirection: this._waveDirection, waveScale: this._waveScale,
+                choppiness: this._choppiness, shoreFade: this._shoreFade, currents: this._currents,
+                materialId: this._materialId,
                 affectCharacters: this._affectCharacters, surfaceNodeId: this._surfaceNodeId,
                 splashTemplate: this._splashTemplate, wadeSplashTemplate: this._wadeSplashTemplate, enabled: this._enabled,
             },
@@ -325,7 +494,10 @@ export class WaterVolumeNode extends Node {
     }
 
     public getBoundingBox(): { min: vec3, max: vec3 } {
-        const b = this.worldBox();
+        // An endless ocean is bounded for framing and culling by a kilometre around the node.
+        const p = this.worldPosition;
+        const wb = this.worldBox();
+        const b = { min: wb.min.map((v, i) => Math.max(v, p[i] - 1000)), max: wb.max.map((v, i) => Math.min(v, p[i] + 1000)) };
         return { min: vec3.fromValues(b.min[0], b.min[1], b.min[2]), max: vec3.fromValues(b.max[0], b.max[1], b.max[2]) };
     }
 }

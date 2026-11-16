@@ -985,6 +985,16 @@ export class Spline3 {
         return this._evaluate(seg, s, out);
     }
 
+    /**
+     * Metres along the path at control point `i` (after consecutive duplicates were dropped, so index
+     * into the points the spline kept: {@link pointCount}). Clamped to the ends.
+     */
+    public distanceAtPoint(i: number): number {
+        if (this._segments === 0) return 0;
+        const k = Math.max(0, Math.min(this._segments, Math.round(i)));
+        return this._lut[k * SPLINE_SAMPLES_PER_SEGMENT];
+    }
+
     /** The point at `u` (0..1) of the path's LENGTH. */
     public pointAt(u: number, out: Vec3Tuple = [0, 0, 0]): Vec3Tuple {
         return this.pointAtDistance(u * this.length, out);
@@ -1003,6 +1013,34 @@ export class Spline3 {
         out[0] = dx / len; out[1] = dy / len; out[2] = dz / len;
         return out;
     }
+}
+
+/**
+ * A closed, smooth XZ outline through `points` (x, z read from [x, y, z]): centripetal Catmull-Rom with the
+ * loop wrapped, so the closing corner is as round as the rest. Flat [x0, z0, x1, z1, ...], about one
+ * vertex per `spacing` metres. Fewer than three points: the points themselves.
+ */
+export function closedSplineXZ(points: readonly (readonly number[])[], spacing = 1): number[] {
+    const pts = points.filter(p => p && p.length >= 3 && Number.isFinite(p[0]) && Number.isFinite(p[2]));
+    if (pts.length < 3) return pts.flatMap(p => [p[0], p[2]]);
+    const n = pts.length;
+    // Wrapped: the last point before the first and the first two after the last, so every original
+    // segment has its true neighbours. Spline3 reflects its end points, which only touches the padding.
+    const wrapped = [pts[n - 1], ...pts, pts[0], pts[1]].map(p => [p[0], 0, p[2]]);
+    const spline = new Spline3(wrapped);
+    if (spline.pointCount !== wrapped.length) {
+        // Duplicate neighbours: the index mapping is gone; fall back to the raw polygon.
+        return pts.flatMap(p => [p[0], p[2]]);
+    }
+    const start = spline.distanceAtPoint(1), end = spline.distanceAtPoint(n + 1);
+    const steps = Math.max(n * 2, Math.min(4096, Math.ceil((end - start) / Math.max(0.05, spacing))));
+    const out: number[] = [];
+    const p: Vec3Tuple = [0, 0, 0];
+    for (let i = 0; i < steps; i++) {
+        spline.pointAtDistance(start + (end - start) * i / steps, p);
+        out.push(p[0], p[2]);
+    }
+    return out;
 }
 
 // =================================================================================================

@@ -933,22 +933,37 @@ node), `enabled`. `particlePositions` is the simulated world positions, or null 
 
 ### WaterVolumeNode — `'waterVolume'` *(unreleased)*
 
-A body of water: an axis-aligned box (the node's rotation is ignored, scale multiplies `size`) whose
-**top face is the water surface**. Every dynamic physics body inside is buoyed by Archimedes' principle —
-its colliders are sampled, and each submerged sample is pushed up by the weight of the water it
-displaces, at that point — so whether a body floats, and how low it rides, follows from its **mass**
-against its collider volume, and a tipped body rights itself. Submerged bodies also get linear and
-angular drag. Character bodies are skipped unless `affectCharacters` (a capsule is mostly air).
+A body of water made of **shapes** (`water/waterShapes.ts`): `river` (a spline through points, each
+`{ pos, width, depth, flowSpeed }`), `lake` (a level surface inside the smooth closed outline through its
+points), `box` (a level block, its top face the surface) and `ocean` (a level surface `extent` metres each
+way, 0 = endless). Shapes are in the node's units (position and scale apply, rotation is ignored); where
+two overlap, the higher `priority` is the water there. A river's `connect.start` / `connect.end` name the
+shapes it flows from and into: that end takes their surface, so the two meet. A legacy node's `size`
+loads as one box.
 
-Properties: `size` (full extents, metres), `density` (kg/m³, default 1000), `linearDrag`,
-`angularDrag` (per second at full submersion), `waveAmplitude` / `waveFrequency` (a swell that makes
-floaters bob), `affectCharacters`, `surfaceNodeId`, `splashTemplate`, `wadeSplashTemplate`, `enabled`. Helpers:
-`worldBox()`, `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)`.
+Every dynamic physics body inside is buoyed by Archimedes' principle: its colliders are sampled, and each
+submerged sample is pushed up by the weight of the water it displaces, at that point, so whether a body
+floats follows from its **mass** against its collider volume and a tipped body rights itself. Drag pulls
+a body toward the water's own velocity, so a river (`currents`) carries it downstream. Character bodies
+are skipped unless `affectCharacters`.
+
+The surface carries a swell (`waveAmplitude`, `waveFrequency`) and Gerstner waves shaped by `windSpeed`
+over the shapes' open water (fetch), travelling toward `waveDirection` degrees, scaled by `waveScale`,
+sharpened by `choppiness` and dying down within `shoreFade` metres of a shore. The same sum
+(`physics/water/gerstner.ts`) floats the bodies and draws the surface.
+
+Properties: `shapes`, `density` (kg/m³, default 1000), `linearDrag`, `angularDrag` (per second at full
+submersion), `waveAmplitude`, `waveFrequency`, `windSpeed`, `waveDirection`, `waveScale`, `choppiness`,
+`shoreFade`, `currents`, `materialId`, `affectCharacters`, `surfaceNodeId`, `splashTemplate`,
+`wadeSplashTemplate`, `enabled`; `size` reads and writes the first box. Helpers: `addShape(type)`,
+`shape(id)`, `resolvedShapes()`, `waves()`, `columnAt(x, z, time?)` (resting or waved surface, floor, flow
+and distance to shore, or null), `worldBox()`, `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)`,
+`version` (bumped by every shape or wave edit).
 
 In play it also disturbs its surface: if the `surfaceNodeId` model's custom material declares vec4
 uniforms `ripple0`..`ripple11`, they are filled each frame with expanding rings (`[x, z, startTime,
 strength]`, startTime on `u_time`'s clock) from characters wading and bodies floating or splashing in;
-and `splashTemplate`, when set, is instantiated at the surface where something enters or wades --
+and `splashTemplate`, when set, is instantiated at the surface where something enters or wades,
 `wadeSplashTemplate`, when set, for the steps of a character wading (every 0.45 s while it moves).
 
 ---

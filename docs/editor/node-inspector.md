@@ -463,14 +463,10 @@ there, so rain falls indoors.
 
 #### Water Volume
 
-A box of water whose top face is the surface. Every dynamic body inside floats by its **mass** against
-the water its colliders displace — denser than the water sinks, lighter floats higher — and is slowed
-by the drag. Physics runs in Play. **Buoy characters** is off by default: a character capsule is
-mostly air and would be launched out of the water. **Swell** makes the surface bob; a **Surface**
-model whose custom material declares `vec4` uniforms `ripple0` … `ripple11` gets ripples from
-whatever moves through, and a **Splash** template spawns where something enters the water or wades
-through it (the **Wading splash** template, when set, for the footsteps of a character wading). Liquid **Presets** (a still pool to lava) set the density, drag and swell, never the box
-or what it links to.
+A body of water made of shapes (rivers, lakes, boxes and an ocean), joined where a river's start or end
+is connected to another shape. What is in it floats by its **mass** against the water it displaces, a
+river's current carries it downstream, and it rides the waves the wind gives the surface. The card's
+fields and how shapes connect are in [Water](water.md).
 
 #### Occlusion Volume
 

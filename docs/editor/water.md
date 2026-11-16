@@ -1,0 +1,120 @@
+# Water
+
+One **Water** node can hold a whole body of water: a river that starts on a mountain, runs down the
+valley and ends in a lake, or the ocean beyond the beach. The node is a list of shapes, edited like a
+Collider's shapes: add a River, a Lake, a Box or an Ocean, shape it, and connect a river's start or end
+to another shape so the two meet. Everything dynamic in the water floats by its mass against the water it
+displaces, a river's current carries it downstream, and the waves it rides are the waves you see.
+
+Add one from **Add › Simulation**: **Water Volume** (a box), **River**, **Lake** or **Ocean**. They are
+all the same node, so a River can be given a Lake and the other way round.
+
+## Water Volume
+
+The Water node's inspector card: whether the water is on, its shapes, its waves, how it buoys what floats
+in it, and the splashes it throws. The **Presets** menu sets the liquid (still pool, lake, river, sea,
+rough sea, swamp, oil, lava): its density, drag, swell and the wind its waves are shaped for, never the
+shapes or what the node links to.
+
+| Field | What it does |
+|---|---|
+| **Enabled** | Off: the water buoys nothing and draws nothing. |
+
+## Shapes
+
+The shapes the water is made of, one row each. The icon buttons above the list add a river, a lake, a
+box or an ocean. A shape is selected by clicking its row (or its outline in the viewport); its row stays
+open while it is selected. Shapes are in the node's units: moving or scaling the node moves or scales
+them all, and the node's rotation is ignored (water stays level).
+
+**Shape** — one shape on the list, titled by its name or its type and place ("River 1"): its fields, a
+frame button that points the camera at it, and a menu to duplicate, reorder or remove it. Removing a
+shape also disconnects whatever flowed into it.
+
+| Field | What it does |
+|---|---|
+| **Priority** | Where two shapes overlap, the higher priority is the water there: a river (priority 1 by default) cuts through the lake (0) it runs into. On a tie, the later shape on the list wins. |
+| **Centre** | A box's centre. Its top face is the surface. |
+| **Size** | A box's width, depth and length in metres, before the node's scale. |
+| **Level** | A lake's or ocean's centre; its height is the surface. |
+| **Depth** | A lake's or ocean's depth below the surface, metres. Where the landscape is higher, it is the floor. |
+| **Extent** | Metres the ocean reaches each way from its centre. 0: endless, to the horizon. |
+| **Offset** | Moves a whole river. |
+| **Flows from** | The shape a river starts in. Its first point takes that shape's surface, so the two meet. |
+| **Flows into** | The shape a river ends in. Its last point takes that shape's surface, so the river runs into it. A new river flows into the node's first lake or ocean. |
+| **Position** | Where a point is: on a river, its centre line at the surface; on a lake, a point of the outline (the height is the lake's level). |
+| **Width** | Metres from bank to bank at a river point. |
+| **Flow speed** | Metres per second downstream at a river point: how fast the river carries what floats. |
+| **Carve landscape** | A river's or lake's bed is dug into the landscape when **Carve landscape** under the list is pressed: the bed inside the water and a sloped bank outside it. It only ever lowers the ground, and the carve is one undo step. |
+| **Bank width** | Metres the carved bank slopes over, from the water's edge back up to the ground. |
+| **Dig deeper** | Metres the carve digs below the water's own depth. |
+
+### Rivers
+
+A river is a smooth spline through its points, listed upstream to downstream. Each point has its own
+**Width**, **Depth** and **Flow speed**, which ease from one point to the next; the channel is deepest and
+fastest on its centre line and shallow and slow at the banks. The surface follows the points' heights, so
+a river runs downhill as its points do. Add a point at the end with the plus button.
+
+### Lakes
+
+A lake is a level surface inside the smooth closed outline through its points, **Depth** deep.
+
+### Oceans
+
+An ocean is a level surface with no shore unless you give it an **Extent**. It carries the node's waves in
+full: open water lets the wind build the longest and tallest of them.
+
+### Connecting shapes
+
+Set a river's **Flows into** to a lake, the ocean or another river and its last point takes that shape's
+surface: the river drops into the lake at its level, or joins the other river where it meets it. **Flows
+from** does the same for the river's start, for a river that drains a lake. Rivers that join rivers are
+worked out in the order they flow, wherever they are on the list.
+
+## Waves
+
+Gerstner waves shaped by the wind: the longer and stronger the wind blows over open water, the longer,
+taller and faster they are. A lake limits them to what its size lets build; an endless ocean lets them
+grow fully developed; rivers carry only a small share of them. Floating bodies ride the same waves the
+surface draws.
+
+| Field | What it does |
+|---|---|
+| **Wind speed** | Metres per second the waves are shaped for. 0: no waves, only the swell. |
+| **Direction** | Degrees the waves travel toward: 0 is +Z, 90 is +X. |
+| **Height** | Multiplies the wave height the wind gives. |
+| **Choppiness** | Rounded swells (0) to sharp crests (1). |
+| **Shore fade** | Metres from a shore over which the waves die down. |
+| **Swell** | Metres the whole surface rises and falls, so floating bodies bob even with no wind. 0: none. |
+| **Swell rate** | How many times a second the swell rises and falls. |
+
+## Buoyancy
+
+How the water floats and slows what is in it. Physics runs in Play. Every dynamic body floats by its mass
+against the water its colliders displace: denser than the water sinks, lighter floats higher, and a tipped
+body rights itself.
+
+| Field | What it does |
+|---|---|
+| **Density** | kg/m³ (fresh water 1000, sea water 1025). |
+| **Drag** | Per second, at full submersion: how quickly a body in the water takes on the water's own speed. In still water that slows it; in a river it carries it along. |
+| **Spin drag** | Per second, at full submersion: how quickly a body stops tumbling. |
+| **Currents** | Flowing water carries what floats downstream. Off: rivers are as still as lakes to the physics. |
+| **Buoy characters** | Off by default: a character capsule is mostly air and would be launched out of the water. |
+
+## Splashes
+
+What moves through the water disturbs it.
+
+| Field | What it does |
+|---|---|
+| **Splash** | Template spawned at the surface where something enters the water or wades through it. |
+| **Wading splash** | Template for the footsteps of a character wading. Same as Splash when not set. |
+| **Surface model** | Legacy: a model drawing the water whose custom material declares `vec4` uniforms `ripple0` … `ripple11`, filled with rings from whatever moves through. |
+
+## Scripting
+
+`WaterVolumeNode` exposes the water to scripts: `shapes` (replace the list to edit it), `addShape(type)`,
+`columnAt(x, z, time?)` (surface, floor and flow over a point, or null), `surfaceHeightAt(x, z, t)`,
+`contains(p)`, `depthAt(p)` and `waves()`. See [Node types](../reference/node-types.md#watervolumenode--watervolume-unreleased).
