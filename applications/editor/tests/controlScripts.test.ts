@@ -77,10 +77,10 @@ describe('generated starters', () => {
 
     it('exposes each starter\'s public fields to the inspector', () => {
         // `parseScriptVariables` only understands literal-initialized number/string/boolean/vec3 fields.
-        // A starter whose example field it cannot read would show an empty Variables list.
+        // A starter whose example field it cannot read would show an empty Attributes section.
         for (const type of ['character', 'controller', 'characterBody2D'] as ScriptBaseType[]) {
             const variables = parseScriptVariables(defaultScriptClass('X', type));
-            expect(variables.length, type).toBeGreaterThan(0);
+            expect(variables.filter(v => !v.hidden).length, type).toBeGreaterThan(0);
             for (const v of variables) expect(v.type, `${type}.${v.name}`).toBeTruthy();
         }
     });

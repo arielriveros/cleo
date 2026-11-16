@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 import { clamp, num } from '@/Core/Scripts/SoulsMath'
 
 /**
@@ -18,24 +18,33 @@ import { clamp, num } from '@/Core/Scripts/SoulsMath'
  */
 export default class SoulsBloodSplatNode extends Node {
   /** Seconds before the splat is gone, its fade included. */
+  @attribute
   public lifetime: number = 12
   /** The last part of `lifetime`, over which the decals fade out. */
+  @attribute
   public fadeSeconds: number = 3
   /** Random size range, as a multiple of each decal's authored size. */
+  @attribute
   public minSize: number = 0.65
+  @attribute
   public maxSize: number = 1.25
   /** How far below the spawn point the floor may be. */
+  @attribute
   public snapDown: number = 2.5
   /** Tilt onto sloped ground. Off, the splat lies flat and the decal's angle fade handles the slope. */
+  @attribute
   public alignToSurface: boolean = true
   /** Set by the spawner. Which way the decal's +Z points, in degrees; NaN for a random turn. */
+  @attribute
   public yaw: number = NaN
   /** Set by the spawner: a bigger hit leaves a bigger splat. */
+  @attribute
   public sizeScale: number = 1
   /**
    * Seconds into a decal's flipbook it starts from: skip the frames before the liquid reaches the floor
    * when nothing else (a spray of droplets) covers that gap. 0 plays it from its first frame.
    */
+  @attribute
   public flipbookStart: number = 0
 
   private _age: number = 0

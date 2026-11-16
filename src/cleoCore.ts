@@ -432,8 +432,8 @@ export { logScriptError } from "./core/scripting/scriptErrors";
 export { SOUNDS_GROUP, ownedSoundsGroup } from "./core/scripting/fieldTypes";
 export type { ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, ProjectTriggers, SpriteClipName, ActionName, ProjectActions, ScriptPickKind } from "./core/scripting/fieldTypes";
 // Script decorators (@child, @find, @onAction, @save, @options, @pick), and what reads them back.
-export { child, find, onAction, onHold, onTap, onEnter, onExit, onEvent, every, save, options, pick, applyScriptDecorators, scriptMembersOf, membersOfNode, SCRIPT_METADATA } from "./core/scripting/decorators";
-export type { ActionWhen, ScriptMember, LoweredMember } from "./core/scripting/decorators";
+export { child, find, onAction, onHold, onTap, onEnter, onExit, onEvent, every, attribute, save, options, pick, applyScriptDecorators, scriptMembersOf, membersOfNode, SCRIPT_METADATA } from "./core/scripting/decorators";
+export type { ActionWhen, ScriptMember, LoweredMember, AttributeOptions } from "./core/scripting/decorators";
 export { GameEvents } from "./core/scripting/scriptEvents";
 export { lowerScriptDecorators } from "./core/scripting/scriptDecoratorLowering";
 export { Game, setGameHost, setMovieRender, type MovieRenderInfo } from "./core/game";

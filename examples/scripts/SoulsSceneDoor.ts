@@ -1,4 +1,4 @@
-import { Game, Logger, Node, SaveGame } from 'cleo'
+import { Game, Logger, Node, SaveGame, attribute } from 'cleo'
 
 /**
  * A way into another scene: the skull cave's mouth, the dungeon's way back out. Attach to a node with a
@@ -15,16 +15,24 @@ import { Game, Logger, Node, SaveGame } from 'cleo'
  */
 export default class SoulsSceneDoorNode extends Node {
   /** The scene to load, by name or id. */
+  @attribute
   public targetScene: string = 'Dungeon'
+  @attribute
   public prompt: string = 'Enter'
+  @attribute
   public question: string = 'Enter?'
+  @attribute
   public detail: string = ''
   /** Heading on the loading screen. */
+  @attribute
   public loadingTitle: string = ''
+  @attribute
   public frontOnly: boolean = false
   /** The door (by node name) in the target scene to come out of; empty = the scene's own start. */
+  @attribute
   public exitTo: string = ''
   /** How far in front of this door an arriving player stands. */
+  @attribute
   public arrivalDistance: number = 2
 
   private _busy: boolean = false

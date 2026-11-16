@@ -7,9 +7,48 @@ import { parseScriptVariables, saveFieldNames } from '../src/utils/scripts'
 const parse = (body: string) => parseScriptVariables(`import { Node } from 'cleo'\nexport default class A extends Node {\n${body}\n}`)
 const byName = (vars: ReturnType<typeof parse>) => Object.fromEntries(vars.map(v => [v.name, v]))
 
+describe('@attribute', () => {
+  it('shows only the fields it marks, whatever their access', () => {
+    const v = byName(parse(`  speed = 3\n  @attribute private _armor = 2\n  @attribute protected reach = 1.5\n  @attribute public label = 'x'`))
+    expect(v.speed.hidden).toBe(true)
+    expect(v._armor).toMatchObject({ hidden: false, access: 'private', attribute: {} })
+    expect(v.reach).toMatchObject({ hidden: false, access: 'protected' })
+    expect(v.label.hidden).toBe(false)
+  })
+
+  it('takes a group, options, or both', () => {
+    const v = byName(parse([
+      `  @attribute('Combat') damage = 10`,
+      `  @attribute('Combat', { min: 0, max: 1, step: 0.05, label: 'Crit chance' }) crit = 0.1`,
+      `  @attribute({ readonly: true }) hp = 100`,
+      `  @attribute({ color: true }) tint: [number, number, number] = [1, 0.5, 0]`,
+      `  @attribute({ multiline: true, showIf: 'talks' }) line = ''`,
+      `  @attribute({ showIf: ['mode', 'ranged'] }) range = 8`,
+      `  @attribute talks = false`,
+    ].join('\n')))
+    expect(v.damage.attribute).toEqual({ group: 'Combat' })
+    expect(v.crit.attribute).toEqual({ group: 'Combat', min: 0, max: 1, step: 0.05, label: 'Crit chance' })
+    expect(v.hp.attribute).toEqual({ readonly: true })
+    expect(v.tint).toMatchObject({ type: 'vec3', attribute: { color: true } })
+    expect(v.line.attribute).toEqual({ multiline: true, showIf: 'talks' })
+    expect(v.range.attribute).toEqual({ showIf: ['mode', 'ranged'] })
+  })
+
+  it('takes the doc comment as the tooltip, without its tags', () => {
+    const v = byName(parse(`  /**\n   * Seconds between shots.\n   * @save\n   */\n  @attribute('Combat') cooldown = 0.5\n  /** Not an attribute. */\n  plain = 1`))
+    expect(v.cooldown).toMatchObject({ save: true, attribute: { group: 'Combat', tooltip: 'Seconds between shots.' } })
+    expect(v.plain.attribute).toBeUndefined()
+  })
+
+  it('never runs its arguments: a non-literal reads as absent, and the field still shows', () => {
+    const v = byName(parse(`  @attribute(GROUP, { min: limit(), max: 5 }) x = 1`))
+    expect(v.x).toMatchObject({ hidden: false, attribute: {} })
+  })
+})
+
 describe('decorated script fields', () => {
   it('reads @save, in front of the field or on its own line', () => {
-    const v = parse(`  @save hp = 100\n  @save\n  private _gold: number = 5\n  other = 1`)
+    const v = parse(`  @attribute @save hp = 100\n  @save\n  private _gold: number = 5\n  other = 1`)
     expect(saveFieldNames(v)).toEqual(['hp', '_gold'])
     expect(byName(v).hp).toMatchObject({ type: 'number', default: 100, hidden: false })
   })
@@ -24,7 +63,7 @@ describe('decorated script fields', () => {
     const v = byName(parse(`  @child('Fire Light') private light?: Node\n  @find('GameManager') gm: Node | null = null\n  speed = 3`))
     expect(v.light).toMatchObject({ hidden: true, ref: { kind: 'child', name: 'Fire Light' } })
     expect(v.gm).toMatchObject({ hidden: true, ref: { kind: 'find', name: 'GameManager' } })
-    expect(v.speed.hidden).toBe(false)
+    expect(v.speed.hidden).toBe(true)   // not an @attribute
   })
 
   it('stacks decorators and ignores @onAction methods', () => {

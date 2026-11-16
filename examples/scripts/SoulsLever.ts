@@ -1,4 +1,4 @@
-import { Node, save, find, child } from 'cleo'
+import { Node, save, find, child, attribute } from 'cleo'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
@@ -9,10 +9,14 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  * A save keeps `pulled` (the door keeps its own `isOpen`), so a loaded game finds the lever down.
  */
 export default class SoulsLeverNode extends Node {
+  @attribute
   public doorName: string = 'Shortcut Gate'
+  @attribute
   public swingDegrees: number = 70
+  @attribute
   public swingSeconds: number = 0.6
   @save
+  @attribute
   public pulled: boolean = false
 
   @find('GameManager')

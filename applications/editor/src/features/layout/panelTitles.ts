@@ -6,7 +6,7 @@ import type { EditorMode } from '../engineContextTypes';
 // The Scene panel hosts the mode-specific tree, so its tab label follows the mode.
 export const PANEL_TITLES: Record<string, string> = {
   viewport: 'Viewport', scene: 'Scene', sceneAdd: 'Scene Elements', uiAdd: 'UI Elements', properties: 'Properties',
-  scripts: 'Scripts', logger: 'Logger', assets: 'Assets', debugger: 'Debugger', saves: 'Saves',
+  scripts: 'Behaviors', logger: 'Logger', assets: 'Assets', debugger: 'Debugger', saves: 'Saves',
   animClips: 'Clips', animVariables: 'Parameters', animStateMachine: 'Animator',
   animField: 'Blend Space Settings', animFieldPlot: 'Blend Space',
   clipInspector: 'Clip', clipTimeline: 'Timeline',

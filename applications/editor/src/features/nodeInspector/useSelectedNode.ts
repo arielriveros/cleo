@@ -7,7 +7,7 @@ import { useSequenceRevision } from '../sequencer/SequenceEditorContext'
 /** How often the Inspector re-reads live values while a Simulate session runs. */
 const LIVE_REFRESH_MS = 250
 
-// Resolves the current selection independently for each of the Properties and Scripts panels.
+// Resolves the current selection independently for each of the Properties and Behaviors panels.
 //
 // While Simulating, the selection lives in the running play scene (`inspectedScene`), and everything but the
 // Transform is read-only: those sections write the editor's persistent stores (bodies, scripts, materials),

@@ -1,4 +1,4 @@
-import { Game, Input, Logger, Node, SaveGame, save, find, child } from 'cleo'
+import { Game, Input, Logger, Node, SaveGame, save, find, child, attribute } from 'cleo'
 import type { TemplateName } from 'cleo'
 import { clamp, forwardYaw, num } from '@/Core/Scripts/SoulsMath'
 import { playSound, stopSound } from '@/Core/Scripts/SoulsAudio'
@@ -57,40 +57,55 @@ import { playSound, stopSound } from '@/Core/Scripts/SoulsAudio'
 export default class SoulsGameManagerNode extends Node {
   // ----- flow -------------------------------------------------------------------------------------
   /** Seconds between the killing blow and the YOU DIED banner. */
+  @attribute('Flow')
   public deathBannerDelay: number = 1.2
   /** Seconds between the killing blow and the respawn at the bonfire. */
+  @attribute('Flow')
   public respawnDelay: number = 5
   /** Template instantiated where the player died, carrying their souls. */
+  @attribute('Flow')
   public bloodstainTemplate: TemplateName = 'Bloodstain'
 
   // ----- blood (see bleed) -------------------------------------------------------------------------
   /** Off, no blood at all: no spray and no decals. */
+  @attribute('Blood')
   public bloodEnabled: boolean = true
   /**
    * The blood thrown off a wound, spawned where the hit struck and scaled with it (particles in the kit; the
    * Valley's is a lit flipbook of an FX Creator liquid simulation). Empty: no spray, the decal alone.
    */
+  @attribute('Blood')
   public bloodSprayTemplate: TemplateName = 'Blood Spray'
   /** The spatter decal thrown along the blow. */
+  @attribute('Blood')
   public bloodDropsTemplate: TemplateName = 'Blood Drops'
   /** Metres along the blow from the target to the spatter decal's centre (at a full-size hit). */
+  @attribute('Blood')
   public bloodDropsOffset: number = 0.9
   /** Blood decals alive at once. The oldest goes first, so a long fight cannot pile up draws. */
+  @attribute('Blood')
   public maxBloodDecals: number = 24
   /** Damage that leaves a full-size splat; less shrinks it, more grows it (0.6x to 1.6x). */
+  @attribute('Blood')
   public bloodReferenceDamage: number = 120
   /** Name of the reward pickup revealed once the boss falls. */
+  @attribute('Blood')
   public bossRewardName: string = 'Boss Reward'
   /** Name of the lore message revealed once the boss falls. */
+  @attribute('Blood')
   public bossEpilogueName: string = 'Epilogue Message'
   // ----- hit-stop (see "Hit-stop") ------------------------------------------------------------------
   /** Off, every blow plays at full speed. */
+  @attribute('Hit-stop')
   public hitStopEnabled: boolean = true
   /** Game speed during a hit-stop: 0.2 is 80% slower. */
+  @attribute('Hit-stop')
   public hitStopScale: number = 0.2
   /** Real seconds a killing blow holds the hit-stop, at least. */
+  @attribute('Hit-stop')
   public killHitStop: number = 0.3
   /** Log a one-off warning when the project's input map lacks the souls actions. */
+  @attribute('Hit-stop')
   public checkInputMap: boolean = true
 
   // ----- runtime state (read by the HUD, which reads the boss's own name and health off `boss`) ----

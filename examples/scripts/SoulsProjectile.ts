@@ -1,4 +1,4 @@
-import { Node, find } from 'cleo'
+import { Node, find, attribute } from 'cleo'
 import type { TemplateName } from 'cleo'
 import { playDetached } from '@/Core/Scripts/SoulsAudio'
 import { hurtboxQuery, hurtboxTargets } from '@/Core/Scripts/SoulsHitbox'
@@ -20,15 +20,22 @@ import { hurtboxQuery, hurtboxTargets } from '@/Core/Scripts/SoulsHitbox'
  * stopped.
  */
 export default class SoulsProjectileNode extends Node {
+  @attribute
   public speed: number = 12
+  @attribute
   public damage: number = 90
+  @attribute
   public poiseDamage: number = 30
+  @attribute
   public lifetime: number = 4
   /** The bolt's hitbox: a sphere of this radius swept along its flight. */
+  @attribute
   public radius: number = 0.2
   /** The effect where the bolt strikes the world, or runs out of flight. */
+  @attribute
   public impactTemplate: TemplateName = 'Bolt Burst'
   /** The effect where it strikes the player. */
+  @attribute
   public playerImpactTemplate: TemplateName = 'Bolt Impact'
 
   private _dir: number[] = [0, 0, 1]

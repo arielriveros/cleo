@@ -262,7 +262,7 @@ rooted at the template's root.
 **Overrides — what each instance keeps of its own.** Besides its transform, an instance may differ
 from its template in:
 - the **name of its root** (rename it in the tree or the inspector; the children keep the template's names);
-- the **value of any script field**, on its root or on any node inside it (edit it in the Scripts section).
+- the **value of any script attribute**, on its root or on any node inside it (edit it in the Behaviors panel).
 
 These are recorded on the instance as **overrides** and replayed whenever the instance is rebuilt from
 its template, so editing the template never wipes them. An overridden value shows a **revert** marker

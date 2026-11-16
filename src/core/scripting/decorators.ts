@@ -49,6 +49,7 @@ export type ScriptMember =
     | { kind: 'enter' | 'exit'; method: string; filter: string }
     | { kind: 'hold'; method: string; action: string; seconds: number }
     | { kind: 'tap'; method: string; action: string; maxSeconds: number }
+    | { kind: 'attribute'; field: string; group?: string; options: AttributeOptions }
     | { kind: 'save'; field: string }
     | { kind: 'options'; field: string; list: string }
     | { kind: 'pick'; field: string; pick: ScriptPickKind };
@@ -192,6 +193,55 @@ export function onTap(action: ActionName, maxSeconds: number = 0.25) {
   return function <This>(_method: (this: This, state: ActionState) => unknown, context: ClassMethodDecoratorContext<This>): void {
     record('@onTap', context, { kind: 'tap', method: memberName('@onTap', context, 'method'), action: name, maxSeconds });
   };
+}
+
+/** How an `@attribute` field shows in the inspector. Every option is editor-only: the game never reads them. */
+export interface AttributeOptions {
+    /** The row's name, instead of the field's. */
+    label?: string;
+    /** A number field's range: a slider, and values clamped to it. `step` snaps them. */
+    min?: number;
+    max?: number;
+    step?: number;
+    /** Shown, not editable. */
+    readonly?: boolean;
+    /**
+     * Shown only while another attribute says so: `'flag'` — that field is truthy; `['mode', 'ranged']` —
+     * it equals that value.
+     */
+    showIf?: string | [field: string, value: unknown];
+    /** A `[r, g, b]` field picked with a colour picker (components 0..1). */
+    color?: boolean;
+    /** A string field edited in a text area. */
+    multiline?: boolean;
+}
+
+/**
+ * Shows the field in the inspector (the Behaviors panel), whatever its access: public, protected or
+ * private. A field without it is the script's own business and is not shown, saved per node or overridden
+ * by templates. The field's doc comment becomes the row's tooltip.
+ *
+ *   @attribute speed = 4                                  // in the Attributes section
+ *   @attribute('Combat') damage = 10                      // in a "Combat" section
+ *   @attribute('Combat', { min: 0, max: 1 }) crit = 0.1   // a slider
+ *   @attribute({ readonly: true }) hp = 100
+ */
+export function attribute<This, V>(value: undefined, context: ClassFieldDecoratorContext<This, V>): void;
+export function attribute(group?: string, options?: AttributeOptions): <This, V>(value: undefined, context: ClassFieldDecoratorContext<This, V>) => void;
+export function attribute(options: AttributeOptions): <This, V>(value: undefined, context: ClassFieldDecoratorContext<This, V>) => void;
+export function attribute(group?: unknown, options?: unknown): any {
+    const apply = (name: string | undefined, opts: AttributeOptions) =>
+        function <This, V>(_value: undefined, context: ClassFieldDecoratorContext<This, V>): void {
+            record('@attribute', context, { kind: 'attribute', field: memberName('@attribute', context, 'field'), group: name, options: opts });
+        };
+    // Bare `@attribute`: called as the decorator itself, with the field's context.
+    if (group === undefined && options && typeof options === 'object' && 'kind' in (options as object)) {
+        apply(undefined, {})(undefined, options as ClassFieldDecoratorContext<unknown, unknown>);
+        return undefined;
+    }
+    const name = typeof group === 'string' ? group : undefined;
+    const opts = ((group && typeof group === 'object' ? group : options) ?? {}) as AttributeOptions;
+    return apply(name, opts);
 }
 
 /** Keeps the field in saves (`SaveGame`, and a scene's memory between visits). */

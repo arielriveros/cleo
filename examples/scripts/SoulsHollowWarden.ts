@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 import type { TemplateName, TriggerName } from 'cleo'
 import SoulsEnemyNode from '@/Characters/Enemies/Base Enemy/Scripts/SoulsEnemy'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
@@ -13,31 +13,53 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  * The phase two lives here and nowhere else: a different boss writes its own `_onDamaged`.
  */
 export default class SoulsHollowWardenNode extends SoulsEnemyNode {
+  @attribute
   public displayName: string = 'Hollow Warden'
+  @attribute
   public weaponTemplates: TemplateName[] = ['Halberd']
+  @attribute
   public isBoss: boolean = true
+  @attribute
   public flinchOnHit: boolean = false
+  @attribute
   public maxHp: number = 2600
+  @attribute
   public hp: number = 2600
+  @attribute
   public defense: number = 0.2
+  @attribute
   public maxPoise: number = 150
+  @attribute
   public poise: number = 150
+  @attribute
   public soulsReward: number = 6000
+  @attribute
   public moveSpeed: number = 3
+  @attribute
   public attackGapMin: number = 0.6
+  @attribute
   public attackGapMax: number = 1.2
+  @attribute
   public bodyRadius: number = 0.7
+  @attribute
   public bodyHeight: number = 3.24
+  @attribute
   public healthBarSeconds: number = 0
+  @attribute
   public deathSeconds: number = 2.2
+  @attribute
   public corpseSeconds: number = 20
 
   // ----- phase two -------------------------------------------------------------------------------
   /** Fraction of max HP at which the Warden turns. */
+  @attribute('Phase two')
   public phase2At: number = 0.5
+  @attribute('Phase two')
   public phase2SpeedMul: number = 1.15
+  @attribute('Phase two')
   public phase2Seconds: number = 2
   /** The animator trigger of the roar's Actions state. */
+  @attribute('Phase two')
   public roarTrigger: TriggerName = 'Roar'
 
   protected _onDamaged(dealt: number, poiseDamage: number, from: Node): void {

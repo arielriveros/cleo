@@ -12,7 +12,7 @@ The shell: a menu bar, a strip of document tabs, and a dockable workspace of pan
 │ Main Scene ● │ Rock.model │ Stone.mat │ Player.script │ ✕            │
 ├───────────────┬──────────────────────────────────┬───────────────────┤
 │ Scene         │                                  │ Properties        │
-│ Elements      │            Viewport              │ Scripts           │
+│ Elements      │            Viewport              │ Behaviors         │
 │ UI Elements   │                                  │                   │
 │───────────────│                                  │                   │
 │ Scene tree    │                                  │                   │
@@ -172,7 +172,7 @@ disturb your layout.
 |---|---|
 | Centre | **Viewport** (locked) |
 | Left rail (20%) | The *Scene Elements* or *UI Elements* palette (both in a template) above the *Scene* tree |
-| Right rail (25%) | *Properties*, *Scripts*, plus any mode-specific panels |
+| Right rail (25%) | *Properties*, *Behaviors*, plus any mode-specific panels |
 | Bottom strip (30%) | *Logger*, *Assets*, the *Debugger*, *Saves*, the *Sequencer* (Sequencer mode), and in animation-field mode the *Blend Space* plot |
 
 ### Every panel
@@ -192,7 +192,7 @@ disturb your layout.
 | **Texture** | Properties while a texture tab is open: how the image is sampled and imported. |
 | **Sound** | Properties while a sound sample is open: loudness, loop points, fades, bus and effects. |
 | **Skeleton** | The bone tree in place of the Scene tree while you edit an animator, a clip or a rig; in a rig tab, Properties too, where the rig's clips, retargeting, sockets and poses live. |
-| **Scripts** | Script slot and per-node script variables. |
+| **Behaviors** | Script slot, and the node's values for the script's attributes. |
 | **Logger** | The console. |
 | **Assets** | The asset explorer. |
 | **Debugger** | Stop, step and continue a game playing in a window; its call stack, variables and every breakpoint. Desktop app. See [Debugging scripts](debugging.md). |

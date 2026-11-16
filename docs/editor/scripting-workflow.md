@@ -7,7 +7,7 @@ How to *write* a script is [Getting started](../scripting/getting-started.md).
 
 ## Creating a script
 
-**Assets ▸ + Add ▸ Script**, or select a node and use the Scripts panel's **+ Create Script**.
+**Assets ▸ + Add ▸ Script**, or select a node and use the Behaviors panel's **+ Create Script**.
 
 Opening a script asset puts the editor into **Script mode**: a full-panel code editor with the
 engine's complete typings loaded, so you get autocomplete and type errors against the real API.
@@ -25,7 +25,7 @@ There is also a GLSL editing mode, for custom material shaders.
 Three ways:
 
 - Drag the script from Assets onto a node in the hierarchy.
-- Select the node, open the **Scripts** panel, and pick the script.
+- Select the node, open the **Behaviors** panel, and pick the script.
 - Drop it on a node in the viewport.
 
 Hovering a script card in the Assets panel **highlights every node using it**, which is the quickest
@@ -33,11 +33,11 @@ answer to "what is this attached to".
 
 One script asset can be attached to many nodes. It is shared: editing it changes all of them.
 
-## The Scripts panel
+## The Behaviors panel
 
 The panel works on the selected node: which script it runs, and that node's own values for the
-script's fields. The source itself is edited in the script's tab, not here. On a node inside a placed
-template instance the script is the template's, so only the field values stay editable, and each edit
+script's attributes. The source itself is edited in the script's tab, not here. On a node inside a placed
+template instance the script is the template's, so only the attribute values stay editable, and each edit
 becomes that instance's override.
 
 **Script** — the slot that links a script asset to the node. **+ Create Script** makes a new
@@ -45,29 +45,48 @@ class-based script for it and opens it; **Link existing…** lists the scripts w
 on this node type; a script dragged from the Assets panel onto the slot links too. ✎ opens the linked
 script, ✕ removes it from the node and keeps the asset.
 
-**Variables** — with a script linked, its class fields and this node's values for them
-([per-node variables](#per-node-variables)). Without one, the node's own
-[node variables](#node-variables), added and removed here.
+**Attributes** — with a script linked, the fields it marks `@attribute` and this node's values for them
+([attributes](#attributes)). An attribute with a group (`@attribute('Combat')`) has a section of its own
+below, titled with the group.
 
-## Per-node variables
+## Attributes
 
-Class fields appear in the Scripts panel as editable values on **that node**. Name, type and access
-come from the script; only the value is edited here.
+A script decides what the panel shows: a field marked `@attribute` appears as an editable value on
+**that node**, whatever its access (public, protected or private). Every other field is the script's own
+state, and is neither shown nor stored per node. Name, type and access come from the script; only the
+value is edited here, and the field's doc comment is the row's tooltip.
 
 ```ts
-export default class SpawnerNode extends Node {
-  public templateName: string = 'Zombie'
-  public interval: number = 6
-  public maxAlive: number = 14
+import { Node, attribute } from 'cleo'
 
-  private _live: Node[] = []      // hidden — underscore prefix
+export default class SpawnerNode extends Node {
+  /** Template to instantiate. */
+  @attribute public templateName: string = 'Zombie'
+  @attribute('Timing', { min: 0.5, max: 30 }) public interval: number = 6
+  @attribute('Timing') private maxAlive: number = 14
+
+  private live: Node[] = []      // not an attribute: not shown
 }
 ```
 
 One spawner script can drive an easy spawner and a hard one with no code duplication.
 
+`@attribute` takes a group name, options, or both:
+
+| Option | Effect |
+|---|---|
+| `label: 'Max HP'` | The row's name, instead of the field's. |
+| `min`, `max`, `step` | A number within a range: a slider, and values clamped to it. |
+| `readonly: true` | Shown, not editable. |
+| `showIf: 'flag'` / `showIf: ['mode', 'ranged']` | Shown only while another attribute is truthy, or equals that value. |
+| `color: true` | An `[r, g, b]` field picked with a colour picker. |
+| `multiline: true` | A string edited in a text area. |
+
+Arguments must be written out (`'Combat'`, `{ min: 0 }`): the editor reads them from the source without
+running it, and ignores one it cannot read.
+
 Supported types are `number`, `string`, `boolean`, `vec3` and `string[]` (an editable list). A string
-field can be picked rather than typed:
+attribute can be picked rather than typed:
 
 - typed `ClipName`, `SoundName`, `SocketName`, `TemplateName` or `NodeName`, it offers the names this
   node can reach;
@@ -79,18 +98,15 @@ field can be picked rather than typed:
 - decorated `@pick('clip')` (or tagged `/** @pick clip */`), it offers the names of that kind.
 
 See [Decorators](../scripting/decorators.md). Fields decorated `@child` or `@find` are filled with a node by the
-engine and shown as `Finds: field → Name`, not as values.
-
-A leading `_` keeps a field internal and out of the panel. Give any other state that prefix: a field
-of another type would be shown as one of these.
+engine and shown as `Finds: field → Name`, not as values; fields kept by `@save` without being attributes
+are listed as **Also saved**.
 
 A value edited on a node is saved with the scene and overrides the code default. Changing the
 default in code affects only the nodes that have never had that field edited.
 
 ## Node variables
 
-Separate from script fields, and used differently: variables are created at runtime or, on a node
-with no script, in the Scripts panel's **Variables** section. Each carries a type and an **access
+Separate from script fields, and used differently: variables are created at runtime, by scripts. Each carries a type and an **access
 modifier** (`public` / `protected` / `private`), and they are meant for *other* scripts to read. In a
 script they are plain properties of the node — `this.isPlayer`, or `other.health` on another node —
 and the editor type-checks them as you type.

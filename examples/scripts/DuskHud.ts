@@ -1,4 +1,4 @@
-import { Node, UIRootNode, UITextNode, child } from 'cleo'
+import { Node, UIRootNode, UITextNode, child, attribute } from 'cleo'
 
 /**
  * Duskwell -- the HUD. Attach to the `HUD` screen-space UI Root; it reads the `Player` node every frame and
@@ -9,6 +9,7 @@ import { Node, UIRootNode, UITextNode, child } from 'cleo'
  *   Notice     uiText   the player's one-line message (a pickup, a checkpoint), empty otherwise
  */
 export default class DuskHud extends UIRootNode {
+  @attribute
   public playerName: string = 'Player'
 
   private _player: Node = null

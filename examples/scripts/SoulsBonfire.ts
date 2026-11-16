@@ -1,4 +1,4 @@
-import { Node, save, find, child } from 'cleo'
+import { Node, save, find, child, attribute } from 'cleo'
 
 /**
  * Hollow Keep — a bonfire. Attach to the bonfire's root node.
@@ -28,11 +28,15 @@ import { Node, save, find, child } from 'cleo'
  * heal, refill flasks, respawn enemies, open the level-up menu. Both save the game (the manager does).
  */
 export default class SoulsBonfireNode extends Node {
+  @attribute
   public startLit: boolean = false
+  @attribute
   public lightIntensity: number = 900
+  @attribute
   public isBonfire: boolean = true
   /** A bonfire lit before a save is still lit when it loads. */
   @save
+  @attribute
   public lit: boolean = false
 
   @find('GameManager')

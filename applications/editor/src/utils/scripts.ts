@@ -93,7 +93,9 @@ export type ScriptVarSchema = {
   type: ScriptVarType             // 'number' | 'string' | 'boolean' | 'vec3' | 'stringList'
   access: NodeVariableAccess      // 'public' | 'private' | 'protected'
   default: any
-  hidden: boolean                 // underscore-prefixed: internal state, not shown in the inspector
+  hidden: boolean                 // not an @attribute: the script's own state, not shown, seeded or saved per node
+  /** Declared `@attribute(...)`: shown in the Behaviors panel, in its group's section. */
+  attribute?: ScriptAttribute
   /**
    * A string field whose value is picked from another field's list: the name of that sibling `string[]`
    * field. Declared with a `@options <field>` tag in the field's doc comment; the inspector shows a dropdown.
@@ -119,6 +121,25 @@ export type ScriptVarSchema = {
   ref?: { kind: 'child' | 'find'; name: string }
 }
 
+/**
+ * How an `@attribute` field shows (the engine's AttributeOptions, plus its group and doc comment). Read from
+ * the source text, never by running it: arguments that are not literals are ignored.
+ */
+export type ScriptAttribute = {
+  /** Its section; undefined is the Attributes section. */
+  group?: string
+  label?: string
+  /** The field's doc comment, without its tags. */
+  tooltip?: string
+  min?: number
+  max?: number
+  step?: number
+  readonly?: boolean
+  showIf?: string | [string, unknown]
+  color?: boolean
+  multiline?: boolean
+}
+
 /** The kinds of name a `pick` field can hold. Mirrors the engine's ClipName / SoundName / ... types. */
 export type ScriptPickKind = 'clip' | 'sound' | 'socket' | 'template' | 'node' | 'trigger' | 'spriteClip'
 export const SCRIPT_PICK_KINDS: readonly ScriptPickKind[] = ['clip', 'sound', 'socket', 'template', 'node', 'trigger', 'spriteClip']
@@ -135,6 +156,11 @@ export type ScriptAsset = {
   variables: ScriptVarSchema[]
   /** Derived cache, recomputed from the source on every save. Absent on assets saved before modules: 'class'. */
   kind?: ScriptKind
+  /**
+   * The reflection rules `variables` was derived under (SCRIPT_REFLECT_VERSION). An asset derived under older
+   * rules — before @attribute decided what shows — is re-derived when the project opens.
+   */
+  reflect?: number
 }
 
 /** The kind of an asset, defaulting the field older assets do not carry. */
@@ -198,13 +224,122 @@ function stripComments(src: string): string {
  * (`@options:<field>`, `@pick:<kind>`, `@save:`), so the tags survive stripComments and reach the field
  * declared after them. Every other comment is left as is.
  */
-function keepFieldTags(src: string): string {
+function keepFieldTags(src: string, docs: string[]): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, c => {
     const tags: string[] = []
     for (const m of c.matchAll(/@(options|pick)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)) tags.push(`@${m[1]}:${m[2]}`)
     if (/(^|[\s*])@save(?![\w$])/.test(c)) tags.push('@save:')
+    // A doc comment's prose is the tooltip of the attribute declared after it.
+    if (c.startsWith('/**')) {
+      const text = docText(c)
+      if (text) { docs.push(text); tags.push(`@doc:d${docs.length - 1}`) }
+    }
     return tags.length ? `${tags.join(' ')} ` : c
   })
+}
+
+/** A doc comment's prose: delimiters and leading `*`s gone, tag lines (`@save`, `@options x`) dropped, one line. */
+function docText(comment: string): string {
+  return comment.replace(/^\/\*\*|\*\/$/g, '').split('\n')
+    .map(line => line.replace(/^\s*\*\s?/, '').trim())
+    .filter(line => line && !line.startsWith('@'))
+    .join(' ').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * The arguments of a decorator call, read as literals: strings, numbers, booleans, null, arrays and plain
+ * objects (identifier or quoted keys). Nothing is evaluated: an argument that is anything else (a variable,
+ * a call) reads as undefined.
+ */
+export function parseLiteralArgs(text: string): unknown[] {
+  let i = 0
+  const BAD = Symbol('bad')
+  const ws = () => { while (i < text.length && /\s/.test(text[i])) i++ }
+  const value = (): unknown => {
+    ws()
+    const c = text[i]
+    if (c === '"' || c === "'" || c === '`') {
+      let out = ''
+      for (i++; i < text.length && text[i] !== c; i++) {
+        if (text[i] === '\\') { i++; out += text[i] ?? ''; continue }
+        if (c === '`' && text[i] === '$' && text[i + 1] === '{') return BAD
+        out += text[i]
+      }
+      i++
+      return out
+    }
+    if (c === '[') {
+      i++
+      const arr: unknown[] = []
+      for (;;) {
+        ws()
+        if (text[i] === ']') { i++; return arr }
+        const v = value()
+        if (v === BAD) return BAD
+        arr.push(v)
+        ws()
+        if (text[i] === ',') { i++; continue }
+        if (text[i] === ']') { i++; return arr }
+        return BAD
+      }
+    }
+    if (c === '{') {
+      i++
+      const obj: Record<string, unknown> = {}
+      for (;;) {
+        ws()
+        if (text[i] === '}') { i++; return obj }
+        let key: string
+        if (text[i] === '"' || text[i] === "'") { const k = value(); if (typeof k !== 'string') return BAD; key = k }
+        else { const m = /^[A-Za-z_$][\w$]*/.exec(text.slice(i)); if (!m) return BAD; key = m[0]; i += key.length }
+        ws()
+        if (text[i] !== ':') return BAD
+        i++
+        const v = value()
+        if (v === BAD) return BAD
+        obj[key] = v
+        ws()
+        if (text[i] === ',') { i++; continue }
+        if (text[i] === '}') { i++; return obj }
+        return BAD
+      }
+    }
+    const m = /^(?:-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?|true|false|null|undefined)(?![\w$.])/i.exec(text.slice(i))
+    if (!m) return BAD
+    i += m[0].length
+    const w = m[0]
+    return w === 'true' ? true : w === 'false' ? false : w === 'null' ? null : w === 'undefined' ? undefined : Number(w)
+  }
+  const out: unknown[] = []
+  for (;;) {
+    ws()
+    if (i >= text.length) return out
+    const v = value()
+    out.push(v === BAD ? undefined : v)
+    // Skip to the next top-level comma, whatever was unreadable before it.
+    let depth = 0
+    for (; i < text.length; i++) {
+      const c = text[i]
+      if (c === '(' || c === '[' || c === '{') depth++
+      else if (c === ')' || c === ']' || c === '}') depth--
+      else if (c === ',' && depth <= 0) { i++; break }
+    }
+  }
+}
+
+/** An `@attribute(group?, options?)` call's arguments as a ScriptAttribute (unknown options dropped). */
+function attributeOf(args: unknown[]): ScriptAttribute {
+  const [a, b] = args
+  const group = typeof a === 'string' && a.trim() ? a.trim() : undefined
+  const raw = (a && typeof a === 'object' && !Array.isArray(a) ? a : b && typeof b === 'object' && !Array.isArray(b) ? b : {}) as Record<string, unknown>
+  const out: ScriptAttribute = {}
+  if (group) out.group = group
+  if (typeof raw.label === 'string') out.label = raw.label
+  for (const k of ['min', 'max', 'step'] as const) if (typeof raw[k] === 'number' && Number.isFinite(raw[k])) out[k] = raw[k] as number
+  for (const k of ['readonly', 'color', 'multiline'] as const) if (raw[k] === true) out[k] = true
+  if (typeof raw.showIf === 'string') out.showIf = raw.showIf
+  else if (Array.isArray(raw.showIf) && typeof raw.showIf[0] === 'string') out.showIf = [raw.showIf[0], raw.showIf[1]]
+  return out
 }
 
 type FieldRef = { kind: 'child' | 'find'; name: string }
@@ -233,7 +368,7 @@ function endOfCall(src: string, open: number): number {
  * the doc-comment tags. Run on comment-stripped source. `@child` / `@find` names go in `refs`, the token
  * holding an index (a name may hold spaces). Any other decorator (`@onAction`, a user one) is dropped.
  */
-function keepDecorators(src: string, refs: FieldRef[]): string {
+function keepDecorators(src: string, refs: FieldRef[], attrs: ScriptAttribute[]): string {
   if (!src.includes('@')) return src
   let out = ''
   let last = 0
@@ -255,6 +390,7 @@ function keepDecorators(src: string, refs: FieldRef[]): string {
     if (name === 'save') token = '@save: '
     else if ((name === 'options' || name === 'pick') && arg && /^[A-Za-z_$][\w$]*$/.test(arg)) token = `@${name}:${arg} `
     else if ((name === 'child' || name === 'find') && arg) { refs.push({ kind: name, name: arg }); token = `@ref:r${refs.length - 1} ` }
+    else if (name === 'attribute') { attrs.push(attributeOf(parseLiteralArgs(args))); token = `@attr:a${attrs.length - 1} ` }
     out += src.slice(last, m.index) + token
     last = end
     DECORATOR.lastIndex = end
@@ -412,7 +548,9 @@ const MODIFIER_KEYWORDS = new Set(['public', 'private', 'protected', 'readonly',
  */
 export function parseScriptVariables(source: string): ScriptVarSchema[] {
   const refs: FieldRef[] = []
-  const body = classBody(keepDecorators(stripComments(keepFieldTags(source)), refs))
+  const attrs: ScriptAttribute[] = []
+  const docs: string[] = []
+  const body = classBody(keepDecorators(stripComments(keepFieldTags(source, docs)), refs, attrs))
   if (!body) return []
 
   const out: ScriptVarSchema[] = []
@@ -422,6 +560,8 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
   let pendingPick: string | undefined
   let pendingSave = false
   let pendingRef: FieldRef | undefined
+  let pendingAttr: ScriptAttribute | undefined
+  let pendingDoc: string | undefined
 
   // Walk statements at class-body depth 0, tracking brace/paren depth so method bodies and
   // object/array initializers are skipped as single units.
@@ -432,8 +572,10 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
     let stmt = body.slice(stmtStart, end).trim()
     stmtStart = end + 1
     // A comment ending on the field's own line leaves its tags in front of the declaration.
-    for (let tag; (tag = /^@(options|pick|save|ref):([A-Za-z_$][A-Za-z0-9_$]*)?\s*/.exec(stmt));) {
-      if (tag[1] === 'options' && tag[2]) pendingOptions = tag[2]
+    for (let tag; (tag = /^@(options|pick|save|ref|attr|doc):([A-Za-z_$][A-Za-z0-9_$]*)?\s*/.exec(stmt));) {
+      if (tag[1] === 'attr' && tag[2]) pendingAttr = attrs[Number(tag[2].slice(1))]
+      else if (tag[1] === 'doc' && tag[2]) pendingDoc = docs[Number(tag[2].slice(1))]
+      else if (tag[1] === 'options' && tag[2]) pendingOptions = tag[2]
       else if (tag[1] === 'pick' && tag[2]) pendingPick = tag[2]
       else if (tag[1] === 'save') pendingSave = true
       else if (tag[1] === 'ref' && tag[2]) pendingRef = refs[Number(tag[2].slice(1))]
@@ -444,7 +586,9 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
     const tagPick = pendingPick
     const save = pendingSave
     const ref = pendingRef
-    pendingRef = undefined
+    const attr = pendingAttr
+    const doc = pendingDoc
+    pendingRef = pendingAttr = pendingDoc = undefined
     pendingOptions = pendingPick = undefined
     pendingSave = false
 
@@ -482,7 +626,9 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
       type,
       access,
       default: def ?? (choices?.length ? choices[0] : typeDefault(type)),
-      hidden: name.startsWith('_') || !!ref,
+      // Only an @attribute is an inspector value; a @child / @find field holds a node, never one.
+      hidden: !attr || !!ref,
+      ...(attr && !ref ? { attribute: { ...attr, ...(doc ? { tooltip: doc } : {}) } } : {}),
       // Only a string can be picked from a list.
       ...(options && type === 'string' ? { options } : {}),
       ...(pick && isText ? { pick } : {}),
@@ -530,7 +676,7 @@ export function scriptClassName(name: string): string {
  * Controller one shows `onThink` writing intent, which is the whole extension point for custom AI.
  */
 const CONTROL_STARTERS: Partial<Record<ScriptBaseType, (className: string, base: string) => string>> = {
-  character: (className, base) => `import { Logger, onAction, ${base} } from 'cleo'
+  character: (className, base) => `import { Logger, attribute, onAction, ${base} } from 'cleo'
 
 // ${className} runs on a Character — a pawn whose walking, turning and jumping the ENGINE owns.
 //
@@ -542,7 +688,8 @@ const CONTROL_STARTERS: Partial<Record<ScriptBaseType, (className: string, base:
 //
 // What a script on a Character IS for: reacting to what the character is doing, and holding game state.
 export default class ${className} extends ${base} {
-  public health: number = 100
+  /** Hit points: game state the character's script keeps, shown in the Behaviors panel. */
+  @attribute public health: number = 100
 
   onUpdate(delta: number, time: number) {
     // Measured motion, from the physics body — see the Character's Animator outputs in the inspector.
@@ -556,7 +703,7 @@ export default class ${className} extends ${base} {
   }
 }
 `,
-  controller: (className, base) => `import { Logger, ${base} } from 'cleo'
+  controller: (className, base) => `import { Logger, attribute, ${base} } from 'cleo'
 
 // ${className} runs on a Controller — the thing that DRIVES a Character.
 //
@@ -566,7 +713,7 @@ export default class ${className} extends ${base} {
 //
 // Set Source to "AI" in the inspector to write the whole intent yourself.
 export default class ${className} extends ${base} {
-  public followDistance: number = 3
+  @attribute public followDistance: number = 3
 
   onThink(delta: number) {
     const pawn = this.possessed
@@ -584,7 +731,7 @@ export default class ${className} extends ${base} {
   }
 }
 `,
-  characterBody2D: (className, base) => `import { Input, Logger, ${base} } from 'cleo'
+  characterBody2D: (className, base) => `import { Input, Logger, attribute, ${base} } from 'cleo'
 
 // ${className} runs on a Character Body 2D -- a 2D pawn whose walking, flying and jumping the ENGINE owns,
 // driven by a Controller (Player: Move and Jump; AI: a brain) exactly as a 3D Character is.
@@ -597,8 +744,8 @@ export default class ${className} extends ${base} {
 // substep (1/120 s or shorter) before the engine steers, so they come out the same at any frame rate.
 // Return true from it to own the substep: the engine's steering and jump skip it, your velocity2D stands.
 export default class ${className} extends ${base} {
-  public hasDoubleJump: boolean = true
-  public airJumps: number = 1
+  @attribute('Jumping') public hasDoubleJump: boolean = true
+  @attribute('Jumping', { min: 0, max: 5, step: 1 }) public airJumps: number = 1
 
   private _airJumpsLeft: number = 0
 
@@ -651,7 +798,7 @@ const UI_STARTERS: Partial<Record<ScriptBaseType, string>> = {
 
 /**
  * The starter class source for a new script of `name` extending `baseType`. Handlers are method overrides;
- * fields are the node's variables (public shows in the inspector, a leading _ stays internal).
+ * fields are the node's state, and those marked `@attribute` show in the inspector.
  */
 export function defaultScriptClass(name: string, baseType: ScriptBaseType): string {
   const base = BASE_CLASS[baseType]
@@ -671,9 +818,8 @@ export function defaultScriptClass(name: string, baseType: ScriptBaseType): stri
   }`
     return `import { Logger, ${base} } from 'cleo'
 
-// ${className} runs on the UI element this script is attached to. Handlers are method overrides; class
-// fields become the node's variables (public/private/protected controls inspector visibility, and a leading
-// underscore hides a field from the inspector).
+// ${className} runs on the UI element this script is attached to. Handlers are method overrides; a class
+// field marked @attribute shows in the inspector (the Behaviors panel), whatever its access.
 //
 // The node already exists, so this class is never CONSTRUCTED — its methods are bound onto the live node.
 // UI layout is resolved once per frame AFTER every onUpdate, so anything written here is on screen the
@@ -684,13 +830,12 @@ ${body}
 `
   }
 
-  const imports = base === 'Node' ? 'Input, Logger, Node, onAction' : `Input, Logger, Node, onAction, ${base}`
+  const imports = base === 'Node' ? 'Input, Logger, Node, attribute, onAction' : `Input, Logger, Node, attribute, onAction, ${base}`
   return `import { ${imports} } from 'cleo'
 
-
 // ${className} runs on every node this script is attached to. Handlers are method overrides; class fields are
-// the node's variables — public/private/protected controls inspector visibility & cross-node access, and a
-// leading underscore marks an internal field hidden from the inspector.
+// the node's state. Mark one @attribute to show it in the inspector (the Behaviors panel), whatever its access;
+// the rest stay the script's own.
 //
 // The node already exists, so this class is never CONSTRUCTED — its methods are bound onto the live node.
 // Field initializers above still apply, but a constructor() you write here would never run. Use:
@@ -699,7 +844,8 @@ ${body}
 //   onSpawn     — once each time the node becomes live (again after a despawn/spawn cycle).
 //   onStart     — once per node, on its first spawn.
 export default class ${className} extends ${base} {
-  public speed: number = 5
+  /** Units per second. */
+  @attribute({ min: 0, max: 20 }) public speed: number = 5
   private _elapsed: number = 0
 
   onStart() {
@@ -769,6 +915,9 @@ export function logOnce(message: string): void {
  * `variables` overrides the reflection — scriptGraph.resolveScriptVariables passes the merged schema of a
  * class that inherits from another script.
  */
+/** Bumped when reflection changes what `variables` holds, so assets derived before re-derive (2: @attribute). */
+export const SCRIPT_REFLECT_VERSION = 2
+
 export function buildScriptAsset(
   name: string, baseType: ScriptBaseType, source: string, id?: string, variables?: ScriptVarSchema[],
 ): ScriptAsset {
@@ -776,6 +925,7 @@ export function buildScriptAsset(
   return {
     id: id ?? cryptoRandomId(), name, baseType, source, kind,
     variables: kind === 'module' ? [] : (variables ?? parseScriptVariables(source)),
+    reflect: SCRIPT_REFLECT_VERSION,
   }
 }
 

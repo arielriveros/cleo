@@ -1,4 +1,4 @@
-import { Node, save, find } from 'cleo'
+import { Node, save, find, attribute } from 'cleo'
 
 /**
  * Hollow Keep — the bloodstain left where the player died, holding every soul they carried. Attach to
@@ -15,6 +15,7 @@ import { Node, save, find } from 'cleo'
  */
 export default class SoulsBloodstainNode extends Node {
   @save
+  @attribute
   public souls: number = 0
 
   @find('GameManager')

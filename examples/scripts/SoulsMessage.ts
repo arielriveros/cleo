@@ -1,4 +1,4 @@
-import { Node, find } from 'cleo'
+import { Node, find, attribute } from 'cleo'
 
 /**
  * Hollow Keep — a readable message on the ground: tutorial hints and lore. Attach to the message's root
@@ -8,8 +8,11 @@ import { Node, find } from 'cleo'
  * `\n` in `text` is a line break. See SoulsBonfire for the interactable protocol.
  */
 export default class SoulsMessageNode extends Node {
+  @attribute
   public title: string = 'A message'
+  @attribute
   public text: string = 'Try rolling.'
+  @attribute
   public hiddenUntilRevealed: boolean = false
 
   @find('GameManager')

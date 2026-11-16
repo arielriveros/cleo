@@ -72,7 +72,7 @@ export default class DoorNode extends Node {
 }
 ```
 
-Public class fields become per-node values you can edit in the inspector without touching code, so
+Class fields marked `@attribute` become per-node values you can edit in the inspector without touching code, so
 one script can drive many nodes with different settings. See
 [Getting started](scripting/getting-started.md).
 

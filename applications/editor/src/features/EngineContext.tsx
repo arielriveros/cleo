@@ -48,7 +48,7 @@ import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
 import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, recenterIfOffOrigin, rescaleLodDistances, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, assetWithRagdollProfile, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, lodLevelMaterialLinks, withLevelLinks, type ModelPart } from "../utils/models";
 import { downscaleTextures, levelTextureIds, maskTextureIds } from "../utils/lodTextures";
 import { detachForeignChildren, reattachForeignChildren } from "../utils/foreignChildren";
-import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, defaultScriptModule, seedScriptFields, scriptKindOfAsset } from "../utils/scripts";
+import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, defaultScriptModule, seedScriptFields, scriptKindOfAsset, SCRIPT_REFLECT_VERSION } from "../utils/scripts";
 import { buildScriptGraphCtx, deriveBaseType, resolveScriptVariables, dependentsOf } from "../utils/scriptGraph";
 import { pushExternalSource } from "./scriptWorkspace/externalSourceStore";
 import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation, withAnimationRef, withoutAnimationRef, extractEmbeddedClips } from "../utils/animationAssets";
@@ -1393,6 +1393,21 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     scriptPathsRef.current = new Map(paths);
     setScriptPathsState(scriptPathsRef.current);
   };
+
+  // Scripts derived under older reflection rules (before @attribute decided what the inspector shows)
+  // re-derive their fields once the explorer has told us where each script lives: a class inheriting fields
+  // from another script is resolved by that path.
+  useEffect(() => {
+    const stale = scriptAssets.filter(a => a.reflect !== SCRIPT_REFLECT_VERSION);
+    if (!stale.length || !scriptAssets.every(a => scriptPaths.has(a.id))) return;
+    const ctx = buildScriptGraphCtx(scriptPathsRef.current, scriptAssets);
+    const fresh = new Map(stale.map(a => [a.id, {
+      ...a,
+      variables: scriptKindOfAsset(a) === 'module' ? [] : resolveScriptVariables(a.source, ctx.pathOf(a.id), ctx),
+      reflect: SCRIPT_REFLECT_VERSION,
+    }]));
+    setScriptAssets(prev => prev.map(a => fresh.get(a.id) ?? a));
+  }, [scriptAssets, scriptPaths]);
 
   const addScriptAsset = (s: ScriptAsset) => setScriptAssets(prev => [...prev, s]);
   const updateScriptAsset = (id: string, s: ScriptAsset) => setScriptAssets(prev => prev.map(x => x.id === id ? s : x));

@@ -1,4 +1,4 @@
-import { Node, find } from 'cleo'
+import { Node, find, attribute } from 'cleo'
 import type { NodeName, SoundName, TemplateName } from 'cleo'
 import { num, statBonus } from '@/Core/Scripts/SoulsMath'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
@@ -38,42 +38,63 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  *        when a requirement is unmet
  */
 export default class SoulsWeaponNode extends Node {
+  @attribute
   public displayName: string = 'Weapon'
+  @attribute
   public baseDamage: number = 100
   /** How fully the weapon scales with each stat: 1.0 is an "A", 0.2 an "E". */
+  @attribute
   public strScaling: number = 0
+  @attribute
   public dexScaling: number = 0
+  @attribute
   public strRequirement: number = 0
+  @attribute
   public dexRequirement: number = 0
   /** Attack-rating multiplier when the wielder misses a STR or DEX requirement. */
+  @attribute
   public unmetRequirementPenalty: number = 0.6
   /** Poise damage per hit, before the move's own multiplier. */
+  @attribute
   public poiseDamage: number = 15
   /** Multiplies every move's stamina cost. */
+  @attribute
   public staminaMul: number = 1
   /** First move of the light chain, and the heavy attack. Names of child SoulsMove nodes. */
+  @attribute
   public lightMove: NodeName = 'Light1'
+  @attribute
   public heavyMove: NodeName = 'Heavy'
   /** The blade hitbox capsule, in the Mesh child's space. See "Hitbox" above. */
+  @attribute
   public bladeStart: number[] = [0, 0.12, 0]
+  @attribute
   public bladeEnd: number[] = [0, 1, 0]
+  @attribute
   public bladeRadius: number = 0.12
   /**
    * Real seconds game time slows for when a hit of this weapon lands (the GameManager's hit-stop), for the
    * light moves and for the heavy move. A killing blow holds it longer. 0 turns it off for this weapon.
    */
+  @attribute
   public hitStop: number = 0.15
+  @attribute
   public heavyHitStop: number = 0.22
   /** Camera kick when a hit lands (the GameManager's shake), light and heavy. */
+  @attribute
   public hitShake: number = 0.12
+  @attribute
   public heavyHitShake: number = 0.25
   /**
    * Effect spawned where the blade meets a WALL (the swing bounces off it: SoulsPlayer/SoulsEnemy). A blade
    * meeting a body draws blood instead (GameManager.bleed). And the sound of a hit.
    */
+  @attribute
   public hitSparkTemplate: TemplateName = 'Hit Spark'
+  @attribute
   public hitSound: SoundName = 'Hit'
   /** Marker characters look for among the nodes they spawn (a script class is never `instanceof`). */
+  @attribute
   public isWeapon: boolean = true
 
   @find('GameManager')

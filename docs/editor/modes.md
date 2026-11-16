@@ -44,10 +44,10 @@ Landscape and Tilemap share one slot, chosen by the scene's authored dimension â
 
 | Mode | Viewport | Panels |
 |---|---|---|
-| `scene` | 3D/2D scene | Everything: tree, **Scene Elements**, Properties, Scripts, Physics, Logger, Assets |
+| `scene` | 3D/2D scene | Everything: tree, **Scene Elements**, Properties, Behaviors, Physics, Logger, Assets |
 | `template` | The template's own scene | Same as Scene, with the tree rooted at the template root, and **both** Add palettes |
-| `landscape` | Scene + brush | Tree, Properties, **Scene Elements**, plus a floating brush card. **No Scripts** |
-| `tilemap` | Scene + tools | Tree, Properties, **Tiles**, **Layers**, plus a floating tool card. No Scripts |
+| `landscape` | Scene + brush | Tree, Properties, **Scene Elements**, plus a floating brush card. **No Behaviors** |
+| `tilemap` | Scene + tools | Tree, Properties, **Tiles**, **Layers**, plus a floating tool card. No Behaviors |
 | `ui` | Scene + DOM overlay | Everything, with **UI Elements** in place of Scene Elements |
 | `options` | Live render | **Only** the Engine, Editor and Project panels |
 | `material` | Preview sphere | Properties, titled *Material*. No tree, no Add palettes |
@@ -58,7 +58,7 @@ Landscape and Tilemap share one slot, chosen by the scene's authored dimension â
 | `rig` | Character + skeleton | Scene panel becomes **Skeleton**; Properties, titled *Skeleton*, with **Ragdoll** and **Bone Masks** tabs beside it |
 | `aiBrain` | *(full-panel graph)* | The graph canvas fills the viewport area. Properties (titled *Brain*), Logger, Assets |
 | `particleSystem` | The effect over a ground plane | Properties (titled *Particle System*) holds the emitter stack; **Particle Preview** transport at the bottom. No tree, no gizmo |
-| `sequence` | The open scene, at the playhead | Tree (select only), Properties (with **Keys**), the **Sequencer** at the bottom, Logger, Assets. **No Add palettes, no Scripts, no Physics.** Orange panel headers |
+| `sequence` | The open scene, at the playhead | Tree (select only), Properties (with **Keys**), the **Sequencer** at the bottom, Logger, Assets. **No Add palettes, no Behaviors, no Physics.** Orange panel headers |
 | `script` | *(full-panel editor)* | The code editor. Logger and Assets only |
 | `tileset` | *(full-panel editor)* | The slicing grid. Properties, titled *Tileset* |
 | `texture` | *(full-panel editor)* | The image as its settings say. Properties, titled *Texture* |

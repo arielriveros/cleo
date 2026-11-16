@@ -182,7 +182,7 @@ function buildDefaultLayout(api: DockviewApi) {
     initialWidth: Math.round(width * 0.25),
   });
   api.addPanel({
-    id: 'scripts', component: 'scripts', title: 'Scripts',
+    id: 'scripts', component: 'scripts', title: 'Behaviors',
     position: { referencePanel: 'properties', direction: 'within' },
   });
   // The animation panels share the Properties tab strip; they are hidden everywhere but the one mode that

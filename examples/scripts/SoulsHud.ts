@@ -1,4 +1,4 @@
-import { Node, UIProgressBarNode, UIRootNode, UITextNode } from 'cleo'
+import { Node, UIProgressBarNode, UIRootNode, UITextNode, attribute } from 'cleo'
 
 /**
  * Hollow Keep — the PLAYER's HUD. Attach to the `HUD` node, a screen-space UI Root that is a CHILD of
@@ -23,12 +23,18 @@ import { Node, UIProgressBarNode, UIRootNode, UITextNode } from 'cleo'
  * Bars grow with their maximum (`pxPerHp`, `pxPerStamina`), so levelling Vigor visibly lengthens the bar.
  */
 export default class SoulsHudNode extends UIRootNode {
+  @attribute
   public pxPerHp: number = 0.75
+  @attribute
   public pxPerStamina: number = 2.4
+  @attribute
   public minBarWidth: number = 160
+  @attribute
   public maxBarWidth: number = 900
+  @attribute
   public noticeSeconds: number = 2.6
   /** Key shown in front of the interaction prompt. */
+  @attribute
   public interactKey: string = 'E'
 
   private _player: Node = null

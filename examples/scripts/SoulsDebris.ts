@@ -1,4 +1,4 @@
-import { Node, Shape } from 'cleo'
+import { Node, Shape, attribute } from 'cleo'
 
 /**
  * The pieces of something that broke (see SoulsBreakable). Attach to the root of a template whose
@@ -16,14 +16,19 @@ import { Node, Shape } from 'cleo'
  */
 export default class SoulsDebrisNode extends Node {
   /** Seconds a piece lies there before it dissolves. */
+  @attribute
   public lifeSeconds: number = 6
   /** Spread of that, so the pile does not vanish in one frame. */
+  @attribute
   public lifeJitter: number = 1.5
   /** Metres per second each piece flies out from the centre, on top of the burst velocity. */
+  @attribute
   public scatterSpeed: number = 2
   /** Radians per second of tumble, at most. */
+  @attribute
   public spin: number = 8
   /** Kilograms per cubic metre of a piece's box: wood is around 600. */
+  @attribute
   public density: number = 600
 
   private _burst: boolean = false

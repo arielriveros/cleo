@@ -1,4 +1,4 @@
-import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
+import { Logger, ModelNode, Node, setMoveWorld, attribute } from 'cleo'
 import type { Animator } from 'cleo'
 import FpsCombatantNode from '@/FPS/Scripts/FpsCombatant'
 import { angleDiff, clamp, combatantOf, distance3, findByVariable, findDescendant, hostile, manager, planarDistance, yawTo } from '@/FPS/Scripts/FpsShared'
@@ -31,38 +31,56 @@ type BotState = 'patrol' | 'search' | 'engage' | 'cover' | 'retreat' | 'dead'
  * on its instance.
  */
 export default class FpsBotNode extends FpsCombatantNode {
+  @attribute
   public displayName: string = 'Bot'
   /** 0..1: aim, reaction and how long it keeps its head up. */
+  @attribute
   public skill: number = 0.55
   /** Sees this far, and across this cone (the full angle). */
+  @attribute
   public sightRange: number = 55
+  @attribute
   public sightAngle: number = 140
   /** Seconds between noticing a target and opening fire (the worse the skill, the longer). */
+  @attribute
   public reactionSeconds: number = 0.45
   /** Walk and run speeds, metres a second. */
+  @attribute
   public patrolSpeedScale: number = 0.42
   /** Below this share of health: seek cover. Below `retreatAt`: run for it and call for help. */
+  @attribute
   public coverAt: number = 0.62
+  @attribute
   public retreatAt: number = 0.3
   /** Health regained a second while out of combat. */
+  @attribute
   public regenPerSecond: number = 3
   /** Probability of crouching while standing and shooting at long range. */
+  @attribute
   public crouchChance: number = 0.45
   /** Seconds it waits behind cover before it looks. */
+  @attribute
   public coverSeconds: number = 3.5
   /** Seconds the clip plays before the body goes ragdoll (0: the clip's length times `ragdollAt`). */
+  @attribute
   public ragdollAt: number = 0.62
+  @attribute
   public corpseSeconds: number = 8
   /** Damage multiplier for a bot's bullets against everyone. */
+  @attribute
   public damageScale: number = 0.55
   /** Rounds a second as a share of the weapon's rate. */
+  @attribute
   public fireRateScale: number = 0.7
 
   // ----- published for the Brain graph and the HUD -----------------------------------------------------
+  @attribute('Published for the Brain graph and the HUD')
   public navMode: number = 0
   public state: BotState = 'patrol'
+  @attribute('Published for the Brain graph and the HUD')
   public goalPoint: number[] = [0, 0, 0]
   /** Mirrors of the controller's blackboard, for the graph. */
+  @attribute('Published for the Brain graph and the HUD')
   public hasThreat: boolean = false
 
   private _brain: any = null

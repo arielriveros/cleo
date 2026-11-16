@@ -1,4 +1,4 @@
-import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node, find, child } from 'cleo'
+import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node, find, child, attribute } from 'cleo'
 
 /**
  * Duskwell -- a Ruin Guard: the knight of the Pixel Platformer set, gone dark. Attach to a walking
@@ -16,17 +16,25 @@ import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node, find, ch
  * the swing has it switched on.
  */
 export default class DuskGuard extends CharacterBody2DNode {
+  @attribute
   public maxHealth: number = 3
+  @attribute
   public health: number = 3
+  @attribute
   public contactDamage: number = 1
   /** Seconds between swings. */
+  @attribute
   public attackCooldown: number = 1.1
   /** A sword hit's push away, and up. */
+  @attribute
   public knockback: number = 7
+  @attribute
   public knockup: number = 4
   /** Seconds a hit staggers it. */
+  @attribute
   public hurtSeconds: number = 0.35
   /** Diamonds it drops. */
+  @attribute
   public reward: number = 2
 
   @child('Sprite')

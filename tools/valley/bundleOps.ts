@@ -48,7 +48,7 @@ let reflector: ((source: string) => any) | null = null
  * imported from another file in examples/scripts), base first. Reflecting the class alone would drop the
  * inherited ones, and `attach` would then trim every node's values for them.
  */
-function resolveVariables(file: string, seen = new Set<string>()): any[] {
+export function resolveVariables(file: string, seen = new Set<string>()): any[] {
   reflector ??= loadScriptReflector(ROOT)
   const source = fs.readFileSync(path.join(SCRIPTS, `${file}.ts`), 'utf8')
   const own = reflector!(source)

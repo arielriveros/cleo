@@ -1,4 +1,4 @@
-import { CameraRigNode, Game, Input, ModelNode, Node, onAction } from 'cleo'
+import { CameraRigNode, Game, Input, ModelNode, Node, onAction, attribute } from 'cleo'
 import type { Animator } from 'cleo'
 import FpsCombatantNode from '@/FPS/Scripts/FpsCombatant'
 import { WEAPONS, aimDirection, approach, clamp, combatantOf, findByVariable, findDescendant, lerp, manager, playCue } from '@/FPS/Scripts/FpsShared'
@@ -27,37 +27,55 @@ interface Slot { key: string, ammo: number, reserve: number, view: ModelNode | n
  * current spread. The view recoils: a kick that mostly recovers, and a little shake.
  */
 export default class FpsPlayerNode extends FpsCombatantNode {
+  @attribute
   public displayName: string = 'Player'
+  @attribute
   public team: string = 'blue'
   /** The weapons carried, in slot order (WEAPONS keys). */
+  @attribute
   public loadout: string[] = ['ak47', 'pistol', 'shotgun']
 
   // ----- movement --------------------------------------------------------------------------------------
+  @attribute('Movement')
   public crouchSpeedScale: number = 0.5
   /** Seconds the eye takes to drop or rise. */
+  @attribute('Movement')
   public crouchSmoothing: number = 0.09
+  @attribute('Movement')
   public eyeStand: number = 1.66
+  @attribute('Movement')
   public eyeCrouch: number = 1.05
 
   // ----- the view --------------------------------------------------------------------------------------
+  @attribute('View')
   public hipFov: number = 78
+  @attribute('View')
   public sprintFovBoost: number = 5
+  @attribute('View')
   public adsSeconds: number = 0.14
   /** Mouse sensitivity share while aimed (1: the same). */
+  @attribute('View')
   public adsSensitivity: number = 0.55
 
   // ----- health ----------------------------------------------------------------------------------------
+  @attribute('Health')
   public regenDelay: number = 5
+  @attribute('Health')
   public regenPerSecond: number = 16
 
   // ----- runtime, read by the HUD ----------------------------------------------------------------------
   public ads: number = 0
   /** Metres the viewmodel group rises while aimed with an aim clip: the clip's sights sit below the crosshair, where the shots go. */
+  @attribute('Aiming')
   public aimClipRaise: number = 0.028
   /** Depth of field while aiming: the aperture f-stop, the blur cap (px), the metres nearer than which nothing blurs, and the focus reach. */
+  @attribute('Aiming')
   public dofAperture: number = 2.0
+  @attribute('Aiming')
   public dofMaxBlur: number = 14
+  @attribute('Aiming')
   public dofNearCutoff: number = 1.2
+  @attribute('Aiming')
   public dofFarFocus: number = 60
   private _dofOn: boolean = false
   private _dofKey: string = ''
@@ -342,8 +360,10 @@ export default class FpsPlayerNode extends FpsCombatantNode {
   }
 
   /** The lens the viewmodels are drawn at (the camera's `viewmodelFov`), degrees. */
+  @attribute('Health')
   public viewmodelFov: number = 58
   /** How far in front of the camera the viewmodel reaches (its muzzle), metres: what a wall must leave room for. */
+  @attribute('Health')
   public viewmodelReach: number = 0.95
   private _vmDepth: number = 1
 

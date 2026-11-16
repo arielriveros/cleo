@@ -1,4 +1,4 @@
-import { AnimatedSpriteNode, Logger, Node, SaveGame, TriggerNode, save, child } from 'cleo'
+import { AnimatedSpriteNode, Logger, Node, SaveGame, TriggerNode, save, child, attribute } from 'cleo'
 
 /**
  * Duskwell -- a checkpoint: a lamp the player lights by walking past it. Attach to an Area 2D that sees the
@@ -9,8 +9,11 @@ import { AnimatedSpriteNode, Logger, Node, SaveGame, TriggerNode, save, child } 
  * player carries, the lamps lit, the pickups taken. The title screen's Continue loads it.
  */
 export default class DuskCheckpoint extends TriggerNode {
+  @attribute
   public litTint: number[] = [1, 1, 1]
+  @attribute
   public unlitTint: number[] = [0.35, 0.35, 0.45]
+  @attribute
   public healTo: number = 99
 
   /** Whether the lamp is lit: a loaded game keeps it lit. */

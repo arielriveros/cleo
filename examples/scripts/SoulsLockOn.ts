@@ -1,4 +1,4 @@
-import { CameraRigNode, Input, Node, dampTime, find, onAction } from 'cleo'
+import { CameraRigNode, Input, Node, dampTime, find, onAction, attribute } from 'cleo'
 import { angleDiff, planarDistance, yawTo } from '@/Core/Scripts/SoulsMath'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
@@ -29,33 +29,46 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  * Both blend over `lockBlendSeconds` — the rig itself does not damp its arm, so a snap would be a cut.
  */
 export default class SoulsLockOnNode extends CameraRigNode {
+  @attribute
   public lockRange: number = 20
+  @attribute
   public breakRange: number = 26
   /** Seconds the target may stay hidden behind geometry before the lock lets go. */
+  @attribute
   public losBreakSeconds: number = 1.5
   /** Seconds between two target switches, so one flick switches once. */
+  @attribute
   public switchCooldown: number = 0.35
   /** Right-stick deflection (scaled ×4 in the map) that counts as a flick. */
+  @attribute
   public stickFlick: number = 2.6
   /**
    * Mouse speed, in pixels per SECOND, that counts as a flick. A per-frame pixel threshold made switching
    * targets harder the higher the frame rate, since the same flick is spread over more frames.
    */
+  @attribute
   public mouseFlickPerSecond: number = 2700
   /** Pitch limits while locked (positive looks down). Keeps a tall boss from flipping the camera. */
+  @attribute
   public lockedPitchMin: number = -25
+  @attribute
   public lockedPitchMax: number = 35
+  @attribute
   public reticleName: string = 'LockReticle'
   /** When the target dies, the lock jumps to another enemy only if one is this close. */
+  @attribute
   public retargetRange: number = 10
   /** Boom length while locked: closer than the free camera, for a tighter view of the fight. */
+  @attribute
   public lockedArmLength: number = 2.3
   /**
    * Pivot offset while locked (rig space: +X is the rig's LEFT, +Y up) — negative X, so the camera sits
    * over the RIGHT shoulder and the target is framed past it.
    */
+  @attribute
   public lockedSocketOffset: [number, number, number] = [-0.6, 0.15, 0]
   /** Seconds the camera takes to move in on a lock, and back out on release. */
+  @attribute
   public lockBlendSeconds: number = 0.3
 
   /** The locked enemy (a SoulsEnemy root), or null. SoulsPlayer reads this. */

@@ -5,7 +5,7 @@ import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { Button, Hint, Select, cn } from '@cleo/app-kit/ui'
 import { formatTimecode } from '@cleo/app-kit/timeline'
 import PropertyEditor from '../nodeInspector/propertyEditors/PropertyEditor'
-import ScriptVariablesEditor from '../nodeInspector/scriptEditor/ScriptVariablesEditor'
+import ScriptAttributesEditor from '../nodeInspector/scriptEditor/ScriptAttributesEditor'
 import { isRootNode } from '../nodeInspector/useSelectedNode'
 import { SequenceIcon } from '../sceneInspector/nodeIcons'
 import { KEYING_ROOT_ATTR, namePathOf, useSequenceEditor, useSequenceRevision } from './SequenceEditorContext'
@@ -135,9 +135,9 @@ export default function SequenceProperties({ node }: { node: Node | null }) {
       {node && !isRootNode(node) && (
         <AssetDropLockContext.Provider value>
           <PropertyEditor key={`${node.id}:${revision}`} node={node} readOnly={node.isEditorOwned} />
-          {/* The script's fields (the Scripts panel, with its attach and detach, is not part of this mode). Never
+          {/* The script's attributes (the Behaviors panel, with its attach and detach, is not part of this mode). Never
               as a template override: what is changed here is keyed, then put back. */}
-          <ScriptVariablesEditor key={`script:${node.id}:${revision}`} node={node} />
+          <ScriptAttributesEditor key={`script:${node.id}:${revision}`} node={node} />
         </AssetDropLockContext.Provider>
       )}
     </div>

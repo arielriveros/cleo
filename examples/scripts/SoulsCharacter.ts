@@ -1,4 +1,4 @@
-import { CharacterNode, Logger, ModelNode, Node, Shape, moveWorldDirection, resolveSocketOwner, setMoveWorld, find } from 'cleo'
+import { CharacterNode, Logger, ModelNode, Node, Shape, moveWorldDirection, resolveSocketOwner, setMoveWorld, find, attribute } from 'cleo'
 import type { AnimationTriggerInfo, Animator, SocketName, TemplateName, TriggerName } from 'cleo'
 import { clamp } from '@/Core/Scripts/SoulsMath'
 import { bladeCapsule, disarmHitbox, ensureHurtbox, setHurtboxEnabled } from '@/Core/Scripts/SoulsHitbox'
@@ -34,33 +34,47 @@ import { bladeCapsule, disarmHitbox, ensureHurtbox, setHurtboxEnabled } from '@/
  * character, and goes when the character does (`_clearDroppedWeapons`, from the subclass's onDespawn).
  */
 export default class SoulsCharacterNode extends CharacterNode {
+  @attribute
   public displayName: string = 'Character'
   /** Which side attacks see this on: 'player' or 'enemy'. */
+  @attribute
   public team: string = 'enemy'
+  @attribute
   public maxHp: number = 100
+  @attribute
   public hp: number = 100
   /** Fraction of incoming damage ignored, 0..0.9. */
+  @attribute
   public defense: number = 0
   /** Collision-ish size, used by hit effects and lock-on height. */
+  @attribute
   public bodyRadius: number = 0.4
+  @attribute
   public bodyHeight: number = 1.8
 
   /** Weapon templates to spawn on start. The first is held. */
+  @attribute
   public weaponTemplates: TemplateName[] = []
   /** Socket on this character's skeleton the weapons attach to. */
+  @attribute
   public weaponSocket: SocketName = 'RightHand'
   /** Child group the weapons are spawned under (this node itself when there is none). */
+  @attribute
   public weaponsGroup: string = 'Weapons'
   /** The held weapon's display name, for the HUD. */
+  @attribute
   public weaponName: string = ''
   /** Let go of the held weapon on death, as a physics body (see dropWeapon). */
+  @attribute
   public dropWeaponOnDeath: boolean = false
   /** The dropped weapon's mass, kg. */
+  @attribute
   public droppedWeaponMass: number = 4
   /**
    * The steepest ground, in degrees, this character can walk UP. On anything steeper it can still move
    * across the slope or down it, but not climb (see limitClimb). The engine's own limit is 60°.
    */
+  @attribute
   public maxWalkSlope: number = 45
 
   // ----- one-shots -----------------------------------------------------------------------------------
@@ -71,7 +85,9 @@ export default class SoulsCharacterNode extends CharacterNode {
    * (`Animator.triggerInfo`) and whether it still plays (`Animator.activeTrigger`). These two take the
    * one-shot's layer back to rest from anything: with its blend-out, and at once.
    */
+  @attribute('One-shots')
   public stopTrigger: TriggerName = 'Stop'
+  @attribute('One-shots')
   public cutTrigger: TriggerName = 'Cut'
 
   // ----- wading ------------------------------------------------------------------------------------

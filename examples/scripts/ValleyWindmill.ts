@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 
 /**
  * Valley — turns a windmill's sails. Attach to the `Sails` node, whose origin is the hub and whose local
@@ -10,8 +10,10 @@ import { Node } from 'cleo'
  */
 export default class ValleyWindmillNode extends Node {
   /** Sail speed in degrees per second at the wind's usual strength; negative turns the other way. */
+  @attribute
   public degreesPerSecond: number = 24
   /** Turn faster in a stronger wind (the scene's Wind node), slower in a weaker one. */
+  @attribute
   public followWind: boolean = true
 
   onUpdate(delta: number) {

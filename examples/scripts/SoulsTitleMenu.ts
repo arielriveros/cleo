@@ -1,4 +1,4 @@
-import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode } from 'cleo'
+import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode, attribute } from 'cleo'
 
 /**
  * Hollow Keep — the title menu: Continue from the last bonfire, or start a new game. Attach to the `TitleMenu`
@@ -20,7 +20,9 @@ import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode } from 'c
  */
 export default class SoulsTitleMenuNode extends UIRootNode {
   /** The slot Continue loads: the one the bonfires save to (GameManager.saveSlot). */
+  @attribute
   public slot: string = 'auto'
+  @attribute
   public isOpen: boolean = false
 
   private _buttons: UIButtonNode[] = []

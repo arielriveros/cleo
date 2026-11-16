@@ -1,4 +1,4 @@
-import { Input, Logger, ModelNode, Node, moveWorldDirection, setMoveWorld, save, onAction } from 'cleo'
+import { Input, Logger, ModelNode, Node, moveWorldDirection, setMoveWorld, save, onAction, attribute } from 'cleo'
 import type { AnimationTriggerInfo, TemplateName, TriggerName } from 'cleo'
 import { clamp, num } from '@/Core/Scripts/SoulsMath'
 import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
@@ -59,139 +59,208 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  * travel (the roll, the Longsword's steps) hands it over through `consumeRootMotion`.
  */
 export default class SoulsPlayerNode extends SoulsCharacterNode {
+  @attribute
   public displayName: string = 'Player'
+  @attribute
   public team: string = 'player'
   /** The weapons the player starts with, by template. F swaps between them. */
+  @attribute
   public weaponTemplates: TemplateName[] = ['Longsword', 'Greatsword']
 
   // ----- stats (level-up spends souls on these four) — a save keeps them, and the souls ------------
   @save
+  @attribute('Stats')
   public vigor: number = 10
   @save
+  @attribute('Stats')
   public endurance: number = 10
   @save
+  @attribute('Stats')
   public strength: number = 10
   @save
+  @attribute('Stats')
   public dexterity: number = 10
   @save
+  @attribute('Stats')
   public souls: number = 0
 
   // ----- resources (runtime; the HUD reads them) --------------------------------------------------
   public hp: number = 400
   public maxHp: number = 400
+  @attribute('Resources')
   public bodyRadius: number = 0.3
   public stamina: number = 90
   public maxStamina: number = 90
   public estus: number = 3
   /** Estus Shards raise it for good. */
   @save
+  @attribute('Resources')
   public estusMax: number = 3
   /** HP restored per flask, spread over `estusHealSeconds`. */
+  @attribute('Resources')
   public estusHeal: number = 250
+  @attribute('Resources')
   public estusHealSeconds: number = 0.4
 
   // ----- stat curves (see hpForVigor and friends) -------------------------------------------------
   /** HP at Vigor 10. Each point to 30 adds `hpPerVigor`, then the curve flattens. */
+  @attribute('Stat curves')
   public baseHp: number = 400
+  @attribute('Stat curves')
   public hpPerVigor: number = 30
   /** Stamina at Endurance 10, plus `staminaPerEndurance` per point to 40. */
+  @attribute('Stat curves')
   public baseStamina: number = 90
+  @attribute('Stat curves')
   public staminaPerEndurance: number = 3
 
   // ----- movement -------------------------------------------------------------------------------
+  @attribute('Movement')
   public jogSpeed: number = 3.8
   /** Shown once on wading in: water slows you and stops rolls and sprints. */
+  @attribute('Movement')
   public waterNotice: string = "Can't roll or sprint in water"
+  @attribute('Movement')
   public sprintSpeed: number = 5.8
   /** Throttle while locked on: strafing is slower than running. */
+  @attribute('Movement')
   public lockedSpeedScale: number = 0.8
   /** Ramp while freely moving. Actions snap (0) so a roll starts at full speed. */
+  @attribute('Movement')
   public freeAcceleration: number = 24
   /** Degrees per second the body turns toward a locked target while standing. */
+  @attribute('Movement')
   public lockTurnSpeed: number = 540
 
   // ----- stamina --------------------------------------------------------------------------------
+  @attribute('Stamina')
   public staminaRegen: number = 45
+  @attribute('Stamina')
   public staminaRegenDelay: number = 0.6
+  @attribute('Stamina')
   public sprintCostPerSecond: number = 14
   /** After sprinting to empty, sprint stays locked until stamina recovers to this. */
+  @attribute('Stamina')
   public exhaustThreshold: number = 15
 
   // ----- roll / backstep --------------------------------------------------------------------------
+  @attribute('Roll / backstep')
   public rollCost: number = 20
+  @attribute('Roll / backstep')
   public rollSeconds: number = 0.7
+  @attribute('Roll / backstep')
   public rollInvulnStart: number = 0.06
+  @attribute('Roll / backstep')
   public rollInvulnEnd: number = 0.42
+  @attribute('Roll / backstep')
   public rollSpeed: number = 6.5
+  @attribute('Roll / backstep')
   public rollFastSeconds: number = 0.45
+  @attribute('Roll / backstep')
   public rollSlowSpeed: number = 2
   /**
    * Move by the roll's OWN travel (the Roll state extracts its clip's root travel) instead of the
    * rollSpeed curve above: the body covers exactly the ground the dive does, through its own collision,
    * for as long as the state lasts. The roll always faces the way it goes -- there is only a forward roll.
    */
+  @attribute('Roll / backstep')
   public rollRootMotion: boolean = true
   // ----- running turn (see _startRunTurn) --------------------------------------------------------
   /** Reversing at a run plays a planted 180° turn instead of spinning on the spot. Off: the plain turn. */
+  @attribute('Running turn')
   public runTurnEnabled: boolean = true
   /** Degrees between where the player is running and where the stick now points that count as reversing. */
+  @attribute('Running turn')
   public runTurnAngle: number = 130
   /** Running at least this fast (m/s); a walker just turns. */
+  @attribute('Running turn')
   public runTurnMinSpeed: number = 3
   /** Share of the turn spent braking to a stop before pushing off the other way. */
+  @attribute('Running turn')
   public runTurnPlant: number = 0.45
   /**
    * The animator parameters the turn holds on a straight-ahead run underneath its clip (see _pinRunPose):
    * the character's measured speed and direction, which would otherwise drop to Idle at the plant.
    */
+  @attribute('Running turn')
   public runTurnSpeedParam: string = 'Speed'
+  @attribute('Running turn')
   public runTurnDirectionParam: string = 'Direction'
   /** After the turn, the longest the speed parameter keeps following the body while the measured speed catches up. */
+  @attribute('Running turn')
   public runTurnReleaseSeconds: number = 0.3
+  @attribute('Running turn')
   public backstepCost: number = 12
+  @attribute('Running turn')
   public backstepSeconds: number = 0.45
+  @attribute('Running turn')
   public backstepInvulnEnd: number = 0.22
+  @attribute('Running turn')
   public backstepSpeed: number = 4
+  @attribute('Running turn')
   public backstepMoveSeconds: number = 0.25
   /** Hold Roll longer than this while moving and it becomes a sprint instead of a roll. */
+  @attribute('Running turn')
   public sprintHoldSeconds: number = 0.25
 
   // ----- input / reactions ------------------------------------------------------------------------
+  @attribute('Input / reactions')
   public inputBufferSeconds: number = 0.3
   /** A hit at or above this much damage is a heavy stagger with knockback; below, a flinch. */
+  @attribute('Input / reactions')
   public heavyHitThreshold: number = 150
   /** Real seconds of hit-stop when a hit lands on the player (the GameManager's), light and heavy. */
+  @attribute('Input / reactions')
   public hurtHitStop: number = 0.08
+  @attribute('Input / reactions')
   public heavyHurtHitStop: number = 0.14
+  @attribute('Input / reactions')
   public hitLightSeconds: number = 0.45
   /** A swing that meets a wall (a `blocksSwings` body) before any enemy bounces off it for this long. */
+  @attribute('Input / reactions')
   public recoilSeconds: number = 0.45
+  @attribute('Input / reactions')
   public hitHeavySeconds: number = 0.9
+  @attribute('Input / reactions')
   public knockbackSpeed: number = 4
+  @attribute('Input / reactions')
   public knockbackSeconds: number = 0.15
   /** Falling below this height is death. */
+  @attribute('Input / reactions')
   public killY: number = -15
 
   // ----- animator triggers: each enters a state of the Actions layer (the clips are the graph's) ------
+  @attribute('Animator triggers')
   public rollTrigger: TriggerName = 'Roll'
+  @attribute('Animator triggers')
   public backstepTrigger: TriggerName = 'Backstep'
   /** The running 180° turn, turning right and turning left (Left falls back to Right when it is missing). */
+  @attribute('Animator triggers')
   public runTurnRightTrigger: TriggerName = 'RunTurnRight'
+  @attribute('Animator triggers')
   public runTurnLeftTrigger: TriggerName = 'RunTurnLeft'
+  @attribute('Animator triggers')
   public drinkTrigger: TriggerName = 'Drink'
   /** Fallback seconds into the drink clip at which the heal starts when it has no `drink` event. */
+  @attribute('Animator triggers')
   public drinkTime: number = 0.85
+  @attribute('Animator triggers')
   public hitLightTrigger: TriggerName = 'HitLight'
+  @attribute('Animator triggers')
   public hitHeavyTrigger: TriggerName = 'HitHeavy'
   /** Played when a swing bounces off a wall. */
+  @attribute('Animator triggers')
   public recoilTrigger: TriggerName = 'Recoil'
   /**
    * A weapon swap: the layer sheathes the one in hand, then draws the next. The weapon changes on the
    * sheathe clip's `swap` event (or as the draw begins, when the clip has none).
    */
+  @attribute('Animator triggers')
   public swapTrigger: TriggerName = 'Swap'
   /** Sitting at a bonfire: a looping state, left on SoulsCharacter's `stopTrigger`. */
+  @attribute('Animator triggers')
   public restTrigger: TriggerName = 'Rest'
+  @attribute('Animator triggers')
   public fogWalkTrigger: TriggerName = 'FogWalk'
 
   // ----- the fight -----------------------------------------------------------------------------------
@@ -200,8 +269,10 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
    * nothing is locked). While `inCombat`, the animator's `InCombat` swaps the idle for the Longsword's
    * guard and keeps both hands on the hilt while moving.
    */
+  @attribute('Fight')
   public combatLinger: number = 5
   /** How often the engaged enemies are looked for, seconds. */
+  @attribute('Fight')
   public combatScanInterval: number = 0.25
 
   // ----- derived, read by the HUD and other scripts ------------------------------------------------

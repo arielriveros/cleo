@@ -1,4 +1,4 @@
-import { Node } from 'cleo'
+import { Node, attribute } from 'cleo'
 
 /**
  * Valley — a fire-and-forget effect: the pond's splashes. Attach to the root of an effect template. On
@@ -8,6 +8,7 @@ import { Node } from 'cleo'
  */
 export default class ValleyFxNode extends Node {
   /** Seconds before the effect removes itself: at least as long as its longest particle lives. */
+  @attribute
   public lifetime: number = 1.2
 
   private _age: number = 0
