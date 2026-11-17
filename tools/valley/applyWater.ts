@@ -21,13 +21,15 @@ if (!materials.some(m => m.id === MATERIAL_ID)) {
     materials.push({ id: MATERIAL_ID, name: 'Pond Water', material: new WaterMaterial(POND_WATER_LOOK).serialize(), textureIds: [], thumbnail: '' })
 }
 const material = materials.find(m => m.id === MATERIAL_ID)!
+// Every run refreshes the look from pondWater.mjs, so a tuned look reaches the shipped pond.
+material.material = new WaterMaterial(POND_WATER_LOOK).serialize()
 
 let moved = 0
 for (const scene of Object.values(bundle.scenes) as any[]) {
     const root = scene.scene ?? scene
     for (const n of nodes(root)) {
         if (n.type !== 'waterVolume' || n.name !== 'Pond Water Volume') continue
-        if (n.waterVolume.waterMaterialId === MATERIAL_ID && !n.waterVolume.surfaceNodeId) continue
+        if (n.waterVolume.waterMaterialId === MATERIAL_ID && !n.waterVolume.surfaceNodeId) { n.waterVolume.waterMaterial = material.material; continue }
         const v = n.waterVolume
         // The plane it pointed at is gone: the node draws its own surface now.
         const surfaceId = v.surfaceNodeId

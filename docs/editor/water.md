@@ -108,6 +108,10 @@ reflects the water back outside Snell's window.
 | **Rain rings** | How much rain from a Weather volume rings the surface. |
 | **Snow and ice** | How much snow from a Weather volume settles on still water, as slush and then ice. |
 | **Wind** | How much the scene's wind roughens the surface. |
+| **Scatter colour** | The colour light takes travelling through the water before it reaches you: subsurface scattering, what thin wave crests and the faces of waves glow with when the sun is behind them. Clear water scatters green-turquoise, silty water brown-green. |
+| **Subsurface** | How strongly light shines through the waves. 0: none; murky water barely scatters forward whatever this says. |
+| **Scatter focus** | How tightly the glow gathers round looking toward the sun: low spreads it wide, high keeps it to the backlit crests. |
+| **Scatter spread** | How far the waves' slopes bend the light through them, spreading the glow over their faces rather than only where the sun is exactly behind them. |
 | **Underwater colour** | The colour of the water seen from inside it. |
 | **Underwater fog** | How thick the water is to see through from inside it, per metre. |
 

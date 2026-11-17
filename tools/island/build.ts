@@ -358,8 +358,8 @@ const addWaterMaterial = (key: string, name: string, material: any) => {
   if (!materials.some(m => m.id === mid)) materials.push({ id: mid, name, material, textureIds: [], thumbnail: '' })
   return mid
 }
-const OCEAN_MAT = addWaterMaterial('ocean', 'Island Ocean', look('openOcean'))
-const LAKE_MAT = addWaterMaterial('lakes', 'Island Lakes', look('clearLake', { turbidity: 0.2, clarity: 6, detailStrength: 0.45 }))
+const OCEAN_MAT = addWaterMaterial('ocean', 'Island Ocean', look('openOcean', { subsurface: 1.4 }))
+const LAKE_MAT = addWaterMaterial('lakes', 'Island Lakes', look('clearLake', { turbidity: 0.2, clarity: 6, detailStrength: 0.45, subsurface: 0.7 }))
 const lakesRivers = [...lakeShapes, ...riverShapes]
 // Flow-bake the lakes and rivers over the island's ground, as the editor's Bake flow button does.
 const resolved = resolveWaterShapes(lakesRivers, { position: [0, 0, 0], scale: [1, 1, 1] })

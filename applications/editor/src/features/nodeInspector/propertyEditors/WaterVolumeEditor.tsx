@@ -415,6 +415,10 @@ function WaterSurface({ node, changed }: { node: WaterVolumeNode; changed: () =>
         {slider('rainRipples', 'Rain rings', 'How much rain from a Weather volume rings the surface.', 0, 2, 0.05)}
         {slider('snowCover', 'Snow and ice', 'How much snow settles on still water as slush, then ice.', 0, 1, 0.05)}
         {slider('windResponse', 'Wind', 'How much the scene wind roughens the surface.', 0, 2, 0.05)}
+        {color('scatterColor', 'Scatter colour', 'The colour light takes travelling through the water: what thin wave crests glow with against the sun.')}
+        {slider('subsurface', 'Subsurface', 'How strongly light shines through the waves (subsurface scattering). 0: none.', 0, 2, 0.05)}
+        {slider('subsurfaceSharpness', 'Scatter focus', 'How tightly the glow gathers round looking toward the sun.', 1, 16, 0.5)}
+        {slider('subsurfaceDistortion', 'Scatter spread', 'How far the waves\u2019 slopes bend the light through them, spreading the glow over their faces.', 0, 1, 0.05)}
         {color('underwaterColor', 'Underwater colour', 'The colour of the water seen from inside it.')}
         {slider('underwaterFog', 'Underwater fog', 'How thick the water is to see through from inside it, per metre.', 0, 2, 0.01)}
       </PropertyTable>

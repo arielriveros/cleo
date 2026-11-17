@@ -279,3 +279,24 @@ describe('the water detail texture', () => {
         expect(jump).toBeLessThan(60);
     });
 });
+
+describe('subsurface scattering on the Water material', () => {
+    it('fills, clamps and round-trips the scatter fields', async () => {
+        const { normaliseWaterLook, DEFAULT_WATER_LOOK, WATER_LOOK_PRESETS } = await import('../src/water/waterLook');
+        const { Material, WaterMaterial } = await import('../src/graphics/material');
+        const old = normaliseWaterLook({ turbidity: 0.5 });   // a look saved before the fields existed
+        expect(old.scatterColor).toEqual(DEFAULT_WATER_LOOK.scatterColor);
+        expect(old.subsurface).toBe(DEFAULT_WATER_LOOK.subsurface);
+        const wild = normaliseWaterLook({ subsurface: 9, subsurfaceSharpness: 0, subsurfaceDistortion: -1, scatterColor: [1, 'x', 0.2] });
+        expect([wild.subsurface, wild.subsurfaceSharpness, wild.subsurfaceDistortion]).toEqual([2, 1, 0]);
+        expect(wild.scatterColor).toEqual([1, DEFAULT_WATER_LOOK.scatterColor[1], 0.2]);
+        const m = new WaterMaterial({ subsurface: 1.4, scatterColor: [0.1, 0.7, 0.6], subsurfaceSharpness: 7, subsurfaceDistortion: 0.2 });
+        const back = Material.parse(JSON.parse(JSON.stringify(m.serialize()))) as InstanceType<typeof WaterMaterial>;
+        expect([back.look.subsurface, back.look.subsurfaceSharpness, back.look.subsurfaceDistortion]).toEqual([1.4, 7, 0.2]);
+        expect(back.look.scatterColor).toEqual([0.1, 0.7, 0.6]);
+        // Murky water barely scatters forward; clear tropical water the most.
+        const of = (id: string) => normaliseWaterLook(WATER_LOOK_PRESETS.find(p => p.id === id)!.options).subsurface;
+        expect(of('murkySwamp')).toBeLessThan(of('clearLake'));
+        expect(of('tropical')).toBeGreaterThan(of('clearLake'));
+    });
+});

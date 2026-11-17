@@ -75,6 +75,8 @@ struct WaterFragmentUniforms {
     u_fInfoSize: vec4<f32>,
     u_fOcean: vec4<f32>,
     u_misc: vec4<f32>,            // pre-exposure, weather clock, 1 = camera under the surface
+    u_sssColor: vec4<f32>,        // subsurface scatter colour (rgb), strength
+    u_sssParams: vec4<f32>,       // sharpness (power), distortion
 };
 @group(1) @binding(1) var<uniform> u_wf: WaterFragmentUniforms;
 
@@ -533,13 +535,26 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     let a = max(roughness * roughness, 0.002);
     let spec = u_wf.u_sunColor.rgb * pre * ggx(max(dot(N, H), 0.0), a) * F * NoL * 0.25 / max(NoV, 0.05);
 
-    // Light through the thin tops of the waves (subsurface scattering): seen against the sun, a crest
-    // glows the water's shallow colour. Strongest looking toward the sun, on what stands above the rest
-    // level, and in clear water.
-    let crestHeight = clamp((in.worldPos.y - surface) * 0.8 + small.w * 0.35, 0.0, 1.0);
-    let back = pow(clamp(dot(V, -L) * 0.5 + 0.5, 0.0, 1.0), 4.0);
-    let sss = u_wf.u_shallowColor.rgb * u_wf.u_sunColor.rgb * pre * back * crestHeight * 0.35
-            * (1.0 - turbidity * 0.6) * select(0.0, 1.0, front);
+    // Subsurface scattering: light that entered the water through one face of a wave and leaves through
+    // the face we see, tinted by the water on the way (the Frostbite / Barre-Brisebois translucency
+    // approximation). The light's path is bent by the surface normal (`distortion`), so the glow spreads
+    // over the faces of the waves rather than only where the sun is exactly behind them, and gathered
+    // round the backlit direction by `sharpness`. Thin water passes most: the crests standing above the
+    // rest level and the small waves' tops, attenuated by the water's own absorption through them. Under
+    // it all, a faint scattering of the sky's light, strongest looking shallowly into clear water.
+    let sssStrength = u_wf.u_sssColor.w;
+    var sss = vec3<f32>(0.0);
+    if (sssStrength > 0.0 && front) {
+        let Ls = normalize(L + N * u_wf.u_sssParams.y);
+        let back = pow(clamp(dot(V, -Ls), 0.0, 1.0), max(u_wf.u_sssParams.x, 1.0));
+        let crest = clamp((in.worldPos.y - surface) * 0.9 + small.w * 0.3 + in.rest.z * 0.25, 0.0, 1.0);
+        let path = mix(2.0, 0.25, crest);   // metres of water the light crosses: less through a thin crest
+        let through = exp(-u_wf.u_absorption.rgb * (1.0 + turbidity * 3.0) * path);
+        let forward = 1.0 - turbidity * 0.7;   // silt scatters it every way instead of on through
+        let sunLit = u_wf.u_sunColor.rgb * back * (0.25 + 0.75 * crest) * through * forward;
+        let skyLit = u_wf.u_ambient.rgb * 0.15 * (1.0 - turbidity * 0.5) * (1.0 - NoV);
+        sss = u_wf.u_sssColor.rgb * (sunLit + skyLit) * sssStrength * pre;
+    }
 
     var color = mix(under + sss, reflected, F) + spec;
 

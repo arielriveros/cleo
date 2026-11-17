@@ -48,6 +48,17 @@ export interface WaterLook {
     snowCover: number;
     /** 0..2: how much the wind roughens the surface. */
     windResponse: number;
+    /**
+     * Linear RGB of light that has travelled THROUGH the water before reaching the eye (subsurface
+     * scattering): what thin wave crests glow with against the sun. Clear water scatters green-turquoise.
+     */
+    scatterColor: [number, number, number];
+    /** 0..2: how strong that subsurface glow is (0 = none). */
+    subsurface: number;
+    /** 1..16: how tightly the glow gathers round looking toward the sun. */
+    subsurfaceSharpness: number;
+    /** 0..1: how far the surface's slope bends the light through it, spreading the glow over wave faces. */
+    subsurfaceDistortion: number;
     /** Linear RGB of the fog seen from underwater. */
     underwaterColor: [number, number, number];
     /** Per metre: how thick that fog is. */
@@ -76,6 +87,10 @@ export const DEFAULT_WATER_LOOK: WaterLook = {
     rainRipples: 1,
     snowCover: 1,
     windResponse: 1,
+    scatterColor: [0.1, 0.55, 0.45],
+    subsurface: 1,
+    subsurfaceSharpness: 5,
+    subsurfaceDistortion: 0.4,
     underwaterColor: [0.03, 0.14, 0.16],
     underwaterFog: 0.12,
 };
@@ -110,6 +125,10 @@ export function normaliseWaterLook(v: any): WaterLook {
         rainRipples: pos(v?.rainRipples, d.rainRipples, 2),
         snowCover: unit(v?.snowCover, d.snowCover),
         windResponse: pos(v?.windResponse, d.windResponse, 2),
+        scatterColor: rgb(v?.scatterColor, d.scatterColor),
+        subsurface: pos(v?.subsurface, d.subsurface, 2),
+        subsurfaceSharpness: Math.max(1, pos(v?.subsurfaceSharpness, d.subsurfaceSharpness, 16)),
+        subsurfaceDistortion: unit(v?.subsurfaceDistortion, d.subsurfaceDistortion),
         underwaterColor: rgb(v?.underwaterColor, d.underwaterColor),
         underwaterFog: pos(v?.underwaterFog, d.underwaterFog, 5),
     };
@@ -121,14 +140,19 @@ export type WaterLookPreset = Preset<Partial<WaterLook>>;
 export const WATER_LOOK_PRESETS: WaterLookPreset[] = definePresets<Partial<WaterLook>>({}, [
     ['clearLake', 'Clear Lake', 'Clean fresh water: you see the bed several metres down, green-blue in the deep.', {}],
     ['tropical', 'Tropical Lagoon', 'Very clear turquoise water over pale sand, bright caustics.',
-        { shallowColor: [0.12, 0.55, 0.52], deepColor: [0.0, 0.12, 0.22], absorption: [0.35, 0.05, 0.03], turbidity: 0.05, clarity: 20, caustics: 1.6 }],
+        { shallowColor: [0.12, 0.55, 0.52], deepColor: [0.0, 0.12, 0.22], absorption: [0.35, 0.05, 0.03], turbidity: 0.05, clarity: 20, caustics: 1.6,
+          scatterColor: [0.08, 0.7, 0.62], subsurface: 1.4, subsurfaceSharpness: 4 }],
     ['alpineRiver', 'Alpine River', 'Cold glacier-fed water: milky blue-green, lots of foam where it runs fast.',
-        { shallowColor: [0.25, 0.45, 0.45], deepColor: [0.04, 0.14, 0.16], turbidity: 0.4, clarity: 3, flowFoam: 0.9, roughness: 0.1, causticsScale: 0.9 }],
+        { shallowColor: [0.25, 0.45, 0.45], deepColor: [0.04, 0.14, 0.16], turbidity: 0.4, clarity: 3, flowFoam: 0.9, roughness: 0.1, causticsScale: 0.9,
+          scatterColor: [0.3, 0.55, 0.5], subsurface: 0.8, subsurfaceDistortion: 0.6 }],
     ['murkySwamp', 'Murky Swamp', 'Brown, still, silted water: the bed vanishes a hand below the surface.',
         { shallowColor: [0.12, 0.10, 0.04], deepColor: [0.03, 0.03, 0.01], absorption: [0.9, 0.8, 0.9], turbidity: 0.9, clarity: 0.4,
-          caustics: 0.1, reflectivity: 0.03, roughness: 0.12, shoreFoam: 0.2, underwaterColor: [0.05, 0.05, 0.02], underwaterFog: 1.2 }],
+          caustics: 0.1, reflectivity: 0.03, roughness: 0.12, shoreFoam: 0.2, underwaterColor: [0.05, 0.05, 0.02], underwaterFog: 1.2,
+          scatterColor: [0.2, 0.22, 0.08], subsurface: 0.15 }],
     ['openOcean', 'Open Ocean', 'Deep blue sea: dark far out, whitecaps on the crests, surf on the shore.',
-        { shallowColor: [0.05, 0.25, 0.32], deepColor: [0.0, 0.03, 0.08], absorption: [0.5, 0.12, 0.07], clarity: 12, crestFoam: 0.8, shoreFoam: 3, roughness: 0.08 }],
+        { shallowColor: [0.05, 0.25, 0.32], deepColor: [0.0, 0.03, 0.08], absorption: [0.5, 0.12, 0.07], clarity: 12, crestFoam: 0.8, shoreFoam: 3, roughness: 0.08,
+          scatterColor: [0.05, 0.42, 0.42], subsurface: 1.3, subsurfaceSharpness: 6, subsurfaceDistortion: 0.35 }],
     ['pool', 'Swimming Pool', 'Chlorinated, perfectly clear, pale blue: the tiles show sharp at the bottom.',
-        { shallowColor: [0.3, 0.7, 0.8], deepColor: [0.05, 0.3, 0.5], absorption: [0.25, 0.05, 0.03], turbidity: 0, clarity: 40, caustics: 1.8, causticsScale: 0.8, shoreFoam: 0, roughness: 0.03 }],
+        { shallowColor: [0.3, 0.7, 0.8], deepColor: [0.05, 0.3, 0.5], absorption: [0.25, 0.05, 0.03], turbidity: 0, clarity: 40, caustics: 1.8, causticsScale: 0.8, shoreFoam: 0, roughness: 0.03,
+          scatterColor: [0.35, 0.75, 0.85], subsurface: 0.9 }],
 ]);

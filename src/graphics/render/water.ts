@@ -235,6 +235,8 @@ export class WaterPasses {
         sm.setUniform('u_surfaceParams', [look.reflectivity, look.screenReflections, look.refraction, look.detailStrength]);
         sm.setUniform('u_detailParams', [look.detailScale, look.flowStrength, look.rainRipples, look.snowCover]);
         sm.setUniform('u_underwater', [...look.underwaterColor, look.underwaterFog]);
+        sm.setUniform('u_sssColor', [...look.scatterColor, look.subsurface]);
+        sm.setUniform('u_sssParams', [look.subsurfaceSharpness, look.subsurfaceDistortion, 0, 0]);
 
         // The wind over the water, from the frame's wind field.
         const field = this._sys.wind.windField;

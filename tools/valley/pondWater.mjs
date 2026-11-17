@@ -10,4 +10,6 @@ export const POND_WATER_LOOK = {
     shoreFoam: 0.3,
     crestFoam: 0.2,
     caustics: 0.8,
+    scatterColor: [0.12, 0.42, 0.3],
+    subsurface: 0.6,
 }
