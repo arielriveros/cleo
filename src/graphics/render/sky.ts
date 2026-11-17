@@ -311,6 +311,12 @@ export class SkyPasses {
         });
         bake.face += faces.length;
         if (bake.face < 6) return;
+        // The first bake runs in the frame the scene loads, and on WebGPU that bake has been seen to land
+        // as nothing at all (every face and mip read back zero, though the same bake a frame later is
+        // right). A sky that never moves never asks again, so a still scene reflected a black sky for the
+        // whole session: water turned to dark paint, every glossy surface lost its sky. One more bake an
+        // interval later, into the back cube, settles it whatever the first frame did.
+        if (fresh) this._skyReflectionDirty = true;
         this._skyReflectionFront = bake.cube;
         this._skyReflectionBake = null;
     }
