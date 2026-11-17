@@ -116,20 +116,37 @@ water is deep.
 
 ## Flow bake
 
-A simulation of the water itself: **Bake flow** runs shallow water over the body and the landscape
-under it until it settles, and the surface then draws what it found: currents that bend round the
-banks and swirl behind a bend, water piling up and speeding over a drop, foam where it tumbles. It takes
-a few seconds, the editor keeps drawing meanwhile, and **Cancel** stops it. Without a bake the surface
-draws the analytic flow along each river. Floating bodies ride the baked water too: its surface and its
-currents carry them. The bake is saved with the project and published with the game.
+A simulation of the water itself: **Bake flow** runs the shallow-water equations over the water, the
+landscape under it and the static colliders standing in it until the water settles, and the surface then
+draws what it found: currents that bend round the banks and round a rock, wakes and eddies behind it, water
+speeding over a shallow bar and piling up before a narrows, foam where it tumbles. Floating bodies ride the
+baked water too: its surface and its currents carry them. The bake runs in the background while the editor
+keeps drawing; **Cancel** stops it. Without a bake the surface draws the analytic flow along each river. The
+bake is saved with the project and published with the game.
 
-A river's first metres feed it, and the water it flows into keeps its level and takes what the river
-brings. Moving or editing the body, or the water it joins, makes the bake stale, and the analytic flow
-draws again until the next bake; carving or sculpting the landscape does not, so bake again after it.
+What it simulates:
+
+- **The ground decides the banks.** The water may run a little past the outline you drew (a bank's width,
+  or 4 m) where the ground is lower, never further: a river laid a little off its valley's floor still
+  follows the valley.
+- **Static colliders are obstacles.** A Collider with no mass standing out of the water is a wall the water
+  goes round; one under the surface raises the bed, and the water speeds over it. Colliders with mass (what
+  floats or falls) are not part of the bake.
+- **A river brings its own water.** Its first metres are fed the water its first point carries (width ×
+  depth × flow speed); after that the slope and the bed's roughness decide how fast and deep it runs, as a
+  real river's do. Where it runs into a lake or the sea it hands the water over; a river that runs into
+  nothing drains at its end.
+- **A lake takes what its rivers bring** and loses it to the rivers that drain it, holding its level.
+
+One press bakes the whole group: everything joined to this water through **Flows from** and **Flows into**,
+upstream first, so a lake is baked after the rivers that feed it. Moving or editing the water, the water it
+joins, the landscape under it or a static collider in it makes the bake stale, and the analytic flow draws
+again until the next bake.
 
 | Field | What it does |
 |---|---|
-| **Bake resolution** | Cells along the longest side of the water: finer catches narrower channels and takes longer. |
+| **Bake resolution** | Cells along the longest side of the water: finer catches narrower channels and smaller rocks, and takes longer. |
+| **Bed roughness** | Manning's roughness of the bed: 0.01 smooth concrete, 0.03 a natural channel, 0.1 a weedy, bouldery one. The rougher, the slower and deeper the water runs. |
 
 ## Waves
 

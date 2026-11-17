@@ -22,7 +22,12 @@ import { WaterMaterial } from '../../src/graphics/material'
 import { WATER_LOOK_PRESETS } from '../../src/water/waterLook'
 import { Scene } from '../../src/core/scene/scene'
 import { WaterVolumeNode } from '../../src/core/scene/nodes/waterVolumeNode'
-import { bakeShallowWater } from '../../src/water/bake/shallowWater'
+import { bakeWater } from '../../src/water/bake/shallowWater'
+import { bakeReach, prepareNodeBake, waterBakeGroup } from '../../src/water/bake/bakeNode'
+import { heightsRegionKey } from '../../src/water/ground'
+import { Node } from '../../src/core/scene/nodes/node'
+import { parseNodeJson } from '../../src/core/scene/nodes/parseNodeJson'
+import { mat4, quat, vec3 } from 'gl-matrix'
 import { encodeWaterBake } from '../../src/water/bake/waterBakeFormat'
 import { seededRandom } from '../../src/core/math'
 
@@ -374,17 +379,43 @@ const LAKE_MAT = addWaterMaterial('lakes', 'Island Lakes', look('clearLake', { t
 const oceanMatAsset = materials.find(m => m.id === OCEAN_MAT), lakeMatAsset = materials.find(m => m.id === LAKE_MAT)
 const ocean = place(new WaterVolumeNode('Ocean', { waterType: 'ocean', depth: 200 }, SEA_ID), [0, SEA, 0])
 
-// Flow-bake every river over the island's ground, as the editor's Bake flow button does: into the water it
-// joins, which keeps its level and takes what the river brings.
+// Flow-bake the rivers and the lakes they run into, as the editor's Bake flow button does (upstream first),
+// over the island's ground and round the static colliders the scene has. The editor checks each bake against
+// the scene it opens, so the scratch scene gets the same colliders, and each bake is signed with the key of
+// the saved landscape heights under it (water/ground.ts heightsRegionKey), read here off what is written.
+const colliderJson = (function* walk(n: any, parent: mat4): Generator<{ json: any; parent: mat4 }> {
+  const q = Array.isArray(n.quaternion) ? n.quaternion as quat : quat.fromEuler(quat.create(), n.rotation?.[0] ?? 0, n.rotation?.[1] ?? 0, n.rotation?.[2] ?? 0)
+  const local = mat4.fromRotationTranslationScale(mat4.create(), q, (n.position ?? [0, 0, 0]) as vec3, (n.scale ?? [1, 1, 1]) as vec3)
+  const world = mat4.multiply(mat4.create(), parent, local)
+  if (n.type === 'collider') yield { json: n, parent }
+  for (const c of n.children ?? []) yield* walk(c, world)
+})(root, mat4.create())
+for (const { json, parent } of colliderJson) {
+  // A holder carrying the collider's parent transform, so the collider lands where the editor will put it.
+  const holder = new Node('holder')
+  holder.setPosition([...mat4.getTranslation(vec3.create(), parent)] as [number, number, number])
+  holder.setQuaternion([...mat4.getRotation(quat.create(), parent)] as any)
+  holder.setScale([...mat4.getScaling(vec3.create(), parent)] as [number, number, number])
+  parseNodeJson(holder, JSON.parse(JSON.stringify({ ...json, children: [] })))
+  waterScene.addNode(holder)
+  holder.updateTransforms()
+}
+const landPos: number[] = landscape.position ?? [0, 0, 0]
+const groundKeyOf = (n: WaterVolumeNode) => {
+  const reach = bakeReach(n)
+  const key = reach ? heightsRegionKey(u16, hMin, hMax, RES, SIZE, landPos[0], landPos[2], reach) : ''
+  return key ? `${landPos[1]}:${key}` : ''
+}
 const bakes: Record<string, string> = {}
-for (const river of riverNodes) {
-  const r = river.resolved()
-  if (!r) continue
-  const info = bakeShallowWater([r], heightAt, { maxRes: 256, duration: 40, handOver: river.handOver() })
-  const bakeId = id(`water-bake:${river.id}`)
-  bundle.giBakes = [...(bundle.giBakes ?? []).filter((g: any) => g.id !== bakeId), { id: bakeId, bytes: encodeWaterBake(info, river.bakeSignature()).buffer }]
-  bakes[river.id] = bakeId
-  log(`${river.name} baked: ${info.nx} x ${info.nz} cells`)
+const toBake = new Set<WaterVolumeNode>()
+for (const river of riverNodes) for (const n of waterBakeGroup(river)) toBake.add(n)
+for (const n of toBake) {
+  // The scratch scene has no landscape node: the island's own ground is the bake's ground.
+  const info = bakeWater(prepareNodeBake(n, { maxRes: 256, ground: heightAt }))
+  const bakeId = id(`water-bake:${n.id}`)
+  bundle.giBakes = [...(bundle.giBakes ?? []).filter((g: any) => g.id !== bakeId), { id: bakeId, bytes: encodeWaterBake(info, n.bakeSignature(groundKeyOf(n))).buffer }]
+  bakes[n.id] = bakeId
+  log(`${n.name} baked: ${info.nx} x ${info.nz} cells`)
 }
 
 const LIQUID = {
@@ -405,7 +436,7 @@ const waterGroup = {
       density: 1025, windSpeed: 7, waveDirection: 25, choppiness: 0.55, shoreFade: 10, followWind: true,
       waterMaterialId: OCEAN_MAT, waterMaterial: oceanMatAsset.material,
     }),
-    ...await Promise.all(lakeNodes.map(n => waterJson(n, LAKE_WATER))),
+    ...await Promise.all(lakeNodes.map(n => waterJson(n, { ...LAKE_WATER, ...(bakes[n.id] ? { bakeId: bakes[n.id] } : {}) }))),
     ...await Promise.all(riverNodes.map(n => waterJson(n, { ...LAKE_WATER, ...(bakes[n.id] ? { bakeId: bakes[n.id] } : {}) }))),
   ],
 }

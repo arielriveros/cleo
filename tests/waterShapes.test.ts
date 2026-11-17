@@ -290,7 +290,7 @@ describe('the shallow-water bake', () => {
         expect(mid.v).toBeGreaterThan(0.05);          // downstream is +z
         expect(Math.abs(mid.u)).toBeLessThan(mid.v);
         expect(at(0, -10).surface).toBeGreaterThan(at(0, 10).surface);
-        expect(at(8, 32).wet).toBe(1);                // the lake kept its water
+        expect(at(8, 32).wet).toBe(0);                // the lake's own node draws the lake (handed over)
         expect(ms).toBeLessThan(20000);
         const bytes = encodeWaterBake(info, 'sig');
         const back = decodeWaterBake(bytes)!;

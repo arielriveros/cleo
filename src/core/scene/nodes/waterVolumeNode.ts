@@ -13,6 +13,7 @@ import type { BuoyancyVolume } from "../../../physics/buoyancy";
 import { buoyancyVolumeFromSpec, waterSpecColumn, type WaterFlowGrid, type WaterShoreGrid, type WaterSpec } from "../../../physics/waterSurface";
 import { buildOceanShoreInfo, type WaterInfo } from "../../../water/waterInfo";
 import { sceneGround } from "../../../water/ground";
+import { waterBakeContext } from "../../../water/bake/bakeNode";
 import { GiBakeRegistry } from "../../../graphics/render/gi/giBakeRegistry";
 import { decodeWaterBake } from "../../../water/bake/waterBakeFormat";
 import {
@@ -76,6 +77,11 @@ export interface WaterVolumeOptions {
     waterMaterialId?: string | null;
     /** The baked shallow-water flow (water/bake/), by id in the bake registry; null = analytic flow. */
     bakeId?: string | null;
+    /**
+     * Manning's roughness of the bed the bake runs the water over (0.01 smooth concrete, 0.03 a natural
+     * channel, 0.1 a weedy, bouldery one): the rougher, the slower and deeper the water runs.
+     */
+    bedRoughness?: number;
     /** Whether character bodies are buoyed too. Off: a character capsule is mostly air and would launch. */
     affectCharacters?: boolean;
     /**
@@ -141,6 +147,7 @@ export class WaterVolumeNode extends Node {
     private _waterMaterial: WaterMaterial | null;
     private _waterMaterialId: string | null;
     private _bakeId: string | null;
+    private _bedRoughness: number;
     private _affectCharacters: boolean;
     private _surfaceNodeId: string | null;
     private _splashTemplate: string;
@@ -184,6 +191,7 @@ export class WaterVolumeNode extends Node {
         this._waterMaterial = WaterVolumeNode._parseMaterial(options.waterMaterial);
         this._waterMaterialId = typeof options.waterMaterialId === 'string' && options.waterMaterialId ? options.waterMaterialId : null;
         this._bakeId = typeof options.bakeId === 'string' && options.bakeId ? options.bakeId : null;
+        this._bedRoughness = Math.min(0.15, Math.max(0.005, finiteOr(options.bedRoughness, 0.03)));
         this._affectCharacters = !!options.affectCharacters;
         this._surfaceNodeId = typeof options.surfaceNodeId === 'string' && options.surfaceNodeId ? options.surfaceNodeId : null;
         this._splashTemplate = typeof options.splashTemplate === 'string' ? options.splashTemplate : '';
@@ -315,18 +323,34 @@ export class WaterVolumeNode extends Node {
     /** The bake drawing the surface's flow, or null for the analytic flow. */
     public get bakeId(): string | null { return this._bakeId; }
     public set bakeId(v: string | null) { this._bakeId = v || null; this._notifyChange('component', 'bakeId'); }
+    public get bedRoughness(): number { return this._bedRoughness; }
+    public set bedRoughness(v: number) {
+        this._bedRoughness = Math.min(0.15, Math.max(0.005, finiteOr(v, this._bedRoughness)));
+        this._signature = null;
+        this._notifyChange('component', 'bedRoughness');
+    }
 
     /**
-     * What a bake of this water depends on: the body, where the node puts it, and the water it joins. A bake
+     * What a bake of this water depends on: the body, where the node puts it, the water it joins, the ground
+     * under it, the static obstacles in it and the rivers running into it (water/bake/bakeNode.ts). A bake
      * whose signature no longer matches is STALE, and the surface falls back to the analytic flow until it is
      * baked again.
      */
-    public bakeSignature(): string {
+    public bakeSignature(groundKey?: string): string {
+        // The scene around it (ground, obstacles, the rivers feeding it) is walked at most twice a second;
+        // its own body and what it joins are checked every time. A tool with no landscape node gives the
+        // ground's key itself (water/ground.ts heightsRegionKey).
+        const key = this.resolveKey();
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        if (groundKey === undefined && this._signature && this._signature.key === key && now - this._signature.at < 500) return this._signature.value;
         const m = this.worldTransform;
         const r = (v: number) => Math.round(v * 1000) / 1000;
         const joined = this.handOver().map(t => [t.id, t.type, r(t.level), t.min.map(r), t.max.map(r)]);
-        return JSON.stringify([this._water, [m[12], m[13], m[14], Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10])].map(r), joined]);
+        const value = JSON.stringify([this._water, [m[12], m[13], m[14], Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10])].map(r), joined, this._bedRoughness, waterBakeContext(this, groundKey)]);
+        if (groundKey === undefined) this._signature = { key, at: now, value };
+        return value;
     }
+    private _signature: { key: string; at: number; value: string } | null = null;
 
     private static _parseMaterial(json: any): WaterMaterial | null {
         if (!json) return null;
@@ -722,6 +746,7 @@ export class WaterVolumeNode extends Node {
                 ...(this._waterMaterial ? { waterMaterial: this._waterMaterial.serialize() } : {}),
                 ...(this._waterMaterialId ? { waterMaterialId: this._waterMaterialId } : {}),
                 ...(this._bakeId ? { bakeId: this._bakeId } : {}),
+                ...(this._bedRoughness !== 0.03 ? { bedRoughness: this._bedRoughness } : {}),
                 affectCharacters: this._affectCharacters, surfaceNodeId: this._surfaceNodeId,
                 splashTemplate: this._splashTemplate, wadeSplashTemplate: this._wadeSplashTemplate, enabled: this._enabled,
             },

@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import {
   ModelNode, WaterVolumeNode, WATER_VOLUME_PRESETS, WATER_BODY_TYPES, normaliseWaterPoint, minWaterPoints, carveWater,
-  WaterMaterial, WATER_LOOK_PRESETS, DEFAULT_WATER_LOOK, ShallowWaterBake, sceneGround, encodeWaterBake, decodeWaterBake,
-  newWaterBakeId, GiBakeRegistry, Logger, type LandscapeNode, type WaterLook, type WaterLookPreset,
+  WaterMaterial, WATER_LOOK_PRESETS, DEFAULT_WATER_LOOK, encodeWaterBake, decodeWaterBake,
+  newWaterBakeId, GiBakeRegistry, Logger, prepareNodeBake, waterBakeGroup, bakeable, type LandscapeNode, type WaterLook, type WaterLookPreset,
   type WaterVolumePreset, type WaterBody, type WaterBodyType, type WaterPoint,
 } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
@@ -17,6 +17,7 @@ import MaterialPicker, { liveMaterial } from '../../terrainMaterials/MaterialPic
 import { buildMaterialAsset } from '../../../utils/materials'
 import { saveGiBake } from '../../../utils/giBakeStore'
 import { WaterVolumeIcon } from '../sectionIcons'
+import { runWaterBake } from '../../../workers/waterBakeClient'
 import {
   WATER_SHAPES_EDITED, setWaterShapeSelection, useWaterShapeSelection,
 } from '../../gizmo/waterSelection'
@@ -301,64 +302,88 @@ function WaterSurface({ node, changed }: { node: WaterVolumeNode; changed: () =>
   )
 }
 
-const BAKE_RESOLUTIONS = [{ value: 128, label: 'Draft (128)' }, { value: 256, label: 'Standard (256)' }, { value: 384, label: 'Fine (384)' }]
+const BAKE_RESOLUTIONS = [{ value: 128, label: 'Draft (128)' }, { value: 256, label: 'Standard (256)' }, { value: 384, label: 'Fine (384)' }, { value: 512, label: 'Finest (512)' }]
+
+/** Whether a node's bake is drawn: none, current, stale (the water or the ground round it changed), or missing. */
+function bakeStatus(node: WaterVolumeNode): 'none' | 'current' | 'stale' | 'missing' {
+  const id = node.bakeId
+  if (!id) return 'none'
+  const decoded = GiBakeRegistry.has(id) ? decodeWaterBake(GiBakeRegistry.get(id)!, id) : null
+  return !decoded ? 'missing' : decoded.signature === node.bakeSignature() ? 'current' : 'stale'
+}
 
 /**
- * The flow bake: a shallow-water simulation over the water and the landscape under it, run here in
- * slices (it takes a few seconds), its settled currents, heights and foam stored as a bake the surface then
- * draws. Without one the surface draws the analytic flow along each river.
+ * The flow bake: the shallow-water equations run over the water, the ground under it and the static
+ * colliders in it until the water settles (water/bake/), in a worker, its settled currents, heights and foam
+ * stored as a bake the surface then draws and physics carries floating bodies on. One press bakes the
+ * node's whole group, everything joined to it, upstream first: a lake after the rivers that feed it.
  */
 function WaterBake({ node, changed }: { node: WaterVolumeNode; changed: () => void }) {
-  const { editorScene } = useCleoEngine()
   const [res, setRes] = useState(256)
-  const [progress, setProgress] = useState<number | null>(null)
-  const cancelRef = useRef(false)
-  useEffect(() => () => { cancelRef.current = true }, [])
-  const id = node.bakeId
-  const decoded = id && GiBakeRegistry.has(id) ? decodeWaterBake(GiBakeRegistry.get(id)!, id) : null
-  const status = !id ? 'none' : !decoded ? 'missing' : decoded.signature === node.bakeSignature() ? 'current' : 'stale'
+  const [progress, setProgress] = useState<{ index: number; count: number; name: string; fraction: number } | null>(null)
+  const cancelRef = useRef<(() => void) | null>(null)
+  const stopRef = useRef(false)
+  useEffect(() => () => { stopRef.current = true; cancelRef.current?.() }, [])
+  const group = waterBakeGroup(node)
+  const status = bakeStatus(node)
+  const canBake = bakeable(node)
   const bake = async () => {
-    if (!editorScene || progress !== null) return
-    let job: ShallowWaterBake
-    try { job = new ShallowWaterBake(node.resolvedShapes(), sceneGround(editorScene).sample, { maxRes: res, handOver: node.handOver() }) }
-    catch (e) { Logger.warn(String((e as Error).message ?? e), 'Water'); return }
-    cancelRef.current = false
-    setProgress(0)
-    const signature = node.bakeSignature()
-    // Slices of ~30 ms, so the editor keeps drawing while it runs.
-    while (!job.done && !cancelRef.current) {
-      const t0 = performance.now()
-      while (!job.done && performance.now() - t0 < 30) job.step(4)
-      setProgress(job.progress)
-      await new Promise(r => setTimeout(r, 0))
+    if (progress !== null || !group.length) return
+    stopRef.current = false
+    for (let k = 0; k < group.length && !stopRef.current; k++) {
+      const n = group[k]
+      let setup
+      try { setup = prepareNodeBake(n, { maxRes: res }) }
+      catch (e) { Logger.warn(`Water "${n.name}": ${String((e as Error).message ?? e)}`, 'Water'); continue }
+      const signature = n.bakeSignature()
+      setProgress({ index: k, count: group.length, name: n.name, fraction: 0 })
+      const run = runWaterBake(setup, fraction => setProgress({ index: k, count: group.length, name: n.name, fraction }))
+      cancelRef.current = run.cancel
+      let info
+      try { info = await run.result }
+      catch (e) { Logger.warn(`Water "${n.name}" bake failed: ${String((e as Error).message ?? e)}`, 'Water'); continue }
+      cancelRef.current = null
+      if (!info || stopRef.current) break
+      const bakeId = newWaterBakeId()
+      info.source = bakeId
+      await saveGiBake(bakeId, encodeWaterBake(info, signature), n.bakeId)
+      n.bakeId = bakeId
+      Logger.info(`Water "${n.name}" baked: ${setup.nx} x ${setup.nz} cells`, 'Water')
     }
-    if (cancelRef.current) { setProgress(null); return }
-    const bakeId = newWaterBakeId()
-    await saveGiBake(bakeId, encodeWaterBake(job.result(bakeId), signature), node.bakeId)
-    node.bakeId = bakeId
     setProgress(null)
-    Logger.info(`Water "${node.name}" baked: ${job.nx} x ${job.nz} cells, ${job.steps} steps`, 'Water')
     changed()
   }
+  const others = group.filter(n => n !== node)
   return (
     <Section title='Flow bake'>
-      <PropertyTable columns={['45%', '55%']}>
-        <PropertyRow label='Bake resolution' hint='Cells along the longest side of the water: finer catches narrower channels and takes longer.' divider>
-          <Select value={String(res)} onChange={e => setRes(Number(e.target.value))}>
-            {BAKE_RESOLUTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-          </Select>
-        </PropertyRow>
-      </PropertyTable>
-      <div className='flex items-center gap-1.5 mt-2'>
-        {progress === null
-          ? <Button size='sm' onClick={bake} title='Simulate the water over the landscape until it settles, and draw the surface with its currents and foam.'>Bake flow</Button>
-          : <Button size='sm' onClick={() => { cancelRef.current = true }} title='Stop the bake; the surface keeps what it drew before.'>Cancel ({Math.round(progress * 100)}%)</Button>}
-        {id && progress === null && <Button size='sm' variant='ghost' onClick={() => { node.bakeId = null; changed() }}
-          title='Draw the analytic flow again (the bake stays in the project until replaced).'>Clear</Button>}
-      </div>
-      {status === 'current' && <Hint className='mt-1'>Drawing the baked flow.</Hint>}
-      {status === 'stale' && <Hint className='mt-1 text-warning'>The water changed since the bake: drawing the analytic flow until it is baked again.</Hint>}
-      {status === 'missing' && <Hint className='mt-1 text-warning'>The bake is missing from the project: drawing the analytic flow.</Hint>}
+      {!canBake && <Hint className='mb-1'>An endless ocean has no flow to settle: nothing to bake.</Hint>}
+      {canBake && <>
+        <PropertyTable columns={['45%', '55%']}>
+          <PropertyRow label='Bake resolution' hint='Cells along the longest side of the water: finer catches narrower channels and smaller rocks, and takes longer.' divider>
+            <Select value={String(res)} onChange={e => setRes(Number(e.target.value))}>
+              {BAKE_RESOLUTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </Select>
+          </PropertyRow>
+          <PropertyRow label='Bed roughness' hint='Manning\u2019s roughness of the bed: 0.01 smooth concrete, 0.03 a natural channel, 0.1 a weedy, bouldery one. The rougher, the slower and deeper the water runs.'>
+            <Slider value={node.bedRoughness} min={0.01} max={0.12} step={0.005} readout onChange={v => { node.bedRoughness = v; changed() }} />
+          </PropertyRow>
+        </PropertyTable>
+        <div className='flex items-center gap-1.5 mt-2'>
+          {progress === null
+            ? <Button size='sm' onClick={bake} title='Simulate the water over the landscape and round the static colliders in it until it settles, for this water and everything joined to it, and draw the surface with its currents and foam.'>
+                {others.length ? `Bake flow (${group.length} waters)` : 'Bake flow'}
+              </Button>
+            : <Button size='sm' onClick={() => { stopRef.current = true; cancelRef.current?.() }} title='Stop the bake; every water keeps what it drew before.'>
+                Cancel ({progress.count > 1 ? `${progress.name}, ${progress.index + 1}/${progress.count}: ` : ''}{Math.round(progress.fraction * 100)}%)
+              </Button>}
+          {node.bakeId && progress === null && <Button size='sm' variant='ghost' onClick={() => { node.bakeId = null; changed() }}
+            title='Draw the analytic flow again (the bake stays in the project until replaced).'>Clear</Button>}
+        </div>
+        {others.length > 0 && progress === null && <Hint className='mt-1'>Bakes with it, upstream first: {others.map(n => n.name).join(', ')}.</Hint>}
+        {status === 'current' && <Hint className='mt-1'>Drawing the baked flow.</Hint>}
+        {status === 'stale' && <Hint className='mt-1 text-warning'>The water, the ground or the colliders in it changed since the bake: drawing the analytic flow until it is baked again.</Hint>}
+        {status === 'missing' && <Hint className='mt-1 text-warning'>The bake is missing from the project: drawing the analytic flow.</Hint>}
+      </>}
     </Section>
   )
 }

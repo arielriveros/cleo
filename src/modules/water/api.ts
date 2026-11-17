@@ -11,6 +11,11 @@ export {
 } from "../../water/waterShapes";
 export { carveWater, type CarveGrid, type CarveRegion } from "../../water/carve";
 export { buildWaterInfo, handOverWaterInfo, type WaterInfo, type GroundSampler } from "../../water/waterInfo";
-export { sceneGround } from "../../water/ground";
-export { ShallowWaterBake, bakeShallowWater, type ShallowWaterOptions } from "../../water/bake/shallowWater";
+export { sceneGround, heightsRegionKey, groundRegionKey } from "../../water/ground";
+export {
+    ShallowWaterBake, bakeShallowWater, bakeWater, prepareWaterBake, riverDischarge, DEFAULT_MANNING,
+    type WaterBakeSetup, type PrepareOptions, type WaterInflow, type WaterOutflow,
+} from "../../water/bake/shallowWater";
+export { prepareNodeBake, waterBakeGroup, waterBakeContext, bakeable, bakeReach } from "../../water/bake/bakeNode";
+export { sceneObstacles, obstacleSpan, obstaclesKey, type WaterObstacle } from "../../water/bake/obstacles";
 export { encodeWaterBake, decodeWaterBake, newWaterBakeId } from "../../water/bake/waterBakeFormat";
