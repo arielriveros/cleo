@@ -33,8 +33,8 @@
 //
 // What stands in the water (a static collider: a post, a pier, a rock; water/bake/obstacles.ts footprints) is
 // SOLID to the waves, as an obstruction is in iWave: no wave inside it, so waves that reach it are thrown back.
-// And in a current the water piles up against its upstream face and drops away behind it, a push that stands
-// still (obstacleWavePush): the same standing wake as a stone's, below everything that stands in a river.
+// The current piling against it and parting round it is the local flow's (water/localFlow.ts), which the waves
+// ride.
 
 import { catmullRomWeights } from '../core/math';
 
@@ -51,26 +51,6 @@ export const WAVE_SIM_TAPS = (WAVE_SIM_REACH + 1) * (WAVE_SIM_REACH + 2) / 2;
 export const WAVE_SIM_DEPTHS: readonly [number, number] = [0.25, 1.2];
 export const WAVE_SIM_GRAVITY = 9.81;
 
-/**
- * How hard the water piles up against what stands in it, as a share of its speed squared (1/m): enough to
- * raise a pillow the velocity head high (the height the water's speed would lift it). The shader's
- * OBSTACLE_PUSH.
- */
-export const OBSTACLE_WAVE_PUSH = 1.5;
-/** Metres out from an obstacle's face over which the water piles up before it and drops behind it (OBSTACLE_REACH). */
-export const OBSTACLE_WAVE_REACH = 0.35;
-
-/**
- * The push (m/s2) on the surface `e` metres out from an obstacle's face, where the face's outward normal
- * meets the current at `facing` (its cosine: -1 the face the water runs into, 1 the one it leaves) in water
- * running at speed squared `speed2`: up before it, down behind it, nought inside it. Over a whole obstacle the
- * two halves cancel: it adds no water. waterWaveStep.wgsl computes the same.
- */
-export function obstacleWavePush(e: number, facing: number, speed2: number): number {
-    if (e < 0) return 0;
-    const d = e / OBSTACLE_WAVE_REACH;
-    return -OBSTACLE_WAVE_PUSH * speed2 * facing * Math.exp(-d * d);
-}
 
 /** Where the weight for the offset (i, j) sits in a packed kernel. */
 export function waveKernelIndex(i: number, j: number): number {

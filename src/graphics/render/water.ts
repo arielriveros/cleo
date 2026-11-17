@@ -44,6 +44,10 @@ export interface WaterPassesHost {
 
 /** Quads across a tile at each level of detail. The first is for the tiles under the camera: fine enough to lift by the live waves. */
 const TILE_LODS = [128, 64, 32, 16, 8];
+/** Metres between vertices the mesh is made fine to under the camera where the local flow is drawn: its cells are 0.3 m. */
+const FINE_SPACING = 0.15;
+/** Metres the local flow lifts or lowers the surface at most, for the culling boxes. */
+const LOCAL_FLOW_REACH = 0.8;
 /** Metres the skirt under each tile's edge hangs, covering cracks between tiles of different density. */
 const SKIRT = 0.3;
 /** Seconds between rebuilds of a node's water info while it is being edited (a gizmo drag). */
@@ -165,10 +169,14 @@ export class WaterPasses {
             // The waves' reach: how far they can lift the surface (the culling box's height). They move it
             // up and down only, so nothing sideways.
             const heightScale = node.waveWindScale();
-            const up = node.waveAmplitude + waveReach(waves, heightScale), side = 0;
+            // The local flow round the camera lifts it too: a cushion, a pillow, at most the head of fast water.
+            const flowUp = oceanLevel === null && this._liveSim?.flowSurface ? LOCAL_FLOW_REACH : 0;
+            const up = node.waveAmplitude + waveReach(waves, heightScale) + flowUp, side = 0;
             // An ocean's surf stands taller than its waves over the beach.
             const surfUp = oceanLevel !== null && info ? 1.5 * surfOf(waves, heightScale, this._surf).amplitude : 0;
-            const tiles = this._tilesOf(node, info, oceanLevel, up + surfUp, side);
+            // Round the camera, where the local flow is drawn, the mesh is made fine enough to show its lift.
+            const fine = flowUp > 0 && this._liveSim ? [this._liveSim.origin[0], this._liveSim.origin[1], WAVE_SIM_SIDE] : null;
+            const tiles = this._tilesOf(node, info, oceanLevel, up + surfUp, side, fine);
             if (!tiles.length) continue;
             // The waves' clock: the physics' drawn time while the game runs (so floaters ride what is drawn),
             // else the frame's; the node's wave speed applied, as physics applies it.
@@ -184,11 +192,14 @@ export class WaterPasses {
             const window = this._liveSim && live > 0 ? [this._liveSim.origin[0], this._liveSim.origin[1], 1 / WAVE_SIM_SIDE, live] : [0, 0, 1, 0];
             sm.setUniform('u_vLive', window);
             sm.setUniform('u_fLive', window);
-            sm.setUniform('u_fLiveGrid', [1 / WAVE_SIM_SIZE, WAVE_SIM_CELL, body && body.type === 'river' ? 1 : 0, 0]);
+            const flowSurface = live > 0 ? this._liveSim!.flowSurface : null;
+            sm.setUniform('u_vLocal', [flowSurface ? 1 : 0, 0, 0, 0]);
+            sm.setUniform('u_fLiveGrid', [1 / WAVE_SIM_SIZE, WAVE_SIM_CELL, body && body.type === 'river' ? 1 : 0, flowSurface ? 1 : 0]);
             pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
                 this._targets.sceneDepth.depth, fbo.colors[0], env.cube ?? this._bindGroups.fallbackCube,
                 water.tex0 ?? this._fallbackInfo(), water.tex1 ?? this._fallbackInfo(), this._detail(),
                 this._liveSim && live > 0 ? this._liveSim.texture : this._detail(), this._foam(),
+                flowSurface ?? this._detail(),
             ]));
             for (const tile of tiles) {
                 const quads = TILE_LODS[tile.lod];
@@ -245,7 +256,7 @@ export class WaterPasses {
             if (!body || (body.type === 'ocean' && body.endless)) continue;
             const water = this._waterOf(node, ground);
             if (!water.info || !water.tex0 || !water.tex1) continue;
-            waters.push({ info: water.info, tex0: water.tex0, tex1: water.tex1 });
+            waters.push({ info: water.info, tex0: water.tex0, tex1: water.tex1, manning: node.bedRoughness });
             // A river with its Live waves at nought asks for none: with no other, nothing is simulated.
             river = river || (node.flowReference() > 0 && WaterPasses._lookOf(node).liveWaves > 0);
         }
@@ -266,7 +277,7 @@ export class WaterPasses {
 
     private _obstaclesNear(scene: Scene, waters: readonly WaveSimWater[], cx: number, cz: number): WaterObstacleFootprint[] {
         const cached = this._footprints;
-        const now = performance.now();
+        const now = performance.now(); // wall-clock: how often the scene is walked, not a time-based effect
         if (cached.scene === scene && now - cached.at < 250) return cached.list;
         const reach = WAVE_SIM_SIDE;
         const list: WaterObstacleFootprint[] = [];
@@ -495,7 +506,8 @@ export class WaterPasses {
      * Every tile of `node` to draw this frame, culled and with its level of detail. `up` and `side` are how
      * far the waves move the surface vertically and sideways: the culling boxes grow by them.
      */
-    private _tilesOf(node: WaterVolumeNode, info: WaterInfo | null, oceanLevel: number | null, up: number, side: number): Tile[] {
+    private _tilesOf(node: WaterVolumeNode, info: WaterInfo | null, oceanLevel: number | null, up: number, side: number,
+                     fine: readonly number[] | null = null): Tile[] {
         const out: Tile[] = [];
         const cam = this._view.camera.position;
         const vis = this._sys.visibility;
@@ -524,7 +536,23 @@ export class WaterPasses {
                 if (cull(x0, z0, span, y0, y1)) continue;
                 const d = distanceTo(x0, z0, span, (y0 + y1) / 2);
                 if (d > drawDistance) continue;
-                out.push({ x0, z0, size: span, lod: lodFor(d, span), ocean: null });
+                const lod = lodFor(d, span);
+                // Under the camera, in the local flow's window, a tile too coarse at its finest to show the
+                // flow's lift (a pile a foot across) is drawn as smaller tiles, each with its own level of detail.
+                if (fine && lod === 0 && span / TILE_LODS[0] > FINE_SPACING
+                    && x0 < fine[0] + fine[2] && x0 + span > fine[0] && z0 < fine[1] + fine[2] && z0 + span > fine[1]) {
+                    const k = Math.min(8, 2 ** Math.ceil(Math.log2(span / TILE_LODS[0] / FINE_SPACING)));
+                    const sub = span / k;
+                    for (let b = 0; b < k; b++) for (let a = 0; a < k; a++) {
+                        const sx = x0 + a * sub, sz = z0 + b * sub;
+                        if (cull(sx, sz, sub, y0, y1)) continue;
+                        const sd = distanceTo(sx, sz, sub, (y0 + y1) / 2);
+                        if (sd > drawDistance) continue;
+                        out.push({ x0: sx, z0: sz, size: sub, lod: lodFor(sd, sub), ocean: null });
+                    }
+                    continue;
+                }
+                out.push({ x0, z0, size: span, lod, ocean: null });
             }
         }
         if (oceanLevel !== null) {

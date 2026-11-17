@@ -1,6 +1,6 @@
 import { riverColumn, waterColumnAt, type ResolvedWaterShape, type WaterColumn } from '../../physics/water/waterColumn';
 import { WATER_INFO_MIN_CELL, type GroundSampler, type WaterInfo } from '../waterInfo';
-import { obstacleSpan, type WaterObstacle } from './obstacles';
+import { OBSTACLE_DRAG, obstacleSpan, type WaterObstacle } from './obstacles';
 import {
     bakeWater, CELL_DRAIN, CELL_HELD, CELL_LEAK, CELL_WALL, CELL_WATER, DEFAULT_MANNING, riverDischarge,
     type WaterBakeMember, type WaterBakeSettle, type WaterBakeSetup,
@@ -67,11 +67,7 @@ const SOURCE_LENGTH = 3;
 const DRY = 0.005;
 /** Samples a side per cell an obstacle is found at. */
 const OBSTACLE_SAMPLES = 6;
-/**
- * The drag coefficient of what stands in the water and is narrower than a cell: a round pier's or a post's
- * in a current (1 to 1.2; a square one's is nearer 2).
- */
-const OBSTACLE_DRAG = 1.2;
+
 /**
  * Metres deep a lake, a pool or held water is simulated at most. A gravity wave's speed, which sets the time
  * step, grows with the depth: a lake 30 m deep would make the whole bake several times as long. Its current

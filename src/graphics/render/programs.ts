@@ -56,6 +56,14 @@ import WaterUnderwaterProgram from '../shaders/wgsl/waterUnderwater.wgsl';
 import WaterWaveFieldProgram from '../shaders/wgsl/waterWaveField.wgsl';
 import WaterWaveAdvectProgram from '../shaders/wgsl/waterWaveAdvect.wgsl';
 import WaterWaveStepProgram from '../shaders/wgsl/waterWaveStep.wgsl';
+import WaterFlowGroundProgram from '../shaders/wgsl/waterFlowGround.wgsl';
+import WaterFlowShiftProgram from '../shaders/wgsl/waterFlowShift.wgsl';
+import WaterFlowAdvectProgram from '../shaders/wgsl/waterFlowAdvect.wgsl';
+import WaterFlowLimitProgram from '../shaders/wgsl/waterFlowLimit.wgsl';
+import WaterFlowDepthProgram from '../shaders/wgsl/waterFlowDepth.wgsl';
+import WaterFlowAccelerateProgram from '../shaders/wgsl/waterFlowAccelerate.wgsl';
+import WaterFlowWavesProgram from '../shaders/wgsl/waterFlowWaves.wgsl';
+import WaterFlowSurfaceProgram from '../shaders/wgsl/waterFlowSurface.wgsl';
 import PresentProgram from '../shaders/wgsl/present.wgsl';
 import OverlayCompositeProgram from '../shaders/wgsl/overlayComposite.wgsl';
 import DebugViewProgram from '../shaders/wgsl/debugView.wgsl';
@@ -171,6 +179,8 @@ export {
     GiAmbientCubeProgram, GiRescaleProgram, GiProbeOverlayProgram, GiStateStampProgram,
     MovieAccumulateProgram, SpriteProgram, PixelUpscaleProgram, WaterProgram, WaterUnderwaterProgram,
     WaterWaveFieldProgram, WaterWaveAdvectProgram, WaterWaveStepProgram,
+    WaterFlowGroundProgram, WaterFlowShiftProgram, WaterFlowAdvectProgram, WaterFlowLimitProgram, WaterFlowDepthProgram,
+    WaterFlowAccelerateProgram, WaterFlowWavesProgram, WaterFlowSurfaceProgram,
 };
 
 // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
@@ -358,6 +368,14 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['waterWaveField',               WaterWaveFieldProgram],
         ['waterWaveAdvect',              WaterWaveAdvectProgram],
         ['waterWaveStep',                WaterWaveStepProgram],
+        ['waterFlowGround',              WaterFlowGroundProgram],
+        ['waterFlowShift',               WaterFlowShiftProgram],
+        ['waterFlowAdvect',              WaterFlowAdvectProgram],
+        ['waterFlowLimit',               WaterFlowLimitProgram],
+        ['waterFlowDepth',               WaterFlowDepthProgram],
+        ['waterFlowAccelerate',          WaterFlowAccelerateProgram],
+        ['waterFlowWaves',               WaterFlowWavesProgram],
+        ['waterFlowSurface',             WaterFlowSurfaceProgram],
     ];
 }
 

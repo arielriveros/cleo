@@ -70,6 +70,10 @@ const MAX_REFLECTION_LOD: f32 = 4.0;
 // The foam texture (waterTextures.ts waterFoamPixels): bubbles, lace, where foam lasts, grain. Tiled, mipmapped.
 @group(0) @binding(14) var u_foam_texture: texture_2d<f32>;
 @group(0) @binding(15) var u_foam_sampler: sampler;
+// The local flow round the camera (render/localFlow.ts), over the live waves' window: the surface's lift over
+// the baked one (m), the current x, z (m/s), and how much of it is the local flow's (0..1).
+@group(0) @binding(16) var u_flow_texture: texture_2d<f32>;
+@group(0) @binding(17) var u_flow_sampler: sampler;
 
 // Vertex stage ONLY (a block read from both stages is a GLSL link error).
 struct WaterVertexUniforms {
@@ -88,6 +92,7 @@ struct WaterVertexUniforms {
     u_vSurf: vec4<f32>,           // surf: frequency (rad/s), amplitude (m), 1 = on (an ocean with a shore grid)
     u_vFlow: vec4<f32>,           // how far the waves ride the current, the speed a river's waves are built for (0: wind waves)
     u_vLive: vec4<f32>,           // the live waves' window: origin x, origin z (m), 1 / side (1/m), strength (0: none)
+    u_vLocal: vec4<f32>,          // 1 = the local flow is drawn over that window, -, -, -
 };
 @group(1) @binding(0) var<uniform> u_wv: WaterVertexUniforms;
 
@@ -123,7 +128,7 @@ struct WaterFragmentUniforms {
     u_fWaveParams: vec4<f32>,     // count, -, height scale, the waves' height deviation (m, at full scale)
     u_fSurf: vec4<f32>,           // as u_vSurf
     u_fLive: vec4<f32>,           // as u_vLive
-    u_fLiveGrid: vec4<f32>,       // the live waves' grid: 1 / texels a side, metres a texel, 1 = this water is a river
+    u_fLiveGrid: vec4<f32>,       // the live waves' grid: 1 / texels a side, metres a texel, 1 = this water is a river, 1 = the local flow is drawn (its cells two texels)
 };
 @group(1) @binding(1) var<uniform> u_wf: WaterFragmentUniforms;
 
@@ -463,6 +468,24 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
             grad = vec2<f32>(hx, hz) / (2.0 * u_wv.u_vInfoOrigin.z);
         }
     }
+    // The local flow round the camera (render/localFlow.ts): the surface's lift where the water piles against
+    // what stands in it, draws down past it and pours over a boulder; and the current its waves ride there.
+    // Read over the mesh's own cell, as the live waves are.
+    var bulk = 0.0;
+    if (u_wv.u_vLocal.x > 0.5 && !ocean) {
+        let luv = (xz - u_wv.u_vLive.xy) * u_wv.u_vLive.z;
+        let inside = min(min(luv.x, luv.y), min(1.0 - luv.x, 1.0 - luv.y));
+        if (inside > 0.0) {
+            let o = 0.25 * cell * u_wv.u_vLive.z;
+            let m = 0.25 * (textureSampleLevel(u_flow_texture, u_flow_sampler, luv + vec2<f32>(o, o), 0.0)
+                          + textureSampleLevel(u_flow_texture, u_flow_sampler, luv + vec2<f32>(-o, o), 0.0)
+                          + textureSampleLevel(u_flow_texture, u_flow_sampler, luv + vec2<f32>(o, -o), 0.0)
+                          + textureSampleLevel(u_flow_texture, u_flow_sampler, luv + vec2<f32>(-o, -o), 0.0));
+            let w = smoothstep(0.0, 0.08, inside);
+            bulk = m.x * w;
+            current = mix(current, m.yz, clamp(m.w, 0.0, 1.0) * w);
+        }
+    }
     // Shoaling: the waves die down toward the shore, as the CPU's waveHeight fades them, and never stand
     // taller than the water is deep allows (a wave breaks at about 0.8 of the depth; 0.4 of it is its crest).
     let fadeW = u_wv.u_waveParams.w;
@@ -492,7 +515,7 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
             lift += 0.25 * h * u_wv.u_vLive.w * smoothstep(0.0, 0.08, inside) * fade;
         }
     }
-    var p = vec3<f32>(xz.x, surface + lift, xz.y);
+    var p = vec3<f32>(xz.x, surface + lift + bulk, xz.y);
     // Over the beach the surf takes over from the waves, as physics/water/surf.ts adds it to what floats.
     if (ocean) {
         let sf = surfAt(u_wv.u_vSurf, xz, t, edge, depth);
@@ -801,6 +824,25 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     // A skirt only fills the cracks between tiles out on open water; at the shore it would hang into view.
     if (in.skirt > 0.0 && edge < u_wf.u_fInfoOrigin.z * 3.0) { discard; }
+    // The local flow round the camera (render/localFlow.ts): its current is the water's own round what stands
+    // in it, so the ripples and the foam part round a post and race down its sides; its lift (the pile, the
+    // drawdown, the pillow and the hole) tilts the surface.
+    var bulkSlope = vec2<f32>(0.0);
+    if (u_wf.u_fLiveGrid.w > 0.5 && !ocean) {
+        let luv = (in.rest.xy - u_wf.u_fLive.xy) * u_wf.u_fLive.z;
+        let inside = min(min(luv.x, luv.y), min(1.0 - luv.x, 1.0 - luv.y));
+        if (inside > 0.0) {
+            let w = smoothstep(0.0, 0.08, inside);
+            let st = 2.0 * u_wf.u_fLiveGrid.x;
+            let here = textureSampleLevel(u_flow_texture, u_flow_sampler, luv, 0.0);
+            flow = mix(flow, here.yz, clamp(here.w, 0.0, 1.0) * w);
+            let bx = textureSampleLevel(u_flow_texture, u_flow_sampler, luv + vec2<f32>(st, 0.0), 0.0).x
+                   - textureSampleLevel(u_flow_texture, u_flow_sampler, luv - vec2<f32>(st, 0.0), 0.0).x;
+            let bz = textureSampleLevel(u_flow_texture, u_flow_sampler, luv + vec2<f32>(0.0, st), 0.0).x
+                   - textureSampleLevel(u_flow_texture, u_flow_sampler, luv - vec2<f32>(0.0, st), 0.0).x;
+            bulkSlope = vec2<f32>(bx, bz) / (4.0 * u_wf.u_fLiveGrid.y) * w;
+        }
+    }
 
     let toCam = cam - in.worldPos;
     let viewDist = length(toCam);
@@ -832,7 +874,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Where on the waves this is: 0 deep in a trough, 0.5 at the resting level, 1 on a tall crest.
     let waveSd = max(u_wf.u_fWaveParams.w * scale, 1e-3);
     let crest = clamp(0.5 + waves.height / (4.0 * waveSd), 0.0, 1.0);
-    var slope = in.grad + waves.slope;
+    var slope = in.grad + waves.slope + bulkSlope;
     // The live waves round the camera: their slopes, their foam, and the turbulence that stirs them.
     var live = vec4<f32>(0.0);
     var liveIn = 0.0;

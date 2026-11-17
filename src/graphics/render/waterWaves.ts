@@ -7,12 +7,14 @@ import type { FullscreenPasses } from './fullscreenPasses';
 import type { PassEncoder } from './passEncoder';
 import type { WaterInfo } from '../../water/waterInfo';
 import type { WaterObstacleFootprint } from '../../water/bake/obstacles';
+import { LocalFlowSim } from './localFlow';
 import {
     WAVE_SIM_CELL, WAVE_SIM_DEPTHS, WAVE_SIM_DT, WAVE_SIM_GRAVITY, WAVE_SIM_SIZE, WAVE_SIM_TAPS, waveSimKernel,
 } from '../../water/waveSim';
+import { LOCAL_FLOW_DT } from '../../water/localFlow';
 
-/** One water in reach of the simulated window: its grid and the two textures the surface is drawn from. */
-export interface WaveSimWater { info: WaterInfo; tex0: Texture; tex1: Texture; }
+/** One water in reach of the simulated window: its grid, the two textures the surface is drawn from, its bed's Manning's n. */
+export interface WaveSimWater { info: WaterInfo; tex0: Texture; tex1: Texture; manning: number; }
 
 /** Metres a side of the simulated window. */
 export const WAVE_SIM_SIDE = WAVE_SIM_SIZE * WAVE_SIM_CELL;
@@ -35,8 +37,11 @@ const OBSTACLE_MAX = 32;
  * its own waves alone. Nothing here reaches the physics: a floating body rides the surface's own waves, as
  * before, not these.
  *
- * What stands in the water (the static colliders in it, as footprints at the surface: water/bake/obstacles.ts)
- * is solid to the waves, piles the current up against it and leaves a wake and foam below it.
+ * The current they ride is the LOCAL FLOW's (render/localFlow.ts): the water simulated again on cells of
+ * 0.3 m in the same window, with the bake as its reference, so it piles up against what stands in it, parts
+ * round it, pours over a boulder and jumps back up. The window moves two texels at a time, a whole cell of it.
+ * What stands in the water (static colliders, as footprints at the surface: water/bake/obstacles.ts) is solid
+ * to the waves too, at their own finer grid, and sheds foam and eddies from its sides.
  */
 export class WaterWaveSim {
     private readonly _sm = ShaderManager.Instance;
@@ -54,6 +59,8 @@ export class WaterWaveSim {
     private _live = false;
     /** The noise the turbulence is renewed with: the water's detail texture (its alpha). */
     private _noise: Texture | null = null;
+    /** The bulk flow round the camera, when the device can run it. */
+    private _flow: LocalFlowSim | null = null;
 
     constructor(private readonly _passes: PassEncoder, private readonly _fullscreen: FullscreenPasses) {}
 
@@ -68,6 +75,11 @@ export class WaterWaveSim {
     public get texture(): Texture { return this._states[this._read]!.colors[0]; }
     /** The window's origin (x, z), metres. */
     public get origin(): readonly number[] { return this._origin; }
+    /**
+     * The local flow's surface over the same window (`LocalFlowSim.surface`: lift, current x, z, its share), or
+     * null where it is not simulated. Valid while {@link live}.
+     */
+    public get flowSurface(): Texture | null { return this._flow && this._flow.live ? this._flow.surface : null; }
 
     /**
      * Bring the waves up to `time` (seconds, the water's clock) round a camera at (`cx`, `cz`) looking along
@@ -87,13 +99,15 @@ export class WaterWaveSim {
         // window less than half its side: the waves it already holds are kept, not begun again.
         const side = WAVE_SIM_SIDE, cell = WAVE_SIM_CELL;
         const ahead = side * 0.22;
-        const ox = Math.round((cx + fx * ahead - side / 2) / cell) * cell;
-        const oz = Math.round((cz + fz * ahead - side / 2) / cell) * cell;
+        // Two texels at a time: a whole cell of the local flow, whose grid is half as fine.
+        const snap = 2 * cell;
+        const ox = Math.round((cx + fx * ahead - side / 2) / snap) * snap;
+        const oz = Math.round((cz + fz * ahead - side / 2) / snap) * snap;
         const inReach = waters.filter(w => {
             const i = w.info;
             return i.originX < ox + side && i.originX + i.nx * i.cell > ox && i.originZ < oz + side && i.originZ + i.nz * i.cell > oz;
         });
-        if (!inReach.length) { this._live = false; this._hasState = false; return; }
+        if (!inReach.length) { this._live = false; this._hasState = false; this._flow?.stop(); return; }
         // A jump (a new scene, a camera cut, the clock set back) starts the water level. A long frame does
         // not: it is simply not caught up with, and the waves carry on from where they were.
         if (!(elapsed >= 0) || Math.abs(ox - this._origin[0]) > side / 2 || Math.abs(oz - this._origin[1]) > side / 2) {
@@ -106,11 +120,25 @@ export class WaterWaveSim {
         this._packObstacles(obstacles, ox + side / 2, oz + side / 2);
         this._ensureTargets();
         this._fieldPass(inReach);
+        const ref = this._field!.colors[0];
+        const flow = LocalFlowSim.supported ? (this._flow ??= new LocalFlowSim(this._passes, this._fullscreen)) : null;
+        if (flow) {
+            flow.prepare(ox, oz, side, FIELD_SIZE, inReach, this._obstacles, this._obstacleCount,
+                datumOf(inReach, ox + side / 2, oz + side / 2, side), ref, !this._hasState);
+        }
         let steps = Math.floor(this._owed / WAVE_SIM_DT + 1e-6);
         // Even a frame too short to owe a step leaves a state to draw.
         if (!this._hasState && steps === 0) steps = 1;
         this._owed = Math.max(0, this._owed - steps * WAVE_SIM_DT);
-        for (let s = 0; s < steps; s++) this._step();
+        for (let s = 0; s < steps; s++) {
+            if (flow) {
+                // The bulk flow first, two substeps to each of the waves' steps, then what the waves ride.
+                for (let k = 0; k < LOCAL_FLOW_SUBSTEPS; k++) flow.substep(ref);
+                flow.outputWaves(ref);
+            }
+            this._step(flow ? flow.wavesField : ref);
+        }
+        flow?.outputSurface(ref);
         this._live = this._hasState;
     }
 
@@ -141,11 +169,10 @@ export class WaterWaveSim {
         });
     }
 
-    /** One step: carried by the current, then propagated and forced. */
-    private _step(): void {
+    /** One step: carried by the current `field` holds, then propagated and forced. */
+    private _step(field: Texture): void {
         const sm = this._sm;
         const window = [this._origin[0], this._origin[1], WAVE_SIM_SIDE, WAVE_SIM_SIZE];
-        const field = this._field!.colors[0];
         const from = this._states[this._read]!, to = this._states[1 - this._read]!;
 
         const carry = this._passes.beginFullscreenPass(this._carried!.renderTarget, 'water.waves.carry', false, undefined, false);
@@ -223,7 +250,35 @@ export class WaterWaveSim {
 
     public dispose(): void {
         for (const fbo of [this._field, this._carried, ...this._states]) for (const c of fbo?.colors ?? []) c.delete();
+        this._flow?.dispose();
         this._field = null; this._carried = null; this._states[0] = null; this._states[1] = null;
         this._live = false; this._hasState = false;
     }
+}
+
+/** The local flow's substeps to each of the waves' steps (WAVE_SIM_DT over LOCAL_FLOW_DT). */
+const LOCAL_FLOW_SUBSTEPS = Math.round(WAVE_SIM_DT / LOCAL_FLOW_DT);
+
+/**
+ * The height the local flow's heights are taken from: the baked surface at the window's centre, or the mean
+ * of the wet samples across it where the centre is dry.
+ */
+function datumOf(waters: readonly WaveSimWater[], cx: number, cz: number, side: number): number {
+    const at = (x: number, z: number): number | null => {
+        for (const { info } of waters) {
+            const i = Math.floor((x - info.originX) / info.cell + 0.5), j = Math.floor((z - info.originZ) / info.cell + 0.5);
+            if (i < 0 || j < 0 || i >= info.nx || j >= info.nz) continue;
+            const c = j * info.nx + i;
+            if (info.info1[c * 4 + 3] > 0.5) return info.info0[c * 4];
+        }
+        return null;
+    };
+    const centre = at(cx, cz);
+    if (centre !== null) return centre;
+    let sum = 0, count = 0;
+    for (let b = -4; b <= 4; b++) for (let a = -4; a <= 4; a++) {
+        const v = at(cx + a * side / 9, cz + b * side / 9);
+        if (v !== null) { sum += v; count++; }
+    }
+    return count ? sum / count : 0;
 }

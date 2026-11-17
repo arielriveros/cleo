@@ -24,11 +24,12 @@
 //    strong as the water's speed squared), and a push that stands still in a current leaves a wake that
 //    stands still: the V below every stone in fast water. They are not drawn: the bed shows none.
 //  - WHAT STANDS IN THE WATER: the static colliders in the window (u_obstacles: water/bake/obstacles.ts
-//    footprints, at the surface). Solid to the waves, as an obstruction is in iWave: nothing inside, so a wave
-//    that reaches one is thrown back. In a current the water piles up against the face it runs into and drops
-//    away behind (waveSim.ts obstacleWavePush), which leaves a wake standing below it; it boils in the lee,
-//    and foam is torn from its sides and carried off in two streaks. One just under the surface is a stone of
-//    its own size, the weaker the deeper it lies.
+//    footprints, at the surface). The current the waves ride is the local flow's (render/localFlow.ts), which
+//    already piles against them, parts round them and pours over the ones under the surface, so the bulk
+//    flow's forcing above raises the bow wave, the standing waves and the jump. Here they are solid to the
+//    waves at the waves' own finer grid, as an obstruction is in iWave: nothing inside, so a wave that reaches
+//    one is thrown back; the water boils in the lee, and foam is torn from their sides and carried off in
+//    two streaks.
 //
 // And what the waves make: FOAM, where they steepen past what a wave can hold (they break, and are damped
 // for it), added to what the rocks and the turbulence churn up where the bake found the water white. Carried
@@ -78,9 +79,6 @@ const FOAM_LIFE: f32 = 3.5;
 const BREAKING: f32 = 0.32;
 /** Obstacles in u_obstacles at most. */
 const OBSTACLE_MAX: i32 = 32;
-/** waveSim.ts OBSTACLE_WAVE_PUSH and OBSTACLE_WAVE_REACH: how hard the water piles against an obstacle, over how many metres. */
-const OBSTACLE_PUSH: f32 = 1.5;
-const OBSTACLE_REACH: f32 = 0.35;
 /** Per second: the foam torn from an obstacle's sides and lee in fast water. */
 const OBSTACLE_FOAM: f32 = 12.0;
 
@@ -171,8 +169,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             var nl = select(vec2<f32>(0.0, sign(p.y)), vec2<f32>(sign(p.x), 0.0), q.x >= q.y);
             if (past > 1e-5) { nl = outside / past * sign(p); }
             let facing = dot(o0.zw * nl.x + across * nl.y, along);
-            let d = e / OBSTACLE_REACH;
-            push -= u_ws.u_force.x * OBSTACLE_PUSH * speed2 * facing * exp(-d * d);
             let edge = e / 0.3;
             shed += exp(-edge * edge) * (0.25 + 0.75 * smoothstep(-0.5, 0.5, facing));
             // Its wake: the eddies it sheds, carried off downstream in a band as wide as it is across the
@@ -187,13 +183,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 stir += wake;
                 shed += 0.3 * wake;
             }
-        } else {
-            // Under the surface: a stone of its own size, the weaker the deeper.
-            let radius = max(min(o1.x, o1.y) + o1.z, 0.1);
-            let d = (e + radius) / radius;
-            let hump = (1.0 - d * d) * exp(-d * d) * exp(-o1.w / radius);
-            push += u_ws.u_force.x * STONE_PUSH * speed2 * hump;
-            shed += max(hump, 0.0) * exp(-o1.w / 0.3);
+        } else if (e < 0.0) {
+            // Over one just under the surface: white where it nearly breaks the surface (the local flow
+            // raises its pillow and its jump).
+            shed += 0.5 * exp(-o1.w / 0.25);
         }
     }
     stir = min(stir, 1.5);

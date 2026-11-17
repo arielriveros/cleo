@@ -215,7 +215,21 @@ that shape them: **Height**, **Wave speed**, **Shore fade** and the swell.
 
 ### Live waves
 
-Round the camera, flowing water also carries waves that are simulated every frame, not drawn from a formula:
+Round the camera the water itself is simulated again, finely, and carries waves that are simulated every frame,
+not drawn from a formula.
+
+**The local flow.** On cells of 30 cm over the same square, the shallow-water equations are solved again with
+the flow bake as their reference: far from anything in the water the result is the bake, and near an obstacle
+it is what water does there, at any bake resolution. Against a post, a tree trunk or a bridge pier the current
+piles up in a cushion about as high as its speed could lift it (11 cm at 1.5 m/s, 45 cm at 3 m/s), parts round
+it, draws down and speeds past its sides, and leaves a sheltered dip and a slow wake behind that the river
+takes some metres to close. Over a boulder just under the surface it rises in a pillow, pours over, drops into a
+hole, and stands back up in a white hydraulic jump. The surface is lifted by it, and its ripples, waves and foam
+ride its current, so they visibly part round what stands in the water. Static colliders count as they do for
+the bake: one that stands out of the water is solid, a narrow one holds the water back by its drag, one under
+the surface raises the bed to its top. The local flow sees a collider as soon as it is placed or moved.
+
+**The waves on it.**
 real surface waves on the baked current. The model is Jeschke and Wojtan's (2023): the flow bake is the bulk
 of the water, and on it ride waves that obey water's own rule, each wavelength running at the speed its length
 and the depth under it give, carried downstream by the current. That rule is what makes water in a river look
@@ -229,13 +243,9 @@ waves are raised where a river raises them, and then left to the water:
   current, hardest where the bake found the water losing its energy, in riffles with glassy runs between.
 - **The bulk flow's turns.** Where the baked current speeds up or slows down sharply (the lip of a drop, the
   foot of one) the surface cannot follow, and a train of waves stands below.
-- **What stands in the water.** Every static collider the surface cuts (a post, a pier, a rock standing out
-  of the water) is solid to the waves: none inside it, and waves that reach it are thrown back. The current
-  piles up against the face it runs into, a share of the height its speed could lift it, and drops away
-  behind, which leaves a wake standing below it; the water boils in its lee, and foam torn from its sides
-  trails off downstream. A collider just under the surface (within a metre) raises a hump and a wake of its
-  own, weaker the deeper it lies. The waves see a collider as soon as it is placed or moved; the current
-  round it is the bake's, and needs **Bake flow** again.
+- **What stands in the water.** Every static collider the surface cuts is solid to the waves too: none inside
+  it, and waves that reach it are thrown back. The local flow's turns round it raise its bow wave and the
+  standing waves of its wake; the water boils in its lee, and foam torn from its sides trails off downstream.
 
 A wave that steepens past what water holds breaks: it is damped, and leaves foam. The foam the stones and the
 boil churn up, where the bake found the water white, is carried by the same current and fades over a few
@@ -244,18 +254,21 @@ seconds, so it lies in streaks. The surface is lifted by these waves, lit by the
 
 What to know:
 
-- They cover a square about 77 m across, set a little ahead of the camera, in cells of 15 cm. Water that
-  comes into it starts level and takes a second or two to be raised. Past it the river draws
+- They cover a square about 77 m across, set a little ahead of the camera, in cells of 15 cm (the local flow
+  in cells of 30 cm). Water that comes into it starts as the bake has it and takes a second or two to be
+  raised. Past it, an obstacle shows only what the bake makes of it. Past it the river draws
   its formula waves and the bake's own foam, as before; the join is faded over the last few metres.
 - A lake or pool joined to a river is in the same simulation, so the river's waves and foam run out into it.
   An ocean keeps its own waves.
-- With no flow bake there is still a current to ride (the drawn **Flow speed**) and the stones still raise
-  wakes, but there is no foam to carry: the bake is what says where water turns white.
+- With no flow bake the drawn river is the reference (its **Flow speed**): the local flow still parts round
+  what stands in it and turns white where it breaks, but the river's own foam is the bake's to say.
 - **Floating bodies do not feel them.** Buoyancy rides the river's formula waves and the baked current, as
-  before: these are for the eye.
+  before: these, and the local flow, are for the eye. A floating body meets a post's collider, but is not
+  carried round it.
 - They run at sixty steps a second, two a frame at most: under 30 frames a second they slow down rather than
   cost more.
 - They need float render targets that can be filtered. A device without them draws the river as before.
+- The local flow costs eight small passes over 256 by 256 cells, two substeps to each of the waves' steps.
 
 ### Surf
 

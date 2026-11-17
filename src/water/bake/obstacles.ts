@@ -35,6 +35,12 @@ interface ColliderLike {
     worldTransform: mat4; worldScale: ArrayLike<number>;
 }
 
+/**
+ * The drag coefficient of what stands in the water and is narrower than a simulation's cell: a round pier's or
+ * a post's in a current (1 to 1.2; a square one's is nearer 2). The flow bake and the local flow both use it.
+ */
+export const OBSTACLE_DRAG = 1.2;
+
 /** Centimetres: what an obstacle's key is rounded to (a tool composing the same transform agrees with the editor). */
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
