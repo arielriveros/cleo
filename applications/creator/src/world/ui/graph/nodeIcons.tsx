@@ -26,6 +26,8 @@ const PATHS: Record<string, string> = {
   maskCombine: 'M9 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0-10 0 M15 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0-10 0',
   normalize: 'M4 4v16 M20 4v16 M4 18 10 9l3 4 7-9',
   filter: 'M3 19 8 9l2 4 2-6 2 5 2-3 5 10Z M8 9v10 M12 7v12 M16 10v9',
+  fluvial: 'M3 19 8 8l4 6 3-4 6 9Z M12 14c-1 2 1 3 0 5 M8 8c-.5 3 1.5 4 1 6',
+  drain: 'M3 9c3 4 6 6 9 6s6-2 9-6 M5 15h14 M12 15v5 M9 18l3 2 3-2',
   thermal: 'M3 19 12 6l9 13Z M14 15l2 4 M10 17l-1 2',
   droplet: 'M12 3c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11Z',
   pipe: 'M3 8h6v8H3 M21 8h-6v8h6 M9 12h6',

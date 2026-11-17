@@ -25,6 +25,43 @@ The frame every node works in.
 | **Seed** | The world's seed. Every node and surface noise derives its randomness from it; change it for a new variation of the same design. |
 | **Sea level** | Normalised height of the sea. The sea fills in from the map's edges up to it; the water rules measure from it. |
 
+## World presets
+
+**World presets** (the World tab's header) start a world from one of seven landscapes. Each is built the
+way real land is, and the graph it leaves is the recipe to change:
+
+1. A broad, smooth **shape** that says where the land stands high: noise with few octaves, under a ramp or
+   a dome. Nothing finer than a valley.
+2. **Rivers and valleys**: the shape is where the land rises, and rivers cut it into valleys that join and
+   fall to the sea or the map's edge, with ridges left between them. No closed hollows are left.
+3. A fine **Erosion filter**: the gullies too small for the simulation's grid.
+4. **Finishing**: **Drain** (so the only lakes are the ones meant), then a lake basin where one is wanted.
+   Built things such as a **Road** follow ground that a new seed moves, so they are left for you to add.
+
+Each is as large as its landscape is, and as high: its slopes are a real landscape's.
+
+| Preset | Size, relief | What it is |
+|---|---|---|
+| **Island** | 2 km, 280 m | An island in open sea: a massif off its centre, valleys to a coast of bays and headlands, a lake in a valley spilling to the sea. What the Island example is built from. |
+| **Coastal range** | 4 km, 900 m | Mountains falling straight to the sea, their valleys drowned into long bays. |
+| **Alpine massif** | 8 km, 2.2 km | High mountains: sharp ridges, deep valleys, snow above about 1800 m. |
+| **Rolling hills** | 4 km, 170 m | Rounded hills and broad vales, a stream in every fold. |
+| **Mesa desert** | 4 km, 350 m | Tablelands under a hard caprock, cut back by canyons into mesas and buttes. |
+| **Eroded highlands** | 8 km, 900 m | Old highlands falling to a coast: broad worn ridges, long branching valleys. |
+| **Badlands** | 1 km, 70 m | Soft clay cut into a maze of steep rills and sharp ridges. |
+
+Picking a preset replaces the terrain and the world settings. It brings the surfaces that suit it (desert
+sand for the mesas, snow on the massif) unless you have edited the surfaces, which then stay. It keeps the
+seed (every preset drains whatever the seed, so a new seed is a new variation), the export resolution,
+the export settings and the painted masks. **Reset** applies the current preset again.
+
+### Proportions
+
+Real relief is small against its extent: mountain flanks average 25 to 35 degrees, hill country 5 to 15.
+A world whose **Height scale** is close to its **World size** stands up in needles however it is eroded;
+keep the highest ground to a third of the map's width for mountains and a twentieth for hills. Then a
+mountain wants its map several kilometres across, and a 2 km map holds a hill or an island.
+
 ## Lakes
 
 The sea reaches every cell whose way off the map never rises above sea level. Basins it cannot reach
@@ -140,16 +177,64 @@ peaks and drop of valleys).
 Wire masks into **Depth mask**, **Detail mask** or **Peak/valley mask** to vary it across the map: a
 painted depth mask erodes only where you paint.
 
+### Rivers and valleys
+
+Fluvial erosion: what gives real land its drainage. Rivers cut down in proportion to the water they carry
+and the slope they run on (the stream power law), against the land rising: the height wired in is where
+the land rises, and the relief that stands is what the rivers leave of it. Every valley joins a larger one
+and falls without a break to the sea or the map's edge; ridges are what is left between them; a river
+steepens upstream as the water it carries shrinks, as real rivers do. Hillsides stand no steeper than the
+talus angle, crests and creases are rounded by soil creep, and hollows silt up, so no closed hollow is left
+to fill with a lake. At the end the land is brought back to the height it was drawn at (its highest
+ground), so the relief you set is the relief you get. The solver is Braun and Willett's (2013), as
+Cordonnier et al. (2016) and Schott et al. (2023) use it for terrain.
+
+Feed it a broad, smooth shape: it makes the valleys. Fine noise before it only roughens where the rivers
+start. The fine gullies come after it, from an **Erosion filter**.
+
+| Field | Meaning |
+|---|---|
+| **Age** | How long the rivers have cut: 0.2 young (valleys near the outlets, the drawn shape kept), 1 mature, 3 the shape the rivers give. Not a step count: it is measured against the land's own drainage. |
+| **Steepest slope** | The steepest a hillside stands, degrees: 35 to 40 for mountains, 20 for soft hills, 50 and more for caprock cliffs. |
+| **Rounding** | Metres over which soil creep rounds crests and creases. It also sets how close the smallest valleys lie: a few metres for badlands, tens for mountains, a hundred or more for hills. |
+| **Simulation grid** | Samples a side the simulation runs on, whatever the preview or export resolution (see below). |
+| **Valley profile** | How fast rivers flatten downstream: higher gives long, flat lower valleys under steep heads. |
+| **Channels from** | Drainage area, m², below which the ground barely cuts: more leaves smooth hillsides between fewer, larger valleys; 0 makes every slope a channel. |
+| **Basin fill** | How far hollows silt up: 1 leaves no closed hollow; less leaves the deepest as basins. |
+
+Its **Hardness** input (a mask) makes rock resist: 1 erodes at a twentieth of the rate, so a caprock
+stands as tablelands over cut-back cliffs. Its **Flow** output is the area draining through each point,
+from a thousand square metres (0) to the whole map (1). What it cuts feeds the surfaces' **Wear**.
+
+### Drain
+
+Fills every closed hollow to the level it spills at, so water runs off: the pits an erosion filter leaves,
+since it carves without regard to where water goes. Put lakes you want (a crater) after it. The sea and the
+map's edge are where water leaves.
+
 ### Simulations
 
 | Node | What it does |
 |---|---|
 | **Thermal erosion** | Material slumps off any slope steeper than the **Talus angle**, softening cliffs into scree. Conserves material. What it piles up is the surfaces' **Talus**. |
-| **Hydraulic (droplets)** | Many single raindrops roll downhill, eroding where they speed up and depositing where they slow: gullies and alluvial fans. What they lay down is **Deposits**, what they cut is **Wear**. |
+| **Hydraulic (droplets)** | Many single raindrops roll downhill, gaining speed as they go, eroding where they can carry more and depositing where they slow: gullies and alluvial fans. What they lay down is **Deposits**, what they cut is **Wear**. |
 | **Hydraulic (pipes)** | A shallow-water simulation (Mei et al. 2007): rain flows between cells through virtual pipes and carries sediment. Runs on the GPU for the export when available. Also produces the flow and wetness masks, and Deposits and Wear. |
 
-Simulations work in grid cells, so the same settings erode a 2049 export more finely than the 257
-preview; check the full-resolution result before committing to a look.
+Their lengths are metres:
+
+| Field | Meaning |
+|---|---|
+| **Reach** | Thermal: how far scree travels from where it falls. Pipes: how far water runs over the simulation. |
+| **Travel** | How far a droplet runs before it is spent. |
+| **Brush radius** | How wide a droplet cuts, metres. |
+
+Every simulation, **Rivers and valleys** and **Drain** included, runs on its own **Simulation grid**
+(257 to 4097 samples a side), whatever resolution the world is evaluated at: the 257 preview, the 513 fine
+preview and a 4097 export erode the same land, and only what the simulation changed is carried to the
+evaluated grid (detail drawn before it, finer than its grid, is kept). A finer grid catches smaller
+features and takes longer: Rivers and valleys takes a few seconds at 513, about four times that at 1025.
+A world saved before the simulation grid existed keeps its look at the resolution it was exported at: its
+simulations run on that resolution, their old counts of cells turned into metres.
 
 ### Paint mask
 
@@ -169,8 +254,8 @@ The world's heights. There is always exactly one.
 Dragging a parameter of a shape, a Combine or an erosion filter, or painting a mask, updates the
 landscape every frame: with GPU compute (WebGPU) those nodes and everything after them run as compute
 kernels at 257², from the outputs of the nodes before them; without it (WebGL 2) the graph's heights
-re-run at 129². Simulations and landforms after the edited node are skipped while you drag (their
-badge reads **Pending**). When the edit pauses the full preview follows: every node, the fields, the
+re-run at 129². Simulations (Rivers and valleys and Drain among them) and landforms after the edited node
+are skipped while you drag (their badge reads **Pending**): the valleys come back when the edit pauses. When the edit pauses the full preview follows: every node, the fields, the
 surfaces and the water. The CPU result is always what the Map, the surfaces and the export use.
 
 ## Surfaces
@@ -193,7 +278,9 @@ Creator shows are generated for the preview and never exported.
 | **Desert** | Hardpan, desert sand, gravel washes, gully floors, scree, rock slopes, ridge rock, banded cliffs. |
 | **Tropical coast** | Lush grass, forest floor, seabed, beach sand, wet sand, mud, rock slopes. |
 
-A world preset (the World tab's header) replaces the terrain but keeps the surfaces.
+A world preset (the World tab's header) brings its own surfaces unless you have edited yours (see
+[World presets](#world-presets)). **Snow** and **Shaded snow** lie above a height over the sea (1800 m and
+1400 m), so hill country has none and a massif's heights are white.
 
 Each row's caption is the share of the map the surface covers in the preview.
 

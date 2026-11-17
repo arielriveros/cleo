@@ -6,8 +6,9 @@
 // Every pass works in CELL UNITS: a height of 1 is one grid spacing. The stack's heights are a fraction
 // of the world's height scale, so each pass converts in (`h * heightScale / cellSize`) and back. That
 // keeps the physical constants (talus angle, droplet capacity, pipe gravity) meaning the same thing at
-// any world size. What does NOT carry over is iteration counts: water and droplets travel in cells, so
-// the same settings erode a 2049 export more finely than a 257 preview.
+// any world size. Iteration counts and reaches are cells too: the nodes (graph/nodes/erosionNodes.ts) run
+// each pass on its own simulation grid and turn their metres into that grid's cells, so a preview and an
+// export erode alike.
 //
 // Everything here is deterministic: no Math.random, no time, a fixed iteration order. The only
 // randomness, droplet spawn points, comes from the engine's seeded PRNG.
@@ -186,8 +187,17 @@ export async function dropletErosion(h: Float32Array, f: WorldFrame, p: DropletP
           sediment += take;
         }
       }
-      speed = Math.sqrt(Math.max(0, speed * speed + dh * p.gravity));
+      // Downhill (dh < 0) the droplet gains speed; uphill it loses it.
+      speed = Math.sqrt(Math.max(0, speed * speed - dh * p.gravity));
       water *= 1 - p.evaporation;
+    }
+    // A spent droplet lays down what it still carries where it stopped (on the map).
+    if (sediment > 0 && x >= 0 && y >= 0 && x < res - 1 && y < res - 1) {
+      const c = Math.floor(x), r = Math.floor(y), u = x - c, v = y - r, i = r * res + c;
+      cells[i] += sediment * (1 - u) * (1 - v);
+      cells[i + 1] += sediment * u * (1 - v);
+      cells[i + res] += sediment * (1 - u) * v;
+      cells[i + res + 1] += sediment * u * v;
     }
     if ((n & 4095) === 4095) await checkpoint(ctx, n / drops, 'Droplet erosion');
   }

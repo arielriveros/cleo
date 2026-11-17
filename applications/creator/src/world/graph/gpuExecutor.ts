@@ -40,6 +40,7 @@ interface StepGpu {
 export interface RealtimeEnv {
   frame: WorldFrame;
   seed: number;
+  seaLevel?: number;
   paint: PaintPixels;
   paintMeta: readonly PaintMaskMeta[];
 }

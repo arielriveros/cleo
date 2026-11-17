@@ -62,7 +62,7 @@ function bypassable(t: NodeType, readPorts: Set<string>): boolean {
  * The plan for editing `root` live, or null when the edit cannot run live (it does not reach the Output,
  * or something after it can neither run on the GPU nor be skipped).
  */
-export function planRealtime(graph: WorldGraph, root: string, env: { frame: WorldFrame; seed: number; paintMeta: readonly PaintMaskMeta[] }): RealtimePlan | null {
+export function planRealtime(graph: WorldGraph, root: string, env: { frame: WorldFrame; seed: number; seaLevel?: number; paintMeta: readonly PaintMaskMeta[] }): RealtimePlan | null {
   const out = outputNode(graph);
   if (!out) return null;
   const feedsOutput = root === out.id || ancestors(graph, out.id).has(root);

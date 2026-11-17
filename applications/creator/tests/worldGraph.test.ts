@@ -8,7 +8,7 @@ import { worldExportHash } from '../src/world/exportWorld';
 import { layoutGraph } from '../src/world/graph/build';
 import { evaluateGraph, GraphCache } from '../src/world/graph/evaluate';
 import { connect, graphKey, outputNode, wouldCycle, type WorldGraph } from '../src/world/graph/graphDoc';
-import { graphFromStack, normaliseGraph, type LegacyErosionPass } from '../src/world/graph/migrate';
+import { graphFromStack, LEGACY_SIM_DEFAULTS, normaliseGraph, type LegacyErosionPass } from '../src/world/graph/migrate';
 import { nodeType, NODE_TYPE_LIST } from '../src/world/graph/nodeRegistry';
 import { shapePoint, shapeUniform } from '../src/world/graph/nodes/shapes';
 import { combinePoint } from '../src/world/graph/nodes/combine';
@@ -21,7 +21,7 @@ const hash = (a: Float32Array) => fnv1a(new Uint8Array(a.buffer, a.byteOffset, a
 const layer = <K extends WorldLayer['kind']>(kind: K, patch: Partial<Extract<WorldLayer, { kind: K }>>, id: string): WorldLayer =>
   ({ ...LAYER_DEFAULTS[kind](), ...patch, id } as WorldLayer);
 const pass = (kind: LegacyErosionPass['kind'], id: string, params: Record<string, unknown> = {}, enabled = true): LegacyErosionPass =>
-  ({ id, kind, enabled, params: { ...nodeType(kind)!.defaults(), ...params } });
+  ({ id, kind, enabled, params: { ...LEGACY_SIM_DEFAULTS[kind], ...params } });
 
 /** The World Creator's generate() before the graph, verbatim in substance: the reference migration must match. */
 async function legacyGenerate(layers: WorldLayer[], erosion: LegacyErosionPass[], settings: WorldDoc['settings']) {
@@ -81,7 +81,7 @@ describe('migration from the landform stack', () => {
     it(`evaluates the "${legacy.id}" stack bit for bit as before`, async () => {
       const settings = { ...DEFAULT_SETTINGS, ...legacy.settings, resolution: 49 };
       const doc = normaliseWorld({ version: 2, settings, layers: legacy.layers, erosion: legacy.erosion });
-      expect(doc.version).toBe(3);
+      expect(doc.version).toBe(4);
       const now = await generateWorld(doc);
       const then = await legacyGenerate(legacy.layers, legacy.erosion, settings);
       expect(hash(now.heights)).toBe(hash(then.heights));
@@ -283,7 +283,9 @@ describe('presets', () => {
       expect(outputNode(doc.graph), p.id).toBeDefined();
       const moved = { ...doc, graph: { ...doc.graph, nodes: doc.graph.nodes.map(n => ({ ...n, x: n.x * 2 + 7, y: -n.y })) } };
       expect(worldExportHash(moved)).toBe(worldExportHash(doc));
-      const out = await generateWorld({ ...doc, settings: { ...doc.settings, resolution: 33 } });
+      // Its simulations on a grid as small as the world, so the graph is checked rather than the erosion.
+      const graph = { ...doc.graph, nodes: doc.graph.nodes.map(n => ('grid' in (nodeType(n.type)?.defaults() ?? {}) ? { ...n, params: { ...n.params, grid: '33' } } : n)) };
+      const out = await generateWorld({ ...doc, graph, settings: { ...doc.settings, resolution: 33 } });
       expect(out.heights.every(Number.isFinite), p.id).toBe(true);
     }
   });

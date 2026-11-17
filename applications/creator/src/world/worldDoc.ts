@@ -1,11 +1,12 @@
 // A World Creator document: the world's frame, the terrain as a node graph (graph/), the painted masks it
 // reads, the surfaces that texture it, the lakes, and how the preview shows it. Plain JSON, so it saves,
-// diffs and travels in the export sidecar as-is. Version 3; versions 1 and 2 (a landform stack and erosion
-// passes) migrate to a chain graph that evaluates bit for bit as they did.
+// diffs and travels in the export sidecar as-is. Version 4; versions 1 and 2 (a landform stack and erosion
+// passes) migrate to a chain graph, and versions 1 to 3 have their simulations put in metres on the grid
+// they were exported at (graph/migrate.ts), so they evaluate there bit for bit as they did.
 
 import type { WorldLayer } from './features';
 import { graphKey, type WorldGraph } from './graph/graphDoc';
-import { graphFromStack, normaliseGraph, type LegacyErosionPass } from './graph/migrate';
+import { graphFromStack, normaliseGraph, simulationsInMetres, type LegacyErosionPass } from './graph/migrate';
 import { DEFAULT_LAKES, type LakeSettings } from './lakes';
 import type { PaintMaskMeta } from './paint';
 import { normaliseSurfaces, surfaceExportKey, type SurfaceLayer } from './surfaces/surfaceDoc';
@@ -64,7 +65,7 @@ export const DEFAULT_OUTPUT: WorldOutputSettings = {
 };
 
 export interface WorldDoc {
-  version: 3;
+  version: 4;
   settings: WorldSettings;
   graph: WorldGraph;
   /** The painted masks' descriptions; their pixels travel beside the document (paint.ts). */
@@ -86,7 +87,7 @@ export const DEFAULT_PREVIEW: WorldPreview = { quality: 'draft', water: DEFAULT_
 
 /** A document's non-terrain parts, for a preset that builds only the graph. */
 export function worldExtras(): Pick<WorldDoc, 'version' | 'paint' | 'surfaces' | 'water' | 'output' | 'preview'> {
-  return { version: 3, paint: [], surfaces: defaultSurfaces(), water: { lakes: { ...DEFAULT_LAKES } }, output: { ...DEFAULT_OUTPUT, masks: [...DEFAULT_OUTPUT.masks] }, preview: { ...DEFAULT_PREVIEW } };
+  return { version: 4, paint: [], surfaces: defaultSurfaces(), water: { lakes: { ...DEFAULT_LAKES } }, output: { ...DEFAULT_OUTPUT, masks: [...DEFAULT_OUTPUT.masks] }, preview: { ...DEFAULT_PREVIEW } };
 }
 
 /** What a version-1 or -2 document stored instead of a graph. */
@@ -105,14 +106,17 @@ export function normaliseWorld(raw: unknown): WorldDoc {
   if (!SPLAT_RESOLUTIONS.includes(output.splatResolution as typeof SPLAT_RESOLUTIONS[number])) output.splatResolution = DEFAULT_OUTPUT.splatResolution;
   if (!Array.isArray(output.masks)) output.masks = [...DEFAULT_OUTPUT.masks];
   const preview = r.preview ?? extras.preview;
-  const graph = r.graph
+  const settings = { ...DEFAULT_SETTINGS, ...(r.settings ?? {}) };
+  let graph = r.graph
     ? normaliseGraph(r.graph)
     : normaliseGraph(graphFromStack(Array.isArray(r.layers) ? r.layers : [], Array.isArray(r.erosion) ? r.erosion : []));
+  const version = typeof r.version === 'number' ? r.version : 1;
+  if (version < 4) graph = simulationsInMetres(graph, settings.resolution, settings.size);
   const paint = (Array.isArray(r.paint) ? r.paint : []).filter(m => m && typeof m.id === 'string' && Number.isFinite(m.resolution))
     .map(m => ({ id: m.id, name: typeof m.name === 'string' ? m.name : 'Mask', resolution: m.resolution, signed: !!m.signed, hash: typeof m.hash === 'string' ? m.hash : '' }));
   return {
-    version: 3,
-    settings: { ...DEFAULT_SETTINGS, ...(r.settings ?? {}) },
+    version: 4,
+    settings,
     graph,
     paint,
     surfaces: normaliseSurfaces(r.surfaces, defaultSurfaces),
@@ -126,7 +130,7 @@ const paintKey = (doc: WorldDoc) => doc.paint.map(m => [m.id, m.resolution, m.si
 
 /** The parts of a document that decide the terrain (heights, erosion): what the terrain stage caches on. */
 export function terrainKey(doc: WorldDoc, resolution: number): string {
-  return JSON.stringify([resolution, doc.settings.size, doc.settings.heightScale, doc.settings.seed, graphKey(doc.graph), paintKey(doc)]);
+  return JSON.stringify([resolution, doc.settings.size, doc.settings.heightScale, doc.settings.seed, doc.settings.seaLevel, graphKey(doc.graph), paintKey(doc)]);
 }
 
 /**
