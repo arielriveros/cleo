@@ -142,8 +142,12 @@ export const FEATURES: readonly FeatureDef[] = [
     },
     {
         id: 'water', label: 'Water volumes', group: 'world',
-        description: 'Water that floats bodies and ripples.',
+        description: 'Rivers, lakes, pools and the sea: baked flow, live waves round the camera, floating bodies.',
         nodeTypes: ['waterVolume'],
+        // The surface, the view from under it, the live waves and the local flow round the camera.
+        shaderModules: wgsl('water', 'waterUnderwater', 'waterWaveField', 'waterWaveAdvect', 'waterWaveStep',
+            'waterFlowGround', 'waterFlowShift', 'waterFlowAdvect', 'waterFlowLimit', 'waterFlowDepth', 'waterFlowAccelerate',
+            'waterFlowWaves', 'waterFlowSurface'),
         apiNames: ['WaterVolumeNode'],
     },
 
