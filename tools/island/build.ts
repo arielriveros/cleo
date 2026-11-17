@@ -1,8 +1,8 @@
 // Build the Island example (applications/editor/public/examples/island): the Creator's Island world (its
 // preset, generated headless) as the landscape, dressed with the Valley's own assets - its landscape
 // material and plants, its hamlet (houses, windmill, well, poles, furniture, torches) stamped onto the
-// island with the ground it stands on - and water: an ocean round the island, its lakes, and rivers from
-// the peak into the big lake and out of it to the sea, the lakes and rivers flow-baked. The Valley's sky,
+// island with the ground it stands on - and water: an Ocean node round the island, a Lake node per lake,
+// and River nodes from the peak into the big lake and out of it to the sea, each flow-baked. The Valley's sky,
 // sun, clouds, wind, weather and day cycle come along as they are.
 //
 //   NODE_OPTIONS=--max-old-space-size=16384 npx vite-node --config applications/creator/vitest.config.ts tools/island/build.ts [--dry]
@@ -20,7 +20,8 @@ import { SILENT_CONTEXT } from '../../applications/creator/src/core/generator'
 import { WATER_LAKE, WATER_SEA } from '../../applications/creator/src/world/lakes'
 import { WaterMaterial } from '../../src/graphics/material'
 import { WATER_LOOK_PRESETS } from '../../src/water/waterLook'
-import { normaliseWaterShape, resolveWaterShapes } from '../../src/water/waterShapes'
+import { Scene } from '../../src/core/scene/scene'
+import { WaterVolumeNode } from '../../src/core/scene/nodes/waterVolumeNode'
 import { bakeShallowWater } from '../../src/water/bake/shallowWater'
 import { encodeWaterBake } from '../../src/water/bake/waterBakeFormat'
 import { seededRandom } from '../../src/core/math'
@@ -306,10 +307,19 @@ const lakeBox = (lake: any) => {
   return { center: [r3((x0 + x1) / 2), r3(lake.level - depth / 2), r3((z0 + z1) / 2)] as [number, number, number],
            size: [r3(x1 - x0), r3(depth), r3(z1 - z0)] as [number, number, number] }
 }
-// Each lake as a LAKE shape: its outline traced from the flooded cells (rays from the centre out to the
-// last lake cell, a few metres past it, smoothed by the lake shape's own spline), so the water stays in the
+// The water is built as real Water nodes in a scratch scene, so the rivers resolve against the lakes they
+// flow into exactly as the editor will, and each bake's signature is the node's own.
+const waterScene = new Scene()
+const place = (n: WaterVolumeNode, position: [number, number, number]) => {
+  n.setPosition(position)
+  waterScene.addNode(n)
+  n.updateTransforms()
+  return n
+}
+// Each lake a Lake node at its level: its outline traced from the flooded cells (rays from the centre out to
+// the last lake cell, a few metres past it, smoothed by the lake's own spline), so the water stays in the
 // basin; a box over its bounds would also flood the downhill ground beyond its rim.
-const lakeShapes = biggest.map((lake, i) => {
+const lakeNodes = biggest.map((lake, i) => {
   const box = lakeBox(lake)
   const cx = box.center[0], cz = box.center[2]
   const pts: { pos: [number, number, number]; width: number; depth: number; flowSpeed: number }[] = []
@@ -323,18 +333,18 @@ const lakeShapes = biggest.map((lake, i) => {
     }
     pts.push({ pos: [r3(dx * (last + 4)), 0, r3(dz * (last + 4))], width: 1, depth: 1, flowSpeed: 0 })
   }
-  return normaliseWaterShape({ type: 'lake', id: `lake${i}`, name: i === 0 ? 'Lake' : `Tarn ${i}`,
-    offset: [cx, r3(lake.level), cz], depth: r3(box.size[1]), points: pts })
+  const node = new WaterVolumeNode(i === 0 ? 'Lake' : `Tarn ${i}`, { waterType: 'lake', depth: r3(box.size[1]), points: pts }, id(`lake${i}`))
+  return place(node, [cx, r3(lake.level), cz])
 })
-const lakeAt = (x: number, z: number) => {
-  const r = resolveWaterShapes(lakeShapes, { position: [0, 0, 0], scale: [1, 1, 1] })
-  const i = r.findIndex(s => s.type === 'lake' && x >= s.min[0] && x <= s.max[0] && z >= s.min[2] && z <= s.max[2])
-  return i >= 0 ? lakeShapes[i] : undefined
-}
+const lakeAt = (x: number, z: number) => lakeNodes.find(n => {
+  const r = n.resolved()
+  return !!r && x >= r.min[0] && x <= r.max[0] && z >= r.min[2] && z <= r.max[2]
+})
 // The rivers the world carved, along the same control points; the surface a metre over the carved bed, never
 // climbing downstream, ending in the lake or the sea.
+const SEA_ID = id('ocean')
 const rivers = (doc.graph.nodes as any[]).filter(n => n.type === 'river')
-const riverShapes = rivers.map((n, i) => {
+const riverNodes = rivers.map((n, i) => {
   const pts: { pos: [number, number, number]; width: number; depth: number; flowSpeed: number }[] = []
   let last = Infinity
   const ctrl: [number, number][] = n.params.points
@@ -347,8 +357,9 @@ const riverShapes = rivers.map((n, i) => {
   }
   const first = pts[0].pos, end = pts[pts.length - 1].pos
   const into = lakeAt(end[0], end[2]), from = lakeAt(first[0], first[2])
-  return normaliseWaterShape({ type: 'river', id: `river${i}`, name: n.name, points: pts, priority: 1,
-    connect: { start: from?.id ?? null, end: into?.id ?? null } })
+  // A river that reaches no lake runs out to sea.
+  const connect = { start: from?.id ?? null, end: into?.id ?? (end[1] <= SEA + 1.5 ? SEA_ID : null) }
+  return place(new WaterVolumeNode(n.name, { waterType: 'river', points: pts, connect }, id(`river${i}`)), [0, 0, 0])
 })
 
 const look = (pid: string, over: any = {}) => new WaterMaterial({ ...WATER_LOOK_PRESETS.find(p => p.id === pid)!.options, ...over }).serialize()
@@ -360,46 +371,52 @@ const addWaterMaterial = (key: string, name: string, material: any) => {
 }
 const OCEAN_MAT = addWaterMaterial('ocean', 'Island Ocean', look('openOcean', { subsurface: 1.4 }))
 const LAKE_MAT = addWaterMaterial('lakes', 'Island Lakes', look('clearLake', { turbidity: 0.2, clarity: 6, detailStrength: 0.45, subsurface: 0.7 }))
-const lakesRivers = [...lakeShapes, ...riverShapes]
-// Flow-bake the lakes and rivers over the island's ground, as the editor's Bake flow button does.
-const resolved = resolveWaterShapes(lakesRivers, { position: [0, 0, 0], scale: [1, 1, 1] })
-const bakeInfo = bakeShallowWater(resolved, heightAt, { maxRes: 256, duration: 40 })
-const BAKE_ID = id('water-bake:lakes')
-const signature = JSON.stringify([lakesRivers, [0, 0, 0, 1, 1, 1]])
-bundle.giBakes = [...(bundle.giBakes ?? []), { id: BAKE_ID, bytes: encodeWaterBake(bakeInfo, signature).buffer }]
-log(`lakes and rivers baked: ${bakeInfo.nx} x ${bakeInfo.nz} cells`)
-
-const waterNode = (key: string, name: string, water: any) => ({
-  id: id(key), name, type: 'waterVolume', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: [], spawnOnStart: true,
-  waterVolume: {
-    density: 1000, linearDrag: 2.5, angularDrag: 1.5, waveAmplitude: 0, waveFrequency: 0.6, affectCharacters: false,
-    splashTemplate: 'Water Splash', wadeSplashTemplate: 'Water Step', enabled: true, currents: true, ...water,
-  },
-})
 const oceanMatAsset = materials.find(m => m.id === OCEAN_MAT), lakeMatAsset = materials.find(m => m.id === LAKE_MAT)
+const ocean = place(new WaterVolumeNode('Ocean', { waterType: 'ocean', depth: 200 }, SEA_ID), [0, SEA, 0])
+
+// Flow-bake every river over the island's ground, as the editor's Bake flow button does: into the water it
+// joins, which keeps its level and takes what the river brings.
+const bakes: Record<string, string> = {}
+for (const river of riverNodes) {
+  const r = river.resolved()
+  if (!r) continue
+  const info = bakeShallowWater([r], heightAt, { maxRes: 256, duration: 40, handOver: river.handOver() })
+  const bakeId = id(`water-bake:${river.id}`)
+  bundle.giBakes = [...(bundle.giBakes ?? []).filter((g: any) => g.id !== bakeId), { id: bakeId, bytes: encodeWaterBake(info, river.bakeSignature()).buffer }]
+  bakes[river.id] = bakeId
+  log(`${river.name} baked: ${info.nx} x ${info.nz} cells`)
+}
+
+const LIQUID = {
+  density: 1000, linearDrag: 2.5, angularDrag: 1.5, waveAmplitude: 0, waveFrequency: 0.6, affectCharacters: false,
+  splashTemplate: 'Water Splash', wadeSplashTemplate: 'Water Step', enabled: true, currents: true,
+}
+const LAKE_WATER = { windSpeed: 2.5, waveDirection: 25, choppiness: 0.3, shoreFade: 4, followWind: true, waterMaterialId: LAKE_MAT, waterMaterial: lakeMatAsset.material }
+const waterJson = async (n: WaterVolumeNode, over: any) => {
+  const json: any = await n.serialize()
+  json.waterVolume = { ...json.waterVolume, ...LIQUID, ...over, waterType: n.waterType }
+  json.children = []
+  return json
+}
 const waterGroup = {
   id: id('water'), name: 'Water', type: 'node', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], spawnOnStart: true,
   children: [
-    waterNode('ocean', 'Ocean', {
-      shapes: [normaliseWaterShape({ type: 'ocean', id: 'sea', name: 'Sea', offset: [0, SEA, 0], depth: 200 })],
+    await waterJson(ocean, {
       density: 1025, windSpeed: 7, waveDirection: 25, choppiness: 0.55, shoreFade: 10, followWind: true,
       waterMaterialId: OCEAN_MAT, waterMaterial: oceanMatAsset.material,
     }),
-    waterNode('lakes', 'Lakes and Rivers', {
-      shapes: lakesRivers, windSpeed: 2.5, waveDirection: 25, choppiness: 0.3, shoreFade: 4, followWind: true,
-      waterMaterialId: LAKE_MAT, waterMaterial: lakeMatAsset.material, bakeId: BAKE_ID,
-    }),
+    ...await Promise.all(lakeNodes.map(n => waterJson(n, LAKE_WATER))),
+    ...await Promise.all(riverNodes.map(n => waterJson(n, { ...LAKE_WATER, ...(bakes[n.id] ? { bakeId: bakes[n.id] } : {}) }))),
   ],
 }
 root.children.splice(root.children.findIndex((c: any) => c.name === 'Landscape') + 1, 0, waterGroup)
 // The pond's mist and probe go over the big lake.
-const lake0 = lakeShapes[0]
-const lakeTop = lake0.offset[1]
+const lake0 = lakeNodes[0].worldPosition
 const lake0Box = lakeBox(biggest[0])
 const mist = byName('Pond Mist')
-if (mist) { mist.name = 'Lake Mist'; mist.position = [lake0.offset[0], r3(lakeTop + 2.5), lake0.offset[2]]; mist.volumetricFog.size = [r3(lake0Box.size[0]), 5.5, r3(lake0Box.size[2])] }
+if (mist) { mist.name = 'Lake Mist'; mist.position = [r3(lake0[0]), r3(lake0[1] + 2.5), r3(lake0[2])]; mist.volumetricFog.size = [r3(lake0Box.size[0]), 5.5, r3(lake0Box.size[2])] }
 const pondProbe = byName('Pond Probe')
-if (pondProbe) { pondProbe.name = 'Lake Probe'; pondProbe.position = [lake0.offset[0], r3(lakeTop + 2), lake0.offset[2]] }
+if (pondProbe) { pondProbe.name = 'Lake Probe'; pondProbe.position = [r3(lake0[0]), r3(lake0[1] + 2), r3(lake0[2])] }
 
 // Weather: a drizzle over everything, so the water rings and the ground darkens; the day cycle and wind stay.
 const weather = byName('Weather')
@@ -408,7 +425,7 @@ if (weather?.weather) Object.assign(weather.weather, { wetness: 0.35, precipitat
 // The camera: on the hamlet's lake side, looking over the lake to the peak and the sea.
 const cam = byName('Fly Camera')
 if (cam) {
-  const cx = (site.dx + lake0.offset[0]) / 2, cz = (site.dz + lake0.offset[2]) / 2
+  const cx = (site.dx + lake0[0]) / 2, cz = (site.dz + lake0[2]) / 2
   cam.position = [r3(cx), r3(heightAt(cx, cz) + 14), r3(cz)]
 }
 

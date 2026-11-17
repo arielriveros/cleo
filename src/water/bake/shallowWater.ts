@@ -1,5 +1,5 @@
 import { waterColumnAt, type ResolvedWaterShape, type WaterColumn } from '../../physics/water/waterColumn';
-import { buildWaterInfo, chamferDistance, tileWaterInfo, type GroundSampler, type WaterInfo } from '../waterInfo';
+import { buildWaterInfo, chamferDistance, handOverWaterInfo, tileWaterInfo, type GroundSampler, type WaterInfo } from '../waterInfo';
 
 // The water BAKE: a shallow-water simulation (the virtual-pipes model, Mei, Decaudin & Hu 2007) run over a
 // Water node's shapes and the ground under them until the water settles, its velocity averaged over the
@@ -29,6 +29,11 @@ export interface ShallowWaterOptions {
     maxRes?: number;
     /** Seconds of water to simulate; default: long enough for the slowest river to run its length twice. */
     duration?: number;
+    /**
+     * Water the baked body joins and gives way to (a river's lake): simulated with it, as where its water
+     * goes, but handed over in the result (see waterInfo.ts handOverWaterInfo), so only the body is drawn.
+     */
+    handOver?: readonly ResolvedWaterShape[];
 }
 
 /** A bake in progress: call `step(n)` until `done`, then `result()`. */
@@ -49,10 +54,16 @@ export class ShallowWaterBake {
     private readonly _sumU: Float32Array; private readonly _sumV: Float32Array; private readonly _sumD: Float32Array;
     private _samples = 0;
     private readonly _dt: number;
+    private readonly _handOver: readonly ResolvedWaterShape[];
+    private readonly _ground: GroundSampler | null;
 
     constructor(shapes: readonly ResolvedWaterShape[], ground: GroundSampler | null, options: ShallowWaterOptions = {}) {
-        const base = buildWaterInfo(shapes, ground, { maxRes: options.maxRes ?? 256, minCell: 0.25 });
+        this._handOver = options.handOver ?? [];
+        this._ground = ground;
+        const all = [...shapes, ...this._handOver.filter(h => !(h.type === 'ocean' && h.endless))];
+        const base = buildWaterInfo(all, ground, { maxRes: options.maxRes ?? 256, minCell: 0.25 });
         if (!base) throw new Error('Nothing to bake: the water has no finite shape.');
+        shapes = all;
         this._base = base;
         const nx = this.nx = base.nx, nz = this.nz = base.nz, cell = this.cell = base.cell;
         const n = nx * nz;
@@ -200,7 +211,8 @@ export class ShallowWaterBake {
             tileCells: 0, tilesX: 0, tilesZ: 0, tileWet: new Uint8Array(0), tileMinY: new Float32Array(0), tileMaxY: new Float32Array(0),
             oceanLevel: base.oceanLevel, source: id,
         };
-        tileWaterInfo(out);
+        if (this._handOver.length) handOverWaterInfo(out, this._handOver, this._ground);
+        else tileWaterInfo(out);
         return out;
     }
 }

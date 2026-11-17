@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react'
 import {
-  ModelNode, WaterVolumeNode, WATER_VOLUME_PRESETS, normaliseWaterShape, normaliseWaterPoint, newWaterShapeId, carveWater,
+  ModelNode, WaterVolumeNode, WATER_VOLUME_PRESETS, WATER_BODY_TYPES, normaliseWaterPoint, minWaterPoints, carveWater,
   WaterMaterial, WATER_LOOK_PRESETS, DEFAULT_WATER_LOOK, ShallowWaterBake, sceneGround, encodeWaterBake, decodeWaterBake,
   newWaterBakeId, GiBakeRegistry, Logger, type LandscapeNode, type WaterLook, type WaterLookPreset,
-  type WaterVolumePreset, type WaterShape, type WaterShapeType, type WaterPoint,
+  type WaterVolumePreset, type WaterBody, type WaterBodyType, type WaterPoint,
 } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import {
-  Button, Hint, MenuItem, NumberInput, Popover, PresetMenu, PropertyRow, PropertyTable, Section, SectionTitle, Select,
+  Button, Hint, NumberInput, PresetMenu, PropertyRow, PropertyTable, Section, SegmentedControl, Select,
   Slider, Toggle, VectorInput, DocScope, ColorInput, cn,
 } from '@cleo/app-kit/ui'
 import NodeRefInput from '../NodeRefInput'
@@ -18,45 +18,32 @@ import { buildMaterialAsset } from '../../../utils/materials'
 import { saveGiBake } from '../../../utils/giBakeStore'
 import { WaterVolumeIcon } from '../sectionIcons'
 import {
-  WATER_SHAPE_FRAME, WATER_SHAPES_EDITED, setWaterShapeSelection, useWaterShapeSelection,
+  WATER_SHAPES_EDITED, setWaterShapeSelection, useWaterShapeSelection,
 } from '../../gizmo/waterSelection'
 
-// The Water inspector. A Water node is a list of shapes (rivers, lakes, boxes, oceans), joined where a
-// river's start or end is connected to another shape; together they are one body of water that buoys what
-// floats in it, carries it downstream and draws one surface. Shapes are edited like a Collider's: a row
-// per shape, and the selected row's handles in the viewport.
+// The Water inspector. A Water node is ONE body of water — a river, a lake, an ocean or a pool — that buoys
+// what floats in it, carries it downstream and draws its surface. A river joins other Water nodes by naming
+// them (Flows from, Flows into), and meets their surface. The body is edited here and with its handles in
+// the viewport.
 
 // Glyphs in the inspector's section-icon style (15 px, stroke currentColor).
 const S = (props: React.SVGProps<SVGSVGElement>) => (
   <svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round' {...props} />
 )
-export const WATER_SHAPE_ICONS: Record<WaterShapeType, React.ReactNode> = {
+export const WATER_BODY_ICONS: Record<WaterBodyType, React.ReactNode> = {
   river: <S><path d='M5 3c4 3-2 6 2 9s-2 6 2 9' /><path d='M15 3c4 3-2 6 2 9s-2 6 2 9' /></S>,
   lake: <S><path d='M4 13c0-4 4-7 8-7 5 0 8 3 8 6 0 4-4 6-8 6s-8-1-8-5Z' /><path d='M8 12c1.3-.8 2.7-.8 4 0s2.7.8 4 0' /></S>,
-  box: <S><path d='M12 3l8 4.5v9L12 21l-8-4.5v-9Z' /><path d='M4 7.5l8 4.5 8-4.5M12 12v9' /></S>,
   ocean: <S><path d='M2 9c2.5-2 5-2 7.5 0s5 2 7.5 0 3.5-1.5 5 0' /><path d='M2 15c2.5-2 5-2 7.5 0s5 2 7.5 0 3.5-1.5 5 0' /></S>,
+  pool: <S><path d='M12 3l8 4.5v9L12 21l-8-4.5v-9Z' /><path d='M4 7.5l8 4.5 8-4.5M12 12v9' /></S>,
 }
-const TYPE_LABEL: Record<WaterShapeType, string> = { river: 'River', lake: 'Lake', box: 'Box', ocean: 'Ocean' }
-const ADD_HINT: Record<WaterShapeType, string> = {
-  river: 'Add a river: a spline with a width, depth and flow speed at each point. Connect its end to a lake or the ocean.',
-  lake: 'Add a lake: a level surface inside a smooth outline.',
-  box: 'Add a box of level water: a pool, a tank, a flooded room.',
-  ocean: 'Add an ocean: a level surface reaching the horizon, with waves from the wind.',
+const TYPE_LABEL: Record<WaterBodyType, string> = { river: 'River', lake: 'Lake', ocean: 'Ocean', pool: 'Pool' }
+const TYPE_HINT: Record<WaterBodyType, string> = {
+  river: 'A river: a spline with a width, depth and flow speed at each point. Flows from and Flows into join it to other water.',
+  lake: 'A lake: a level surface at the node\u2019s height inside a smooth outline.',
+  ocean: 'An ocean: a level surface at the node\u2019s height reaching the horizon, with waves from the wind.',
+  pool: 'A pool: a level block of water centred on the node (a tank, a fountain, a flooded room).',
 }
-const FrameIcon = () => <S><path d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5' /><circle cx='12' cy='12' r='2.5' /></S>
-const MoreIcon = () => <S><circle cx='5.5' cy='12' r='1.2' fill='currentColor' /><circle cx='12' cy='12' r='1.2' fill='currentColor' /><circle cx='18.5' cy='12' r='1.2' fill='currentColor' /></S>
 const PlusIcon = () => <S><path d='M12 5v14M5 12h14' /></S>
-const Caret = ({ open }: { open: boolean }) => (
-  <S width='11' height='11' className={cn('transition-transform', open ? 'rotate-90' : '')}><path d='M9 6l6 6-6 6' /></S>
-)
-
-const rowTitle = (s: WaterShape, i: number) => s.name || `${TYPE_LABEL[s.type]} ${i + 1}`
-
-/** A copy of `shape` with a fresh id, its connections dropped (they would join the same ends twice). */
-function duplicateWaterShape(shape: WaterShape): WaterShape {
-  const copy = normaliseWaterShape(JSON.parse(JSON.stringify(shape)))
-  return { ...copy, id: newWaterShapeId(), name: shape.name ? `${shape.name} copy` : '', connect: { start: null, end: null } }
-}
 
 /** One control point of a river (width, depth, flow) or a lake (position only). */
 const PointRow = ({ point, index, river, selected, onChange, onRemove, onSelect, canRemove }: {
@@ -71,7 +58,7 @@ const PointRow = ({ point, index, river, selected, onChange, onRemove, onSelect,
         onClick={(e) => { e.stopPropagation(); onRemove() }}>✕</Button>
     </div>
     <PropertyTable columns={['32%', '68%']}>
-      <PropertyRow label='Position' hint={river ? 'Where the surface runs along the centre line, in the node’s units.' : 'A point of the outline, in the node’s units (height is the lake’s level).'}>
+      <PropertyRow label='Position' hint={river ? 'Where the surface runs along the centre line, in the node\u2019s units.' : 'A point of the outline, in the node\u2019s units (the lake\u2019s level is the node\u2019s height).'}>
         <VectorInput value={point.pos} step={0.25} onChange={pos => onChange({ ...point, pos: pos as [number, number, number] })} />
       </PropertyRow>
       {river && <>
@@ -90,11 +77,11 @@ const PointRow = ({ point, index, river, selected, onChange, onRemove, onSelect,
 )
 
 /** Where a point added to the end of a river or lake goes: past the last one, along the last segment. */
-function nextPoint(shape: WaterShape): WaterPoint {
-  const pts = shape.points
+function nextPoint(body: WaterBody): WaterPoint {
+  const pts = body.points
   const last = pts[pts.length - 1]
   if (!last) return normaliseWaterPoint({})
-  if (shape.type === 'lake') {
+  if (body.type === 'lake') {
     // Between the last point and the first: the outline closes there.
     const first = pts[0]
     return normaliseWaterPoint({ ...last, pos: [(last.pos[0] + first.pos[0]) / 2, last.pos[1], (last.pos[2] + first.pos[2]) / 2] })
@@ -104,141 +91,22 @@ function nextPoint(shape: WaterShape): WaterPoint {
   return normaliseWaterPoint({ ...last, pos: [last.pos[0] + d[0], last.pos[1] + d[1], last.pos[2] + d[2]] })
 }
 
-/** One row of the shape list: a header that selects the shape, and, open, its fields. */
-function WaterShapeRow(props: {
-  shape: WaterShape; index: number; all: readonly WaterShape[]; selected: boolean; selectedPoint: number; open: boolean;
-  onToggleOpen: () => void; onChange: (s: WaterShape) => void; onSelect: (point: number) => void; onFrame: () => void;
-  onDuplicate: () => void; onRemove: () => void; onMoveUp?: () => void; onMoveDown?: () => void;
-}) {
-  const s = props.shape
-  const patch = (p: Partial<WaterShape>) => props.onChange({ ...s, ...p })
-  const rowRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { if (props.selected) rowRef.current?.scrollIntoView({ block: 'nearest' }) }, [props.selected])
-  const others = props.all.filter(o => o.id !== s.id)
-  const hasPoints = s.type === 'river' || s.type === 'lake'
-  const setPoint = (i: number, p: WaterPoint) => patch({ points: s.points.map((q, k) => (k === i ? normaliseWaterPoint(p) : q)) })
-  const removePoint = (i: number) => patch({ points: s.points.filter((_, k) => k !== i) })
-  const minPoints = s.type === 'river' ? 2 : 3
-
-  return (
-    <div ref={rowRef} className={cn('w-full rounded border mb-1.5', props.selected ? 'border-highlight bg-highlight/10' : 'border-border-subtle')}>
-      <div className='flex items-center gap-1 px-1 py-0.5 cursor-pointer select-none' onClick={() => props.onSelect(-1)}
-        title='Select this shape: the viewport shows its handles.'>
-        <button type='button' className='p-0.5 text-muted hover:text-fg' aria-label={props.open ? 'Collapse' : 'Expand'}
-          onClick={(e) => { e.stopPropagation(); props.onToggleOpen() }}>
-          <Caret open={props.open} />
-        </button>
-        <span className={cn('shrink-0', props.selected ? 'text-highlight' : 'text-muted')}>{WATER_SHAPE_ICONS[s.type]}</span>
-        <SectionTitle title={rowTitle(s, props.index)} doc='editor/water#shapes::Shape' className='flex-1 min-w-0 truncate' />
-        <Button variant='ghost' size='icon' title='Select and frame in the viewport'
-          onClick={(e) => { e.stopPropagation(); props.onFrame() }}><FrameIcon /></Button>
-        <span onClick={(e) => e.stopPropagation()}>
-          <Popover align='right' title='Shape actions' className='p-1 w-[200px]'
-            trigger={<span className='inline-flex p-1 text-muted hover:text-fg'><MoreIcon /></span>}>
-            {close => (
-              <div className='flex flex-col'>
-                <MenuItem onClick={() => { props.onDuplicate(); close() }}>Duplicate</MenuItem>
-                <MenuItem disabled={!props.onMoveUp} onClick={() => { props.onMoveUp?.(); close() }}>Move up</MenuItem>
-                <MenuItem disabled={!props.onMoveDown} onClick={() => { props.onMoveDown?.(); close() }}>Move down</MenuItem>
-                <MenuItem danger onClick={() => { props.onRemove(); close() }}>Remove</MenuItem>
-              </div>
-            )}
-          </Popover>
-        </span>
-        <Button variant='remove' size='icon' title='Remove this shape'
-          onClick={(e) => { e.stopPropagation(); props.onRemove() }}>✕</Button>
-      </div>
-
-      {props.open && <div className='px-2 pb-2'>
-        <PropertyTable columns={['32%', '68%']}>
-          <PropertyRow label='Priority' hint='Where two shapes overlap, the higher priority is the water there (a river through a lake, say).'>
-            <NumberInput value={s.priority} step={1} onChange={priority => patch({ priority: Math.round(priority) })} />
-          </PropertyRow>
-          {s.type === 'box' && <>
-            <PropertyRow label='Centre' hint='The box centre, in the node’s units. The top face is the surface.'>
-              <VectorInput value={s.offset} step={0.25} onChange={offset => patch({ offset: offset as [number, number, number] })} />
-            </PropertyRow>
-            <PropertyRow label='Size' hint='Width, depth, length in metres, before the node scale.'>
-              <VectorInput value={s.size} min={0.01} step={0.25} onChange={size => patch({ size: size as [number, number, number] })} />
-            </PropertyRow>
-          </>}
-          {(s.type === 'lake' || s.type === 'ocean') && <>
-            <PropertyRow label='Level' hint='The surface height, and the outline’s centre, in the node’s units.'>
-              <VectorInput value={s.offset} step={0.25} onChange={offset => patch({ offset: offset as [number, number, number] })} />
-            </PropertyRow>
-            <PropertyRow label='Depth' hint='Metres, surface to floor. The landscape, where higher, is the real floor.'>
-              <NumberInput value={s.depth} min={0.05} step={0.5} onChange={depth => patch({ depth })} />
-            </PropertyRow>
-          </>}
-          {s.type === 'ocean' &&
-            <PropertyRow label='Extent' hint='Metres the ocean reaches each way from its centre. 0: endless, to the horizon.'>
-              <NumberInput value={s.extent} min={0} step={50} onChange={extent => patch({ extent })} />
-            </PropertyRow>}
-          {s.type === 'river' && <>
-            <PropertyRow label='Offset' hint='Moves the whole river, in the node’s units.'>
-              <VectorInput value={s.offset} step={0.25} onChange={offset => patch({ offset: offset as [number, number, number] })} />
-            </PropertyRow>
-            <PropertyRow label='Flows from' hint='The shape the river starts in: its first point takes that shape’s surface, so the two meet.'>
-              <Select value={s.connect.start ?? ''} onChange={e => patch({ connect: { ...s.connect, start: e.target.value || null } })}>
-                <option value=''>Nothing (a spring)</option>
-                {others.map((o, i) => <option key={o.id} value={o.id}>{rowTitle(o, props.all.indexOf(o) ?? i)}</option>)}
-              </Select>
-            </PropertyRow>
-            <PropertyRow label='Flows into' hint='The shape the river ends in: its last point takes that shape’s surface, so the river runs into it.'>
-              <Select value={s.connect.end ?? ''} onChange={e => patch({ connect: { ...s.connect, end: e.target.value || null } })}>
-                <option value=''>Nothing</option>
-                {others.map((o, i) => <option key={o.id} value={o.id}>{rowTitle(o, props.all.indexOf(o) ?? i)}</option>)}
-              </Select>
-            </PropertyRow>
-          </>}
-          {hasPoints && <>
-            <PropertyRow label='Carve landscape' hint='Dig this shape’s bed into the landscape when Carve is pressed: the bed inside the water, a sloped bank outside it. Only ever lowers the ground.'>
-              <Toggle checked={s.carve.enabled} onChange={enabled => patch({ carve: { ...s.carve, enabled } })} />
-            </PropertyRow>
-            {s.carve.enabled && <>
-              <PropertyRow label='Bank width' hint='Metres the bank slopes over, from the water’s edge back up to the ground.'>
-                <NumberInput value={s.carve.bankWidth} min={0} step={0.5} onChange={bankWidth => patch({ carve: { ...s.carve, bankWidth } })} />
-              </PropertyRow>
-              <PropertyRow label='Dig deeper' hint='Metres dug below the water’s own depth.'>
-                <NumberInput value={s.carve.extraDepth} min={0} step={0.1} onChange={extraDepth => patch({ carve: { ...s.carve, extraDepth } })} />
-              </PropertyRow>
-            </>}
-          </>}
-        </PropertyTable>
-        {hasPoints && <div className='mt-2'>
-          <div className='flex items-center mb-1'>
-            <span className='text-ui-xs text-muted flex-1'>{s.type === 'river' ? 'Points, upstream to downstream' : 'Outline points'}</span>
-            <Button variant='ghost' size='icon' title='Add a point at the end'
-              onClick={() => patch({ points: [...s.points, nextPoint(s)] })}><PlusIcon /></Button>
-          </div>
-          {s.points.map((p, i) => (
-            <PointRow key={i} point={p} index={i} river={s.type === 'river'} selected={props.selected && props.selectedPoint === i}
-              canRemove={s.points.length > minPoints}
-              onSelect={() => props.onSelect(i)} onChange={q => setPoint(i, q)} onRemove={() => removePoint(i)} />
-          ))}
-        </div>}
-      </div>}
-    </div>
-  )
-}
-
-/** The shape list and its add row. */
 /**
- * Digs every shape with Carve landscape on into every landscape under it, as one undo step: the touched
- * rectangle of each terrain, before and after.
+ * Digs the river's or lake's bed into every landscape under it, as one undo step: the touched rectangle of
+ * each terrain, before and after.
  */
 function useCarve(node: WaterVolumeNode) {
   const { eventEmitter, editorScene } = useCleoEngine()
   const { push } = useHistory()
   return () => {
-    const resolved = node.resolvedShapes()
+    const resolved = node.resolved()
     const edits: { id: string; region: { c0: number; r0: number; c1: number; r1: number }; before: Float32Array; after: Float32Array }[] = []
     for (const land of (editorScene?.landscapes ?? []) as Set<LandscapeNode>) {
       const terrain = land.terrain
       if (!terrain) continue
       const original = terrain.heights.slice()
       const region = carveWater({ heights: terrain.heights, resolution: terrain.resolution, size: terrain.size, origin: terrain.origin },
-        node.shapes, resolved)
+        node.waterBody, resolved)
       if (!region) continue
       const after = terrain.readHeights(region)
       // The carve wrote straight into the grid: the before copy comes from the saved original, and
@@ -263,81 +131,88 @@ function useCarve(node: WaterVolumeNode) {
   }
 }
 
-function WaterShapes({ node, changed }: { node: WaterVolumeNode; changed: () => void }) {
-  const { eventEmitter } = useCleoEngine()
+/** The body of water: its type, that type's fields, and a river's or lake's points. */
+function WaterBodyCard({ node, changed }: { node: WaterVolumeNode; changed: () => void }) {
+  const { eventEmitter, editorScene } = useCleoEngine()
   const carve = useCarve(node)
   const [carveMiss, setCarveMiss] = useState(false)
-  const anyCarve = node.shapes.some(s => s.carve.enabled && (s.type === 'river' || s.type === 'lake'))
   const selection = useWaterShapeSelection(eventEmitter)
-  const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set())
-  const shapes = node.shapes
-  const write = (next: WaterShape[]) => { node.shapes = next; changed() }
-  const select = (shapeId: string | null, point = -1) =>
-    setWaterShapeSelection(eventEmitter, shapeId ? { nodeId: node.id, shapeId, point } : null)
-  const add = (type: WaterShapeType) => {
-    const shape = normaliseWaterShape({ type })
-    // A new river flows into the node's first lake or ocean, so the obvious layout needs no connecting.
-    if (type === 'river') {
-      const target = shapes.find(s => s.type === 'lake' || s.type === 'ocean')
-      if (target) shape.connect = { start: null, end: target.id }
-    }
-    write([...shapes, shape])
-    select(shape.id)
-  }
-  const move = (i: number, delta: number) => {
-    const to = Math.min(shapes.length - 1, Math.max(0, i + delta))
-    const next = [...shapes]
-    next.splice(to, 0, next.splice(i, 1)[0])
-    write(next)
-  }
-  const remove = (i: number) => {
-    const gone = shapes[i].id
-    // Whatever flowed into the removed shape now flows into nothing.
-    write(shapes.filter((_, k) => k !== i).map(s => ({
-      ...s, connect: { start: s.connect.start === gone ? null : s.connect.start, end: s.connect.end === gone ? null : s.connect.end },
-    })))
-    if (selection?.shapeId === gone) select(null)
-  }
-  const toggle = (id: string) => setClosed(prev => {
-    const next = new Set(prev)
-    if (next.has(id)) next.delete(id); else next.add(id)
-    return next
-  })
+  const b = node.waterBody
+  const write = (patch: Partial<WaterBody>) => { node.waterBody = { ...b, ...patch }; changed() }
+  const selectedPoint = selection && selection.nodeId === node.id ? selection.point : -1
+  const selectPoint = (point: number) => setWaterShapeSelection(eventEmitter, { nodeId: node.id, point })
+  const others = ([...((editorScene?.waterVolumes ?? []) as Set<WaterVolumeNode>)]).filter(n => n !== node)
+  const hasPoints = b.type === 'river' || b.type === 'lake'
+  const minPoints = minWaterPoints(b.type)
+  const setPoint = (i: number, p: WaterPoint) => write({ points: b.points.map((q, k) => (k === i ? normaliseWaterPoint(p) : q)) })
+  const removePoint = (i: number) => write({ points: b.points.filter((_, k) => k !== i) })
+  const joined = (id: string | null) => (id && !others.some(o => o.id === id) ? `${id} (missing)` : null)
 
   return (
-    <Section title='Shapes'>
-      <div className='flex items-center gap-1 mb-2'>
-        {(['river', 'lake', 'box', 'ocean'] as WaterShapeType[]).map(t => (
-          <Button key={t} variant='ghost' size='icon' title={ADD_HINT[t]} aria-label={`Add ${TYPE_LABEL[t].toLowerCase()}`}
-            onClick={() => add(t)}>{WATER_SHAPE_ICONS[t]}</Button>
-        ))}
-      </div>
-      {shapes.length === 0 && <Hint className='mb-2'>No shapes: there is no water yet.</Hint>}
-      {anyCarve && <div className='mb-2'>
-        <Button size='sm' title='Dig the beds of the shapes with Carve landscape on into the landscape under them. One undo step.'
+    <Section title='Water body'>
+      <SegmentedControl joined size='sm' value={b.type} className='mb-2'
+        options={WATER_BODY_TYPES.map(t => ({ value: t, label: WATER_BODY_ICONS[t], title: TYPE_HINT[t], doc: `editor/water#water-body::${TYPE_LABEL[t]}` }))}
+        onChange={t => { node.waterType = t; setWaterShapeSelection(eventEmitter, null); changed() }} />
+      <PropertyTable columns={['40%', '60%']}>
+        {b.type === 'pool' &&
+          <PropertyRow label='Size' hint='Width, depth, length in metres, before the node scale. The node is its centre; the top face is the surface.'>
+            <VectorInput value={b.size} min={0.01} step={0.25} onChange={size => write({ size: size as [number, number, number] })} />
+          </PropertyRow>}
+        {(b.type === 'lake' || b.type === 'ocean') &&
+          <PropertyRow label='Depth' hint='Metres, surface to floor. The landscape, where higher, is the real floor. The node\u2019s height is the surface.'>
+            <NumberInput value={b.depth} min={0.05} step={0.5} onChange={depth => write({ depth })} />
+          </PropertyRow>}
+        {b.type === 'ocean' &&
+          <PropertyRow label='Extent' hint='Metres the ocean reaches each way from the node. 0: endless, to the horizon.'>
+            <NumberInput value={b.extent} min={0} step={50} onChange={extent => write({ extent })} />
+          </PropertyRow>}
+        {b.type === 'river' && <>
+          <PropertyRow label='Flows from' hint='The Water node the river starts in (a lake it drains, a river it branches from): its first point takes that water\u2019s surface, so the two meet.'>
+            <Select value={b.connect.start ?? ''} onChange={e => write({ connect: { ...b.connect, start: e.target.value || null } })}>
+              <option value=''>Nothing (a spring)</option>
+              {joined(b.connect.start) && <option value={b.connect.start!}>{joined(b.connect.start)}</option>}
+              {others.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </Select>
+          </PropertyRow>
+          <PropertyRow label='Flows into' hint='The Water node the river ends in (a lake, the ocean, another river): its last point takes that water\u2019s surface, and runs into it.'>
+            <Select value={b.connect.end ?? ''} onChange={e => write({ connect: { ...b.connect, end: e.target.value || null } })}>
+              <option value=''>Nothing</option>
+              {joined(b.connect.end) && <option value={b.connect.end!}>{joined(b.connect.end)}</option>}
+              {others.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </Select>
+          </PropertyRow>
+        </>}
+        {hasPoints && <>
+          <PropertyRow label='Carve landscape' hint='Dig the bed into the landscape when Carve is pressed: the bed inside the water, a sloped bank outside it. Only ever lowers the ground.'>
+            <Toggle checked={b.carve.enabled} onChange={enabled => write({ carve: { ...b.carve, enabled } })} />
+          </PropertyRow>
+          {b.carve.enabled && <>
+            <PropertyRow label='Bank width' hint='Metres the bank slopes over, from the water\u2019s edge back up to the ground.'>
+              <NumberInput value={b.carve.bankWidth} min={0} step={0.5} onChange={bankWidth => write({ carve: { ...b.carve, bankWidth } })} />
+            </PropertyRow>
+            <PropertyRow label='Dig deeper' hint='Metres dug below the water\u2019s own depth.'>
+              <NumberInput value={b.carve.extraDepth} min={0} step={0.1} onChange={extraDepth => write({ carve: { ...b.carve, extraDepth } })} />
+            </PropertyRow>
+          </>}
+        </>}
+      </PropertyTable>
+      {hasPoints && b.carve.enabled && <div className='mt-2'>
+        <Button size='sm' title='Dig the bed into the landscape under the water. One undo step.'
           onClick={() => setCarveMiss(!carve())}>Carve landscape</Button>
-        {carveMiss && <Hint className='mt-1'>Nothing to carve: no landscape is under those shapes, or it is already lower.</Hint>}
+        {carveMiss && <Hint className='mt-1'>Nothing to carve: no landscape is under the water, or it is already lower.</Hint>}
       </div>}
-      {shapes.map((shape, i) => {
-        const selected = selection?.nodeId === node.id && selection.shapeId === shape.id
-        return (
-          <WaterShapeRow key={shape.id} shape={shape} index={i} all={shapes}
-            selected={selected} selectedPoint={selected ? selection!.point : -1}
-            open={selected || !closed.has(shape.id)} onToggleOpen={() => toggle(shape.id)}
-            onChange={s => write(shapes.map((q, k) => (k === i ? normaliseWaterShape(s) : q)))}
-            onSelect={point => select(shape.id, point)}
-            onFrame={() => { select(shape.id); eventEmitter.emit(WATER_SHAPE_FRAME, { nodeId: node.id, shapeId: shape.id, point: -1 }) }}
-            onDuplicate={() => {
-              const copy = duplicateWaterShape(shape)
-              write([...shapes.slice(0, i + 1), copy, ...shapes.slice(i + 1)])
-              select(copy.id)
-            }}
-            onRemove={() => remove(i)}
-            onMoveUp={i > 0 ? () => move(i, -1) : undefined}
-            onMoveDown={i < shapes.length - 1 ? () => move(i, 1) : undefined}
-          />
-        )
-      })}
+      {hasPoints && <div className='mt-2'>
+        <div className='flex items-center mb-1'>
+          <span className='text-ui-xs text-muted flex-1'>{b.type === 'river' ? 'Points, upstream to downstream' : 'Outline points'}</span>
+          <Button variant='ghost' size='icon' title='Add a point at the end'
+            onClick={() => write({ points: [...b.points, nextPoint(b)] })}><PlusIcon /></Button>
+        </div>
+        {b.points.map((p, i) => (
+          <PointRow key={i} point={p} index={i} river={b.type === 'river'} selected={selectedPoint === i}
+            canRemove={b.points.length > minPoints}
+            onSelect={() => selectPoint(i)} onChange={q => setPoint(i, q)} onRemove={() => removePoint(i)} />
+        ))}
+      </div>}
     </Section>
   )
 }
@@ -429,7 +304,7 @@ function WaterSurface({ node, changed }: { node: WaterVolumeNode; changed: () =>
 const BAKE_RESOLUTIONS = [{ value: 128, label: 'Draft (128)' }, { value: 256, label: 'Standard (256)' }, { value: 384, label: 'Fine (384)' }]
 
 /**
- * The flow bake: a shallow-water simulation over the shapes and the landscape under them, run here in
+ * The flow bake: a shallow-water simulation over the water and the landscape under it, run here in
  * slices (it takes a few seconds), its settled currents, heights and foam stored as a bake the surface then
  * draws. Without one the surface draws the analytic flow along each river.
  */
@@ -445,7 +320,7 @@ function WaterBake({ node, changed }: { node: WaterVolumeNode; changed: () => vo
   const bake = async () => {
     if (!editorScene || progress !== null) return
     let job: ShallowWaterBake
-    try { job = new ShallowWaterBake(node.resolvedShapes(), sceneGround(editorScene).sample, { maxRes: res }) }
+    try { job = new ShallowWaterBake(node.resolvedShapes(), sceneGround(editorScene).sample, { maxRes: res, handOver: node.handOver() }) }
     catch (e) { Logger.warn(String((e as Error).message ?? e), 'Water'); return }
     cancelRef.current = false
     setProgress(0)
@@ -476,13 +351,13 @@ function WaterBake({ node, changed }: { node: WaterVolumeNode; changed: () => vo
       </PropertyTable>
       <div className='flex items-center gap-1.5 mt-2'>
         {progress === null
-          ? <Button size='sm' onClick={bake} title='Simulate the water over the shapes and the landscape until it settles, and draw the surface with its currents and foam.'>Bake flow</Button>
+          ? <Button size='sm' onClick={bake} title='Simulate the water over the landscape until it settles, and draw the surface with its currents and foam.'>Bake flow</Button>
           : <Button size='sm' onClick={() => { cancelRef.current = true }} title='Stop the bake; the surface keeps what it drew before.'>Cancel ({Math.round(progress * 100)}%)</Button>}
         {id && progress === null && <Button size='sm' variant='ghost' onClick={() => { node.bakeId = null; changed() }}
           title='Draw the analytic flow again (the bake stays in the project until replaced).'>Clear</Button>}
       </div>
       {status === 'current' && <Hint className='mt-1'>Drawing the baked flow.</Hint>}
-      {status === 'stale' && <Hint className='mt-1 text-warning'>The shapes changed since the bake: drawing the analytic flow until it is baked again.</Hint>}
+      {status === 'stale' && <Hint className='mt-1 text-warning'>The water changed since the bake: drawing the analytic flow until it is baked again.</Hint>}
       {status === 'missing' && <Hint className='mt-1 text-warning'>The bake is missing from the project: drawing the analytic flow.</Hint>}
     </Section>
   )
@@ -496,7 +371,7 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
     setTick(t => t + 1)
     eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node })
   }
-  // The viewport handles edit the shapes mid-drag: keep the fields live.
+  // The viewport handles edit the body mid-drag: keep the fields live.
   useEffect(() => {
     const onEdited = (p: { nodeId?: string }) => { if (!p || p.nodeId === node.id) setTick(t => t + 1) }
     eventEmitter.on(WATER_SHAPES_EDITED, onEdited)
@@ -508,7 +383,7 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
 
   return (
     <DocScope page='editor/water'>
-    <Collapsable title='Water Volume' icon={<WaterVolumeIcon />} persistKey='waterVolumeEditor' badge={node.shapes.length || undefined}
+    <Collapsable title='Water Volume' icon={<WaterVolumeIcon />} persistKey='waterVolumeEditor' badge={TYPE_LABEL[node.waterType]}
       right={<PresetMenu presets={WATER_VOLUME_PRESETS} onApply={applyPreset} title='Liquid presets' />}>
       <div className='w-full p-2 flex flex-col gap-2'>
         <PropertyTable columns={['45%', '55%']}>
@@ -517,7 +392,7 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
           </PropertyRow>
         </PropertyTable>
 
-        <WaterShapes node={node} changed={changed} />
+        <WaterBodyCard node={node} changed={changed} />
 
         <WaterSurface node={node} changed={changed} />
 
@@ -525,7 +400,7 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
 
         <Section title='Waves'>
           <PropertyTable columns={['45%', '55%']}>
-            <PropertyRow label='Wind speed' hint='m/s the waves are shaped for: longer, taller, faster waves as it rises, limited by how much open water the shapes give it. 0: no waves.' divider>
+            <PropertyRow label='Wind speed' hint='m/s the waves are shaped for: longer, taller, faster waves as it rises, limited by how much open water the body gives it. 0: no waves.' divider>
               <NumberInput value={node.windSpeed} min={0} step={0.5} onChange={v => set('windSpeed', v)} />
             </PropertyRow>
             <PropertyRow label='Direction' hint='Degrees the waves travel toward: 0 is +Z, 90 is +X.' divider>

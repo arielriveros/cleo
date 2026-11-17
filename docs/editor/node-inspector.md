@@ -463,10 +463,10 @@ there, so rain falls indoors.
 
 #### Water Volume
 
-A body of water made of shapes (rivers, lakes, boxes and an ocean), joined where a river's start or end
-is connected to another shape. What is in it floats by its **mass** against the water it displaces, a
+One body of water: a river, a lake, an ocean or a pool. A river joins other Water nodes by naming them
+(**Flows from**, **Flows into**). What is in it floats by its **mass** against the water it displaces, a
 river's current carries it downstream, and it rides the waves the wind gives the surface. The card's
-fields and how shapes connect are in [Water](water.md).
+fields and how water connects are in [Water](water.md).
 
 #### Occlusion Volume
 

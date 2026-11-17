@@ -1,18 +1,19 @@
-// The water over a point: which of a Water node's (resolved, world-space) shapes is there, its resting
+// The water over a point: which resolved, world-space body of water is there (a Water node's), its resting
 // surface, bed, flow and distance to shore. Read by the physics step on either thread, by the node and by
-// the renderer's CPU side. The shapes are resolved by water/waterShapes.ts on the main thread; this half
-// only queries them, so it stays inside src/physics (the worker bundle imports nothing else).
+// the renderer's CPU side. Bodies are resolved by water/waterShapes.ts on the main thread; this half only
+// queries them, so it stays inside src/physics (the worker bundle imports nothing else).
 
-export type WaterShapeKind = 'box' | 'lake' | 'river' | 'ocean';
+export type WaterShapeKind = 'pool' | 'lake' | 'river' | 'ocean';
 
 /** One sample along a resolved river: world centre-line surface point plus what the river is like there. */
 export interface RiverSample { x: number; y: number; z: number; dist: number; width: number; depth: number; speed: number; tx: number; tz: number; }
 
 /**
- * A shape in world space, everything a query needs precomputed. Plain data (no class), so it crosses to the
- * physics worker by structured clone.
+ * A body of water in world space, everything a query needs precomputed. Plain data (no class), so it crosses
+ * to the physics worker by structured clone.
  */
 export interface ResolvedWaterShape {
+    /** The Water node's id. */
     id: string;
     type: WaterShapeKind;
     priority: number;
@@ -20,9 +21,9 @@ export interface ResolvedWaterShape {
     order: number;
     min: [number, number, number];
     max: [number, number, number];
-    /** box / lake / ocean: the resting surface height. */
+    /** pool / lake / ocean: the resting surface height. river: its highest. */
     level: number;
-    /** box: the floor. lake / ocean: level - depth. */
+    /** pool: the floor. lake / ocean: level - depth. */
     floor: number;
     /** lake: the smoothed outline, flat [x0, z0, ...]. */
     outline: number[];

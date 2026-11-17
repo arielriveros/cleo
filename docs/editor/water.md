@@ -1,76 +1,64 @@
 # Water
 
-One **Water** node can hold a whole body of water: a river that starts on a mountain, runs down the
-valley and ends in a lake, or the ocean beyond the beach. The node is a list of shapes, edited like a
-Collider's shapes: add a River, a Lake, a Box or an Ocean, shape it, and connect a river's start or end
-to another shape so the two meet. Everything dynamic in the water floats by its mass against the water it
-displaces, a river's current carries it downstream, and the waves it rides are the waves you see.
+A **Water** node is one body of water: a **River**, a **Lake**, an **Ocean** or a **Pool**. Everything
+dynamic in it floats by its mass against the water it displaces, a river's current carries it downstream,
+and the waves it rides are the waves you see. A river joins other Water nodes by naming them: a river that
+starts on a mountain and ends in a lake is a River node flowing into a Lake node, and the river meets the
+lake's surface where it runs in.
 
-Add one from **Add › Simulation**: **Water Volume** (a box), **River**, **Lake** or **Ocean**. They are
-all the same node, so a River can be given a Lake and the other way round.
+Add one from **Add › Simulation › Water Volume**: it starts as a lake, and the inspector's **Water body** card
+turns it into any other type.
 
 ## Water Volume
 
-The Water node's inspector card: whether the water is on, its shapes, its waves, how it buoys what floats
-in it, and the splashes it throws. The **Presets** menu sets the liquid (still pool, lake, river, sea,
-rough sea, swamp, oil, lava): its density, drag, swell and the wind its waves are shaped for, never the
-shapes or what the node links to.
+The Water node's inspector card: whether the water is on, its body, its surface, its waves, how it buoys
+what floats in it, and the splashes it throws. The badge on the card names the body's type. The
+**Presets** menu sets the liquid (still pool, lake, river, sea, rough sea, swamp, oil, lava): its density,
+drag, swell and the wind its waves are shaped for, never the body or what the node links to.
 
 | Field | What it does |
 |---|---|
 | **Enabled** | Off: the water buoys nothing and draws nothing. |
 
-## Shapes
+## Water body
 
-The shapes the water is made of, one row each. The icon buttons above the list add a river, a lake, a
-box or an ocean. A shape is selected by clicking its row (or its outline in the viewport); its row stays
-open while it is selected. Shapes are in the node's units: moving or scaling the node moves or scales
-them all, and the node's rotation is ignored (water stays level).
-
-**Shape** — one shape on the list, titled by its name or its type and place ("River 1"): its fields, a
-frame button that points the camera at it, and a menu to duplicate, reorder or remove it. Removing a
-shape also disconnects whatever flowed into it.
+What the water is, from the strip of icons at the top of the **Water body** card, and that type's fields. The
+body is in the node's units: the node's position is its origin (a pool's centre, a lake's or ocean's
+surface), its scale scales it, and its rotation is ignored (water stays level). Changing the type keeps the
+liquid and the look and starts the new type's own shape from its default. With the node selected, the
+viewport shows the body's handles: a point per river or lake point (drag it; Shift drags a river point up
+and down), a **+** between neighbours to insert a point, a handle on each river bank for its width, and a
+handle on each face of a pool to resize it about its centre. Delete removes the selected point.
 
 | Field | What it does |
 |---|---|
-| **Priority** | Where two shapes overlap, the higher priority is the water there: a river (priority 1 by default) cuts through the lake (0) it runs into. On a tie, the later shape on the list wins. |
-| **Centre** | A box's centre. Its top face is the surface. |
-| **Size** | A box's width, depth and length in metres, before the node's scale. |
-| **Level** | A lake's or ocean's centre; its height is the surface. |
+| **River** | A smooth spline through its points, listed upstream to downstream. Each point has its own **Width**, **Depth** and **Flow speed**, easing from one point to the next; the channel is deepest and fastest on its centre line and shallow and slow at the banks. The surface follows the points' heights, so the river runs downhill as its points do. |
+| **Lake** | A level surface at the node's height inside the smooth closed outline through its points, **Depth** deep. |
+| **Ocean** | A level surface at the node's height with no shore unless you give it an **Extent**. Open water lets the wind build the longest and tallest waves. |
+| **Pool** | A level block of water centred on the node, **Size** big: a tank, a fountain, a flooded room. Its top face is the surface. |
+| **Size** | A pool's width, depth and length in metres, before the node's scale. |
 | **Depth** | A lake's or ocean's depth below the surface, metres. Where the landscape is higher, it is the floor. |
-| **Extent** | Metres the ocean reaches each way from its centre. 0: endless, to the horizon. |
-| **Offset** | Moves a whole river. |
-| **Flows from** | The shape a river starts in. Its first point takes that shape's surface, so the two meet. |
-| **Flows into** | The shape a river ends in. Its last point takes that shape's surface, so the river runs into it. A new river flows into the node's first lake or ocean. |
-| **Position** | Where a point is: on a river, its centre line at the surface; on a lake, a point of the outline (the height is the lake's level). |
+| **Extent** | Metres the ocean reaches each way from the node. 0: endless, to the horizon. |
+| **Flows from** | The Water node a river starts in: a lake it drains, a river it branches from. Its first point takes that water's surface, so the two meet. |
+| **Flows into** | The Water node a river ends in: a lake, the ocean, another river. Its last point takes that water's surface and the river runs on into it. |
+| **Position** | Where a point is: on a river, its centre line at the surface; on a lake, a point of the outline (the lake's level is the node's height). |
 | **Width** | Metres from bank to bank at a river point. |
 | **Flow speed** | Metres per second downstream at a river point: how fast the river carries what floats. |
-| **Carve landscape** | A river's or lake's bed is dug into the landscape when **Carve landscape** under the list is pressed: the bed inside the water and a sloped bank outside it. It only ever lowers the ground, and the carve is one undo step. |
+| **Carve landscape** | A river's or lake's bed is dug into the landscape when the **Carve landscape** button is pressed: the bed inside the water and a sloped bank outside it. It only ever lowers the ground, and the carve is one undo step. |
 | **Bank width** | Metres the carved bank slopes over, from the water's edge back up to the ground. |
 | **Dig deeper** | Metres the carve digs below the water's own depth. |
 
-### Rivers
+### Connecting water
 
-A river is a smooth spline through its points, listed upstream to downstream. Each point has its own
-**Width**, **Depth** and **Flow speed**, which ease from one point to the next; the channel is deepest and
-fastest on its centre line and shallow and slow at the banks. The surface follows the points' heights, so
-a river runs downhill as its points do. Add a point at the end with the plus button.
+Set a river's **Flows into** to a lake, the ocean, a pool or another river and its last point takes that
+water's surface: the river drops into the lake at its level, or joins the other river where it meets it.
+**Flows from** does the same for the river's start, for a river that drains a lake. In the viewport,
+dropping a river's first or last point on another Water node's water connects it, and dragging it back out
+lets go.
 
-### Lakes
-
-A lake is a level surface inside the smooth closed outline through its points, **Depth** deep.
-
-### Oceans
-
-An ocean is a level surface with no shore unless you give it an **Extent**. It carries the node's waves in
-full: open water lets the wind build the longest and tallest of them.
-
-### Connecting shapes
-
-Set a river's **Flows into** to a lake, the ocean or another river and its last point takes that shape's
-surface: the river drops into the lake at its level, or joins the other river where it meets it. **Flows
-from** does the same for the river's start, for a river that drains a lake. Rivers that join rivers are
-worked out in the order they flow, wherever they are on the list.
+Where the river runs into what it joins, the other water is the water: it draws the surface there and buoys
+what floats, so a log drifting out of the river mouth is carried into the lake without being lifted twice,
+and the river's edge there grows no shore foam. Move the lake and the river's mouth follows it.
 
 ## Surface
 
@@ -119,22 +107,21 @@ reflects the water back outside Snell's window.
 
 The surface is drawn in tiles: each is as dense as its distance from the camera calls for, from 64
 quads across close up to 8 far away, and the waves, ripples and reflections fade out with distance. An
-endless ocean adds rings of ever larger tiles round the camera to the horizon. Tiles out of view, or past
-the node's **Draw distance**, are not drawn.
+endless ocean is drawn in rings of ever larger tiles round the camera to the horizon. Tiles out of view, or
+past the node's **Draw distance**, are not drawn.
 
 ## Flow bake
 
-A simulation of the water itself: **Bake flow** runs shallow water over the shapes and the landscape
-under them until it settles, and the surface then draws what it found: currents that bend round the
+A simulation of the water itself: **Bake flow** runs shallow water over the body and the landscape
+under it until it settles, and the surface then draws what it found: currents that bend round the
 banks and swirl behind a bend, water piling up and speeding over a drop, foam where it tumbles. It takes
 a few seconds, the editor keeps drawing meanwhile, and **Cancel** stops it. Without a bake the surface
 draws the analytic flow along each river. Floating bodies ride the baked water too: its surface and its
 currents carry them. The bake is saved with the project and published with the game.
 
-While a river's first metres feed it, lakes, boxes and the ocean keep their levels and take what the
-rivers bring, and outside the shapes is dry: the shapes say where water may be, the landscape how deep
-it is. Moving or editing a shape makes the bake stale, and the analytic flow draws again until the next
-bake; carving or sculpting the landscape does not, so bake again after it.
+A river's first metres feed it, and the water it flows into keeps its level and takes what the river
+brings. Moving or editing the body, or the water it joins, makes the bake stale, and the analytic flow
+draws again until the next bake; carving or sculpting the landscape does not, so bake again after it.
 
 | Field | What it does |
 |---|---|
@@ -143,8 +130,8 @@ bake; carving or sculpting the landscape does not, so bake again after it.
 ## Waves
 
 Gerstner waves shaped by the wind: the longer and stronger the wind blows over open water, the longer,
-taller and faster they are. A lake limits them to what its size lets build; an endless ocean lets them
-grow fully developed; rivers carry only a small share of them. Floating bodies ride the same waves the
+taller and faster they are. A lake or pool limits them to what its size lets build; an endless ocean lets
+them grow fully developed; a river carries only a small share of them. Floating bodies ride the same waves the
 surface draws.
 
 | Field | What it does |
@@ -184,6 +171,6 @@ What moves through the water disturbs it.
 
 ## Scripting
 
-`WaterVolumeNode` exposes the water to scripts: `shapes` (replace the list to edit it), `addShape(type)`,
-`columnAt(x, z, time?)` (surface, floor and flow over a point, or null), `surfaceHeightAt(x, z, t)`,
-`contains(p)`, `depthAt(p)` and `waves()`. See [Node types](../reference/node-types.md#watervolumenode--watervolume-unreleased).
+`WaterVolumeNode` exposes the water to scripts: `waterType`, `points`, `size`, `depth`, `extent`,
+`flowsFrom` and `flowsInto` (the body; set them to edit it), `columnAt(x, z, time?)` (surface, floor and
+flow over a point, or null), `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)` and `waves()`. See [Node types](../reference/node-types.md#watervolumenode--watervolume-unreleased).

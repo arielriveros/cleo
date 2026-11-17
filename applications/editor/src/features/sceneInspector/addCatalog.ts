@@ -515,35 +515,12 @@ export const ADD_ITEMS: AddItem[] = [
     },
   },
   {
-    // A box of water: everything dynamic inside floats by its mass (buoyancy), and what moves through
-    // it ripples and splashes the surface it is pointed at. Placeable: it is a volume.
+    // One body of water: a lake to start with, its type (river, lake, ocean, pool) chosen in the inspector.
+    // Everything dynamic in it floats by its mass, and a river joins other Water nodes by naming them.
     id: 'waterVolume', label: 'Water Volume', icon: WaterVolumeIcon, category: 'simulation',
-    create: async () => new WaterVolumeNode('water volume', { size: [10, 2, 10] }),
-  },
-  {
-    // The same Water node, started as one river: a 30 m run with a light current. Add a lake or the ocean
-    // to it and set Flows into, and the river runs into it.
-    id: 'waterRiver', label: 'River', icon: WaterVolumeIcon, category: 'simulation',
     create: async () => {
-      const water = new WaterVolumeNode('river', { shapes: [{ type: 'river', name: 'River' }] })
-      water.applyPreset('river')
-      return water
-    },
-  },
-  {
-    id: 'waterLake', label: 'Lake', icon: WaterVolumeIcon, category: 'simulation',
-    create: async () => {
-      const water = new WaterVolumeNode('lake', { shapes: [{ type: 'lake', name: 'Lake' }] })
+      const water = new WaterVolumeNode('water', { waterType: 'lake' })
       water.applyPreset('lake')
-      return water
-    },
-  },
-  {
-    // An endless ocean at the node's height, with waves from a steady breeze.
-    id: 'waterOcean', label: 'Ocean', icon: WaterVolumeIcon, category: 'simulation',
-    create: async () => {
-      const water = new WaterVolumeNode('ocean', { shapes: [{ type: 'ocean', name: 'Ocean' }] })
-      water.applyPreset('sea')
       return water
     },
   },

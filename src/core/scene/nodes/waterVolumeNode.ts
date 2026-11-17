@@ -14,18 +14,26 @@ import { buoyancyVolumeFromSpec, waterSpecColumn, type WaterFlowGrid, type Water
 import { GiBakeRegistry } from "../../../graphics/render/gi/giBakeRegistry";
 import { decodeWaterBake } from "../../../water/bake/waterBakeFormat";
 import {
-    normaliseWaterShape, resolveWaterShapes, waterColumnAt, waterShapeFetch, waterShapesBounds,
-    type ResolvedWaterShape, type WaterColumn, type WaterShape, type WaterShapeType,
+    legacyWaterShapes, normaliseWaterBody, normaliseWaterPoint, resolveWaterBody, retypeWaterBody, waterColumnAt,
+    waterShapeFetch, type ResolvedWaterShape, type WaterBody, type WaterBodyType, type WaterCarve, type WaterColumn,
+    type WaterPoint,
 } from "../../../water/waterShapes";
 
 export interface WaterVolumeOptions {
-    /**
-     * The water's shapes (water/waterShapes.ts): rivers, lakes, boxes and oceans, joined where a river's
-     * end is connected to another shape. Missing: one box of `size`.
-     */
-    shapes?: Partial<WaterShape>[];
-    /** Legacy, and the size of a new node's single box: full extents [x, depth, z] in metres. */
+    /** Which body of water the node is (water/waterShapes.ts). Missing: a pool of `size` (the original volume). */
+    waterType?: WaterBodyType;
+    /** River: the centre line, upstream to downstream. Lake: the outline. Node-local. */
+    points?: Partial<WaterPoint>[];
+    /** Pool: full extents [x, depth, z] in metres, centred on the node; the top face is the surface. */
     size?: [number, number, number];
+    /** Lake, ocean: metres, surface to floor. */
+    depth?: number;
+    /** Ocean: metres it reaches each way (0 = endless). */
+    extent?: number;
+    /** River, lake: how its bed is dug into the landscape. */
+    carve?: Partial<WaterCarve>;
+    /** River: the Water nodes (ids) it flows from and into. */
+    connect?: { start?: string | null; end?: string | null };
     /** kg/m³. Fresh water 1000. */
     density?: number;
     /** Per second, at full submersion. */
@@ -94,16 +102,22 @@ const MAX_SPLASHES_PER_SECOND = 8;
 
 interface SourceState { inWater: boolean; nextWake: number; nextSplash: number; lastVy: number; }
 
+/** Water nodes being resolved or keyed right now: a cycle of rivers stops at the node it started from. */
+const RESOLVING = new Set<WaterVolumeNode>();
+const KEYING = new Set<WaterVolumeNode>();
+
 /**
- * A body of water: everything dynamic inside it is buoyed by the water it displaces and slowed by drag
- * (see physics/buoyancy.ts), and whatever moves through it disturbs the surface — ripples on the water's
- * material and splashes from a template.
+ * One body of water: a river, a lake, an ocean or a pool (water/waterShapes.ts). Everything dynamic inside it
+ * is buoyed by the water it displaces and dragged by the water's motion (see physics/buoyancy.ts), and
+ * whatever moves through it disturbs the surface — ripples on the water's material and splashes from a
+ * template. A river joins other Water nodes by naming them: it flows from one and into another, meeting
+ * their surface.
  *
- * An axis-aligned box: the node's rotation is ignored, its position is the box centre and its scale
- * multiplies `size`. The top face is the water level.
+ * The node's position is the body's origin (a pool's centre, a lake's or ocean's level); its scale
+ * multiplies the body; its rotation is ignored: water stays level.
  */
 export class WaterVolumeNode extends Node {
-    private _shapes: WaterShape[];
+    private _water: WaterBody;
     private _density: number;
     private _linearDrag: number;
     private _angularDrag: number;
@@ -126,10 +140,10 @@ export class WaterVolumeNode extends Node {
     private _enabled: boolean;
 
     // ---- derived (cached) ----
-    /** Bumped on every shape or wave edit: what renderers and the bake compare against. */
+    /** Bumped on every body or wave edit: what renderers and the bake compare against. */
     private _version = 0;
-    private _resolved: ResolvedWaterShape[] | null = null;
-    private _resolvedKey = '';
+    private _resolved: ResolvedWaterShape | null = null;
+    private _resolvedKey: string | null = null;
     private _waves: GerstnerWave[] | null = null;
 
     // ---- runtime ----
@@ -144,14 +158,8 @@ export class WaterVolumeNode extends Node {
 
     constructor(name: string, options: WaterVolumeOptions = {}, id: string = uuidv4()) {
         super(name, 'waterVolume', id);
-        if (Array.isArray(options.shapes)) {
-            this._shapes = options.shapes.map(sh => normaliseWaterShape(sh));
-        } else {
-            // A legacy (or new) node: one box, centred on the node, its top the surface.
-            const s = options.size;
-            const size: [number, number, number] = Array.isArray(s) ? [Math.abs(finiteOr(s[0], 10)), Math.abs(finiteOr(s[1], 2)), Math.abs(finiteOr(s[2], 10))] : [10, 2, 10];
-            this._shapes = [normaliseWaterShape({ type: 'box', size, name: 'Water' })];
-        }
+        // No type is the original water volume: a pool (a box), centred on the node, its top the surface.
+        this._water = normaliseWaterBody({ ...options, type: options.waterType ?? 'pool' });
         this._density = Math.max(1, finiteOr(options.density, 1000));
         this._linearDrag = Math.max(0, finiteOr(options.linearDrag, 2.5));
         this._angularDrag = Math.max(0, finiteOr(options.angularDrag, 1.5));
@@ -175,49 +183,76 @@ export class WaterVolumeNode extends Node {
     }
 
     // ---- properties ----
-    /**
-     * The shapes the water is made of. Replace the whole list to edit it (as a Collider's shapes): every
-     * entry is normalised, so a partial shape takes the defaults for what it leaves out.
-     */
-    public get shapes(): readonly WaterShape[] { return this._shapes; }
-    public set shapes(v: readonly Partial<WaterShape>[]) {
-        this._shapes = (Array.isArray(v) ? v : []).map(sh => normaliseWaterShape(sh));
-        this._shapesChanged('shapes');
+    /** The body as plain data (water/waterShapes.ts). Replace it whole to edit it; it is normalised. */
+    public get waterBody(): Readonly<WaterBody> { return this._water; }
+    public set waterBody(v: Readonly<Partial<WaterBody>>) {
+        this._water = normaliseWaterBody({ ...this._water, ...v });
+        this._bodyChanged('waterBody');
     }
-
-    /** Adds a shape of `type` (defaults filled in) and returns it. */
-    public addShape(type: WaterShapeType, init: Partial<WaterShape> = {}): WaterShape {
-        const shape = normaliseWaterShape({ ...init, type });
-        this._shapes = [...this._shapes, shape];
-        this._shapesChanged('shapes');
-        return shape;
-    }
-
-    /** A shape by id. */
-    public shape(id: string): WaterShape | undefined { return this._shapes.find(s => s.id === id); }
 
     /**
-     * The first box's size (the whole of a legacy water volume). Setting it resizes that box, or adds one
-     * when there is none.
+     * Which body of water this is. Changing it keeps what the two types share and starts the new type's own
+     * fields (a river's centre line, a lake's outline) from their defaults.
      */
-    public get size(): [number, number, number] {
-        const box = this._shapes.find(s => s.type === 'box');
-        return box ? box.size : [0, 0, 0];
+    public get waterType(): WaterBodyType { return this._water.type; }
+    public set waterType(v: WaterBodyType) {
+        const next = retypeWaterBody(this._water, v);
+        if (next === this._water) return;
+        this._water = next;
+        this._bodyChanged('waterType');
     }
+
+    /** River: the centre line, upstream to downstream. Lake: the outline. Node-local; empty for the other types. */
+    public get points(): readonly WaterPoint[] { return this._water.points; }
+    public set points(v: readonly Partial<WaterPoint>[]) {
+        this._water = normaliseWaterBody({ ...this._water, points: (Array.isArray(v) ? v : []).map(p => normaliseWaterPoint(p)) });
+        this._bodyChanged('points');
+    }
+
+    /** Pool: full extents [x, depth, z] in metres before the node scale. */
+    public get size(): [number, number, number] { return [...this._water.size] as [number, number, number]; }
     public set size(v: [number, number, number]) {
-        const size: [number, number, number] = [Math.abs(finiteOr(v?.[0], 10)), Math.abs(finiteOr(v?.[1], 2)), Math.abs(finiteOr(v?.[2], 10))];
-        const i = this._shapes.findIndex(s => s.type === 'box');
-        if (i < 0) this._shapes = [...this._shapes, normaliseWaterShape({ type: 'box', size })];
-        else this._shapes = this._shapes.map((s, k) => k === i ? normaliseWaterShape({ ...s, size }) : s);
-        this._shapesChanged('size');
+        this._water = normaliseWaterBody({ ...this._water, size: [Math.abs(finiteOr(v?.[0], 10)), Math.abs(finiteOr(v?.[1], 2)), Math.abs(finiteOr(v?.[2], 10))] });
+        this._bodyChanged('size');
     }
 
-    /** Changes with every edit to the shapes or waves: compare it to know when to rebuild what they feed. */
+    /** Lake, ocean: metres, surface to floor (where the landscape is higher, it is the floor). */
+    public get depth(): number { return this._water.depth; }
+    public set depth(v: number) { this._water = normaliseWaterBody({ ...this._water, depth: v }); this._bodyChanged('depth'); }
+
+    /** Ocean: metres it reaches each way from the node; 0 = endless, to the horizon. */
+    public get extent(): number { return this._water.extent; }
+    public set extent(v: number) { this._water = normaliseWaterBody({ ...this._water, extent: v }); this._bodyChanged('extent'); }
+
+    /** River, lake: how the bed is dug into the landscape when Carve is run. */
+    public get carve(): Readonly<WaterCarve> { return this._water.carve; }
+    public set carve(v: Readonly<Partial<WaterCarve>>) {
+        this._water = normaliseWaterBody({ ...this._water, carve: { ...this._water.carve, ...v } });
+        this._bodyChanged('carve');
+    }
+
+    /** River: the Water node it starts in (a lake it drains, a river it branches from), by id; null = a spring. */
+    public get flowsFrom(): string | null { return this._water.connect.start; }
+    public set flowsFrom(v: string | null) {
+        this._water = normaliseWaterBody({ ...this._water, connect: { ...this._water.connect, start: v || null } });
+        this._bodyChanged('flowsFrom');
+    }
+    /** River: the Water node it ends in (a lake, the ocean, another river), by id; null = nowhere. */
+    public get flowsInto(): string | null { return this._water.connect.end; }
+    public set flowsInto(v: string | null) {
+        this._water = normaliseWaterBody({ ...this._water, connect: { ...this._water.connect, end: v || null } });
+        this._bodyChanged('flowsInto');
+    }
+
+    /**
+     * Changes with every edit to the body or waves: compare it to know when to rebuild what they feed. A
+     * river also depends on the water it joins: see {@link resolveKey}.
+     */
     public get version(): number { return this._version; }
 
-    private _shapesChanged(key: string): void {
+    private _bodyChanged(key: string): void {
         this._version++;
-        this._resolved = null;
+        this._resolvedKey = null;
         this._waves = null;
         this._notifyChange('component', key);
     }
@@ -232,15 +267,15 @@ export class WaterVolumeNode extends Node {
     public get waveFrequency(): number { return this._waveFrequency; }
     public set waveFrequency(v: number) { this._waveFrequency = Math.max(0, finiteOr(v, this._waveFrequency)); this._notifyChange('component', 'waveFrequency'); }
     public get windSpeed(): number { return this._windSpeed; }
-    public set windSpeed(v: number) { this._windSpeed = Math.max(0, finiteOr(v, this._windSpeed)); this._shapesChanged('windSpeed'); }
+    public set windSpeed(v: number) { this._windSpeed = Math.max(0, finiteOr(v, this._windSpeed)); this._bodyChanged('windSpeed'); }
     public get waveDirection(): number { return this._waveDirection; }
-    public set waveDirection(v: number) { this._waveDirection = finiteOr(v, this._waveDirection); this._shapesChanged('waveDirection'); }
+    public set waveDirection(v: number) { this._waveDirection = finiteOr(v, this._waveDirection); this._bodyChanged('waveDirection'); }
     public get waveScale(): number { return this._waveScale; }
-    public set waveScale(v: number) { this._waveScale = Math.max(0, finiteOr(v, this._waveScale)); this._shapesChanged('waveScale'); }
+    public set waveScale(v: number) { this._waveScale = Math.max(0, finiteOr(v, this._waveScale)); this._bodyChanged('waveScale'); }
     public get choppiness(): number { return this._choppiness; }
-    public set choppiness(v: number) { this._choppiness = Math.min(1, Math.max(0, finiteOr(v, this._choppiness))); this._shapesChanged('choppiness'); }
+    public set choppiness(v: number) { this._choppiness = Math.min(1, Math.max(0, finiteOr(v, this._choppiness))); this._bodyChanged('choppiness'); }
     public get shoreFade(): number { return this._shoreFade; }
-    public set shoreFade(v: number) { this._shoreFade = Math.max(0, finiteOr(v, this._shoreFade)); this._shapesChanged('shoreFade'); }
+    public set shoreFade(v: number) { this._shoreFade = Math.max(0, finiteOr(v, this._shoreFade)); this._bodyChanged('shoreFade'); }
     public get followWind(): boolean { return this._followWind; }
     public set followWind(v: boolean) { this._followWind = !!v; this._notifyChange('component', 'followWind'); }
 
@@ -271,13 +306,15 @@ export class WaterVolumeNode extends Node {
     public set bakeId(v: string | null) { this._bakeId = v || null; this._notifyChange('component', 'bakeId'); }
 
     /**
-     * What a bake of this water depends on: the shapes and where the node puts them. A bake whose signature
-     * no longer matches is STALE, and the surface falls back to the analytic flow until it is baked again.
+     * What a bake of this water depends on: the body, where the node puts it, and the water it joins. A bake
+     * whose signature no longer matches is STALE, and the surface falls back to the analytic flow until it is
+     * baked again.
      */
     public bakeSignature(): string {
         const m = this.worldTransform;
         const r = (v: number) => Math.round(v * 1000) / 1000;
-        return JSON.stringify([this._shapes, [m[12], m[13], m[14], Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10])].map(r)]);
+        const joined = this.handOver().map(t => [t.id, t.type, r(t.level), t.min.map(r), t.max.map(r)]);
+        return JSON.stringify([this._water, [m[12], m[13], m[14], Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10])].map(r), joined]);
     }
 
     private static _parseMaterial(json: any): WaterMaterial | null {
@@ -298,31 +335,95 @@ export class WaterVolumeNode extends Node {
 
     // ---- geometry ----
 
+    /** The Water node one of a river's ends names, if it is in the scene (and is not this node). */
+    private _target(which: 'start' | 'end'): WaterVolumeNode | null {
+        if (this._water.type !== 'river') return null;
+        const id = which === 'start' ? this._water.connect.start : this._water.connect.end;
+        if (!id || id === this.id) return null;
+        const n = (this._scene as any)?.getNodeById?.(id);
+        return n instanceof WaterVolumeNode && n !== this ? n : null;
+    }
+
+    /** The Water nodes this river joins: what it flows from, then what it flows into (either may be missing). */
+    public joinedNodes(): WaterVolumeNode[] {
+        const out: WaterVolumeNode[] = [];
+        for (const w of ['start', 'end'] as const) {
+            const t = this._target(w);
+            if (t && !out.includes(t)) out.push(t);
+        }
+        return out;
+    }
+
     /**
-     * The shapes in world space, connections applied (water/waterShapes.ts). Cached until the shapes or
-     * the node's world placement change.
+     * Everything the resolved body depends on: the body, the node's placement and, for a river, the same of
+     * the water it joins (a lake that moves moves the river's mouth). Compare it to know when to rebuild.
      */
-    public resolvedShapes(): ResolvedWaterShape[] {
-        const m = this.worldTransform;
-        const sx = Math.hypot(m[0], m[1], m[2]), sy = Math.hypot(m[4], m[5], m[6]), sz = Math.hypot(m[8], m[9], m[10]);
-        const key = `${this._version}|${m[12]},${m[13]},${m[14]}|${sx},${sy},${sz}`;
-        if (!this._resolved || key !== this._resolvedKey) {
-            this._resolved = resolveWaterShapes(this._shapes, { position: [m[12], m[13], m[14]], scale: [sx, sy, sz] });
+    public resolveKey(): string {
+        if (KEYING.has(this)) return 'cycle';
+        KEYING.add(this);
+        try {
+            const m = this.worldTransform;
+            let key = `${this.id}:${this._version}|${m[12]},${m[13]},${m[14]}|${Math.hypot(m[0], m[1], m[2])},${Math.hypot(m[4], m[5], m[6])},${Math.hypot(m[8], m[9], m[10])}`;
+            if (this._water.type === 'river') {
+                const s = this._target('start'), e = this._target('end');
+                key += `|from(${s ? s.resolveKey() : ''})into(${e ? e.resolveKey() : ''})`;
+            }
+            return key;
+        } finally {
+            KEYING.delete(this);
+        }
+    }
+
+    /**
+     * The body in world space, connections applied (water/waterShapes.ts); null when it has nothing to
+     * resolve. Cached until the body, the node's placement or the water it joins change.
+     */
+    public resolved(): ResolvedWaterShape | null {
+        const key = this.resolveKey();
+        if (key === this._resolvedKey) return this._resolved;
+        // A cycle of rivers: the one that started it keeps what it had.
+        if (RESOLVING.has(this)) return this._resolved;
+        RESOLVING.add(this);
+        try {
+            const m = this.worldTransform;
+            const frame = { position: [m[12], m[13], m[14]], scale: [Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10])] };
+            const targets = { start: this._target('start')?.resolved() ?? null, end: this._target('end')?.resolved() ?? null };
+            this._resolved = resolveWaterBody(this._water, frame, this.id, targets);
             this._resolvedKey = key;
             this._waves = null;
+        } finally {
+            RESOLVING.delete(this);
         }
         return this._resolved;
     }
 
+    /** The resolved body as a list (empty or one): what the shape-list helpers take. */
+    public resolvedShapes(): ResolvedWaterShape[] {
+        const r = this.resolved();
+        return r ? [r] : [];
+    }
+
+    /**
+     * The water this river HANDS OVER to where they overlap: the bodies it flows from and into. There, the
+     * other node's water is the water (it draws it, it buoys what is in it), and the river's edge is no shore.
+     */
+    public handOver(): ResolvedWaterShape[] {
+        const out: ResolvedWaterShape[] = [];
+        for (const n of this.joinedNodes()) {
+            const r = RESOLVING.has(n) ? null : n.resolved();
+            if (r) out.push(r);
+        }
+        return out;
+    }
+
     /**
      * The Gerstner waves the surface is drawn with and bodies ride: shaped by {@link windSpeed} over the
-     * largest open water the shapes give (fetch). Empty when the wind is 0.
+     * open water this body gives (fetch). Empty when the wind is 0.
      */
     public waves(): GerstnerWave[] {
-        const shapes = this.resolvedShapes();
+        const r = this.resolved();
         if (!this._waves) {
-            let fetch = 0;
-            for (const r of shapes) fetch = Math.max(fetch, waterShapeFetch(r));
+            const fetch = r ? waterShapeFetch(r) : 0;
             this._waves = this._windSpeed > 0 && this._waveScale > 0
                 ? gerstnerWavesForWind(this._windSpeed, this._waveDirection, fetch || 10,
                     { scale: this._waveScale, choppiness: this._choppiness, seed: 0 })
@@ -336,8 +437,8 @@ export class WaterVolumeNode extends Node {
      * An endless ocean makes it very large.
      */
     public worldBox(): { min: [number, number, number]; max: [number, number, number] } {
-        const b = waterShapesBounds(this.resolvedShapes());
-        if (b) return b;
+        const b = this.resolved();
+        if (b) return { min: [...b.min] as [number, number, number], max: [...b.max] as [number, number, number] };
         const p = this.worldPosition;
         return { min: [p[0], p[1], p[2]], max: [p[0], p[1], p[2]] };
     }
@@ -386,9 +487,9 @@ export class WaterVolumeNode extends Node {
         const box = this.worldBox();
         const shapes = this.resolvedShapes();
         const waves = this.waves();
-        // A single box with nothing but the swell is the original water volume: buoyed by its box alone,
-        // the cheapest path (and the one every existing scene was tuned on).
-        const plainBox = shapes.length === 1 && shapes[0].type === 'box' && !waves.length;
+        // A pool with nothing but the swell is the original water volume: buoyed by its box alone, the
+        // cheapest path (and the one every existing scene was tuned on).
+        const plainBox = shapes.length === 1 && shapes[0].type === 'pool' && !waves.length;
         return {
             min: box.min, max: box.max, density: this._density,
             linearDrag: this._linearDrag, angularDrag: this._angularDrag, affectCharacters: this._affectCharacters,
@@ -558,7 +659,7 @@ export class WaterVolumeNode extends Node {
     protected _serializePayload(): any {
         return {
             waterVolume: {
-                shapes: JSON.parse(JSON.stringify(this._shapes)), density: this._density,
+                ...WaterVolumeNode._bodyPayload(this._water), density: this._density,
                 linearDrag: this._linearDrag, angularDrag: this._angularDrag,
                 waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
                 windSpeed: this._windSpeed, waveDirection: this._waveDirection, waveScale: this._waveScale,
@@ -573,9 +674,57 @@ export class WaterVolumeNode extends Node {
         };
     }
 
+    /** The body's fields for a save: only what its type reads. */
+    private static _bodyPayload(b: WaterBody): any {
+        const out: any = { waterType: b.type };
+        if (b.type === 'river' || b.type === 'lake') {
+            out.points = JSON.parse(JSON.stringify(b.points));
+            out.carve = { ...b.carve };
+        }
+        if (b.type === 'pool') out.size = [...b.size];
+        if (b.type === 'lake' || b.type === 'ocean') out.depth = b.depth;
+        if (b.type === 'ocean') out.extent = b.extent;
+        if (b.type === 'river' && (b.connect.start || b.connect.end)) out.connect = { ...b.connect };
+        return out;
+    }
+
     public static parse(parent: Node, json: any) {
-        const node = new WaterVolumeNode(json.name, json.waterVolume ?? {}, json.id);
+        const wv = json.waterVolume ?? {};
+        if (Array.isArray(wv.shapes) && wv.shapes.length && !wv.waterType) { WaterVolumeNode._parseLegacyShapes(parent, json); return; }
+        const node = new WaterVolumeNode(json.name, wv, json.id);
         Node.finishParse(node, parent, json);
+    }
+
+    /**
+     * An older save: one node holding a list of shapes. Each shape becomes a Water node of its own, siblings
+     * with the same settings and material, placed where the shape was (its offset folded into the node's
+     * position) and named after it; the first keeps the node's id and children. Connections that named a
+     * shape name the node it became. The old bake covered all the shapes at once: dropped, to be baked again.
+     */
+    private static _parseLegacyShapes(parent: Node, json: any): void {
+        const wv = json.waterVolume;
+        const shapes = legacyWaterShapes(wv.shapes);
+        const ids = new Map<string, string>();
+        shapes.forEach((s, i) => ids.set(s.id, i === 0 && json.id ? json.id : uuidv4()));
+        const pos: number[] = Array.isArray(json.position) ? json.position : [0, 0, 0];
+        const scale: number[] = Array.isArray(json.scale) ? json.scale : [1, 1, 1];
+        const { shapes: _shapes, bakeId: _bake, ...settings } = wv;
+        void _shapes; void _bake;
+        shapes.forEach((s, i) => {
+            const connect = s.body.type === 'river'
+                ? { start: s.body.connect.start ? ids.get(s.body.connect.start) ?? null : null, end: s.body.connect.end ? ids.get(s.body.connect.end) ?? null : null }
+                : undefined;
+            const options: WaterVolumeOptions = { ...settings, waterType: s.body.type, points: s.body.points, size: s.body.size,
+                depth: s.body.depth, extent: s.body.extent, carve: s.body.carve, connect };
+            const name = shapes.length === 1 ? json.name : (s.name || `${json.name} ${s.body.type}`);
+            const id = ids.get(s.id)!;
+            const position = [pos[0] + s.offset[0] * (scale[0] ?? 1), pos[1] + s.offset[1] * (scale[1] ?? 1), pos[2] + s.offset[2] * (scale[2] ?? 1)];
+            const node = new WaterVolumeNode(name, options, id);
+            const nodeJson = i === 0 ? { ...json, name, position } : {
+                id, name, position, rotation: json.rotation, scale: json.scale, visible: json.visible, drawDistance: json.drawDistance, children: [],
+            };
+            Node.finishParse(node, parent, nodeJson);
+        });
     }
 
     /** A small box at the origin: the volume itself would swallow clicks aimed at what is in the water. */

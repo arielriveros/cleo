@@ -741,17 +741,21 @@ function lineGeometry(lines: { positions: [number, number, number][]; indices: n
     lines.positions.map(() => [0, 0] as [number, number]), undefined, undefined, lines.indices, false);
 }
 
-/** What a Water node's outline wireframe was built from: rebuilt when the shapes or the node move. */
+/**
+ * What a Water node's outline wireframe was built from: rebuilt when the body, the node or the water it
+ * joins move (a short hash: it goes into a node name).
+ */
 function waterShapeKey(node: WaterVolumeNode): string {
-  const p = node.worldPosition, m = node.worldTransform;
-  const r = (v: number) => Math.round(v * 1000);
-  return `w${node.version}_${r(p[0])}_${r(p[1])}_${r(p[2])}_${r(Math.hypot(m[0], m[1], m[2]))}_${r(Math.hypot(m[4], m[5], m[6]))}_${r(Math.hypot(m[8], m[9], m[10]))}`;
+  const key = node.resolveKey() + '|' + node.handOver().map(t => t.id).join(',');
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619) >>> 0;
+  return `w${h.toString(36)}`;
 }
 
 /**
- * Line pairs, in world space, outlining every shape of a Water node: a box's edges, a lake's shore at its
- * level and its floor, a river's banks and centre line with a rung every ten metres, an ocean's square
- * (an endless one, 250 m of it around the node).
+ * Line pairs, in world space, outlining a Water node's body: a pool's edges, a lake's shore at its level and
+ * its floor, a river's banks and centre line with a rung every ten metres, an ocean's square (an endless
+ * one, 250 m of it around the node). A river also outlines the water it joins, so where its ends land shows.
  */
 export function waterShapeLines(node: WaterVolumeNode): { positions: [number, number, number][]; indices: number[] } {
   const positions: [number, number, number][] = [];
@@ -768,8 +772,8 @@ export function waterShapeLines(node: WaterVolumeNode): { positions: [number, nu
     }
   };
   const p = node.worldPosition;
-  for (const r of node.resolvedShapes()) {
-    if (r.type === 'box') {
+  for (const r of [...node.resolvedShapes(), ...node.handOver()]) {
+    if (r.type === 'pool') {
       const { min, max } = r;
       for (let i = 0; i < 8; i++) for (const bit of [1, 2, 4]) if (!(i & bit)) {
         const c = (k: number): [number, number, number] => [(k & 1) ? max[0] : min[0], (k & 2) ? max[1] : min[1], (k & 4) ? max[2] : min[2]];
@@ -821,7 +825,7 @@ export function waterShapeLines(node: WaterVolumeNode): { positions: [number, nu
  */
 function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode | WaterVolumeNode | OcclusionVolumeNode | ExposureVolumeNode | VolumetricFogNode | WeatherNode | LightProbeNode | GIVolumeNode) {
   if (node instanceof WaterVolumeNode) {
-    // The outline of every shape, in world space; its name carries what it was built from, so an edit
+    // The outline of the body, in world space; its name carries what it was built from, so an edit
     // drops it (the sweep below) and the next frame builds the new one.
     const name = `${EFFECTSHAPE_PREFIX}${node.id}:${waterShapeKey(node)}`;
     if (!scene.getNodesByName(name)[0]) scene.addNode(wireModel(name, waterShapeLines(node), [0.3, 0.6, 1]));

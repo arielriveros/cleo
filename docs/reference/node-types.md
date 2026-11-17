@@ -933,13 +933,14 @@ node), `enabled`. `particlePositions` is the simulated world positions, or null 
 
 ### WaterVolumeNode — `'waterVolume'` *(unreleased)*
 
-A body of water made of **shapes** (`water/waterShapes.ts`): `river` (a spline through points, each
-`{ pos, width, depth, flowSpeed }`), `lake` (a level surface inside the smooth closed outline through its
-points), `box` (a level block, its top face the surface) and `ocean` (a level surface `extent` metres each
-way, 0 = endless). Shapes are in the node's units (position and scale apply, rotation is ignored); where
-two overlap, the higher `priority` is the water there. A river's `connect.start` / `connect.end` name the
-shapes it flows from and into: that end takes their surface, so the two meet. A legacy node's `size`
-loads as one box.
+One body of water (`water/waterShapes.ts`), of one `waterType`: `river` (a spline through `points`, each
+`{ pos, width, depth, flowSpeed }`), `lake` (a level surface at the node's height inside the smooth closed
+outline through its `points`), `ocean` (a level surface at the node's height `extent` metres each way, 0 =
+endless) and `pool` (a level block `size` big centred on the node, its top face the surface). The body is
+in the node's units (position and scale apply, rotation is ignored). A river's `flowsFrom` / `flowsInto`
+name the Water nodes it flows from and into (by id): that end takes their surface, so the two meet, and
+where they overlap the other node's water is the water there (`handOver()`). A legacy node's `size` loads
+as a pool; an older node holding a list of `shapes` loads as one node per shape.
 
 Every dynamic physics body inside is buoyed by Archimedes' principle: its colliders are sampled, and each
 submerged sample is pushed up by the weight of the water it displaces, at that point, so whether a body
@@ -948,17 +949,18 @@ a body toward the water's own velocity, so a river (`currents`) carries it downs
 are skipped unless `affectCharacters`.
 
 The surface carries a swell (`waveAmplitude`, `waveFrequency`) and Gerstner waves shaped by `windSpeed`
-over the shapes' open water (fetch), travelling toward `waveDirection` degrees, scaled by `waveScale`,
+over the body's open water (fetch), travelling toward `waveDirection` degrees, scaled by `waveScale`,
 sharpened by `choppiness` and dying down within `shoreFade` metres of a shore. The same sum
 (`physics/water/gerstner.ts`) floats the bodies and draws the surface.
 
-Properties: `shapes`, `density` (kg/m³, default 1000), `linearDrag`, `angularDrag` (per second at full
+Properties: `waterType`, `points`, `size`, `depth`, `extent`, `carve`, `flowsFrom`, `flowsInto`,
+`waterBody` (all of them at once, as plain data), `density` (kg/m³, default 1000), `linearDrag`, `angularDrag` (per second at full
 submersion), `waveAmplitude`, `waveFrequency`, `windSpeed`, `waveDirection`, `waveScale`, `choppiness`,
 `shoreFade`, `currents`, `waterMaterial`, `waterMaterialId`, `affectCharacters`, `surfaceNodeId`, `splashTemplate`,
-`wadeSplashTemplate`, `enabled`; `size` reads and writes the first box. Helpers: `addShape(type)`,
-`shape(id)`, `resolvedShapes()`, `waves()`, `columnAt(x, z, time?)` (resting or waved surface, floor, flow
-and distance to shore, or null), `worldBox()`, `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)`,
-`version` (bumped by every shape or wave edit).
+`wadeSplashTemplate`, `enabled`. Helpers: `resolved()` (the body in world space), `joinedNodes()`,
+`handOver()`, `waves()`, `columnAt(x, z, time?)` (resting or waved surface, floor, flow and distance to
+shore, or null), `worldBox()`, `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)`, `version` (bumped
+by every body or wave edit) and `resolveKey()` (which also changes when the water a river joins moves).
 
 In play it also disturbs its surface: if the `surfaceNodeId` model's custom material declares vec4
 uniforms `ripple0`..`ripple11`, they are filled each frame with expanding rings (`[x, z, startTime,

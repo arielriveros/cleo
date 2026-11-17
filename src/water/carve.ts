@@ -1,5 +1,5 @@
 import { closestOnSegmentXZ, pointInPolygonXZ, polygonEdgeDistance2XZ, type ResolvedWaterShape } from '../physics/water/waterColumn';
-import type { WaterShape } from './waterShapes';
+import type { WaterBody } from './waterShapes';
 
 // Carving: a river's or lake's bed dug into a height grid, so the water has a channel to sit in. Pure over
 // a plain grid (row-major, `resolution`² samples over `size` metres centred on `origin`), so the Terrain
@@ -21,8 +21,8 @@ export interface CarveGrid {
 export interface CarveRegion { c0: number; r0: number; c1: number; r1: number; }
 
 /**
- * Where the bed should be at (x, z) for one shape: `bed` (world height) and `outside` (metres beyond the
- * shape's edge, 0 or less inside). Null where the shape has no bed (a box, an ocean) or the point is far.
+ * Where the bed should be at (x, z) for one body: `bed` (world height) and `outside` (metres beyond the
+ * water's edge, 0 or less inside). Null where the body has no bed (a pool, an ocean) or the point is far.
  */
 function bedAt(r: ResolvedWaterShape, x: number, z: number, extraDepth: number, reach: number): { bed: number; outside: number } | null {
     if (x < r.min[0] - reach || x > r.max[0] + reach || z < r.min[2] - reach || z > r.max[2] + reach) return null;
@@ -56,17 +56,16 @@ function bedAt(r: ResolvedWaterShape, x: number, z: number, extraDepth: number, 
 }
 
 /**
- * Lowers `grid` under every shape in `resolved` whose authored shape has `carve.enabled`: the bed inside
+ * Lowers `grid` under a river or lake whose body has `carve.enabled` (`r` its resolved form): the bed inside
  * the water, easing back up to the original ground over `carve.bankWidth` outside it. Returns the grid
  * rectangle it changed (null when nothing did), for an undo step and a refresh.
  */
-export function carveWater(grid: CarveGrid, shapes: readonly WaterShape[], resolved: readonly ResolvedWaterShape[]): CarveRegion | null {
+export function carveWater(grid: CarveGrid, body: WaterBody, r: ResolvedWaterShape | null): CarveRegion | null {
     const R = grid.resolution, half = grid.size / 2, step = grid.size / (R - 1);
     const oy = grid.origin[1];
     let region: CarveRegion | null = null;
-    for (const r of resolved) {
-        const shape = shapes.find(s => s.id === r.id);
-        if (!shape || !shape.carve.enabled || (r.type !== 'river' && r.type !== 'lake')) continue;
+    const shape = body;
+    if (r && shape.carve.enabled && (r.type === 'river' || r.type === 'lake')) {
         const bank = Math.max(0, shape.carve.bankWidth);
         const reach = bank + 1;
         const c0 = Math.max(0, Math.floor((r.min[0] - reach - grid.origin[0] + half) / step));

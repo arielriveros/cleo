@@ -4,13 +4,13 @@ export { WaterVolumeNode, WATER_RIPPLE_SLOTS } from "../../core/scene/nodes/wate
 export type { WaterVolumeOptions } from "../../core/scene/nodes/waterVolumeNode";
 export { WATER_VOLUME_PRESETS, type WaterVolumePreset } from "../../core/scene/nodes/waterVolumePresets";
 export {
-    WATER_SHAPE_TYPES, normaliseWaterShape, normaliseWaterPoint, cloneWaterShape, newWaterShapeId,
-    resolveWaterShapes, waterColumnAt, waterShapesBounds,
-    type WaterShape, type WaterShapeType, type WaterPoint, type WaterCarve, type WaterConnect,
+    WATER_BODY_TYPES, normaliseWaterBody, normaliseWaterPoint, cloneWaterBody, retypeWaterBody, defaultWaterPoints,
+    minWaterPoints, resolveWaterBody, waterColumnAt, waterShapesBounds, legacyWaterShapes,
+    type WaterBody, type WaterBodyType, type WaterPoint, type WaterCarve, type WaterConnect, type WaterTargets,
     type ResolvedWaterShape, type WaterColumn,
 } from "../../water/waterShapes";
 export { carveWater, type CarveGrid, type CarveRegion } from "../../water/carve";
-export { buildWaterInfo, type WaterInfo, type GroundSampler } from "../../water/waterInfo";
+export { buildWaterInfo, handOverWaterInfo, type WaterInfo, type GroundSampler } from "../../water/waterInfo";
 export { sceneGround } from "../../water/ground";
 export { ShallowWaterBake, bakeShallowWater, type ShallowWaterOptions } from "../../water/bake/shallowWater";
 export { encodeWaterBake, decodeWaterBake, newWaterBakeId } from "../../water/bake/waterBakeFormat";

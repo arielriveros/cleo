@@ -13,7 +13,7 @@ export const FEATURE_ADD_ITEMS: Readonly<Record<string, readonly string[]>> = {
   skyAtmosphere: ['skyAtmosphere'],
   decals: ['decal'],
   landscape: ['landscape'],
-  water: ['waterVolume', 'waterRiver', 'waterLake', 'waterOcean'],
+  water: ['waterVolume'],
   particles: ['particleSystem', 'forceField'],
   weather: ['weather'],
   world2d: ['tilemap', 'camera2D', 'room2D', 'parallaxLayer'],

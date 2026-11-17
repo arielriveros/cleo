@@ -96,7 +96,7 @@ export class WaterPasses {
         for (const node of scene.waterVolumes as Set<WaterVolumeNode>)
             // A legacy volume drawing its water with a Surface model (surfaceNodeId) keeps that look: drawing
             // a surface of its own too would put two waters on top of each other.
-            if (node.enabled && node.visible && node.shapes.length && !node.surfaceNodeId) nodes.push(node);
+            if (node.enabled && node.visible && node.resolved() && !node.surfaceNodeId) nodes.push(node);
         this._forget(scene);
         this.tilesDrawn = 0;
         if (!nodes.length) return;
@@ -147,7 +147,8 @@ export class WaterPasses {
             const info = water.info;
             const look = WaterPasses._lookOf(node);
             const waves = node.waves();
-            const oceanLevel = info ? info.oceanLevel : node.resolvedShapes().find(s => s.type === 'ocean' && s.endless)?.level ?? null;
+            const body = node.resolved();
+            const oceanLevel = info ? info.oceanLevel : body && body.type === 'ocean' && body.endless ? body.level : null;
             if (!info && oceanLevel === null) continue;
             const tiles = this._tilesOf(node, info, oceanLevel, waves.reduce((s, w) => s + w.amplitude, 0) + node.waveAmplitude);
             if (!tiles.length) continue;
@@ -263,8 +264,7 @@ export class WaterPasses {
     /** The node's water info and textures, rebuilt when its shapes, placement or the ground under it change. */
     private _waterOf(node: WaterVolumeNode, ground: { sample: GroundSampler | null; key: string }): NodeWater {
         let water = this._nodes.get(node);
-        const m = node.worldTransform;
-        const key = `${node.version}|${m[12]},${m[13]},${m[14]},${m[0]},${m[5]},${m[10]}|${ground.key}`;
+        const key = `${node.resolveKey()}|${ground.key}`;
         const now = performance.now() / 1000;
         // A current bake replaces the analytic grid; a stale one (the shapes changed since) is ignored.
         const bake = node.bakeId ? this._bakeOf(node.bakeId) : null;
@@ -272,7 +272,7 @@ export class WaterPasses {
         const fullKey = baked ? `bake:${node.bakeId}|${GiBakeRegistry.generation}` : key;
         if (water && water.key === fullKey) return water;
         if (!baked && water && water.info && water.info.source === 'analytic' && now - water.builtAt < REBUILD_INTERVAL) return water;
-        const info = baked ? baked.info : buildWaterInfo(node.resolvedShapes(), ground.sample);
+        const info = baked ? baked.info : buildWaterInfo(node.resolvedShapes(), ground.sample, { handOver: node.handOver() });
         const keyNow = fullKey;
         if (!water) { water = { key, info: null, tex0: null, tex1: null, builtAt: now }; this._nodes.set(node, water); }
         water.key = keyNow;

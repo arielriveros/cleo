@@ -3,8 +3,8 @@ import { definePresets, type Preset } from "../../presets";
 
 /**
  * One-click liquids for WaterVolumeNode: how the liquid buoys, drags and bobs what floats in it, and the
- * wind its waves are shaped for. Never the shapes, the material, the splash template or whether characters
- * are buoyed: those are the scene's layout, not the liquid.
+ * wind its waves are shaped for. Never the body (its type, points, size, connections), the material, the
+ * splash template or whether characters are buoyed: those are the scene's layout, not the liquid.
  */
 export type WaterVolumePreset = Preset<WaterVolumeOptions>;
 

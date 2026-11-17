@@ -7,27 +7,31 @@ export {
     waterColumnAt, type ResolvedWaterShape, type RiverSample, type WaterColumn,
 } from '../physics/water/waterColumn';
 
-// The shapes a Water node is made of, as plain data, and the geometry queries over them: where the water
-// is, how high its surface rests, how deep it is and which way it flows. Shared by the node, the physics
-// worker (which has no scene) and the renderer, so all three agree on where the water is.
+// The BODY of water a Water node is, as plain data, and its resolution into world space: where the water
+// is, how high its surface rests, how deep it is and which way it flows. Every Water node is exactly one
+// body of one type; a river joins another node (a lake it runs into, the lake it drains) by naming it.
+// Shared by the node, the physics worker (which has no scene, and gets the resolved form) and the renderer.
 //
 // A LEAF apart from core/math: no scene, no graphics.
 
-export type WaterShapeType = 'box' | 'lake' | 'river' | 'ocean';
+export type WaterBodyType = 'river' | 'lake' | 'ocean' | 'pool';
 
-/** One control point of a river: where its surface runs, and how wide, deep and fast it is there. */
+/** The types, in the order the inspector offers them. */
+export const WATER_BODY_TYPES: readonly WaterBodyType[] = ['river', 'lake', 'ocean', 'pool'];
+
+/** One control point of a river or a lake's outline: where its surface runs, and how wide, deep and fast it is there. */
 export interface WaterPoint {
-    /** Node-local position of the SURFACE at the river's centre line. */
+    /** Node-local position: a river's surface on its centre line, a lake outline's point (its height unused). */
     pos: [number, number, number];
-    /** Metres, bank to bank. */
+    /** River: metres, bank to bank. */
     width: number;
-    /** Metres, surface to bed at the centre line. */
+    /** River: metres, surface to bed at the centre line. */
     depth: number;
-    /** Metres per second, downstream. */
+    /** River: metres per second, downstream. */
     flowSpeed: number;
 }
 
-/** How a shape digs its bed into the landscape (only when `enabled`). */
+/** How a river or lake digs its bed into the landscape (only when `enabled`). */
 export interface WaterCarve {
     enabled: boolean;
     /** Metres the bank slopes over, beyond the water's edge. */
@@ -36,40 +40,27 @@ export interface WaterCarve {
     extraDepth: number;
 }
 
-/** Which shape a river's start and end run into (shape ids), so its surface meets theirs. */
+/** The Water nodes (by id) a river's start and end run into or out of, so its surface meets theirs. */
 export interface WaterConnect { start: string | null; end: string | null; }
 
 /**
- * One shape of a Water node, in the node's local units (it scales with the node, and moves with it;
- * rotation is ignored, water stays level).
+ * One body of water, in its node's local units (it scales with the node and moves with it; rotation is
+ * ignored, water stays level). The node's position is the body's origin:
  *
- *  - `box`: a level block of water `size` big, centred on `offset`; the top face is the surface.
- *  - `lake`: a level surface at `offset[1]` inside the smooth closed outline through `points`, `depth` deep.
- *  - `river`: an open spline through `points`, each with its own width, depth and flow speed.
- *  - `ocean`: a level surface at `offset[1]` reaching `extent` metres each way (0 = endless), `depth` deep.
+ *  - `river`: an open spline through `points` (surface on the centre line), each with its own width, depth
+ *    and flow speed; `connect` names what it flows from and into.
+ *  - `lake`: a level surface at the node's height inside the smooth closed outline through `points`, `depth` deep.
+ *  - `ocean`: a level surface at the node's height reaching `extent` metres each way (0 = endless), `depth` deep.
+ *  - `pool`: a level block of water `size` big centred on the node; its top face is the surface.
  */
-export interface WaterShape {
-    id: string;
-    type: WaterShapeType;
-    name: string;
-    offset: [number, number, number];
-    size: [number, number, number];
+export interface WaterBody {
+    type: WaterBodyType;
     points: WaterPoint[];
+    size: [number, number, number];
     depth: number;
     extent: number;
-    /** Where two shapes overlap, the higher priority's water is the one there. */
-    priority: number;
     carve: WaterCarve;
     connect: WaterConnect;
-}
-
-export const WATER_SHAPE_TYPES: readonly WaterShapeType[] = ['river', 'lake', 'box', 'ocean'];
-
-let _idCounter = 0;
-/** A short id unique within a node (shape ids only need to be unique among siblings). */
-export function newWaterShapeId(): string {
-    _idCounter = (_idCounter + 1) % 1679616;
-    return `w${Date.now().toString(36).slice(-5)}${_idCounter.toString(36)}`;
 }
 
 const vec3Or = (v: unknown, d: [number, number, number]): [number, number, number] =>
@@ -97,51 +88,114 @@ const LAKE_POINTS: WaterPoint[] = [
     [12, 0, 0], [6, 0, 7], [-6, 0, 8], [-12, 0, 0], [-6, 0, -7], [6, 0, -8],
 ].map(pos => ({ pos: pos as [number, number, number], width: 1, depth: 1, flowSpeed: 0 }));
 
-/** A shape of `type` with every field filled from `json` (missing or broken values take the defaults). */
-export function normaliseWaterShape(json: any, type?: WaterShapeType): WaterShape {
-    const t: WaterShapeType = WATER_SHAPE_TYPES.includes(json?.type) ? json.type : (type ?? 'box');
-    const defaults = t === 'river' ? RIVER_POINTS : t === 'lake' ? LAKE_POINTS : [];
-    const rawPoints = Array.isArray(json?.points) ? json.points : defaults;
-    const points = rawPoints.map((p: any) => normaliseWaterPoint(p));
+/** The points a new river or lake starts with (none for an ocean or pool). */
+export function defaultWaterPoints(type: WaterBodyType): WaterPoint[] {
+    const src = type === 'river' ? RIVER_POINTS : type === 'lake' ? LAKE_POINTS : [];
+    return src.map(p => normaliseWaterPoint(p));
+}
+
+/** Fewest points a type needs (a river is a line, a lake an outline). */
+export function minWaterPoints(type: WaterBodyType): number {
+    return type === 'river' ? 2 : type === 'lake' ? 3 : 0;
+}
+
+/** A body with every field filled from `json` (missing or broken values take the defaults). */
+export function normaliseWaterBody(json: any, type?: WaterBodyType): WaterBody {
+    const t: WaterBodyType = WATER_BODY_TYPES.includes(json?.type) ? json.type : (type ?? 'pool');
+    const rawPoints = Array.isArray(json?.points) ? json.points : null;
+    let points: WaterPoint[] = rawPoints ? rawPoints.map((p: any) => normaliseWaterPoint(p)) : defaultWaterPoints(t);
+    if (points.length < minWaterPoints(t)) points = defaultWaterPoints(t);
+    if (t !== 'river' && t !== 'lake') points = [];
     const size = vec3Or(json?.size, [10, 2, 10]).map(Math.abs) as [number, number, number];
     const carve = json?.carve ?? {};
     const connect = json?.connect ?? {};
-    return {
-        id: typeof json?.id === 'string' && json.id ? json.id : newWaterShapeId(),
+    const river = t === 'river';
+    return freezeBody({
         type: t,
-        name: typeof json?.name === 'string' ? json.name : '',
-        offset: vec3Or(json?.offset, [0, 0, 0]),
+        points,
         size: [Math.max(0.01, size[0]), Math.max(0.01, size[1]), Math.max(0.01, size[2])],
-        points: t === 'river' && points.length < 2 ? RIVER_POINTS.map(p => normaliseWaterPoint(p))
-            : t === 'lake' && points.length < 3 ? LAKE_POINTS.map(p => normaliseWaterPoint(p)) : points,
         depth: Math.max(0.05, finiteOr(json?.depth, t === 'ocean' ? 50 : 3)),
         extent: Math.max(0, finiteOr(json?.extent, 0)),
-        priority: Math.round(finiteOr(json?.priority, t === 'river' ? 1 : 0)),
         carve: {
             enabled: !!carve.enabled,
             bankWidth: Math.max(0, finiteOr(carve.bankWidth, 3)),
             extraDepth: Math.max(0, finiteOr(carve.extraDepth, 0)),
         },
+        // Only a river joins other water; the rest stand on their own.
         connect: {
-            start: typeof connect.start === 'string' && connect.start ? connect.start : null,
-            end: typeof connect.end === 'string' && connect.end ? connect.end : null,
+            start: river && typeof connect.start === 'string' && connect.start ? connect.start : null,
+            end: river && typeof connect.end === 'string' && connect.end ? connect.end : null,
         },
-    };
+    });
 }
 
-/** A deep copy (shapes are edited by replacing the list, as collider shapes are). */
-export function cloneWaterShape(s: WaterShape): WaterShape {
-    return normaliseWaterShape(JSON.parse(JSON.stringify(s)));
+/**
+ * Bodies are values: a node replaces its body whole, so an edit is always seen (its version moves). Frozen,
+ * so something writing into one in place fails loudly instead of changing water nothing knows to rebuild.
+ */
+function freezeBody(b: WaterBody): WaterBody {
+    for (const p of b.points) { Object.freeze(p.pos); Object.freeze(p); }
+    Object.freeze(b.points); Object.freeze(b.size); Object.freeze(b.carve); Object.freeze(b.connect);
+    return Object.freeze(b);
+}
+
+/** A deep copy (bodies are edited by replacing them whole, as collider shapes are). */
+export function cloneWaterBody(b: WaterBody): WaterBody {
+    return normaliseWaterBody(JSON.parse(JSON.stringify(b)));
+}
+
+/**
+ * The same body as another type: the fields both share are kept, the points are kept only between
+ * types that read them the same way (none do: a river's centre line is not a lake's outline), and the
+ * new type's own fields take their defaults.
+ */
+export function retypeWaterBody(b: WaterBody, type: WaterBodyType): WaterBody {
+    if (b.type === type) return b;
+    return normaliseWaterBody({ ...b, type, points: undefined, connect: { start: null, end: null } });
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Resolved shapes: world space, connections applied, ready to query
+// Older saves: one node, a list of shapes
 // ---------------------------------------------------------------------------------------------------
 
-/** Where a node puts its shapes: translation and per-axis scale (rotation is ignored). */
+/** A shape of the list an older Water node held, made a body of its own: where it sits relative to that node, and what it was called. */
+export interface LegacyWaterShape {
+    /** The old shape id: what other shapes' connections named. */
+    id: string;
+    name: string;
+    /** The shape's offset in the old node's local units. */
+    offset: [number, number, number];
+    body: WaterBody;
+}
+
+/**
+ * The shapes of an older Water node's `shapes` list, each as a body of its own. `box` became `pool`; a
+ * connection still names the OLD shape id (the caller maps those to the nodes it makes).
+ */
+export function legacyWaterShapes(shapes: readonly any[]): LegacyWaterShape[] {
+    return shapes.map((s, i) => {
+        const type: WaterBodyType = s?.type === 'box' ? 'pool' : WATER_BODY_TYPES.includes(s?.type) ? s.type : 'pool';
+        const connect = s?.connect ?? {};
+        return {
+            id: typeof s?.id === 'string' && s.id ? s.id : `shape${i}`,
+            name: typeof s?.name === 'string' ? s.name : '',
+            offset: vec3Or(s?.offset, [0, 0, 0]),
+            body: normaliseWaterBody({ ...s, type, connect: type === 'river' ? connect : {} }),
+        };
+    });
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Resolved: world space, connections applied, ready to query
+// ---------------------------------------------------------------------------------------------------
+
+/** Where a node puts its body: translation and per-axis scale (rotation is ignored). */
 export interface WaterFrame { position: readonly number[]; scale: readonly number[]; }
 
-/** Shape-local → world. */
+/** What a river's ends join, already resolved: the water it flows from and into. */
+export interface WaterTargets { start?: ResolvedWaterShape | null; end?: ResolvedWaterShape | null; }
+
+/** Node-local → world. */
 function toWorld(frame: WaterFrame, p: readonly number[]): Vec3Tuple {
     return [
         frame.position[0] + p[0] * frame.scale[0],
@@ -151,30 +205,33 @@ function toWorld(frame: WaterFrame, p: readonly number[]): Vec3Tuple {
 }
 
 const RIVER_SPACING = 1;
-/** Rivers carry this share of the node's waves: a chop, not a swell. */
+/** Rivers carry this share of their node's waves: a chop, not a swell. */
 export const RIVER_WAVE_FACTOR = 0.15;
 
-/** The surface level a lake / box / ocean rests at, in world space. */
-function levelOf(shape: WaterShape, frame: WaterFrame): number {
-    if (shape.type === 'box') return frame.position[1] + (shape.offset[1] + shape.size[1] / 2) * frame.scale[1];
-    return frame.position[1] + shape.offset[1] * frame.scale[1];
-}
-
-/** The surface of shape `id` over (x, z), for a river end joining it; undefined when unknown. */
-type LevelOf = (id: string, x: number, z: number) => number | undefined;
-/** A resolved lake, box or ocean by id (rivers resolve after them), for a river end reaching into it. */
-type TargetOf = (id: string) => ResolvedWaterShape | undefined;
-
-/** How far inside the shape a river's connected end reaches, metres. */
+/** How far inside the water it joins a river's connected end reaches, metres. */
 const REACH_INSIDE = 2;
 
+/** The surface of `target` over (x, z), for a river end joining it. */
+function levelOn(target: ResolvedWaterShape, x: number, z: number): number {
+    if (target.type !== 'river') return target.level;
+    const col: WaterColumn = { shape: -1, surface: 0, floor: 0, flowX: 0, flowZ: 0, edge: 0, waveFactor: 1 };
+    if (riverColumn(target, x, z, col)) return col.surface;
+    // The nearest point of the other river's centre line, wherever the end lands.
+    let best = Infinity, y = target.level;
+    for (const q of target.samples) {
+        const d = (q.x - x) * (q.x - x) + (q.z - z) * (q.z - z);
+        if (d < best) { best = d; y = q.y; }
+    }
+    return y;
+}
+
 /**
- * Where a river end at world (x, z) meets the lake or box it connects to: (x, z) itself when it is already
- * inside, else the nearest point of the shape's edge, `REACH_INSIDE` metres in. Null for anything else
- * (another river, an endless ocean, which every end is already in).
+ * Where a river end at world (x, z) meets the lake or pool it connects to: null when it is already inside,
+ * else the nearest point of the water's edge, `REACH_INSIDE` metres in. Null for anything else (another
+ * river, an endless ocean, which every end is already in).
  */
 function reachInto(target: ResolvedWaterShape, x: number, z: number): [number, number] | null {
-    if (target.type === 'box' || (target.type === 'ocean' && !target.endless)) {
+    if (target.type === 'pool' || (target.type === 'ocean' && !target.endless)) {
         const m = REACH_INSIDE;
         const cx = Math.min(target.max[0] - m, Math.max(target.min[0] + m, x));
         const cz = Math.min(target.max[2] - m, Math.max(target.min[2] + m, z));
@@ -198,23 +255,16 @@ function reachInto(target: ResolvedWaterShape, x: number, z: number): [number, n
     return [bx + dx / l * REACH_INSIDE, bz + dz / l * REACH_INSIDE];
 }
 
-function resolveRiver(shape: WaterShape, frame: WaterFrame, levelAt: LevelOf, targetOf: TargetOf, out: ResolvedWaterShape): void {
+function resolveRiver(body: WaterBody, frame: WaterFrame, targets: WaterTargets, out: ResolvedWaterShape): void {
     const sx = Math.abs(frame.scale[0]), sz = Math.abs(frame.scale[2]), sy = Math.abs(frame.scale[1]);
     const lateral = (sx + sz) / 2;
-    const raw = shape.points.map(p => ({ ...p, pos: toWorld(frame, [p.pos[0] + shape.offset[0], p.pos[1] + shape.offset[1], p.pos[2] + shape.offset[2]]) }));
+    const raw = body.points.map(p => ({ ...p, pos: toWorld(frame, p.pos) }));
     // A connected end takes the surface of what it flows into (or out of), so the two meet.
-    if (raw.length && shape.connect.start) {
-        const q = raw[0].pos, l = levelAt(shape.connect.start, q[0], q[2]);
-        if (l !== undefined) q[1] = l;
-    }
-    if (raw.length && shape.connect.end) {
-        const q = raw[raw.length - 1].pos, l = levelAt(shape.connect.end, q[0], q[2]);
-        if (l !== undefined) q[1] = l;
-    }
-    // An end that stops short of the lake or box it connects to carries on into it: one more point, on
-    // the shape's surface just past its shore, so the river visibly flows in (and out of, for a start).
-    const reach = (id: string | null, end: boolean) => {
-        const target = id ? targetOf(id) : undefined;
+    if (raw.length && targets.start) { const q = raw[0].pos; q[1] = levelOn(targets.start, q[0], q[2]); }
+    if (raw.length && targets.end) { const q = raw[raw.length - 1].pos; q[1] = levelOn(targets.end, q[0], q[2]); }
+    // An end that stops short of the lake or pool it connects to carries on into it: one more point, on
+    // its surface just past its shore, so the river visibly flows in (and out of, for a start).
+    const reach = (target: ResolvedWaterShape | null | undefined, end: boolean) => {
         if (!target || !raw.length) return;
         const at = end ? raw[raw.length - 1] : raw[0];
         const inside = reachInto(target, at.pos[0], at.pos[2]);
@@ -223,8 +273,8 @@ function resolveRiver(shape: WaterShape, frame: WaterFrame, levelAt: LevelOf, ta
         at.pos[1] = target.level;
         if (end) raw.push(extra); else raw.unshift(extra);
     };
-    reach(shape.connect.end, true);
-    reach(shape.connect.start, false);
+    reach(targets.end, true);
+    reach(targets.start, false);
     // Spline3 drops consecutive duplicates; drop the same ones here so control indices line up.
     const kept = raw.filter((p, i) => i === 0 || Math.hypot(p.pos[0] - raw[i - 1].pos[0], p.pos[1] - raw[i - 1].pos[1], p.pos[2] - raw[i - 1].pos[2]) > 1e-6);
     if (kept.length < 2) return;
@@ -279,89 +329,48 @@ function resolveRiver(shape: WaterShape, frame: WaterFrame, levelAt: LevelOf, ta
 }
 
 /**
- * The node's shapes in world space, with connections applied (a river end that runs into a lake takes the
- * lake's level). Order is kept: `order` is the index in `shapes`.
+ * The body in world space, with its connections applied (a river end that runs into a lake takes the lake's
+ * level and reaches into it). `id` is the node's, so other nodes' columns can tell this water apart. Null
+ * when there is nothing to resolve (a river whose points collapse to one).
  */
-export function resolveWaterShapes(shapes: readonly WaterShape[], frame: WaterFrame): ResolvedWaterShape[] {
-    const levels = new Map<string, number>();
-    for (const s of shapes) if (s.type !== 'river') levels.set(s.id, levelOf(s, frame));
-    // A river joining another river takes that river's surface where they meet, so rivers resolve in
-    // dependency order: one whose target is a river not yet resolved waits for it (a cycle just ignores
-    // the joins that close it).
-    const rivers = new Map<string, ResolvedWaterShape>();
-    const targets = new Map<string, ResolvedWaterShape>();
-    const col: WaterColumn = { shape: -1, surface: 0, floor: 0, flowX: 0, flowZ: 0, edge: 0, waveFactor: 1 };
-    const levelAt: LevelOf = (id, x, z) => {
-        const level = levels.get(id);
-        if (level !== undefined) return level;
-        const r = rivers.get(id);
-        if (!r) return undefined;
-        // The nearest point of the other river's centre line, wherever the end lands.
-        let best = Infinity, y: number | undefined;
-        for (const q of r.samples) {
-            const d = (q.x - x) * (q.x - x) + (q.z - z) * (q.z - z);
-            if (d < best) { best = d; y = q.y; }
-        }
-        return riverColumn(r, x, z, col) ? col.surface : y;
-    };
-    const out: (ResolvedWaterShape | null)[] = shapes.map(() => null);
+export function resolveWaterBody(body: WaterBody, frame: WaterFrame, id: string, targets: WaterTargets = {}): ResolvedWaterShape | null {
     const sx = Math.abs(frame.scale[0]), sy = Math.abs(frame.scale[1]), sz = Math.abs(frame.scale[2]);
-    const resolveOne = (shape: WaterShape, order: number): void => {
-        const r: ResolvedWaterShape = {
-            id: shape.id, type: shape.type, priority: shape.priority, order,
-            min: [0, 0, 0], max: [0, 0, 0], level: 0, floor: 0, outline: [], samples: [], cell: 1, grid: {}, endless: false,
-            waveFactor: shape.type === 'river' ? RIVER_WAVE_FACTOR : 1,
-        };
-        if (shape.type === 'box') {
-            const c = toWorld(frame, shape.offset);
-            const h = [shape.size[0] * sx / 2, shape.size[1] * sy / 2, shape.size[2] * sz / 2];
-            r.min = [c[0] - h[0], c[1] - h[1], c[2] - h[2]];
-            r.max = [c[0] + h[0], c[1] + h[1], c[2] + h[2]];
-            r.level = r.max[1]; r.floor = r.min[1];
-        } else if (shape.type === 'lake') {
-            const pts = shape.points.map(p => toWorld(frame, [p.pos[0] + shape.offset[0], 0, p.pos[2] + shape.offset[2]]));
-            r.outline = closedSplineXZ(pts, 1);
-            r.level = levelOf(shape, frame);
-            r.floor = r.level - shape.depth * sy;
-            r.min = [Infinity, r.floor, Infinity]; r.max = [-Infinity, r.level, -Infinity];
-            for (let i = 0; i < r.outline.length; i += 2) {
-                r.min[0] = Math.min(r.min[0], r.outline[i]); r.max[0] = Math.max(r.max[0], r.outline[i]);
-                r.min[2] = Math.min(r.min[2], r.outline[i + 1]); r.max[2] = Math.max(r.max[2], r.outline[i + 1]);
-            }
-        } else if (shape.type === 'ocean') {
-            const c = toWorld(frame, shape.offset);
-            r.level = c[1]; r.floor = c[1] - shape.depth * sy;
-            r.endless = !(shape.extent > 0);
-            const e = r.endless ? 1e7 : shape.extent;
-            r.min = [c[0] - e * sx, r.floor, c[2] - e * sz];
-            r.max = [c[0] + e * sx, r.level, c[2] + e * sz];
-        } else {
-            resolveRiver(shape, frame, levelAt, id => targets.get(id), r);
-            if (!r.samples.length) return;
-            rivers.set(shape.id, r);
-        }
-        if (shape.type !== 'river') targets.set(shape.id, r);
-        out[order] = r;
+    const r: ResolvedWaterShape = {
+        id, type: body.type, priority: 0, order: 0,
+        min: [0, 0, 0], max: [0, 0, 0], level: 0, floor: 0, outline: [], samples: [], cell: 1, grid: {}, endless: false,
+        waveFactor: body.type === 'river' ? RIVER_WAVE_FACTOR : 1,
     };
-    const ids = new Set(shapes.map(s => s.id));
-    const done = new Set<string>();
-    const pending = shapes.map((s, i) => ({ s, i })).filter(({ s, i }) => {
-        if (s.type !== 'river') { resolveOne(s, i); done.add(s.id); return false; }
-        return true;
-    });
-    const waitsOn = (s: WaterShape) => [s.connect.start, s.connect.end]
-        .filter((id): id is string => !!id && ids.has(id) && id !== s.id && !done.has(id));
-    while (pending.length) {
-        let k = pending.findIndex(({ s }) => waitsOn(s).length === 0);
-        if (k < 0) k = 0;   // a cycle: resolve the first, its unresolved joins ignored
-        const [{ s, i }] = pending.splice(k, 1);
-        resolveOne(s, i);
-        done.add(s.id);
+    if (body.type === 'pool') {
+        const c = toWorld(frame, [0, 0, 0]);
+        const h = [body.size[0] * sx / 2, body.size[1] * sy / 2, body.size[2] * sz / 2];
+        r.min = [c[0] - h[0], c[1] - h[1], c[2] - h[2]];
+        r.max = [c[0] + h[0], c[1] + h[1], c[2] + h[2]];
+        r.level = r.max[1]; r.floor = r.min[1];
+    } else if (body.type === 'lake') {
+        const pts = body.points.map(p => toWorld(frame, [p.pos[0], 0, p.pos[2]]));
+        r.outline = closedSplineXZ(pts, 1);
+        r.level = frame.position[1];
+        r.floor = r.level - body.depth * sy;
+        r.min = [Infinity, r.floor, Infinity]; r.max = [-Infinity, r.level, -Infinity];
+        for (let i = 0; i < r.outline.length; i += 2) {
+            r.min[0] = Math.min(r.min[0], r.outline[i]); r.max[0] = Math.max(r.max[0], r.outline[i]);
+            r.min[2] = Math.min(r.min[2], r.outline[i + 1]); r.max[2] = Math.max(r.max[2], r.outline[i + 1]);
+        }
+    } else if (body.type === 'ocean') {
+        const c = toWorld(frame, [0, 0, 0]);
+        r.level = c[1]; r.floor = c[1] - body.depth * sy;
+        r.endless = !(body.extent > 0);
+        const e = r.endless ? 1e7 : body.extent;
+        r.min = [c[0] - e * sx, r.floor, c[2] - e * sz];
+        r.max = [c[0] + e * sx, r.level, c[2] + e * sz];
+    } else {
+        resolveRiver(body, frame, targets, r);
+        if (!r.samples.length) return null;
     }
-    return out.filter((r): r is ResolvedWaterShape => r !== null);
+    return r;
 }
 
-/** World box around every shape (endless oceans included, so it can be huge). Null with no shapes. */
+/** World box around the shapes (endless oceans included, so it can be huge). Null with none. */
 export function waterShapesBounds(shapes: readonly ResolvedWaterShape[]): { min: [number, number, number]; max: [number, number, number] } | null {
     if (!shapes.length) return null;
     const min: [number, number, number] = [Infinity, Infinity, Infinity], max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
@@ -369,7 +378,7 @@ export function waterShapesBounds(shapes: readonly ResolvedWaterShape[]): { min:
     return { min, max };
 }
 
-/** Rough open-water distance of a shape, for fetch-limited waves (Infinity for an endless ocean). */
+/** Rough open-water distance of a body, for fetch-limited waves (Infinity for an endless ocean). */
 export function waterShapeFetch(r: ResolvedWaterShape): number {
     if (r.type === 'ocean' && r.endless) return Infinity;
     if (r.type === 'river') return Math.max(4, ...r.samples.map(s => s.width)) * 2;
