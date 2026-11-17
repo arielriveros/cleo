@@ -52,7 +52,6 @@ const H = new Float32Array(RES * RES)
 for (let i = 0; i < H.length; i++) H[i] = out.heights[i] * K
 log(`world ${RES}² over ${SIZE} m, ${Math.min(...H.subarray(0, 4)).toFixed(0)}..; sea ${SEA} m, lakes ${fields.water.lakes.length}`)
 
-const toWorld = (u: number) => (u - 0.5) * SIZE
 const heightAt = (x: number, z: number) => {
   const fx = Math.min(RES - 1.001, Math.max(0, (x + SIZE / 2) / CELL)), fz = Math.min(RES - 1.001, Math.max(0, (z + SIZE / 2) / CELL))
   const c = Math.floor(fx), r = Math.floor(fz), tx = fx - c, tz = fz - r
@@ -160,11 +159,10 @@ for (let r = 0; r < RES; r++) for (let c = 0; c < RES; c++) {
 
 // ----- the rivers' channels -------------------------------------------------------------------------------
 
-// The flow bake runs the water over the GROUND, not along the line a river was drawn on, so each river is
-// drawn here for the ground to hold it: from the head of the preset's river node down the world's own
-// drainage; its surface under the lowest ground across its channel, out to the top of its banks, so both
-// banks stand over it; always falling; never under the water it runs into. Its bed is then dug into the
-// heights, before they are written.
+// The flow bake runs the water over the GROUND, not along a line drawn for it, so each river is drawn here
+// for the ground to hold it: from its head down the world's own drainage; its surface under the lowest
+// ground across its channel, out to the top of its banks, so both banks stand over it; always falling; never
+// under the water it runs into. Its bed is then dug into the heights, before they are written.
 const lakes = fields.water.lakes as { id: number; level: number; floor: number; area: number; bounds: [number, number, number, number] }[]
 const lakeIds = fields.water.lakeId as Int32Array
 const lakeIdAt = (x: number, z: number, reach = 0) => {
@@ -191,8 +189,50 @@ type RiverPoint = { pos: [number, number, number]; width: number; depth: number;
 // for the river wherever it cut one.
 const flood = priorityFlood(H, RES)
 const drainsTo = flood.parent
-const traced = (doc.graph.nodes as any[]).filter(n => n.type === 'river').map(n => {
-  const head: [number, number] = [toWorld(n.params.points[0][0]), toWorld(n.params.points[0][1])]
+// Where the rivers are: the preset draws none (its valleys are its rivers' work), so they are found in the
+// drainage. The area draining through each sample, over the filled surface:
+const drained = new Float64Array(RES * RES).fill(CELL * CELL)
+for (let k = RES * RES - 1; k >= 0; k--) { const c = flood.order[k], p = drainsTo[c]; if (p >= 0) drained[p] += drained[c] }
+const worldOf = (c: number): [number, number] => [-SIZE / 2 + (c % RES) * CELL, -SIZE / 2 + Math.floor(c / RES) * CELL]
+/** A stream's head: where what drains into it falls under this much (m²). */
+const HEAD_AREA = 6000
+const bigLake = [...lakes].sort((a, b) => b.area - a.area)[0]
+if (!bigLake) throw new Error('the island has no lake for its rivers')
+// The stream that feeds the lake: the largest that runs into it, followed up its largest branch to its head.
+let inflow = -1
+for (let c = 0; c < RES * RES; c++) {
+  const p = drainsTo[c]
+  if (p >= 0 && lakeIds[p] === bigLake.id && lakeIds[c] !== bigLake.id && (inflow < 0 || drained[c] > drained[inflow])) inflow = c
+}
+let streamHead = inflow
+for (;;) {
+  const r = Math.floor(streamHead / RES), q = streamHead % RES
+  let up = -1
+  for (let dr = -1; dr <= 1; dr++) for (let dq = -1; dq <= 1; dq++) {
+    const rr = r + dr, qq = q + dq
+    if (rr < 0 || qq < 0 || rr >= RES || qq >= RES) continue
+    const j = rr * RES + qq
+    if (drainsTo[j] === streamHead && (up < 0 || drained[j] > drained[up])) up = j
+  }
+  if (up < 0 || drained[up] < HEAD_AREA) break
+  streamHead = up
+}
+// The lake's way out: where its water leaves it, followed from any of its samples.
+let spill = -1
+for (let c = 0; c < RES * RES && spill < 0; c++) if (lakeIds[c] === bigLake.id) {
+  let d = c
+  for (let guard = 0; guard < RES * RES && d >= 0 && lakeIds[d] === bigLake.id; guard++) d = drainsTo[d]
+  spill = d
+}
+if (spill < 0) throw new Error('the lake has no way out')
+log(`rivers: a stream draining ${(drained[inflow] / 1e4).toFixed(1)} ha into the lake (head ${worldOf(streamHead).map(v => v.toFixed(0))}), the outflow from ${worldOf(spill).map(v => v.toFixed(0))}`)
+/** The rivers, by name, width (m) and head. */
+const RIVERS = [
+  { name: 'Peak river', width: 7, head: worldOf(streamHead) },
+  { name: 'Lake outflow', width: 9, head: worldOf(spill) },
+]
+const traced = RIVERS.map(n => {
+  const head = n.head
   const cells: number[] = []
   for (let c = Math.round((head[1] + SIZE / 2) / CELL) * RES + Math.round((head[0] + SIZE / 2) / CELL); c >= 0 && cells.length < RES * 8; c = drainsTo[c]) {
     cells.push(c)
@@ -236,8 +276,8 @@ const traced = (doc.graph.nodes as any[]).filter(n => n.type === 'river').map(n 
   for (const e of levelled.values()) { samples += e.samples; deepest = Math.max(deepest, e.deepest) }
   log(`hollows on the rivers' way levelled: ${levelled.size}, ${samples} samples in all, the deepest ${deepest.toFixed(1)} m`)
 }
-const riverPlans = (doc.graph.nodes as any[]).filter(n => n.type === 'river').map((n, k) => {
-  const width = r3((n.params.width ?? 0.004) * SIZE), half = width / 2
+const riverPlans = RIVERS.map((n, k) => {
+  const width = r3(n.width), half = width / 2
   const { head, from, cells } = traced[k]
   // It starts where it leaves the lake it drains, and ends where it first reaches another lake, or the sea.
   let start = 0, stop = cells.length - 1, into: number | 'sea' | null = null
@@ -323,7 +363,7 @@ const riverPlans = (doc.graph.nodes as any[]).filter(n => n.type === 'river').ma
     // The sill is shallow, so the lake stands near the level the world flooded it to.
     depth: from >= 0 && along[i] <= SILL ? SILL_DEPTH : STREAM[k % 2].depth, flowSpeed: STREAM[k % 2].flowSpeed,
   }))
-  return { name: n.name as string, points, from, into, deepest }
+  return { name: n.name, points, from, into, deepest }
 })
 const RIVER_CARVE = { enabled: true, bankWidth: BANK, extraDepth: DIG }
 // Metres from each sample to the nearest river's water (negative in its bed), and that river's surface there.
