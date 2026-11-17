@@ -943,10 +943,12 @@ where they overlap the other node's water is the water there (`handOver()`). A l
 as a pool; an older node holding a list of `shapes` loads as one node per shape.
 
 Every dynamic physics body inside is buoyed by Archimedes' principle: its colliders are sampled, and each
-submerged sample is pushed up by the weight of the water it displaces, at that point, so whether a body
-floats follows from its **mass** against its collider volume and a tipped body rights itself. Drag pulls
-a body toward the water's own velocity, so a river (`currents`) carries it downstream. Character bodies
-are skipped unless `affectCharacters`.
+submerged sample is pushed by the weight of the water it displaces, at that point and along the water's
+slope (down a wave's face, down a river's gradient), so whether a body floats follows from its **mass**
+against its collider volume and a tipped body rights itself. Drag pulls each sample toward the water's own
+velocity there (the current with `currents`, plus the waves' orbits), for the water displaced, so what
+floats rides the waves that are drawn (they share a clock in Play, `physics/water/waterClock.ts`). Where
+two Water nodes overlap, each sample is in one of them. Character bodies are skipped unless `affectCharacters`.
 
 The surface carries a swell (`waveAmplitude`, `waveFrequency`) and Gerstner waves shaped by `windSpeed`
 over the body's open water (fetch), travelling toward `waveDirection` degrees, scaled by `waveScale`,
@@ -956,7 +958,7 @@ sharpened by `choppiness` and dying down within `shoreFade` metres of a shore. T
 Properties: `waterType`, `points`, `size`, `depth`, `extent`, `carve`, `flowsFrom`, `flowsInto`,
 `waterBody` (all of them at once, as plain data), `density` (kg/m³, default 1000), `linearDrag`, `angularDrag` (per second at full
 submersion), `waveAmplitude`, `waveFrequency`, `windSpeed`, `waveDirection`, `waveScale`, `choppiness`,
-`shoreFade`, `currents`, `waterMaterial`, `waterMaterialId`, `affectCharacters`, `surfaceNodeId`, `splashTemplate`,
+`waveSpeed`, `shoreFade`, `currents`, `waterMaterial`, `waterMaterialId`, `affectCharacters`, `surfaceNodeId`, `splashTemplate`,
 `wadeSplashTemplate`, `enabled`. Helpers: `resolved()` (the body in world space), `joinedNodes()`,
 `handOver()`, `waves()`, `columnAt(x, z, time?)` (resting or waved surface, floor, flow and distance to
 shore, or null), `worldBox()`, `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)`, `version` (bumped

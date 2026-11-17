@@ -1,37 +1,49 @@
 import type { BuoyancyVolume, WaterColumnSample } from './buoyancy';
-import { gerstnerHeightAt, type GerstnerWave } from './water/gerstner';
+import { gerstnerSurfaceAt, type GerstnerSurface, type GerstnerWave } from './water/gerstner';
 import { waterColumnAt, type ResolvedWaterShape, type WaterColumn } from './water/waterColumn';
 
 // A water node as plain data, and the surface it waves. Shared by the scene's WaterVolumeNode and the
 // physics worker (physics/worker/), which buoys bodies in a thread that has no scene: both build the
 // BuoyancyVolume the solver reads from the same numbers with the same formula, so a crate floats the same
-// on either side, and on the wave the renderer draws (the Gerstner sum is core/math's, twin of the shader's).
+// on either side, and on the wave the renderer draws (the Gerstner sum here is the twin of the shader's).
 
 /** Everything buoyancy needs from one water node, cloneable across threads. */
 export interface WaterSpec {
-    /** World-space box around every shape: the cheap reject. `max[1]` is the highest resting surface. */
+    /** The Water node's id, so overlapping water can tell which gives way to which. */
+    id?: string;
+    /**
+     * What this spec is built from, beyond the per-step `waveScale`: equal keys, equal specs. The physics
+     * worker is sent a spec once per key and keeps it.
+     */
+    key?: string;
+    /** World-space box around the water: the cheap reject. `max[1]` is the highest resting surface. */
     min: [number, number, number];
     max: [number, number, number];
     density: number;
+    /** Per second: how fast drag brings a body that displaces its own weight of water to the water's speed. */
     linearDrag: number;
     angularDrag: number;
     affectCharacters: boolean;
     /** The swell: metres, and cycles per second. 0 amplitude is no swell. */
     waveAmplitude: number;
     waveFrequency: number;
-    /** The node's shapes in world space (water/waterShapes.ts). Empty: the box `min`..`max` itself. */
+    /** The body in world space (water/waterShapes.ts). Empty: the box `min`..`max` itself. */
     shapes?: ResolvedWaterShape[];
     /** The Gerstner waves on top of the swell, and the factor on their height (wind strength). */
     waves?: GerstnerWave[];
     waveScale?: number;
-    /** How fast the waves run against their natural pace (time is multiplied by it). Default 1. */
+    /** How fast the waves run against their natural pace (their clock is multiplied by it). Default 1. */
     waveSpeed?: number;
     /** Metres from a shore over which waves fade out (0 = no fade). */
     shoreFade?: number;
     /** Whether flowing water drags bodies along with it (river currents). */
     currents?: boolean;
-    /** A bake's settled water, coarse: where it is given it replaces the shapes' surface and flow. */
+    /** A bake's settled water: where it is given it replaces the shapes' surface and flow. */
     flowGrid?: WaterFlowGrid;
+    /** An endless ocean's shore: how far each point is from land, and the sea bed there. */
+    shoreGrid?: WaterShoreGrid;
+    /** The Water nodes (ids) this water gives way to where they overlap: a river's lake. */
+    yieldsTo?: string[];
 }
 
 /**
@@ -40,6 +52,16 @@ export interface WaterSpec {
  * crosses to the worker with the rest of the spec.
  */
 export interface WaterFlowGrid {
+    originX: number; originZ: number; cell: number; nx: number; nz: number;
+    data: Float32Array;
+}
+
+/**
+ * An endless ocean's shore grid (water/waterInfo.ts buildOceanShoreInfo, the one the surface is drawn
+ * with): `nx` x `nz` cells from (originX, originZ), two floats each: metres to the shore (negative on land)
+ * and the bed's height.
+ */
+export interface WaterShoreGrid {
     originX: number; originZ: number; cell: number; nx: number; nz: number;
     data: Float32Array;
 }
@@ -64,41 +86,83 @@ function sampleFlowGrid(g: WaterFlowGrid, x: number, z: number, col: WaterColumn
     return true;
 }
 
-/** The swell alone: a gentle bob at a world x/z at `time` seconds. */
-function swell(spec: Pick<WaterSpec, 'waveAmplitude' | 'waveFrequency'>, x: number, z: number, time: number): number {
-    if (!(spec.waveAmplitude > 0)) return 0;
-    const phase = time * spec.waveFrequency * Math.PI * 2 + x * 0.37 + z * 0.29;
-    return spec.waveAmplitude * Math.sin(phase);
+/** Bilinear lookup of the shore grid at (x, z): [metres to shore, bed]; false outside it. */
+function sampleShoreGrid(g: WaterShoreGrid, x: number, z: number, out: number[]): boolean {
+    const fx = (x - g.originX) / g.cell, fz = (z - g.originZ) / g.cell;
+    if (fx < 0 || fz < 0 || fx > g.nx - 1 || fz > g.nz - 1) return false;
+    const x0 = Math.min(g.nx - 2, Math.floor(fx)), z0 = Math.min(g.nz - 2, Math.floor(fz));
+    const tx = fx - x0, tz = fz - z0;
+    let e = 0, b = 0;
+    for (let k = 0; k < 4; k++) {
+        const o = ((z0 + (k >> 1)) * g.nx + x0 + (k & 1)) * 2;
+        const wk = ((k & 1) ? tx : 1 - tx) * ((k >> 1) ? tz : 1 - tz);
+        e += g.data[o] * wk; b += g.data[o + 1] * wk;
+    }
+    out[0] = e; out[1] = b;
+    return true;
 }
+
+/** The swell's phase at a world x/z on the waves' clock `t`. */
+const swellPhase = (spec: Pick<WaterSpec, 'waveFrequency'>, x: number, z: number, t: number) =>
+    t * spec.waveFrequency * Math.PI * 2 + x * 0.37 + z * 0.29;
 
 /** The surface height at a world x/z at `time` seconds over a resting level of `spec.max[1]`. */
-export function waterSurfaceHeight(spec: Pick<WaterSpec, 'max' | 'waveAmplitude' | 'waveFrequency'>, x: number, z: number, time: number): number {
+export function waterSurfaceHeight(spec: Pick<WaterSpec, 'max' | 'waveAmplitude' | 'waveFrequency' | 'waveSpeed'>, x: number, z: number, time: number): number {
     const level = spec.max[1];
     if (!(spec.waveAmplitude > 0)) return level;
-    return level + swell(spec, x, z, time);
+    return level + spec.waveAmplitude * Math.sin(swellPhase(spec, x, z, time * (spec.waveSpeed ?? 1)));
 }
 
-/** Height the waves add over a column `edge` metres from its shore. */
-export function waveHeight(spec: WaterSpec, x: number, z: number, time: number, edge: number, factor = 1): number {
-    let h = swell(spec, x, z, time);
-    const waves = spec.waves;
-    if (waves && waves.length && (spec.waveScale ?? 1) > 0) {
-        const fade = spec.shoreFade && spec.shoreFade > 0 ? Math.min(1, Math.max(0, edge / spec.shoreFade)) : 1;
-        const scale = (spec.waveScale ?? 1) * factor * fade * fade * (3 - 2 * fade);
-        if (scale > 0) h += gerstnerHeightAt(waves, x, z, time * (spec.waveSpeed ?? 1), scale);
-    }
-    return h;
-}
+const _surface: GerstnerSurface = { height: 0, vx: 0, vy: 0, vz: 0, k: 0 };
 
 /**
- * The water at (x, z) at `time`: surface (waves included), bed and flow; null where there is none. Exactly
- * what the buoyancy solver reads, and what scripts asking "is this point under water" get.
+ * The waves over a column `edge` metres from its shore and `depth` deep: their height (into `out.height`),
+ * the water's motion there and the wavenumber it fades with below. The renderer's vertex stage does the
+ * same: shoaling over `shoreFade`, and no taller than 0.4 of the depth.
+ */
+export function waveAt(spec: WaterSpec, x: number, z: number, time: number, edge: number, factor: number,
+                       depth: number, out: GerstnerSurface): GerstnerSurface {
+    const speed = spec.waveSpeed ?? 1;
+    const t = time * speed;
+    out.height = 0; out.vx = 0; out.vy = 0; out.vz = 0; out.k = 0;
+    const waves = spec.waves;
+    const heightScale = spec.waveScale ?? 1;
+    if (waves && waves.length && heightScale > 0) {
+        const fade = spec.shoreFade && spec.shoreFade > 0 ? Math.min(1, Math.max(0, edge / spec.shoreFade)) : 1;
+        let sum = 0;
+        for (const w of waves) sum += w.amplitude * heightScale;
+        const cap = Number.isFinite(depth) ? Math.min(1, Math.max(0, 0.4 * depth / Math.max(sum, 1e-3))) : 1;
+        const scale = heightScale * factor * fade * fade * (3 - 2 * fade) * cap;
+        if (scale > 0) gerstnerSurfaceAt(waves, x, z, t, scale, speed, out);
+    }
+    if (spec.waveAmplitude > 0) {
+        const ph = swellPhase(spec, x, z, t);
+        out.height += spec.waveAmplitude * Math.sin(ph);
+        out.vy += spec.waveAmplitude * Math.cos(ph) * spec.waveFrequency * Math.PI * 2 * speed;
+    }
+    return out;
+}
+
+/** Height the waves add over a column `edge` metres from its shore (and `depth` deep). */
+export function waveHeight(spec: WaterSpec, x: number, z: number, time: number, edge: number, factor = 1, depth = Infinity): number {
+    return waveAt(spec, x, z, time, edge, factor, depth, _surface).height;
+}
+
+const _shore = [0, 0];
+
+/**
+ * The water at (x, z) at `time`: surface (waves included), its resting height, bed, flow, and the waves'
+ * motion; null where there is none. Exactly what the buoyancy solver reads, and what scripts asking "is this
+ * point under water" get.
  */
 export function waterSpecColumn(spec: WaterSpec, x: number, z: number, time: number, out?: WaterColumn): WaterColumn | null {
     if (x < spec.min[0] || x > spec.max[0] || z < spec.min[2] || z > spec.max[2]) return null;
     const col = out ?? { shape: -1, surface: 0, floor: 0, flowX: 0, flowZ: 0, edge: Infinity, waveFactor: 1 };
+    let ocean = false;
     if (spec.shapes && spec.shapes.length) {
         if (!waterColumnAt(spec.shapes, x, z, col)) return null;
+        const r = spec.shapes[col.shape];
+        ocean = !!r && r.type === 'ocean' && r.endless;
     } else {
         col.shape = -1; col.surface = spec.max[1]; col.floor = spec.min[1];
         col.flowX = 0; col.flowZ = 0; col.waveFactor = 1;
@@ -110,7 +174,16 @@ export function waterSpecColumn(spec: WaterSpec, x: number, z: number, time: num
         if (!sampleFlowGrid(spec.flowGrid, x, z, col)) return null;
         col.floor = Math.min(keepFloor, col.surface);
     }
-    col.surface += waveHeight(spec, x, z, time, col.edge, col.waveFactor);
+    // The ocean knows where the beach is: the waves shoal over it and the bed is the sea floor there.
+    let depth = Infinity;
+    if (ocean && spec.shoreGrid && sampleShoreGrid(spec.shoreGrid, x, z, _shore)) {
+        col.edge = _shore[0];
+        depth = Math.max(0, col.surface - _shore[1]);
+    }
+    col.rest = col.surface;
+    const w = waveAt(spec, x, z, time, col.edge, col.waveFactor, depth, _surface);
+    col.surface += w.height;
+    col.waveVX = w.vx; col.waveVY = w.vy; col.waveVZ = w.vz; col.waveK = w.k;
     if (!spec.currents) { col.flowX = 0; col.flowZ = 0; }
     return col;
 }
@@ -121,6 +194,7 @@ export function buoyancyVolumeFromSpec(spec: WaterSpec, time: number): BuoyancyV
     if (!layered) {
         // One box, a swell at most: the original (and cheapest) path.
         return {
+            id: spec.id, yieldsTo: spec.yieldsTo,
             min: spec.min, max: spec.max, density: spec.density,
             linearDrag: spec.linearDrag, angularDrag: spec.angularDrag,
             affectCharacters: spec.affectCharacters,
@@ -128,17 +202,20 @@ export function buoyancyVolumeFromSpec(spec: WaterSpec, time: number): BuoyancyV
         };
     }
     const col: WaterColumn = { shape: -1, surface: 0, floor: 0, flowX: 0, flowZ: 0, edge: Infinity, waveFactor: 1 };
-    const sample: WaterColumnSample = { surface: 0, floor: 0, flowX: 0, flowZ: 0 };
+    const sample: WaterColumnSample = { surface: 0, floor: 0, flowX: 0, flowZ: 0, rest: 0, waveVX: 0, waveVY: 0, waveVZ: 0, waveK: 0 };
     // Waves can lift the surface above the resting box: widen the reject by their reach.
     let reach = Math.max(0, spec.waveAmplitude);
     for (const w of spec.waves ?? []) reach += w.amplitude * (spec.waveScale ?? 1);
     return {
+        id: spec.id, yieldsTo: spec.yieldsTo,
         min: spec.min, max: [spec.max[0], spec.max[1] + reach, spec.max[2]], density: spec.density,
         linearDrag: spec.linearDrag, angularDrag: spec.angularDrag,
         affectCharacters: spec.affectCharacters,
         columnAt: (x, z) => {
             if (!waterSpecColumn(spec, x, z, time, col)) return null;
             sample.surface = col.surface; sample.floor = col.floor; sample.flowX = col.flowX; sample.flowZ = col.flowZ;
+            sample.rest = col.rest ?? col.surface;
+            sample.waveVX = col.waveVX ?? 0; sample.waveVY = col.waveVY ?? 0; sample.waveVZ = col.waveVZ ?? 0; sample.waveK = col.waveK ?? 0;
             return sample;
         },
     };

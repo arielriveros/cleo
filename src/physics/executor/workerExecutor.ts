@@ -146,6 +146,8 @@ export class WorkerExecutor implements PhysicsExecutor {
      * already applied, however long the frame was, and nothing has to be extrapolated.
      */
     private _vis = 0;
+    /** Water spec keys the worker has been sent (it keeps them until a reset). */
+    private readonly _waterKeys = new Set<string>();
     private _visReady = false;
     /** A slow average of the time scale: how much game time "one frame behind" is (see _advance). */
     private _scaleAvg = 1;
@@ -455,11 +457,18 @@ export class WorkerExecutor implements PhysicsExecutor {
         for (const slot of diff.released) this._tracks[slot] = undefined;
         const water = this._host.water();
         this._sentWater = water;
+        // Each spec once per key: the worker keeps it (see WaterStep).
+        const steps = water.map((w, i) => {
+            const key = w.spec.key ?? `#${i}:${this._seq}`;
+            const fresh = !this._waterKeys.has(key);
+            if (fresh) this._waterKeys.add(key);
+            return { key, waveScale: w.spec.waveScale ?? 1, spec: fresh ? w.spec : undefined };
+        });
         const msg: StepMessage = {
             kind: 'step', epoch: this._epoch, seq: ++this._seq, dt: stepDt, substeps: this._host.substepsFor(stepDt),
             profile: this._host.profileStep(), changes: diff.changes,
             gravity: world.gravity, iterations: world.solverIterations, time: world.time,
-            water: water.map(w => w.spec), recycle: this._recycle,
+            water: steps, recycle: this._recycle,
         };
         const transfer = uniqueBuffers([...diff.transfer, ...this._recycle]);
         // Measured before posting: a transferred buffer reads as empty afterwards.
@@ -480,6 +489,11 @@ export class WorkerExecutor implements PhysicsExecutor {
         physicsStats.syncMs += performance.now() - start;
     }
 
+    /** The game time bodies are drawn at this frame (see _vis): what the water's waves are drawn at too. */
+    public get drawnTime(): number {
+        return this._visReady ? this._vis : this._host.world.time;
+    }
+
     public reset(): void {
         this._epoch++;
         this._inFlight = false;
@@ -496,6 +510,7 @@ export class WorkerExecutor implements PhysicsExecutor {
         this._tracks.length = 0;
         this._recycle = [];
         this._sentWater = [];
+        this._waterKeys.clear();
         this._port.post({ kind: 'reset', epoch: this._epoch, backend: this._host.world.backend }, []);
         // Still warming up: the answer it was waiting for belongs to the old epoch, so ask again.
         if (!this._ready) this.prime();

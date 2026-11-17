@@ -53,6 +53,10 @@ export interface WaterColumn {
     edge: number;
     /** The shape's share of the node's waves (ResolvedWaterShape.waveFactor). */
     waveFactor: number;
+    /** With the waves (physics/waterSurface.ts waterSpecColumn): the surface before them, ... */
+    rest?: number;
+    /** ... the water's motion from them at the surface (m/s), and the wavenumber it fades with below. */
+    waveVX?: number; waveVY?: number; waveVZ?: number; waveK?: number;
 }
 
 export function bucketKey(ix: number, iz: number): string { return ix + ',' + iz; }

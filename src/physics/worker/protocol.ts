@@ -23,10 +23,18 @@ export interface StepMessage {
     iterations: number;
     /** The main thread's world clock, which the step continues from. */
     time: number;
-    water: WaterSpec[];
+    /** The water buoying bodies this step (see WaterStep). */
+    water: WaterStep[];
     /** Buffers the main thread is done with, handed back for the worker's next snapshot. */
     recycle: ArrayBuffer[];
 }
+
+/**
+ * One water volume in a step: its spec's key, the per-step height factor of its waves (the wind's), and the
+ * spec itself only the first time the worker meets that key: a river's samples, a bake's grid and an ocean's
+ * shore grid are megabytes that do not change from one step to the next. The worker keeps what it was sent.
+ */
+export interface WaterStep { key: string; waveScale: number; spec?: WaterSpec }
 
 /** Start over with an empty world on `backend`: the main thread's was cleared (a scene change), or is new. */
 export interface ResetMessage { kind: 'reset'; epoch: number; backend: PhysicsBackendKind }

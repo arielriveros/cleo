@@ -10,7 +10,9 @@ import { WaterMaterial } from "../../../graphics/material";
 import { WATER_VOLUME_PRESETS, type WaterVolumePreset } from "./waterVolumePresets";
 import { applyPreset } from "../../presets";
 import type { BuoyancyVolume } from "../../../physics/buoyancy";
-import { buoyancyVolumeFromSpec, waterSpecColumn, type WaterFlowGrid, type WaterSpec } from "../../../physics/waterSurface";
+import { buoyancyVolumeFromSpec, waterSpecColumn, type WaterFlowGrid, type WaterShoreGrid, type WaterSpec } from "../../../physics/waterSurface";
+import { buildOceanShoreInfo, type WaterInfo } from "../../../water/waterInfo";
+import { sceneGround } from "../../../water/ground";
 import { GiBakeRegistry } from "../../../graphics/render/gi/giBakeRegistry";
 import { decodeWaterBake } from "../../../water/bake/waterBakeFormat";
 import {
@@ -168,7 +170,7 @@ export class WaterVolumeNode extends Node {
         this._water = normaliseWaterBody({ ...options, type: options.waterType ?? 'pool' });
         this._density = Math.max(1, finiteOr(options.density, 1000));
         this._linearDrag = Math.max(0, finiteOr(options.linearDrag, 2.5));
-        this._angularDrag = Math.max(0, finiteOr(options.angularDrag, 1.5));
+        this._angularDrag = Math.max(0, finiteOr(options.angularDrag, 0.5));
         this._waveAmplitude = Math.max(0, finiteOr(options.waveAmplitude, 0.03));
         this._waveFrequency = Math.max(0, finiteOr(options.waveFrequency, 0.6));
         this._windSpeed = Math.max(0, finiteOr(options.windSpeed, 0));
@@ -491,29 +493,73 @@ export class WaterVolumeNode extends Node {
         return buoyancyVolumeFromSpec(this.buoyancySpec(), time);
     }
 
-    /** The water as plain data (see physics/waterSurface.ts): what the physics worker buoys with. */
+    private _spec: { key: string; spec: WaterSpec } | null = null;
+
+    /**
+     * The water as plain data (see physics/waterSurface.ts): what the physics, on either thread, buoys with.
+     * The same object while nothing it is built from changes (its `key` says what), so the physics worker is
+     * sent it once; only the waves' height factor (the wind's) is refreshed on every call.
+     */
     public buoyancySpec(): WaterSpec {
+        const shore = this.oceanShoreInfo();
+        const bake = this._bakeId ? `${this._bakeId}@${GiBakeRegistry.generation}` : '';
+        const key = [this.resolveKey(), this._density, this._linearDrag, this._angularDrag, this._affectCharacters,
+            this._waveAmplitude, this._waveFrequency, this._waveSpeed, this._shoreFade, this._currents, bake,
+            shore ? this._shore!.key : ''].join('|');
+        const waveScale = this.waveWindScale();
+        if (this._spec && this._spec.key === key) { this._spec.spec.waveScale = waveScale; return this._spec.spec; }
         const box = this.worldBox();
         const shapes = this.resolvedShapes();
         const waves = this.waves();
         // A pool with nothing but the swell is the original water volume: buoyed by its box alone, the
         // cheapest path (and the one every existing scene was tuned on).
         const plainBox = shapes.length === 1 && shapes[0].type === 'pool' && !waves.length;
-        return {
+        const joined = this.joinedNodes().map(n => n.id);
+        const spec: WaterSpec = {
+            id: this.id, key, yieldsTo: joined.length ? joined : undefined,
             min: box.min, max: box.max, density: this._density,
             linearDrag: this._linearDrag, angularDrag: this._angularDrag, affectCharacters: this._affectCharacters,
             waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
             shapes: plainBox ? undefined : shapes,
-            waves, waveScale: this.waveWindScale(), waveSpeed: this._waveSpeed, shoreFade: this._shoreFade, currents: this._currents,
+            waves, waveScale, waveSpeed: this._waveSpeed, shoreFade: this._shoreFade, currents: this._currents,
             flowGrid: plainBox ? undefined : this.bakedFlowGrid() ?? undefined,
+            shoreGrid: shore ? WaterVolumeNode._shoreGrid(shore) : undefined,
         };
+        this._spec = { key, spec };
+        return spec;
+    }
+
+    private _shore: { key: string; info: WaterInfo | null } | null = null;
+
+    /**
+     * An endless ocean's shore grid over the scene's landscapes (water/waterInfo.ts buildOceanShoreInfo): where
+     * the beach is and how deep the sea is. The surface is drawn with it and physics reads it, so the waves
+     * die down on the beach for both. Null for any other water, or with no landscape.
+     */
+    public oceanShoreInfo(): WaterInfo | null {
+        const r = this.resolved();
+        if (!r || r.type !== 'ocean' || !r.endless || !this._scene) return null;
+        const ground = sceneGround(this._scene);
+        const key = `${ground.key}|${r.level}`;
+        if (this._shore && this._shore.key === key) return this._shore.info;
+        const info = buildOceanShoreInfo(r.level, ground.sample, ground.bounds);
+        this._shore = { key, info };
+        return info;
+    }
+
+    /** The shore grid as physics reads it: metres to the shore and the bed, per cell. */
+    private static _shoreGrid(info: WaterInfo): WaterShoreGrid {
+        const n = info.nx * info.nz;
+        const data = new Float32Array(n * 2);
+        for (let i = 0; i < n; i++) { data[i * 2] = info.info0[i * 4 + 3]; data[i * 2 + 1] = info.info1[i * 4 + 2]; }
+        return { originX: info.originX, originZ: info.originZ, cell: info.cell, nx: info.nx, nz: info.nz, data };
     }
 
     private _flowGrid: { key: string; grid: WaterFlowGrid | null } | null = null;
 
     /**
-     * The current bake (if any, and not stale) as physics reads it, at most 96 cells a side: what floats
-     * follows the baked currents. Cached per bake and registry change.
+     * The current bake (if any, and not stale) as physics reads it, cell for cell: what floats follows the
+     * baked currents, right to the banks. Cached per bake and registry change.
      */
     public bakedFlowGrid(): WaterFlowGrid | null {
         if (!this._bakeId || !GiBakeRegistry.has(this._bakeId)) return null;
@@ -523,17 +569,16 @@ export class WaterVolumeNode extends Node {
         let grid: WaterFlowGrid | null = null;
         if (decoded && decoded.signature === this.bakeSignature()) {
             const info = decoded.info;
-            const step = Math.max(1, Math.ceil(Math.max(info.nx, info.nz) / 96));
-            const nx = Math.ceil(info.nx / step), nz = Math.ceil(info.nz / step);
+            const nx = info.nx, nz = info.nz;
             const data = new Float32Array(nx * nz * 3);
             for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
-                const i = Math.min(info.nz - 1, z * step) * info.nx + Math.min(info.nx - 1, x * step), o = (z * nx + x) * 3;
+                const i = z * nx + x, o = i * 3;
                 const wet = info.info1[i * 4 + 3] > 0.5;
                 data[o] = wet ? info.info0[i * 4] : NaN;
                 data[o + 1] = wet ? info.info0[i * 4 + 1] : 0;
                 data[o + 2] = wet ? info.info0[i * 4 + 2] : 0;
             }
-            grid = { originX: info.originX, originZ: info.originZ, cell: info.cell * step, nx, nz, data };
+            grid = { originX: info.originX, originZ: info.originZ, cell: info.cell, nx, nz, data };
         }
         this._flowGrid = { key, grid };
         return grid;

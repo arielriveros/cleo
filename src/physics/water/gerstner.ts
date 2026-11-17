@@ -63,6 +63,48 @@ export function gerstnerHeightAt(waves: readonly GerstnerWave[], x: number, z: n
     return gerstnerDisplacement(waves, ux, uz, time, scale, _gerstnerTmp)[1];
 }
 
+/**
+ * What the waved surface does over a WORLD point (x, z): its height above rest, the velocity of the water
+ * there (m/s: the surface particles' orbits, which carry what floats forward on a crest and back in a
+ * trough), and the amplitude-weighted wavenumber that motion fades with below the surface (e^(-k·depth)).
+ */
+export interface GerstnerSurface { height: number; vx: number; vy: number; vz: number; k: number; }
+
+/**
+ * {@link gerstnerHeightAt} and the water's motion there at once. `time` is the waves' own clock; `speed` how
+ * fast it runs against real time (the node's wave speed), which the velocities are scaled by.
+ */
+export function gerstnerSurfaceAt(waves: readonly GerstnerWave[], x: number, z: number, time: number, scale: number,
+                                  speed: number, out: GerstnerSurface): GerstnerSurface {
+    out.height = 0; out.vx = 0; out.vy = 0; out.vz = 0; out.k = 0;
+    if (!waves.length || !(scale > 0)) return out;
+    let ux = x, uz = z;
+    for (let i = 0; i < 3; i++) {
+        gerstnerDisplacement(waves, ux, uz, time, scale, _gerstnerTmp);
+        ux = x - _gerstnerTmp[0]; uz = z - _gerstnerTmp[2];
+    }
+    const n = waves.length;
+    let ka = 0, as = 0;
+    for (let i = 0; i < n; i++) {
+        const w = waves[i];
+        const k = 6.283185307179586 / Math.max(0.01, w.wavelength);
+        const omega = Math.sqrt(GERSTNER_G * k);
+        const a = w.amplitude * scale;
+        const theta = k * (w.dirX * ux + w.dirZ * uz) - omega * time + w.phase;
+        const q = a > 0 ? w.steepness / (k * a * n) : 0;
+        const c = Math.cos(theta), s = Math.sin(theta);
+        out.height += a * s;
+        // The displacement's rate of change: the phase falls at omega per second of the waves' clock.
+        const rate = omega * speed;
+        out.vx += q * a * w.dirX * rate * s;
+        out.vz += q * a * w.dirZ * rate * s;
+        out.vy -= a * rate * c;
+        ka += k * a; as += a;
+    }
+    out.k = as > 0 ? ka / as : 0;
+    return out;
+}
+
 /** Small deterministic hash to 0..1, for wave set spreads. */
 function waveHash(i: number, seed: number): number {
     let h = (Math.imul(i + 1, 2654435761) ^ Math.imul(seed + 7, 1597334677)) >>> 0;

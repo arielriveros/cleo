@@ -152,15 +152,18 @@ surface draws.
 
 ## Buoyancy
 
-How the water floats and slows what is in it. Physics runs in Play. Every dynamic body floats by its mass
+How the water floats and moves what is in it. Physics runs in Play. Every dynamic body floats by its mass
 against the water its colliders displace: denser than the water sinks, lighter floats higher, and a tipped
-body rights itself.
+body rights itself. The water pushes along its own slope, so a body slides down the face of a wave and drifts
+down a river's gradient; and drag pulls it toward the water's own motion, the current and the waves'
+orbits, so what floats rides the waves you see (they run on the same clock in Play) instead of bobbing
+against them. Where a river runs into the water it flows into, a body there is in one of them, never both.
 
 | Field | What it does |
 |---|---|
 | **Density** | kg/m³ (fresh water 1000, sea water 1025). |
-| **Drag** | Per second, at full submersion: how quickly a body in the water takes on the water's own speed. In still water that slows it; in a river it carries it along. |
-| **Spin drag** | Per second, at full submersion: how quickly a body stops tumbling. |
+| **Drag** | Per second: how quickly a body takes on the water's own speed, for the water it displaces. A body that floats at rest settles at this rate; a dense one sinking through the water is slowed less, as a stone falls through water a cork would stop in. Fast motion is slowed harder still (form drag, with the square of the speed). |
+| **Spin drag** | Per second, at full submersion: extra damping on tumbling, over what the water's drag on every part of the body already gives. |
 | **Currents** | Flowing water carries what floats downstream. Off: rivers are as still as lakes to the physics. |
 | **Buoy characters** | Off by default: a character capsule is mostly air and would be launched out of the water. |
 

@@ -13,7 +13,7 @@ import { WaterProgram, WaterUnderwaterProgram } from './programs';
 import type { FullscreenPasses } from './fullscreenPasses';
 import { sizedTarget } from './featureSubsystems';
 import { ViewProjection } from './viewProjection';
-import { buildOceanShoreInfo, buildWaterInfo, type WaterInfo } from '../../water/waterInfo';
+import { buildWaterInfo, type WaterInfo } from '../../water/waterInfo';
 import { WATER_DETAIL_SIZE, waterDetailPixels } from '../../water/waterTextures';
 import { selectOceanTiles, type OceanTile } from '../../water/oceanLod';
 import { sceneGround } from '../../water/ground';
@@ -21,6 +21,7 @@ import { decodeWaterBake } from '../../water/bake/waterBakeFormat';
 import { GiBakeRegistry } from './gi/giBakeRegistry';
 import { DEFAULT_WATER_LOOK, type WaterLook } from '../../water/waterLook';
 import { GERSTNER_MAX_WAVES, type GerstnerWave } from '../../physics/water/gerstner';
+import { waterTime } from '../../physics/water/waterClock';
 import { createWindSample, sampleWindField } from '../../core/wind/windField';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
@@ -162,11 +163,13 @@ export class WaterPasses {
             for (const w of waves) { up += w.amplitude * heightScale; side += w.steepness * w.wavelength / (2 * Math.PI * waves.length); }
             const tiles = this._tilesOf(node, info, oceanLevel, up, side);
             if (!tiles.length) continue;
-            // The node's own clock: the frame's, run at its wave speed.
-            const t = this._view.windTime * node.waveSpeed;
+            // The waves' clock: the physics' drawn time while the game runs (so floaters ride what is drawn),
+            // else the frame's; the node's wave speed applied, as physics applies it.
+            const clock = waterTime(this._view.windTime);
+            const t = clock * node.waveSpeed;
             this._nodeUniforms(node, info, oceanLevel, look, waves, t, scene);
             if (!under) {
-                const c = cam.position, col = node.columnAt(c[0], c[2], this._view.windTime);
+                const c = cam.position, col = node.columnAt(c[0], c[2], clock);
                 if (col && c[1] < col.surface && c[1] > col.floor - 1) under = { node, level: col.surface, look };
             }
             pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
@@ -307,7 +310,7 @@ export class WaterPasses {
     /** Whether the camera is below this node's surface (and so sees it from underneath). */
     private _cameraUnder(node: WaterVolumeNode): boolean {
         const c = this._view.camera.position;
-        const col = node.columnAt(c[0], c[2], this._view.windTime);
+        const col = node.columnAt(c[0], c[2], waterTime(this._view.windTime));
         return !!col && c[1] < col.surface && c[1] > col.floor - 1;
     }
 
@@ -324,7 +327,7 @@ export class WaterPasses {
         if (!baked && water && water.info && water.info.source === 'analytic' && now - water.builtAt < REBUILD_INTERVAL) return water;
         const body = node.resolved();
         const info = baked ? baked.info
-            : body && body.type === 'ocean' && body.endless ? buildOceanShoreInfo(body.level, ground.sample, ground.bounds)
+            : body && body.type === 'ocean' && body.endless ? node.oceanShoreInfo()
             : buildWaterInfo(node.resolvedShapes(), ground.sample, { handOver: node.handOver() });
         const keyNow = fullKey;
         if (!water) { water = { key, info: null, tex0: null, tex1: null, builtAt: now }; this._nodes.set(node, water); }

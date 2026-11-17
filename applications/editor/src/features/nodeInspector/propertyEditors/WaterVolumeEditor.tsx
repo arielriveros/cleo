@@ -435,10 +435,10 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
             <PropertyRow label='Density' hint='kg/m³ (fresh water 1000). A body denser than this sinks; lighter ones float, riding higher the lighter they are.' divider>
               <NumberInput value={node.density} min={1} step={25} onChange={v => set('density', v)} />
             </PropertyRow>
-            <PropertyRow label='Drag' hint='Per second, at full submersion: how quickly bodies in the water take on its speed.' divider>
+            <PropertyRow label='Drag' hint='Per second: how quickly a body takes on the water’s speed, for the water it displaces. Dense bodies sink through it; fast ones are slowed harder.' divider>
               <NumberInput value={node.linearDrag} min={0} step={0.1} onChange={v => set('linearDrag', v)} />
             </PropertyRow>
-            <PropertyRow label='Spin drag' hint='Per second, at full submersion: how quickly a body stops tumbling.' divider>
+            <PropertyRow label='Spin drag' hint='Per second, at full submersion: extra damping on tumbling, over the water’s own drag.' divider>
               <NumberInput value={node.angularDrag} min={0} step={0.1} onChange={v => set('angularDrag', v)} />
             </PropertyRow>
             <PropertyRow label='Currents' hint='Flowing water (rivers) carries what floats in it downstream.' divider>

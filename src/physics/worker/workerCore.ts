@@ -2,7 +2,7 @@ import { acquirePhysicsBackend, createWorldReplica, isPhysicsBackendLoaded } fro
 import type { WorldReplica } from '../pal/replication';
 import type { PhysicsBackendKind } from '../pal/types';
 import type { PhysicsWorld } from '../pal/world';
-import { applyBuoyancy, floats } from '../buoyancy';
+import { applyBuoyancy, floats, type BuoyancyVolume } from '../buoyancy';
 import { buoyancyVolumeFromSpec, type WaterSpec } from '../waterSurface';
 import type { FromWorker, Snapshot, StepMessage, ToWorker } from './protocol';
 import { CONTACT_ROW } from './protocol';
@@ -20,6 +20,8 @@ export class PhysicsWorkerCore {
     private _replica: WorldReplica;
     private _epoch = -1;
     private _water: WaterSpec[] = [];
+    /** Water specs by key, as the main thread sent them (see protocol.ts WaterStep). */
+    private readonly _waterCache = new Map<string, WaterSpec>();
     // Per-step reports.
     private _events: number[] = [];
     private _submerged = new Map<number, number>();
@@ -90,6 +92,9 @@ export class PhysicsWorkerCore {
             this._replica = this._replicaOf(backend);
         } else this._replica.clear();
         this._events = []; this._submerged.clear();
+        // The main thread starts sending specs afresh after a reset.
+        this._waterCache.clear();
+        this._water = [];
     }
 
     private _step(msg: StepMessage): Snapshot {
@@ -105,7 +110,19 @@ export class PhysicsWorkerCore {
         // The same clock as the main thread's (water waves are a function of it), whoever stepped last.
         world.time = msg.time;
         if (msg.iterations > 0) world.solverIterations = msg.iterations;
-        this._water = msg.water;
+        // The specs it was sent, and the ones it already has; whatever is not in this step is gone.
+        const water: WaterSpec[] = [];
+        const seen = new Set<string>();
+        for (const w of msg.water) {
+            if (w.spec) this._waterCache.set(w.key, w.spec);
+            const spec = this._waterCache.get(w.key);
+            if (!spec) continue;
+            spec.waveScale = w.waveScale;
+            water.push(spec);
+            seen.add(w.key);
+        }
+        for (const key of this._waterCache.keys()) if (!seen.has(key)) this._waterCache.delete(key);
+        this._water = water;
 
         // Step exactly as the inline executor does: `substeps` equal substeps summing to dt.
         this._events = []; this._submerged.clear();
@@ -172,18 +189,24 @@ export class PhysicsWorkerCore {
         const g = world.gravity;
         const gravity = Math.hypot(g[0], g[1], g[2]);
         const dt = substep > 0 ? substep : MAX_SUBSTEP;
-        this._water.forEach((spec, vi) => {
-            const volume = buoyancyVolumeFromSpec(spec, world.time);
-            for (const h of world.bodies()) {
-                // applyForce wakes a sleeping body: a frozen floater would be thawed every substep.
-                if (world.isSleeping(h)) continue;
-                const body = this._replica.floater(h);
-                if (!body || !floats(body, volume, b => b.character)) continue;
-                const fraction = applyBuoyancy(world, h, body.mass, volume, gravity, dt);
-                if (fraction <= 0) continue;
-                const key = vi * 1048576 + this._replica.slotOf(h)!;
-                this._submerged.set(key, Math.max(this._submerged.get(key) ?? 0, fraction));
+        const volumes = this._water.map(spec => buoyancyVolumeFromSpec(spec, world.time));
+        const mine: BuoyancyVolume[] = [], index: number[] = [];
+        for (const h of world.bodies()) {
+            // applyForce wakes a sleeping body: a frozen floater would be thawed every substep.
+            if (world.isSleeping(h)) continue;
+            const body = this._replica.floater(h);
+            if (!body) continue;
+            mine.length = 0; index.length = 0;
+            for (let vi = 0; vi < volumes.length; vi++) {
+                if (!floats(body, volumes[vi], b => b.character)) continue;
+                mine.push(volumes[vi]); index.push(vi);
             }
-        });
+            if (!mine.length) continue;
+            const slot = this._replica.slotOf(h)!;
+            applyBuoyancy(world, h, body.mass, mine, gravity, dt, (i, fraction) => {
+                const key = index[i] * 1048576 + slot;
+                this._submerged.set(key, Math.max(this._submerged.get(key) ?? 0, fraction));
+            });
+        }
     }
 }

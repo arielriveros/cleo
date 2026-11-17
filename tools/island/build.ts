@@ -388,7 +388,7 @@ for (const river of riverNodes) {
 }
 
 const LIQUID = {
-  density: 1000, linearDrag: 2.5, angularDrag: 1.5, waveAmplitude: 0, waveFrequency: 0.6, affectCharacters: false,
+  density: 1000, linearDrag: 2.5, angularDrag: 0.5, waveAmplitude: 0, waveFrequency: 0.6, affectCharacters: false,
   splashTemplate: 'Water Splash', wadeSplashTemplate: 'Water Step', enabled: true, currents: true,
 }
 const LAKE_WATER = { windSpeed: 2.5, waveDirection: 25, choppiness: 0.3, shoreFade: 4, followWind: true, waterMaterialId: LAKE_MAT, waterMaterial: lakeMatAsset.material }
