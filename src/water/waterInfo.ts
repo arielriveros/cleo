@@ -204,6 +204,27 @@ export function handOverWaterInfo(info: WaterInfo, handOver: readonly ResolvedWa
     tileWaterInfo(info);
 }
 
+/**
+ * The step the COARSE part of a surface height is rounded to when a grid spanning `range` metres of height
+ * goes to the GPU as half floats (render/water.ts). A half float holds 11 significant bits: 3 cm steps 32 m
+ * up, which terraces a gently falling river and bands its normal across the stream. So a height is sent as
+ * two numbers that add up: a multiple of this step, which half floats hold exactly anywhere in the range,
+ * and the small remainder, which they hold to a few hundredths of a millimetre. Filtering is linear, so
+ * the two filtered parts still add up to the filtered height.
+ */
+export function heightQuantum(range: number): number {
+    // Every multiple of 2^(e - 10) up to 2^e is a half float exactly.
+    const e = Math.ceil(Math.log2(Math.max(range, 1e-3) * 1.0001));
+    return Math.pow(2, e - 10);
+}
+
+/** `height` as its coarse and fine parts for `quantum` (see {@link heightQuantum}): `out` = [coarse, fine]. */
+export function splitHeight(height: number, quantum: number, out: number[] = [0, 0]): number[] {
+    const coarse = Math.round(height / quantum) * quantum;
+    out[0] = coarse; out[1] = height - coarse;
+    return out;
+}
+
 /** Fill `info`'s surface tiles from its grid: which hold water, and their lowest and highest surface. */
 export function tileWaterInfo(info: WaterInfo): void {
     const { nx, nz, info0, info1 } = info;

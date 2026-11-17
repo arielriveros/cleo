@@ -1,8 +1,8 @@
 // The WATER SURFACE of a Water node (core/scene/nodes/waterVolumeNode.ts), drawn by render/water.ts.
 //
 // One tile of the node's surface per draw: a grid in 0..1 (x, z) placed over `u_tile`, its height read
-// from the node's WATER INFO (water/waterInfo.ts: resting surface, flow, shore distance, wave share, foam,
-// bed) and lifted by the node's waves, the same sum physics/water/waves.ts evaluates on the CPU, so a
+// from the node's WATER INFO (water/waterInfo.ts: resting surface, flow, shore distance, foam, bed) and
+// lifted by the node's waves, the same sum physics/water/waves.ts evaluates on the CPU, so a
 // floating body rides exactly this surface. The waves are afl_ext's (Shadertoy MdXyzX, MIT licence, see
 // THIRD_PARTY_NOTICES.md): sharp-crested exp(sin) waves in scattered directions, each dragging the shorter
 // ones onto its crests, their lengths, heights and slopes those of the wind's sea (waves.ts). Vertices with y = -1 are the tile's SKIRT, hung
@@ -47,9 +47,11 @@ const MAX_REFLECTION_LOD: f32 = 4.0;
 @group(0) @binding(3) var u_sceneColor_sampler: sampler;
 @group(0) @binding(4) var u_envMap_texture: texture_cube<f32>;
 @group(0) @binding(5) var u_envMap_sampler: sampler;
-@group(0) @binding(6) var u_info0_texture: texture_3d<f32>;         // surface, flow x, flow z, shore distance
+// The resting surface is the sum of its two parts (water/waterInfo.ts heightQuantum): half floats alone
+// would terrace it.
+@group(0) @binding(6) var u_info0_texture: texture_3d<f32>;         // surface (coarse), flow x, flow z, shore distance
 @group(0) @binding(7) var u_info0_sampler: sampler;
-@group(0) @binding(8) var u_info1_texture: texture_3d<f32>;         // wave share, foam, bed, wet
+@group(0) @binding(8) var u_info1_texture: texture_3d<f32>;         // surface (fine), foam, bed, wet
 @group(0) @binding(9) var u_info1_sampler: sampler;
 // The detail texture (water/waterTextures.ts): B is the foam web. Tiled, mipmapped.
 @group(0) @binding(10) var u_detail_texture: texture_2d<f32>;
@@ -67,7 +69,7 @@ struct WaterVertexUniforms {
     u_waves: array<vec4<f32>, 40>,     // heading x, z, amplitude (m, the look's ripples folded in), drag; longest first
     u_waveK: array<vec4<f32>, 40>,     // wavenumber (rad/m), length (m), frequency (rad/s), slope variance of it and all shorter
     u_waveParams: vec4<f32>,      // count, time (s, wave speed applied), height scale, shore fade
-    u_swell: vec4<f32>,           // amplitude (m), frequency (Hz), a tall crest of the waves (m)
+    u_swell: vec4<f32>,           // amplitude (m), frequency (Hz), a tall crest of the waves (m), the body's wave share
     u_vCamera: vec4<f32>,         // camera position
     u_vSurf: vec4<f32>,           // surf: frequency (rad/s), amplitude (m), 1 = on (an ocean with a shore grid)
 };
@@ -151,6 +153,12 @@ fn infoUvw(xz: vec2<f32>, origin: vec4<f32>, size: vec4<f32>) -> vec3<f32> {
 
 fn insideInfo(uvw: vec3<f32>) -> bool {
     return all(uvw.xy >= vec2<f32>(0.0)) && all(uvw.xy <= vec2<f32>(1.0));
+}
+
+/** The resting surface above the grid's base at `c`: its coarse and fine parts, each filtered, added. */
+fn restHeight(c: vec3<f32>) -> f32 {
+    return textureSampleLevel(u_info0_texture, u_info0_sampler, c, 0.0).x
+         + textureSampleLevel(u_info1_texture, u_info1_sampler, c, 0.0).x;
 }
 
 /** How much of a wave of length `lambda` a grid of `cell` metres (or a pixel of that footprint) draws. */
@@ -311,7 +319,7 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
     let cell = tile.z / lodp.x * (1.0 + morph);
     var surface = u_wv.u_vOcean.x;
     var edge = 1e4;
-    var share = 1.0;
+    let share = u_wv.u_swell.w;
     var depth = 1e4;
     var grad = vec2<f32>(0.0);
     let ocean = u_wv.u_vOcean.y > 0.5;
@@ -321,18 +329,15 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
         let i0 = textureSampleLevel(u_info0_texture, u_info0_sampler, c, 0.0);
         let i1 = textureSampleLevel(u_info1_texture, u_info1_sampler, c, 0.0);
         edge = i0.w;
-        share = i1.x;
         // The sea's depth over the beach (its shore grid's bed): the cap below. Physics reads the same grid.
         if (ocean) { depth = max(0.0, u_wv.u_vOcean.x - (i1.z + u_wv.u_vInfoSize.z)); }
         if (!ocean) {
-            surface = i0.x + u_wv.u_vInfoSize.z;
+            surface = i0.x + i1.x + u_wv.u_vInfoSize.z;
             // The resting surface's own slope, a cell either way: a river runs downhill, a waterfall drops.
             let du = vec3<f32>(1.0 / u_wv.u_vInfoSize.x, 0.0, 0.0);
             let dv = vec3<f32>(0.0, 1.0 / u_wv.u_vInfoSize.y, 0.0);
-            let hx = textureSampleLevel(u_info0_texture, u_info0_sampler, clamp(c + du, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0).x
-                   - textureSampleLevel(u_info0_texture, u_info0_sampler, clamp(c - du, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0).x;
-            let hz = textureSampleLevel(u_info0_texture, u_info0_sampler, clamp(c + dv, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0).x
-                   - textureSampleLevel(u_info0_texture, u_info0_sampler, clamp(c - dv, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0).x;
+            let hx = restHeight(clamp(c + du, vec3<f32>(0.0), vec3<f32>(1.0))) - restHeight(clamp(c - du, vec3<f32>(0.0), vec3<f32>(1.0)));
+            let hz = restHeight(clamp(c + dv, vec3<f32>(0.0), vec3<f32>(1.0))) - restHeight(clamp(c - dv, vec3<f32>(0.0), vec3<f32>(1.0)));
             grad = vec2<f32>(hx, hz) / (2.0 * u_wv.u_vInfoOrigin.z);
         }
     }
@@ -633,7 +638,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         edge = i0.w;
         if (ocean) { seaDepth = max(0.0, u_wf.u_fOcean.x - (i1.z + u_wf.u_fInfoSize.z)); }
         if (!ocean) {
-            surface = i0.x + u_wf.u_fInfoSize.z;
+            surface = i0.x + i1.x + u_wf.u_fInfoSize.z;
             flow = i0.yz;
             foamBake = i1.y;
             wet = i1.w;

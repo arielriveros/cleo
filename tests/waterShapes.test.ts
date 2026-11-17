@@ -210,6 +210,30 @@ describe('water bodies', () => {
         expect(lake.besideKey()).not.toBe(key);
     });
 
+    it('sends a surface height to the GPU as two half floats that add up to it', async () => {
+        const { heightQuantum, splitHeight } = await import('../src/water/waterInfo');
+        const { floatToHalf } = await import('../src/core/math');
+        const back = (h: number) => {
+            const s = h & 0x8000 ? -1 : 1, e = (h >> 10) & 31, m = h & 1023;
+            return e === 0 ? s * m * 2 ** -24 : s * (1 + m / 1024) * 2 ** (e - 15);
+        };
+        const half = (v: number) => back(floatToHalf(v));
+        for (const range of [0.4, 7, 31.9, 100, 127.99, 400]) {
+            const q = heightQuantum(range);
+            let worst = 0, alone = 0;
+            for (let k = 0; k <= 4000; k++) {
+                const h = range * k / 4000;
+                const [coarse, fine] = splitHeight(h, q);
+                expect(half(coarse)).toBe(coarse);                  // held exactly, wherever it is in the range
+                worst = Math.max(worst, Math.abs(half(coarse) + half(fine) - h));
+                alone = Math.max(alone, Math.abs(half(h) - h));
+            }
+            expect(worst).toBeLessThan(1e-4);                       // a tenth of a millimetre
+            // One half float alone is centimetres out a hundred metres up: the terraces.
+            if (range >= 100) expect(alone).toBeGreaterThan(0.01);
+        }
+    });
+
     it('an endless ocean is everywhere, a pool only inside itself', () => {
         const ocean: ResolvedWaterShape = resolve({ type: 'ocean' }, placed([0, -1, 0]));
         expect(waterColumnAt([ocean], 5000, -9000)!.surface).toBe(-1);

@@ -13,7 +13,7 @@ import { WaterProgram, WaterUnderwaterProgram } from './programs';
 import type { FullscreenPasses } from './fullscreenPasses';
 import { sizedTarget } from './featureSubsystems';
 import { ViewProjection } from './viewProjection';
-import { buildWaterInfo, type WaterInfo } from '../../water/waterInfo';
+import { buildWaterInfo, heightQuantum, splitHeight, type WaterInfo } from '../../water/waterInfo';
 import { WATER_DETAIL_SIZE, waterDetailPixels } from '../../water/waterTextures';
 import { selectOceanTiles, type OceanTile } from '../../water/oceanLod';
 import { sceneGround } from '../../water/ground';
@@ -254,8 +254,8 @@ export class WaterPasses {
         sm.setUniform('u_fWaves', packed);
         sm.setUniform('u_fWaveK', packedK);
         sm.setUniform('u_fWaveParams', [n, t, heightScale, waveSigma(waves)]);
-        // The swell, and the crest the shallows cap the waves against.
-        sm.setUniform('u_swell', [node.waveAmplitude, node.waveFrequency, waveCrest(waves, heightScale), 0]);
+        // The swell, the crest the shallows cap the waves against, and the body's share of its waves.
+        sm.setUniform('u_swell', [node.waveAmplitude, node.waveFrequency, waveCrest(waves, heightScale), node.resolved()?.waveFactor ?? 1]);
         // The surf over the beach (physics/water/surf.ts): an ocean with a shore grid has it, from its waves.
         const surf = surfOf(waves, heightScale, this._surf);
         const surfOn = oceanLevel !== null && !!info ? 1 : 0;
@@ -327,9 +327,17 @@ export class WaterPasses {
             const fit = (tex: Texture | null) => tex && tex.width === info.nx && tex.height === info.nz;
             if (!fit(water.tex0)) { water.tex0?.delete(); water.tex0 = WaterPasses._infoTexture(info.nx, info.nz); }
             if (!fit(water.tex1)) { water.tex1?.delete(); water.tex1 = WaterPasses._infoTexture(info.nx, info.nz); }
-            // Heights above the grid's lowest surface: half floats keep centimetres there, not at 100 m up.
+            // Heights above the grid's lowest surface, the surface in two parts that add up (waterInfo.ts
+            // heightQuantum): a coarse one half floats hold exactly and the remainder, in the channel the
+            // wave share had (one number per node, now a uniform). A river's fall then reaches the GPU to a
+            // fraction of a millimetre instead of in 3 cm terraces.
             const rel0 = info.info0.slice(), rel1 = info.info1.slice();
-            for (let i = 0; i < rel0.length; i += 4) { rel0[i] -= info.minY; rel1[i + 2] -= info.minY; }
+            const quantum = heightQuantum(info.maxY - info.minY), parts = [0, 0];
+            for (let i = 0; i < rel0.length; i += 4) {
+                splitHeight(rel0[i] - info.minY, quantum, parts);
+                rel0[i] = parts[0]; rel1[i] = parts[1];
+                rel1[i + 2] -= info.minY;
+            }
             WaterPasses._upload(water.tex0!, rel0, info.nx, info.nz);
             WaterPasses._upload(water.tex1!, rel1, info.nx, info.nz);
         }
