@@ -199,6 +199,16 @@ export class ForwardPass {
         // a glowing decal exactly as it veils the surface under it.
         if (this._decals.emissiveDecals.length > 0 && this._passes.beginPass('decals.emissive')) this._decals.emissiveDecalPass();
 
+        // Water surfaces: part of the scene, not drawn over it. They refract the opaque scene (the colour
+        // and the depth snapshot just taken) and write depth, so the snapshot is taken again after them:
+        // the fog then veils the sea as it veils the land and the sky beyond it, the volumetric fog hangs
+        // over a lake, and the temporal resolve smooths the glints with the depth the surface really has.
+        // Glass, particles and sprites still draw over (and under) the water, testing against that depth.
+        if (!this._host.thumbnailMode && scene.waterVolumes.size > 0 && this._passes.beginPass('water')) {
+            this._sys.water.renderWater(scene);
+            this.copySceneDepth();
+        }
+
         // Atmospheric fog over the opaque scene (aerial perspective from the SkyAtmosphere node).
         // Drawn before the grid/transparents so editor overlays stay crisp.
         if (!this._host.thumbnailMode && this._passes.beginPass('skyFog')) this._sky.renderSkyFog(scene);
@@ -208,7 +218,7 @@ export class ForwardPass {
         this._host.renderVolumetricFog(scene);
 
         // --- The temporal boundary. ---------------------------------------------------------------
-        // Everything ABOVE is the scene: sky, clouds, opaques, fog. It is full render resolution,
+        // Everything ABOVE is the scene: sky, clouds, opaques, water, fog. It is full render resolution,
         // linear HDR, pre-tonemap, and matched by the depth snapshot taken a few lines up — the only
         // point in the frame where all four are true at once.
         // Everything BELOW — transparents, sprites, the selection mask — is drawn ON TOP of the

@@ -119,7 +119,7 @@ export interface InputInfo {
 
 export const INPUT_INFO: Record<SurfaceInput, InputInfo> = {
   height: { label: 'Height', unit: 'm', domain: [-200, 3000], defaults: { min: 0, max: 200, falloffLow: 10, falloffHigh: 10 }, step: 1, hint: 'Ground height above the world origin.' },
-  heightAboveWater: { label: 'Height above water', unit: 'm', domain: [-50, 500], defaults: { min: 0, max: 4, falloffLow: 0.5, falloffHigh: 2 }, step: 0.1, hint: 'Ground height above the nearest sea or lake surface: beaches, banks, flood plains.' },
+  heightAboveWater: { label: 'Height above water', unit: 'm', domain: [-50, 5000], defaults: { min: 0, max: 4, falloffLow: 0.5, falloffHigh: 2 }, step: 0.1, hint: 'Ground height above the nearest sea or lake surface: beaches, banks, flood plains.' },
   relativeHeight: { label: 'Relative height', unit: '', domain: [0, 1], defaults: { min: 0.6, max: 1, falloffLow: 0.05, falloffHigh: 0 }, step: 0.005, hint: 'Height as a fraction of the map\'s lowest to highest point.' },
   slope: { label: 'Slope', unit: '°', domain: [0, 90], defaults: { min: 30, max: 90, falloffLow: 5, falloffHigh: 0 }, step: 0.5, hint: 'Steepness in degrees: 0 is flat, 90 a vertical wall.' },
   aspect: { label: 'Aspect', unit: '°', domain: [0, 360], defaults: { min: 0, max: 0, falloffLow: 0, falloffHigh: 40 }, step: 1, hint: 'The compass direction a slope faces (0 north = -Z, 90 east = +X). Flat ground reads as half.' },

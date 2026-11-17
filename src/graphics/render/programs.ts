@@ -50,6 +50,20 @@ import FluidVolumeCompositeProgram from '../shaders/wgsl/fluidVolumeComposite.wg
 // and carries the WGSL through for WebGPU. The `.vs`/`.fs` imports above are the unconverted ones.
 import ScreenProgram from '../shaders/wgsl/screen.wgsl';
 import PixelUpscaleProgram from '../shaders/wgsl/pixelUpscale.wgsl';
+// A Water node's surface (render/water.ts).
+import WaterProgram from '../shaders/wgsl/water.wgsl';
+import WaterUnderwaterProgram from '../shaders/wgsl/waterUnderwater.wgsl';
+import WaterWaveFieldProgram from '../shaders/wgsl/waterWaveField.wgsl';
+import WaterWaveAdvectProgram from '../shaders/wgsl/waterWaveAdvect.wgsl';
+import WaterWaveStepProgram from '../shaders/wgsl/waterWaveStep.wgsl';
+import WaterFlowGroundProgram from '../shaders/wgsl/waterFlowGround.wgsl';
+import WaterFlowShiftProgram from '../shaders/wgsl/waterFlowShift.wgsl';
+import WaterFlowAdvectProgram from '../shaders/wgsl/waterFlowAdvect.wgsl';
+import WaterFlowLimitProgram from '../shaders/wgsl/waterFlowLimit.wgsl';
+import WaterFlowDepthProgram from '../shaders/wgsl/waterFlowDepth.wgsl';
+import WaterFlowAccelerateProgram from '../shaders/wgsl/waterFlowAccelerate.wgsl';
+import WaterFlowWavesProgram from '../shaders/wgsl/waterFlowWaves.wgsl';
+import WaterFlowSurfaceProgram from '../shaders/wgsl/waterFlowSurface.wgsl';
 import PresentProgram from '../shaders/wgsl/present.wgsl';
 import OverlayCompositeProgram from '../shaders/wgsl/overlayComposite.wgsl';
 import DebugViewProgram from '../shaders/wgsl/debugView.wgsl';
@@ -163,7 +177,10 @@ export {
     VolumetricFogInjectProgram, VolumetricFogIntegrateProgram, VolumetricFogApplyProgram,
     GiReduceProgram, GiVisibilityProgram, GiRadianceProgram, GiIntegrateProgram, GiResolveProgram,
     GiAmbientCubeProgram, GiRescaleProgram, GiProbeOverlayProgram, GiStateStampProgram,
-    MovieAccumulateProgram, SpriteProgram, PixelUpscaleProgram,
+    MovieAccumulateProgram, SpriteProgram, PixelUpscaleProgram, WaterProgram, WaterUnderwaterProgram,
+    WaterWaveFieldProgram, WaterWaveAdvectProgram, WaterWaveStepProgram,
+    WaterFlowGroundProgram, WaterFlowShiftProgram, WaterFlowAdvectProgram, WaterFlowLimitProgram, WaterFlowDepthProgram,
+    WaterFlowAccelerateProgram, WaterFlowWavesProgram, WaterFlowSurfaceProgram,
 };
 
 // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
@@ -343,6 +360,22 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['sprite',                       SpriteProgram],
         // A pixel-perfect 2D frame scaled up to the screen unfiltered (render/frame2d.ts). APPENDED.
         ['pixelUpscale',                 PixelUpscaleProgram],
+        // A Water node's surface tiles (render/water.ts). APPENDED.
+        ['water',                        WaterProgram],
+        // The view from inside a Water node's water (render/water.ts). APPENDED.
+        ['waterUnderwater',              WaterUnderwaterProgram],
+        // The live waves on flowing water: the field they ride, carried, propagated (render/waterWaves.ts). APPENDED.
+        ['waterWaveField',               WaterWaveFieldProgram],
+        ['waterWaveAdvect',              WaterWaveAdvectProgram],
+        ['waterWaveStep',                WaterWaveStepProgram],
+        ['waterFlowGround',              WaterFlowGroundProgram],
+        ['waterFlowShift',               WaterFlowShiftProgram],
+        ['waterFlowAdvect',              WaterFlowAdvectProgram],
+        ['waterFlowLimit',               WaterFlowLimitProgram],
+        ['waterFlowDepth',               WaterFlowDepthProgram],
+        ['waterFlowAccelerate',          WaterFlowAccelerateProgram],
+        ['waterFlowWaves',               WaterFlowWavesProgram],
+        ['waterFlowSurface',             WaterFlowSurfaceProgram],
     ];
 }
 

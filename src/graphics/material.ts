@@ -1,6 +1,7 @@
 import { defaultBlendRule, parseBlendRule, cloneBlendRule, legacyAutoRule } from '../terrain/terrainLayers';
 import type { TerrainBlendRule } from '../terrain/terrainLayers';
 import { finiteOr } from '../core/math';
+import { normaliseWaterLook, type WaterLook } from '../water/waterLook';
 
 interface MaterialConfig {
     side?: 'front' | 'back' | 'double';
@@ -1105,6 +1106,7 @@ export class Material {
     private static _parseShading(m: any): Material {
         // A serialized TerrainMaterial carries the extra terrain/foliage fields; delegate to its subclass.
         if (m.terrainMaterial) return TerrainMaterial.parse(m);
+        if (m.waterMaterial) return WaterMaterial.parse(m);
         // Route on the discriminator flag OR a `custom:`/`customGeom:` type prefix — a blob without the
         // flag must still reconstruct as a CustomMaterial, not a base Material carrying a custom type.
         if (m.customMaterial ||
@@ -1901,5 +1903,37 @@ export class CustomMaterial extends Material {
         for (const [k, v] of Object.entries(m.textures ?? {})) if (v) cm.textures.set(k, v as string);
         cm.refreshType();
         return cm;
+    }
+}
+
+/**
+ * A WATER material: how a Water node's surface looks (water/waterLook.ts), drawn only by the water surface
+ * renderer (render/water.ts). Its own base shading is a translucent basic tint of the shallow colour, so the
+ * asset still previews (and shows on a model it is dropped on) as something water-coloured.
+ */
+export class WaterMaterial extends Material {
+    public look: WaterLook;
+
+    constructor(look?: Partial<WaterLook>) {
+        super({ transparent: true, castShadow: false });
+        this.type = 'basic' as any;
+        this.look = normaliseWaterLook(look ?? {});
+        this.syncBase();
+    }
+
+    /** Keep the base tint (what a model shows it as) the look's shallow colour. */
+    public syncBase(): void {
+        this.properties.set('color', [...this.look.shallowColor]);
+        this.properties.set('opacity', 0.75);
+        this.properties.set('hasTexture', false);
+    }
+
+    public serialize(): any {
+        return { ...super.serialize(), waterMaterial: true, look: JSON.parse(JSON.stringify(this.look)) };
+    }
+
+    public static parse(m: any): WaterMaterial {
+        const wm = new WaterMaterial(m?.look);
+        return wm;
     }
 }

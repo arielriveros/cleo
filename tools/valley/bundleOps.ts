@@ -295,8 +295,11 @@ export function prune(bundle: any, keep: Set<string> = new Set()) {
 
   // The GI bakes the remaining volumes name.
   const bakeIds = new Set<string>()
-  for (const scene of Object.values(bundle.scenes) as any[]) for (const n of nodes(scene.scene))
+  for (const scene of Object.values(bundle.scenes) as any[]) for (const n of nodes(scene.scene)) {
     if (n.type === 'giVolume' && n.giVolume?.bakeId) bakeIds.add(n.giVolume.bakeId)
+    // A Water node's flow bake travels the same way.
+    if (n.type === 'waterVolume' && n.waterVolume?.bakeId) bakeIds.add(n.waterVolume.bakeId)
+  }
   if (bundle.giBakes) bundle.giBakes = bundle.giBakes.filter((b: any) => bakeIds.has(b.id) || gone('giBake', b))
 
   return { removed, textureBytes }

@@ -5,6 +5,7 @@ import { Raycaster, Node, Vec, Logger, SequenceNode } from "cleo";
 import TransformGizmo from "./gizmo/TransformGizmo";
 import CollisionGizmo from "./gizmo/CollisionGizmo";
 import BoxVolumeGizmo from "./gizmo/BoxVolumeGizmo";
+import WaterGizmo from "./gizmo/WaterGizmo";
 import { useCollisionShapeSelection } from "./gizmo/collisionSelection";
 import SocketPreviews from "./sockets/SocketPreviews";
 import SocketGizmo from "./sockets/SocketGizmo";
@@ -519,6 +520,11 @@ export default function EngineViewport() {
             />}
             {/* Light probe and exposure volume boxes, sized by the same face handles as collision shapes. */}
             {collisionShapes && !editingShape && <BoxVolumeGizmo
+                selectedNodeId={selectedNode}
+                viewportRef={viewportRef}
+            />}
+            {/* A Water node's rivers, lakes, boxes and oceans: points, banks, faces. */}
+            {collisionShapes && !editingShape && <WaterGizmo
                 selectedNodeId={selectedNode}
                 viewportRef={viewportRef}
             />}

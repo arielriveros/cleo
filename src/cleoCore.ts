@@ -196,7 +196,8 @@ export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";
 export { applyUvMapping, uvConfigOf, applyWind, windConfigOf, applyInteraction, interactionConfigOf, type InteractionConfig, applyFoliageSurface, foliageSurfaceOf, foliageSurfaceJson, FOLIAGE_STARTER, isFoliageMaterial, setFoliage, type FoliageSurfaceConfig, emissiveExposureWeightOf, setEmissiveExposureWeight, type WindConfig } from "./graphics/material";
 export type { UvConfig, UvProjection, UvSpace } from "./graphics/material";
-export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, FOLIAGE_ORIENTATIONS, migrateFoliageRule, foliageRuleKey, newTerrainSlotId, legacyHeightBlendToRule, setTerrainSurfaceFrom, shallowCloneTerrainMaterial, terrainFoliageRules, allTerrainFoliageRules, type TerrainFoliageScope } from "./graphics/material";
+export { Material, TerrainMaterial, CustomMaterial, WaterMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, FOLIAGE_ORIENTATIONS, migrateFoliageRule, foliageRuleKey, newTerrainSlotId, legacyHeightBlendToRule, setTerrainSurfaceFrom, shallowCloneTerrainMaterial, terrainFoliageRules, allTerrainFoliageRules, type TerrainFoliageScope } from "./graphics/material";
+export { DEFAULT_WATER_LOOK, WATER_LOOK_PRESETS, normaliseWaterLook, type WaterLook, type WaterLookPreset } from "./water/waterLook";
 export type { TerrainBaseType, TerrainFoliageRule, TerrainMaterialSlot, FoliageCollision, FoliageOrientation, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
 export { customSeedTemplate, customSeedUniforms, tryCompileCustom, assembleCustomFragment,
          setWgslTranslator, hasWgslTranslator, vulkanUnsupportedReason, customWgslHash } from "./graphics/systems/customShaders";

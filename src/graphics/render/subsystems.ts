@@ -12,6 +12,7 @@ import type { ProgramRegistry } from './programRegistry';
 import type { ObjectTable } from '../objectTable';
 import type { GiSubsystem } from './featureSubsystems';
 import type { WindClock } from './windClock';
+import type { WaterSubsystem } from './featureSubsystems';
 import type { FoliageSubsystem } from './featureSubsystems';
 
 /**
@@ -42,4 +43,6 @@ export interface RenderSubsystems {
     readonly foliage: FoliageSubsystem;
     /** The effects clock and the frame's wind field (render/windClock.ts). */
     readonly wind: WindClock;
+    /** Water nodes' surfaces (render/water.ts), or the stand-in. */
+    readonly water: WaterSubsystem;
 }

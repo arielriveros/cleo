@@ -72,8 +72,8 @@ describe('programsFor', () => {
         // The impostor shadow program the Valley's pines cast through in the outer cascades; the smoke's
         // lit sprite (no decals since the puddles went); the High tier's screen-space reflections (three)
         // and local exposure (two); the fog volumes' three; the GI Volumes' seven (capture reduce,
-        // visibility, radiance, integrate, resolve, ambient cube, rescale).
-        expect(list.length).toBeLessThan(85);
+        // visibility, radiance, integrate, resolve, ambient cube, rescale); its water's local flow (eight passes).
+        expect(list.length).toBeLessThan(93);
     });
 
     it('lists the skinned programs for the Dungeon, whose knight and enemies are skinned', () => {

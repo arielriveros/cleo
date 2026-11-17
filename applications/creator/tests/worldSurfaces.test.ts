@@ -16,6 +16,7 @@ import { BIOME_SETS } from '../src/world/surfaces/presets';
 import { coastalRange } from '../src/world/presets';
 import { LAYER_DEFAULTS } from '../src/world/features';
 import { nodeType } from '../src/world/graph/nodeRegistry';
+import { LEGACY_SIM_DEFAULTS } from '../src/world/graph/migrate';
 import { normaliseWorld, type WorldDoc } from '../src/world/worldDoc';
 import type { WorldMasks } from '../src/world/masks';
 
@@ -101,7 +102,7 @@ describe('fields', () => {
     const legacy = normaliseWorld({
       settings: { ...coastalRange().settings, resolution: 49 },
       layers: [LAYER_DEFAULTS.mountain()],
-      erosion: [{ id: 'drops', kind: 'droplet', enabled: true, params: nodeType('droplet')!.defaults() }],
+      erosion: [{ id: 'drops', kind: 'droplet', enabled: true, params: { ...LEGACY_SIM_DEFAULTS.droplet } }],
     });
     const out = await generateWorld(legacy);
     const dep = out.history.deposits.reduce((s, v) => s + v, 0);
@@ -302,7 +303,7 @@ describe('world export v2', () => {
   it('migrates a version-1 document', () => {
     const v1 = { settings: { resolution: 257, size: 1000, heightScale: 300, seed: 3, seaLevel: 0.2 }, layers: [], erosion: [] };
     const doc = normaliseWorld(v1);
-    expect(doc.version).toBe(3);
+    expect(doc.version).toBe(4);
     expect(doc.graph.nodes.map(n => n.type)).toEqual(['output']);
     expect(doc.surfaces.length).toBeGreaterThan(3);
     expect(doc.settings.size).toBe(1000);

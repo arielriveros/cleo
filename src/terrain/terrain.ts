@@ -1410,9 +1410,15 @@ export class Terrain {
 
     // --- serialization ------------------------------------------------------------------------
 
-    public serialize(): any {
-        // Heights quantize to Uint16 across their own [min,max] range: half the size of Float32, with
-        // sub-millimetre precision for typical terrains.
+    private _quantized: { version: number; u16: Uint16Array; min: number; max: number } | null = null;
+
+    /**
+     * The heights as a save stores them: Uint16 across their own [min, max] range, half the size of Float32,
+     * with sub-millimetre precision for typical terrains. Cached until the heights change. What water bakes key
+     * the ground under them on (water/ground.ts), the same in the editor as in a tool that wrote the save.
+     */
+    public quantizedHeights(): { u16: Uint16Array; min: number; max: number } {
+        if (this._quantized && this._quantized.version === this._heightsVersion) return this._quantized;
         let min = Infinity, max = -Infinity;
         for (let i = 0; i < this._heights.length; i++) {
             const h = this._heights[i];
@@ -1424,6 +1430,12 @@ export class Terrain {
         const u16 = new Uint16Array(this._heights.length);
         for (let i = 0; i < this._heights.length; i++)
             u16[i] = Math.round(((this._heights[i] - min) / span) * 65535);
+        this._quantized = { version: this._heightsVersion, u16, min, max };
+        return this._quantized;
+    }
+
+    public serialize(): any {
+        const { u16, min, max } = this.quantizedHeights();
 
         return {
             size: this._cfg.size,

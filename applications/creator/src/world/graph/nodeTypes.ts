@@ -28,6 +28,8 @@ export interface EvalEnv {
   frame: WorldFrame;
   /** The world seed. */
   seed: number;
+  /** The world's sea level, a fraction of the height scale (what the nodes that drain water to it read). */
+  seaLevel?: number;
   paint: PaintPixels;
   paintMeta: readonly PaintMaskMeta[];
   ctx: GenerateContext;
@@ -71,6 +73,8 @@ export interface NodeType {
   mainThread?: boolean;
   /** A simulation: the realtime preview may bypass it (shown with a "pending" badge) until it settles. */
   sim?: boolean;
+  /** Reads the world's sea level (so its cached result is keyed on it). */
+  readsSea?: boolean;
   /** Whether output `port`'s gradient is exact, given which inputs' are (for the GPU's flags). */
   exact?(params: NodeParams, inputs: Record<string, boolean>, port: string): boolean;
   /** The input a disabled node passes through (default: its first height input). */

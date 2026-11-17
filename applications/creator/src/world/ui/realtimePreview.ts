@@ -46,7 +46,7 @@ export class RealtimePreview {
     const res = Math.min(this.backend === 'gpu' ? REALTIME_RES_GPU : REALTIME_RES_CPU, doc.settings.resolution);
     const frame = { resolution: res, size: doc.settings.size, heightScale: doc.settings.heightScale };
     let plan: RealtimePlan | null = null;
-    try { plan = planRealtime(doc.graph, root, { frame, seed: doc.settings.seed, paintMeta: doc.paint }); } catch { plan = null; }
+    try { plan = planRealtime(doc.graph, root, { frame, seed: doc.settings.seed, seaLevel: doc.settings.seaLevel, paintMeta: doc.paint }); } catch { plan = null; }
     if (!plan) return false;
     this.next = { doc, paint, plan, res, gen: this.gen };
     void this.pump();
@@ -78,7 +78,7 @@ export class RealtimePreview {
         }
         heights = await this.gpu.run(req.doc.graph, {
           frame: { resolution: req.res, size: req.doc.settings.size, heightScale: req.doc.settings.heightScale },
-          seed: req.doc.settings.seed, paint: req.paint, paintMeta: req.doc.paint,
+          seed: req.doc.settings.seed, seaLevel: req.doc.settings.seaLevel, paint: req.paint, paintMeta: req.doc.paint,
         });
       } else {
         heights = await this.client.heights(req.doc, req.paint, req.res, req.plan.bypassed);
@@ -105,14 +105,14 @@ export class RealtimePreview {
     if (!this.gpu) return null;
     const res = Math.min(REALTIME_RES_GPU, doc.settings.resolution);
     const frame = { resolution: res, size: doc.settings.size, heightScale: doc.settings.heightScale };
-    const plan = planRealtime(doc.graph, root, { frame, seed: doc.settings.seed, paintMeta: doc.paint });
+    const plan = planRealtime(doc.graph, root, { frame, seed: doc.settings.seed, seaLevel: doc.settings.seaLevel, paintMeta: doc.paint });
     if (!plan) return null;
     const probe = new RealtimeGpu();
     try {
       const sources = await this.client.sources(doc, paint, res, plan.sources);
       if (!sources) return null;
       probe.load(plan, sources, res, doc.graph);
-      const gpu = await probe.run(doc.graph, { frame, seed: doc.settings.seed, paint, paintMeta: doc.paint });
+      const gpu = await probe.run(doc.graph, { frame, seed: doc.settings.seed, seaLevel: doc.settings.seaLevel, paint, paintMeta: doc.paint });
       const cpu = await this.client.heights(doc, paint, res, plan.bypassed);
       if (!gpu || !cpu) return null;
       const errs = Array.from(gpu, (v, i) => Math.abs(v - cpu[i]) * doc.settings.heightScale).sort((a, b) => a - b);

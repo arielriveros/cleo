@@ -515,10 +515,14 @@ export const ADD_ITEMS: AddItem[] = [
     },
   },
   {
-    // A box of water: everything dynamic inside floats by its mass (buoyancy), and what moves through
-    // it ripples and splashes the surface it is pointed at. Placeable: it is a volume.
+    // One body of water: a lake to start with, its type (river, lake, ocean, pool) chosen in the inspector.
+    // Everything dynamic in it floats by its mass, and a river joins other Water nodes by naming them.
     id: 'waterVolume', label: 'Water Volume', icon: WaterVolumeIcon, category: 'simulation',
-    create: async () => new WaterVolumeNode('water volume', { size: [10, 2, 10] }),
+    create: async () => {
+      const water = new WaterVolumeNode('water', { waterType: 'lake' })
+      water.applyPreset('lake')
+      return water
+    },
   },
   {
     // Scene-wide, so unplaceable. Plants only sway where their material asks for it.

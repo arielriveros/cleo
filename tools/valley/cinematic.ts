@@ -210,8 +210,9 @@ export function tourSequence(bundle: any, regenerate = false): any {
   if (!regenerate && fs.existsSync(TOUR_FILE)) return parseSequence(JSON.parse(fs.readFileSync(TOUR_FILE, 'utf8')))
   const root = bundle.scenes[VALLEY_SCENE].scene
   const heightAt = terrainHeightSampler(root)
-  const pond = child(child(root, 'Water'), 'Pond Water')
-  const tour = parseSequence(buildTour(heightAt, { pondLevel: pond?.position?.[1], day: dayAuthored(root) }))
+  const pond = child(child(root, 'Water'), 'Pond Water Volume')
+  const pondLevel = pond ? pond.position[1] + pond.waterVolume.size[1] / 2 : undefined
+  const tour = parseSequence(buildTour(heightAt, { pondLevel, day: dayAuthored(root) }))
   fs.writeFileSync(TOUR_FILE, JSON.stringify(tour, null, 2) + '\n')
   log(`cinematic: tour written to ${path.relative(ROOT, TOUR_FILE)}`)
   return tour
@@ -259,7 +260,7 @@ export function applyCinematic(bundle: any, options: { regenerate?: boolean } = 
   const clouds = root.children.find((c: any) => c.type === 'volumetricClouds')
   const wind = root.children.find((c: any) => c.type === 'wind')
   const landscape = root.children.find((c: any) => c.type === 'landscape')
-  const pond = child(child(root, 'Water'), 'Pond Water')
+  const pond = child(child(root, 'Water'), 'Pond Water Volume')
   if (!clouds || !wind || !landscape || !pond) throw new Error('the Valley has no clouds / wind / landscape / pond for the tour')
 
   // The weather, at the root beside the Wind (replaced in place on a re-run).

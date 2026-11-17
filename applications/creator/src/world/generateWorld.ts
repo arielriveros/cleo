@@ -45,7 +45,7 @@ export async function generateWorldRun(doc: WorldDoc, ctx: GenerateContext = SIL
   const frame: WorldFrame = { resolution, size: doc.settings.size, heightScale: doc.settings.heightScale };
   const graphCtx: GenerateContext = { progress: (f, l) => ctx.progress(f * 0.95, l), get cancelled() { return ctx.cancelled; } };
   const run = await evaluateGraph(doc.graph, {
-    frame, seed: doc.settings.seed, paint: opts.paint ?? {}, paintMeta: doc.paint, ctx: graphCtx, pipeGpu: opts.pipeGpu ?? null,
+    frame, seed: doc.settings.seed, seaLevel: doc.settings.seaLevel, paint: opts.paint ?? {}, paintMeta: doc.paint, ctx: graphCtx, pipeGpu: opts.pipeGpu ?? null,
   }, opts.cache ?? new GraphCache(), { targets: opts.targets });
   ctx.progress(0.95, 'Masks');
   // The Output's array may be a cached node's: the masks and the caller get their own copy.

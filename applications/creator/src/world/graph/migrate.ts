@@ -2,6 +2,10 @@
 // graph: one chain, each layer a landform node reading the one before, each pass an erosion node, into
 // the Output. Landform nodes run features.ts `applyLayer` and erosion nodes the same kernels with the same
 // seeds, so a migrated document evaluates bit for bit as it did. Also the graph's own repair on load.
+//
+// Version 4 put the simulations (thermal, droplets, pipes) on a simulation grid of their own with their
+// reaches in metres. A document from before keeps its look at the resolution it was exported at: its
+// simulation grid is that resolution, and its reaches are its old counts of that grid's cells.
 
 import type { WorldLayer } from '../features';
 import { landformType } from './nodes/landforms';
@@ -23,6 +27,34 @@ const LEGACY_EROSION_LABELS: Record<LegacyErosionPass['kind'], string> = {
 
 /** Canvas spacing for laid-out chains. */
 export const NODE_DX = 230, NODE_DY = 150;
+
+/** The simulation nodes' defaults before version 4, in grid cells: what a parameter a saved world left out meant then. */
+export const LEGACY_SIM_DEFAULTS: Record<'thermal' | 'droplet' | 'pipe', Record<string, number>> = {
+  thermal: { iterations: 40, talus: 38, rate: 0.5 },
+  droplet: { density: 300, inertia: 0.05, capacity: 4, minSlope: 0.01, erosion: 0.3, deposition: 0.3, evaporation: 0.02, gravity: 4, lifetime: 40, radius: 3, seed: 7 },
+  pipe: { iterations: 160, rain: 0.012, evaporation: 0.015, capacity: 1.2, dissolve: 0.3, deposit: 0.3, dt: 0.05 },
+};
+
+/**
+ * A graph from before version 4 with its simulations in metres on the grid of `resolution` samples over
+ * `size` metres (the resolution the world was exported at): its counts of cells become lengths of as many
+ * of that grid's cells, and that grid becomes the simulation grid, so it evaluates there as it did.
+ */
+export function simulationsInMetres(graph: WorldGraph, resolution: number, size: number): WorldGraph {
+  const cell = size / (resolution - 1);
+  const grid = String(resolution);
+  const nodes = graph.nodes.map(n => {
+    if (n.type !== 'thermal' && n.type !== 'droplet' && n.type !== 'pipe') return n;
+    const legacy = LEGACY_SIM_DEFAULTS[n.type];
+    const p: Record<string, unknown> = { ...legacy, ...n.params };
+    const count = (k: string) => { const v = Number(p[k]); delete p[k]; return (Number.isFinite(v) ? v : legacy[k]) * cell; };
+    if (n.type === 'droplet') { p.travel = count('lifetime'); p.brush = count('radius'); }
+    else p.reach = count('iterations');
+    p.grid = grid;
+    return { ...n, params: p };
+  });
+  return { nodes, edges: graph.edges };
+}
 
 export function graphFromStack(layers: readonly WorldLayer[], erosion: readonly LegacyErosionPass[]): WorldGraph {
   const nodes: GraphNode[] = [];

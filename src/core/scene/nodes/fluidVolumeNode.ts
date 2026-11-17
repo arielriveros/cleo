@@ -1,3 +1,4 @@
+import { floatsToHalves } from "../../math";
 import { mat4 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
@@ -382,31 +383,5 @@ export function occupancyFromVolume(data: Float32Array, resolution: readonly [nu
     return out;
 }
 
-const _f32 = new Float32Array(1);
-const _u32 = new Uint32Array(_f32.buffer);
-
-/** IEEE 754 binary16 bits of `v`, rounded to nearest; overflow saturates to infinity. */
-export function floatToHalf(v: number): number {
-    _f32[0] = v;
-    const x = _u32[0];
-    const sign = (x >>> 16) & 0x8000;
-    const exp = (x >>> 23) & 0xff;
-    let mant = x & 0x7fffff;
-    if (exp === 0xff) return sign | 0x7c00 | (mant ? 0x200 : 0);
-    let e = exp - 127 + 15;
-    if (e >= 0x1f) return sign | 0x7c00;
-    if (e <= 0) {
-        if (e < -10) return sign;
-        mant = (mant | 0x800000) >>> (1 - e);
-        return sign | ((mant + 0x1000) >>> 13);
-    }
-    const h = sign | (e << 10) | (mant >>> 13);
-    // Round to nearest: carries into the exponent correctly.
-    return (mant & 0x1000) ? h + 1 : h;
-}
-
-/** Convert a float array to binary16 bits, element for element. */
-export function floatsToHalves(src: Float32Array, dst: Uint16Array): void {
-    const n = Math.min(src.length, dst.length);
-    for (let i = 0; i < n; i++) dst[i] = floatToHalf(src[i]);
-}
+// The binary16 conversion moved to core/math.ts (every math helper lives there); re-exported for old imports.
+export { floatToHalf, floatsToHalves } from "../../math";

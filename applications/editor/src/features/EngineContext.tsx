@@ -4328,6 +4328,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (changed) eventEmitter.current.emit('SCENE_CHANGED');
   };
 
+  /** And the fifth: Water nodes, whose surface embeds a copy of a Water material asset (`waterMaterialId`). */
+  const syncWaterMaterials = (materialId: string, asset: MaterialAsset, exceptTabId?: string) => {
+    let changed = false;
+    for (const scene of liveScenes(exceptTabId)) {
+      for (const w of Array.from((scene as any).waterVolumes ?? []) as any[]) {
+        if (w.waterMaterialId !== materialId) continue;
+        try { w.waterMaterial = Material.parse(asset.material); changed = true; } catch { /* keep the old copy */ }
+      }
+    }
+    if (changed) eventEmitter.current.emit('SCENE_CHANGED');
+  };
+
   // The other half of "the model changed": a foliage prototype bakes its material INLINE, so editing a
   // shared Material asset never reached scattered foliage at all — syncMaterialInstances only walks
   // scene nodes, and a prototype is reachable from none. Re-derive through the model path for every
@@ -5498,6 +5510,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       syncTerrainMaterialSlots(asset.id, asset, exceptTabId);
       // …and the weather volumes that draw their snow with it.
       syncWeatherSnowMaterials(asset.id, asset, exceptTabId);
+      // …and the Water nodes whose surface it draws.
+      syncWaterMaterials(asset.id, asset, exceptTabId);
     });
     // …and the generated LOD levels derived from it — after their texture twins exist.
     void refreshLodLevelsForMaterial(asset.id, asset, exceptTabId);

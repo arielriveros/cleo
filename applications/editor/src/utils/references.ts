@@ -445,7 +445,8 @@ export function collectPublishedSoundIds(node: any, set: Set<string>): void {
  */
 export function collectGiBakeIds(node: any, set: Set<string>): void {
   if (!node || typeof node !== 'object') return
-  const id = node.giVolume?.bakeId
+  // Water nodes' flow bakes live in the same registry and travel the same way.
+  const id = node.giVolume?.bakeId ?? node.waterVolume?.bakeId
   if (typeof id === 'string' && id) set.add(id)
   for (const child of (node.children ?? [])) collectGiBakeIds(child, set)
 }

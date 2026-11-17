@@ -12,6 +12,7 @@ import { GI_TIERS } from './gi/giSettings';
 import type { VolumetricFogPasses } from './volumetricFog';
 import type { ParticlePasses } from './particlePasses';
 import type { FoliagePasses } from './foliage';
+import type { WaterPasses } from './water';
 import { TemporalHistory } from './temporalHistory';
 
 /** A screen-sized target matched to the render resolution, made on first use. */
@@ -30,6 +31,7 @@ export const RENDER_FACTORY = {
     volumetricFog: 'render.volumetricFog',
     particles: 'render.particles',
     foliage: 'render.foliage',
+    water: 'render.water',
 } as const;
 
 // --- Decals (feature `decals`) ------------------------------------------------------------------------------------
@@ -56,6 +58,14 @@ export function createNullFluids(): FluidSubsystem {
         // Allocates nothing until first used, which a stand-in never is.
         fluidHistory: new TemporalHistory({ depth: false }),
     };
+}
+
+// --- Water surfaces (feature `water`) ------------------------------------------------------------------------------
+
+export type WaterSubsystem = Pick<WaterPasses, 'renderWater' | 'tilesDrawn'>;
+
+export function createNullWater(): WaterSubsystem {
+    return { renderWater() {}, tilesDrawn: 0 };
 }
 
 // --- Volumetric clouds (feature `volumetricClouds`) ---------------------------------------------------------------

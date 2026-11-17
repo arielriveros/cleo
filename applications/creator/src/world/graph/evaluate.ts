@@ -109,7 +109,7 @@ function passthrough(type: NodeType | undefined, node: GraphNode, inputs: Record
 }
 
 /** The key of every node in `order` (what its result is cached on). */
-export function nodeKeys(graph: WorldGraph, order: readonly string[], env: Pick<EvalEnv, 'frame' | 'seed' | 'paintMeta'>): Map<string, string> {
+export function nodeKeys(graph: WorldGraph, order: readonly string[], env: Pick<EvalEnv, 'frame' | 'seed' | 'paintMeta' | 'seaLevel'>): Map<string, string> {
   const keys = new Map<string, string>();
   const byId = new Map(graph.nodes.map(n => [n.id, n]));
   const fk = frameKey(env.frame);
@@ -121,7 +121,10 @@ export function nodeKeys(graph: WorldGraph, order: readonly string[], env: Pick<
       return e && keys.has(e.from.node) ? `${keys.get(e.from.node)}:${e.from.port}` : null;
     });
     const paint = node.type === 'paint' ? env.paintMeta.find(m => m.id === node.params.mask) ?? null : null;
-    keys.set(id, hashString(JSON.stringify([node.type, node.enabled, canonical(node.params), inputs, fk, env.seed, paint])));
+    // Only what reads the sea is keyed on it: moving the sea re-runs nothing else.
+    const sea = type?.readsSea ? env.seaLevel ?? 0 : null;
+    keys.set(id, hashString(JSON.stringify(sea === null ? [node.type, node.enabled, canonical(node.params), inputs, fk, env.seed, paint]
+      : [node.type, node.enabled, canonical(node.params), inputs, fk, env.seed, paint, sea])));
   }
   return keys;
 }

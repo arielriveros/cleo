@@ -20,7 +20,8 @@ import { newId } from '../ids';
 import { blankMask, decodeMask, encodeMask, paintFileName, paintHash, parsePaintFileName, type PaintMaskMeta, type PaintPixels } from '../paint';
 import { loadScratchMasks, pruneScratchMasks, saveScratchMask } from '../paintStore';
 import { pipeErosionGpu } from '../pipeErosionGpu';
-import { coastalRange, WORLD_PRESETS } from '../presets';
+import { WORLD_PRESETS } from '../presets';
+import { stockBiomeOf } from '../surfaces/presets';
 import { surfaceExportKey, type SurfaceLayer } from '../surfaces/surfaceDoc';
 import { alphasToWeights, coverage as coverageOf } from '../surfaces/weights';
 import { WATER_LOOKS, type WaterLook } from '../water/waterLook';
@@ -106,7 +107,7 @@ function loadDoc(): WorldDoc {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return normaliseWorld(JSON.parse(raw));
   } catch { /* fall through */ }
-  return normaliseWorld(coastalRange());
+  return normaliseWorld(WORLD_PRESETS[0].params());
 }
 
 function loadJson<T>(key: string, fallback: T): T {
@@ -170,12 +171,18 @@ export function WorldWorkspace() {
     try { localStorage.setItem(BRUSH_KEY, JSON.stringify(b)); } catch { /* quota */ }
   };
 
-  /** A preset replaces the terrain but keeps the seed and the surfaces (and how the preview looks). */
+  /**
+   * A preset replaces the terrain and brings the surfaces that suit it, unless the document's own have been
+   * edited (then they stay). It keeps the seed (a preset drains whatever the seed), the export resolution,
+   * the export and preview settings, and the painted masks.
+   */
   const applyPreset = (id: string) => {
     const p = WORLD_PRESETS.find(x => x.id === id);
     if (!p) return;
     const next = normaliseWorld(p.params());
-    commit({ ...next, settings: { ...next.settings, seed: doc.settings.seed }, surfaces: doc.surfaces, preview: doc.preview, output: doc.output, paint: doc.paint }, `Preset ${p.label}`);
+    const surfaces = stockBiomeOf(doc.surfaces) ? next.surfaces : doc.surfaces;
+    commit({ ...next, settings: { ...next.settings, seed: doc.settings.seed, resolution: doc.settings.resolution }, surfaces,
+             preview: doc.preview, output: doc.output, paint: doc.paint }, `Preset ${p.label}`);
     selectNode(null);
     setPresetId(id);
     try { localStorage.setItem(PRESET_KEY, id); } catch { /* quota */ }

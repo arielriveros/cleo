@@ -14,7 +14,8 @@ import { skipCameraHit, CameraProbeBody, skipRayHit, RayHitBody, RayFilter } fro
 import { physicsStats, resetPhysicsStats, PhysicsStats } from "./physicsStats";
 import { MotionRecord, MotionConfig, createMotionRecord, sampleMotion, motionConfig } from "./motion";
 import { OverlapHit, OverlapOptions, OverlapBody, QueryShape, queryPoses, sweepPoses } from "./overlap";
-import { applyBuoyancy, floats } from "./buoyancy";
+import { applyBuoyancy, floats, type BuoyancyVolume } from "./buoyancy";
+import { setWaterClock } from "./water/waterClock";
 import { InlineExecutor } from "./executor/inlineExecutor";
 import { WorkerExecutor } from "./executor/workerExecutor";
 import type { ContactSource, PhysicsExecutor } from "./executor/physicsExecutor";
@@ -377,6 +378,9 @@ export class PhysicsSystem {
       const nodes = this._scene.nodes;
       const spawnRules = this._scene.spawnRulesEnabled !== false;
       const worker = this._executor.kind === 'worker' ? this._executor as WorkerExecutor : null;
+      // The water's clock, in a scene that runs: the time the bodies are drawn at, so the waves drawn under
+      // a floating crate are the waves the crate rides (physics/water/waterClock.ts).
+      if (spawnRules && this._world) setWaterClock(worker ? worker.drawnTime : this._world.time);
       // A body moving its node is simulation, never an edit (see authoring.derived).
       authoring.derived++;
       try {
@@ -854,16 +858,27 @@ export class PhysicsSystem {
     const dt = substep > 0 ? substep : PhysicsSystem.MAX_SUBSTEP;
     const time = this._world.time;
     const isCharacter = (b: PhysicsBody) => b.isCharacter;
+    const nodes: any[] = [], specs: BuoyancyVolume[] = [];
     for (const volume of volumes) {
       if (!volume.enabled) continue;
-      const spec = volume.buoyancyVolume(time);
-      for (const body of this.bodies) {
-        // applyForce wakes a sleeping body: a frozen floater would be thawed every substep.
-        if (asleep(body)) continue;
-        if (!body.isDynamic || !floats(body, spec, isCharacter)) continue;
-        const fraction = applyBuoyancy(this._world, body.id as BodyHandle, body.mass, spec, gravity, dt);
-        if (fraction > 0) volume.recordSubmerged(body, fraction);
+      nodes.push(volume);
+      specs.push(volume.buoyancyVolume(time));
+    }
+    if (!specs.length) return;
+    // Every water a body could be in, together: where two overlap (a river's mouth in its lake) each point of
+    // the body is in one of them, never buoyed twice.
+    const mine: BuoyancyVolume[] = [], owners: any[] = [];
+    for (const body of this.bodies) {
+      // applyForce wakes a sleeping body: a frozen floater would be thawed every substep.
+      if (asleep(body) || !body.isDynamic) continue;
+      mine.length = 0; owners.length = 0;
+      for (let i = 0; i < specs.length; i++) {
+        if (!floats(body, specs[i], isCharacter)) continue;
+        mine.push(specs[i]); owners.push(nodes[i]);
       }
+      if (!mine.length) continue;
+      applyBuoyancy(this._world, body.id as BodyHandle, body.mass, mine, gravity, dt,
+                    (i, fraction) => owners[i].recordSubmerged(body, fraction));
     }
   }
 

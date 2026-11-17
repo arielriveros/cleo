@@ -933,6 +933,20 @@ export function evaluateGradient(gradient: Gradient, t: number): [number, number
 // Splines
 // =================================================================================================
 
+/**
+ * A Catmull-Rom cubic's four weights at `t` (0..1) between the second and third of four evenly spaced samples.
+ * They sum to 1, and at `t` = 0 the second sample is returned as it is: what a grid is resampled with when a
+ * linear lookup would smear it (water/waveSim.ts carries its waves with it).
+ */
+export function catmullRomWeights(t: number, out: number[] = [0, 0, 0, 0]): number[] {
+    const t2 = t * t, t3 = t2 * t;
+    out[0] = -0.5 * t3 + t2 - 0.5 * t;
+    out[1] = 1.5 * t3 - 2.5 * t2 + 1;
+    out[2] = -1.5 * t3 + 2 * t2 + 0.5 * t;
+    out[3] = 0.5 * t3 - 0.5 * t2;
+    return out;
+}
+
 /** A 3D point or vector as a plain tuple. */
 export type Vec3Tuple = [number, number, number];
 
@@ -1037,6 +1051,16 @@ export class Spline3 {
         return this._evaluate(seg, s, out);
     }
 
+    /**
+     * Metres along the path at control point `i` (after consecutive duplicates were dropped, so index
+     * into the points the spline kept: {@link pointCount}). Clamped to the ends.
+     */
+    public distanceAtPoint(i: number): number {
+        if (this._segments === 0) return 0;
+        const k = Math.max(0, Math.min(this._segments, Math.round(i)));
+        return this._lut[k * SPLINE_SAMPLES_PER_SEGMENT];
+    }
+
     /** The point at `u` (0..1) of the path's LENGTH. */
     public pointAt(u: number, out: Vec3Tuple = [0, 0, 0]): Vec3Tuple {
         return this.pointAtDistance(u * this.length, out);
@@ -1055,6 +1079,119 @@ export class Spline3 {
         out[0] = dx / len; out[1] = dy / len; out[2] = dz / len;
         return out;
     }
+}
+
+/**
+ * A closed, smooth XZ outline through `points` (x, z read from [x, y, z]): centripetal Catmull-Rom with the
+ * loop wrapped, so the closing corner is as round as the rest. Flat [x0, z0, x1, z1, ...], about one
+ * vertex per `spacing` metres. Fewer than three points: the points themselves.
+ */
+export function closedSplineXZ(points: readonly (readonly number[])[], spacing = 1): number[] {
+    const pts = points.filter(p => p && p.length >= 3 && Number.isFinite(p[0]) && Number.isFinite(p[2]));
+    if (pts.length < 3) return pts.flatMap(p => [p[0], p[2]]);
+    const n = pts.length;
+    // Wrapped: the last point before the first and the first two after the last, so every original
+    // segment has its true neighbours. Spline3 reflects its end points, which only touches the padding.
+    const wrapped = [pts[n - 1], ...pts, pts[0], pts[1]].map(p => [p[0], 0, p[2]]);
+    const spline = new Spline3(wrapped);
+    if (spline.pointCount !== wrapped.length) {
+        // Duplicate neighbours: the index mapping is gone; fall back to the raw polygon.
+        return pts.flatMap(p => [p[0], p[2]]);
+    }
+    const start = spline.distanceAtPoint(1), end = spline.distanceAtPoint(n + 1);
+    const steps = Math.max(n * 2, Math.min(4096, Math.ceil((end - start) / Math.max(0.05, spacing))));
+    const out: number[] = [];
+    const p: Vec3Tuple = [0, 0, 0];
+    for (let i = 0; i < steps; i++) {
+        spline.pointAtDistance(start + (end - start) * i / steps, p);
+        out.push(p[0], p[2]);
+    }
+    return out;
+}
+
+// =================================================================================================
+// FFT
+// =================================================================================================
+
+/**
+ * In-place radix-2 FFT of `re.length` complex values (re, im); the inverse when `inverse` (unscaled: the
+ * caller divides by n if it wants the true inverse). The length must be a power of two.
+ */
+export function fftRadix2(re: Float64Array, im: Float64Array, inverse: boolean): void {
+    const n = re.length;
+    for (let i = 1, j = 0; i < n; i++) {
+        let bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) {
+            let t = re[i]; re[i] = re[j]; re[j] = t;
+            t = im[i]; im[i] = im[j]; im[j] = t;
+        }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+        const ang = (2 * Math.PI) / len * (inverse ? 1 : -1);
+        const wr = Math.cos(ang), wi = Math.sin(ang);
+        for (let i = 0; i < n; i += len) {
+            let cr = 1, ci = 0;
+            for (let k = 0; k < len / 2; k++) {
+                const a = i + k, b = a + len / 2;
+                const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+                re[b] = re[a] - tr; im[b] = im[a] - ti;
+                re[a] += tr; im[a] += ti;
+                const ncr = cr * wr - ci * wi;
+                ci = cr * wi + ci * wr;
+                cr = ncr;
+            }
+        }
+    }
+}
+
+/** 2D FFT in place over a `size` x `size` row-major grid (both axes, radix-2). */
+export function fft2d(re: Float64Array, im: Float64Array, size: number, inverse: boolean): void {
+    const rr = new Float64Array(size), ri = new Float64Array(size);
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) { rr[x] = re[y * size + x]; ri[x] = im[y * size + x]; }
+        fftRadix2(rr, ri, inverse);
+        for (let x = 0; x < size; x++) { re[y * size + x] = rr[x]; im[y * size + x] = ri[x]; }
+    }
+    for (let x = 0; x < size; x++) {
+        for (let y = 0; y < size; y++) { rr[y] = re[y * size + x]; ri[y] = im[y * size + x]; }
+        fftRadix2(rr, ri, inverse);
+        for (let y = 0; y < size; y++) { re[y * size + x] = rr[y]; im[y * size + x] = ri[y]; }
+    }
+}
+
+// =================================================================================================
+// Half floats
+// =================================================================================================
+
+const _halfF32 = new Float32Array(1);
+const _halfU32 = new Uint32Array(_halfF32.buffer);
+
+/** IEEE 754 binary16 bits of `v`, rounded to nearest; overflow saturates to infinity. */
+export function floatToHalf(v: number): number {
+    _halfF32[0] = v;
+    const x = _halfU32[0];
+    const sign = (x >>> 16) & 0x8000;
+    const exp = (x >>> 23) & 0xff;
+    let mant = x & 0x7fffff;
+    if (exp === 0xff) return sign | 0x7c00 | (mant ? 0x200 : 0);
+    let e = exp - 127 + 15;
+    if (e >= 0x1f) return sign | 0x7c00;
+    if (e <= 0) {
+        if (e < -10) return sign;
+        mant = (mant | 0x800000) >>> (1 - e);
+        return sign | ((mant + 0x1000) >>> 13);
+    }
+    const h = sign | (e << 10) | (mant >>> 13);
+    // Round to nearest: carries into the exponent correctly.
+    return (mant & 0x1000) ? h + 1 : h;
+}
+
+/** Convert a float array to binary16 bits, element for element. */
+export function floatsToHalves(src: Float32Array, dst: Uint16Array): void {
+    const n = Math.min(src.length, dst.length);
+    for (let i = 0; i < n; i++) dst[i] = floatToHalf(src[i]);
 }
 
 // =================================================================================================

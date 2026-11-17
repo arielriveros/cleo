@@ -167,7 +167,10 @@ describe('the programs', () => {
                                               'volumetricFogApply', 'giReduce', 'giVisibility', 'giRadiance',
                                               'giIntegrate', 'giResolve', 'giAmbientCube', 'giRescale',
                                               'giProbeOverlay', 'giStateStamp', 'movieAccumulate', 'sprite',
-                                              'pixelUpscale']);
+                                              'pixelUpscale', 'water', 'waterUnderwater', 'waterWaveField',
+                                              'waterWaveAdvect', 'waterWaveStep', 'waterFlowGround', 'waterFlowShift',
+                                              'waterFlowAdvect', 'waterFlowLimit', 'waterFlowDepth', 'waterFlowAccelerate',
+                                              'waterFlowWaves', 'waterFlowSurface']);
     });
 
     it('read every map through the flipbook cells, inset per cell so no neighbouring frame bleeds in', () => {

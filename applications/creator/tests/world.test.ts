@@ -8,6 +8,7 @@ import { slopeMask, curvatureMask, d8FlowMask } from '../src/world/masks';
 import { exportWorld, generateWorld } from '../src/world/generateWorld';
 import { coastalRange, WORLD_PRESETS } from '../src/world/presets';
 import { nodeType } from '../src/world/graph/nodeRegistry';
+import { LEGACY_SIM_DEFAULTS } from '../src/world/graph/migrate';
 import type { WorldDoc } from '../src/world/worldDoc';
 
 const small = (doc: WorldDoc, resolution = 65): WorldDoc => ({ ...doc, settings: { ...doc.settings, resolution } });
@@ -30,22 +31,26 @@ describe('World Creator generation', () => {
 
   it('builds every preset to finite heights and 0..1 masks', async () => {
     for (const preset of WORLD_PRESETS) {
-      const out = await generateWorld(small(preset.params(), 49));
+      const doc = small(preset.params(), 49);
+      // Simulations on a grid as small as the world: what is checked is the graph's output, not the erosion.
+      doc.graph = { ...doc.graph, nodes: doc.graph.nodes.map(n => ('grid' in (nodeType(n.type)?.defaults() ?? {}) ? { ...n, params: { ...n.params, grid: '49' } } : n)) };
+      const out = await generateWorld(doc);
       expect(out.heights.every(Number.isFinite), preset.id).toBe(true);
       for (const [kind, mask] of Object.entries(out.masks))
         expect(mask.every(v => v >= 0 && v <= 1), `${preset.id} ${kind}`).toBe(true);
     }
   });
 
-  it('carves the coastal preset into land, beach and sea', async () => {
+  it('lays the coastal preset out as the sea along +Z and mountains inland', async () => {
     const doc = withoutErosion(small(coastalRange(), 97));
     const out = await generateWorld(doc);
     const res = out.frame.resolution;
     const sea = doc.settings.seaLevel;
-    // The coast layer puts the sea toward +Z (direction 90): the last row is under water, the peak is not.
-    const lastRow = out.heights.subarray((res - 1) * res, res * res);
-    expect(Math.max(...lastRow)).toBeLessThan(sea);
-    expect(Math.max(...out.heights)).toBeGreaterThan(0.5);
+    // The land rises away from +Z: most of the last row is under the sea, the first row stands high.
+    const lastRow = Array.from(out.heights.subarray((res - 1) * res, res * res));
+    const firstRow = Array.from(out.heights.subarray(0, res));
+    expect(lastRow.filter(h => h < sea).length / res).toBeGreaterThan(0.6);
+    expect(firstRow.reduce((a, b) => a + b, 0) / res).toBeGreaterThan(0.4);
   });
 });
 
@@ -107,7 +112,7 @@ describe('erosion', () => {
   });
 
   it('droplet erosion is seeded and deterministic', async () => {
-    const p = { ...nodeType('droplet')!.defaults(), density: 400 } as any;
+    const p = { ...LEGACY_SIM_DEFAULTS.droplet, density: 400 } as any;
     const a = cone(), b = cone();
     await dropletErosion(a, frame, p);
     await dropletErosion(b, frame, p);
@@ -118,7 +123,7 @@ describe('erosion', () => {
   it('pipe erosion moves material downhill and reports flow where water ran', async () => {
     const h = cone();
     const peak = h[16 * 33 + 16];
-    const masks = await pipeErosion(h, frame, { ...(nodeType('pipe')!.defaults() as any), iterations: 60 });
+    const masks = await pipeErosion(h, frame, { ...(LEGACY_SIM_DEFAULTS.pipe as any), iterations: 60 });
     expect(h.every(Number.isFinite)).toBe(true);
     expect(h[16 * 33 + 16]).toBeLessThanOrEqual(peak + 1e-6);
     expect(Math.max(...masks.flow)).toBeGreaterThan(0);

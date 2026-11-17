@@ -138,3 +138,116 @@ describe('buoyancy', () => {
 
 // Quaternion import kept for readers extending these; cannon's setFromEuler covers the cases above.
 void Quaternion;
+
+// The water's motion: pressure along the water's slope (Froude–Krylov), drag toward the waves' orbits and
+// the current, for the water displaced rather than the body's mass, one water per point where two overlap,
+// and the same clock as the surface that is drawn.
+describe('water motion', () => {
+    it('pushes a floating body down a sloped surface, with no current at all', () => {
+        // A surface falling 1 m per 20 m along +x, still water (no flow).
+        const sloped: BuoyancyVolume = {
+            ...WATER, columnAt: (x) => ({ surface: -0.05 * x, rest: -0.05 * x, floor: -4, flowX: 0, flowZ: 0 }),
+        };
+        const w = world(sloped, false);
+        const b = box(0.5, 0.5, 0.5, 500, 0);
+        w.raw.addBody(b);
+        run(w, 2);
+        expect(b.position.x).toBeGreaterThan(0.2);   // downhill
+    });
+
+    it('lets a floater ride the waves: carried forward on a crest, back in a trough', () => {
+        // The water's surface velocity alternates along +x with a 4 s period; the surface itself stays flat.
+        let t = 0;
+        const orbit: BuoyancyVolume = {
+            ...WATER, linearDrag: 4,
+            columnAt: () => ({ surface: 0, rest: 0, floor: -4, flowX: 0, flowZ: 0, waveVX: Math.cos(t * Math.PI / 2), waveVY: 0, waveVZ: 0, waveK: 0.1 }),
+        };
+        const w = world(orbit, false);
+        const b = box(0.4, 0.4, 0.4, 0.512 * 400, 0);
+        w.raw.addBody(b);
+        const h = 1 / 60;
+        let agree = 0, samples = 0;
+        for (; t < 12; t += h) {
+            w.step(h);
+            if (t > 4) { samples++; if (Math.sign(b.velocity.x) === Math.sign(Math.cos((t - 0.3) * Math.PI / 2))) agree++; }
+        }
+        expect(agree / samples).toBeGreaterThan(0.8);
+    });
+
+    it('drags by the water displaced, not by mass: the denser body sinks faster', () => {
+        const w = world(WATER, false);
+        const light = box(0.3, 0.3, 0.3, 0.216 * 2000, -1); light.position.x = -5;
+        const heavy = box(0.3, 0.3, 0.3, 0.216 * 4000, -1); heavy.position.x = 5;
+        w.raw.addBody(light); w.raw.addBody(heavy);
+        run(w, 0.8);
+        expect(heavy.velocity.y).toBeLessThan(light.velocity.y * 1.5);   // both negative: heavy much faster
+    });
+
+    it('buoys a body in two overlapping waters once, in the one the other gives way to', () => {
+        const lake: BuoyancyVolume = { ...WATER, id: 'lake' };
+        const mouth: BuoyancyVolume = { ...WATER, id: 'river', yieldsTo: ['lake'], density: 3000 };
+        const single = new CannonWorld([0, -G, 0]), both = new CannonWorld([0, -G, 0]);
+        const a = box(0.5, 0.5, 0.5, 500, 0), b = box(0.5, 0.5, 0.5, 500, 0);
+        let fromRiver = 0;
+        single.onPreSubstep = dt => { applyBuoyancy(single, a.id as BodyHandle, a.mass, lake, G, dt); };
+        both.onPreSubstep = dt => {
+            applyBuoyancy(both, b.id as BodyHandle, b.mass, [mouth, lake], G, dt, (i, f) => { if (i === 0) fromRiver += f; });
+        };
+        single.raw.addBody(a); both.raw.addBody(b);
+        run(single, 6); run(both, 6);
+        expect(b.position.y).toBeCloseTo(a.position.y, 2);   // the lake's water, once: not the denser river's, not both
+        expect(fromRiver).toBe(0);
+    });
+
+    it('fades the waves out on an ocean beach for physics as the surface does, the surf running in instead', async () => {
+        const { waterSpecColumn } = await import('../src/physics/waterSurface');
+        const { wavesForWind } = await import('../src/physics/water/waves');
+        const { surfOf } = await import('../src/physics/water/surf');
+        const ocean = { id: 'o', type: 'ocean' as const, priority: 0, order: 0, min: [-1e7, -50, -1e7] as [number, number, number],
+            max: [1e7, 0, 1e7] as [number, number, number], level: 0, floor: -50, outline: [], samples: [], cell: 1, grid: {}, endless: true, waveFactor: 1 };
+        // A shore grid: land at x >= 100, the bed rising toward it.
+        const nx = 64, nz = 4, cell = 4;
+        const data = new Float32Array(nx * nz * 2);
+        for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
+            const wx = x * cell;
+            data[(z * nx + x) * 2] = 100 - wx;            // metres to the shore
+            data[(z * nx + x) * 2 + 1] = -0.2 * (100 - wx); // the bed
+        }
+        const spec = {
+            min: [-1e7, -50, -1e7] as [number, number, number], max: [1e7, 0, 1e7] as [number, number, number],
+            density: 1025, linearDrag: 2, angularDrag: 0.5, affectCharacters: false, waveAmplitude: 0, waveFrequency: 0,
+            shapes: [ocean], waves: wavesForWind(8, 90, Infinity), waveScale: 1, shoreFade: 10,
+            shoreGrid: { originX: 0, originZ: 0, cell, nx, nz, data },
+        };
+        const swing = (x: number) => {
+            let lo = Infinity, hi = -Infinity;
+            for (let t = 0; t < 12; t += 0.25) { const s = waterSpecColumn(spec, x, 4, t)!.surface; lo = Math.min(lo, s); hi = Math.max(hi, s); }
+            return hi - lo;
+        };
+        expect(swing(20)).toBeGreaterThan(0.2);
+        // At the waterline the sea's waves are gone; what moves the water is the surf, no taller than its
+        // run-up: 0.78 of the depth (0.4 m here) plus half the sea's amplitude, trough to crest.
+        const a = surfOf(spec.waves, 1).amplitude;
+        expect(swing(98)).toBeGreaterThan(0.02);
+        expect(swing(98)).toBeLessThanOrEqual(2 * (0.39 * 0.4 + 0.5 * a) + 1e-6);
+        // And floaters there are carried in with each breaker and out with the backwash.
+        let inward = 0, outward = 0;
+        for (let t = 0; t < 12; t += 0.25) {
+            const v = waterSpecColumn(spec, 90, 4, t)!.waveVX ?? 0;
+            inward = Math.max(inward, v); outward = Math.min(outward, v);
+        }
+        expect(inward).toBeGreaterThan(0.05);
+        expect(outward).toBeLessThan(-0.05);
+        // Inland there is no sea at all (two cells past the shore, as the surface is drawn), so a river
+        // running down to it is not the sea's along its whole length.
+        expect(waterSpecColumn(spec, 99, 4, 0)).not.toBeNull();
+        expect(waterSpecColumn(spec, 112, 4, 0)).toBeNull();
+        expect(waterSpecColumn(spec, 180, 4, 0)).toBeNull();
+    });
+
+    it('runs the waves on the physics\u2019 drawn time while it steps, else on the render clock', async () => {
+        const { setWaterClock, waterTime } = await import('../src/physics/water/waterClock');
+        setWaterClock(42);
+        expect(waterTime(1000)).toBe(42);
+    });
+});

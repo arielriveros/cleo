@@ -1,12 +1,16 @@
-// Ready-made surfaces (the Surfaces section's + Add menu) and whole stacks (its biome sets). Rules lean on
-// relative height and water-relative height rather than absolute metres, so a preset reads sensibly on a
-// 200 m hill country and a 2 km massif alike.
+// Ready-made surfaces (the Surfaces section's + Add menu) and whole stacks (its biome sets). Most rules lean
+// on slope, water and erosion history, which read the same on a 200 m hill country and a 2 km massif. Snow
+// does not: it lies where the air is cold, above a height in metres over the sea, so a hill country has none
+// and a massif's summits are white (a rule by the map's own highest to lowest put snow on a mesa).
 
 import { surfaceKindInfo, type SurfaceKind } from '../../surfaces/kinds';
-import { newCondition, newSurface, type SurfaceLayer } from './surfaceDoc';
+import { newCondition, newSurface, normaliseSurfaces, type SurfaceLayer } from './surfaceDoc';
 
 const look = (kind: SurfaceKind, tint: [number, number, number] = [1, 1, 1], heightBlend?: number) =>
   ({ kind, tint, tiling: surfaceKindInfo(kind).tiling, heightBlend: heightBlend ?? surfaceKindInfo(kind).heightBlend });
+
+/** Metres above the sea where snow lies the year round in the temperate mid-latitudes (lower on north faces). */
+export const SNOW_LINE = 1800;
 
 export type SurfacePresetId =
   | 'grass' | 'meadow' | 'seabed' | 'beach' | 'wetSand' | 'riverbed' | 'mud' | 'dirt' | 'forest' | 'rock' | 'cliff' | 'scree' | 'gravel'
@@ -86,11 +90,11 @@ export function surfacePreset(id: SurfacePresetId): SurfaceLayer {
       c('flowArea', { min: 4.5, max: 9, falloffLow: 0.6 }),
     ]);
     case 'snow': return newSurface('Snow', look('snow'), [
-      c('relativeHeight', { min: 0.72, max: 1, falloffLow: 0.06, falloffHigh: 0 }),
+      c('heightAboveWater', { min: SNOW_LINE, max: 5000, falloffLow: 300, falloffHigh: 0 }),
       c('slope', { min: 0, max: 48, falloffLow: 0, falloffHigh: 8 }),
     ], { breakup: { amount: 0.7, scale: 30, octaves: 5, seed: 7, warp: 0.5 } });
     case 'shadedSnow': return newSurface('Shaded snow', look('snow', [0.92, 0.95, 1]), [
-      c('relativeHeight', { min: 0.55, max: 1, falloffLow: 0.08, falloffHigh: 0 }),
+      c('heightAboveWater', { min: SNOW_LINE - 400, max: 5000, falloffLow: 300, falloffHigh: 0 }),
       c('aspect', { goal: 0, spread: 50, falloffHigh: 50 }),
       c('slope', { min: 4, max: 42, falloffLow: 2, falloffHigh: 8 }),
     ], { breakup: { amount: 0.7, scale: 24, octaves: 5, seed: 8, warp: 0.5 } });
@@ -129,3 +133,35 @@ export const BIOME_SETS: { id: BiomeId; label: string; description: string; make
 ];
 
 export const defaultSurfaces = (): SurfaceLayer[] => BIOME_SETS[0].make();
+
+/** A stack as it compares: ids dropped (and a Layer condition's surface by its place in the stack). */
+function canonical(stack: readonly SurfaceLayer[]): string {
+  const at = new Map(stack.map((s, i) => [s.id, i]));
+  return JSON.stringify(normaliseSurfaces(stack, () => []).map(s => ({
+    ...s, id: undefined,
+    conditions: s.conditions.map(c => ({ ...c, id: undefined, layerId: c.layerId !== undefined ? at.get(c.layerId) ?? -1 : undefined })),
+  })));
+}
+
+/** A biome set as it was made before snow went by height in metres (what a world saved then holds). */
+function withOldSnow(stack: SurfaceLayer[]): SurfaceLayer[] {
+  return stack.map(s => {
+    const old = s.name === 'Snow' ? { min: 0.72, falloffLow: 0.06 } : s.name === 'Shaded snow' ? { min: 0.55, falloffLow: 0.08 } : null;
+    if (!old) return s;
+    const [first, ...rest] = s.conditions;
+    return { ...s, conditions: [{ ...newCondition('relativeHeight', { min: old.min, max: 1, falloffLow: old.falloffLow, falloffHigh: 0 }), id: first.id }, ...rest] };
+  });
+}
+
+/**
+ * The biome set `stack` is, untouched (as made now or before snow went by metres), or null when it has been
+ * edited: what a world preset may replace with its own without losing anyone's work.
+ */
+export function stockBiomeOf(stack: readonly SurfaceLayer[]): BiomeId | null {
+  const key = canonical(stack);
+  for (const b of BIOME_SETS) {
+    const made = b.make();
+    if (canonical(made) === key || canonical(withOldSnow(made)) === key) return b.id;
+  }
+  return null;
+}

@@ -337,7 +337,7 @@ const SPLASHES = (): [number, number, number][] => [[when('pond', 1.2), 41.6, 27
 
 type HeightAt = (x: number, z: number) => number
 
-/** The pond's surface (the Pond Water model's top, layout.mjs POND): the camera's floor over the water. */
+/** The pond's surface (the Pond Water Volume's top, layout.mjs POND): the camera's floor over the water. */
 const POND = { x: 44, z: 22, r: 10.5, level: 0.47 }
 
 /** What a camera must stay above: the terrain, or the pond's surface where the pond is. */
@@ -495,9 +495,9 @@ export function buildTour(terrainAt: HeightAt, options: { pondLevel?: number; da
       valueType: 'number', sections: [{ id: 'foliage-shadows:shot', start: when('foliage'), end: before('foliage'), whenFinished: 'restore',
         curve: { keys: keysFrom(0, FOLIAGE_SHADOWS) } }] } as any,
     // The pond: its ripples calm to a mirror, and screen-space reflections reach the windmill and the hamlet.
-    { id: 'pond-waves', name: 'Pond calm', type: 'property', slot: 'pond', path: 'model.material.properties.waveStrength',
+    { id: 'pond-waves', name: 'Pond calm', type: 'property', slot: 'pond', path: 'waterMaterial.look.detailStrength',
       valueType: 'number', sections: [{ id: 'pond-waves:shot', start: when('pond'), end: D, whenFinished: 'restore',
-        curve: { keys: keysFrom(when('pond'), ramp([[when('pond'), 0.32], [when('pond', 4), 0.08], [when('finale', 4), 0.08], [when('finale', 12), 0.32]])) } }] } as any,
+        curve: { keys: keysFrom(when('pond'), ramp([[when('pond'), 1], [when('pond', 4), 0.25], [when('finale', 4), 0.25], [when('finale', 12), 1]])) } }] } as any,
     { id: 'pond-ssr', name: 'Reflection reach', type: 'property', target: 'renderer', path: 'ssrMaxDistance',
       valueType: 'number', sections: [{ id: 'pond-ssr:shot', start: when('pond'), end: D, whenFinished: 'restore',
         curve: { keys: [{ t: 0, v: 400 }] } }] } as any,
@@ -527,7 +527,7 @@ export function buildTour(terrainAt: HeightAt, options: { pondLevel?: number; da
       { id: 'wind', name: 'Wind', nodeType: 'wind', path: 'Wind' },
       { id: 'weather', name: 'Weather', nodeType: 'weather', path: 'Weather' },
       { id: 'landscape', name: 'Landscape', nodeType: 'landscape', path: 'Landscape' },
-      { id: 'pond', name: 'Pond', nodeType: 'model', path: 'Water/Pond Water' },
+      { id: 'pond', name: 'Pond', nodeType: 'waterVolume', path: 'Water/Pond Water Volume' },
       ...daySlots(options.day),
     ],
     tracks,

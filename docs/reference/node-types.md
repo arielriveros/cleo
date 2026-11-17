@@ -933,22 +933,51 @@ node), `enabled`. `particlePositions` is the simulated world positions, or null 
 
 ### WaterVolumeNode — `'waterVolume'` *(unreleased)*
 
-A body of water: an axis-aligned box (the node's rotation is ignored, scale multiplies `size`) whose
-**top face is the water surface**. Every dynamic physics body inside is buoyed by Archimedes' principle —
-its colliders are sampled, and each submerged sample is pushed up by the weight of the water it
-displaces, at that point — so whether a body floats, and how low it rides, follows from its **mass**
-against its collider volume, and a tipped body rights itself. Submerged bodies also get linear and
-angular drag. Character bodies are skipped unless `affectCharacters` (a capsule is mostly air).
+One body of water (`water/waterShapes.ts`), of one `waterType`: `river` (a spline through `points`, each
+`{ pos, width, depth, flowSpeed }`), `lake` (a level surface at the node's height inside the smooth closed
+outline through its `points`), `ocean` (a level surface at the node's height `extent` metres each way, 0 =
+endless) and `pool` (a level block `size` big centred on the node, its top face the surface). The body is
+in the node's units (position and scale apply, rotation is ignored). A river's surface never rises on the
+way down. Its `flowsFrom` / `flowsInto` name the Water nodes it flows from and into (by id): it never stands
+above the one or runs below the other, so the two meet, and where they overlap the other node's water is the
+water there (`handOver()`; an endless ocean only where its water stands over the ground). A legacy node's
+`size` loads as a pool; an older node holding a list of `shapes` loads as one node per shape.
 
-Properties: `size` (full extents, metres), `density` (kg/m³, default 1000), `linearDrag`,
-`angularDrag` (per second at full submersion), `waveAmplitude` / `waveFrequency` (a swell that makes
-floaters bob), `affectCharacters`, `surfaceNodeId`, `splashTemplate`, `wadeSplashTemplate`, `enabled`. Helpers:
-`worldBox()`, `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)`.
+Every dynamic physics body inside is buoyed by Archimedes' principle: its colliders are sampled, and each
+submerged sample is pushed by the weight of the water it displaces, at that point and along the water's
+slope (down a wave's face, down a river's gradient), so whether a body floats follows from its **mass**
+against its collider volume and a tipped body rights itself. Drag pulls each sample toward the water's own
+velocity there (the current with `currents`, plus the waves' orbits), for the water displaced, so what
+floats rides the waves that are drawn (they share a clock in Play, `physics/water/waterClock.ts`). Where
+two Water nodes overlap, each sample is in one of them. Character bodies are skipped unless `affectCharacters`.
+
+The surface carries a swell (`waveAmplitude`, `waveFrequency`) and up to forty sharp-crested waves (afl_ext's
+exp(sin) waves, MIT) shaped by `windSpeed` over `fetch` metres of open water (0: the body's own), the longest
+travelling toward `waveDirection` degrees, scaled by `waveScale`, the short ones crowded onto the long ones'
+crests by `choppiness`, and dying down within `shoreFade` metres of a shore. A river's waves are raised by
+its current instead (`wavesForCurrent`, for the speed `flowReference()` gives: the baked current's, else the
+fastest drawn `flowSpeed`), scaled along it by the water's speed and carried downstream with it. The same
+sum (`physics/water/waves.ts`) floats the bodies and draws the surface.
+
+A flow bake (`bakeId`, `water/bake/`) is one shallow-water simulation of every water joined through
+`flowsFrom` / `flowsInto`, run over the landscape and the static colliders until it settles: each node then
+draws and floats bodies on its share of the settled heights, currents and foam. `bakeSignature()` is what the
+bake depends on (the system's bodies, placements and `bedRoughness`, the ground and the colliders in reach);
+a bake whose signature no longer matches is dropped for the water as drawn.
+
+Properties: `waterType`, `points`, `size`, `depth`, `extent`, `carve`, `flowsFrom`, `flowsInto`,
+`waterBody` (all of them at once, as plain data), `density` (kg/m³, default 1000), `linearDrag`, `angularDrag` (per second at full
+submersion), `waveAmplitude`, `waveFrequency`, `windSpeed`, `fetch`, `waveDirection`, `waveScale`, `choppiness`,
+`waveSpeed`, `shoreFade`, `currents`, `waterMaterial`, `waterMaterialId`, `bakeId`, `bedRoughness`, `affectCharacters`, `surfaceNodeId`, `splashTemplate`,
+`wadeSplashTemplate`, `enabled`. Helpers: `resolved()` (the body in world space), `joinedNodes()`,
+`handOver()`, `waves()`, `flowReference()`, `bakeSignature()`, `columnAt(x, z, time?)` (resting or waved surface, floor, flow and distance to
+shore, or null), `worldBox()`, `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)`, `version` (bumped
+by every body or wave edit) and `resolveKey()` (which also changes when the water a river joins moves).
 
 In play it also disturbs its surface: if the `surfaceNodeId` model's custom material declares vec4
 uniforms `ripple0`..`ripple11`, they are filled each frame with expanding rings (`[x, z, startTime,
 strength]`, startTime on `u_time`'s clock) from characters wading and bodies floating or splashing in;
-and `splashTemplate`, when set, is instantiated at the surface where something enters or wades --
+and `splashTemplate`, when set, is instantiated at the surface where something enters or wades,
 `wadeSplashTemplate`, when set, for the steps of a character wading (every 0.45 s while it moves).
 
 ---

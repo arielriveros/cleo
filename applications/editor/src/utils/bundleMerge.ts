@@ -139,6 +139,8 @@ export function remapDeep(obj: any, r: Remaps): void {
     // A weather volume's link to the Material asset its snow is drawn with. The `snowMaterial` beside it
     // is the embedded copy, walked on only for the textures it names.
     if (key === 'snowMaterialId') { obj[key] = sub(r.mat, val); continue }
+    // A Water node's link to the Water material its surface is drawn with.
+    if (key === 'waterMaterialId') { obj[key] = sub(r.mat, val); continue }
     if (key === 'materialIds' && Array.isArray(val)) { obj[key] = val.map((x: any) => sub(r.mat, x)); continue }
     // 'meshId' is the legacy spelling of 'modelId'; both point at a model asset.
     if (key === 'modelId' || key === 'meshId') { obj[key] = sub(r.model, val); continue }

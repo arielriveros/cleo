@@ -1,11 +1,17 @@
-// Erosion nodes: the erosion filter (per sample, GPU in the realtime preview) and the three simulations
-// (thermal, hydraulic droplets, hydraulic virtual pipes; CPU, pipes on the GPU at export). Simulations
-// read and write whole grids over many iterations, so the realtime preview bypasses one that sits after
-// the node being dragged and shows the result once it settles.
+// Erosion nodes: the erosion filter (per sample, GPU in the realtime preview), rivers and valleys (fluvial
+// erosion, fluvial.ts) and the three older simulations (thermal, hydraulic droplets, hydraulic virtual pipes;
+// CPU, pipes on the GPU at export). Simulations read and write whole grids over many iterations, so the
+// realtime preview bypasses one that sits after the node being dragged and shows the result once it settles.
+//
+// Every simulation runs on its own SIMULATION GRID (simGrid.ts), whatever resolution the world is evaluated
+// at, and its parameters are in metres: the preview shows what the export will. The kernels in erosion.ts
+// work in grid cells; the nodes convert.
 
-import { dropletErosion, pipeErosion, thermalErosion, type DropletParams, type PipeParams, type ThermalParams } from '../../erosion';
+import { cellSize, dropletErosion, pipeErosion, thermalErosion, type DropletParams, type PipeMasks, type PipeParams, type WorldFrame } from '../../erosion';
 import { applyErosionFilter, DEFAULT_EROSION_FILTER, filterSeed, MAX_FILTER_OCTAVES, type ErosionFilterParams } from '../../erosionFilter';
-import { fspec, ispec, num, plain, type NodeParams, type NodeType } from '../nodeTypes';
+import { DEFAULT_FLUVIAL, drainHollows, fluvialErosion } from '../../fluvial';
+import { fromSimGrid, onSimGrid, SIM_GRID_OPTIONS, simGridOf, toSimGrid } from '../../simGrid';
+import { espec, fspec, ispec, num, plain, type EvalEnv, type NodeParams, type NodeType } from '../nodeTypes';
 
 /** The node's parameters, complete (missing keys take the defaults). */
 export function filterParams(p: NodeParams): ErosionFilterParams {
@@ -15,16 +21,18 @@ export function filterParams(p: NodeParams): ErosionFilterParams {
   return out;
 }
 
+// The looks are filters for land that already drains (Rivers and valleys before them cut its valleys): gullies at
+// most about a sixth as deep as they are apart. Deeper, over six octaves, they stood the land up in spikes.
 export const FILTER_PRESETS = [
   { id: 'default', label: 'Balanced', description: 'The filter\'s reference settings: branching gullies, crisp ridges.', params: { ...DEFAULT_EROSION_FILTER } },
   { id: 'soft', label: 'Soft hills', description: 'Shallow, rounded gullies for rolling country.',
-    params: { ...DEFAULT_EROSION_FILTER, spacing: 420, depth: 0.12, gullyWeight: 0.7, detail: 1, octaves: 4, peakRounding: 0.4, valleyRounding: 0.3, inputRounding: 0.3 } },
+    params: { ...DEFAULT_EROSION_FILTER, spacing: 420, depth: 0.08, gullyWeight: 0.7, detail: 1, octaves: 4, peakRounding: 0.4, valleyRounding: 0.3, inputRounding: 0.3 } },
   { id: 'alpine', label: 'Alpine', description: 'Deep, sharp gullies and knife-edge ridges for high mountains.',
-    params: { ...DEFAULT_EROSION_FILTER, spacing: 260, depth: 0.3, gullyWeight: 0.4, detail: 2, octaves: 6, peakRounding: 0.02, valleyRounding: 0, onsetInput: 1.6 } },
+    params: { ...DEFAULT_EROSION_FILTER, spacing: 160, depth: 0.16, gullyWeight: 0.4, detail: 2, octaves: 6, peakRounding: 0.02, valleyRounding: 0, onsetInput: 1.6 } },
   { id: 'badlands', label: 'Badlands', description: 'Dense, fine, deeply branching rills on every slope.',
-    params: { ...DEFAULT_EROSION_FILTER, spacing: 120, depth: 0.35, gullyWeight: 0.6, detail: 3, octaves: 6, gain: 0.55, assumedSlope: 1, onsetInput: 2, onsetOctave: 1.6 } },
+    params: { ...DEFAULT_EROSION_FILTER, spacing: 120, depth: 0.18, gullyWeight: 0.6, detail: 3, octaves: 6, gain: 0.55, assumedSlope: 1, onsetInput: 2, onsetOctave: 1.6 } },
   { id: 'fine', label: 'Fine detail', description: 'Small gullies only: texture on top of a terrain already eroded.',
-    params: { ...DEFAULT_EROSION_FILTER, spacing: 80, depth: 0.15, octaves: 4, detail: 1.5 } },
+    params: { ...DEFAULT_EROSION_FILTER, spacing: 80, depth: 0.1, octaves: 4, detail: 1.5 } },
 ];
 
 const FILTER_SCHEMA = [
@@ -66,6 +74,25 @@ const sim = (t: Pick<NodeType, 'type' | 'label' | 'description' | 'icon' | 'sche
   ...t, category: 'erosion', inputs: [heightIn], outputs: [heightOut], sim: true,
 });
 
+/** The simulation grid a node runs on, and its frame (the kernels' cells are that grid's). */
+function simFrame(p: NodeParams, env: EvalEnv): { G: number; frame: WorldFrame; cell: number } {
+  const G = simGridOf(p.grid, 513);
+  const frame = { resolution: G, size: env.frame.size, heightScale: env.frame.heightScale };
+  return { G, frame, cell: cellSize(frame) };
+}
+
+const GRID_SPEC = espec('grid', 'Simulation grid', SIM_GRID_OPTIONS,
+  'Samples a side the simulation runs on, whatever the preview or export resolution: finer catches smaller features and takes longer.');
+
+/** Metres, as a whole number of the simulation grid's cells (at least one). */
+const inCells = (metres: unknown, fallback: number, cell: number) => Math.max(1, Math.round(num(metres, fallback) / cell));
+
+export const DEFAULT_THERMAL = { reach: 160, talus: 38, rate: 0.5, grid: '513' };
+// Tuned on true slopes (the kernel runs in cells, where a step's drop is the slope itself): gravity of 4, a
+// figure from heightmaps scaled 0..1, accelerated every droplet into a scouring jet that left the ground pitted.
+export const DEFAULT_DROPLET = { density: 300, inertia: 0.05, capacity: 4, minSlope: 0.01, erosion: 0.1, deposition: 0.3, evaporation: 0.02, gravity: 0.25, travel: 160, brush: 16, seed: 7, grid: '513' };
+export const DEFAULT_PIPE = { reach: 640, rain: 0.012, evaporation: 0.015, capacity: 1.2, dissolve: 0.3, deposit: 0.3, dt: 0.05, grid: '513' };
+
 export const EROSION_NODES: NodeType[] = [
   {
     type: 'erosionFilter', label: 'Erosion filter', category: 'erosion', icon: 'filter',
@@ -99,15 +126,82 @@ export const EROSION_NODES: NodeType[] = [
       };
     },
   },
+  {
+    type: 'fluvial', label: 'Rivers and valleys', category: 'erosion', icon: 'fluvial',
+    description: "Rivers cut the land into valleys that join and fall to the sea or the map's edge; ridges are what is left. Feeds Wear, Deposits and Flow.",
+    inputs: [heightIn, { id: 'hardness', label: 'Hardness', type: 'mask', optional: true }],
+    outputs: [heightOut, { id: 'flow', label: 'Flow', type: 'mask' }],
+    schema: [
+      fspec('age', 'Age', 0, 4, 0.01, 'How long the rivers have cut: 0.2 young (valleys near the outlets, the drawn shape kept), 1 mature, 3 the shape the rivers give.'),
+      fspec('talus', 'Steepest slope', 10, 70, 0.5, 'The steepest a hillside stands.', '°'),
+      fspec('rounding', 'Rounding', 0, 1000, 1, 'How far soil creep rounds crests and creases; also how close the smallest valleys lie.', 'm'),
+      GRID_SPEC,
+      fspec('concavity', 'Valley profile', 0.3, 0.7, 0.01, 'How fast rivers flatten downstream: higher gives long, flat lower valleys under steep heads.'),
+      fspec('channelArea', 'Channels from', 0, 5e6, 1000, 'Drainage area below which the ground barely cuts: more leaves smooth hillsides between fewer, larger valleys.', 'm²'),
+      fspec('fill', 'Basin fill', 0, 1, 0.01, 'How far hollows silt up: 1 leaves no closed hollow (no lakes); less leaves the deepest as basins.'),
+    ],
+    advanced: ['concavity', 'channelArea', 'fill'],
+    defaults: () => ({ ...DEFAULT_FLUVIAL, grid: '513' }),
+    sim: true,
+    readsSea: true,
+    evaluate: async (inputs, p, env) => {
+      const R = env.frame.resolution, N = R * R;
+      const before = inputs.height?.h ?? new Float32Array(N);
+      const { G, cell } = simFrame(p, env);
+      const kh = env.frame.heightScale;
+      const g = toSimGrid(before, R, G);
+      for (let i = 0; i < g.length; i++) g[i] *= kh;
+      const start = Float64Array.from(g);
+      const hard = inputs.hardness ? toSimGrid(inputs.hardness.h, R, G) : null;
+      const params = { ...DEFAULT_FLUVIAL };
+      for (const k of Object.keys(params) as (keyof typeof params)[]) params[k] = num(p[k], DEFAULT_FLUVIAL[k]);
+      const { area } = await fluvialErosion(g, G, cell, (env.seaLevel ?? 0) * kh, params, hard, env.ctx);
+      // What it changed, at the evaluated resolution, on the input as it came.
+      const change = new Float64Array(G * G);
+      for (let i = 0; i < change.length; i++) change[i] = (g[i] - start[i]) / kh;
+      const back = fromSimGrid(change, G, R);
+      const after = new Float32Array(N);
+      for (let i = 0; i < N; i++) after[i] = before[i] + back[i];
+      // Flow: the area draining through a point, from a thousand square metres (0) to the whole map (1).
+      const lo = 3, hi = Math.max(lo + 1, Math.log10(env.frame.size * env.frame.size));
+      const flowG = new Float32Array(G * G);
+      for (let i = 0; i < flowG.length; i++) flowG[i] = Math.min(1, Math.max(0, (Math.log10(Math.max(1, area[i])) - lo) / (hi - lo)));
+      const flow = fromSimGrid(flowG, G, R);
+      for (let i = 0; i < N; i++) flow[i] = Math.min(1, Math.max(0, flow[i]));
+      return { outputs: { height: plain(after), flow: plain(flow) }, history: { kind: 'hydraulic', before, after } };
+    },
+  },
+  {
+    type: 'drain', label: 'Drain', category: 'erosion', icon: 'drain',
+    description: 'Fills every closed hollow to the level it spills at, so water runs off: the pits a filter after Rivers and valleys leaves. Lakes you want go after it.',
+    inputs: [heightIn], outputs: [heightOut], schema: [], defaults: () => ({}),
+    // A whole-map flood: bypassed while something before it is dragged, as a simulation is.
+    sim: true,
+    readsSea: true,
+    evaluate: (inputs, _p, env) => {
+      const N = env.frame.resolution ** 2, kh = env.frame.heightScale;
+      const before = inputs.height?.h ?? new Float32Array(N);
+      const z = Float64Array.from(before, v => v * kh);
+      drainHollows(z, env.frame.resolution, (env.seaLevel ?? 0) * kh);
+      return { outputs: { height: plain(Float32Array.from(z, v => v / kh)) } };
+    },
+  },
   sim({
     type: 'thermal', label: 'Thermal erosion', icon: 'thermal',
     description: 'Slopes steeper than the angle of repose slump into scree at their feet (feeds Talus).',
-    schema: [ispec('iterations', 'Iterations', 0, 500), fspec('talus', 'Talus angle', 5, 85, 0.5, 'Slopes steeper than this slump.', '°'), fspec('rate', 'Rate', 0, 1, 0.01)],
-    defaults: () => ({ iterations: 40, talus: 38, rate: 0.5 }),
+    schema: [
+      fspec('reach', 'Reach', 0, 5000, 1, 'How far scree travels from where it falls.', 'm'),
+      fspec('talus', 'Talus angle', 5, 85, 0.5, 'Slopes steeper than this slump.', '°'), fspec('rate', 'Rate', 0, 1, 0.01),
+      GRID_SPEC,
+    ],
+    defaults: () => ({ ...DEFAULT_THERMAL }),
     evaluate: async (inputs, p, env) => {
-      const before = inputs.height?.h ?? new Float32Array(env.frame.resolution ** 2);
-      const h = before.slice();
-      await thermalErosion(h, env.frame, p as unknown as ThermalParams, env.ctx);
+      const R = env.frame.resolution;
+      const before = inputs.height?.h ?? new Float32Array(R * R);
+      const { G, frame, cell } = simFrame(p, env);
+      // Material moves a cell an iteration at most: the reach in cells is the iterations.
+      const params = { iterations: Math.round(num(p.reach, DEFAULT_THERMAL.reach) / cell), talus: num(p.talus, DEFAULT_THERMAL.talus), rate: num(p.rate, DEFAULT_THERMAL.rate) };
+      const h = await onSimGrid(before, R, G, g => thermalErosion(g, frame, params, env.ctx));
       return { outputs: { height: plain(h) }, history: { kind: 'thermal', before, after: h } };
     },
   }),
@@ -115,16 +209,28 @@ export const EROSION_NODES: NodeType[] = [
     type: 'droplet', label: 'Hydraulic (droplets)', icon: 'droplet',
     description: 'Simulated raindrops cut channels and lay sediment down (feeds Wear and Deposits).',
     schema: [
-      fspec('density', 'Droplets', 0, 5000, 10, 'Droplets per 1000 cells.'), fspec('inertia', 'Inertia', 0, 0.95, 0.01), fspec('capacity', 'Capacity', 0, 16, 0.1),
+      fspec('density', 'Droplets', 0, 5000, 10, 'Droplets per 1000 cells of the simulation grid.'), fspec('inertia', 'Inertia', 0, 0.95, 0.01), fspec('capacity', 'Capacity', 0, 16, 0.1),
       fspec('minSlope', 'Min slope', 0, 0.2, 0.001), fspec('erosion', 'Erosion', 0, 1, 0.01), fspec('deposition', 'Deposition', 0, 1, 0.01),
-      fspec('evaporation', 'Evaporation', 0, 0.5, 0.001), fspec('gravity', 'Gravity', 0, 20, 0.1), ispec('lifetime', 'Lifetime', 1, 200), ispec('radius', 'Brush radius', 1, 8), ispec('seed', 'Seed offset', 0, 9999),
+      fspec('evaporation', 'Evaporation', 0, 0.5, 0.001), fspec('gravity', 'Gravity', 0, 20, 0.1),
+      fspec('travel', 'Travel', 1, 5000, 1, 'How far a droplet runs before it is spent.', 'm'),
+      fspec('brush', 'Brush radius', 1, 200, 0.5, 'How wide a droplet cuts.', 'm'),
+      ispec('seed', 'Seed offset', 0, 9999),
+      GRID_SPEC,
     ],
-    defaults: () => ({ density: 300, inertia: 0.05, capacity: 4, minSlope: 0.01, erosion: 0.3, deposition: 0.3, evaporation: 0.02, gravity: 4, lifetime: 40, radius: 3, seed: 7 }),
+    defaults: () => ({ ...DEFAULT_DROPLET }),
     evaluate: async (inputs, p, env) => {
-      const before = inputs.height?.h ?? new Float32Array(env.frame.resolution ** 2);
-      const h = before.slice();
-      const params = p as unknown as DropletParams;
-      await dropletErosion(h, env.frame, { ...params, seed: params.seed + env.seed * 1013 }, env.ctx);
+      const R = env.frame.resolution;
+      const before = inputs.height?.h ?? new Float32Array(R * R);
+      const { G, frame, cell } = simFrame(p, env);
+      const d = DEFAULT_DROPLET;
+      const params: DropletParams = {
+        density: num(p.density, d.density), inertia: num(p.inertia, d.inertia), capacity: num(p.capacity, d.capacity),
+        minSlope: num(p.minSlope, d.minSlope), erosion: num(p.erosion, d.erosion), deposition: num(p.deposition, d.deposition),
+        evaporation: num(p.evaporation, d.evaporation), gravity: num(p.gravity, d.gravity),
+        lifetime: inCells(p.travel, d.travel, cell), radius: inCells(p.brush, d.brush, cell),
+        seed: num(p.seed, d.seed) + env.seed * 1013,
+      };
+      const h = await onSimGrid(before, R, G, g => dropletErosion(g, frame, params, env.ctx));
       return { outputs: { height: plain(h) }, history: { kind: 'hydraulic', before, after: h } };
     },
   }),
@@ -132,16 +238,28 @@ export const EROSION_NODES: NodeType[] = [
     type: 'pipe', label: 'Hydraulic (pipes)', icon: 'pipe',
     description: 'Shallow-water erosion: rain flows, carries and drops sediment across the whole map (feeds Flow, Wetness, Wear, Deposits).',
     schema: [
-      ispec('iterations', 'Iterations', 0, 3000), fspec('rain', 'Rain', 0, 0.1, 0.0005), fspec('evaporation', 'Evaporation', 0, 0.5, 0.001),
+      fspec('reach', 'Reach', 0, 50000, 1, 'How far water runs over the simulation: a cell a step at most.', 'm'),
+      fspec('rain', 'Rain', 0, 0.1, 0.0005), fspec('evaporation', 'Evaporation', 0, 0.5, 0.001),
       fspec('capacity', 'Capacity', 0, 8, 0.01), fspec('dissolve', 'Dissolve', 0, 1, 0.01), fspec('deposit', 'Deposit', 0, 1, 0.01), fspec('dt', 'Time step', 0.005, 0.2, 0.001),
+      GRID_SPEC,
     ],
-    defaults: () => ({ iterations: 160, rain: 0.012, evaporation: 0.015, capacity: 1.2, dissolve: 0.3, deposit: 0.3, dt: 0.05 }),
+    defaults: () => ({ ...DEFAULT_PIPE }),
     evaluate: async (inputs, p, env) => {
-      const before = inputs.height?.h ?? new Float32Array(env.frame.resolution ** 2);
-      const h = before.slice();
-      const params = p as unknown as PipeParams;
+      const R = env.frame.resolution;
+      const before = inputs.height?.h ?? new Float32Array(R * R);
+      const { G, frame, cell } = simFrame(p, env);
+      const d = DEFAULT_PIPE;
+      const params: PipeParams = {
+        iterations: Math.round(num(p.reach, d.reach) / cell), rain: num(p.rain, d.rain), evaporation: num(p.evaporation, d.evaporation),
+        capacity: num(p.capacity, d.capacity), dissolve: num(p.dissolve, d.dissolve), deposit: num(p.deposit, d.deposit), dt: num(p.dt, d.dt),
+      };
       const gpu = env.pipeGpu;
-      const pipe = gpu ? await gpu(h, env.frame, params, env.ctx) : await pipeErosion(h, env.frame, params, env.ctx);
+      let masks: PipeMasks | null = null;
+      const h = await onSimGrid(before, R, G, async g => {
+        masks = gpu ? await gpu(g, frame, params, env.ctx) : await pipeErosion(g, frame, params, env.ctx);
+      });
+      const m = masks as unknown as PipeMasks;
+      const pipe = G === R ? m : { flow: fromSimGrid(m.flow, G, R), water: fromSimGrid(m.water, G, R) };
       return { outputs: { height: plain(h) }, history: { kind: 'hydraulic', before, after: h }, pipe, pipeBackend: gpu ? 'gpu' : 'cpu' };
     },
   }),

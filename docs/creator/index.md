@@ -11,7 +11,7 @@ left end goes back to the home page. A reload keeps the tool that was open; a ne
 
 | Tool | Makes | Exports |
 |---|---|---|
-| **[World Creator](world.md)** | Landscapes from landform layers and erosion, textured by rule-placed surfaces, with the sea and lakes | A 16-bit heightmap (PNG, RAW, optional EXR), RGBA splatmaps and per-surface weight maps, data masks, and a JSON manifest |
+| **[World Creator](world.md)** | Landscapes from a node graph of shapes, rivers and erosion, textured by rule-placed surfaces, with the sea and lakes | A 16-bit heightmap (PNG, RAW, optional EXR), RGBA splatmaps and per-surface weight maps, data masks, and a JSON manifest |
 | **FX Creator** | Fire, smoke and explosions from a volumetric fluid simulation, or liquids (splashes, pours) from a particle one | A tileset flipbook (RGBA atlas PNG), a `.tileset` asset, and a JSON sidecar with the particle flipbook settings; for a liquid, its floor decal (an animated colour, normal and ORM atlas) |
 | **Foliage Creator** | Grass clumps, bushes, trees and rocks from parameters, each with an LOD ladder and its materials | One `.glb` per level (textures embedded), impostor atlases for trees, and a JSON sidecar with the LOD distances |
 | **[Motion Creator](motion.md)** | Character animation from a few key poses: eased in-betweens, overlapping action, IK-planted hands and feet | An `.anim.json` clip with its skeleton, and a JSON sidecar |
