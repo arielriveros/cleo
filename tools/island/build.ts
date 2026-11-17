@@ -432,8 +432,11 @@ const waterJson = async (n: WaterVolumeNode, over: any) => {
 const waterGroup = {
   id: id('water'), name: 'Water', type: 'node', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], spawnOnStart: true,
   children: [
+    // A fresh breeze over the strait: 12 m/s across 10 km of open water raises a young sea of short, steep,
+    // choppy waves. Offshore the wind blows stronger than the Wind node's breeze over the land, so the
+    // sea keeps its own rather than following it.
     await waterJson(ocean, {
-      density: 1025, windSpeed: 7, waveDirection: 25, choppiness: 0.55, shoreFade: 10, followWind: true,
+      density: 1025, windSpeed: 12, fetch: 10000, waveDirection: 25, choppiness: 0.8, shoreFade: 10, followWind: false,
       waterMaterialId: OCEAN_MAT, waterMaterial: oceanMatAsset.material,
     }),
     ...await Promise.all(lakeNodes.map(n => waterJson(n, { ...LAKE_WATER, ...(bakes[n.id] ? { bakeId: bakes[n.id] } : {}) }))),

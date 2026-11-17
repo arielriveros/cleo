@@ -1,12 +1,12 @@
 import type { BuoyancyVolume, WaterColumnSample } from './buoyancy';
-import { gerstnerSurfaceAt, type GerstnerSurface, type GerstnerWave } from './water/gerstner';
+import { PHYSICS_WAVE_CELL, waveCrest, waveReach, waveSurfaceAt, type WaterWave, type WaveSurface } from './water/waves';
 import { waterColumnAt, type ResolvedWaterShape, type WaterColumn } from './water/waterColumn';
 import { addSurf, surfOf, surfTravelTime, type SurfWave } from './water/surf';
 
 // A water node as plain data, and the surface it waves. Shared by the scene's WaterVolumeNode and the
 // physics worker (physics/worker/), which buoys bodies in a thread that has no scene: both build the
 // BuoyancyVolume the solver reads from the same numbers with the same formula, so a crate floats the same
-// on either side, and on the wave the renderer draws (the Gerstner sum here is the twin of the shader's).
+// on either side, and on the wave the renderer draws (water/waves.ts here is the twin of the shader's).
 
 /** Everything buoyancy needs from one water node, cloneable across threads. */
 export interface WaterSpec {
@@ -30,8 +30,8 @@ export interface WaterSpec {
     waveFrequency: number;
     /** The body in world space (water/waterShapes.ts). Empty: the box `min`..`max` itself. */
     shapes?: ResolvedWaterShape[];
-    /** The Gerstner waves on top of the swell, and the factor on their height (wind strength). */
-    waves?: GerstnerWave[];
+    /** The waves on top of the swell (water/waves.ts), and the factor on their height (wind strength). */
+    waves?: WaterWave[];
     waveScale?: number;
     /** How fast the waves run against their natural pace (their clock is multiplied by it). Default 1. */
     waveSpeed?: number;
@@ -114,15 +114,15 @@ export function waterSurfaceHeight(spec: Pick<WaterSpec, 'max' | 'waveAmplitude'
     return level + spec.waveAmplitude * Math.sin(swellPhase(spec, x, z, time * (spec.waveSpeed ?? 1)));
 }
 
-const _surface: GerstnerSurface = { height: 0, vx: 0, vy: 0, vz: 0, k: 0 };
+const _surface: WaveSurface = { height: 0, vx: 0, vy: 0, vz: 0, k: 0 };
 
 /**
  * The waves over a column `edge` metres from its shore and `depth` deep: their height (into `out.height`),
  * the water's motion there and the wavenumber it fades with below. The renderer's vertex stage does the
- * same: shoaling over `shoreFade`, and no taller than 0.4 of the depth.
+ * same: shoaling over `shoreFade`, and a tall crest no taller than 0.4 of the depth.
  */
 export function waveAt(spec: WaterSpec, x: number, z: number, time: number, edge: number, factor: number,
-                       depth: number, out: GerstnerSurface): GerstnerSurface {
+                       depth: number, out: WaveSurface): WaveSurface {
     const speed = spec.waveSpeed ?? 1;
     const t = time * speed;
     out.height = 0; out.vx = 0; out.vy = 0; out.vz = 0; out.k = 0;
@@ -130,11 +130,10 @@ export function waveAt(spec: WaterSpec, x: number, z: number, time: number, edge
     const heightScale = spec.waveScale ?? 1;
     if (waves && waves.length && heightScale > 0) {
         const fade = spec.shoreFade && spec.shoreFade > 0 ? Math.min(1, Math.max(0, edge / spec.shoreFade)) : 1;
-        let sum = 0;
-        for (const w of waves) sum += w.amplitude * heightScale;
-        const cap = Number.isFinite(depth) ? Math.min(1, Math.max(0, 0.4 * depth / Math.max(sum, 1e-3))) : 1;
+        const crest = waveCrest(waves, heightScale);
+        const cap = Number.isFinite(depth) ? Math.min(1, Math.max(0, 0.4 * depth / Math.max(crest, 1e-3))) : 1;
         const scale = heightScale * factor * fade * fade * (3 - 2 * fade) * cap;
-        if (scale > 0) gerstnerSurfaceAt(waves, x, z, t, scale, speed, out);
+        if (scale > 0) waveSurfaceAt(waves, x, z, t, scale, speed, PHYSICS_WAVE_CELL, out);
     }
     if (spec.waveAmplitude > 0) {
         const ph = swellPhase(spec, x, z, t);
@@ -227,7 +226,7 @@ export function buoyancyVolumeFromSpec(spec: WaterSpec, time: number): BuoyancyV
     const sample: WaterColumnSample = { surface: 0, floor: 0, flowX: 0, flowZ: 0, rest: 0, waveVX: 0, waveVY: 0, waveVZ: 0, waveK: 0 };
     // Waves can lift the surface above the resting box: widen the reject by their reach.
     let reach = Math.max(0, spec.waveAmplitude);
-    for (const w of spec.waves ?? []) reach += w.amplitude * (spec.waveScale ?? 1);
+    reach += waveReach(spec.waves ?? [], spec.waveScale ?? 1);
     // The surf over a beach stands taller still (water/surf.ts: at most 1.41 times its amplitude, in sets).
     if (spec.shoreGrid && spec.waves && spec.waves.length) reach += 1.5 * surfOf(spec.waves, spec.waveScale ?? 1, _surf).amplitude;
     return {

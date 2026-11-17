@@ -1,6 +1,6 @@
-import type { GerstnerSurface, GerstnerWave } from './gerstner';
+import { waterNoise as surfNoise, waveOmega, waveSigma, type WaterWave, type WaveSurface } from './waves';
 
-// SURF: the sea's waves as they run in over a beach. Offshore the Gerstner sum (gerstner.ts) is the sea; over
+// SURF: the sea's waves as they run in over a beach. Offshore the wave set (waves.ts) is the sea; over
 // the last few metres of depth it is shaved off (waterSurface.ts waveAt: no taller than 0.4 of the depth) and
 // this takes over: one train of breakers at the sea's own period, slowed by the shallows so its crests bunch
 // up and follow the depth contours as real surf does (refraction), growing as the water shoals (Green's law,
@@ -29,17 +29,17 @@ export interface SurfWave {
 }
 
 /** The surf of a sea of `waves` at `heightScale` (the wind's share of their height). */
-export function surfOf(waves: readonly GerstnerWave[], heightScale: number, out: SurfWave = { omega: 0, amplitude: 0 }): SurfWave {
+export function surfOf(waves: readonly WaterWave[], heightScale: number, out: SurfWave = { omega: 0, amplitude: 0 }): SurfWave {
     let e = 0, eo = 0;
     for (let i = 0; i < waves.length; i++) {
         const w = waves[i];
         const a = w.amplitude * heightScale;
-        const omega = Math.sqrt(G * 6.283185307179586 / Math.max(0.01, w.wavelength));
+        const omega = waveOmega(6.283185307179586 / Math.max(0.01, w.wavelength));
         e += a * a; eo += a * a * omega;
     }
     out.omega = e > 0 ? eo / e : 0;
-    // Significant height 4 sqrt(m0), m0 = sum a^2 / 2: half of it is sqrt(2 sum a^2).
-    out.amplitude = Math.sqrt(2 * e);
+    // Half the significant height (4 sigma).
+    out.amplitude = 2 * waveSigma(waves, heightScale);
     return out;
 }
 
@@ -48,22 +48,8 @@ export function surfTravelTime(edge: number, depth: number): number {
     return 2 * Math.max(edge, 0) / Math.sqrt(G * Math.max(depth, SURF_MIN_DEPTH));
 }
 
-// water.wgsl hash12 / valueNoise, in doubles: the noise only shifts the breakers' phase and height a little
-// along the shore, so the last float bits the GPU drops do not matter.
-const fract = (v: number) => v - Math.floor(v);
-function hash12(x: number, y: number): number {
-    let p0 = fract(x * 0.1031), p1 = fract(y * 0.1031), p2 = fract(x * 0.1031);
-    const d = p0 * (p1 + 33.33) + p1 * (p2 + 33.33) + p2 * (p0 + 33.33);
-    p0 += d; p1 += d; p2 += d;
-    return fract((p0 + p1) * p2);
-}
-export function surfNoise(x: number, y: number): number {
-    const ix = Math.floor(x), iy = Math.floor(y);
-    const fx = x - ix, fy = y - iy;
-    const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
-    const a = hash12(ix, iy), b = hash12(ix + 1, iy), c = hash12(ix, iy + 1), d = hash12(ix + 1, iy + 1);
-    return (a + (b - a) * ux) + ((c + (d - c) * ux) - (a + (b - a) * ux)) * uy;
-}
+// The breakers' phase and height wander a little along the shore by waves.ts waterNoise (water.wgsl
+// valueNoise), the same noise the shader reads.
 
 /** What the surf does at a point (see surfAt). */
 export interface SurfSample {
@@ -124,10 +110,10 @@ const _sample: SurfSample = { height: 0, rate: 0, slopeX: 0, slopeZ: 0, breaking
 /**
  * The surf added to the waves at a point (waterSurface.ts waterSpecColumn): its height, and the water's
  * motion in it, rising and falling and, in shallow water, running with the crest toward the shore at
- * height * sqrt(g / depth) (long-wave particle speed). `speed` is the waves' clock rate, as in gerstnerSurfaceAt.
+ * height * sqrt(g / depth) (long-wave particle speed). `speed` is the waves' clock rate, as in waveSurfaceAt.
  */
 export function addSurf(s: SurfWave, x: number, z: number, t: number, speed: number, edge: number, depth: number,
-                        tx: number, tz: number, out: GerstnerSurface): void {
+                        tx: number, tz: number, out: WaveSurface): void {
     const r = surfAt(s, x, z, t, edge, depth, tx, tz, _sample);
     if (r.height === 0 && r.rate === 0) return;
     out.height += r.height;

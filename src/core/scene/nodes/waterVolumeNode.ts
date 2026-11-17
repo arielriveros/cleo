@@ -1,7 +1,7 @@
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { finiteOr } from "../../math";
-import { gerstnerWavesForWind, type GerstnerWave } from "../../../physics/water/gerstner";
+import { wavesForWind, type WaterWave } from "../../../physics/water/waves";
 import { windFieldClock, WIND_REFERENCE_SPEED } from "../../wind/windField";
 /** What the water reads back from a body it buoyed: where it is and how it moves. */
 type FloatingBody = { position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number } };
@@ -47,15 +47,21 @@ export interface WaterVolumeOptions {
     /** Hz of that bob. */
     waveFrequency?: number;
     /**
-     * Wind (m/s) the Gerstner waves are shaped for: their length, height and speed grow with it and with
-     * how much open water the shapes give it. 0 = no waves, only the swell.
+     * Wind (m/s) the waves are shaped for: their length, height and roughness grow with it and with how
+     * much open water the body gives it. 0 = no waves, only the swell.
      */
     windSpeed?: number;
+    /**
+     * Metres of open water the wind has blown across (its fetch): the shorter, the shorter, steeper and
+     * choppier the young sea it raises. 0 = what the body gives it (an endless ocean: the open sea, fully
+     * developed).
+     */
+    fetch?: number;
     /** Degrees the waves travel toward (0 = +Z, 90 = +X). */
     waveDirection?: number;
     /** Multiplies wave height. */
     waveScale?: number;
-    /** 0..1: rounded swells to sharp crests. */
+    /** 0..1: how hard the long waves crowd the short ones onto their crests (0 none: an even, glassy chop). */
     choppiness?: number;
     /**
      * 0..2: how fast the waves and ripples run against their natural (deep-water) pace. 1 is real; below it
@@ -137,6 +143,7 @@ export class WaterVolumeNode extends Node {
     private _waveAmplitude: number;
     private _waveFrequency: number;
     private _windSpeed: number;
+    private _fetch: number;
     private _waveDirection: number;
     private _waveScale: number;
     private _choppiness: number;
@@ -159,7 +166,7 @@ export class WaterVolumeNode extends Node {
     private _version = 0;
     private _resolved: ResolvedWaterShape | null = null;
     private _resolvedKey: string | null = null;
-    private _waves: GerstnerWave[] | null = null;
+    private _waves: WaterWave[] | null = null;
 
     // ---- runtime ----
     /** The submerged fraction of every body the physics buoyed since the last update (max over substeps). */
@@ -181,6 +188,7 @@ export class WaterVolumeNode extends Node {
         this._waveAmplitude = Math.max(0, finiteOr(options.waveAmplitude, 0.03));
         this._waveFrequency = Math.max(0, finiteOr(options.waveFrequency, 0.6));
         this._windSpeed = Math.max(0, finiteOr(options.windSpeed, 0));
+        this._fetch = Math.max(0, finiteOr(options.fetch, 0));
         this._waveDirection = finiteOr(options.waveDirection, 0);
         this._waveScale = Math.max(0, finiteOr(options.waveScale, 1));
         this._choppiness = Math.min(1, Math.max(0, finiteOr(options.choppiness, 0.5)));
@@ -285,6 +293,8 @@ export class WaterVolumeNode extends Node {
     public set waveFrequency(v: number) { this._waveFrequency = Math.max(0, finiteOr(v, this._waveFrequency)); this._notifyChange('component', 'waveFrequency'); }
     public get windSpeed(): number { return this._windSpeed; }
     public set windSpeed(v: number) { this._windSpeed = Math.max(0, finiteOr(v, this._windSpeed)); this._bodyChanged('windSpeed'); }
+    public get fetch(): number { return this._fetch; }
+    public set fetch(v: number) { this._fetch = Math.max(0, finiteOr(v, this._fetch)); this._bodyChanged('fetch'); }
     public get waveDirection(): number { return this._waveDirection; }
     public set waveDirection(v: number) { this._waveDirection = finiteOr(v, this._waveDirection); this._bodyChanged('waveDirection'); }
     public get waveScale(): number { return this._waveScale; }
@@ -452,15 +462,15 @@ export class WaterVolumeNode extends Node {
     }
 
     /**
-     * The Gerstner waves the surface is drawn with and bodies ride: shaped by {@link windSpeed} over the
-     * open water this body gives (fetch). Empty when the wind is 0.
+     * The waves the surface is drawn with and bodies ride (physics/water/waves.ts): shaped by
+     * {@link windSpeed} over {@link fetch} metres of open water, or what this body gives. Empty when the wind is 0.
      */
-    public waves(): GerstnerWave[] {
+    public waves(): WaterWave[] {
         const r = this.resolved();
         if (!this._waves) {
-            const fetch = r ? waterShapeFetch(r) : 0;
+            const fetch = this._fetch > 0 ? this._fetch : r ? waterShapeFetch(r) : 0;
             this._waves = this._windSpeed > 0 && this._waveScale > 0
-                ? gerstnerWavesForWind(this._windSpeed, this._waveDirection, fetch || 10,
+                ? wavesForWind(this._windSpeed, this._waveDirection, fetch || 10,
                     { scale: this._waveScale, choppiness: this._choppiness, seed: 0 })
                 : [];
         }
@@ -740,7 +750,8 @@ export class WaterVolumeNode extends Node {
                 ...WaterVolumeNode._bodyPayload(this._water), density: this._density,
                 linearDrag: this._linearDrag, angularDrag: this._angularDrag,
                 waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
-                windSpeed: this._windSpeed, waveDirection: this._waveDirection, waveScale: this._waveScale,
+                windSpeed: this._windSpeed, ...(this._fetch > 0 ? { fetch: this._fetch } : {}),
+                waveDirection: this._waveDirection, waveScale: this._waveScale,
                 choppiness: this._choppiness, waveSpeed: this._waveSpeed, shoreFade: this._shoreFade, currents: this._currents,
                 ...(this._followWind ? { followWind: true } : {}),
                 ...(this._waterMaterial ? { waterMaterial: this._waterMaterial.serialize() } : {}),

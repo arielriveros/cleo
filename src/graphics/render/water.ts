@@ -20,7 +20,7 @@ import { sceneGround } from '../../water/ground';
 import { decodeWaterBake } from '../../water/bake/waterBakeFormat';
 import { GiBakeRegistry } from './gi/giBakeRegistry';
 import { DEFAULT_WATER_LOOK, type WaterLook } from '../../water/waterLook';
-import { GERSTNER_MAX_WAVES, type GerstnerWave } from '../../physics/water/gerstner';
+import { WAVE_MAX, WAVE_SLOPE_VARIANCE, rippleShare, waveCrest, waveOmega, waveReach, waveSigma, type WaterWave } from '../../physics/water/waves';
 import { waterTime } from '../../physics/water/waterClock';
 import { surfOf } from '../../physics/water/surf';
 import { createWindSample, sampleWindField } from '../../core/wind/windField';
@@ -43,10 +43,6 @@ export interface WaterPassesHost {
 const TILE_LODS = [64, 32, 16, 8];
 /** Metres the skirt under each tile's edge hangs, covering cracks between tiles of different density. */
 const SKIRT = 0.3;
-/** Ripple trains at most (the shader's MAX_RIPPLES), each this much shorter than the last, down to the shortest. */
-const RIPPLE_TRAINS = 16;
-const RIPPLE_RATIO = 0.72;
-const RIPPLE_SHORTEST = 0.05;
 /** Seconds between rebuilds of a node's water info while it is being edited (a gizmo drag). */
 const REBUILD_INTERVAL = 0.2;
 
@@ -158,13 +154,13 @@ export class WaterPasses {
             const waves = node.waves();
             const oceanLevel = body && body.type === 'ocean' && body.endless ? body.level : null;
             if (!info && oceanLevel === null) continue;
-            // The waves' reach: how far they lift the surface (the culling box's height), and sideways.
+            // The waves' reach: how far they can lift the surface (the culling box's height). They move it
+            // up and down only, so nothing sideways.
             const heightScale = node.waveWindScale();
-            let up = node.waveAmplitude, side = 0;
-            for (const w of waves) { up += w.amplitude * heightScale; side += w.steepness * w.wavelength / (2 * Math.PI * waves.length); }
+            const up = node.waveAmplitude + waveReach(waves, heightScale), side = 0;
             // An ocean's surf stands taller than its waves over the beach.
-            if (oceanLevel !== null && info) up += 1.5 * surfOf(waves, heightScale, this._surf).amplitude;
-            const tiles = this._tilesOf(node, info, oceanLevel, up, side);
+            const surfUp = oceanLevel !== null && info ? 1.5 * surfOf(waves, heightScale, this._surf).amplitude : 0;
+            const tiles = this._tilesOf(node, info, oceanLevel, up + surfUp, side);
             if (!tiles.length) continue;
             // The waves' clock: the physics' drawn time while the game runs (so floaters ride what is drawn),
             // else the frame's; the node's wave speed applied, as physics applies it.
@@ -225,7 +221,7 @@ export class WaterPasses {
     // ---- per node ---------------------------------------------------------------------------------
 
     private _nodeUniforms(node: WaterVolumeNode, info: WaterInfo | null, oceanLevel: number | null, look: WaterLook,
-                          waves: GerstnerWave[], t: number, scene: Scene): void {
+                          waves: WaterWave[], t: number, scene: Scene): void {
         const sm = this._shaderManager;
         const origin = info ? [info.originX, info.originZ, info.cell, 1] : [0, 0, 1, 0];
         const size = info ? [info.nx, info.nz, info.minY, 0] : [1, 1, 0, 0];
@@ -236,24 +232,30 @@ export class WaterPasses {
         const ocean = [oceanLevel ?? 0, oceanLevel !== null ? 1 : 0, 0, 0];
         sm.setUniform('u_vOcean', ocean);
         sm.setUniform('u_fOcean', ocean);
-        const dir = this._waveDir, phase = this._wavePhase;
-        dir.fill(0); phase.fill(0);
-        const n = Math.min(GERSTNER_MAX_WAVES, waves.length);
-        let amplitude = 0;
+        // The waves (physics/water/waves.ts), longest first, with what every pixel would otherwise work out
+        // for each of them: heading, amplitude (the look's ripple strength folded in), drag; wavenumber,
+        // length, frequency, and the slope variance of it and every shorter wave (what a pixel too coarse to
+        // draw the rest adds to its roughness, all at once). Their phases follow from their index, on both sides.
+        const packed = this._waves, packedK = this._waveK;
+        packed.fill(0); packedK.fill(0);
+        const n = Math.min(WAVE_MAX, waves.length);
         for (let i = 0; i < n; i++) {
             const w = waves[i];
-            dir.set([w.dirX, w.dirZ, w.amplitude, w.wavelength], i * 4);
-            phase.set([w.steepness, w.phase, 0, 0], i * 4);
-            amplitude += w.amplitude;
+            const k = 2 * Math.PI / Math.max(0.01, w.wavelength);
+            const a = w.amplitude * rippleShare(w.wavelength, look.detailStrength);
+            packed.set([w.dirX, w.dirZ, a, w.drag], i * 4);
+            packedK.set([k, w.wavelength, waveOmega(k), (k * a) ** 2 * WAVE_SLOPE_VARIANCE], i * 4);
         }
+        for (let i = n - 2; i >= 0; i--) packedK[i * 4 + 3] += packedK[(i + 1) * 4 + 3];
         const heightScale = node.waveWindScale();
-        sm.setUniform('u_waveDir', dir);
-        sm.setUniform('u_wavePhase', phase);
+        sm.setUniform('u_waves', packed);
+        sm.setUniform('u_waveK', packedK);
         sm.setUniform('u_waveParams', [n, t, heightScale, node.shoreFade]);
-        sm.setUniform('u_fWaveDir', dir);
-        sm.setUniform('u_fWavePhase', phase);
-        sm.setUniform('u_fWaveParams', [n, t, heightScale, node.shoreFade]);
-        sm.setUniform('u_swell', [node.waveAmplitude, node.waveFrequency, amplitude * heightScale, 0]);
+        sm.setUniform('u_fWaves', packed);
+        sm.setUniform('u_fWaveK', packedK);
+        sm.setUniform('u_fWaveParams', [n, t, heightScale, waveSigma(waves)]);
+        // The swell, and the crest the shallows cap the waves against.
+        sm.setUniform('u_swell', [node.waveAmplitude, node.waveFrequency, waveCrest(waves, heightScale), 0]);
         // The surf over the beach (physics/water/surf.ts): an ocean with a shore grid has it, from its waves.
         const surf = surfOf(waves, heightScale, this._surf);
         const surfOn = oceanLevel !== null && !!info ? 1 : 0;
@@ -287,34 +289,12 @@ export class WaterPasses {
         const under = this._cameraUnder(node);
         sm.setUniform('u_misc', [this._view.preExposure, 0, under ? 1 : 0, 0]);
 
-        // The ripples: the spectrum carried on below the shortest Gerstner wave down to a few centimetres,
-        // their slope variance what Cox and Munk measured on a sea under this wind, less what the waves
-        // already have. The wind is the scene's where it blows here, else the wind the waves were shaped for.
-        const wind = field.active && speed > 0.5 ? speed * look.windResponse : node.windSpeed;
-        const longest = n ? Math.min(...waves.slice(0, n).map(w => w.wavelength)) * 0.75 : 2;
-        const count = Math.max(1, Math.min(RIPPLE_TRAINS, Math.floor(Math.log(RIPPLE_SHORTEST / Math.max(longest, RIPPLE_SHORTEST * 1.01)) / Math.log(RIPPLE_RATIO)) + 1));
-        let wavesVariance = 0;
-        for (let i = 0; i < n; i++) {
-            const k = 2 * Math.PI / Math.max(0.01, waves[i].wavelength);
-            wavesVariance += 0.5 * Math.pow(k * waves[i].amplitude * heightScale, 2);
-        }
-        const coxMunk = 0.003 + 0.00512 * Math.max(0, wind);
-        const rippleVariance = Math.max(coxMunk - wavesVariance, 0.002);
-        sm.setUniform('u_ripple', [Math.max(longest, RIPPLE_SHORTEST), Math.sqrt(2 * rippleVariance / count), RIPPLE_RATIO, count]);
-        const heading = speed > 0.5 && field.active ? [wx / speed, wz / speed] : WaterPasses._heading(node.waveDirection);
-        sm.setUniform('u_rippleDir', [heading[0], heading[1], 0, 0]);
         void scene;
     }
 
     private readonly _surf = { omega: 0, amplitude: 0 };
-    private readonly _waveDir = new Float32Array(GERSTNER_MAX_WAVES * 4);
-    private readonly _wavePhase = new Float32Array(GERSTNER_MAX_WAVES * 4);
-
-    /** Unit x, z of a heading in degrees (0 = +Z, 90 = +X), as the waves' direction is given. */
-    private static _heading(degrees: number): [number, number] {
-        const a = degrees * Math.PI / 180;
-        return [Math.sin(a), Math.cos(a)];
-    }
+    private readonly _waves = new Float32Array(WAVE_MAX * 4);
+    private readonly _waveK = new Float32Array(WAVE_MAX * 4);
 
     /** Whether the camera is below this node's surface (and so sees it from underneath). */
     private _cameraUnder(node: WaterVolumeNode): boolean {

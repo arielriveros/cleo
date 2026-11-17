@@ -279,8 +279,8 @@ function WaterSurface({ node, changed }: { node: WaterVolumeNode; changed: () =>
         {slider('roughness', 'Roughness', 'How blurred the reflections are: 0 a mirror.', 0, 1, 0.01)}
         {slider('screenReflections', 'Screen reflections', 'How much the screen-space reflection of the scene is used over the sky.', 0, 1, 0.05)}
         {slider('refraction', 'Refraction', 'How far what is under the surface bends with the waves.', 0, 2, 0.05)}
-        {slider('detailStrength', 'Ripples', 'Strength of the small ripples on top of the waves.', 0, 2, 0.05)}
-        {slider('detailScale', 'Ripple size', 'Metres across the small ripples.', 0.1, 10, 0.1)}
+        {slider('detailStrength', 'Ripples', 'Strength of the waves under a metre long: the ripples the wind raises on the waves. 1 is the wind\u2019s own.', 0, 2, 0.05)}
+        {slider('detailScale', 'Foam size', 'Metres across the bubble web the foam is drawn with.', 0.1, 10, 0.1)}
         {slider('flowStrength', 'Flow', 'How far the ripples and foam ride the current.', 0, 2, 0.05)}
         {color('foamColor', 'Foam colour', 'The colour of the foam.')}
         {slider('shoreFoam', 'Shore foam', 'Metres of foam along the shore and in thin water.', 0, 10, 0.1)}
@@ -428,13 +428,16 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
             <PropertyRow label='Wind speed' hint='m/s the waves are shaped for: longer, taller, faster waves as it rises, limited by how much open water the body gives it. 0: no waves.' divider>
               <NumberInput value={node.windSpeed} min={0} step={0.5} onChange={v => set('windSpeed', v)} />
             </PropertyRow>
+            <PropertyRow label='Fetch' hint='Metres of open water the wind has crossed: short fetch raises a young sea of short, steep, choppy waves; long, the long swell of the open sea. 0: what the body gives (an endless ocean is the open sea).' divider>
+              <NumberInput value={node.fetch} min={0} step={500} onChange={v => set('fetch', v)} />
+            </PropertyRow>
             <PropertyRow label='Direction' hint='Degrees the waves travel toward: 0 is +Z, 90 is +X.' divider>
               <NumberInput value={node.waveDirection} step={5} onChange={v => set('waveDirection', v)} />
             </PropertyRow>
             <PropertyRow label='Height' hint='Multiplies the wave height the wind gives.' divider>
               <Slider value={node.waveScale} min={0} max={3} step={0.05} onChange={v => set('waveScale', v)} />
             </PropertyRow>
-            <PropertyRow label='Choppiness' hint='Rounded swells (0) to sharp crests (1).' divider>
+            <PropertyRow label='Choppiness' hint='How hard the long waves crowd the short ones onto their crests: 0 an even chop, 1 the small waves bunched on every crest.' divider>
               <Slider value={node.choppiness} min={0} max={1} step={0.05} onChange={v => set('choppiness', v)} />
             </PropertyRow>
             <PropertyRow label='Wave speed' hint='How fast the waves and ripples run against their natural pace: 1 is real. Floating bodies follow it.' divider>

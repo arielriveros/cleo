@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { surfAt, surfOf, surfTravelTime, type SurfSample, type SurfWave } from '../src/physics/water/surf';
-import { gerstnerWavesForWind } from '../src/physics/water/gerstner';
+import { seaState, waveOmega, wavesForWind } from '../src/physics/water/waves';
 
 // The surf over an ocean beach (physics/water/surf.ts, twin of water.wgsl surfAt): breakers at the sea's
 // period moving in at the shallow-water speed, growing as the water shoals, breaking at 0.78 of the depth.
@@ -22,12 +22,10 @@ function beach(s: SurfWave, slope: number) {
 
 describe('surf', () => {
     it('takes the sea’s energy-weighted period and half its significant height', () => {
-        const waves = gerstnerWavesForWind(8, 90, Infinity);
+        const waves = wavesForWind(8, 90, Infinity);
         const s = surfOf(waves, 1);
-        let e = 0;
-        for (const w of waves) e += w.amplitude * w.amplitude;
-        expect(s.amplitude).toBeCloseTo(Math.sqrt(2 * e), 6);
-        const omegas = waves.map(w => Math.sqrt(9.81 * 2 * Math.PI / w.wavelength));
+        expect(s.amplitude).toBeCloseTo(seaState(8, Infinity).hs / 2, 6);
+        const omegas = waves.map(w => waveOmega(2 * Math.PI / w.wavelength));
         expect(s.omega).toBeGreaterThan(Math.min(...omegas));
         expect(s.omega).toBeLessThan(Math.max(...omegas));
         expect(surfOf(waves, 0).amplitude).toBe(0);

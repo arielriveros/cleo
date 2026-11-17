@@ -24,11 +24,11 @@ export interface WaterLook {
     screenReflections: number;
     /** Metres: how far the refraction bends what is seen through the surface. */
     refraction: number;
-    /** 0..2: strength of the small ripples on top of the waves. */
+    /** 0..2: strength of the waves under a metre long, the ripples on top of the waves (physics never feels them). */
     detailStrength: number;
-    /** Metres: size of those ripples. */
+    /** Metres: size of the bubble web the foam is drawn with. */
     detailScale: number;
-    /** 0..2: how far the ripples ride the current (rivers). */
+    /** 0..2: how far the waves and foam ride the current (rivers). */
     flowStrength: number;
     /** Linear RGB of foam. */
     foamColor: [number, number, number];

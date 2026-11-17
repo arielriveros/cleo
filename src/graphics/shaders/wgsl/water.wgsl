@@ -2,8 +2,10 @@
 //
 // One tile of the node's surface per draw: a grid in 0..1 (x, z) placed over `u_tile`, its height read
 // from the node's WATER INFO (water/waterInfo.ts: resting surface, flow, shore distance, wave share, foam,
-// bed) and lifted by the node's Gerstner waves, the same sum physics/water/gerstner.ts evaluates on the
-// CPU, so a floating body rides exactly this surface. Vertices with y = -1 are the tile's SKIRT, hung
+// bed) and lifted by the node's waves, the same sum physics/water/waves.ts evaluates on the CPU, so a
+// floating body rides exactly this surface. The waves are afl_ext's (Shadertoy MdXyzX, MIT licence, see
+// THIRD_PARTY_NOTICES.md): sharp-crested exp(sin) waves in scattered directions, each dragging the shorter
+// ones onto its crests, their lengths, heights and slopes those of the wind's sea (waves.ts). Vertices with y = -1 are the tile's SKIRT, hung
 // below the edge so neighbouring tiles of different density never show a crack. An endless ocean's tiles
 // are a CDLOD quadtree (water/oceanLod.ts): their odd vertices MORPH onto the next level's grid with
 // distance, so levels meet without cracks and need no skirt, and they reach the horizon (pinned inside
@@ -11,11 +13,11 @@
 //
 // LEVEL OF DETAIL, as GPU Gems' "Effective Water Simulation" (ch. 1) and Bruneton, Neyret & Holzschuch
 // ("Real-time Realistic Ocean Lighting", 2010) do it: a wave moves the mesh only where the mesh has the
-// vertices to draw it (two to four per wavelength); the normal is worked out per pixel from the same waves
-// plus a train of small ripples continuing the spectrum, each faded out where a pixel no longer resolves
-// it; and the slope variance faded out is not lost but becomes roughness, so a distant sea turns from
-// sharp glints into the broad glitter path a real one has. The ripples' slope variance follows Cox and
-// Munk's measured wind sea (0.003 + 0.00512 per m/s of wind).
+// vertices to draw it (two to four per wavelength); the normal is worked out per pixel from the same waves,
+// down to the capillary ripples, each faded out where a pixel no longer resolves it; and the slope variance
+// faded out is not lost but becomes roughness, so a distant sea turns from sharp glints into the broad
+// glitter path a real one has. The set's slope variance is Cox and Munk's measured wind sea (0.003 +
+// 0.00512 per m/s of wind).
 //
 // Shading is single-layer water: what is under the surface comes from the opaque scene's colour copy
 // (refracted), dimmed and tinted by Beer-Lambert absorption over the true thickness of water the view ray
@@ -29,8 +31,12 @@
 // No implicit derivatives (every fetch is explicit-level), so the module translates to GLSL as it is.
 
 const PI: f32 = 3.14159265;
-const MAX_WAVES: i32 = 8;
-const MAX_RIPPLES: i32 = 16;
+const MAX_WAVES: i32 = 40;
+// physics/water/waves.ts: the mean of exp(sin - 1), and the mean square of its derivative.
+const WAVE_MEAN: f32 = 0.46575961;
+const WAVE_SLOPE_VARIANCE: f32 = 0.10763481;
+// waves.ts WAVE_BEND: radians a crest is bent by across the noise's 0..1.
+const WAVE_BEND: f32 = 1.6;
 const MAX_REFLECTION_LOD: f32 = 4.0;
 
 #include "./chunks/shadows.wgsl"
@@ -58,10 +64,10 @@ struct WaterVertexUniforms {
     u_vInfoOrigin: vec4<f32>,     // origin x, origin z, cell (m), 1 = has an info grid
     u_vInfoSize: vec4<f32>,       // cells x, cells z, height base (m: the grid's heights are stored above it)
     u_vOcean: vec4<f32>,          // level, 1 = an endless ocean (its grid only says where the shore is)
-    u_waveDir: array<vec4<f32>, 8>,    // dir x, dir z, amplitude (m), wavelength (m)
-    u_wavePhase: array<vec4<f32>, 8>,  // steepness, phase
-    u_waveParams: vec4<f32>,      // count, time (s, wave speed applied), height scale, shore fade (m)
-    u_swell: vec4<f32>,           // amplitude (m), frequency (Hz), summed wave amplitude (m)
+    u_waves: array<vec4<f32>, 40>,     // heading x, z, amplitude (m, the look's ripples folded in), drag; longest first
+    u_waveK: array<vec4<f32>, 40>,     // wavenumber (rad/m), length (m), frequency (rad/s), slope variance of it and all shorter
+    u_waveParams: vec4<f32>,      // count, time (s, wave speed applied), height scale, shore fade
+    u_swell: vec4<f32>,           // amplitude (m), frequency (Hz), a tall crest of the waves (m)
     u_vCamera: vec4<f32>,         // camera position
     u_vSurf: vec4<f32>,           // surf: frequency (rad/s), amplitude (m), 1 = on (an ocean with a shore grid)
 };
@@ -74,7 +80,7 @@ struct WaterFragmentUniforms {
     u_absorption: vec4<f32>,      // rgb per metre, roughness
     u_foamColor: vec4<f32>,       // rgb, shore foam width (m)
     u_foamParams: vec4<f32>,      // crest foam, flow foam, caustics, caustics scale (m)
-    u_surfaceParams: vec4<f32>,   // reflectivity, screen reflections, refraction (m), detail strength
+    u_surfaceParams: vec4<f32>,   // reflectivity, screen reflections, refraction (m), - (the ripples ride u_fWaves)
     u_detailParams: vec4<f32>,    // detail scale (m), flow strength, rain ripples, snow cover
     u_windParams: vec4<f32>,      // wind dir x, dir z, speed (m/s), wind response
     u_underwater: vec4<f32>,      // rgb, fog per metre
@@ -94,11 +100,9 @@ struct WaterFragmentUniforms {
     u_misc: vec4<f32>,            // pre-exposure, -, 1 = camera under the surface, -
     u_sssColor: vec4<f32>,        // subsurface scatter colour (rgb), strength
     u_sssParams: vec4<f32>,       // sharpness (power), distortion
-    u_fWaveDir: array<vec4<f32>, 8>,
-    u_fWavePhase: array<vec4<f32>, 8>,
-    u_fWaveParams: vec4<f32>,     // count, -, height scale, -
-    u_ripple: vec4<f32>,          // longest ripple (m), slope of each, wavelength ratio, count
-    u_rippleDir: vec4<f32>,       // dir x, dir z (the waves' heading)
+    u_fWaves: array<vec4<f32>, 40>,
+    u_fWaveK: array<vec4<f32>, 40>,
+    u_fWaveParams: vec4<f32>,     // count, -, height scale, the waves' height deviation (m, at full scale)
     u_fSurf: vec4<f32>,           // as u_vSurf
 };
 @group(1) @binding(1) var<uniform> u_wf: WaterFragmentUniforms;
@@ -128,7 +132,7 @@ struct VertexOutput {
     @location(0) worldPos: vec3<f32>,
     /** The resting surface's own slope (d/dx, d/dz): a river runs downhill. */
     @location(1) grad: vec2<f32>,
-    /** Undisplaced x, z (where the surface point rests), and the wave height scale there. */
+    /** x, z, and the wave height scale there. */
     @location(2) rest: vec3<f32>,
     /** 1 on the tile's skirt, 0 on its surface. */
     @location(3) skirt: f32,
@@ -173,6 +177,26 @@ fn valueNoise(p: vec2<f32>) -> f32 {
     let c = hash12(i + vec2<f32>(0.0, 1.0));
     let d = hash12(i + vec2<f32>(1.0, 1.0));
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+/** valueNoise and its gradient: (value, d/dx, d/dy). */
+fn valueNoiseGrad(p: vec2<f32>) -> vec3<f32> {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let du = 6.0 * f * (1.0 - f);
+    let a = hash12(i);
+    let b = hash12(i + vec2<f32>(1.0, 0.0));
+    let c = hash12(i + vec2<f32>(0.0, 1.0));
+    let d = hash12(i + vec2<f32>(1.0, 1.0));
+    let k = a - b - c + d;
+    let v = a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y;
+    return vec3<f32>(v, du.x * ((b - a) + k * u.y), du.y * ((c - a) + k * u.x));
+}
+
+/** Where wave `i`, `lambda` metres long, reads the crest-bending noise at rest point `p0` (waves.ts waveBend). */
+fn bendAt(i: i32, lambda: f32, p0: vec2<f32>) -> vec2<f32> {
+    return p0 / lambda + vec2<f32>(f32(i) * 17.3, f32(i) * 7.1);
 }
 
 // ---- surf (physics/water/surf.ts surfAt, operation for operation) ---------------------------------------
@@ -233,30 +257,39 @@ fn surfAt(s: vec4<f32>, p: vec2<f32>, t: f32, edge: f32, depth: f32) -> Surf {
     return r;
 }
 
-// ---- Gerstner waves (physics/water/gerstner.ts gerstnerDisplacement, operation for operation) -----------
+// ---- the waves (physics/water/waves.ts waveSurfaceAt, operation for operation) ---------------------------
+
+/** Wave `i`'s phase (waves.ts wavePhase). */
+fn wavePhase(i: i32) -> f32 {
+    return fract(f32(i) * 0.61803398875 + 0.1) * 6.2831853;
+}
+
 
 /**
- * The displacement of the resting point (x, z), each wave weighted by what a grid of `cell` metres can
- * draw. With every weight 1 it is the CPU's sum exactly.
+ * The waves' height above the resting level at `p`, each weighted by what a grid of `cell` metres can draw.
+ * Each wave is exp(sin - 1) less its mean; the point the next wave is read at is dragged along this one by
+ * its slope, so the short waves crowd onto the long ones' crests.
  */
-fn gerstnerOffset(x: f32, z: f32, t: f32, scale: f32, cell: f32) -> vec3<f32> {
-    var offset = vec3<f32>(0.0);
+fn waveHeight(p0: vec2<f32>, t: f32, scale: f32, cell: f32) -> f32 {
+    var p = p0;
+    var h = 0.0;
     let count = min(i32(u_wv.u_waveParams.x), MAX_WAVES);
-    let n = f32(max(count, 1));
     for (var i = 0; i < MAX_WAVES; i++) {
         if (i >= count) { break; }
-        let d = u_wv.u_waveDir[i];
-        let ph = u_wv.u_wavePhase[i];
-        let k = 6.283185307179586 / max(0.01, d.w);
-        let omega = sqrt(9.81 * k);
-        let a = d.z * scale;
-        let theta = k * (d.x * x + d.y * z) - omega * t + ph.y;
-        var q = 0.0;
-        if (a > 0.0) { q = ph.x / (k * a * n); }
-        let w = bandLimit(d.w, cell);
-        offset += vec3<f32>(q * a * d.x * cos(theta), a * sin(theta), q * a * d.y * cos(theta)) * w;
+        let w = u_wv.u_waves[i];
+        let kw = u_wv.u_waveK[i];
+        let band = bandLimit(kw.y, cell);
+        if (band <= 0.0) { break; }   // longest first: every wave after this one is shorter still
+        let a = w.z * scale * band;
+        let bend = WAVE_BEND * (valueNoise(bendAt(i, kw.y, p0)) - 0.5);
+        let theta = kw.x * dot(w.xy, p) - kw.z * t + wavePhase(i) + bend;
+        let s = sin(theta);
+        let c = cos(theta);
+        let e = exp(s - 1.0);
+        h += a * (e - WAVE_MEAN);
+        p += w.xy * (-w.w * a * e * c);
     }
-    return offset;
+    return h;
 }
 
 @vertex
@@ -310,7 +343,7 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
     let cap = clamp(0.4 * depth / max(u_wv.u_swell.z, 1e-3), 0.0, 1.0);
     let scale = u_wv.u_waveParams.z * share * fade * fade * (3.0 - 2.0 * fade) * cap;
     let t = u_wv.u_waveParams.y;
-    var p = vec3<f32>(xz.x, surface, xz.y) + gerstnerOffset(xz.x, xz.y, t, scale, cell);
+    var p = vec3<f32>(xz.x, surface + waveHeight(xz, t, scale, cell), xz.y);
     // Over the beach the surf takes over from the waves, as physics/water/surf.ts adds it to what floats.
     if (ocean) {
         let sf = surfAt(u_wv.u_vSurf, xz, t, edge, depth);
@@ -356,68 +389,63 @@ fn sceneDepthAt(uv: vec2<f32>) -> f32 {
     return linearDepth(textureSampleLevel(u_sceneDepth_texture, u_sceneDepth_sampler, uv, 0));
 }
 
-/** What the waves give the pixel at rest point `p`: xy slope (d/dx, d/dz), z crest compression, w unresolved slope variance. */
-fn waveSlopes(p: vec2<f32>, t: f32, scale: f32, footprint: f32) -> vec4<f32> {
-    var sx = 0.0;
-    var sz = 0.0;
-    var compress = 0.0;
-    var removed = 0.0;
-    let count = min(i32(u_wf.u_fWaveParams.x), MAX_WAVES);
-    let n = f32(max(count, 1));
-    for (var i = 0; i < MAX_WAVES; i++) {
-        if (i >= count) { break; }
-        let d = u_wf.u_fWaveDir[i];
-        let ph = u_wf.u_fWavePhase[i];
-        let k = 6.283185307179586 / max(0.01, d.w);
-        let omega = sqrt(9.81 * k);
-        let a = d.z * scale;
-        let theta = k * (d.x * p.x + d.y * p.y) - omega * t + ph.y;
-        var q = 0.0;
-        if (a > 0.0) { q = ph.x / (k * a * n); }
-        let wa = k * a;
-        let w = smoothstep(2.0 * footprint, 6.0 * footprint, d.w);
-        sx += d.x * wa * cos(theta) * w;
-        sz += d.y * wa * cos(theta) * w;
-        compress += q * wa * sin(theta) * w;
-        removed += (1.0 - w * w) * 0.5 * wa * wa;
-    }
-    return vec4<f32>(sx, sz, compress, removed);
-}
+/** What the waves give a pixel. */
+struct Waves {
+    /** Metres above the resting level. */
+    height: f32,
+    /** d height / dx, d height / dz. */
+    slope: vec2<f32>,
+    /** How much the drag has squeezed the water here (1 - the warp's determinant): high on crowded crests. */
+    squeeze: f32,
+    /** The slope variance of the waves too small for this pixel: roughness. */
+    unresolved: f32,
+};
 
 /**
- * The ripples below the Gerstner waves: `u_ripple.w` trains of sines, from `u_ripple.x` metres down by
- * `u_ripple.z` each, every one with the same slope `u_ripple.y` (so their variance adds up to the wind
- * sea's), heading round the waves' direction with a spread that widens as they shorten, each at its own
- * speed (capillary-gravity dispersion). xy their slope, z the slope variance a pixel of `footprint`
- * metres no longer resolves, w their height.
+ * The waves at `p0` for a pixel of `footprint` metres (waveHeight, with each wave faded where the pixel no
+ * longer resolves it). The slope is exact: the drag's warp is carried along as its Jacobian, so the slopes
+ * of the short waves crowded onto a crest steepen as they should.
  */
-fn ripples(p: vec2<f32>, t: f32, footprint: f32) -> vec4<f32> {
+fn waveStack(p0: vec2<f32>, t: f32, scale: f32, footprint: f32) -> Waves {
+    var r: Waves;
+    var p = p0;
+    var J = mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
+    var h = 0.0;
     var g = vec2<f32>(0.0);
     var removed = 0.0;
-    var h = 0.0;
-    let count = min(i32(u_wf.u_ripple.w), MAX_RIPPLES);
-    let s = u_wf.u_ripple.y;
-    let base = u_wf.u_rippleDir.xy;
-    var lambda = u_wf.u_ripple.x;
-    for (var i = 0; i < MAX_RIPPLES; i++) {
+    let count = min(i32(u_wf.u_fWaveParams.x), MAX_WAVES);
+    for (var i = 0; i < MAX_WAVES; i++) {
         if (i >= count) { break; }
-        let fi = f32(i);
-        let spread = mix(0.6, 1.5, fi / f32(MAX_RIPPLES - 1));
-        let ang = (hash11(fi * 7.31 + 0.5) * 2.0 - 1.0) * spread;
-        let ca = cos(ang);
-        let sa = sin(ang);
-        let d = vec2<f32>(base.x * ca - base.y * sa, base.x * sa + base.y * ca);
-        let k = 6.2831853 / lambda;
-        // Gravity plus surface tension (0.074 N/m over 1000 kg/m^3): the shortest ripples run faster.
-        let omega = sqrt(9.81 * k + 7.4e-5 * k * k * k);
-        let theta = k * dot(d, p) - omega * t + hash11(fi * 3.17 + 1.3) * 6.2831853;
-        let w = smoothstep(2.0 * footprint, 6.0 * footprint, lambda);
-        g += d * (s * cos(theta) * w);
-        h += s / k * sin(theta) * w;
-        removed += (1.0 - w * w) * 0.5 * s * s;
-        lambda *= u_wf.u_ripple.z;
+        let w = u_wf.u_fWaves[i];
+        let kw = u_wf.u_fWaveK[i];
+        let k = kw.x;
+        let lambda = kw.y;
+        let band = smoothstep(2.0 * footprint, 6.0 * footprint, lambda);
+        // Longest first: from the first wave the pixel cannot draw, none after it is drawn either. Their
+        // slope variance, summed on the CPU, is the roughness they leave.
+        if (band <= 0.0) { removed += kw.w * scale * scale; break; }
+        let a = w.z * scale;
+        removed += (1.0 - band * band) * k * k * a * a * WAVE_SLOPE_VARIANCE;
+        let bend = valueNoiseGrad(bendAt(i, lambda, p0));
+        let theta = k * dot(w.xy, p) - kw.z * t + wavePhase(i) + WAVE_BEND * (bend.x - 0.5);
+        let s = sin(theta);
+        let c = cos(theta);
+        let e = exp(s - 1.0);
+        // d theta / d p0, through the warp of the waves before, and the bend of the crest.
+        let dTheta = vec2<f32>(dot(J[0], w.xy), dot(J[1], w.xy)) * k + bend.yz * (WAVE_BEND / lambda);
+        let ab = a * band;
+        h += ab * (e - WAVE_MEAN);
+        g += dTheta * (ab * e * c);
+        let d = w.xy;
+        p += d * (-w.w * ab * e * c);
+        let q = dTheta * (-w.w * ab * e * (c * c - s));
+        J = J + mat2x2<f32>(d * q.x, d * q.y);
     }
-    return vec4<f32>(g, removed, h);
+    r.height = h;
+    r.slope = g;
+    r.squeeze = 1.0 - determinant(J);
+    r.unresolved = removed;
+    return r;
 }
 
 /** Rings from raindrops on standing water (chunks/terrainWeather.wgsl rippleLayer's wavelets, scaled up). */
@@ -630,23 +658,28 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let grazing = max(abs(V.y), 0.02);
     let footprint = pixel / sqrt(grazing);
 
-    // The slopes: the resting surface's, the Gerstner waves', the ripples' riding the current, the rain's.
+    // The slopes: the resting surface's, the waves', the rain's. On a river the waves ride the current: two
+    // phases of the flow map (Vlachos), half a cycle apart, so they move with the water and never stretch;
+    // each pixel's cycle is offset by a slow noise, so a river does not pulse as a whole.
     let scale = in.rest.z;
-    let waves = waveSlopes(in.rest.xy, t, scale, footprint);
-    let strength = u_wf.u_surfaceParams.w;
-    // Two phases of the flow map (Vlachos), half a cycle apart, so the ripples move with the river and
-    // never stretch; each pixel's cycle is offset by a slow noise, so a river does not pulse as a whole.
     let f = flow * u_wf.u_detailParams.y;
     let cycle = 3.0;
     let jitter = valueNoise(in.rest.xy * 0.15);
     let ph0 = fract(t / cycle + jitter);
     let ph1 = fract(t / cycle + jitter + 0.5);
     let wgt = abs(ph0 * 2.0 - 1.0);
-    var rip = ripples(in.rest.xy - f * ph0 * cycle, t, footprint);
+    var waves = waveStack(in.rest.xy - f * ph0 * cycle, t, scale, footprint);
     if (length(f) > 1e-3) {
-        rip = mix(rip, ripples(in.rest.xy - f * ph1 * cycle + vec2<f32>(3.7, 1.9), t, footprint), wgt);
+        let w1 = waveStack(in.rest.xy - f * ph1 * cycle + vec2<f32>(3.7, 1.9), t, scale, footprint);
+        waves.height = mix(waves.height, w1.height, wgt);
+        waves.slope = mix(waves.slope, w1.slope, wgt);
+        waves.squeeze = mix(waves.squeeze, w1.squeeze, wgt);
+        waves.unresolved = mix(waves.unresolved, w1.unresolved, wgt);
     }
-    var slope = in.grad + waves.xy + rip.xy * strength;
+    // Where on the waves this is: 0 deep in a trough, 0.5 at the resting level, 1 on a tall crest.
+    let waveSd = max(u_wf.u_fWaveParams.w * scale, 1e-3);
+    let crest = clamp(0.5 + waves.height / (4.0 * waveSd), 0.0, 1.0);
+    var slope = in.grad + waves.slope;
     let weather = precipitationAt(in.worldPos);
     let still = 1.0 - smoothstep(0.1, 0.8, length(flow));
     // Rain rings are centimetres across: past a couple of centimetres a pixel they would only sparkle, so
@@ -674,13 +707,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             if (length(vec2<f32>(tx, tz)) > 1e-6) { toShore = -normalize(vec2<f32>(tx, tz)); }
         }
     }
-    var N = normalize(vec3<f32>(-slope.x, 1.0 - waves.z, -slope.y));
+    var N = normalize(vec3<f32>(-slope.x, 1.0, -slope.y));
     if (below) { N = -N; }
     let NoV = clamp(dot(N, V), 1e-3, 1.0);
 
     // Roughness: the surface's own (a floor, so the sun never collapses to a single pixel), the rain's,
     // and every slope too small for this pixel to draw (Bruneton: their variance is the highlight's width).
-    let unresolved = waves.w + rip.z * strength * strength + weather.x * 0.01 * u_wf.u_detailParams.z + surfVariance;
+    let unresolved = waves.unresolved + weather.x * 0.01 * u_wf.u_detailParams.z + surfVariance;
     let base = max(u_wf.u_absorption.w * u_wf.u_absorption.w, 0.02);
     var alpha = sqrt(base * base + unresolved);
 
@@ -724,7 +757,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // E / pi of radiance. So deep water stays as dark as a real sea's, and the sky it reflects, not paint,
     // gives it its colour away from the vertical.
     let lightIn = (u_wf.u_ambient.rgb + u_wf.u_sunColor.rgb * sunUp * mix(0.35, 1.0, sunVis)) * pre;
-    let scatter = mix(u_wf.u_shallowColor.rgb, u_wf.u_deepColor.rgb, clamp(1.0 - exp(-thickness / clarity), 0.0, 1.0)) * lightIn / PI;
+    // The waves' crests glow and their troughs go dark (as in every reference sea: afl_ext's scattering grows
+    // with the height above the trough, TDM's Seascape and Enscape's add the water's colour with it): light
+    // enters a crest from the sides and the back and leaves through its thin top, while a trough is lit only
+    // from above through its walls. The mean over a wave stays the scatter the colours say.
+    let crestGlow = mix(0.3, 1.7, crest);
+    let scatter = mix(u_wf.u_shallowColor.rgb, u_wf.u_deepColor.rgb, clamp(1.0 - exp(-thickness / clarity), 0.0, 1.0)) * lightIn / PI * crestGlow;
     // The bed is lit THROUGH the water above it, as well as seen through it: the sun's light comes down a
     // path bent by refraction (Snell, 1.33), the sky's from every way (on average some 1.2 of the depth),
     // so a deep bed darkens and turns blue-green twice over, down and back up. Forward scattering keeps
@@ -790,7 +828,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (sssStrength > 0.0 && !below) {
         let Ls = normalize(L + N * u_wf.u_sssParams.y);
         let back = pow(clamp(dot(V, -Ls), 0.0, 1.0), max(u_wf.u_sssParams.x, 1.0));
-        let crest = clamp((in.worldPos.y - surface) * 0.9 + rip.w * 4.0 + waves.z * 0.25, 0.0, 1.0);
         let path = mix(2.0, 0.25, crest);   // metres of water the light crosses: less through a thin crest
         let through = exp(-u_wf.u_absorption.rgb * (1.0 + turbidity * 3.0) * path);
         let forward = 1.0 - turbidity * 0.7;   // silt scatters it every way instead of on through
@@ -818,11 +855,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             surfAmount = max(band * mix(0.15, 0.8, swash), surf.breaking * surf.breaking * trail * 0.85 * min(shoreW, 1.0));
         } else {
             // Lines running in toward the shore (the phase falls as the distance does), broken by the ripples.
-            let lines = 0.5 + 0.5 * sin(edge * 2.5 + t * 1.6 + rip.w * 30.0);
+            let lines = 0.5 + 0.5 * sin(edge * 2.5 + t * 1.6 + waves.height / waveSd * 0.8);
             amount = max(amount, band * mix(0.55, 1.0, lines));
         }
     }
-    amount = max(amount, smoothstep(0.3, 0.85, waves.z) * u_wf.u_foamParams.x);
+    // Whitecaps: where the long waves crowd the short ones hardest, on their crests.
+    amount = max(amount, smoothstep(0.35, 0.7, waves.squeeze) * smoothstep(0.55, 0.8, crest) * u_wf.u_foamParams.x);
     amount = max(amount, foamBake * u_wf.u_foamParams.y);
     // A waterfall: where the surface drops steeply the water tumbles white, in streaks racing down the fall.
     let fall = smoothstep(0.6, 1.6, in.slope) * u_wf.u_foamParams.y;

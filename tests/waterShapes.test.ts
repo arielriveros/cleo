@@ -7,13 +7,13 @@ import { WaterVolumeNode } from '../src/core/scene/nodes/waterVolumeNode';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
 import { normaliseWaterBody, resolveWaterBody, waterColumnAt, type ResolvedWaterShape } from '../src/water/waterShapes';
-import { gerstnerDisplacement, gerstnerHeightAt, gerstnerWavesForWind } from '../src/physics/water/gerstner';
+import { seaState, waterNoise, WAVE_BEND, WAVE_SHORTEST, waveHeightAt, waveOmega, wavePhase, waveSigma, waveSlopeVariance, waveSurfaceAt, wavesForWind } from '../src/physics/water/waves';
 import { TEST_PHYSICS } from './helpers/testPhysics';
 import { carveWater } from '../src/water/carve';
 
 // The Water node's body: one river, lake, ocean or pool as plain data, resolved to world space, joined to
-// other Water nodes where a river runs into them, and queried for surface, bed and flow. Plus the Gerstner
-// waves the surface and the physics share.
+// other Water nodes where a river runs into them, and queried for surface, bed and flow. Plus the waves
+// the surface and the physics share.
 
 const FRAME = { position: [0, 0, 0], scale: [1, 1, 1] };
 const placed = (position: number[]) => ({ position, scale: [1, 1, 1] });
@@ -165,22 +165,103 @@ describe('water bodies', () => {
     });
 });
 
-describe('Gerstner waves', () => {
-    it('heightAt finds the displaced surface over a world point', () => {
-        const waves = gerstnerWavesForWind(9, 30, Infinity, { choppiness: 0.7 });
-        expect(waves.length).toBeGreaterThan(3);
-        const d = [0, 0, 0];
-        for (const [x, z, t] of [[3, 7, 1.5], [-40, 12, 9], [100, -3, 33]]) {
-            gerstnerDisplacement(waves, x, z, t, 1, d);
-            expect(gerstnerHeightAt(waves, x + d[0], z + d[2], t, 1)).toBeCloseTo(d[1], 2);
+describe('waves', () => {
+    it("a wind's set has the sea's significant height and Cox and Munk's slope", () => {
+        for (const [U, F] of [[7, Infinity], [12, Infinity], [7, 300], [4, 80]]) {
+            const waves = wavesForWind(U, 30, F);
+            expect(waves.length).toBeGreaterThan(5);
+            // Longest first, down to the capillary ripples.
+            for (let i = 1; i < waves.length; i++) expect(waves[i].wavelength).toBeLessThan(waves[i - 1].wavelength);
+            expect(waves[waves.length - 1].wavelength).toBeGreaterThanOrEqual(WAVE_SHORTEST * 0.99);
+            expect(4 * waveSigma(waves) / seaState(U, F).hs).toBeCloseTo(1, 2);
+            expect(waveSlopeVariance(waves) / (0.003 + 0.00512 * U)).toBeCloseTo(1, 2);
         }
     });
 
+    it('rides the resting level, its spread as measured', () => {
+        const waves = wavesForWind(9, 30, Infinity);
+        let s = 0, s2 = 0, n = 0;
+        for (let x = 0; x < 400; x += 3.1) for (let z = 0; z < 400; z += 2.7) {
+            const h = waveHeightAt(waves, x, z, 17.3, 1, 0);
+            s += h; s2 += h * h; n++;
+        }
+        const sigma = waveSigma(waves);
+        expect(Math.abs(s / n)).toBeLessThan(0.1 * sigma);
+        expect(Math.sqrt(s2 / n - (s / n) ** 2) / sigma).toBeGreaterThan(0.8);
+        expect(Math.sqrt(s2 / n - (s / n) ** 2) / sigma).toBeLessThan(1.2);
+    });
+
+    it("reports the water's vertical speed as the surface rises and falls", () => {
+        const waves = wavesForWind(9, 30, Infinity, { choppiness: 0.8 });
+        const out = { height: 0, vx: 0, vy: 0, vz: 0, k: 0 };
+        for (const [x, z, t] of [[3, 7, 1.5], [-40, 12, 9], [100, -3, 33]]) {
+            const dt = 1e-3;
+            const h0 = waveHeightAt(waves, x, z, t - dt, 1), h1 = waveHeightAt(waves, x, z, t + dt, 1);
+            waveSurfaceAt(waves, x, z, t, 1, 1, 0.5, out);
+            expect(out.vy).toBeCloseTo((h1 - h0) / (2 * dt), 2);
+        }
+    });
+
+    it("the shader's per-pixel slope is the height's: the drag's Jacobian and the bent crests carried exactly", () => {
+        // water.wgsl waveStack, operation for operation, with every wave resolved: the slope it builds from the
+        // warp's Jacobian and the bend noise's analytic gradient must be the height field's true gradient.
+        const waves = wavesForWind(10, 40, 8000, { choppiness: 0.9 });
+        const t = 7.7;
+        const corner = (x: number, y: number) => waterNoise(x, y);   // value noise at a lattice point is its hash
+        const noiseGrad = (x: number, y: number) => {
+            const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+            const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+            const dux = 6 * fx * (1 - fx), duy = 6 * fy * (1 - fy);
+            const a = corner(ix, iy), b = corner(ix + 1, iy), c = corner(ix, iy + 1), d = corner(ix + 1, iy + 1);
+            const k = a - b - c + d;
+            return [dux * ((b - a) + k * uy), duy * ((c - a) + k * ux)];
+        };
+        const shaderSlope = (x0: number, z0: number) => {
+            let px = x0, pz = z0;
+            let j00 = 1, j01 = 0, j10 = 0, j11 = 1;   // J[column][row]: column 0 is d p / d x0
+            let gx = 0, gz = 0;
+            waves.forEach((w, i) => {
+                const k = 2 * Math.PI / w.wavelength, kx = w.dirX * k, kz = w.dirZ * k;
+                const qx = x0 / w.wavelength + i * 17.3, qz = z0 / w.wavelength + i * 7.1;
+                const ng = noiseGrad(qx, qz);
+                const theta = kx * px + kz * pz - waveOmega(k) * t + wavePhase(i) + WAVE_BEND * (waterNoise(qx, qz) - 0.5);
+                const s = Math.sin(theta), c = Math.cos(theta), e = Math.exp(s - 1);
+                const dtx = j00 * kx + j01 * kz + ng[0] * WAVE_BEND / w.wavelength;
+                const dtz = j10 * kx + j11 * kz + ng[1] * WAVE_BEND / w.wavelength;
+                gx += dtx * w.amplitude * e * c; gz += dtz * w.amplitude * e * c;
+                px += w.dirX * (-w.drag * w.amplitude * e * c); pz += w.dirZ * (-w.drag * w.amplitude * e * c);
+                const q = -w.drag * w.amplitude * e * (c * c - s);
+                j00 += w.dirX * q * dtx; j01 += w.dirZ * q * dtx;
+                j10 += w.dirX * q * dtz; j11 += w.dirZ * q * dtz;
+            });
+            return [gx, gz];
+        };
+        for (const [x, z] of [[3, 7], [-41.3, 12.9], [104.2, -3.3], [0.37, 0.91]]) {
+            const h = 1e-4;
+            const fx = (waveHeightAt(waves, x + h, z, t, 1, 0) - waveHeightAt(waves, x - h, z, t, 1, 0)) / (2 * h);
+            const fz = (waveHeightAt(waves, x, z + h, t, 1, 0) - waveHeightAt(waves, x, z - h, t, 1, 0)) / (2 * h);
+            const [sx, sz] = shaderSlope(x, z);
+            expect(sx).toBeCloseTo(fx, 3);
+            expect(sz).toBeCloseTo(fz, 3);
+        }
+    });
+
+    it('a short fetch raises a young sea: shorter, steeper waves', () => {
+        const open = seaState(12, Infinity), young = seaState(12, 10000);
+        expect(young.peak).toBeLessThan(open.peak / 4);
+        expect(young.hs / young.peak).toBeGreaterThan(1.3 * open.hs / open.peak);
+        // The node's own fetch overrides the body's, and is saved.
+        const sea = new WaterVolumeNode('sea', { waterType: 'ocean', windSpeed: 12, fetch: 10000 });
+        expect(sea.waves()[0].wavelength).toBeCloseTo(young.peak, 6);
+        expect(new WaterVolumeNode('sea', { waterType: 'ocean', windSpeed: 12 }).waves()[0].wavelength).toBeCloseTo(open.peak, 6);
+        expect((sea as any)._serializePayload().waterVolume.fetch).toBe(10000);
+    });
+
     it('grows with the wind and is limited by fetch', () => {
-        const height = (ws: ReturnType<typeof gerstnerWavesForWind>) => ws.reduce((s, w) => s + w.amplitude, 0);
-        expect(height(gerstnerWavesForWind(15, 0, Infinity))).toBeGreaterThan(height(gerstnerWavesForWind(5, 0, Infinity)));
-        expect(height(gerstnerWavesForWind(15, 0, 200))).toBeLessThan(height(gerstnerWavesForWind(15, 0, Infinity)));
-        expect(gerstnerWavesForWind(0, 0, Infinity)).toEqual([]);
+        const height = (U: number, F: number) => waveSigma(wavesForWind(U, 0, F));
+        expect(height(15, Infinity)).toBeGreaterThan(height(5, Infinity));
+        expect(height(15, 200)).toBeLessThan(height(15, Infinity));
+        expect(wavesForWind(0, 0, Infinity)).toEqual([]);
     });
 
     it('floating bodies ride the waves the node reports', () => {

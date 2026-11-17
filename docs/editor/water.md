@@ -84,9 +84,9 @@ reflects the water back outside Snell's window.
 | **Roughness** | How blurred the reflections are: 0 a mirror. Wind adds to it. |
 | **Screen reflections** | How much the screen-space reflection of the scene is used over the sky. Needs Screen-Space Reflections on in the Renderer settings. |
 | **Refraction** | How far what is under the surface bends with the waves. |
-| **Ripples** | Strength of the small ripples on top of the waves. |
-| **Ripple size** | Metres across the small ripples. |
-| **Flow** | How far the ripples and foam ride the current, so a river visibly runs. |
+| **Ripples** | Strength of the waves under a metre long: the ripples the wind raises on the waves. 1 is the wind's own; floating bodies do not feel them. |
+| **Foam size** | Metres across the bubble web the foam is drawn with. |
+| **Flow** | How far the waves and foam ride the current, so a river visibly runs. |
 | **Foam colour** | The colour of the foam. |
 | **Shore foam** | Metres of foam along the shore and in thin water, with surf lines running in; on an ocean, the foam of its breaking surf. |
 | **Crest foam** | Foam on breaking wave crests. |
@@ -107,7 +107,7 @@ reflects the water back outside Snell's window.
 
 The surface is drawn in tiles: each is as dense as its distance from the camera calls for, from 64
 quads across close up to 8 far away. A wave moves the surface only where the tiles are dense enough to
-draw it; past that, and for the ripples below the waves, the shading draws it, and what a pixel is too
+draw it; past that, down to the smallest ripples, the shading draws it, and what a pixel is too
 coarse to show becomes roughness: a distant sea's glints merge into the broad glitter path under the sun,
 as a real one's do. An endless ocean is drawn in tiles that grow with distance and blend into each other,
 to the horizon. Tiles out of view, or past the node's **Draw distance**, are not drawn. On a landscape the
@@ -150,10 +150,19 @@ again until the next bake.
 
 ## Waves
 
-Gerstner waves shaped by the wind: the longer and stronger the wind blows over open water, the longer,
-taller and faster they are. A lake or pool limits them to what its size lets build; an endless ocean lets
-them grow fully developed; a river carries only a small share of them. Floating bodies ride the same waves the
-surface draws.
+Waves raised by the wind, as many as forty of them from the longest the wind builds down to ripples a
+centimetre and a half long, each one shorter than the last and running at its own natural speed. Each has a
+sharp crest over a broad trough, as wind waves do; they run in scattered directions, their crests bent and
+broken into short segments; and the long waves gather the short ones onto their crests, so the sea reads as
+water rather than as a pattern. The waves are afl_ext's (from the Shadertoy "Very fast procedural ocean", MIT
+licence); the crest bending follows TDM's "Seascape".
+
+The sea is the one that wind raises: its height is the significant wave height measured for that wind over that
+much open water (the **Fetch**), and its roughness, how much the surface tilts, is what Cox and Munk measured
+from the sun's glitter on real seas. A short fetch raises a young sea of short, steep, choppy waves; a long one
+the long swell of the open ocean. A lake or pool limits them to what its size lets build, an endless ocean
+lets them grow fully developed unless **Fetch** says otherwise, and a river carries only a small share of them.
+Floating bodies ride the same waves the surface draws, all those a metre long or more.
 
 ### Surf
 
@@ -168,11 +177,12 @@ Nothing to set: the waves decide it.
 | Field | What it does |
 |---|---|
 | **Wind speed** | Metres per second the waves are shaped for. 0: no waves, only the swell. |
-| **Direction** | Degrees the waves travel toward: 0 is +Z, 90 is +X. |
+| **Fetch** | Metres of open water the wind has crossed: a short fetch raises a young sea of short, steep, choppy waves; a long one the long swell of the open sea. 0: what the body gives (an endless ocean is the open sea). |
+| **Direction** | Degrees the waves travel toward: 0 is +Z, 90 is +X. The longest run with the wind; the short ones, raised by every gust, run every way. |
 | **Height** | Multiplies the wave height the wind gives. |
-| **Choppiness** | Rounded swells (0) to sharp crests (1). |
+| **Choppiness** | How hard the long waves crowd the short ones onto their crests: 0 an even chop, 1 the small waves bunched on every crest. |
 | **Wave speed** | How fast the waves and ripples run against their natural pace. 1 is real: a wave runs as fast as its length makes it (a 40 m ocean swell at 8 m/s, a lake's 1 m chop at 1.2 m/s). Below 1, a calmer, slower sea. Floating bodies ride the waves at the same pace. |
-| **Follow wind** | The scene's Wind node raises and calms the waves: their height follows its speed against **Wind speed**, squared as a sea's does, up to twice as tall. Their length and direction stay as shaped. |
+| **Follow wind** | The scene's Wind node raises and calms the waves: their height follows its speed against **Wind speed**, squared as a sea's does, up to twice as tall. Their length and direction stay as shaped. A sea set to a stronger wind than the Wind node blows (offshore winds often are) is flattened by it: leave this off there. |
 | **Shore fade** | Metres from a shore over which the waves die down. |
 | **Swell** | Metres the whole surface rises and falls, so floating bodies bob even with no wind. 0: none. |
 | **Swell rate** | How many times a second the swell rises and falls. |

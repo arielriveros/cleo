@@ -950,14 +950,15 @@ velocity there (the current with `currents`, plus the waves' orbits), for the wa
 floats rides the waves that are drawn (they share a clock in Play, `physics/water/waterClock.ts`). Where
 two Water nodes overlap, each sample is in one of them. Character bodies are skipped unless `affectCharacters`.
 
-The surface carries a swell (`waveAmplitude`, `waveFrequency`) and Gerstner waves shaped by `windSpeed`
-over the body's open water (fetch), travelling toward `waveDirection` degrees, scaled by `waveScale`,
-sharpened by `choppiness` and dying down within `shoreFade` metres of a shore. The same sum
-(`physics/water/gerstner.ts`) floats the bodies and draws the surface.
+The surface carries a swell (`waveAmplitude`, `waveFrequency`) and up to forty sharp-crested waves (afl_ext's
+exp(sin) waves, MIT) shaped by `windSpeed` over `fetch` metres of open water (0: the body's own), the longest
+travelling toward `waveDirection` degrees, scaled by `waveScale`, the short ones crowded onto the long ones'
+crests by `choppiness`, and dying down within `shoreFade` metres of a shore. The same sum
+(`physics/water/waves.ts`) floats the bodies and draws the surface.
 
 Properties: `waterType`, `points`, `size`, `depth`, `extent`, `carve`, `flowsFrom`, `flowsInto`,
 `waterBody` (all of them at once, as plain data), `density` (kg/m³, default 1000), `linearDrag`, `angularDrag` (per second at full
-submersion), `waveAmplitude`, `waveFrequency`, `windSpeed`, `waveDirection`, `waveScale`, `choppiness`,
+submersion), `waveAmplitude`, `waveFrequency`, `windSpeed`, `fetch`, `waveDirection`, `waveScale`, `choppiness`,
 `waveSpeed`, `shoreFade`, `currents`, `waterMaterial`, `waterMaterialId`, `affectCharacters`, `surfaceNodeId`, `splashTemplate`,
 `wadeSplashTemplate`, `enabled`. Helpers: `resolved()` (the body in world space), `joinedNodes()`,
 `handOver()`, `waves()`, `columnAt(x, z, time?)` (resting or waved surface, floor, flow and distance to

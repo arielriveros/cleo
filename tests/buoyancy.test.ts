@@ -201,7 +201,7 @@ describe('water motion', () => {
 
     it('fades the waves out on an ocean beach for physics as the surface does, the surf running in instead', async () => {
         const { waterSpecColumn } = await import('../src/physics/waterSurface');
-        const { gerstnerWavesForWind } = await import('../src/physics/water/gerstner');
+        const { wavesForWind } = await import('../src/physics/water/waves');
         const { surfOf } = await import('../src/physics/water/surf');
         const ocean = { id: 'o', type: 'ocean' as const, priority: 0, order: 0, min: [-1e7, -50, -1e7] as [number, number, number],
             max: [1e7, 0, 1e7] as [number, number, number], level: 0, floor: -50, outline: [], samples: [], cell: 1, grid: {}, endless: true, waveFactor: 1 };
@@ -216,7 +216,7 @@ describe('water motion', () => {
         const spec = {
             min: [-1e7, -50, -1e7] as [number, number, number], max: [1e7, 0, 1e7] as [number, number, number],
             density: 1025, linearDrag: 2, angularDrag: 0.5, affectCharacters: false, waveAmplitude: 0, waveFrequency: 0,
-            shapes: [ocean], waves: gerstnerWavesForWind(8, 90, Infinity), waveScale: 1, shoreFade: 10,
+            shapes: [ocean], waves: wavesForWind(8, 90, Infinity), waveScale: 1, shoreFade: 10,
             shoreGrid: { originX: 0, originZ: 0, cell, nx, nz, data },
         };
         const swing = (x: number) => {
