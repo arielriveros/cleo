@@ -72,6 +72,7 @@ struct WaterVertexUniforms {
     u_swell: vec4<f32>,           // amplitude (m), frequency (Hz), a tall crest of the waves (m), the body's wave share
     u_vCamera: vec4<f32>,         // camera position
     u_vSurf: vec4<f32>,           // surf: frequency (rad/s), amplitude (m), 1 = on (an ocean with a shore grid)
+    u_vFlow: vec4<f32>,           // how far the waves ride the current, the speed a river's waves are built for (0: wind waves)
 };
 @group(1) @binding(0) var<uniform> u_wv: WaterVertexUniforms;
 
@@ -99,7 +100,7 @@ struct WaterFragmentUniforms {
     u_fInfoOrigin: vec4<f32>,
     u_fInfoSize: vec4<f32>,
     u_fOcean: vec4<f32>,          // level, 1 = an endless ocean
-    u_misc: vec4<f32>,            // pre-exposure, -, 1 = camera under the surface, -
+    u_misc: vec4<f32>,            // pre-exposure, how much fast water churns (lightens, clouds), 1 = camera under the surface, cells a baked surface is drawn past its wet ones
     u_sssColor: vec4<f32>,        // subsurface scatter colour (rgb), strength
     u_sssParams: vec4<f32>,       // sharpness (power), distortion
     u_fWaves: array<vec4<f32>, 40>,
@@ -188,6 +189,16 @@ fn valueNoise(p: vec2<f32>) -> f32 {
 }
 
 /** valueNoise and its gradient: (value, d/dx, d/dy). */
+// Smooth noise smeared along a direction (a short line integral over four taps, half a metre apart): streaks
+// that follow the current wherever it turns, with no frame to rotate. About 0..1, spread back out to the
+// contrast one tap has.
+fn whiteStreaks(p: vec2<f32>, along: vec2<f32>) -> f32 {
+    let q = p * 2.2;
+    let stride = along;
+    let sum = valueNoise(q - stride * 1.5) + valueNoise(q - stride * 0.5) + valueNoise(q + stride * 0.5) + valueNoise(q + stride * 1.5);
+    return clamp((sum * 0.25 - 0.5) * 1.7 + 0.5, 0.0, 1.0);
+}
+
 fn valueNoiseGrad(p: vec2<f32>) -> vec3<f32> {
     let i = floor(p);
     let f = fract(p);
@@ -205,6 +216,52 @@ fn valueNoiseGrad(p: vec2<f32>) -> vec3<f32> {
 /** Where wave `i`, `lambda` metres long, reads the crest-bending noise at rest point `p0` (waves.ts waveBend). */
 fn bendAt(i: i32, lambda: f32, p0: vec2<f32>) -> vec2<f32> {
     return p0 / lambda + vec2<f32>(f32(i) * 17.3, f32(i) * 7.1);
+}
+
+// ---- water carried by a current (physics/water/waves.ts waveSurfaceInFlow, flowWaveScale) ----------------
+//
+// What rides the water (its waves, its foam, the caustics under it) moves with the current. Carried rigidly it
+// would shear apart where the current varies, so two copies are read, each carried for FLOW_CYCLE seconds and
+// then put back, half a cycle apart, and cross-faded so neither is seen at its jump (a flow map's two
+// phases, Vlachos). Wave heights and slopes are blended to keep their height: the sum of two unlike fields
+// weighted a and b stands sqrt(a^2 + b^2) as tall, and a plain cross-fade would flatten the water twice a
+// cycle. Each place runs its cycle at its own offset (a slow noise), so a river does not pulse as a whole.
+
+const FLOW_CYCLE: f32 = 3.0;
+/** Where the second copy is read, so the two never look alike. */
+const FLOW_APART: vec2<f32> = vec2<f32>(3.7, 1.9);
+
+struct FlowPhases {
+    /** Seconds each copy has been carried, about zero: read it at `p - flow * a` and `p - flow * b + FLOW_APART`. */
+    a: f32, b: f32,
+    /** Their weights for waves (height kept), and the second's weight for anything cross-faded plainly. */
+    wa: f32, wb: f32, fade: f32,
+};
+
+fn flowPhases(p: vec2<f32>, t: f32) -> FlowPhases {
+    var r: FlowPhases;
+    let jitter = valueNoise(p * 0.15);
+    let ph0 = fract(t / FLOW_CYCLE + jitter);
+    let ph1 = fract(t / FLOW_CYCLE + jitter + 0.5);
+    let w1 = abs(ph0 * 2.0 - 1.0);
+    let w0 = 1.0 - w1;
+    let norm = inverseSqrt(w0 * w0 + w1 * w1);
+    r.a = (ph0 - 0.5) * FLOW_CYCLE;
+    r.b = (ph1 - 0.5) * FLOW_CYCLE;
+    r.wa = w0 * norm;
+    r.wb = w1 * norm;
+    r.fade = w1;
+    return r;
+}
+
+/**
+ * What a current's waves are scaled by where the water runs at `speed` and the set was built for `reference`:
+ * with the square of the speed, as their length and height go; nearly still where the water is. 1 for wind waves.
+ */
+fn flowWaveScale(speed: f32, reference: f32) -> f32 {
+    if (reference <= 0.0) { return 1.0; }
+    let s = speed / reference;
+    return clamp(s * s, 0.04, 1.6);
 }
 
 // ---- surf (physics/water/surf.ts surfAt, operation for operation) ---------------------------------------
@@ -322,6 +379,7 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
     let share = u_wv.u_swell.w;
     var depth = 1e4;
     var grad = vec2<f32>(0.0);
+    var current = vec2<f32>(0.0);
     let ocean = u_wv.u_vOcean.y > 0.5;
     let uvw = infoUvw(xz, u_wv.u_vInfoOrigin, u_wv.u_vInfoSize);
     if (u_wv.u_vInfoOrigin.w > 0.5 && (insideInfo(uvw) || !ocean)) {
@@ -333,6 +391,7 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
         if (ocean) { depth = max(0.0, u_wv.u_vOcean.x - (i1.z + u_wv.u_vInfoSize.z)); }
         if (!ocean) {
             surface = i0.x + i1.x + u_wv.u_vInfoSize.z;
+            current = i0.yz;
             // The resting surface's own slope, a cell either way: a river runs downhill, a waterfall drops.
             let du = vec3<f32>(1.0 / u_wv.u_vInfoSize.x, 0.0, 0.0);
             let dv = vec3<f32>(0.0, 1.0 / u_wv.u_vInfoSize.y, 0.0);
@@ -346,9 +405,18 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
     let fadeW = u_wv.u_waveParams.w;
     let fade = select(1.0, clamp(edge / max(fadeW, 1e-3), 0.0, 1.0), fadeW > 0.0);
     let cap = clamp(0.4 * depth / max(u_wv.u_swell.z, 1e-3), 0.0, 1.0);
-    let scale = u_wv.u_waveParams.z * share * fade * fade * (3.0 - 2.0 * fade) * cap;
+    // A river's waves are its current's: scaled by how fast the water runs here, and carried along by it.
+    let scale = u_wv.u_waveParams.z * share * fade * fade * (3.0 - 2.0 * fade) * cap * flowWaveScale(length(current), u_wv.u_vFlow.y);
     let t = u_wv.u_waveParams.y;
-    var p = vec3<f32>(xz.x, surface + waveHeight(xz, t, scale, cell), xz.y);
+    let ride = current * u_wv.u_vFlow.x;
+    var lift = 0.0;
+    if (dot(ride, ride) > 1e-6) {
+        let ph = flowPhases(xz, t);
+        lift = waveHeight(xz - ride * ph.a, t, scale, cell) * ph.wa + waveHeight(xz - ride * ph.b + FLOW_APART, t, scale, cell) * ph.wb;
+    } else {
+        lift = waveHeight(xz, t, scale, cell);
+    }
+    var p = vec3<f32>(xz.x, surface + lift, xz.y);
     // Over the beach the surf takes over from the waves, as physics/water/surf.ts adds it to what floats.
     if (ocean) {
         let sf = surfAt(u_wv.u_vSurf, xz, t, edge, depth);
@@ -645,11 +713,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
     // A lake or river ends where its grid says it is dry. The ocean is drawn on under the land's edge, a
-    // couple of cells in: the landscape's own depth test draws its waterline, exactly, wherever it is.
+    // couple of cells in: the landscape's own depth test draws its waterline, exactly, wherever it is. So is
+    // baked water, a cell past its wet ones (the bake carries its surface on under the dry ground there):
+    // its banks are then the ground's, not the outline of the bake's cells. Where the water beside it is
+    // another node's (a river's mouth in its lake), it ends at its own cells as ever.
     if (ocean) {
         if (hasInfo && edge < -2.0 * u_wf.u_fInfoOrigin.z) { discard; }
-    } else if (wet < 0.5 || edge < -0.01) {
-        discard;
+    } else {
+        let past = u_wf.u_misc.w * u_wf.u_fInfoOrigin.z;
+        if (edge < -0.01 - past || (wet < 0.5 && (past <= 0.0 || edge > 0.0))) { discard; }
     }
     // A skirt only fills the cracks between tiles out on open water; at the shore it would hang into view.
     if (in.skirt > 0.0 && edge < u_wf.u_fInfoOrigin.z * 3.0) { discard; }
@@ -668,18 +740,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // each pixel's cycle is offset by a slow noise, so a river does not pulse as a whole.
     let scale = in.rest.z;
     let f = flow * u_wf.u_detailParams.y;
-    let cycle = 3.0;
-    let jitter = valueNoise(in.rest.xy * 0.15);
-    let ph0 = fract(t / cycle + jitter);
-    let ph1 = fract(t / cycle + jitter + 0.5);
-    let wgt = abs(ph0 * 2.0 - 1.0);
-    var waves = waveStack(in.rest.xy - f * ph0 * cycle, t, scale, footprint);
-    if (length(f) > 1e-3) {
-        let w1 = waveStack(in.rest.xy - f * ph1 * cycle + vec2<f32>(3.7, 1.9), t, scale, footprint);
-        waves.height = mix(waves.height, w1.height, wgt);
-        waves.slope = mix(waves.slope, w1.slope, wgt);
-        waves.squeeze = mix(waves.squeeze, w1.squeeze, wgt);
-        waves.unresolved = mix(waves.unresolved, w1.unresolved, wgt);
+    let moving = dot(f, f) > 1e-6;
+    let ph = flowPhases(in.rest.xy, t);
+    var waves: Waves;
+    if (moving) {
+        waves = waveStack(in.rest.xy - f * ph.a, t, scale, footprint);
+        let w1 = waveStack(in.rest.xy - f * ph.b + FLOW_APART, t, scale, footprint);
+        waves.height = waves.height * ph.wa + w1.height * ph.wb;
+        waves.slope = waves.slope * ph.wa + w1.slope * ph.wb;
+        waves.squeeze = mix(waves.squeeze, w1.squeeze, ph.fade);
+        waves.unresolved = mix(waves.unresolved, w1.unresolved, ph.fade);
+    } else {
+        waves = waveStack(in.rest.xy, t, scale, footprint);
     }
     // Where on the waves this is: 0 deep in a trough, 0.5 at the resting level, 1 on a tall crest.
     let waveSd = max(u_wf.u_fWaveParams.w * scale, 1e-3);
@@ -755,7 +827,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let clarity = max(u_wf.u_deepColor.w, 0.05);
     let absorb = u_wf.u_absorption.rgb * (1.0 + turbidity * 3.0);
     let sigma = absorb + vec3<f32>(turbidity / clarity + 0.15 / clarity);
-    let transmit = exp(-sigma * thickness);
+    // Fast water is churned: air and silt in it scatter the light, so it lightens toward its shallow colour and
+    // hides what is under it (Unreal's river material does the same with its velocity scattering).
+    let rush = clamp(smoothstep(0.6, 3.0, length(flow)) * u_wf.u_misc.y, 0.0, 1.0);
+    let transmit = exp(-sigma * thickness) * (1.0 - 0.5 * rush);
     // The light going down into the water (the sky's and the sun's, by its height and its shadow), and the
     // share of it the water scatters back up: the shallow and deep colours are that share (reflectances,
     // as an ocean's is a few percent in the blue), and what leaves a surface lit by an irradiance E is
@@ -767,7 +842,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // enters a crest from the sides and the back and leaves through its thin top, while a trough is lit only
     // from above through its walls. The mean over a wave stays the scatter the colours say.
     let crestGlow = mix(0.3, 1.7, crest);
-    let scatter = mix(u_wf.u_shallowColor.rgb, u_wf.u_deepColor.rgb, clamp(1.0 - exp(-thickness / clarity), 0.0, 1.0)) * lightIn / PI * crestGlow;
+    let body = mix(u_wf.u_shallowColor.rgb, u_wf.u_deepColor.rgb, clamp(1.0 - exp(-thickness / clarity), 0.0, 1.0));
+    let scatter = mix(body, u_wf.u_shallowColor.rgb * 1.3, rush * 0.5) * lightIn / PI * crestGlow;
     // The bed is lit THROUGH the water above it, as well as seen through it: the sun's light comes down a
     // path bent by refraction (Snell, 1.33), the sky's from every way (on average some 1.2 of the depth),
     // so a deep bed darkens and turns blue-green twice over, down and back up. Forward scattering keeps
@@ -786,7 +862,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // waves above focus the sun on it.
         if (u_wf.u_foamParams.z > 0.0) {
             let cScale = max(u_wf.u_foamParams.w, 0.05);
-            let c = causticAt(bed.xz / cScale * 2.0 + flow * t * 0.3, t * 0.8);
+            // Carried by the current on the same two phases as the waves that make them.
+            let cp = bed.xz / cScale * 2.0;
+            let cv = f * (0.6 / cScale);
+            var c = 0.0;
+            if (moving) { c = mix(causticAt(cp - cv * ph.a, t * 0.8), causticAt(cp - cv * ph.b + FLOW_APART, t * 0.8), ph.fade); }
+            else { c = causticAt(cp, t * 0.8); }
             caustic = vec3<f32>(c * u_wf.u_foamParams.z * 1.5 * sunUp * sunVis) * exp(-sigma * underBy) * smoothstep(0.0, 0.3, underBy);
         }
     }
@@ -866,7 +947,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     // Whitecaps: where the long waves crowd the short ones hardest, on their crests.
     amount = max(amount, smoothstep(0.35, 0.7, waves.squeeze) * smoothstep(0.55, 0.8, crest) * u_wf.u_foamParams.x);
-    amount = max(amount, foamBake * u_wf.u_foamParams.y);
     // A waterfall: where the surface drops steeply the water tumbles white, in streaks racing down the fall.
     let fall = smoothstep(0.6, 1.6, in.slope) * u_wf.u_foamParams.y;
     if (fall > 0.0) {
@@ -877,18 +957,47 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let streak = valueNoise(vec2<f32>(sx * 3.0, sy * 0.6 - t * 3.5)) * 0.65 + valueNoise(vec2<f32>(sx * 9.0, sy * 1.5 - t * 6.0)) * 0.35;
         amount = max(amount, fall * (0.5 + 0.5 * streak));
     }
-    if (amount > 0.0) {
+    // The current's own foam: what the water churned up upstream and carried here (the bake's foam, made
+    // and transported by the simulation; the analytic river's where it runs fast or drops). Gone where the
+    // water is nearly still: foam that sits does not read as a river's. Never a solid white sheet: the
+    // whitest water still shows its lace, and with it which way it runs.
+    let churn = clamp(foamBake * u_wf.u_foamParams.y * 1.6, 0.0, 0.8) * smoothstep(0.15, 0.5, length(flow));
+    if (amount > 0.0 || churn > 0.0) {
         // The web drifts with the water, sampled at the mip the footprint calls for, on the same two phases
-        // as the ripples: one phase alone would jump back every cycle.
+        // as the waves: one phase alone would jump back every cycle.
         let webScale = max(u_wf.u_detailParams.x, 0.05) * 4.0;
         let webLod = clamp(log2(footprint / (webScale / 256.0)), 0.0, 8.0);
-        var web = textureSampleLevel(u_detail_texture, u_detail_sampler, (in.rest.xy - f * ph0 * cycle) / webScale, webLod).z;
-        if (length(f) > 1e-3) {
-            let web1 = textureSampleLevel(u_detail_texture, u_detail_sampler, (in.rest.xy - f * ph1 * cycle + vec2<f32>(3.7, 1.9)) / webScale, webLod).z;
-            web = mix(web, web1, wgt);
+        let webA = textureSampleLevel(u_detail_texture, u_detail_sampler, (in.rest.xy - f * ph.a) / webScale, webLod).z;
+        var webB = webA;
+        if (moving) { webB = textureSampleLevel(u_detail_texture, u_detail_sampler, (in.rest.xy - f * ph.b + FLOW_APART) / webScale, webLod).z; }
+        var foam = 0.0;
+        if (amount > 0.0) {
+            let web = mix(webA, webB, ph.fade);
+            foam = smoothstep(1.0 - amount, 1.0 - amount + 0.35, web * 0.75 + amount * 0.45) * smoothstep(0.0, 0.08, amount);
         }
-        var foam = smoothstep(1.0 - amount, 1.0 - amount + 0.35, web * 0.75 + amount * 0.45);
-        foam *= smoothstep(0.0, 0.08, amount);
+        if (churn > 0.0) {
+            // Whitewater is streaks and rafts drawn out along the current, laced with bubbles, not a web of
+            // even cells: smooth noise smeared a couple of metres along the flow (whiteStreaks), broken into
+            // rafts by a slower, broader noise and edged with the bubble web at a third of its size. On the
+            // two phases of the flow, each cross-faded AFTER it is thresholded, so the lace stays crisp
+            // through the fade. `cover` is the share of the water it whitens.
+            let along = normalize(flow);
+            let pa = in.rest.xy - f * ph.a;
+            let pb = in.rest.xy - f * ph.b + FLOW_APART;
+            let lace = webScale * 0.3;
+            let laceLod = clamp(log2(footprint / (lace / 256.0)), 0.0, 8.0);
+            let la = textureSampleLevel(u_detail_texture, u_detail_sampler, pa / lace, laceLod).z;
+            let lb = textureSampleLevel(u_detail_texture, u_detail_sampler, pb / lace, laceLod).z;
+            let na = whiteStreaks(pa, along) * 0.55 + valueNoise(pa * 0.4 + vec2<f32>(11.3, 5.1)) * 0.2 + la * 0.25;
+            let nb = whiteStreaks(pb, along) * 0.55 + valueNoise(pb * 0.4 + vec2<f32>(7.9, 14.2)) * 0.2 + lb * 0.25;
+            let cover = churn * 0.8;
+            let lo = 1.0 - cover;
+            // Too far to tell a streak from the next: the share alone.
+            let far = smoothstep(0.25, 1.2, footprint);
+            let sa = mix(smoothstep(lo - 0.1, lo + 0.1, na), cover, far);
+            let sb = mix(smoothstep(lo - 0.1, lo + 0.1, nb), cover, far);
+            foam = max(foam, mix(sa, sb, ph.fade) * smoothstep(0.0, 0.08, churn));
+        }
         // Foam is a rough white scatterer: lit by the sun as it falls (not by the rippled normal) and the sky.
         let foamLit = u_wf.u_foamColor.rgb * (u_wf.u_ambient.rgb + u_wf.u_sunColor.rgb * sunUp * sunVis) * pre * 0.3;
         color = mix(color, foamLit, foam * select(1.0, 0.0, below));

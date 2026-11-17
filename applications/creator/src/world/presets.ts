@@ -121,8 +121,8 @@ export function badlands(): WorldDoc {
 
 /**
  * An island in open sea: a dome of land a kilometre across rising to a peak, a lake in a basin on its
- * shoulder and a tarn on the other, a river from the peak into the lake and another from the lake down to the
- * sea, eroded. The sea
+ * shoulder and a tarn on the other, a stream down the mountain into the lake and a river from the lake down
+ * to the sea, eroded. The sea
  * is everything below `seaLevel`; the lake comes out of the water pass (priority flood) where the basin
  * holds water. What the Island example is built from (tools/island/).
  */
@@ -137,8 +137,21 @@ export function island(): WorldDoc {
     const tarn = g.add('crater', { center: [0.36, 0.62], radius: 0.045, depth: 0.08, rim: 0.02 }, 'Tarn basin');
     const scree = g.add('thermal', { iterations: 30, talus: 38, rate: 0.5 }, 'Scree');
     const erode = g.add('erosionFilter', filter('soft', { spacing: 200, depth: 0.09, valleyLevel: 0.1, peakLevel: 0.7 }), 'Erosion');
-    const upper = g.add('river', { points: [[0.45, 0.45], [0.5, 0.5], [0.545, 0.535], [0.575, 0.56]], width: 0.006, bank: 0.012, bedStart: 0.42, bedEnd: 0.2 }, 'Peak river');
-    const lower = g.add('river', { points: [[0.675, 0.64], [0.72, 0.69], [0.75, 0.76], [0.79, 0.83], [0.84, 0.9]], width: 0.008, bank: 0.016, bedStart: 0.3, bedEnd: 0.04 }, 'Lake outflow');
+    // The rivers run where the land sends its water (traced over this terrain before they are cut): the stream
+    // that feeds the lake, down the mountain's shoulder into it, and the lake's own way out over its rim to the
+    // sea. Each bed starts a little under the ground at its head and ends a little under the water it reaches,
+    // so the cut is a stream bed, never a canyon, and the upper one stops no water short of the lake.
+    const upper = g.add('river', {
+      points: [[0.501, 0.4814], [0.5098, 0.4824], [0.5166, 0.4814], [0.5234, 0.4805], [0.5303, 0.4854], [0.5352, 0.4951],
+               [0.5391, 0.5059], [0.5449, 0.5176], [0.5527, 0.5215], [0.5576, 0.5283], [0.5625, 0.5352], [0.5674, 0.542],
+               [0.5723, 0.5488], [0.5732, 0.5596], [0.5732, 0.5713], [0.5742, 0.5801], [0.5781, 0.5889]],
+      width: 0.0035, bank: 0.006, bedStart: 0.565, bedEnd: 0.297,
+    }, 'Peak river');
+    const lower = g.add('river', {
+      points: [[0.666, 0.5957], [0.6719, 0.6035], [0.6738, 0.6152], [0.6816, 0.627], [0.6963, 0.6309], [0.7168, 0.6338],
+               [0.7363, 0.6377], [0.7559, 0.6416], [0.7695, 0.6455]],
+      width: 0.0045, bank: 0.008, bedStart: 0.2978, bedEnd: 0.0953,
+    }, 'Lake outflow');
     const out = g.add('output');
     g.link(dome, land, 'a').link(relief, land, 'b');
     g.chain(land, peak, ridge, basin, tarn, scree, erode, upper, lower);

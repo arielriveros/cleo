@@ -250,7 +250,9 @@ export class WaterPasses {
         const heightScale = node.waveWindScale();
         sm.setUniform('u_waves', packed);
         sm.setUniform('u_waveK', packedK);
-        sm.setUniform('u_waveParams', [n, t, heightScale, node.shoreFade]);
+        sm.setUniform('u_waveParams', [n, t, heightScale, node.waveShoreFade]);
+        // How far what rides the water is carried by its current, and the speed a river's waves are built for.
+        sm.setUniform('u_vFlow', [look.flowStrength, node.flowReference(), 0, 0]);
         sm.setUniform('u_fWaves', packed);
         sm.setUniform('u_fWaveK', packedK);
         sm.setUniform('u_fWaveParams', [n, t, heightScale, waveSigma(waves)]);
@@ -287,7 +289,9 @@ export class WaterPasses {
         }
         sm.setUniform('u_windParams', [wx, wz, speed, look.windResponse]);
         const under = this._cameraUnder(node);
-        sm.setUniform('u_misc', [this._view.preExposure, 0, under ? 1 : 0, 0]);
+        // A baked surface is drawn a cell past its wet ones, on under the banks (see the shader's waterline).
+        const baked = !!info && info.source !== 'analytic' && info.source !== 'shore';
+        sm.setUniform('u_misc', [this._view.preExposure, look.flowScatter, under ? 1 : 0, baked ? 1.25 : 0]);
 
         void scene;
     }

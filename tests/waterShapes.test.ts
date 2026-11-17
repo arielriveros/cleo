@@ -7,7 +7,10 @@ import { WaterVolumeNode } from '../src/core/scene/nodes/waterVolumeNode';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
 import { normaliseWaterBody, resolveWaterBody, waterColumnAt, type ResolvedWaterShape } from '../src/water/waterShapes';
-import { seaState, waterNoise, WAVE_BEND, WAVE_SHORTEST, waveHeightAt, waveOmega, wavePhase, waveSigma, waveSlopeVariance, waveSurfaceAt, wavesForWind } from '../src/physics/water/waves';
+import {
+    CURRENT_WAVE_CALM, flowWaveScale, seaState, waterNoise, WAVE_BEND, WAVE_SHORTEST, waveHeightAt, waveOmega, wavePhase, waveSigma,
+    waveSlopeVariance, waveSurfaceAt, waveSurfaceInFlow, wavesForCurrent, wavesForWind,
+} from '../src/physics/water/waves';
 import { TEST_PHYSICS } from './helpers/testPhysics';
 import { carveWater } from '../src/water/carve';
 
@@ -347,6 +350,76 @@ describe('waves', () => {
         expect((sea as any)._serializePayload().waterVolume.fetch).toBe(10000);
     });
 
+    it('a current raises its own waves: as long as can stand still in it, as tall as a share of its velocity head', () => {
+        for (const v of [0.8, 1.5, 3]) {
+            const waves = wavesForCurrent(v);
+            expect(waves[0].wavelength).toBeCloseTo(Math.min(6, 2 * Math.PI * v * v / 9.81), 6);
+            expect(4 * waveSigma(waves)).toBeCloseTo(0.35 * v * v / (2 * 9.81), 6);
+            expect(waveSlopeVariance(waves) / 0.039).toBeCloseTo(1, 2);
+        }
+        expect(wavesForCurrent(0)).toEqual([]);
+        // No wind picks a heading: they run every way.
+        const waves = wavesForCurrent(2);
+        let sx = 0, sz = 0;
+        for (const w of waves) { sx += w.dirX; sz += w.dirZ; }
+        expect(Math.hypot(sx, sz) / waves.length).toBeLessThan(0.4);
+        // Where the water runs faster or slower than the set was built for: with the square of its speed.
+        expect(flowWaveScale(2, 2)).toBe(1);
+        expect(flowWaveScale(1, 2)).toBeCloseTo(0.25, 9);
+        expect(flowWaveScale(0, 2)).toBe(CURRENT_WAVE_CALM);
+        expect(flowWaveScale(10, 2)).toBe(1.6);
+        expect(flowWaveScale(3, 0)).toBe(1);                    // wind waves: the same everywhere
+    });
+
+    it('carries the waves with the current without flattening them between its two phases', () => {
+        const waves = wavesForCurrent(2);
+        const a = { height: 0, vx: 0, vy: 0, vz: 0, k: 0 }, b = { height: 0, vx: 0, vy: 0, vz: 0, k: 0 };
+        // Still water: the waves as they are.
+        waveSurfaceInFlow(waves, 3, 7, 1.5, 1, 1, 0, 0, 0, a);
+        waveSurfaceAt(waves, 3, 7, 1.5, 1, 1, 0, b);
+        expect(a.height).toBe(b.height);
+        expect(a.vy).toBe(b.vy);
+        // In a current, at every moment of the cycle, the water stands as tall on average as it does still:
+        // a plain cross-fade of the two phases would stand 0.71 of it half way through.
+        const sigma = waveSigma(waves);
+        for (const t of [0, 0.75, 1.5, 2.25, 9.1]) {
+            let s = 0, s2 = 0, n = 0;
+            for (let x = 0; x < 60; x += 0.37) for (let z = 0; z < 20; z += 0.41) {
+                const h = waveSurfaceInFlow(waves, x, z, t, 1, 1, 0, 1.6, 0.5, a).height;
+                s += h; s2 += h * h; n++;
+            }
+            const spread = Math.sqrt(s2 / n - (s / n) ** 2);
+            expect(spread / sigma).toBeGreaterThan(0.85);
+            expect(spread / sigma).toBeLessThan(1.15);
+        }
+    });
+
+    it('a river node rides its current\u2019s waves, whatever the wind, and its banks calm them', () => {
+        const river = new WaterVolumeNode('river', { waterType: 'river', windSpeed: 0, waveAmplitude: 0, points: [
+            { pos: [0, 2, 0], width: 8, depth: 1, flowSpeed: 2 }, { pos: [0, 0, 80], width: 8, depth: 1, flowSpeed: 2 },
+        ] });
+        const lake = new WaterVolumeNode('lake', { waterType: 'lake', windSpeed: 0 });
+        lake.setPosition([200, 0, 0]);
+        sceneOf(river, lake);
+        expect(river.flowReference()).toBe(2);
+        expect(river.waves()[0].wavelength).toBeCloseTo(2 * Math.PI * 4 / 9.81, 6);
+        expect(river.waveShoreFade).toBe(1.5);
+        expect(river.buoyancySpec().flowWaves).toBe(2);
+        expect(river.buoyancySpec().shoreFade).toBe(1.5);
+        // What floats on it rises and falls with them, more in the fast water of the centre line than toward the bank.
+        const swing = (x: number) => {
+            let lo = Infinity, hi = -Infinity;
+            for (let t = 0; t < 8; t += 0.05) { const c = river.columnAt(x, 40, t)!; const h = c.surface - c.rest!; lo = Math.min(lo, h); hi = Math.max(hi, h); }
+            return hi - lo;
+        };
+        expect(swing(0)).toBeGreaterThan(0.01);
+        expect(swing(0)).toBeGreaterThan(2 * swing(3.2));
+        // No wind, no waves on the lake; and nothing of a current's about it.
+        expect(lake.waves()).toEqual([]);
+        expect(lake.flowReference()).toBe(0);
+        expect(lake.waveShoreFade).toBe(lake.shoreFade);
+    });
+
     it('grows with the wind and is limited by fetch', () => {
         const height = (U: number, F: number) => waveSigma(wavesForWind(U, 0, F));
         expect(height(15, Infinity)).toBeGreaterThan(height(5, Infinity));
@@ -470,12 +543,12 @@ describe('water info and look', () => {
 
 describe('the shallow-water bake', () => {
     it('settles a river running downhill into its lake, flowing downstream, and round-trips its bytes', async () => {
-        const { bakeShallowWater } = await import('../src/water/bake/shallowWater');
+        const { bakeShallowWater } = await import('../src/water/bake/groupSetup');
         const { encodeWaterBake, decodeWaterBake } = await import('../src/water/bake/waterBakeFormat');
         const lake = resolveWaterBody(normaliseWaterBody({ type: 'lake' }), placed([0, -1.5, 30]), 'L')!;
         const river = resolveWaterBody(normaliseWaterBody({ type: 'river' }), FRAME, 'R', { end: lake })!;
         const t0 = performance.now();
-        const info = bakeShallowWater([river, lake], null, { maxRes: 96, duration: 25 });
+        const info = bakeShallowWater([river, lake], null, { maxRes: 96 });
         const ms = performance.now() - t0;
         const at = (x: number, z: number) => {
             const i = Math.round((z - info.originZ) / info.cell) * info.nx + Math.round((x - info.originX) / info.cell);
@@ -486,7 +559,8 @@ describe('the shallow-water bake', () => {
         expect(mid.v).toBeGreaterThan(0.05);          // downstream is +z
         expect(Math.abs(mid.u)).toBeLessThan(mid.v);
         expect(at(0, -10).surface).toBeGreaterThan(at(0, 10).surface);
-        expect(at(8, 32).wet).toBe(0);                // the lake's own node draws the lake (handed over)
+        // The lake's own node draws the lake (handed over): just inside it, the river draws nothing.
+        expect(at(0, river.samples.at(-1)!.z - 0.5).wet).toBe(0);
         expect(ms).toBeLessThan(20000);
         const bytes = encodeWaterBake(info, 'sig');
         const back = decodeWaterBake(bytes)!;
@@ -499,7 +573,7 @@ describe('the shallow-water bake', () => {
 
 describe('physics on a baked flow', () => {
     it('reads the bake surface and currents, and drops a stale bake', async () => {
-        const { bakeShallowWater } = await import('../src/water/bake/shallowWater');
+        const { bakeShallowWater } = await import('../src/water/bake/groupSetup');
         const { encodeWaterBake } = await import('../src/water/bake/waterBakeFormat');
         const { GiBakeRegistry } = await import('../src/graphics/render/gi/giBakeRegistry');
         const lake = new WaterVolumeNode('lake', { waterType: 'lake' });
@@ -507,7 +581,7 @@ describe('physics on a baked flow', () => {
         const w = new WaterVolumeNode('river', { waterType: 'river', waveAmplitude: 0 });
         w.flowsInto = lake.id;
         sceneOf(lake, w);
-        const info = bakeShallowWater(w.resolvedShapes(), null, { maxRes: 96, duration: 25, handOver: w.handOver() });
+        const info = bakeShallowWater(w.resolvedShapes(), null, { maxRes: 96, handOver: w.handOver() });
         GiBakeRegistry.set('wb-test', encodeWaterBake(info, w.bakeSignature()));
         w.bakeId = 'wb-test';
         const grid = w.bakedFlowGrid()!;

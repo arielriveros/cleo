@@ -32,15 +32,15 @@ handle on each face of a pool to resize it about its centre. Delete removes the 
 
 | Field | What it does |
 |---|---|
-| **River** | A smooth spline through its points, listed upstream to downstream. Each point has its own **Width**, **Depth** and **Flow speed**, easing from one point to the next; the channel is deepest and fastest on its centre line and shallow and slow at the banks. The surface follows the points' heights, so the river runs downhill as its points do. |
+| **River** | A smooth spline through its points, listed upstream to downstream. Each point has its own **Width**, **Depth** and **Flow speed**, easing from one point to the next; the channel is deepest and fastest on its centre line and shallow and slow at the banks. The surface follows the points' heights and never rises on the way down: a point drawn higher than the one before it is taken at that one's height. This is the river as drawn; a **Flow bake** runs its water over the ground itself. |
 | **Lake** | A level surface at the node's height inside the smooth closed outline through its points, **Depth** deep. |
 | **Ocean** | A level surface at the node's height with no shore unless you give it an **Extent**. Open water lets the wind build the longest and tallest waves. |
 | **Pool** | A level block of water centred on the node, **Size** big: a tank, a fountain, a flooded room. Its top face is the surface. |
 | **Size** | A pool's width, depth and length in metres, before the node's scale. |
 | **Depth** | A lake's or ocean's depth below the surface, metres. Where the landscape is higher, it is the floor. |
 | **Extent** | Metres the ocean reaches each way from the node. 0: endless, to the horizon. |
-| **Flows from** | The Water node a river starts in: a lake it drains, a river it branches from. Its first point takes that water's surface, so the two meet. |
-| **Flows into** | The Water node a river ends in: a lake, the ocean, another river. Its last point takes that water's surface and the river runs on into it. |
+| **Flows from** | The Water node a river starts in: a lake it drains, a river it branches from. The river never stands higher than that water: a start drawn above it is taken at its surface. |
+| **Flows into** | The Water node a river ends in: a lake, the ocean, another river. The river never runs lower than that water: where it is drawn under it, that water backs up the channel, and the river runs on into it. |
 | **Position** | Where a point is: on a river, its centre line at the surface; on a lake, a point of the outline (the lake's level is the node's height). |
 | **Width** | Metres from bank to bank at a river point. |
 | **Flow speed** | Metres per second downstream at a river point: how fast the river carries what floats. |
@@ -50,15 +50,20 @@ handle on each face of a pool to resize it about its centre. Delete removes the 
 
 ### Connecting water
 
-Set a river's **Flows into** to a lake, the ocean, a pool or another river and its last point takes that
-water's surface: the river drops into the lake at its level, or joins the other river where it meets it.
-**Flows from** does the same for the river's start, for a river that drains a lake. In the viewport,
-dropping a river's first or last point on another Water node's water connects it, and dragging it back out
-lets go.
+Set a river's **Flows into** to a lake, the ocean, a pool or another river and it runs on into that water:
+its surface comes down to that water's level and never under it, so the river meets the lake at the lake's
+level and the lake backs up the last of its channel. **Flows from** does the same for the river's start, for
+a river that drains a lake: it starts no higher than the lake stands. In the viewport, dropping a river's
+first or last point on another Water node's water connects it, and dragging it back out lets go.
 
 Where the river runs into what it joins, the other water is the water: it draws the surface there and buoys
-what floats, so a log drifting out of the river mouth is carried into the lake without being lifted twice,
-and the river's edge there grows no shore foam. Move the lake and the river's mouth follows it.
+what floats, so a log drifting out of the river mouth is carried into the lake without being lifted twice.
+The mouth is a shore to neither: no shore foam grows across it, and the lake's waves do not die down there.
+A river that runs to the sea carries what floats all the way down: the sea takes over where its water really
+stands, at the beach, not before. Move the lake and the river's mouth follows it.
+
+Water joined this way is one system: a [flow bake](#flow-bake) simulates all of it together, so the current
+runs from a river into its lake, across it and out down the river that drains it.
 
 ## Surface
 
@@ -86,11 +91,12 @@ reflects the water back outside Snell's window.
 | **Refraction** | How far what is under the surface bends with the waves. |
 | **Ripples** | Strength of the waves under a metre long: the ripples the wind raises on the waves. 1 is the wind's own; floating bodies do not feel them. |
 | **Foam size** | Metres across the bubble web the foam is drawn with. |
-| **Flow** | How far the waves and foam ride the current, so a river visibly runs. |
+| **Flow** | How far the waves, the foam and the caustics ride the current, so a river visibly runs: 1 carries them at the water's own speed. Floating bodies ride the waves where the surface draws them. |
+| **Churn** | How much fast water lightens and clouds, as churned water does: a rapid reads pale against the dark, clear pool below it. 0: speed does not show in the colour. |
 | **Foam colour** | The colour of the foam. |
 | **Shore foam** | Metres of foam along the shore and in thin water, with surf lines running in; on an ocean, the foam of its breaking surf. |
 | **Crest foam** | Foam on breaking wave crests. |
-| **Rapids foam** | Foam where the water runs fast or drops: rapids, weirs, waterfalls. |
+| **Rapids foam** | Foam where the water runs fast or drops: rapids, weirs, waterfalls. With a flow bake it is the foam the bake made and carried, so it trails downstream of a drop or a rock: streaks and rafts drawn out along the current, laced with bubbles, never a solid white sheet, and gone where the water is nearly still. |
 | **Caustics** | Brightness of the light the waves focus on the bed. |
 | **Caustics size** | Metres between the caustic lines. |
 | **Rain rings** | How much rain from a Weather volume rings the surface. |
@@ -116,39 +122,67 @@ water is deep.
 
 ## Flow bake
 
-A simulation of the water itself: **Bake flow** runs the shallow-water equations over the water, the
-landscape under it and the static colliders standing in it until the water settles, and the surface then
-draws what it found: currents that bend round the banks and round a rock, wakes and eddies behind it, water
-speeding over a shallow bar and piling up before a narrows, foam where it tumbles. Floating bodies ride the
-baked water too: its surface and its currents carry them. The bake runs in the background while the editor
-keeps drawing; **Cancel** stops it. Without a bake the surface draws the analytic flow along each river. The
-bake is saved with the project and published with the game.
+A simulation of the water itself, the way Unreal's baked river simulation works: **Bake flow** runs the
+shallow-water equations over the ground until the water settles, and every water in the system then draws
+what was found: where the water really stands and how high, currents that bend with the banks and round a
+rock, wakes and eddies behind it, water speeding over a shallow bar and piling up before a narrows, and foam
+where it tumbles, trailing off downstream. Floating bodies ride the baked water too: its surface and its
+currents carry them. The bake runs in the background while the editor keeps drawing; **Cancel** stops it.
+Without a bake each water draws as it was drawn. The bake is saved with the project and published with the
+game.
+
+One press bakes the whole system: everything joined to this water through **Flows from** and **Flows into**,
+on one grid, so a river's water reaches its lake, crosses it and leaves down the river that drains it. An
+endless ocean is where a system ends: it is held at its level, and two rivers that reach the same sea are two
+systems.
 
 What it simulates:
 
-- **The ground decides the banks.** The water may run a little past the outline you drew (a bank's width,
-  or 4 m) where the ground is lower, never further: a river laid a little off its valley's floor still
-  follows the valley.
+- **The ground decides where the water goes.** The bed is the landscape, and nothing holds the water at the
+  height or along the line it was drawn at. A river's water is free to run anywhere in a corridor round its
+  course (twice its width either side, between 8 and 40 m); a lake's wherever the ground beside it lies under
+  its level. A river drawn across ground with no channel runs off downhill, and the bake says so: press
+  **Carve landscape** (with **Dig deeper**, for a channel that holds more than the drawn depth) or draw the
+  river where the ground runs. Only where there is no landscape under a water does its own drawn bed stand in
+  for the ground.
 - **Static colliders are obstacles.** A Collider with no mass standing out of the water is a wall the water
   goes round; one under the surface raises the bed, and the water speeds over it. Colliders with mass (what
   floats or falls) are not part of the bake.
-- **A river brings its own water.** Its first metres are fed the water its first point carries (width ×
-  depth × flow speed); after that the slope and the bed's roughness decide how fast and deep it runs, as a
-  real river's do. Where it runs into a lake or the sea it hands the water over; a river that runs into
-  nothing drains at its end.
-- **A lake takes what its rivers bring** and loses it to the rivers that drain it, holding its level.
+- **A river brings its own water.** A river that starts in no other water rises at its first point, with the
+  water that point carries (width × depth × flow speed). From there the slope and the bed's roughness decide
+  how fast and deep it runs. On steep ground a stream tumbles from step to pool instead of sheeting down: a
+  natural bed (a **Bed roughness** of 0.025 and up) is never taken smoother there than mountain streams
+  measure. A river that runs into nothing drains at its end.
+- **A lake finds its own level.** A lake with a river in and a river out is not held where it was drawn: it
+  stands where its outlet lets it, and the flow crosses it from one mouth to the other. A lake with no river
+  out takes what comes without rising; a lake with a river out and none in feeds it.
+- **A hollow on the way fills** before the water runs on. One too big to fill in the time a bake allows is
+  reported: make it a lake.
+- **Foam is made and carried.** It is made where the water loses its energy: tumbling down a steep bed, at
+  the foot of a drop, in the shear beside a jet and the eddy behind a rock. The smooth tongue over a weir's
+  lip makes none; a short hard drop makes more than a long steady chute. It is carried downstream by the
+  current and fades over a few seconds, so a torrent comes out streaked: white where it falls, clear in its
+  pools.
+- **The banks are the ground's.** The baked surface is drawn on a little way under the dry ground beside it,
+  so the waterline is where the water meets the bank, not the outline of the bake's cells.
 
-One press bakes the whole group: everything joined to this water through **Flows from** and **Flows into**,
-upstream first, so a lake is baked after the rivers that feed it. Moving or editing the water, the water it
-joins, the landscape under it or a static collider in it makes the bake stale, and the analytic flow draws
-again until the next bake.
+When the bake is done the card says how it went: whether the water settled (what flows in is what flows
+out) and after how long; how much water left its course, and where; any hollow still filling, and where; and
+a lake that stands at another level than it was drawn at. Water that leaves its course is the thing to fix:
+the river is drawn where the ground does not hold it.
+
+Moving or editing any water of the system, the landscape under it or a static collider in it makes the bake
+stale, and every water of the system draws as drawn again until the next bake; the Console says so. Editing
+the waves, the look or the carve settings does not.
 
 | Field | What it does |
 |---|---|
-| **Bake resolution** | Cells along the longest side of the water: finer catches narrower channels and smaller rocks, and takes longer. |
-| **Bed roughness** | Manning's roughness of the bed: 0.01 smooth concrete, 0.03 a natural channel, 0.1 a weedy, bouldery one. The rougher, the slower and deeper the water runs. |
+| **Bake resolution** | Cells along the longest side of everything baked together: finer catches narrower channels and smaller rocks, and takes longer (twice as fine is four times the cells and eight times the time). A river wants half a dozen cells across it; the card warns when it has fewer. |
+| **Bed roughness** | Manning's roughness of the bed: 0.01 smooth concrete, 0.03 a natural channel, 0.1 a weedy, bouldery one. The rougher, the slower and deeper the water runs. A natural bed (0.025 and up) is never taken smoother than a stream on its slope measures; a smoother one is a flume, and runs as fast as its slope lets it. |
 
 ## Waves
+
+A lake's, a pool's and the sea's waves are raised by the wind; a river's by its own current (below).
 
 Waves raised by the wind, as many as forty of them from the longest the wind builds down to ripples a
 centimetre and a half long, each one shorter than the last and running at its own natural speed. Each has a
@@ -160,9 +194,17 @@ licence); the crest bending follows TDM's "Seascape".
 The sea is the one that wind raises: its height is the significant wave height measured for that wind over that
 much open water (the **Fetch**), and its roughness, how much the surface tilts, is what Cox and Munk measured
 from the sun's glitter on real seas. A short fetch raises a young sea of short, steep, choppy waves; a long one
-the long swell of the open ocean. A lake or pool limits them to what its size lets build, an endless ocean
-lets them grow fully developed unless **Fetch** says otherwise, and a river carries only a small share of them.
-Floating bodies ride the same waves the surface draws, all those a metre long or more.
+the long swell of the open ocean. A lake or pool limits them to what its size lets build, and an endless ocean
+lets them grow fully developed unless **Fetch** says otherwise. Floating bodies ride the same waves the
+surface draws, all those a metre long or more.
+
+A river's waves are its current's, whatever the wind: the chop and standing waves fast water raises over its
+bed. The longest is the wave that can stand still against the flow (60 cm long in water running 1 m/s, 2.5 m
+at 2 m/s), their height a share of the height the water's speed could lift it (centimetres at 1 m/s, a hand's
+width at 3), and they run every way. Each stretch has the waves of its own speed: tall in a rapid, calm in a
+pool, with the baked current where there is a flow bake and the drawn **Flow speed** where there is none.
+They ride downstream with the water, and the banks calm them within a stride. A river shows only the fields
+that shape them: **Height**, **Wave speed**, **Shore fade** and the swell.
 
 ### Surf
 
@@ -179,11 +221,11 @@ Nothing to set: the waves decide it.
 | **Wind speed** | Metres per second the waves are shaped for. 0: no waves, only the swell. |
 | **Fetch** | Metres of open water the wind has crossed: a short fetch raises a young sea of short, steep, choppy waves; a long one the long swell of the open sea. 0: what the body gives (an endless ocean is the open sea). |
 | **Direction** | Degrees the waves travel toward: 0 is +Z, 90 is +X. The longest run with the wind; the short ones, raised by every gust, run every way. |
-| **Height** | Multiplies the wave height the wind gives. |
+| **Height** | Multiplies the wave height the wind gives, or on a river the height its current gives. |
 | **Choppiness** | How hard the long waves crowd the short ones onto their crests: 0 an even chop, 1 the small waves bunched on every crest. |
 | **Wave speed** | How fast the waves and ripples run against their natural pace. 1 is real: a wave runs as fast as its length makes it (a 40 m ocean swell at 8 m/s, a lake's 1 m chop at 1.2 m/s). Below 1, a calmer, slower sea. Floating bodies ride the waves at the same pace. |
-| **Follow wind** | The scene's Wind node raises and calms the waves: their height follows its speed against **Wind speed**, squared as a sea's does, up to twice as tall. Their length and direction stay as shaped. A sea set to a stronger wind than the Wind node blows (offshore winds often are) is flattened by it: leave this off there. |
-| **Shore fade** | Metres from a shore over which the waves die down. |
+| **Follow wind** | The scene's Wind node raises and calms the waves: their height follows its speed against **Wind speed**, squared as a sea's does, up to twice as tall. Their length and direction stay as shaped. A sea set to a stronger wind than the Wind node blows (offshore winds often are) is flattened by it: leave this off there. A river's waves do not follow the wind. |
+| **Shore fade** | Metres from a shore over which the waves die down. A river's banks calm its waves within 1.5 m at most. |
 | **Swell** | Metres the whole surface rises and falls, so floating bodies bob even with no wind. 0: none. |
 | **Swell rate** | How many times a second the swell rises and falls. |
 

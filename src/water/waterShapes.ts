@@ -205,8 +205,11 @@ function toWorld(frame: WaterFrame, p: readonly number[]): Vec3Tuple {
 }
 
 const RIVER_SPACING = 1;
-/** Rivers carry this share of their node's waves: a chop, not a swell. */
-export const RIVER_WAVE_FACTOR = 0.15;
+/**
+ * A river's share of its node's waves. Its waves are its own current's (physics/water/waves.ts
+ * wavesForCurrent), built for it, so all of them.
+ */
+export const RIVER_WAVE_FACTOR = 1;
 
 /** How far inside the water it joins a river's connected end reaches, metres. */
 const REACH_INSIDE = 2;

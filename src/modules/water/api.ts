@@ -13,9 +13,15 @@ export { carveWater, type CarveGrid, type CarveRegion } from "../../water/carve"
 export { buildWaterInfo, handOverWaterInfo, type WaterInfo, type GroundSampler } from "../../water/waterInfo";
 export { sceneGround, heightsRegionKey, groundRegionKey } from "../../water/ground";
 export {
-    ShallowWaterBake, bakeShallowWater, bakeWater, prepareWaterBake, riverDischarge, DEFAULT_MANNING,
-    type WaterBakeSetup, type PrepareOptions, type WaterInflow, type WaterOutflow,
+    ShallowWaterBake, bakeWater, riverDischarge, DEFAULT_MANNING,
+    type WaterBakeSetup, type WaterBakeMember, type WaterBakeSettle, type WaterBakeReport, type WaterBakeOutput,
 } from "../../water/bake/shallowWater";
-export { prepareNodeBake, waterBakeGroup, waterBakeContext, bakeable, bakeReach } from "../../water/bake/bakeNode";
+export {
+    prepareWaterGroup, prepareWaterBake, bakeShallowWater, groupReach, bodyReach, riverCorridor, WATER_BAKE_DEPTH_CAP,
+    type WaterGroupMember, type WaterGroupOptions,
+} from "../../water/bake/groupSetup";
+export {
+    prepareGroupBake, waterBakeGroup, waterGroupBoundary, waterGroupReach, waterGroupSignature, forgetWaterBakeContext, bakeable,
+} from "../../water/bake/bakeNode";
 export { sceneObstacles, obstacleSpan, obstaclesKey, type WaterObstacle } from "../../water/bake/obstacles";
 export { encodeWaterBake, decodeWaterBake, newWaterBakeId } from "../../water/bake/waterBakeFormat";

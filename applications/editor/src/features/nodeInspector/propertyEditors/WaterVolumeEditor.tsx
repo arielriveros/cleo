@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import {
   ModelNode, WaterVolumeNode, WATER_VOLUME_PRESETS, WATER_BODY_TYPES, normaliseWaterPoint, minWaterPoints, carveWater,
   WaterMaterial, WATER_LOOK_PRESETS, DEFAULT_WATER_LOOK, encodeWaterBake, decodeWaterBake,
-  newWaterBakeId, GiBakeRegistry, Logger, prepareNodeBake, waterBakeGroup, bakeable, type LandscapeNode, type WaterLook, type WaterLookPreset,
+  newWaterBakeId, GiBakeRegistry, Logger, prepareGroupBake, waterBakeGroup, waterGroupReach, waterGroupSignature, forgetWaterBakeContext, bakeable,
+  type LandscapeNode, type WaterLook, type WaterLookPreset, type WaterBakeReport,
   type WaterVolumePreset, type WaterBody, type WaterBodyType, type WaterPoint,
 } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
@@ -281,7 +282,8 @@ function WaterSurface({ node, changed }: { node: WaterVolumeNode; changed: () =>
         {slider('refraction', 'Refraction', 'How far what is under the surface bends with the waves.', 0, 2, 0.05)}
         {slider('detailStrength', 'Ripples', 'Strength of the waves under a metre long: the ripples the wind raises on the waves. 1 is the wind\u2019s own.', 0, 2, 0.05)}
         {slider('detailScale', 'Foam size', 'Metres across the bubble web the foam is drawn with.', 0.1, 10, 0.1)}
-        {slider('flowStrength', 'Flow', 'How far the ripples and foam ride the current.', 0, 2, 0.05)}
+        {slider('flowStrength', 'Flow', 'How far the waves and foam ride the current, so a river visibly runs.', 0, 2, 0.05)}
+        {slider('flowScatter', 'Churn', 'How much fast water lightens and clouds, as churned water does.', 0, 2, 0.05)}
         {color('foamColor', 'Foam colour', 'The colour of the foam.')}
         {slider('shoreFoam', 'Shore foam', 'Metres of foam along the shore and in thin water.', 0, 10, 0.1)}
         {slider('crestFoam', 'Crest foam', 'Foam on breaking wave crests.', 0, 1, 0.05)}
@@ -302,7 +304,10 @@ function WaterSurface({ node, changed }: { node: WaterVolumeNode; changed: () =>
   )
 }
 
-const BAKE_RESOLUTIONS = [{ value: 128, label: 'Draft (128)' }, { value: 256, label: 'Standard (256)' }, { value: 384, label: 'Fine (384)' }, { value: 512, label: 'Finest (512)' }]
+const BAKE_RESOLUTIONS = [{ value: 256, label: 'Draft (256)' }, { value: 512, label: 'Standard (512)' }, { value: 768, label: 'Fine (768)' }, { value: 1024, label: 'Finest (1024, slow)' }]
+
+/** How each bake made this session went, by bake id: what the card says under the button. */
+const BAKE_REPORTS = new Map<string, WaterBakeReport>()
 
 /** Whether a node's bake is drawn: none, current, stale (the water or the ground round it changed), or missing. */
 function bakeStatus(node: WaterVolumeNode): 'none' | 'current' | 'stale' | 'missing' {
@@ -312,15 +317,41 @@ function bakeStatus(node: WaterVolumeNode): 'none' | 'current' | 'stale' | 'miss
   return !decoded ? 'missing' : decoded.signature === node.bakeSignature() ? 'current' : 'stale'
 }
 
+const at = (p: [number, number]) => `${Math.round(p[0])}, ${Math.round(p[1])}`
+
+/** A bake's report in plain words: whether it settled, and what the water did that it was not drawn to do. */
+function reportLines(report: WaterBakeReport, group: readonly WaterVolumeNode[]): { text: string; warn: boolean }[] {
+  const lines: { text: string; warn: boolean }[] = []
+  const flow = `${report.inflow.toFixed(1)} m\u00b3/s in, ${(report.outflow + report.lost).toFixed(1)} out`
+  if (report.settled) lines.push({ text: `Settled after ${Math.round(report.seconds)} s of flow (${flow}).`, warn: false })
+  else {
+    const where = report.fillingAt && report.filling > 0 ? ` Water was still gathering near ${at(report.fillingAt)}: a hollow on its way that is a lake; add one there, or fill it in.` : ''
+    lines.push({ text: `Not settled after ${Math.round(report.seconds)} s of flow (${flow}).${where}`, warn: true })
+  }
+  if (report.lost > 0.02 * Math.max(report.inflow, 1e-6)) {
+    const share = Math.round(100 * report.lost / Math.max(report.inflow, 1e-6))
+    lines.push({
+      text: `${Math.min(100, share)}% of the water left the course it was drawn on${report.lostAt ? `, most near ${at(report.lostAt)}` : ''}: the ground has no channel for it there. Carve one, or draw the river where the ground runs.`,
+      warn: true,
+    })
+  }
+  for (const l of report.levels) {
+    if (Math.abs(l.level - l.drawn) < 0.05) continue
+    const name = group.find(n => n.id === l.id)?.name ?? 'A lake'
+    lines.push({ text: `${name} stands at ${l.level.toFixed(2)} m, not the ${l.drawn.toFixed(2)} m it was drawn at: that is where its outlet lets it.`, warn: false })
+  }
+  return lines
+}
+
 /**
- * The flow bake: the shallow-water equations run over the water, the ground under it and the static
- * colliders in it until the water settles (water/bake/), in a worker, its settled currents, heights and foam
- * stored as a bake the surface then draws and physics carries floating bodies on. One press bakes the
- * node's whole group, everything joined to it, upstream first: a lake after the rivers that feed it.
+ * The flow bake: the shallow-water equations run over this water and everything joined to it as one system,
+ * over the ground under it and round the static colliders in it, until what flows in is what flows out
+ * (water/bake/), in a worker. Each water's settled heights, currents and foam are stored as its bake, which
+ * the surface then draws and physics carries floating bodies on.
  */
 function WaterBake({ node, changed }: { node: WaterVolumeNode; changed: () => void }) {
-  const [res, setRes] = useState(256)
-  const [progress, setProgress] = useState<{ index: number; count: number; name: string; fraction: number } | null>(null)
+  const [res, setRes] = useState(512)
+  const [progress, setProgress] = useState<{ fraction: number; seconds: number } | null>(null)
   const cancelRef = useRef<(() => void) | null>(null)
   const stopRef = useRef(false)
   useEffect(() => () => { stopRef.current = true; cancelRef.current?.() }, [])
@@ -330,59 +361,75 @@ function WaterBake({ node, changed }: { node: WaterVolumeNode; changed: () => vo
   const bake = async () => {
     if (progress !== null || !group.length) return
     stopRef.current = false
-    for (let k = 0; k < group.length && !stopRef.current; k++) {
-      const n = group[k]
-      let setup
-      try { setup = prepareNodeBake(n, { maxRes: res }) }
-      catch (e) { Logger.warn(`Water "${n.name}": ${String((e as Error).message ?? e)}`, 'Water'); continue }
-      const signature = n.bakeSignature()
-      setProgress({ index: k, count: group.length, name: n.name, fraction: 0 })
-      const run = runWaterBake(setup, fraction => setProgress({ index: k, count: group.length, name: n.name, fraction }))
-      cancelRef.current = run.cancel
-      let info
-      try { info = await run.result }
-      catch (e) { Logger.warn(`Water "${n.name}" bake failed: ${String((e as Error).message ?? e)}`, 'Water'); continue }
-      cancelRef.current = null
-      if (!info || stopRef.current) break
-      const bakeId = newWaterBakeId()
-      info.source = bakeId
-      await saveGiBake(bakeId, encodeWaterBake(info, signature), n.bakeId)
-      n.bakeId = bakeId
-      Logger.info(`Water "${n.name}" baked: ${setup.nx} x ${setup.nz} cells`, 'Water')
+    let prepared
+    try { prepared = prepareGroupBake(node, { maxRes: res }) }
+    catch (e) { Logger.warn(`Water "${node.name}": ${String((e as Error).message ?? e)}`, 'Water'); return }
+    // Signed with what it is baked from, read now.
+    forgetWaterBakeContext()
+    const signature = waterGroupSignature(node)
+    setProgress({ fraction: 0, seconds: 0 })
+    const run = runWaterBake(prepared.setup, (fraction, seconds) => setProgress({ fraction, seconds }))
+    cancelRef.current = run.cancel
+    let output = null
+    try { output = await run.result }
+    catch (e) { Logger.warn(`Water "${node.name}" bake failed: ${String((e as Error).message ?? e)}`, 'Water') }
+    cancelRef.current = null
+    if (output && !stopRef.current) {
+      for (const m of output.members) {
+        const n = prepared.group.find(g => g.id === m.id)
+        if (!n) continue
+        const bakeId = newWaterBakeId()
+        m.info.source = bakeId
+        await saveGiBake(bakeId, encodeWaterBake(m.info, signature), n.bakeId)
+        n.bakeId = bakeId
+        BAKE_REPORTS.set(bakeId, output.report)
+      }
+      const lines = reportLines(output.report, prepared.group)
+      const say = lines.some(l => l.warn) ? Logger.warn : Logger.info
+      say.call(Logger, `Water baked (${prepared.group.map(n => n.name).join(', ')}): ${prepared.setup.nx} x ${prepared.setup.nz} cells. ${lines.map(l => l.text).join(' ')}`, 'Water')
     }
     setProgress(null)
     changed()
   }
   const others = group.filter(n => n !== node)
+  const report = node.bakeId ? BAKE_REPORTS.get(node.bakeId) : undefined
+  // A river narrower than a few cells cannot carry a current the bake can see.
+  const reach = waterGroupReach(group)
+  const cell = reach ? Math.max(0.25, Math.max(reach[2] - reach[0], reach[3] - reach[1]) / (res - 5)) : 0
+  let narrowest = Infinity
+  for (const n of group) if (n.waterType === 'river') for (const p of n.points) narrowest = Math.min(narrowest, p.width)
+  const coarse = Number.isFinite(narrowest) && cell > narrowest / 6
   return (
     <Section title='Flow bake'>
       {!canBake && <Hint className='mb-1'>An endless ocean has no flow to settle: nothing to bake.</Hint>}
       {canBake && <>
         <PropertyTable columns={['45%', '55%']}>
-          <PropertyRow label='Bake resolution' hint='Cells along the longest side of the water: finer catches narrower channels and smaller rocks, and takes longer.' divider>
+          <PropertyRow label='Bake resolution' hint='Cells along the longest side of the water baked together: finer catches narrower channels and smaller rocks, and takes longer (four times the cells, eight times the time).' divider>
             <Select value={String(res)} onChange={e => setRes(Number(e.target.value))}>
               {BAKE_RESOLUTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
             </Select>
           </PropertyRow>
-          <PropertyRow label='Bed roughness' hint='Manning\u2019s roughness of the bed: 0.01 smooth concrete, 0.03 a natural channel, 0.1 a weedy, bouldery one. The rougher, the slower and deeper the water runs.'>
+          <PropertyRow label='Bed roughness' hint={"Manning's roughness of the bed: 0.01 smooth concrete, 0.03 a natural channel, 0.1 a weedy, bouldery one. The rougher, the slower and deeper the water runs. A natural bed (0.025 and up) is never taken smoother than a stream on its slope measures."}>
             <Slider value={node.bedRoughness} min={0.01} max={0.12} step={0.005} readout onChange={v => { node.bedRoughness = v; changed() }} />
           </PropertyRow>
         </PropertyTable>
         <div className='flex items-center gap-1.5 mt-2'>
           {progress === null
-            ? <Button size='sm' onClick={bake} title='Simulate the water over the landscape and round the static colliders in it until it settles, for this water and everything joined to it, and draw the surface with its currents and foam.'>
+            ? <Button size='sm' onClick={bake} title='Simulate this water and everything joined to it over the landscape and round the static colliders in it, until what flows in is what flows out, and draw each with its settled heights, currents and foam.'>
                 {others.length ? `Bake flow (${group.length} waters)` : 'Bake flow'}
               </Button>
             : <Button size='sm' onClick={() => { stopRef.current = true; cancelRef.current?.() }} title='Stop the bake; every water keeps what it drew before.'>
-                Cancel ({progress.count > 1 ? `${progress.name}, ${progress.index + 1}/${progress.count}: ` : ''}{Math.round(progress.fraction * 100)}%)
+                Cancel ({Math.round(progress.seconds)} s of flow simulated)
               </Button>}
           {node.bakeId && progress === null && <Button size='sm' variant='ghost' onClick={() => { node.bakeId = null; changed() }}
-            title='Draw the analytic flow again (the bake stays in the project until replaced).'>Clear</Button>}
+            title='Draw the unbaked water again (the bake stays in the project until replaced).'>Clear</Button>}
         </div>
-        {others.length > 0 && progress === null && <Hint className='mt-1'>Bakes with it, upstream first: {others.map(n => n.name).join(', ')}.</Hint>}
+        {others.length > 0 && progress === null && <Hint className='mt-1'>Baked with it, as one system: {others.map(n => n.name).join(', ')}.</Hint>}
+        {coarse && progress === null && <Hint className='mt-1 text-warning'>At this resolution a cell is {cell.toFixed(1)} m and the narrowest river {narrowest.toFixed(1)} m: too few cells across it to carry a current. Raise the resolution.</Hint>}
         {status === 'current' && <Hint className='mt-1'>Drawing the baked flow.</Hint>}
-        {status === 'stale' && <Hint className='mt-1 text-warning'>The water, the ground or the colliders in it changed since the bake: drawing the analytic flow until it is baked again.</Hint>}
-        {status === 'missing' && <Hint className='mt-1 text-warning'>The bake is missing from the project: drawing the analytic flow.</Hint>}
+        {status === 'current' && report && reportLines(report, group).map((l, i) => <Hint key={i} className={cn('mt-1', l.warn && 'text-warning')}>{l.text}</Hint>)}
+        {status === 'stale' && <Hint className='mt-1 text-warning'>The water, something joined to it, the ground or the colliders in it changed since the bake: drawing the unbaked water until it is baked again.</Hint>}
+        {status === 'missing' && <Hint className='mt-1 text-warning'>The bake is missing from the project: drawing the unbaked water.</Hint>}
       </>}
     </Section>
   )
@@ -404,6 +451,7 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
   }, [eventEmitter, node])
 
   const set = <K extends keyof WaterVolumeNode>(key: K, value: WaterVolumeNode[K]) => { (node as any)[key] = value; changed() }
+  const river = node.waterType === 'river'
   const applyPreset = (p: WaterVolumePreset) => { node.applyPreset(p); changed() }
 
   return (
@@ -424,29 +472,32 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
         <WaterBake node={node} changed={changed} />
 
         <Section title='Waves'>
+          {river && <Hint className='mb-1'>A river's waves are raised by its own current: taller and longer where it runs fast, calm where it is slow.</Hint>}
           <PropertyTable columns={['45%', '55%']}>
-            <PropertyRow label='Wind speed' hint='m/s the waves are shaped for: longer, taller, faster waves as it rises, limited by how much open water the body gives it. 0: no waves.' divider>
-              <NumberInput value={node.windSpeed} min={0} step={0.5} onChange={v => set('windSpeed', v)} />
-            </PropertyRow>
-            <PropertyRow label='Fetch' hint='Metres of open water the wind has crossed: short fetch raises a young sea of short, steep, choppy waves; long, the long swell of the open sea. 0: what the body gives (an endless ocean is the open sea).' divider>
-              <NumberInput value={node.fetch} min={0} step={500} onChange={v => set('fetch', v)} />
-            </PropertyRow>
-            <PropertyRow label='Direction' hint='Degrees the waves travel toward: 0 is +Z, 90 is +X.' divider>
-              <NumberInput value={node.waveDirection} step={5} onChange={v => set('waveDirection', v)} />
-            </PropertyRow>
-            <PropertyRow label='Height' hint='Multiplies the wave height the wind gives.' divider>
+            {!river && <>
+              <PropertyRow label='Wind speed' hint='m/s the waves are shaped for: longer, taller, faster waves as it rises, limited by how much open water the body gives it. 0: no waves.' divider>
+                <NumberInput value={node.windSpeed} min={0} step={0.5} onChange={v => set('windSpeed', v)} />
+              </PropertyRow>
+              <PropertyRow label='Fetch' hint='Metres of open water the wind has crossed: short fetch raises a young sea of short, steep, choppy waves; long, the long swell of the open sea. 0: what the body gives (an endless ocean is the open sea).' divider>
+                <NumberInput value={node.fetch} min={0} step={500} onChange={v => set('fetch', v)} />
+              </PropertyRow>
+              <PropertyRow label='Direction' hint='Degrees the waves travel toward: 0 is +Z, 90 is +X.' divider>
+                <NumberInput value={node.waveDirection} step={5} onChange={v => set('waveDirection', v)} />
+              </PropertyRow>
+            </>}
+            <PropertyRow label='Height' hint={river ? 'Multiplies the wave height the current gives.' : 'Multiplies the wave height the wind gives.'} divider>
               <Slider value={node.waveScale} min={0} max={3} step={0.05} onChange={v => set('waveScale', v)} />
             </PropertyRow>
-            <PropertyRow label='Choppiness' hint='How hard the long waves crowd the short ones onto their crests: 0 an even chop, 1 the small waves bunched on every crest.' divider>
+            {!river && <PropertyRow label='Choppiness' hint='How hard the long waves crowd the short ones onto their crests: 0 an even chop, 1 the small waves bunched on every crest.' divider>
               <Slider value={node.choppiness} min={0} max={1} step={0.05} onChange={v => set('choppiness', v)} />
-            </PropertyRow>
+            </PropertyRow>}
             <PropertyRow label='Wave speed' hint='How fast the waves and ripples run against their natural pace: 1 is real. Floating bodies follow it.' divider>
               <Slider value={node.waveSpeed} min={0} max={2} step={0.05} readout onChange={v => set('waveSpeed', v)} />
             </PropertyRow>
-            <PropertyRow label='Follow wind' hint='The scene’s Wind node raises and calms the waves: their height follows its speed against Wind speed.' divider>
+            {!river && <PropertyRow label='Follow wind' hint='The scene’s Wind node raises and calms the waves: their height follows its speed against Wind speed.' divider>
               <Toggle checked={node.followWind} onChange={v => set('followWind', v)} />
-            </PropertyRow>
-            <PropertyRow label='Shore fade' hint='Metres from a shore over which the waves die down.' divider>
+            </PropertyRow>}
+            <PropertyRow label='Shore fade' hint={river ? 'Metres from a bank over which the waves die down (a river’s banks calm them within 1.5 m at most).' : 'Metres from a shore over which the waves die down.'} divider>
               <NumberInput value={node.shoreFade} min={0} step={0.5} onChange={v => set('shoreFade', v)} />
             </PropertyRow>
             <PropertyRow label='Swell' hint='Metres the whole surface rises and falls, so floating bodies bob. 0 = none.' divider>

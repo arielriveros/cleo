@@ -1,7 +1,8 @@
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { finiteOr } from "../../math";
-import { wavesForWind, type WaterWave } from "../../../physics/water/waves";
+import { Logger } from "../../logger";
+import { wavesForCurrent, wavesForWind, type WaterWave } from "../../../physics/water/waves";
 import { windFieldClock, WIND_REFERENCE_SPEED } from "../../wind/windField";
 /** What the water reads back from a body it buoyed: where it is and how it moves. */
 type FloatingBody = { position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number } };
@@ -13,9 +14,10 @@ import type { BuoyancyVolume } from "../../../physics/buoyancy";
 import { buoyancyVolumeFromSpec, waterSpecColumn, type WaterFlowGrid, type WaterShoreGrid, type WaterSpec } from "../../../physics/waterSurface";
 import { buildOceanShoreInfo, type WaterInfo } from "../../../water/waterInfo";
 import { sceneGround } from "../../../water/ground";
-import { waterBakeContext } from "../../../water/bake/bakeNode";
+import { waterGroupSignature } from "../../../water/bake/bakeNode";
 import { GiBakeRegistry } from "../../../graphics/render/gi/giBakeRegistry";
 import { decodeWaterBake } from "../../../water/bake/waterBakeFormat";
+import { DEFAULT_WATER_LOOK } from "../../../water/waterLook";
 import {
     legacyWaterShapes, normaliseWaterBody, normaliseWaterPoint, resolveWaterBody, retypeWaterBody, waterColumnAt,
     waterShapeFetch, type ResolvedWaterShape, type WaterBody, type WaterBodyType, type WaterCarve, type WaterColumn,
@@ -311,10 +313,11 @@ export class WaterVolumeNode extends Node {
     /**
      * What the waves' height is multiplied by right now: 1, or with {@link followWind} the scene wind's
      * speed against the wind the waves were shaped for, squared, 0..2. The renderer and the physics both
-     * read it, so a calm that flattens the drawn sea flattens the one bodies ride too.
+     * read it, so a calm that flattens the drawn sea flattens the one bodies ride too. A river's waves are
+     * its current's, whatever the wind: always 1.
      */
     public waveWindScale(): number {
-        if (!this._followWind || !(this._windSpeed > 0)) return 1;
+        if (this._water.type === 'river' || !this._followWind || !(this._windSpeed > 0)) return 1;
         const wind = (this._scene as any)?.wind;
         if (!wind || wind.enabled === false) return 0;
         const speed = Math.max(0, Number(wind.strength) || 0) * WIND_REFERENCE_SPEED;
@@ -341,22 +344,19 @@ export class WaterVolumeNode extends Node {
     }
 
     /**
-     * What a bake of this water depends on: the body, where the node puts it, the water it joins, the ground
-     * under it, the static obstacles in it and the rivers running into it (water/bake/bakeNode.ts). A bake
-     * whose signature no longer matches is STALE, and the surface falls back to the analytic flow until it is
-     * baked again.
+     * What a bake of this water depends on: every water of the system it is baked with (everything joined to
+     * it through a river), their bodies and placements, the water the system runs into, the ground under it
+     * and the static obstacles in it (water/bake/bakeNode.ts waterGroupSignature). A bake whose signature no
+     * longer matches is STALE, and the surface falls back to the unbaked water until it is baked again.
      */
     public bakeSignature(groundKey?: string): string {
-        // The scene around it (ground, obstacles, the rivers feeding it) is walked at most twice a second;
-        // its own body and what it joins are checked every time. A tool with no landscape node gives the
-        // ground's key itself (water/ground.ts heightsRegionKey).
+        // The system and the scene round it are walked at most twice a second; this water's own body is
+        // checked every time. A tool with no landscape node gives the ground's key itself (water/ground.ts
+        // heightsRegionKey).
         const key = this.resolveKey();
         const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
         if (groundKey === undefined && this._signature && this._signature.key === key && now - this._signature.at < 500) return this._signature.value;
-        const m = this.worldTransform;
-        const r = (v: number) => Math.round(v * 1000) / 1000;
-        const joined = this.handOver().map(t => [t.id, t.type, r(t.level), t.min.map(r), t.max.map(r)]);
-        const value = JSON.stringify([this._water, [m[12], m[13], m[14], Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10])].map(r), joined, this._bedRoughness, waterBakeContext(this, groundKey)]);
+        const value = waterGroupSignature(this, groundKey);
         if (groundKey === undefined) this._signature = { key, at: now, value };
         return value;
     }
@@ -491,19 +491,48 @@ export class WaterVolumeNode extends Node {
     }
 
     /**
-     * The waves the surface is drawn with and bodies ride (physics/water/waves.ts): shaped by
-     * {@link windSpeed} over {@link fetch} metres of open water, or what this body gives. Empty when the wind is 0.
+     * The waves the surface is drawn with and bodies ride (physics/water/waves.ts). A river's are raised by
+     * its own current (wavesForCurrent, for the speed {@link flowReference} gives), whatever the wind; any
+     * other water's by the wind: {@link windSpeed} over {@link fetch} metres of open water, or what the body
+     * gives, and none when the wind is 0.
      */
     public waves(): WaterWave[] {
         const r = this.resolved();
-        if (!this._waves) {
-            const fetch = this._fetch > 0 ? this._fetch : r ? waterShapeFetch(r) : 0;
-            this._waves = this._windSpeed > 0 && this._waveScale > 0
-                ? wavesForWind(this._windSpeed, this._waveDirection, fetch || 10,
-                    { scale: this._waveScale, choppiness: this._choppiness, seed: 0 })
-                : [];
+        const reference = this.flowReference();
+        if (!this._waves || this._wavesFor !== reference) {
+            this._wavesFor = reference;
+            if (r && r.type === 'river') {
+                this._waves = this._waveScale > 0 ? wavesForCurrent(reference, { scale: this._waveScale, choppiness: this._choppiness, seed: 0 }) : [];
+            } else {
+                const fetch = this._fetch > 0 ? this._fetch : r ? waterShapeFetch(r) : 0;
+                this._waves = this._windSpeed > 0 && this._waveScale > 0
+                    ? wavesForWind(this._windSpeed, this._waveDirection, fetch || 10,
+                        { scale: this._waveScale, choppiness: this._choppiness, seed: 0 })
+                    : [];
+            }
         }
         return this._waves;
+    }
+    private _wavesFor = 0;
+
+    /**
+     * The speed a river's waves are built for (m/s): its baked current's typical speed, else the fastest it
+     * was drawn to flow. Where its water runs faster or slower the waves are scaled (waves.ts flowWaveScale).
+     * 0 for any other water, whose waves the wind raises.
+     */
+    public flowReference(): number {
+        const r = this.resolved();
+        if (!r || r.type !== 'river') return 0;
+        this.bakedFlowGrid();
+        if (this._flowGrid && this._flowGrid.grid && this._flowGrid.speed > 0) return this._flowGrid.speed;
+        let fastest = 0;
+        for (const q of r.samples) fastest = Math.max(fastest, q.speed);
+        return fastest;
+    }
+
+    /** Metres from a shore over which this water's waves die down: a river's banks calm its chop within a stride. */
+    public get waveShoreFade(): number {
+        return this._water.type === 'river' ? Math.min(this._shoreFade, 1.5) : this._shoreFade;
     }
 
     /**
@@ -568,7 +597,7 @@ export class WaterVolumeNode extends Node {
         const bake = this._bakeId ? `${this._bakeId}@${GiBakeRegistry.generation}` : '';
         const key = [this.resolveKey(), this._density, this._linearDrag, this._angularDrag, this._affectCharacters,
             this._waveAmplitude, this._waveFrequency, this._waveSpeed, this._shoreFade, this._currents, bake,
-            shore ? this._shore!.key : ''].join('|');
+            shore ? this._shore!.key : '', this.flowReference(), this._flowAdvect()].join('|');
         const waveScale = this.waveWindScale();
         if (this._spec && this._spec.key === key) { this._spec.spec.waveScale = waveScale; return this._spec.spec; }
         const box = this.worldBox();
@@ -584,12 +613,18 @@ export class WaterVolumeNode extends Node {
             linearDrag: this._linearDrag, angularDrag: this._angularDrag, affectCharacters: this._affectCharacters,
             waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
             shapes: plainBox ? undefined : shapes,
-            waves, waveScale, waveSpeed: this._waveSpeed, shoreFade: this._shoreFade, currents: this._currents,
+            waves, waveScale, waveSpeed: this._waveSpeed, shoreFade: this.waveShoreFade, currents: this._currents,
+            flowWaves: this.flowReference(), flowAdvect: this._flowAdvect(),
             flowGrid: plainBox ? undefined : this.bakedFlowGrid() ?? undefined,
             shoreGrid: shore ? WaterVolumeNode._shoreGrid(shore) : undefined,
         };
         this._spec = { key, spec };
         return spec;
+    }
+
+    /** How far the surface's waves ride the current: its Water material's Flow (the default look's when it has none). */
+    private _flowAdvect(): number {
+        return this._waterMaterial ? this._waterMaterial.look.flowStrength : DEFAULT_WATER_LOOK.flowStrength;
     }
 
     private _shore: { key: string; info: WaterInfo | null } | null = null;
@@ -618,32 +653,65 @@ export class WaterVolumeNode extends Node {
         return { originX: info.originX, originZ: info.originZ, cell: info.cell, nx: info.nx, nz: info.nz, data };
     }
 
-    private _flowGrid: { key: string; grid: WaterFlowGrid | null } | null = null;
+    private _flowGrid: { key: string; grid: WaterFlowGrid | null; speed: number; stale: boolean } | null = null;
+    private _staleSince = 0;
+    private _staleTold: string | null = null;
+
+    /**
+     * A bake that no longer matches what it was baked from is dropped for the water as drawn, which is easy
+     * to miss: the Console says so, once per bake, when it has stayed stale a few seconds (a scene still
+     * loading its landscape and colliders is not stale yet).
+     */
+    private _noteStale(stale: boolean): void {
+        if (!stale) { this._staleSince = 0; return; }
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        if (!this._staleSince) { this._staleSince = now; return; }
+        if (now - this._staleSince < 3000 || this._staleTold === this._bakeId) return;
+        this._staleTold = this._bakeId;
+        Logger.warn(`Water "${this.name}": its flow bake no longer matches the water, the ground or the colliders it was baked over, so the water is drawn unbaked. Bake flow again.`, 'Water');
+    }
 
     /**
      * The current bake (if any, and not stale) as physics reads it, cell for cell: what floats follows the
      * baked currents, right to the banks. Cached per bake and registry change.
+     *
+     * Its water is this node's own cells and, two cells on, the water of whatever it meets (the lake at a
+     * river's mouth, the river at a lake's outlet: the same simulated field, cut in two for drawing). Both
+     * grids then cover the seam, with the same surface and current, so a floating body is never between two
+     * waters with neither under it; which of the two it is in there is the physics' usual choice.
      */
     public bakedFlowGrid(): WaterFlowGrid | null {
         if (!this._bakeId || !GiBakeRegistry.has(this._bakeId)) return null;
         const key = `${this._bakeId}|${GiBakeRegistry.generation}|${this.bakeSignature()}`;
-        if (this._flowGrid && this._flowGrid.key === key) return this._flowGrid.grid;
+        if (this._flowGrid && this._flowGrid.key === key) { this._noteStale(this._flowGrid.stale); return this._flowGrid.grid; }
         const decoded = decodeWaterBake(GiBakeRegistry.get(this._bakeId)!, this._bakeId);
         let grid: WaterFlowGrid | null = null;
+        let speed = 0;
         if (decoded && decoded.signature === this.bakeSignature()) {
             const info = decoded.info;
             const nx = info.nx, nz = info.nz;
             const data = new Float32Array(nx * nz * 3);
+            let squares = 0, cells = 0;
+            const own = (x: number, z: number) => x >= 0 && z >= 0 && x < nx && z < nz && info.info1[(z * nx + x) * 4 + 3] > 0.5;
             for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
                 const i = z * nx + x, o = i * 3;
-                const wet = info.info1[i * 4 + 3] > 0.5;
+                let wet = info.info1[i * 4 + 3] > 0.5;
+                if (wet) { const u = info.info0[i * 4 + 1], v = info.info0[i * 4 + 2]; squares += u * u + v * v; cells++; }
+                else if (info.info0[i * 4 + 3] > 0) {
+                    // Water of the system that another node draws: this node's too within two cells of its own.
+                    for (let dz = -2; dz <= 2 && !wet; dz++) for (let dx = -2; dx <= 2 && !wet; dx++) wet = own(x + dx, z + dz);
+                }
                 data[o] = wet ? info.info0[i * 4] : NaN;
                 data[o + 1] = wet ? info.info0[i * 4 + 1] : 0;
                 data[o + 2] = wet ? info.info0[i * 4 + 2] : 0;
             }
             grid = { originX: info.originX, originZ: info.originZ, cell: info.cell, nx, nz, data };
+            // The current's typical speed (root mean square over its water), to a tenth: what its waves are built for.
+            speed = cells ? Math.round(Math.sqrt(squares / cells) * 10) / 10 : 0;
         }
-        this._flowGrid = { key, grid };
+        const stale = !!decoded && !grid;
+        this._flowGrid = { key, grid, speed, stale };
+        this._noteStale(stale);
         return grid;
     }
 

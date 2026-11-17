@@ -2,7 +2,8 @@
 // preset, generated headless) as the landscape, dressed with the Valley's own assets - its landscape
 // material and plants, its hamlet (houses, windmill, well, poles, furniture, torches) stamped onto the
 // island with the ground it stands on - and water: an Ocean node round the island, a Lake node per lake,
-// and River nodes from the peak into the big lake and out of it to the sea, each flow-baked. The Valley's sky,
+// and River nodes from the peak into the big lake and out of it to the sea, their channels cut into the
+// ground and the whole system flow-baked as one. The Valley's sky,
 // sun, clouds, wind, weather and day cycle come along as they are.
 //
 //   NODE_OPTIONS=--max-old-space-size=16384 npx vite-node --config applications/creator/vitest.config.ts tools/island/build.ts [--dry]
@@ -17,13 +18,16 @@ import { island } from '../../applications/creator/src/world/presets'
 import { generateWorld } from '../../applications/creator/src/world/generateWorld'
 import { buildFields } from '../../applications/creator/src/world/pipeline'
 import { SILENT_CONTEXT } from '../../applications/creator/src/core/generator'
-import { WATER_LAKE, WATER_SEA } from '../../applications/creator/src/world/lakes'
+import { priorityFlood, WATER_LAKE, WATER_SEA } from '../../applications/creator/src/world/lakes'
 import { WaterMaterial } from '../../src/graphics/material'
 import { WATER_LOOK_PRESETS } from '../../src/water/waterLook'
 import { Scene } from '../../src/core/scene/scene'
 import { WaterVolumeNode } from '../../src/core/scene/nodes/waterVolumeNode'
 import { bakeWater } from '../../src/water/bake/shallowWater'
-import { bakeReach, prepareNodeBake, waterBakeGroup } from '../../src/water/bake/bakeNode'
+import { prepareGroupBake, waterBakeGroup, waterGroupReach } from '../../src/water/bake/bakeNode'
+import { carveWater } from '../../src/water/carve'
+import { normaliseWaterBody, resolveWaterBody } from '../../src/water/waterShapes'
+import { pointInPolygonXZ } from '../../src/physics/water/waterColumn'
 import { heightsRegionKey } from '../../src/water/ground'
 import { Node } from '../../src/core/scene/nodes/node'
 import { parseNodeJson } from '../../src/core/scene/nodes/parseNodeJson'
@@ -154,6 +158,219 @@ for (let r = 0; r < RES; r++) for (let c = 0; c < RES; c++) {
   H[i] = H[i] + (valleyHeight(x - site.dx, z - site.dz) + site.dy - H[i]) * s
 }
 
+// ----- the rivers' channels -------------------------------------------------------------------------------
+
+// The flow bake runs the water over the GROUND, not along the line a river was drawn on, so each river is
+// drawn here for the ground to hold it: from the head of the preset's river node down the world's own
+// drainage; its surface under the lowest ground across its channel, out to the top of its banks, so both
+// banks stand over it; always falling; never under the water it runs into. Its bed is then dug into the
+// heights, before they are written.
+const lakes = fields.water.lakes as { id: number; level: number; floor: number; area: number; bounds: [number, number, number, number] }[]
+const lakeIds = fields.water.lakeId as Int32Array
+const lakeIdAt = (x: number, z: number, reach = 0) => {
+  for (let d = 0; d <= reach; d += CELL) for (let a = 0; a < (d === 0 ? 1 : 8); a++) {
+    const c = Math.round((x + Math.cos(a * Math.PI / 4) * d + SIZE / 2) / CELL), r = Math.round((z + Math.sin(a * Math.PI / 4) * d + SIZE / 2) / CELL)
+    if (c >= 0 && r >= 0 && c < RES && r < RES && lakeIds[r * RES + c] >= 0) return lakeIds[r * RES + c]
+  }
+  return -1
+}
+const levelOf = (lake: number) => lakes.find(l => l.id === lake)!.level
+/** Metres between a river's points at most; how far under its lowest bank its surface is drawn; its banks' width; the least it falls; how far its bed is dug under its drawn depth. */
+const STEP = 14, FREEBOARD = 0.8, BANK = 4, MIN_SLOPE = 0.012, DIG = 0.5
+/** Metres a straight run between two points may ride over the surface the ground allows, and the closest two points stand. */
+const RIDE = 0.1, CLOSEST = 4
+/** Metres the straight run between two points may pass beside the line the water takes. */
+const ASIDE = 0.75
+/** Metres of a river's start that are the sill of the lake it drains, and how deep it is drawn there. */
+const SILL = 12, SILL_DEPTH = 0.3
+/** Mountain streams: a few cubic metres a second. */
+const STREAM = [{ depth: 0.7, flowSpeed: 1.4 }, { depth: 0.8, flowSpeed: 1.5 }]
+type RiverPoint = { pos: [number, number, number]; width: number; depth: number; flowSpeed: number }
+// Where the ground sends the water from each river's head: the drainage of the ground as it stands (each
+// sample's downstream neighbour on the filled surface, lakes.ts), which runs down the trench the world cut
+// for the river wherever it cut one.
+const flood = priorityFlood(H, RES)
+const drainsTo = flood.parent
+const traced = (doc.graph.nodes as any[]).filter(n => n.type === 'river').map(n => {
+  const head: [number, number] = [toWorld(n.params.points[0][0]), toWorld(n.params.points[0][1])]
+  const cells: number[] = []
+  for (let c = Math.round((head[1] + SIZE / 2) / CELL) * RES + Math.round((head[0] + SIZE / 2) / CELL); c >= 0 && cells.length < RES * 8; c = drainsTo[c]) {
+    cells.push(c)
+    // Down to the sea, and no further.
+    if (kind[c] === WATER_SEA && cells.length > 4 && kind[cells[cells.length - 4]] === WATER_SEA) break
+  }
+  return { head, from: lakeIdAt(head[0], head[1], 10), cells }
+})
+// A hollow on a river's way that the world did not make a lake of would hold the stream back as a deep pool
+// wider than its course, and one beside it would take the stream off its course: every hollow the course
+// touches is levelled up to where it spills, the whole of it, so the stream runs on across or past it. A
+// lake's own basin is left as it is.
+{
+  const lakeSpills = new Set<number>()
+  for (let c = 0; c < lakeIds.length; c++) if (lakeIds[c] >= 0) lakeSpills.add(Math.round(flood.spill[c] * 1000))
+  const hollow = (c: number) => kind[c] === 0 && lakeIds[c] < 0 && flood.spill[c] - H[c] >= 0.02 && !lakeSpills.has(Math.round(flood.spill[c] * 1000))
+  const TOUCH = Math.round(12 / CELL)
+  const queue: number[] = []
+  const taken = new Uint8Array(RES * RES)
+  for (const river of traced) for (const c of river.cells) {
+    const cc = c % RES, cr = Math.floor(c / RES)
+    for (let r = Math.max(0, cr - TOUCH); r <= Math.min(RES - 1, cr + TOUCH); r++) for (let q = Math.max(0, cc - TOUCH); q <= Math.min(RES - 1, cc + TOUCH); q++) {
+      const i = r * RES + q
+      if (!taken[i] && hollow(i)) { taken[i] = 1; queue.push(i) }
+    }
+  }
+  const levelled = new Map<number, { samples: number; deepest: number }>()
+  for (let head = 0; head < queue.length; head++) {
+    const c = queue[head]
+    const spill = flood.spill[c]
+    const entry = levelled.get(spill) ?? levelled.set(spill, { samples: 0, deepest: 0 }).get(spill)!
+    entry.samples++; entry.deepest = Math.max(entry.deepest, spill - H[c])
+    H[c] = spill
+    const cc = c % RES
+    for (const j of [c - 1, c + 1, c - RES, c + RES]) {
+      if (j < 0 || j >= taken.length || taken[j] || Math.abs((j % RES) - cc) > 1 || flood.spill[j] !== spill || !hollow(j)) continue
+      taken[j] = 1; queue.push(j)
+    }
+  }
+  let samples = 0, deepest = 0
+  for (const e of levelled.values()) { samples += e.samples; deepest = Math.max(deepest, e.deepest) }
+  log(`hollows on the rivers' way levelled: ${levelled.size}, ${samples} samples in all, the deepest ${deepest.toFixed(1)} m`)
+}
+const riverPlans = (doc.graph.nodes as any[]).filter(n => n.type === 'river').map((n, k) => {
+  const width = r3((n.params.width ?? 0.004) * SIZE), half = width / 2
+  const { head, from, cells } = traced[k]
+  // It starts where it leaves the lake it drains, and ends where it first reaches another lake, or the sea.
+  let start = 0, stop = cells.length - 1, into: number | 'sea' | null = null
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i]
+    if (from >= 0 && lakeIds[c] === from) { start = i; continue }
+    if (lakeIds[c] >= 0) { stop = i; into = lakeIds[c]; break }
+    if (kind[c] === WATER_SEA || H[c] < SEA) { stop = i; into = 'sea'; break }
+  }
+  // A few metres on into the water it reaches, so its mouth lies in it.
+  stop = Math.min(cells.length - 1, stop + Math.round(6 / CELL))
+  // And a few metres back in the lake it drains, so it starts in its water.
+  start = Math.max(0, start - Math.round(6 / CELL))
+  const raw = cells.slice(start, stop + 1).map(c => [-SIZE / 2 + (c % RES) * CELL, -SIZE / 2 + Math.floor(c / RES) * CELL] as [number, number])
+  if (from >= 0 && lakeIds[cells[start]] !== from) {
+    // Its head stands on the lake's rim: it starts at the lake's nearest water.
+    let best = Infinity, at: [number, number] | null = null
+    for (let dz = -12; dz <= 12; dz += CELL) for (let dx = -12; dx <= 12; dx += CELL) {
+      const c = Math.round((head[1] + dz + SIZE / 2) / CELL) * RES + Math.round((head[0] + dx + SIZE / 2) / CELL)
+      if (lakeIds[c] === from && dx * dx + dz * dz < best) { best = dx * dx + dz * dz; at = [head[0] + dx, head[1] + dz] }
+    }
+    if (at) raw.unshift(at)
+  }
+  // The samples step from one to its neighbour: smoothed into a line (its ends held), then a point every STEP metres.
+  const REACH = Math.round(8 / CELL)
+  const smooth = raw.map((q, i) => {
+    const w = Math.min(REACH, i, raw.length - 1 - i)
+    let x = 0, z = 0
+    for (let k = i - w; k <= i + w; k++) { x += raw[k][0]; z += raw[k][1] }
+    return [x / (2 * w + 1), z / (2 * w + 1)] as [number, number]
+  })
+  // Its surface along that line, sample by sample: under the lowest ground across its channel, out to the top
+  // of its banks, so both banks stand over it; always falling; never under the water it runs into.
+  const endLevel = into === 'sea' ? SEA : into !== null ? levelOf(into) : -Infinity
+  const fromLevel = from >= 0 ? levelOf(from) : Infinity
+  const last = smooth.length - 1
+  const along = new Float64Array(smooth.length), ideal = new Float64Array(smooth.length)
+  let deepest = 0
+  for (let i = 0; i <= last; i++) {
+    const [x, z] = smooth[i]
+    const [px, pz] = smooth[Math.max(0, i - 2)], [qx, qz] = smooth[Math.min(last, i + 2)]
+    const len = Math.hypot(qx - px, qz - pz) || 1, ox = -(qz - pz) / len, oz = (qx - px) / len
+    let low = heightAt(x, z)
+    for (const o of [half + BANK / 2, half + BANK]) for (const side of [-1, 1]) {
+      // Dry banks only: the bed of the lake it drains, or of the sea, is no bank of its.
+      const bx = x + ox * o * side, bz = z + oz * o * side
+      if (waterKindAt(bx, bz) === 0) low = Math.min(low, heightAt(bx, bz))
+    }
+    const ds = i ? Math.hypot(x - smooth[i - 1][0], z - smooth[i - 1][1]) : 0
+    along[i] = i ? along[i - 1] + ds : 0
+    if (i === last && Number.isFinite(endLevel)) ideal[i] = endLevel
+    // Across the rim of the lake it drains it holds the lake's level: the cut there is the lake's sill, and a
+    // deep one would drain the lake down to it.
+    else if (from >= 0 && along[i] <= SILL) ideal[i] = fromLevel - MIN_SLOPE * along[i]
+    else ideal[i] = Math.max(endLevel, Math.min((i ? ideal[i - 1] : Infinity) - MIN_SLOPE * ds, low - FREEBOARD))
+    deepest = Math.max(deepest, heightAt(x, z) - ideal[i])
+  }
+  // Its points: as few as draw that surface along that line. A point at most every STEP metres, and sooner
+  // wherever the straight run to the next would ride over ground that falls away faster (a step down in a
+  // steep bed: the water would stand over its banks) or cut a bend (the channel would be dug beside the line
+  // the ground sends the water down).
+  const picked = [0]
+  for (let i = 0; i < last;) {
+    let j = i + 1
+    while (j < last && along[j + 1] - along[i] <= STEP) {
+      let fits = true
+      const [ax, az] = smooth[i], [cx, cz] = smooth[j + 1]
+      const span = Math.hypot(cx - ax, cz - az) || 1
+      for (let k = i + 1; k <= j && fits; k++) {
+        const chord = ideal[i] + (ideal[j + 1] - ideal[i]) * (along[k] - along[i]) / (along[j + 1] - along[i])
+        // Nor may it cut a bend: the channel is dug along the line through the points.
+        const aside = Math.abs((smooth[k][0] - ax) * (cz - az) - (smooth[k][1] - az) * (cx - ax)) / span
+        fits = (chord <= ideal[k] + RIDE && aside <= ASIDE) || along[j + 1] - along[i] <= CLOSEST
+      }
+      if (!fits) break
+      j++
+    }
+    picked.push(j)
+    i = j
+  }
+  const points: RiverPoint[] = picked.map(i => ({
+    pos: [r3(smooth[i][0]), r3(ideal[i]), r3(smooth[i][1])], width,
+    // The sill is shallow, so the lake stands near the level the world flooded it to.
+    depth: from >= 0 && along[i] <= SILL ? SILL_DEPTH : STREAM[k % 2].depth, flowSpeed: STREAM[k % 2].flowSpeed,
+  }))
+  return { name: n.name as string, points, from, into, deepest }
+})
+const RIVER_CARVE = { enabled: true, bankWidth: BANK, extraDepth: DIG }
+// Metres from each sample to the nearest river's water (negative in its bed), and that river's surface there.
+const riverEdge = new Float32Array(RES * RES).fill(Infinity), riverTop = new Float32Array(RES * RES)
+const riverEnds = new Float32Array(RES * RES)
+for (const plan of riverPlans) {
+  const body = normaliseWaterBody({ type: 'river', points: plan.points, carve: RIVER_CARVE })
+  const shape = resolveWaterBody(body, { position: [0, 0, 0], scale: [1, 1, 1] } as any, plan.name)!
+  const region = carveWater({ heights: H, resolution: RES, size: SIZE, origin: [0, 0, 0] }, body, shape)
+  log(`${plan.name}: ${plan.points.length} points from ${plan.from >= 0 ? 'lake ' + plan.from : 'a spring'} into ${plan.into === 'sea' ? 'the sea' : plan.into !== null ? 'lake ' + plan.into : 'nothing'}, `
+    + `${plan.points[0].pos[1].toFixed(1)} m down to ${plan.points[plan.points.length - 1].pos[1].toFixed(1)} m, its surface at most ${plan.deepest.toFixed(1)} m under the ground; `
+    + `carved ${region ? `${region.c1 - region.c0 + 1} x ${region.r1 - region.r0 + 1} samples` : 'nothing'}`)
+  const endLevel = plan.into === 'sea' ? SEA : plan.into !== null ? levelOf(plan.into) : -Infinity
+  for (const q of (shape as any).samples as { x: number; z: number; y: number; width: number }[]) {
+    const half = q.width / 2, reach = half + BANK + 10
+    const c0 = Math.max(0, Math.floor((q.x - reach + SIZE / 2) / CELL)), c1 = Math.min(RES - 1, Math.ceil((q.x + reach + SIZE / 2) / CELL))
+    const r0 = Math.max(0, Math.floor((q.z - reach + SIZE / 2) / CELL)), r1 = Math.min(RES - 1, Math.ceil((q.z + reach + SIZE / 2) / CELL))
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+      const d = Math.hypot(-SIZE / 2 + c * CELL - q.x, -SIZE / 2 + r * CELL - q.z) - half
+      const i = r * RES + c
+      if (d < riverEdge[i]) { riverEdge[i] = d; riverTop[i] = q.y; riverEnds[i] = endLevel }
+    }
+  }
+}
+// The banks the carve leaves are the ground's own, and the ground beside a channel may lie under its water
+// where a sample of it was not looked at: a dip, the trench the world cut forking off. There, within the
+// banks' width, the ground is raised into a bank that stands FREEBOARD over the river's surface, so the water
+// has one channel to run in. Not where the river has come down to the water it runs into: that is its mouth.
+{
+  let raised = 0, most = 0
+  for (let i = 0; i < riverEdge.length; i++) {
+    const d = riverEdge[i]
+    if (!(d > 0 && d <= BANK + 1.5) || kind[i] !== 0 || riverTop[i] <= riverEnds[i] + 0.3) continue
+    const t = Math.min(1, d / (BANK * 0.75))
+    const need = riverTop[i] - 0.2 + (FREEBOARD + 0.2) * t * t * (3 - 2 * t)
+    const lift = need - H[i]
+    if (lift <= 0 || lift > 2.5) continue
+    H[i] = need
+    raised++; most = Math.max(most, lift)
+  }
+  log(`river banks raised where the ground lay under the water: ${raised} samples, by ${most.toFixed(2)} m at most`)
+}
+const riverEdgeAt = (x: number, z: number) => {
+  const c = Math.round((x + SIZE / 2) / CELL), r = Math.round((z + SIZE / 2) / CELL)
+  return c < 0 || r < 0 || c >= RES || r >= RES ? Infinity : riverEdge[r * RES + c]
+}
+
 // ----- the landscape: heights, masks, material ------------------------------------------------------------
 
 let hMin = Infinity, hMax = -Infinity
@@ -162,6 +379,8 @@ const u16 = new Uint16Array(H.length)
 for (let i = 0; i < H.length; i++) u16[i] = Math.round((H[i] - hMin) / (hMax - hMin) * 65535)
 t.size = SIZE; t.resolution = RES; t.heightMin = hMin; t.heightMax = hMax
 t.heights = Buffer.from(u16.buffer).toString('base64')
+// From here on the ground is the ground as saved, to the last bit: the water is baked over what the editor loads.
+for (let i = 0; i < H.length; i++) H[i] = hMin + u16[i] / 65535 * (hMax - hMin)
 
 // Masks: the Valley's paint channels (trail 0, forest 1, dirt road 2, path 3, clay 4, sand 5, dirt 6).
 const ls = t.layerStack
@@ -183,14 +402,17 @@ const forestAt = (x: number, z: number, h: number, slope: number) => {
   const n = noise(x, z, 90) * 0.7 + noise(x, z, 23) * 0.3
   return Math.min(1, Math.max(0, (n - 0.34) * 5))
 }
-const lakes = fields.water.lakes as { level: number; area: number; bounds: [number, number, number, number] | any }[]
 const sh = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255)
 for (let r = 0; r < MR; r++) for (let c = 0; c < MR; c++) {
   const x = -SIZE / 2 + (c + 0.5) * texel, z = -SIZE / 2 + (r + 0.5) * texel
   const h = heightAt(x, z), slope = slopeAt(x, z), wk = waterKindAt(x, z)
   const foot = inFoot(x, z)
   // Under water: the clay bed. On the shore: sand. In the forests: forest floor. By the rivers: dirt.
-  const clay = wk !== 0 || h < SEA - 0.5 ? 1 : 0
+  const bank = riverEdgeAt(x, z)
+  const clay = wk !== 0 || h < SEA - 0.5 || bank < 0.5 ? 1 : 0
+  // A river's cut banks are bare earth, and the forest floor stops short of them.
+  const dirt = bank >= 0.5 && bank < BANK + 1 ? 1 - Math.max(0, bank - BANK * 0.5) / (BANK * 0.5 + 1) : 0
+  const wooded = Math.min(1, Math.max(0, (bank - BANK * 0.5) / BANK))
   const sand = Math.max(0, 1 - Math.max(0, h - SEA) / (4 + noise(x, z, 30) * 4)) * (slope < 22 ? 1 : 0)
   let lakeShore = 0
   if (wk === 0) for (const lake of lakes) {
@@ -200,7 +422,7 @@ for (let r = 0; r < MR; r++) for (let c = 0; c < MR; c++) {
       if (near) lakeShore = Math.max(lakeShore, 1 - above / 1.6)
     }
   }
-  const values = [0, forestAt(x, z, h, slope), 0, 0, clay, Math.max(sand * (wk === 0 ? 1 : 0), lakeShore), 0]
+  const values = [0, forestAt(x, z, h, slope) * wooded, 0, 0, clay, Math.max(sand * (wk === 0 ? 1 : 0), lakeShore) * (bank < 0.5 ? 0 : 1), dirt]
   for (let ch = 0; ch < 7; ch++) {
     let v = values[ch] * (1 - foot)
     if (foot > 0) {
@@ -260,6 +482,8 @@ for (const layer of t.foliage) {
   for (let z = -ISLAND_R; z < ISLAND_R; z += step) for (let x = -ISLAND_R; x < ISLAND_R; x += step) {
     const px = x + (prand() - 0.5) * step, pz = z + (prand() - 0.5) * step
     if (waterKindAt(px, pz) !== 0) continue
+    // Nothing in a river's bed; trees and bushes stand back from its banks.
+    if (riverEdgeAt(px, pz) < (TREES.has(layer.name) ? BANK + 3 : 0.5)) continue
     const h = heightAt(px, pz), s = slopeAt(px, pz)
     if (!rule(px, pz, h, s, forestMaskAt(px, pz))) continue
     const foot = inFoot(px, pz)
@@ -302,8 +526,8 @@ removeChild(root, 'Water')
 
 const biggest = [...lakes].sort((a, b) => b.area - a.area)
 const lakeBox = (lake: any) => {
-  // Bounds in cells: [c0, r0, c1, r1] or {c0, r0, c1, r1}.
-  const b = Array.isArray(lake.bounds) ? lake.bounds : [lake.bounds.c0 ?? lake.bounds.minX, lake.bounds.r0 ?? lake.bounds.minZ, lake.bounds.c1 ?? lake.bounds.maxX, lake.bounds.r1 ?? lake.bounds.maxZ]
+  // Bounds in cells: [c0, r0, c1, r1].
+  const b = lake.bounds
   const x0 = -SIZE / 2 + b[0] * CELL - 6, x1 = -SIZE / 2 + b[2] * CELL + 6
   const z0 = -SIZE / 2 + b[1] * CELL - 6, z1 = -SIZE / 2 + b[3] * CELL + 6
   let floor = lake.level
@@ -321,50 +545,94 @@ const place = (n: WaterVolumeNode, position: [number, number, number]) => {
   n.updateTransforms()
   return n
 }
-// Each lake a Lake node at its level: its outline traced from the flooded cells (rays from the centre out to
-// the last lake cell, a few metres past it, smoothed by the lake's own spline), so the water stays in the
-// basin; a box over its bounds would also flood the downhill ground beyond its rim.
+/**
+ * The outline of a lake's flooded samples and `grow` samples round them: its boundary walked once round
+ * (Moore's neighbour tracing) and thinned to the points that shape it (Douglas-Peucker, `tolerance` metres).
+ * A lake with bays and arms keeps them, which rays from its middle would cut off.
+ */
+const lakeOutline = (lake: { id: number; bounds: [number, number, number, number] }, grow: number, tolerance: number): [number, number][] => {
+  const pad = grow + 2
+  const c0 = lake.bounds[0] - pad, r0 = lake.bounds[1] - pad
+  const w = lake.bounds[2] - lake.bounds[0] + 1 + 2 * pad, h = lake.bounds[3] - lake.bounds[1] + 1 + 2 * pad
+  const mask = new Uint8Array(w * h)
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+    const gc = c + c0, gr = r + r0
+    if (gc < 0 || gr < 0 || gc >= RES || gr >= RES || lakeIds[gr * RES + gc] !== lake.id) continue
+    for (let dr = -grow; dr <= grow; dr++) for (let dc = -grow; dc <= grow; dc++) {
+      if (dc * dc + dr * dr <= grow * grow + 1) mask[(r + dr) * w + c + dc] = 1
+    }
+  }
+  const inside = (c: number, r: number) => c >= 0 && r >= 0 && c < w && r < h && mask[r * w + c] === 1
+  const first = mask.indexOf(1)
+  if (first < 0) return []
+  const dirs = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]]
+  const ring: [number, number][] = []
+  let c = first % w, r = Math.floor(first / w), back = 4
+  const sc = c, sr = r
+  do {
+    ring.push([c, r])
+    let moved = false
+    for (let k = 1; k <= 8 && !moved; k++) {
+      const d = (back + k) % 8
+      const nc = c + dirs[d][0], nr = r + dirs[d][1]
+      if (!inside(nc, nr)) continue
+      // The neighbour looked at just before this one was outside: the next walk starts from it.
+      const pd = (d + 7) % 8
+      const bc = c + dirs[pd][0] - nc, br = r + dirs[pd][1] - nr
+      back = dirs.findIndex(([x, z]) => x === bc && z === br)
+      c = nc; r = nr; moved = true
+    }
+    if (!moved) break
+  } while ((c !== sc || r !== sr) && ring.length < w * h)
+  const world = ring.map(([cc, rr]) => [-SIZE / 2 + (cc + c0) * CELL, -SIZE / 2 + (rr + r0) * CELL] as [number, number])
+  // Thinned between the two points farthest apart, each half on its own.
+  let far = 0
+  for (let i = 1; i < world.length; i++) if (Math.hypot(world[i][0] - world[0][0], world[i][1] - world[0][1]) > Math.hypot(world[far][0] - world[0][0], world[far][1] - world[0][1])) far = i
+  const thin = (pts: [number, number][]): [number, number][] => {
+    if (pts.length < 3) return pts.slice(0, -1)
+    const [ax, az] = pts[0], [bx, bz] = pts[pts.length - 1]
+    const len = Math.hypot(bx - ax, bz - az) || 1
+    let worst = 0, at = -1
+    for (let i = 1; i < pts.length - 1; i++) {
+      const d = Math.abs((pts[i][0] - ax) * (bz - az) - (pts[i][1] - az) * (bx - ax)) / len
+      if (d > worst) { worst = d; at = i }
+    }
+    if (worst <= tolerance) return [pts[0]]
+    return [...thin(pts.slice(0, at + 1)), ...thin(pts.slice(at))]
+  }
+  return [...thin(world.slice(0, far + 1)), ...thin([...world.slice(far), world[0]])]
+}
+// Each lake a Lake node at its level, inside the outline of its flooded samples and 4 m round them (the
+// lake's own spline rounds the corners): the water stays in its basin, where a box over its bounds would
+// also flood the downhill ground beyond its rim.
+const lakeNodeOf = new Map<number, WaterVolumeNode>()
 const lakeNodes = biggest.map((lake, i) => {
   const box = lakeBox(lake)
   const cx = box.center[0], cz = box.center[2]
-  const pts: { pos: [number, number, number]; width: number; depth: number; flowSpeed: number }[] = []
-  const RAYS = 28
-  for (let k = 0; k < RAYS; k++) {
-    const a = k / RAYS * Math.PI * 2, dx = Math.cos(a), dz = Math.sin(a)
-    let last = 2
-    for (let d = 2; d < 400; d += 2) {
-      if (waterKindAt(cx + dx * d, cz + dz * d) === WATER_LAKE) last = d
-      else if (d - last > 12) break
-    }
-    pts.push({ pos: [r3(dx * (last + 4)), 0, r3(dz * (last + 4))], width: 1, depth: 1, flowSpeed: 0 })
+  const outline = lakeOutline(lake, Math.round(4 / CELL), 2.5)
+  const pts = outline.map(([x, z]) => ({ pos: [r3(x - cx), 0, r3(z - cz)] as [number, number, number], width: 1, depth: 1, flowSpeed: 0 }))
+  const node = place(new WaterVolumeNode(i === 0 ? 'Lake' : `Tarn ${i}`, { waterType: 'lake', depth: r3(box.size[1]), points: pts }, id(`lake${i}`)), [cx, r3(lake.level), cz])
+  lakeNodeOf.set(lake.id, node)
+  const shape: any = node.resolved()
+  let inside = 0, all = 0
+  for (let c = 0; c < lakeIds.length; c++) {
+    if (lakeIds[c] !== lake.id) continue
+    all++
+    if (pointInPolygonXZ(-SIZE / 2 + (c % RES) * CELL, -SIZE / 2 + Math.floor(c / RES) * CELL, shape.outline)) inside++
   }
-  const node = new WaterVolumeNode(i === 0 ? 'Lake' : `Tarn ${i}`, { waterType: 'lake', depth: r3(box.size[1]), points: pts }, id(`lake${i}`))
-  return place(node, [cx, r3(lake.level), cz])
+  log(`${node.name}: level ${lake.level.toFixed(2)} m, ${pts.length} outline points round ${(inside / all * 100).toFixed(1)}% of its ${all} flooded samples`)
+  if (inside < all * 0.995) throw new Error(`${node.name}'s outline leaves ${(100 - inside / all * 100).toFixed(1)}% of its water outside it`)
+  return node
 })
-const lakeAt = (x: number, z: number) => lakeNodes.find(n => {
-  const r = n.resolved()
-  return !!r && x >= r.min[0] && x <= r.max[0] && z >= r.min[2] && z <= r.max[2]
-})
-// The rivers the world carved, along the same control points; the surface a metre over the carved bed, never
-// climbing downstream, ending in the lake or the sea.
+// The rivers as planned above, each joined to the lake it drains and the water it runs into.
 const SEA_ID = id('ocean')
-const rivers = (doc.graph.nodes as any[]).filter(n => n.type === 'river')
-const riverNodes = rivers.map((n, i) => {
-  const pts: { pos: [number, number, number]; width: number; depth: number; flowSpeed: number }[] = []
-  let last = Infinity
-  const ctrl: [number, number][] = n.params.points
-  for (let k = 0; k < ctrl.length; k++) {
-    const x = toWorld(ctrl[k][0]), z = toWorld(ctrl[k][1])
-    let y = Math.min(last, Math.max(heightAt(x, z) + 1.0, SEA))
-    last = y
-    const width = (n.params.width ?? 0.006) * SIZE + 4
-    pts.push({ pos: [r3(x), r3(y), r3(z)], width: r3(width), depth: 1.2, flowSpeed: k === 0 ? 1.6 : 1.2 })
+const riverNodes = riverPlans.map((plan, i) => {
+  const connect = {
+    start: plan.from >= 0 ? lakeNodeOf.get(plan.from)!.id : null,
+    end: plan.into === 'sea' ? SEA_ID : plan.into !== null ? lakeNodeOf.get(plan.into)!.id : null,
   }
-  const first = pts[0].pos, end = pts[pts.length - 1].pos
-  const into = lakeAt(end[0], end[2]), from = lakeAt(first[0], first[2])
-  // A river that reaches no lake runs out to sea.
-  const connect = { start: from?.id ?? null, end: into?.id ?? (end[1] <= SEA + 1.5 ? SEA_ID : null) }
-  return place(new WaterVolumeNode(n.name, { waterType: 'river', points: pts, connect }, id(`river${i}`)), [0, 0, 0])
+  // A bouldery mountain bed.
+  return place(new WaterVolumeNode(plan.name, { waterType: 'river', points: plan.points, connect, carve: RIVER_CARVE, bedRoughness: 0.05 }, id(`river${i}`)), [0, 0, 0])
 })
 
 const look = (pid: string, over: any = {}) => new WaterMaterial({ ...WATER_LOOK_PRESETS.find(p => p.id === pid)!.options, ...over }).serialize()
@@ -376,13 +644,16 @@ const addWaterMaterial = (key: string, name: string, material: any) => {
 }
 const OCEAN_MAT = addWaterMaterial('ocean', 'Island Ocean', look('openOcean', { subsurface: 1.4 }))
 const LAKE_MAT = addWaterMaterial('lakes', 'Island Lakes', look('clearLake', { turbidity: 0.2, clarity: 6, detailStrength: 0.45, subsurface: 0.7 }))
-const oceanMatAsset = materials.find(m => m.id === OCEAN_MAT), lakeMatAsset = materials.find(m => m.id === LAKE_MAT)
+// A mountain stream: clear, a little green with what it carries, white where it tumbles.
+const RIVER_MAT = addWaterMaterial('rivers', 'Island Rivers', look('alpineRiver', { turbidity: 0.25, clarity: 4, shoreFoam: 0.2 }))
+const oceanMatAsset = materials.find(m => m.id === OCEAN_MAT), lakeMatAsset = materials.find(m => m.id === LAKE_MAT), riverMatAsset = materials.find(m => m.id === RIVER_MAT)
 const ocean = place(new WaterVolumeNode('Ocean', { waterType: 'ocean', depth: 200 }, SEA_ID), [0, SEA, 0])
 
-// Flow-bake the rivers and the lakes they run into, as the editor's Bake flow button does (upstream first),
-// over the island's ground and round the static colliders the scene has. The editor checks each bake against
-// the scene it opens, so the scratch scene gets the same colliders, and each bake is signed with the key of
-// the saved landscape heights under it (water/ground.ts heightsRegionKey), read here off what is written.
+// Flow-bake every system of joined water as the editor's Bake flow button does: one simulation over the
+// island's ground and round the static colliders the scene has, from the spring through the lake to the sea.
+// The editor checks each bake against the scene it opens, so the scratch scene gets the same colliders, and
+// each bake is signed with the key of the saved landscape heights under its system (water/ground.ts
+// heightsRegionKey), read here off what is written.
 const colliderJson = (function* walk(n: any, parent: mat4): Generator<{ json: any; parent: mat4 }> {
   const q = Array.isArray(n.quaternion) ? n.quaternion as quat : quat.fromEuler(quat.create(), n.rotation?.[0] ?? 0, n.rotation?.[1] ?? 0, n.rotation?.[2] ?? 0)
   const local = mat4.fromRotationTranslationScale(mat4.create(), q, (n.position ?? [0, 0, 0]) as vec3, (n.scale ?? [1, 1, 1]) as vec3)
@@ -401,21 +672,60 @@ for (const { json, parent } of colliderJson) {
   holder.updateTransforms()
 }
 const landPos: number[] = landscape.position ?? [0, 0, 0]
-const groundKeyOf = (n: WaterVolumeNode) => {
-  const reach = bakeReach(n)
+const groundKeyOf = (group: WaterVolumeNode[]) => {
+  const reach = waterGroupReach(group)
   const key = reach ? heightsRegionKey(u16, hMin, hMax, RES, SIZE, landPos[0], landPos[2], reach) : ''
   return key ? `${landPos[1]}:${key}` : ''
 }
+const BAKE_RES = Number(process.env.ISLAND_BAKE_RES ?? 1024)
 const bakes: Record<string, string> = {}
-const toBake = new Set<WaterVolumeNode>()
-for (const river of riverNodes) for (const n of waterBakeGroup(river)) toBake.add(n)
-for (const n of toBake) {
+const grouped = new Set<WaterVolumeNode>()
+for (const river of riverNodes) {
+  if (grouped.has(river)) continue
+  const group = waterBakeGroup(river)
+  for (const n of group) grouped.add(n)
   // The scratch scene has no landscape node: the island's own ground is the bake's ground.
-  const info = bakeWater(prepareNodeBake(n, { maxRes: 256, ground: heightAt }))
-  const bakeId = id(`water-bake:${n.id}`)
-  bundle.giBakes = [...(bundle.giBakes ?? []).filter((g: any) => g.id !== bakeId), { id: bakeId, bytes: encodeWaterBake(info, n.bakeSignature(groundKeyOf(n))).buffer }]
-  bakes[n.id] = bakeId
-  log(`${n.name} baked: ${info.nx} x ${info.nz} cells`)
+  // A lake between two rivers stands where its outlet lets it, not where the world flooded it to: a coarse
+  // bake finds that level, the lake is drawn there, and the fine bake starts from it.
+  for (let pass = 0; pass < 2; pass++) {
+    const coarse = bakeWater(prepareGroupBake(river, { maxRes: 256, ground: heightAt }).setup)
+    let moved = false
+    for (const l of coarse.report.levels) {
+      const node = group.find(n => n.id === l.id)
+      if (!node || Math.abs(l.level - l.drawn) < 0.05) continue
+      const at = node.worldPosition
+      node.setPosition([at[0], r3(l.level), at[2]])
+      node.updateTransforms()
+      log(`${node.name} stands at ${l.level.toFixed(2)} m (the world flooded it to ${l.drawn.toFixed(2)} m)`)
+      moved = true
+    }
+    if (!moved) break
+  }
+  const started = Date.now()
+  const { setup } = prepareGroupBake(river, { maxRes: BAKE_RES, ground: heightAt })
+  const output = bakeWater(setup)
+  const report = output.report
+  log(`${group.map(n => n.name).join(', ')} baked as one: ${setup.nx} x ${setup.nz} cells of ${setup.cell.toFixed(2)} m in ${((Date.now() - started) / 1000).toFixed(0)} s; `
+    + `${report.settled ? 'settled' : 'NOT settled'} after ${report.seconds.toFixed(0)} s of flow, ${report.inflow.toFixed(2)} m3/s in, ${report.outflow.toFixed(2)} out, ${report.lost.toFixed(2)} lost`)
+  if (!report.settled || report.lost > 0.02 * report.inflow || Math.abs(report.outflow - report.inflow) > 0.05 * report.inflow) {
+    throw new Error(`the water did not settle in its channels: ${JSON.stringify(report)}`)
+  }
+  const signature = river.bakeSignature(groundKeyOf(group))
+  for (const m of output.members) {
+    const n = group.find(g => g.id === m.id)!
+    const bakeId = id(`water-bake:${n.id}`)
+    m.info.source = bakeId
+    bundle.giBakes = [...(bundle.giBakes ?? []).filter((g: any) => g.id !== bakeId), { id: bakeId, bytes: encodeWaterBake(m.info, signature).buffer }]
+    bakes[n.id] = bakeId
+    // How it runs: the share of its cells that are wet, and how fast.
+    let wet = 0, sum = 0, top = 0
+    for (let c = 0; c < m.info.nx * m.info.nz; c++) {
+      if (m.info.info1[c * 4 + 3] <= 0.5) continue
+      const v = Math.hypot(m.info.info0[c * 4 + 1], m.info.info0[c * 4 + 2])
+      wet++; sum += v; top = Math.max(top, v)
+    }
+    log(`  ${n.name}: ${m.info.nx} x ${m.info.nz} cells, ${wet} wet, ${(sum / Math.max(1, wet)).toFixed(2)} m/s on average, ${top.toFixed(2)} at its fastest`)
+  }
 }
 
 const LIQUID = {
@@ -423,6 +733,8 @@ const LIQUID = {
   splashTemplate: 'Water Splash', wadeSplashTemplate: 'Water Step', enabled: true, currents: true,
 }
 const LAKE_WATER = { windSpeed: 2.5, waveDirection: 25, choppiness: 0.3, shoreFade: 4, followWind: true, waterMaterialId: LAKE_MAT, waterMaterial: lakeMatAsset.material }
+// A river's waves are its current's, whatever the wind; its banks calm them.
+const RIVER_WATER = { windSpeed: 0, shoreFade: 1.5, followWind: false, waterMaterialId: RIVER_MAT, waterMaterial: riverMatAsset.material }
 const waterJson = async (n: WaterVolumeNode, over: any) => {
   const json: any = await n.serialize()
   json.waterVolume = { ...json.waterVolume, ...LIQUID, ...over, waterType: n.waterType }
@@ -440,7 +752,7 @@ const waterGroup = {
       waterMaterialId: OCEAN_MAT, waterMaterial: oceanMatAsset.material,
     }),
     ...await Promise.all(lakeNodes.map(n => waterJson(n, { ...LAKE_WATER, ...(bakes[n.id] ? { bakeId: bakes[n.id] } : {}) }))),
-    ...await Promise.all(riverNodes.map(n => waterJson(n, { ...LAKE_WATER, ...(bakes[n.id] ? { bakeId: bakes[n.id] } : {}) }))),
+    ...await Promise.all(riverNodes.map(n => waterJson(n, { ...RIVER_WATER, ...(bakes[n.id] ? { bakeId: bakes[n.id] } : {}) }))),
   ],
 }
 root.children.splice(root.children.findIndex((c: any) => c.name === 'Landscape') + 1, 0, waterGroup)

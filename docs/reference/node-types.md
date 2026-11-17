@@ -937,10 +937,11 @@ One body of water (`water/waterShapes.ts`), of one `waterType`: `river` (a splin
 `{ pos, width, depth, flowSpeed }`), `lake` (a level surface at the node's height inside the smooth closed
 outline through its `points`), `ocean` (a level surface at the node's height `extent` metres each way, 0 =
 endless) and `pool` (a level block `size` big centred on the node, its top face the surface). The body is
-in the node's units (position and scale apply, rotation is ignored). A river's `flowsFrom` / `flowsInto`
-name the Water nodes it flows from and into (by id): that end takes their surface, so the two meet, and
-where they overlap the other node's water is the water there (`handOver()`). A legacy node's `size` loads
-as a pool; an older node holding a list of `shapes` loads as one node per shape.
+in the node's units (position and scale apply, rotation is ignored). A river's surface never rises on the
+way down. Its `flowsFrom` / `flowsInto` name the Water nodes it flows from and into (by id): it never stands
+above the one or runs below the other, so the two meet, and where they overlap the other node's water is the
+water there (`handOver()`; an endless ocean only where its water stands over the ground). A legacy node's
+`size` loads as a pool; an older node holding a list of `shapes` loads as one node per shape.
 
 Every dynamic physics body inside is buoyed by Archimedes' principle: its colliders are sampled, and each
 submerged sample is pushed by the weight of the water it displaces, at that point and along the water's
@@ -953,15 +954,23 @@ two Water nodes overlap, each sample is in one of them. Character bodies are ski
 The surface carries a swell (`waveAmplitude`, `waveFrequency`) and up to forty sharp-crested waves (afl_ext's
 exp(sin) waves, MIT) shaped by `windSpeed` over `fetch` metres of open water (0: the body's own), the longest
 travelling toward `waveDirection` degrees, scaled by `waveScale`, the short ones crowded onto the long ones'
-crests by `choppiness`, and dying down within `shoreFade` metres of a shore. The same sum
-(`physics/water/waves.ts`) floats the bodies and draws the surface.
+crests by `choppiness`, and dying down within `shoreFade` metres of a shore. A river's waves are raised by
+its current instead (`wavesForCurrent`, for the speed `flowReference()` gives: the baked current's, else the
+fastest drawn `flowSpeed`), scaled along it by the water's speed and carried downstream with it. The same
+sum (`physics/water/waves.ts`) floats the bodies and draws the surface.
+
+A flow bake (`bakeId`, `water/bake/`) is one shallow-water simulation of every water joined through
+`flowsFrom` / `flowsInto`, run over the landscape and the static colliders until it settles: each node then
+draws and floats bodies on its share of the settled heights, currents and foam. `bakeSignature()` is what the
+bake depends on (the system's bodies, placements and `bedRoughness`, the ground and the colliders in reach);
+a bake whose signature no longer matches is dropped for the water as drawn.
 
 Properties: `waterType`, `points`, `size`, `depth`, `extent`, `carve`, `flowsFrom`, `flowsInto`,
 `waterBody` (all of them at once, as plain data), `density` (kg/m³, default 1000), `linearDrag`, `angularDrag` (per second at full
 submersion), `waveAmplitude`, `waveFrequency`, `windSpeed`, `fetch`, `waveDirection`, `waveScale`, `choppiness`,
-`waveSpeed`, `shoreFade`, `currents`, `waterMaterial`, `waterMaterialId`, `affectCharacters`, `surfaceNodeId`, `splashTemplate`,
+`waveSpeed`, `shoreFade`, `currents`, `waterMaterial`, `waterMaterialId`, `bakeId`, `bedRoughness`, `affectCharacters`, `surfaceNodeId`, `splashTemplate`,
 `wadeSplashTemplate`, `enabled`. Helpers: `resolved()` (the body in world space), `joinedNodes()`,
-`handOver()`, `waves()`, `columnAt(x, z, time?)` (resting or waved surface, floor, flow and distance to
+`handOver()`, `waves()`, `flowReference()`, `bakeSignature()`, `columnAt(x, z, time?)` (resting or waved surface, floor, flow and distance to
 shore, or null), `worldBox()`, `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)`, `version` (bumped
 by every body or wave edit) and `resolveKey()` (which also changes when the water a river joins moves).
 

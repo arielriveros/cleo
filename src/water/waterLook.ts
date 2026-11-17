@@ -30,6 +30,8 @@ export interface WaterLook {
     detailScale: number;
     /** 0..2: how far the waves and foam ride the current (rivers). */
     flowStrength: number;
+    /** 0..2: how much fast water lightens and clouds, as churned water does (rivers). */
+    flowScatter: number;
     /** Linear RGB of foam. */
     foamColor: [number, number, number];
     /** Metres of foam along the shore. */
@@ -78,6 +80,7 @@ export const DEFAULT_WATER_LOOK: WaterLook = {
     detailStrength: 1,
     detailScale: 1.5,
     flowStrength: 1,
+    flowScatter: 1,
     foamColor: [0.9, 0.93, 0.95],
     shoreFoam: 0.6,
     crestFoam: 0.5,
@@ -116,6 +119,7 @@ export function normaliseWaterLook(v: any): WaterLook {
         detailStrength: pos(v?.detailStrength, d.detailStrength, 2),
         detailScale: pos(v?.detailScale, d.detailScale, 50) || 0.05,
         flowStrength: pos(v?.flowStrength, d.flowStrength, 2),
+        flowScatter: pos(v?.flowScatter, d.flowScatter, 2),
         foamColor: rgb(v?.foamColor, d.foamColor),
         shoreFoam: pos(v?.shoreFoam, d.shoreFoam, 20),
         crestFoam: unit(v?.crestFoam, d.crestFoam),

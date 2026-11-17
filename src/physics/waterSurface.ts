@@ -1,5 +1,5 @@
 import type { BuoyancyVolume, WaterColumnSample } from './buoyancy';
-import { PHYSICS_WAVE_CELL, waveCrest, waveReach, waveSurfaceAt, type WaterWave, type WaveSurface } from './water/waves';
+import { PHYSICS_WAVE_CELL, flowWaveScale, waveCrest, waveReach, waveSurfaceInFlow, type WaterWave, type WaveSurface } from './water/waves';
 import { waterColumnAt, type ResolvedWaterShape, type WaterColumn } from './water/waterColumn';
 import { addSurf, surfOf, surfTravelTime, type SurfWave } from './water/surf';
 
@@ -37,6 +37,13 @@ export interface WaterSpec {
     waveSpeed?: number;
     /** Metres from a shore over which waves fade out (0 = no fade). */
     shoreFade?: number;
+    /**
+     * A river: the speed its waves were built for (waves.ts wavesForCurrent); where its water runs faster or
+     * slower they are scaled (flowWaveScale). 0 or absent: waves the wind raised, the same everywhere.
+     */
+    flowWaves?: number;
+    /** How far the waves ride the current (the Water material's Flow), as the surface draws them. */
+    flowAdvect?: number;
     /** Whether flowing water drags bodies along with it (river currents). */
     currents?: boolean;
     /** A bake's settled water: where it is given it replaces the shapes' surface and flow. */
@@ -119,10 +126,11 @@ const _surface: WaveSurface = { height: 0, vx: 0, vy: 0, vz: 0, k: 0 };
 /**
  * The waves over a column `edge` metres from its shore and `depth` deep: their height (into `out.height`),
  * the water's motion there and the wavenumber it fades with below. The renderer's vertex stage does the
- * same: shoaling over `shoreFade`, and a tall crest no taller than 0.4 of the depth.
+ * same: shoaling over `shoreFade`, a tall crest no taller than 0.4 of the depth, and the waves carried by the
+ * current (`flowX`, `flowZ`: the water's velocity there) and scaled by its speed on a river.
  */
 export function waveAt(spec: WaterSpec, x: number, z: number, time: number, edge: number, factor: number,
-                       depth: number, out: WaveSurface): WaveSurface {
+                       depth: number, out: WaveSurface, flowX = 0, flowZ = 0): WaveSurface {
     const speed = spec.waveSpeed ?? 1;
     const t = time * speed;
     out.height = 0; out.vx = 0; out.vy = 0; out.vz = 0; out.k = 0;
@@ -132,8 +140,9 @@ export function waveAt(spec: WaterSpec, x: number, z: number, time: number, edge
         const fade = spec.shoreFade && spec.shoreFade > 0 ? Math.min(1, Math.max(0, edge / spec.shoreFade)) : 1;
         const crest = waveCrest(waves, heightScale);
         const cap = Number.isFinite(depth) ? Math.min(1, Math.max(0, 0.4 * depth / Math.max(crest, 1e-3))) : 1;
-        const scale = heightScale * factor * fade * fade * (3 - 2 * fade) * cap;
-        if (scale > 0) waveSurfaceAt(waves, x, z, t, scale, speed, PHYSICS_WAVE_CELL, out);
+        const scale = heightScale * factor * fade * fade * (3 - 2 * fade) * cap * flowWaveScale(Math.hypot(flowX, flowZ), spec.flowWaves ?? 0);
+        const ride = spec.flowAdvect ?? 0;
+        if (scale > 0) waveSurfaceInFlow(waves, x, z, t, scale, speed, PHYSICS_WAVE_CELL, flowX * ride, flowZ * ride, out);
     }
     if (spec.waveAmplitude > 0) {
         const ph = swellPhase(spec, x, z, t);
@@ -193,7 +202,7 @@ export function waterSpecColumn(spec: WaterSpec, x: number, z: number, time: num
         depth = Math.max(0, col.surface - _shore[1]);
     }
     col.rest = col.surface;
-    const w = waveAt(spec, x, z, time, col.edge, col.waveFactor, depth, _surface);
+    const w = waveAt(spec, x, z, time, col.edge, col.waveFactor, depth, _surface, col.flowX, col.flowZ);
     // Over the beach, the surf (water/surf.ts), as the renderer draws it: its slope from the travel time's
     // gradient, a grid cell either way.
     if (ocean && spec.shoreGrid && Number.isFinite(depth) && spec.waves && spec.waves.length) {
