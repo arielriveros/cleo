@@ -54,6 +54,11 @@ export interface WaterVolumeOptions {
     waveScale?: number;
     /** 0..1: rounded swells to sharp crests. */
     choppiness?: number;
+    /**
+     * 0..2: how fast the waves and ripples run against their natural (deep-water) pace. 1 is real; below it
+     * a calmer, slower sea. Physics follows it, so floating bodies ride the waves as drawn.
+     */
+    waveSpeed?: number;
     /** Metres from a shore over which waves die down (shoaling). */
     shoreFade?: number;
     /** Whether flowing water (rivers) carries floating bodies along. */
@@ -127,6 +132,7 @@ export class WaterVolumeNode extends Node {
     private _waveDirection: number;
     private _waveScale: number;
     private _choppiness: number;
+    private _waveSpeed: number;
     private _shoreFade: number;
     private _currents: boolean;
     private _followWind: boolean;
@@ -169,6 +175,7 @@ export class WaterVolumeNode extends Node {
         this._waveDirection = finiteOr(options.waveDirection, 0);
         this._waveScale = Math.max(0, finiteOr(options.waveScale, 1));
         this._choppiness = Math.min(1, Math.max(0, finiteOr(options.choppiness, 0.5)));
+        this._waveSpeed = Math.min(2, Math.max(0, finiteOr(options.waveSpeed, 1)));
         this._shoreFade = Math.max(0, finiteOr(options.shoreFade, 6));
         this._currents = options.currents !== false;
         this._followWind = !!options.followWind;
@@ -274,6 +281,8 @@ export class WaterVolumeNode extends Node {
     public set waveScale(v: number) { this._waveScale = Math.max(0, finiteOr(v, this._waveScale)); this._bodyChanged('waveScale'); }
     public get choppiness(): number { return this._choppiness; }
     public set choppiness(v: number) { this._choppiness = Math.min(1, Math.max(0, finiteOr(v, this._choppiness))); this._bodyChanged('choppiness'); }
+    public get waveSpeed(): number { return this._waveSpeed; }
+    public set waveSpeed(v: number) { this._waveSpeed = Math.min(2, Math.max(0, finiteOr(v, this._waveSpeed))); this._notifyChange('component', 'waveSpeed'); }
     public get shoreFade(): number { return this._shoreFade; }
     public set shoreFade(v: number) { this._shoreFade = Math.max(0, finiteOr(v, this._shoreFade)); this._bodyChanged('shoreFade'); }
     public get followWind(): boolean { return this._followWind; }
@@ -495,7 +504,7 @@ export class WaterVolumeNode extends Node {
             linearDrag: this._linearDrag, angularDrag: this._angularDrag, affectCharacters: this._affectCharacters,
             waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
             shapes: plainBox ? undefined : shapes,
-            waves, waveScale: this.waveWindScale(), shoreFade: this._shoreFade, currents: this._currents,
+            waves, waveScale: this.waveWindScale(), waveSpeed: this._waveSpeed, shoreFade: this._shoreFade, currents: this._currents,
             flowGrid: plainBox ? undefined : this.bakedFlowGrid() ?? undefined,
         };
     }
@@ -663,7 +672,7 @@ export class WaterVolumeNode extends Node {
                 linearDrag: this._linearDrag, angularDrag: this._angularDrag,
                 waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
                 windSpeed: this._windSpeed, waveDirection: this._waveDirection, waveScale: this._waveScale,
-                choppiness: this._choppiness, shoreFade: this._shoreFade, currents: this._currents,
+                choppiness: this._choppiness, waveSpeed: this._waveSpeed, shoreFade: this._shoreFade, currents: this._currents,
                 ...(this._followWind ? { followWind: true } : {}),
                 ...(this._waterMaterial ? { waterMaterial: this._waterMaterial.serialize() } : {}),
                 ...(this._waterMaterialId ? { waterMaterialId: this._waterMaterialId } : {}),

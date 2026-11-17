@@ -106,9 +106,13 @@ reflects the water back outside Snell's window.
 ### Level of detail
 
 The surface is drawn in tiles: each is as dense as its distance from the camera calls for, from 64
-quads across close up to 8 far away, and the waves, ripples and reflections fade out with distance. An
-endless ocean is drawn in rings of ever larger tiles round the camera to the horizon. Tiles out of view, or
-past the node's **Draw distance**, are not drawn.
+quads across close up to 8 far away. A wave moves the surface only where the tiles are dense enough to
+draw it; past that, and for the ripples below the waves, the shading draws it, and what a pixel is too
+coarse to show becomes roughness: a distant sea's glints merge into the broad glitter path under the sun,
+as a real one's do. An endless ocean is drawn in tiles that grow with distance and blend into each other,
+to the horizon. Tiles out of view, or past the node's **Draw distance**, are not drawn. On a landscape the
+ocean knows where the beach is: its waves die down over **Shore fade** and never stand taller than the
+water is deep.
 
 ## Flow bake
 
@@ -140,6 +144,7 @@ surface draws.
 | **Direction** | Degrees the waves travel toward: 0 is +Z, 90 is +X. |
 | **Height** | Multiplies the wave height the wind gives. |
 | **Choppiness** | Rounded swells (0) to sharp crests (1). |
+| **Wave speed** | How fast the waves and ripples run against their natural pace. 1 is real: a wave runs as fast as its length makes it (a 40 m ocean swell at 8 m/s, a lake's 1 m chop at 1.2 m/s). Below 1, a calmer, slower sea. Floating bodies ride the waves at the same pace. |
 | **Follow wind** | The scene's Wind node raises and calms the waves: their height follows its speed against **Wind speed**, squared as a sea's does, up to twice as tall. Their length and direction stay as shaped. |
 | **Shore fade** | Metres from a shore over which the waves die down. |
 | **Swell** | Metres the whole surface rises and falls, so floating bodies bob even with no wind. 0: none. |

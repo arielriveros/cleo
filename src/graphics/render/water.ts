@@ -13,13 +13,14 @@ import { WaterProgram, WaterUnderwaterProgram } from './programs';
 import type { FullscreenPasses } from './fullscreenPasses';
 import { sizedTarget } from './featureSubsystems';
 import { ViewProjection } from './viewProjection';
-import { buildWaterInfo, type GroundSampler, type WaterInfo } from '../../water/waterInfo';
+import { buildOceanShoreInfo, buildWaterInfo, type WaterInfo } from '../../water/waterInfo';
 import { WATER_DETAIL_SIZE, waterDetailPixels } from '../../water/waterTextures';
+import { selectOceanTiles, type OceanTile } from '../../water/oceanLod';
 import { sceneGround } from '../../water/ground';
 import { decodeWaterBake } from '../../water/bake/waterBakeFormat';
 import { GiBakeRegistry } from './gi/giBakeRegistry';
 import { DEFAULT_WATER_LOOK, type WaterLook } from '../../water/waterLook';
-import { GERSTNER_MAX_WAVES } from '../../physics/water/gerstner';
+import { GERSTNER_MAX_WAVES, type GerstnerWave } from '../../physics/water/gerstner';
 import { createWindSample, sampleWindField } from '../../core/wind/windField';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
@@ -38,11 +39,12 @@ export interface WaterPassesHost {
 
 /** Quads across a tile at each level of detail. */
 const TILE_LODS = [64, 32, 16, 8];
-/** An endless ocean's tiles: the innermost size (m) and how many doublings reach the horizon. */
-const OCEAN_TILE = 16;
-const OCEAN_LEVELS = 9;
 /** Metres the skirt under each tile's edge hangs, covering cracks between tiles of different density. */
 const SKIRT = 0.3;
+/** Ripple trains at most (the shader's MAX_RIPPLES), each this much shorter than the last, down to the shortest. */
+const RIPPLE_TRAINS = 16;
+const RIPPLE_RATIO = 0.72;
+const RIPPLE_SHORTEST = 0.05;
 /** Seconds between rebuilds of a node's water info while it is being edited (a gizmo drag). */
 const REBUILD_INTERVAL = 0.2;
 
@@ -55,19 +57,20 @@ interface NodeWater {
     builtAt: number;
 }
 
-interface Tile { x0: number; z0: number; size: number; lod: number; ocean: boolean; }
+/** One draw: where, with which mesh (`lod` into TILE_LODS), and, for an ocean tile, its morph. */
+interface Tile { x0: number; z0: number; size: number; lod: number; ocean: OceanTile | null; }
 
 /**
  * The surface of every Water node (core/scene/nodes/waterVolumeNode.ts): its water info, its tiles, and
- * one forward draw per visible tile with `water.wgsl`, right before the transparents (so glass, particles
+ * one forward draw per visible tile with `water.wgsl`, into the scene before the fog and the temporal resolve (glass, particles
  * and sprites still draw over water, and the water writes depth they test against).
  *
  * LOD: a node's grid of tiles (water/waterInfo.ts) draws each tile with the grid density its distance
  * from the camera calls for, from 64 quads across up close to 8 far away, and skirts hide the cracks
- * between neighbours of different density; the waves fade out with distance, and so do the detail, the
- * screen-space reflection and the caustics in the shader's own terms. An endless ocean adds concentric
- * rings of tiles around the camera, each ring's tiles twice the last's, to the horizon. Tiles outside
- * the view frustum, or past the node's draw distance, are not drawn.
+ * between neighbours of different density; each wave moves only meshes dense enough to draw it, and the
+ * shader fades the rest into roughness. An endless ocean is a CDLOD quadtree round the camera
+ * (water/oceanLod.ts), morphing between levels, to the horizon. Tiles outside the view frustum, or past
+ * the node's draw distance, are not drawn.
  */
 export class WaterPasses {
     private readonly _shaderManager = ShaderManager.Instance;
@@ -121,10 +124,14 @@ export class WaterPasses {
         sm.bind('water');
         const { sunColor, ambient, sunDir } = this._light(scene);
         const env = this._envOf(scene);
-        const viewProj = mat4.multiply(mat4.create(), cam.projectionMatrix, cam.viewMatrix);
         if (device.capabilities.conventions.originTopLeft) mat4.multiply(this._uvProj, ViewProjection.FLIP_SCREEN_Y, cam.projectionMatrix);
         else mat4.copy(this._uvProj, cam.projectionMatrix);
-        const t = this._view.windTime;
+        // The key light's cascades and the cloud shadow: the glint, the caustics and the glow through the
+        // waves all go dark in the shadow of a mountain or a cloud.
+        if (this._bindGroups.declaresShadowGroup(pipeline)) {
+            this._sys.shadows.uploadShadowUniforms('water');
+            pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline, false));
+        }
 
         // Per frame.
         sm.setUniform('u_view', cam.viewMatrix);
@@ -135,26 +142,31 @@ export class WaterPasses {
         sm.setUniform('u_sunDir', [sunDir[0], sunDir[1], sunDir[2], 0]);
         sm.setUniform('u_sunColor', [sunColor[0], sunColor[1], sunColor[2], 0]);
         sm.setUniform('u_ambient', [ambient[0], ambient[1], ambient[2], 0]);
-        sm.setUniform('u_viewPos', [cam.position[0], cam.position[1], cam.position[2], t]);
+        sm.setUniform('u_vCamera', [cam.position[0], cam.position[1], cam.position[2], 0]);
         sm.setUniform('u_depthParams', [cam.near, cam.far, cam.type === 'orthographic' ? 1 : 0, 0]);
         sm.setUniform('u_resolution', [w, h, 1 / Math.max(1, w), 1 / Math.max(1, h)]);
         sm.setUniform('u_envScale', env.scale);
-        void viewProj;
 
         let under: { node: WaterVolumeNode; level: number; look: WaterLook } | null = null;
         for (const node of nodes) {
+            const body = node.resolved();
             const water = this._waterOf(node, ground);
             const info = water.info;
             const look = WaterPasses._lookOf(node);
             const waves = node.waves();
-            const body = node.resolved();
-            const oceanLevel = info ? info.oceanLevel : body && body.type === 'ocean' && body.endless ? body.level : null;
+            const oceanLevel = body && body.type === 'ocean' && body.endless ? body.level : null;
             if (!info && oceanLevel === null) continue;
-            const tiles = this._tilesOf(node, info, oceanLevel, waves.reduce((s, w) => s + w.amplitude, 0) + node.waveAmplitude);
+            // The waves' reach: how far they lift the surface (the culling box's height), and sideways.
+            const heightScale = node.waveWindScale();
+            let up = node.waveAmplitude, side = 0;
+            for (const w of waves) { up += w.amplitude * heightScale; side += w.steepness * w.wavelength / (2 * Math.PI * waves.length); }
+            const tiles = this._tilesOf(node, info, oceanLevel, up, side);
             if (!tiles.length) continue;
+            // The node's own clock: the frame's, run at its wave speed.
+            const t = this._view.windTime * node.waveSpeed;
             this._nodeUniforms(node, info, oceanLevel, look, waves, t, scene);
             if (!under) {
-                const c = cam.position, col = node.columnAt(c[0], c[2], t);
+                const c = cam.position, col = node.columnAt(c[0], c[2], this._view.windTime);
                 if (col && c[1] < col.surface && c[1] > col.floor - 1) under = { node, level: col.surface, look };
             }
             pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
@@ -162,8 +174,11 @@ export class WaterPasses {
                 water.tex0 ?? this._fallbackInfo(), water.tex1 ?? this._fallbackInfo(), this._detail(),
             ]));
             for (const tile of tiles) {
-                sm.setUniform('u_tile', [tile.x0, tile.z0, tile.size, SKIRT]);
-                sm.setUniform('u_fOcean', [oceanLevel ?? 0, oceanLevel !== null ? 1 : 0, tile.ocean ? 1 : 0, 0]);
+                const quads = TILE_LODS[tile.lod];
+                sm.setUniform('u_tile', [tile.x0, tile.z0, tile.size, tile.ocean ? 0 : SKIRT]);
+                sm.setUniform('u_tileLod', tile.ocean
+                    ? [quads, tile.ocean.morphStart, tile.ocean.morphEnd, 1]
+                    : [quads, 0, 0, 0]);
                 this._passes.recordDraw(pass, meshes[tile.lod], 0, 0);
                 this.tilesDrawn++;
             }
@@ -204,7 +219,7 @@ export class WaterPasses {
     // ---- per node ---------------------------------------------------------------------------------
 
     private _nodeUniforms(node: WaterVolumeNode, info: WaterInfo | null, oceanLevel: number | null, look: WaterLook,
-                          waves: ReturnType<WaterVolumeNode['waves']>, t: number, scene: Scene): void {
+                          waves: GerstnerWave[], t: number, scene: Scene): void {
         const sm = this._shaderManager;
         const origin = info ? [info.originX, info.originZ, info.cell, 1] : [0, 0, 1, 0];
         const size = info ? [info.nx, info.nz, info.minY, 0] : [1, 1, 0, 0];
@@ -212,20 +227,29 @@ export class WaterPasses {
         sm.setUniform('u_vInfoSize', size);
         sm.setUniform('u_fInfoOrigin', origin);
         sm.setUniform('u_fInfoSize', size);
-        sm.setUniform('u_vOcean', [oceanLevel ?? 0, oceanLevel !== null ? 1 : 0, 0, 0]);
-        const dir = new Float32Array(GERSTNER_MAX_WAVES * 4), phase = new Float32Array(GERSTNER_MAX_WAVES * 4);
+        const ocean = [oceanLevel ?? 0, oceanLevel !== null ? 1 : 0, 0, 0];
+        sm.setUniform('u_vOcean', ocean);
+        sm.setUniform('u_fOcean', ocean);
+        const dir = this._waveDir, phase = this._wavePhase;
+        dir.fill(0); phase.fill(0);
         const n = Math.min(GERSTNER_MAX_WAVES, waves.length);
+        let amplitude = 0;
         for (let i = 0; i < n; i++) {
             const w = waves[i];
             dir.set([w.dirX, w.dirZ, w.amplitude, w.wavelength], i * 4);
             phase.set([w.steepness, w.phase, 0, 0], i * 4);
+            amplitude += w.amplitude;
         }
+        const heightScale = node.waveWindScale();
         sm.setUniform('u_waveDir', dir);
         sm.setUniform('u_wavePhase', phase);
-        sm.setUniform('u_waveParams', [n, t, node.waveWindScale(), node.shoreFade]);
-        sm.setUniform('u_swell', [node.waveAmplitude, node.waveFrequency, 0, 0]);
+        sm.setUniform('u_waveParams', [n, t, heightScale, node.shoreFade]);
+        sm.setUniform('u_fWaveDir', dir);
+        sm.setUniform('u_fWavePhase', phase);
+        sm.setUniform('u_fWaveParams', [n, t, heightScale, node.shoreFade]);
+        sm.setUniform('u_swell', [node.waveAmplitude, node.waveFrequency, amplitude * heightScale, 0]);
         const cam = this._view.camera.position;
-        sm.setUniform('u_vCamera', [cam[0], cam[1], cam[2], 1500]);
+        sm.setUniform('u_viewPos', [cam[0], cam[1], cam[2], t]);
 
         // The look.
         sm.setUniform('u_shallowColor', [...look.shallowColor, look.turbidity]);
@@ -251,7 +275,33 @@ export class WaterPasses {
         sm.setUniform('u_windParams', [wx, wz, speed, look.windResponse]);
         const under = this._cameraUnder(node);
         sm.setUniform('u_misc', [this._view.preExposure, 0, under ? 1 : 0, 0]);
+
+        // The ripples: the spectrum carried on below the shortest Gerstner wave down to a few centimetres,
+        // their slope variance what Cox and Munk measured on a sea under this wind, less what the waves
+        // already have. The wind is the scene's where it blows here, else the wind the waves were shaped for.
+        const wind = field.active && speed > 0.5 ? speed * look.windResponse : node.windSpeed;
+        const longest = n ? Math.min(...waves.slice(0, n).map(w => w.wavelength)) * 0.75 : 2;
+        const count = Math.max(1, Math.min(RIPPLE_TRAINS, Math.floor(Math.log(RIPPLE_SHORTEST / Math.max(longest, RIPPLE_SHORTEST * 1.01)) / Math.log(RIPPLE_RATIO)) + 1));
+        let wavesVariance = 0;
+        for (let i = 0; i < n; i++) {
+            const k = 2 * Math.PI / Math.max(0.01, waves[i].wavelength);
+            wavesVariance += 0.5 * Math.pow(k * waves[i].amplitude * heightScale, 2);
+        }
+        const coxMunk = 0.003 + 0.00512 * Math.max(0, wind);
+        const rippleVariance = Math.max(coxMunk - wavesVariance, 0.002);
+        sm.setUniform('u_ripple', [Math.max(longest, RIPPLE_SHORTEST), Math.sqrt(2 * rippleVariance / count), RIPPLE_RATIO, count]);
+        const heading = speed > 0.5 && field.active ? [wx / speed, wz / speed] : WaterPasses._heading(node.waveDirection);
+        sm.setUniform('u_rippleDir', [heading[0], heading[1], 0, 0]);
         void scene;
+    }
+
+    private readonly _waveDir = new Float32Array(GERSTNER_MAX_WAVES * 4);
+    private readonly _wavePhase = new Float32Array(GERSTNER_MAX_WAVES * 4);
+
+    /** Unit x, z of a heading in degrees (0 = +Z, 90 = +X), as the waves' direction is given. */
+    private static _heading(degrees: number): [number, number] {
+        const a = degrees * Math.PI / 180;
+        return [Math.sin(a), Math.cos(a)];
     }
 
     /** Whether the camera is below this node's surface (and so sees it from underneath). */
@@ -262,7 +312,7 @@ export class WaterPasses {
     }
 
     /** The node's water info and textures, rebuilt when its shapes, placement or the ground under it change. */
-    private _waterOf(node: WaterVolumeNode, ground: { sample: GroundSampler | null; key: string }): NodeWater {
+    private _waterOf(node: WaterVolumeNode, ground: ReturnType<typeof sceneGround>): NodeWater {
         let water = this._nodes.get(node);
         const key = `${node.resolveKey()}|${ground.key}`;
         const now = performance.now() / 1000;
@@ -272,7 +322,10 @@ export class WaterPasses {
         const fullKey = baked ? `bake:${node.bakeId}|${GiBakeRegistry.generation}` : key;
         if (water && water.key === fullKey) return water;
         if (!baked && water && water.info && water.info.source === 'analytic' && now - water.builtAt < REBUILD_INTERVAL) return water;
-        const info = baked ? baked.info : buildWaterInfo(node.resolvedShapes(), ground.sample, { handOver: node.handOver() });
+        const body = node.resolved();
+        const info = baked ? baked.info
+            : body && body.type === 'ocean' && body.endless ? buildOceanShoreInfo(body.level, ground.sample, ground.bounds)
+            : buildWaterInfo(node.resolvedShapes(), ground.sample, { handOver: node.handOver() });
         const keyNow = fullKey;
         if (!water) { water = { key, info: null, tex0: null, tex1: null, builtAt: now }; this._nodes.set(node, water); }
         water.key = keyNow;
@@ -333,11 +386,15 @@ export class WaterPasses {
     }
 
     private _detailTexture: Texture | null = null;
-    /** The small-wave and foam texture (water/waterTextures.ts), made on first use, mipmapped, tiled. */
+    /**
+     * The foam texture (water/waterTextures.ts), made on first use, tiled, and MIPMAPPED: the shader picks a
+     * level by distance, and an unfilled level is black (a raw-bytes upload fills level 0 only), so it goes
+     * up the way an image does, which builds the chain on both backends.
+     */
     private _detail(): Texture {
         if (!this._detailTexture) {
             const tex = new Texture({ mipMap: true, wrapping: 'repeat' });
-            tex.createFromData(waterDetailPixels(), WATER_DETAIL_SIZE, WATER_DETAIL_SIZE, 'repeat');
+            tex.createFromPixels(new Uint8ClampedArray(waterDetailPixels().buffer), WATER_DETAIL_SIZE, WATER_DETAIL_SIZE);
             this._detailTexture = tex;
         }
         return this._detailTexture;
@@ -355,15 +412,20 @@ export class WaterPasses {
 
     // ---- tiles ------------------------------------------------------------------------------------
 
-    /** Every tile of `node` to draw this frame, culled and with its level of detail. */
-    private _tilesOf(node: WaterVolumeNode, info: WaterInfo | null, oceanLevel: number | null, reach: number): Tile[] {
+    private readonly _oceanTiles: OceanTile[] = [];
+
+    /**
+     * Every tile of `node` to draw this frame, culled and with its level of detail. `up` and `side` are how
+     * far the waves move the surface vertically and sideways: the culling boxes grow by them.
+     */
+    private _tilesOf(node: WaterVolumeNode, info: WaterInfo | null, oceanLevel: number | null, up: number, side: number): Tile[] {
         const out: Tile[] = [];
         const cam = this._view.camera.position;
         const vis = this._sys.visibility;
         const drawDistance = node.drawDistance > 0 ? node.drawDistance : Infinity;
         const cull = (x0: number, z0: number, size: number, y0: number, y1: number): boolean => {
-            this._min[0] = x0; this._min[1] = y0 - reach - SKIRT; this._min[2] = z0;
-            this._max[0] = x0 + size; this._max[1] = y1 + reach; this._max[2] = z0 + size;
+            this._min[0] = x0 - side; this._min[1] = y0 - up - SKIRT; this._min[2] = z0 - side;
+            this._max[0] = x0 + size + side; this._max[1] = y1 + up; this._max[2] = z0 + size + side;
             return vis.frustumCulling && !vis.frustum.intersectsAABB(this._min, this._max);
         };
         const distanceTo = (x0: number, z0: number, size: number, y: number) => {
@@ -375,7 +437,7 @@ export class WaterPasses {
             const r = d / Math.max(size, 1);
             return r < 1.5 ? 0 : r < 4 ? 1 : r < 10 ? 2 : 3;
         };
-        if (info) {
+        if (info && info.tilesX > 0) {
             const span = info.tileCells * info.cell;
             for (let tz = 0; tz < info.tilesZ; tz++) for (let tx = 0; tx < info.tilesX; tx++) {
                 const k = tz * info.tilesX + tx;
@@ -385,30 +447,26 @@ export class WaterPasses {
                 if (cull(x0, z0, span, y0, y1)) continue;
                 const d = distanceTo(x0, z0, span, (y0 + y1) / 2);
                 if (d > drawDistance) continue;
-                out.push({ x0, z0, size: span, lod: lodFor(d, span), ocean: false });
+                out.push({ x0, z0, size: span, lod: lodFor(d, span), ocean: null });
             }
         }
         if (oceanLevel !== null) {
-            // Rings of tiles round the camera, each level's tiles twice the size of the last, snapped to
-            // their own size so they do not swim as the camera moves. Level 0 is a 4x4 block; each further
-            // level is the 4x4 block of its size around the camera minus the 2x2 the level inside it covers.
-            for (let level = 0; level < OCEAN_LEVELS; level++) {
-                const s = OCEAN_TILE * Math.pow(2, level);
-                const cx = Math.floor(cam[0] / (2 * s)) * 2 * s, cz = Math.floor(cam[2] / (2 * s)) * 2 * s;
-                const inner = level === 0 ? null : OCEAN_TILE * Math.pow(2, level - 1);
-                const icx = inner ? Math.floor(cam[0] / (2 * inner)) * 2 * inner : 0, icz = inner ? Math.floor(cam[2] / (2 * inner)) * 2 * inner : 0;
-                for (let j = -2; j < 2; j++) for (let i = -2; i < 2; i++) {
-                    const x0 = cx + i * s, z0 = cz + j * s;
-                    if (inner) {
-                        // Inside the previous level's block (its 4x4 of half-size tiles): already drawn.
-                        const bx0 = icx - 2 * inner, bz0 = icz - 2 * inner, bx1 = icx + 2 * inner, bz1 = icz + 2 * inner;
-                        if (x0 >= bx0 && x0 + s <= bx1 && z0 >= bz0 && z0 + s <= bz1) continue;
-                    }
-                    if (cull(x0, z0, s, oceanLevel, oceanLevel)) continue;
-                    const d = distanceTo(x0, z0, s, oceanLevel);
-                    if (d > drawDistance) continue;
-                    out.push({ x0, z0, size: s, lod: level === 0 ? 0 : 1, ocean: true });
+            // An endless ocean: the CDLOD quadtree round the camera, culled by the frustum's sides only (its
+            // far plane would stop the sea short of the horizon; the shader pins it inside).
+            const planes = vis.frustum.planes;
+            const culling = vis.frustumCulling;
+            const visible = (min: number[], max: number[]) => {
+                if (!culling) return true;
+                for (let i = 0; i < 4; i++) {
+                    const o = i * 4, a = planes[o], b = planes[o + 1], c = planes[o + 2];
+                    const px = a >= 0 ? max[0] + side : min[0] - side, py = b >= 0 ? max[1] : min[1], pz = c >= 0 ? max[2] + side : min[2] - side;
+                    if (a * px + b * py + c * pz + planes[o + 3] < 0) return false;
                 }
+                return true;
+            };
+            for (const tile of selectOceanTiles(cam, oceanLevel, up + SKIRT, visible, this._oceanTiles)) {
+                if (distanceTo(tile.x0, tile.z0, tile.size, oceanLevel) > drawDistance) continue;
+                out.push({ x0: tile.x0, z0: tile.z0, size: tile.size, lod: TILE_LODS.indexOf(tile.quads), ocean: tile });
             }
         }
         return out;
@@ -452,13 +510,17 @@ export class WaterPasses {
     private _light(scene: Scene): { sunColor: number[]; ambient: number[]; sunDir: number[] } {
         const sunColor = [0, 0, 0];
         const sunDir = [0, 1, 0];
+        // The sun as the deferred lighting has it: dimmed and whitened by the cloud cover (lighting.ts
+        // `_uploadDirectional`), so the glint fades under an overcast exactly as the land's light does.
+        const grade = this._sys.lighting.cloudGrade(scene);
         for (const node of scene.lights) {
             if (node.type !== 'directional') continue;
             const light = node.light as DirectionalLight;
             const key = node === this._sys.lighting.keyLightNode ? this._sys.lighting.keyLight : null;
-            const k = key ? key.intensity : light.internalIntensity;
+            const k = (key ? key.intensity : light.internalIntensity) * grade.sun;
             const c = key ? key.color : light.color;
-            sunColor[0] = c[0] * k; sunColor[1] = c[1] * k; sunColor[2] = c[2] * k;
+            const lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+            for (let i = 0; i < 3; i++) sunColor[i] = (c[i] + (lum - c[i]) * grade.white) * k;
             const f = this._sys.lighting.dirOf(node);
             sunDir[0] = -f[0]; sunDir[1] = -f[1]; sunDir[2] = -f[2];
             break;
@@ -466,7 +528,6 @@ export class WaterPasses {
         const ambient = this._sys.lighting.internalAmbient(scene);
         const skyNode = scene.skyLight;
         if (skyNode && this._sys.sky.skySHValid) {
-            const grade = this._sys.lighting.cloudGrade(scene);
             const sky = skyAmbient(this._sys.sky.skySH, skyNode.intensity * grade.sky);
             ambient[0] += sky[0]; ambient[1] += sky[1]; ambient[2] += sky[2];
         }

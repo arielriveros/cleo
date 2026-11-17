@@ -24,6 +24,8 @@ export interface WaterSpec {
     /** The Gerstner waves on top of the swell, and the factor on their height (wind strength). */
     waves?: GerstnerWave[];
     waveScale?: number;
+    /** How fast the waves run against their natural pace (time is multiplied by it). Default 1. */
+    waveSpeed?: number;
     /** Metres from a shore over which waves fade out (0 = no fade). */
     shoreFade?: number;
     /** Whether flowing water drags bodies along with it (river currents). */
@@ -83,7 +85,7 @@ export function waveHeight(spec: WaterSpec, x: number, z: number, time: number, 
     if (waves && waves.length && (spec.waveScale ?? 1) > 0) {
         const fade = spec.shoreFade && spec.shoreFade > 0 ? Math.min(1, Math.max(0, edge / spec.shoreFade)) : 1;
         const scale = (spec.waveScale ?? 1) * factor * fade * fade * (3 - 2 * fade);
-        if (scale > 0) h += gerstnerHeightAt(waves, x, z, time, scale);
+        if (scale > 0) h += gerstnerHeightAt(waves, x, z, time * (spec.waveSpeed ?? 1), scale);
     }
     return h;
 }

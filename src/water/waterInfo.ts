@@ -218,3 +218,41 @@ export function tileWaterInfo(info: WaterInfo): void {
     info.tileCells = tileCells; info.tilesX = tilesX; info.tilesZ = tilesZ;
     info.tileWet = tileWet; info.tileMinY = tileMinY; info.tileMaxY = tileMaxY;
 }
+
+/**
+ * An endless ocean's SHORE grid at `level`, over the landscapes' rectangle (and a margin): where the land
+ * rises out of the sea, how far each point is from it, and how deep the sea is there. The ocean is drawn
+ * everywhere regardless; this only tells its waves where to die down and break, and its foam where the
+ * beach is. Null without ground. Its `oceanLevel` is the level, and it has no surface tiles of its own.
+ */
+export function buildOceanShoreInfo(level: number, ground: GroundSampler | null,
+                                    bounds: { min: readonly number[]; max: readonly number[] } | null,
+                                    options: { maxRes?: number } = {}): WaterInfo | null {
+    if (!ground || !bounds) return null;
+    const margin = 32;
+    const x0 = bounds.min[0] - margin, z0 = bounds.min[1] - margin;
+    const x1 = bounds.max[0] + margin, z1 = bounds.max[1] + margin;
+    const maxRes = Math.max(16, Math.min(2048, options.maxRes ?? WATER_INFO_MAX_RES));
+    const cell = Math.max(1, Math.max(x1 - x0, z1 - z0) / (maxRes - 1));
+    const nx = Math.min(maxRes, Math.ceil((x1 - x0) / cell) + 1), nz = Math.min(maxRes, Math.ceil((z1 - z0) / cell) + 1);
+    const n = nx * nz;
+    const info0 = new Float32Array(n * 4), info1 = new Float32Array(n * 4);
+    const wet = new Uint8Array(n);
+    for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
+        const i = z * nx + x;
+        const g = ground(x0 + x * cell, z0 + z * cell);
+        wet[i] = g === null || g < level - 0.02 ? 1 : 0;
+        info0[i * 4] = level;
+        info1[i * 4] = 1;
+        // Off the landscape, the sea is as deep as anything a wave cares about.
+        info1[i * 4 + 2] = g ?? level - 1000;
+        info1[i * 4 + 3] = wet[i];
+    }
+    const { dist } = chamferDistance(wet, nx, nz, cell);
+    for (let i = 0; i < n; i++) info0[i * 4 + 3] = dist[i];
+    return {
+        originX: x0, originZ: z0, cell, nx, nz, info0, info1, minY: level, maxY: level,
+        tileCells: WATER_TILE_CELLS, tilesX: 0, tilesZ: 0, tileWet: new Uint8Array(0), tileMinY: new Float32Array(0), tileMaxY: new Float32Array(0),
+        oceanLevel: level, source: 'shore',
+    };
+}
