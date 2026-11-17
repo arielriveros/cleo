@@ -20,6 +20,7 @@ import { WaterWaveSim, WAVE_SIM_SIDE, type WaveSimWater } from './waterWaves';
 import { selectOceanTiles, type OceanTile } from '../../water/oceanLod';
 import { sceneGround } from '../../water/ground';
 import { decodeWaterBake } from '../../water/bake/waterBakeFormat';
+import { obstacleFootprint, sceneObstacles, type WaterObstacle, type WaterObstacleFootprint } from '../../water/bake/obstacles';
 import { GiBakeRegistry } from './gi/giBakeRegistry';
 import { DEFAULT_WATER_LOOK, type WaterLook } from '../../water/waterLook';
 import { WAVE_MAX, WAVE_SLOPE_VARIANCE, rippleShare, waveCrest, waveOmega, waveReach, waveSigma, type WaterWave } from '../../physics/water/waves';
@@ -109,7 +110,7 @@ export class WaterPasses {
         const ground = sceneGround(scene);
         // The live waves, before the surface's own pass opens: they record passes of their own. Only where a
         // river runs: still water raises none.
-        this._liveWaves(nodes, ground);
+        this._liveWaves(scene, nodes, ground);
 
         // The opaque scene's colour, for refraction: the transparents' copy, taken earlier here.
         const w = this._host.renderWidth, h = this._host.renderHeight;
@@ -236,7 +237,7 @@ export class WaterPasses {
      * Step the live waves for this frame (render/waterWaves.ts): over every water with a grid, when a river
      * is among them. They follow the camera, on the water's own clock.
      */
-    private _liveWaves(nodes: readonly WaterVolumeNode[], ground: ReturnType<typeof sceneGround>): void {
+    private _liveWaves(scene: Scene, nodes: readonly WaterVolumeNode[], ground: ReturnType<typeof sceneGround>): void {
         const waters: WaveSimWater[] = [];
         let river = false;
         for (const node of nodes) {
@@ -256,7 +257,26 @@ export class WaterPasses {
         const cam = this._view.camera;
         // The camera looks down its view matrix's third row, negated.
         const v = cam.viewMatrix;
-        this._liveSim.update(waterTime(this._view.windTime), cam.position[0], cam.position[2], -v[2], -v[10], waters, this._detail());
+        const obstacles = this._obstaclesNear(scene, waters, cam.position[0], cam.position[2]);
+        this._liveSim.update(waterTime(this._view.windTime), cam.position[0], cam.position[2], -v[2], -v[10], waters, this._detail(), obstacles);
+    }
+
+    /** What stands in the water round the camera, for the live waves: read from the scene at most four times a second. */
+    private _footprints: { scene: Scene | null; at: number; list: WaterObstacleFootprint[] } = { scene: null, at: -Infinity, list: [] };
+
+    private _obstaclesNear(scene: Scene, waters: readonly WaveSimWater[], cx: number, cz: number): WaterObstacleFootprint[] {
+        const cached = this._footprints;
+        const now = performance.now();
+        if (cached.scene === scene && now - cached.at < 250) return cached.list;
+        const reach = WAVE_SIM_SIDE;
+        const list: WaterObstacleFootprint[] = [];
+        for (const o of sceneObstacles(scene.nodes, [cx - reach, cz - reach, cx + reach, cz + reach])) {
+            const surface = surfaceRound(waters, o);
+            const footprint = surface === null ? null : obstacleFootprint(o, surface);
+            if (footprint) list.push(footprint);
+        }
+        this._footprints = { scene, at: now, list };
+        return list;
     }
 
     // ---- per node ---------------------------------------------------------------------------------
@@ -608,4 +628,22 @@ export class WaterPasses {
     private static _lookOf(node: WaterVolumeNode): WaterLook {
         return node.waterMaterial?.look ?? DEFAULT_WATER_LOOK;
     }
+}
+
+/** The mean surface of the water round an obstacle (its bounds and a couple of cells about them); null for none. */
+function surfaceRound(waters: readonly WaveSimWater[], o: WaterObstacle): number | null {
+    let sum = 0, count = 0;
+    for (const { info } of waters) {
+        const c = info.cell;
+        const x0 = Math.max(0, Math.floor((o.min[0] - info.originX) / c) - 2), x1 = Math.min(info.nx - 1, Math.ceil((o.max[0] - info.originX) / c) + 2);
+        const z0 = Math.max(0, Math.floor((o.min[2] - info.originZ) / c) - 2), z1 = Math.min(info.nz - 1, Math.ceil((o.max[2] - info.originZ) / c) + 2);
+        if (x0 > x1 || z0 > z1) continue;
+        const stride = Math.max(1, Math.ceil(Math.max(x1 - x0, z1 - z0) / 32));
+        for (let z = z0; z <= z1; z += stride) for (let x = x0; x <= x1; x += stride) {
+            const i = z * info.nx + x;
+            if (info.info1[i * 4 + 3] < 0.5) continue;
+            sum += info.info0[i * 4]; count++;
+        }
+    }
+    return count ? sum / count : null;
 }

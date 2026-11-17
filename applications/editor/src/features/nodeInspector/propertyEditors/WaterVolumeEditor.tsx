@@ -336,6 +336,13 @@ function reportLines(report: WaterBakeReport, group: readonly WaterVolumeNode[])
       warn: true,
     })
   }
+  const met = report.obstacles
+  if (met && met.count > 0) {
+    const them = met.count === 1 ? 'it' : 'them'
+    let text = `Flowed round ${met.count} static collider${met.count === 1 ? '' : 's'} standing in the water.`
+    if (met.narrow > 0) text += ` ${met.narrow === met.count ? (met.count === 1 ? 'It is' : 'They are') : `${met.narrow} of ${them} ${met.narrow === 1 ? 'is' : 'are'}`} narrower than two cells at this resolution: the water is held back by ${met.narrow === 1 ? 'its' : 'their'} drag, but not seen to part round ${met.narrow === 1 ? 'it' : 'them'}. Raise the resolution to see that.`
+    lines.push({ text, warn: false })
+  }
   for (const l of report.levels) {
     if (Math.abs(l.level - l.drawn) < 0.05) continue
     const name = group.find(n => n.id === l.id)?.name ?? 'A lake'

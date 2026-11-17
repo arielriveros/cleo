@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mat4 } from 'gl-matrix';
+import { mat4, quat } from 'gl-matrix';
 import './helpers/features';
 import { Scene } from '../src/core/scene/scene';
 import { WaterVolumeNode } from '../src/core/scene/nodes/waterVolumeNode';
@@ -8,7 +8,7 @@ import { normaliseWaterBody, resolveWaterBody } from '../src/water/waterShapes';
 import { bakeWater, riverDischarge, ShallowWaterBake, CELL_HELD, CELL_LEAK, CELL_WALL, CELL_WATER } from '../src/water/bake/shallowWater';
 import { transportFoam } from '../src/water/bake/foam';
 import { prepareWaterBake, prepareWaterGroup } from '../src/water/bake/groupSetup';
-import { sceneObstacles, obstacleSpan } from '../src/water/bake/obstacles';
+import { obstacleFootprint, sceneObstacles, obstacleSpan } from '../src/water/bake/obstacles';
 import { forgetWaterBakeContext, prepareGroupBake, waterBakeGroup } from '../src/water/bake/bakeNode';
 import { encodeWaterBake } from '../src/water/bake/waterBakeFormat';
 import { GiBakeRegistry } from '../src/graphics/render/gi/giBakeRegistry';
@@ -60,6 +60,31 @@ describe('the water flow bake', { timeout: 120000 }, () => {
         expect(sceneObstacles([{ ...rock(0, 1, 0, 2, 4, 2), mass: 5 }])).toEqual([]);
     });
 
+    it('gives the live waves where each obstacle meets the water: a turned box exactly, a post as a disc, how deep a rock lies', () => {
+        // A box 4 m long and 1 m thick, turned 30 degrees, standing through a surface at 0.5 m.
+        const turned = { ...rock(0, 0, 0, 4, 6, 1), worldTransform: mat4.fromRotationTranslation(mat4.create(), quat.fromEuler(quat.create(), 0, 30, 0), [5, 0, 2]) };
+        const box = obstacleFootprint(sceneObstacles([turned])[0], 0.5)!;
+        expect(box.x).toBeCloseTo(5, 3); expect(box.z).toBeCloseTo(2, 3);
+        expect(box.a).toBeCloseTo(2, 3); expect(box.b).toBeCloseTo(0.5, 3); expect(box.r).toBe(0); expect(box.under).toBe(0);
+        // Its long axis is the box's own x, turned 30 degrees about up: (cos 30, -sin 30).
+        expect(Math.abs(box.ax * Math.cos(Math.PI / 6) - box.az * Math.sin(Math.PI / 6))).toBeCloseTo(1, 3);
+        // A post: a disc of its radius.
+        const post = { ...rock(0, 0, 0, 1, 1, 1), shapes: [{ type: 'cylinder', radius: 0.5, height: 4, offset: [0, 0, 0], rotation: [0, 0, 0] }] };
+        const disc = obstacleFootprint(sceneObstacles([post])[0], 0)!;
+        expect(disc.a).toBe(0); expect(disc.b).toBe(0);
+        expect(disc.r).toBeGreaterThan(0.47); expect(disc.r).toBeLessThan(0.53);
+        // A boulder (a sphere of 1 m) whose top stands 0.4 m out of the water: the circle the surface cuts.
+        const boulder = { ...rock(0, 0, 0, 1, 1, 1), shapes: [{ type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }] };
+        const cut = obstacleFootprint(sceneObstacles([boulder])[0], 0.6)!;
+        expect(cut.r).toBeGreaterThan(0.75); expect(cut.r).toBeLessThan(0.85);
+        // A rock under the water: how deep its top lies. Too deep, or above the water, it shows nothing.
+        const under = obstacleFootprint(sceneObstacles([rock(0, -1, 0, 2, 1, 2)])[0], 0)!;
+        expect(under.under).toBeCloseTo(0.5, 3);
+        expect(under.a).toBeGreaterThan(0.9);
+        expect(obstacleFootprint(sceneObstacles([rock(0, -3, 0, 2, 1, 2)])[0], 0)).toBeNull();
+        expect(obstacleFootprint(sceneObstacles([rock(0, 3, 0, 2, 1, 2)])[0], 0)).toBeNull();
+    });
+
     it('settles a river at the speed Manning gives its slope and depth, and says it has settled', () => {
         const river = straightRiver(30, 200);
         const ground = channel(15);
@@ -93,6 +118,29 @@ describe('the water flow bake', { timeout: 120000 }, () => {
         const beside = (at(info, 3, 40).speed + at(info, -3, 40).speed) / 2;
         const upstream = (at(info, 3, 20).speed + at(info, -3, 20).speed) / 2;
         expect(beside).toBeGreaterThan(upstream);
+    });
+
+    it('holds a river back behind a post narrower than a cell: slower behind it, piled before it, and counts it', () => {
+        // A post a metre across in a river 9 m wide, baked at cells of nearly 3 m: no cell is half post, so none
+        // is a wall, and only the post's drag can show it.
+        const river = straightRiver(9, 120, 0.006);
+        const ground = channel(4.5, 0.006);
+        const post = {
+            nodeType: 'collider', id: 'post', mass: 0, simulatePhysics: true,
+            shapes: [{ type: 'cylinder', radius: 0.5, height: 3, offset: [0, 0, 0], rotation: [0, 0, 0] }],
+            worldTransform: mat4.fromTranslation(mat4.create(), [0, ground(0, 60) + 1, 60]), worldScale: [1, 1, 1],
+        };
+        const plain = bakeWater(prepareWaterBake(river, [], ground, [], { maxRes: 64, duration: 120 })).members[0].info;
+        const setup = prepareWaterBake(river, [], ground, sceneObstacles([post]), { maxRes: 64, duration: 120 });
+        expect(setup.cell).toBeGreaterThan(2);
+        const there = Math.round((60 - setup.originZ) / setup.cell) * setup.nx + Math.round((0 - setup.originX) / setup.cell);
+        expect(setup.kind[there]).toBe(CELL_WATER);
+        expect(setup.drag![there]).toBeGreaterThan(0);
+        const { members, report } = bakeWater(setup);
+        expect(report.obstacles).toEqual({ count: 1, narrow: 1 });
+        const info = members[0].info;
+        expect(at(info, 0, 62).speed).toBeLessThan(0.92 * at(plain, 0, 62).speed);
+        expect(at(info, 0, 57).surface).toBeGreaterThan(at(plain, 0, 57).surface + 0.01);
     });
 
     it('speeds up over a rock under the water', () => {

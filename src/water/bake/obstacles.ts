@@ -24,6 +24,8 @@ export interface WaterObstacle {
     max: [number, number, number];
     /** What it was built from, for the bake's signature. */
     key: string;
+    /** The collider it is a shape of (its node's id). */
+    node: string;
 }
 
 /** The authored-collider fields read here (core/scene/nodes/colliderNode.ts), duck-typed. */
@@ -126,7 +128,7 @@ export function sceneObstacles(nodes: Iterable<unknown>, area?: readonly number[
             }
             if (area && (max[0] < area[0] || min[0] > area[2] || max[2] < area[1] || min[2] > area[3])) return;
             const key = `${n.id}:${si}:${kind}:${[...Array.from(m), ...dims, ...planes].map(r2).join(',')}`;
-            out.push({ kind, inverse, dims, planes, min, max, key });
+            out.push({ kind, inverse, dims, planes, min, max, key, node: n.id });
         });
     }
     return out;
@@ -163,4 +165,81 @@ export function obstacleSpan(o: WaterObstacle, x: number, z: number): [number, n
     const bottom = first === 0 ? y0 : bisect(y0 + (first - 1) * step, y0 + first * step);
     const top = last === steps ? y1 : bisect(y0 + (last + 1) * step, y0 + last * step);
     return [bottom, top];
+}
+
+// ---- footprints: what the live waves see of an obstacle ----------------------------------------------------
+
+/**
+ * Where an obstacle meets the water, as the live waves (render/waterWaves.ts) take it: its cross-section at
+ * the surface, as a rounded rectangle (a disc is one with no straight sides); for one under the surface, the
+ * cross-section just under its top, and how far under it is.
+ */
+export interface WaterObstacleFootprint {
+    /** Its centre, world x and z. */
+    x: number; z: number;
+    /** Its long axis: a unit vector in x and z. */
+    ax: number; az: number;
+    /** Half its length along that axis and half its width across it, before the rounding (m). */
+    a: number; b: number;
+    /** The rounding of its corners (m): a disc has a = b = 0 and this its radius. */
+    r: number;
+    /** Metres its top lies under the surface; 0 for one that stands out of the water. */
+    under: number;
+}
+
+/** Metres under the surface past which an obstacle no longer shows on it. */
+export const FOOTPRINT_DEPTH = 1;
+/** Samples a side the cross-section is found with. */
+const FOOTPRINT_SAMPLES = 24;
+const _q = vec3.create();
+
+/**
+ * `o`'s footprint on water whose surface is at `surfaceY`; null when it stands clear of the water (above it,
+ * or deeper under it than FOOTPRINT_DEPTH). Upright boxes are taken exactly; round shapes as discs of the area
+ * they cut; anything else as the rectangle with the same spread (its second moments).
+ */
+export function obstacleFootprint(o: WaterObstacle, surfaceY: number): WaterObstacleFootprint | null {
+    if (o.min[1] >= surfaceY) return null;
+    const under = Math.max(0, surfaceY - o.max[1]);
+    if (under > FOOTPRINT_DEPTH) return null;
+    // The plane cut: the surface, or just under the top of one beneath it.
+    const y = under > 0 ? o.max[1] - Math.min(0.1, 0.25 * (o.max[1] - o.min[1])) : surfaceY;
+    const toWorld = mat4.invert(mat4.create(), o.inverse);
+    if (!toWorld) return null;
+    // An upright box: its own rectangle, if the plane cuts it through its sides.
+    if (o.kind === 'box' && Math.abs(toWorld[5]) > 0.995) {
+        vec3.set(_q, toWorld[12], y, toWorld[14]);
+        vec3.transformMat4(_q, _q, o.inverse);
+        if (Math.abs(_q[1]) < o.dims[1]) {
+            const len = Math.hypot(toWorld[0], toWorld[2]) || 1;
+            let ax = toWorld[0] / len, az = toWorld[2] / len, a = o.dims[0], b = o.dims[2];
+            if (b > a) { const t = ax; ax = -az; az = t; a = o.dims[2]; b = o.dims[0]; }
+            return { x: toWorld[12], z: toWorld[14], ax, az, a, b, r: 0, under };
+        }
+    }
+    // Anything else: sampled across its bounds at the plane.
+    const N = FOOTPRINT_SAMPLES;
+    const dx = (o.max[0] - o.min[0]) / N, dz = (o.max[2] - o.min[2]) / N;
+    let count = 0, sx = 0, sz = 0, sxx = 0, szz = 0, sxz = 0;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+        const px = o.min[0] + (i + 0.5) * dx, pz = o.min[2] + (j + 0.5) * dz;
+        vec3.set(_q, px, y, pz);
+        vec3.transformMat4(_q, _q, o.inverse);
+        if (!inside(o, _q)) continue;
+        count++; sx += px; sz += pz; sxx += px * px; szz += pz * pz; sxz += px * pz;
+    }
+    if (!count) return null;
+    const cx = sx / count, cz = sz / count;
+    // The spread, with each sample's own square (dx² / 12) so a footprint a sample wide keeps its width.
+    const vxx = Math.max(0, sxx / count - cx * cx) + dx * dx / 12, vzz = Math.max(0, szz / count - cz * cz) + dz * dz / 12;
+    const vxz = sxz / count - cx * cz;
+    const mid = (vxx + vzz) / 2, half = Math.sqrt(((vxx - vzz) / 2) ** 2 + vxz * vxz);
+    const l1 = mid + half, l2 = Math.max(0, mid - half);
+    const angle = 0.5 * Math.atan2(2 * vxz, vxx - vzz);
+    const ax = Math.cos(angle), az = Math.sin(angle);
+    const area = count * dx * dz;
+    if ((o.kind === 'sphere' || o.kind === 'cylinder' || o.kind === 'capsule') && l2 > 0.8 * l1)
+        return { x: cx, z: cz, ax: 1, az: 0, a: 0, b: 0, r: Math.sqrt(area / Math.PI), under };
+    // A uniform rectangle 2a long has a spread of a² / 3 along it.
+    return { x: cx, z: cz, ax, az, a: Math.sqrt(3 * l1), b: Math.sqrt(3 * l2), r: 0, under };
 }

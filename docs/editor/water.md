@@ -149,8 +149,12 @@ What it simulates:
   river where the ground runs. Only where there is no landscape under a water does its own drawn bed stand in
   for the ground.
 - **Static colliders are obstacles.** A Collider with no mass standing out of the water is a wall the water
-  goes round; one under the surface raises the bed, and the water speeds over it. Colliders with mass (what
-  floats or falls) are not part of the bake.
+  goes round; one under the surface raises the bed, and the water speeds over it. One narrower than the bake's
+  cells (a post or a pier at a draft resolution) still counts: the water through its cell is held back by its
+  drag, so it piles up a little before it and runs slower behind it, though the water is not seen to part
+  round it until the resolution is fine enough. The card says how many colliders the water met, and which of
+  them were too narrow to see it part round. Colliders with mass (what floats or falls) are not part of the
+  bake.
 - **A river brings its own water.** A river that starts in no other water rises at its first point, with the
   water that point carries (width × depth × flow speed). From there the slope and the bed's roughness decide
   how fast and deep it runs. On steep ground a stream tumbles from step to pool instead of sheeting down: a
@@ -170,8 +174,8 @@ What it simulates:
   so the waterline is where the water meets the bank, not the outline of the bake's cells.
 
 When the bake is done the card says how it went: whether the water settled (what flows in is what flows
-out) and after how long; how much water left its course, and where; any hollow still filling, and where; and
-a lake that stands at another level than it was drawn at. Water that leaves its course is the thing to fix:
+out) and after how long; how much water left its course, and where; any hollow still filling, and where; a
+lake that stands at another level than it was drawn at; and the static colliders the water flowed round. Water that leaves its course is the thing to fix:
 the river is drawn where the ground does not hold it.
 
 Moving or editing any water of the system, the landscape under it or a static collider in it makes the bake
@@ -225,6 +229,13 @@ waves are raised where a river raises them, and then left to the water:
   current, hardest where the bake found the water losing its energy, in riffles with glassy runs between.
 - **The bulk flow's turns.** Where the baked current speeds up or slows down sharply (the lip of a drop, the
   foot of one) the surface cannot follow, and a train of waves stands below.
+- **What stands in the water.** Every static collider the surface cuts (a post, a pier, a rock standing out
+  of the water) is solid to the waves: none inside it, and waves that reach it are thrown back. The current
+  piles up against the face it runs into, a share of the height its speed could lift it, and drops away
+  behind, which leaves a wake standing below it; the water boils in its lee, and foam torn from its sides
+  trails off downstream. A collider just under the surface (within a metre) raises a hump and a wake of its
+  own, weaker the deeper it lies. The waves see a collider as soon as it is placed or moved; the current
+  round it is the bake's, and needs **Bake flow** again.
 
 A wave that steepens past what water holds breaks: it is damped, and leaves foam. The foam the stones and the
 boil churn up, where the bake found the water white, is carried by the same current and fades over a few

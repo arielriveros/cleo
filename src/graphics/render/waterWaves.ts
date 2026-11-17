@@ -6,6 +6,7 @@ import { WaterWaveFieldProgram, WaterWaveAdvectProgram, WaterWaveStepProgram } f
 import type { FullscreenPasses } from './fullscreenPasses';
 import type { PassEncoder } from './passEncoder';
 import type { WaterInfo } from '../../water/waterInfo';
+import type { WaterObstacleFootprint } from '../../water/bake/obstacles';
 import {
     WAVE_SIM_CELL, WAVE_SIM_DEPTHS, WAVE_SIM_DT, WAVE_SIM_GRAVITY, WAVE_SIM_SIZE, WAVE_SIM_TAPS, waveSimKernel,
 } from '../../water/waveSim';
@@ -19,6 +20,8 @@ export const WAVE_SIM_SIDE = WAVE_SIM_SIZE * WAVE_SIM_CELL;
 const FIELD_SIZE = WAVE_SIM_SIZE / 2;
 /** The wave (rad/m) whose speed the blend of the two kernels gets right: two metres long, a standing wave's length. */
 const BLEND_Q = Math.PI;
+/** Obstacles the step is handed at most (waterWaveStep.wgsl OBSTACLE_MAX): the nearest the window's centre. */
+const OBSTACLE_MAX = 32;
 
 /**
  * The LIVE WAVES on flowing water: a simulation of surface waves riding the baked current, in a window that
@@ -31,6 +34,9 @@ const BLEND_Q = Math.PI;
  * camera and moved a whole texel at a time, so what it keeps is carried over exactly. Past it the surface draws
  * its own waves alone. Nothing here reaches the physics: a floating body rides the surface's own waves, as
  * before, not these.
+ *
+ * What stands in the water (the static colliders in it, as footprints at the surface: water/bake/obstacles.ts)
+ * is solid to the waves, piles the current up against it and leaves a wake and foam below it.
  */
 export class WaterWaveSim {
     private readonly _sm = ShaderManager.Instance;
@@ -65,11 +71,12 @@ export class WaterWaveSim {
 
     /**
      * Bring the waves up to `time` (seconds, the water's clock) round a camera at (`cx`, `cz`) looking along
-     * (`fx`, `fz`) (its forward's level part, not made a unit), over `waters`; `noise` is the water's detail texture. Call before the surface's own pass
-     * opens: it records passes of its own.
+     * (`fx`, `fz`) (its forward's level part, not made a unit), over `waters`; `noise` is the water's detail texture;
+     * `obstacles`, what stands in the water. Call before the surface's own pass opens: it records passes of its own.
      * Called again within the same frame (a second viewport pane), it leaves the waves where they are.
      */
-    public update(time: number, cx: number, cz: number, fx: number, fz: number, waters: readonly WaveSimWater[], noise: Texture | null = null): void {
+    public update(time: number, cx: number, cz: number, fx: number, fz: number, waters: readonly WaveSimWater[], noise: Texture | null = null,
+                  obstacles: readonly WaterObstacleFootprint[] = []): void {
         this._noise = noise;
         if (!WaterWaveSim.supported) { this._live = false; return; }
         if (time === this._time && this._live) return;
@@ -96,6 +103,7 @@ export class WaterWaveSim {
             this._owed = Math.min(this._owed + elapsed, WaterWaveSim.MAX_STEPS * WAVE_SIM_DT);
         }
         this._origin[0] = ox; this._origin[1] = oz;
+        this._packObstacles(obstacles, ox + side / 2, oz + side / 2);
         this._ensureTargets();
         this._fieldPass(inReach);
         let steps = Math.floor(this._owed / WAVE_SIM_DT + 1e-6);
@@ -157,6 +165,8 @@ export class WaterWaveSim {
         sm.setUniform('u_blend', [Math.tanh(BLEND_Q * WAVE_SIM_DEPTHS[0]), Math.tanh(BLEND_Q * WAVE_SIM_DEPTHS[1]), BLEND_Q, 0]);
         sm.setUniform('u_kernelShallow', WaterWaveSim._packed(shallow, this._kernelA));
         sm.setUniform('u_kernelDeep', WaterWaveSim._packed(deep, this._kernelB));
+        sm.setUniform('u_obstacleCount', [this._obstacleCount, 0, 0, 0]);
+        if (this._obstacleCount) sm.setUniform('u_obstacles', this._obstacles.subarray(0, this._obstacleCount * 8));
         this._passes.drawFullscreenAndEnd(pass);
 
         this._read = 1 - this._read;
@@ -183,6 +193,25 @@ export class WaterWaveSim {
      * at about a third of the bake's figure on the whole: next to nothing between the streaks, thick in them.
      */
     public static FOAM_CHURN = 0.1;
+
+    private readonly _obstacles = new Float32Array(OBSTACLE_MAX * 8);
+    private _obstacleCount = 0;
+
+    /** The obstacles that reach into the window round (`cx`, `cz`), the nearest first, packed for the step. */
+    private _packObstacles(list: readonly WaterObstacleFootprint[], cx: number, cz: number): void {
+        const half = WAVE_SIM_SIDE / 2 + 3;
+        const near = list.filter(o => {
+            const reach = Math.max(o.a, o.b) + o.r;
+            return Math.abs(o.x - cx) < half + reach && Math.abs(o.z - cz) < half + reach;
+        });
+        if (near.length > OBSTACLE_MAX) near.sort((p, q) => Math.hypot(p.x - cx, p.z - cz) - Math.hypot(q.x - cx, q.z - cz));
+        const out = this._obstacles;
+        const count = this._obstacleCount = Math.min(near.length, OBSTACLE_MAX);
+        for (let k = 0; k < count; k++) {
+            const o = near[k];
+            out.set([o.x, o.z, o.ax, o.az, o.a, o.b, o.r, o.under], k * 8);
+        }
+    }
 
     private readonly _kernelA = new Float32Array(28);
     private readonly _kernelB = new Float32Array(28);

@@ -24,6 +24,9 @@ import { transportFoam } from './foam';
 // down, its surface's along the flow: not the bed's, whose slope across a channel (its banks) says nothing of
 // how steeply the stream falls. It holds for natural beds: one smoother than a natural channel's (Manning's
 // n under NATURAL_BED: concrete, a flume) is taken at its word and runs as fast as its slope lets it.
+// Something standing in a cell without filling it (a post, a pier narrower than the grid can draw the water
+// parting round) holds it back by its drag, as Manning's friction does: u /= 1 + dt·D·|u|, D the obstacle's
+// (bake/groupSetup.ts), so the water slows through it, piles a little before it and loses its head behind it.
 //
 // Cell kinds (the boundaries):
 //  - WALL: not simulated: outside every member's reach, or a static obstacle standing out of the water;
@@ -120,6 +123,13 @@ export interface WaterBakeSetup {
     owner: Uint8Array;
     /** LEAK cells: the height of the ground just outside the simulated region; only water standing above it leaves. */
     sill: Float32Array;
+    /**
+     * Per cell: the drag (1/m) of what stands in it without filling it (a post, a pier narrower than a cell):
+     * the water through it slows by du/dt = -drag u|u|. None: nothing does.
+     */
+    drag?: Float32Array;
+    /** The static colliders the water met; narrow: those it is held back by but not seen to part round. */
+    obstacles?: { count: number; narrow: number };
     members: WaterBakeMember[];
     /** Run until settled; null runs `duration` seconds and averages the last third (tests, tools). */
     settle: WaterBakeSettle | null;
@@ -146,6 +156,8 @@ export interface WaterBakeReport {
     fillingAt: [number, number] | null;
     /** Each lake's and pool's settled level against the level it was drawn at. */
     levels: { id: string; level: number; drawn: number }[];
+    /** The static colliders standing in the water (see WaterBakeSetup.obstacles). */
+    obstacles?: { count: number; narrow: number };
 }
 
 export interface WaterBakeOutput {
@@ -180,6 +192,8 @@ export class ShallowWaterBake {
     private readonly _active: Int32Array;
     /** Per cell: its member's roughness. */
     private readonly _rough: Float32Array;
+    /** Per cell: the drag of what stands in it (WaterBakeSetup.drag); null when nothing does. */
+    private readonly _drag: Float32Array | null;
     /** Each lake or pool with water running through it: its cells, and the water in them when last looked at (m x cells). */
     private readonly _lakes: { cells: Int32Array; held: number }[] = [];
     /** Cubic metres the lakes were lifted by (or dropped, negative) since the check in progress opened. */
@@ -219,6 +233,8 @@ export class ShallowWaterBake {
         this._limit = new Float32Array(n).fill(1);
         this._sumU = new Float32Array(n); this._sumV = new Float32Array(n); this._sumD = new Float32Array(n);
         this._rough = new Float32Array(n);
+        this._drag = setup.drag && setup.drag.some(d => d > 0) ? setup.drag : null;
+        if (setup.obstacles) this._report.obstacles = { ...setup.obstacles };
         this._leaked = new Float32Array(n); this._hAtWindow = new Float32Array(n);
         const active: number[] = [];
         let source = 0;
@@ -520,7 +536,7 @@ export class ShallowWaterBake {
     /** 3. Velocities down the surface's slope, with the bed's friction; closed at walls and dry banks. */
     private _accelerate(): void {
         const s = this._s, dt = this._dt, g = G * dt / this.cell, fr = G * dt;
-        const h = this._h, bed = s.bed, maxU = this._maxU, rough = this._rough, cell = this.cell;
+        const h = this._h, bed = s.bed, maxU = this._maxU, rough = this._rough, cell = this.cell, drag = this._drag;
         let fastest = this._fastest;
         for (let pass = 0; pass < 2; pass++) {
             const faces = pass === 0 ? this._xFaces : this._zFaces, vel = pass === 0 ? this._u : this._w;
@@ -543,7 +559,11 @@ export class ShallowWaterBake {
                     const torrent = 0.32 * quarter * Math.sqrt(quarter) / Math.sqrt(root);
                     if (torrent > n) n = torrent;
                 }
-                v /= 1 + fr * n * n * Math.abs(v) / (hf * root);
+                // Implicit, as one: the bed's friction, and the drag of anything standing in either cell
+                // (the face's water is half in each).
+                let resist = fr * n * n * Math.abs(v) / (hf * root);
+                if (drag) resist += 0.5 * (drag[a] + drag[c]) * dt * Math.abs(v);
+                v /= 1 + resist;
                 v = v > maxU ? maxU : v < -maxU ? -maxU : v;
                 vel[f] = v;
                 const speed = v < 0 ? -v : v;

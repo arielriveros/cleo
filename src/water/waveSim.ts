@@ -27,9 +27,14 @@
 // because a linear lookup smears a four-cell wave away within ten steps.
 //
 // What RAISES the waves is in the shader alone (waterWaveStep.wgsl: the bulk flow's turns, turbulence, the
-// stones of the bed), and so is the foam they make. The stepper here takes any forcing as a field, which is
-// how the tests hold the shader's forcing to what it should do: a push that stands still in a current leaves
-// a wake that stands still, downstream of it.
+// stones of the bed, and what stands in the water), and so is the foam they make. The stepper here takes any
+// forcing as a field, which is how the tests hold the shader's forcing to what it should do: a push that
+// stands still in a current leaves a wake that stands still, downstream of it.
+//
+// What stands in the water (a static collider: a post, a pier, a rock; water/bake/obstacles.ts footprints) is
+// SOLID to the waves, as an obstruction is in iWave: no wave inside it, so waves that reach it are thrown back.
+// And in a current the water piles up against its upstream face and drops away behind it, a push that stands
+// still (obstacleWavePush): the same standing wake as a stone's, below everything that stands in a river.
 
 import { catmullRomWeights } from '../core/math';
 
@@ -45,6 +50,27 @@ export const WAVE_SIM_TAPS = (WAVE_SIM_REACH + 1) * (WAVE_SIM_REACH + 2) / 2;
 /** The two depths (m) a kernel is built for; the shader blends them by the water's depth at each texel. */
 export const WAVE_SIM_DEPTHS: readonly [number, number] = [0.25, 1.2];
 export const WAVE_SIM_GRAVITY = 9.81;
+
+/**
+ * How hard the water piles up against what stands in it, as a share of its speed squared (1/m): enough to
+ * raise a pillow the velocity head high (the height the water's speed would lift it). The shader's
+ * OBSTACLE_PUSH.
+ */
+export const OBSTACLE_WAVE_PUSH = 1.5;
+/** Metres out from an obstacle's face over which the water piles up before it and drops behind it (OBSTACLE_REACH). */
+export const OBSTACLE_WAVE_REACH = 0.35;
+
+/**
+ * The push (m/s2) on the surface `e` metres out from an obstacle's face, where the face's outward normal
+ * meets the current at `facing` (its cosine: -1 the face the water runs into, 1 the one it leaves) in water
+ * running at speed squared `speed2`: up before it, down behind it, nought inside it. Over a whole obstacle the
+ * two halves cancel: it adds no water. waterWaveStep.wgsl computes the same.
+ */
+export function obstacleWavePush(e: number, facing: number, speed2: number): number {
+    if (e < 0) return 0;
+    const d = e / OBSTACLE_WAVE_REACH;
+    return -OBSTACLE_WAVE_PUSH * speed2 * facing * Math.exp(-d * d);
+}
 
 /** Where the weight for the offset (i, j) sits in a packed kernel. */
 export function waveKernelIndex(i: number, j: number): number {
@@ -173,6 +199,8 @@ export interface WaveSimStep {
     flowX?: number; flowZ?: number;
     /** The surface's acceleration (m/s2) from outside the waves, per texel. */
     force?: ArrayLike<number>;
+    /** Per texel, 1 inside something standing in the water: no wave there (what reaches it is thrown back). */
+    solid?: ArrayLike<number>;
     /** Per second: how fast the waves die down. */
     damping?: number;
     /** The share of each texel's rate shared with its four neighbours a step: what the grid cannot carry dies out. */
@@ -231,6 +259,7 @@ export function stepWaveSim(grid: WaveSimGrid, step: WaveSimStep): void {
             }
         }
         const c = z * nx + x;
+        if (step.solid && step.solid[c]) { nextV[c] = 0; nextE[c] = 0; continue; }
         let v = vel[c] + dt * (-k * conv + (step.force ? step.force[c] : 0));
         if (viscosity > 0) {
             const around = (x > 0 ? vel[c - 1] : 0) + (x < nx - 1 ? vel[c + 1] : 0) + (z > 0 ? vel[c - nx] : 0) + (z < nz - 1 ? vel[c + nx] : 0);

@@ -65,6 +65,13 @@ const LAKE_HEAD = 0.75;
 const SOURCE_LENGTH = 3;
 /** Depth below which a cell counts as dry (the solver's). */
 const DRY = 0.005;
+/** Samples a side per cell an obstacle is found at. */
+const OBSTACLE_SAMPLES = 6;
+/**
+ * The drag coefficient of what stands in the water and is narrower than a cell: a round pier's or a post's
+ * in a current (1 to 1.2; a square one's is nearer 2).
+ */
+const OBSTACLE_DRAG = 1.2;
 /**
  * Metres deep a lake, a pool or held water is simulated at most. A gravity wave's speed, which sets the time
  * step, grows with the depth: a lake 30 m deep would make the whole bake several times as long. Its current
@@ -256,32 +263,63 @@ export function prepareWaterGroup(members: readonly WaterGroupMember[], boundary
             if (level === level && level > bed[i] + DRY) { kind[i] = CELL_HELD; target[i] = level; owner[i] = 0; started[i] = 0; }
         }
     }
-    // Static obstacles: a column the obstacle fills above the water is a wall (the water goes round it);
-    // one under the surface raises the bed (the water speeds over it). Two by two samples per cell.
+    // Static obstacles, over the cells each one's footprint touches, OBSTACLE_SAMPLES a side per cell. A sample
+    // the obstacle fills from the bed to above the water is blocked; one it fills only under the surface has
+    // its bed raised (the water speeds over it). A cell blocked over half its area is a wall: the water goes
+    // round it. One blocked over less keeps its water, held back by the drag of what stands in it (a post, a
+    // pier narrower than a cell): the solver slows the water through it as the obstacle's own drag would, so
+    // it piles a little before it, runs slower behind it and loses its head there, which whitens it.
+    const drag = new Float32Array(n);
+    const hit = new Uint8Array(obstacles.length);
     if (obstacles.length) {
-        for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
-            const i = z * nx + x;
-            if (kind[i] === CELL_WALL) continue;
+        const touching = new Map<number, number[]>();
+        obstacles.forEach((o, k) => {
+            const c0 = Math.max(0, Math.floor((o.min[0] - x0) / cell - 0.5)), c1 = Math.min(nx - 1, Math.ceil((o.max[0] - x0) / cell + 0.5));
+            const r0 = Math.max(0, Math.floor((o.min[2] - z0) / cell - 0.5)), r1 = Math.min(nz - 1, Math.ceil((o.max[2] - z0) / cell + 0.5));
+            for (let z = r0; z <= r1; z++) for (let x = c0; x <= c1; x++) {
+                const i = z * nx + x;
+                if (kind[i] === CELL_WALL) continue;
+                const list = touching.get(i);
+                if (list) list.push(k); else touching.set(i, [k]);
+            }
+        });
+        const S = OBSTACLE_SAMPLES, samples = S * S;
+        for (const [i, list] of touching) {
+            const x = i % nx, z = (i - x) / nx;
             // Still water has its level; a river's is taken a metre over its bed, whatever it starts with.
             const level = Number.isFinite(target[i]) && !started[i] ? target[i] : bed[i] + 1;
-            let walls = 0, raised = 0;
-            for (let s = 0; s < 4; s++) {
-                const wx = x0 + (x + ((s & 1) ? 0.25 : -0.25)) * cell, wz = z0 + (z + ((s & 2) ? 0.25 : -0.25)) * cell;
+            let blocked = 0, raised = 0;
+            for (let sz = 0; sz < S; sz++) for (let sx = 0; sx < S; sx++) {
+                const wx = x0 + (x + (sx + 0.5) / S - 0.5) * cell, wz = z0 + (z + (sz + 0.5) / S - 0.5) * cell;
                 let top = bed[i], wall = false;
-                for (const o of obstacles) {
-                    const span = obstacleSpan(o, wx, wz);
+                for (const k of list) {
+                    const span = obstacleSpan(obstacles[k], wx, wz);
                     // Only what reaches down to (near) the bed blocks the water; a bridge deck above it does not.
                     if (!span || span[0] > Math.max(bed[i], level - 0.25)) continue;
+                    hit[k] = 1;
                     if (span[1] >= level) wall = true;
                     else top = Math.max(top, span[1]);
                 }
-                if (wall) walls++;
+                if (wall) blocked++;
                 raised += top;
             }
-            if (walls >= 2) { kind[i] = CELL_WALL; owner[i] = 0; target[i] = NaN; }
-            else bed[i] = Math.max(bed[i], raised / 4);
+            if (blocked * 2 >= samples) { kind[i] = CELL_WALL; owner[i] = 0; target[i] = NaN; continue; }
+            bed[i] = Math.max(bed[i], raised / samples);
+            // The drag of what stands in the cell, as one obstacle as wide as a disc of the area blocked:
+            // du/dt = -(Cd D / 2) u|u| over the cell's area.
+            if (blocked) drag[i] = OBSTACLE_DRAG * Math.sqrt(blocked / samples / Math.PI) / cell;
         }
     }
+    // The obstacles the water met, by collider; narrow: none wider than two cells, so the water is felt to be
+    // held back by it but not seen to part round it.
+    const met = new Map<string, boolean>();
+    obstacles.forEach((o, k) => {
+        if (!hit[k]) return;
+        const wide = Math.min(o.max[0] - o.min[0], o.max[2] - o.min[2]) >= 2 * cell;
+        met.set(o.node, (met.get(o.node) ?? false) || wide);
+    });
+    let narrow = 0;
+    for (const wide of met.values()) if (!wide) narrow++;
     const cellOf = (x: number, z: number): number => {
         const cx = Math.min(nx - 1, Math.max(0, Math.round((x - x0) / cell)));
         const cz = Math.min(nz - 1, Math.max(0, Math.round((z - z0) / cell)));
@@ -352,7 +390,10 @@ export function prepareWaterGroup(members: readonly WaterGroupMember[], boundary
         minSeconds: flowing ? 30 : 5, maxSeconds: flowing ? 2400 : 60, average: flowing ? 20 : 5,
         ...options.settle,
     };
-    return { originX: x0, originZ: z0, cell, nx, nz, bed, floor, kind, target, inflow, owner, sill, members: out, settle, duration: options.duration ?? 0 };
+    return {
+        originX: x0, originZ: z0, cell, nx, nz, bed, floor, kind, target, inflow, owner, sill, drag, members: out, settle,
+        duration: options.duration ?? 0, obstacles: { count: met.size, narrow },
+    };
 }
 
 /**

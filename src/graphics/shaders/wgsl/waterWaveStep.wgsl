@@ -23,6 +23,12 @@
 //    drops behind it (a push that does not change, up over the stone and down round it, adding no water, as
 //    strong as the water's speed squared), and a push that stands still in a current leaves a wake that
 //    stands still: the V below every stone in fast water. They are not drawn: the bed shows none.
+//  - WHAT STANDS IN THE WATER: the static colliders in the window (u_obstacles: water/bake/obstacles.ts
+//    footprints, at the surface). Solid to the waves, as an obstruction is in iWave: nothing inside, so a wave
+//    that reaches one is thrown back. In a current the water piles up against the face it runs into and drops
+//    away behind (waveSim.ts obstacleWavePush), which leaves a wake standing below it; it boils in the lee,
+//    and foam is torn from its sides and carried off in two streaks. One just under the surface is a stone of
+//    its own size, the weaker the deeper it lies.
 //
 // And what the waves make: FOAM, where they steepen past what a wave can hold (they break, and are damped
 // for it), added to what the rocks and the turbulence churn up where the bake found the water white. Carried
@@ -49,6 +55,10 @@ struct StepUniforms {
     u_blend: vec4<f32>,        // tanh(q h) of the shallow kernel's depth, of the deep one's, q (rad/m), -
     u_kernelShallow: array<vec4<f32>, 7>,
     u_kernelDeep: array<vec4<f32>, 7>,
+    u_obstacleCount: vec4<f32>,  // obstacles in u_obstacles, -, -, -
+    // Two per obstacle: its centre x, z and long axis x, z; half its length and width, its rounding (m), and
+    // metres its top lies under the surface (0: it stands out of the water).
+    u_obstacles: array<vec4<f32>, 64>,
 };
 @group(1) @binding(0) var<uniform> u_ws: StepUniforms;
 
@@ -66,6 +76,13 @@ const TURBULENCE_LIFE: f32 = 0.5;
 const FOAM_LIFE: f32 = 3.5;
 /** The steepest a wave stands (rise over run) before it breaks. */
 const BREAKING: f32 = 0.32;
+/** Obstacles in u_obstacles at most. */
+const OBSTACLE_MAX: i32 = 32;
+/** waveSim.ts OBSTACLE_WAVE_PUSH and OBSTACLE_WAVE_REACH: how hard the water piles against an obstacle, over how many metres. */
+const OBSTACLE_PUSH: f32 = 1.5;
+const OBSTACLE_REACH: f32 = 0.35;
+/** Per second: the foam torn from an obstacle's sides and lee in fast water. */
+const OBSTACLE_FOAM: f32 = 12.0;
 
 fn hash12(p: vec2<f32>) -> f32 {
     var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
@@ -130,19 +147,68 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             push = u_ws.u_force.x * speed2 * bend / (2.0 * G);
         }
     }
-    // Turbulence, carried with the water: renewed a little every step with noise as broad as a boil.
     let xz = u_ws.u_window.xy + uv * u_ws.u_window.z;
+    // What stands in the water: solid, piled against, boiling and white in its lee.
+    let along = select(vec2<f32>(0.0), flow * inverseSqrt(max(speed2, 1e-8)), speed2 > 1e-4);
+    var shed = 0.0;
+    var stir = 0.0;
+    let obstacles = min(i32(u_ws.u_obstacleCount.x), OBSTACLE_MAX);
+    for (var k = 0; k < obstacles; k++) {
+        let o0 = u_ws.u_obstacles[2 * k];
+        let o1 = u_ws.u_obstacles[2 * k + 1];
+        let rel = xz - o0.xy;
+        let across = vec2<f32>(-o0.w, o0.z);
+        let p = vec2<f32>(dot(rel, o0.zw), dot(rel, across));
+        let q = abs(p) - o1.xy;
+        let outside = max(q, vec2<f32>(0.0));
+        let past = length(outside);
+        // How far out of its rounded rectangle (negative inside).
+        let e = past + min(max(q.x, q.y), 0.0) - o1.z;
+        if (e > 3.0) { continue; }
+        if (o1.w <= 0.0) {
+            if (e < 0.0) { return vec4<f32>(0.0); }
+            // Its face's outward normal, and how squarely the current meets it (-1: head on).
+            var nl = select(vec2<f32>(0.0, sign(p.y)), vec2<f32>(sign(p.x), 0.0), q.x >= q.y);
+            if (past > 1e-5) { nl = outside / past * sign(p); }
+            let facing = dot(o0.zw * nl.x + across * nl.y, along);
+            let d = e / OBSTACLE_REACH;
+            push -= u_ws.u_force.x * OBSTACLE_PUSH * speed2 * facing * exp(-d * d);
+            let edge = e / 0.3;
+            shed += exp(-edge * edge) * (0.25 + 0.75 * smoothstep(-0.5, 0.5, facing));
+            // Its wake: the eddies it sheds, carried off downstream in a band as wide as it is across the
+            // current and widening as it goes, dying out over some eight of its widths.
+            let side = vec2<f32>(-along.y, along.x);
+            let wide = o1.x * abs(dot(o0.zw, side)) + o1.y * abs(dot(across, side)) + o1.z + 0.05;
+            let down = dot(rel, along);
+            if (down > 0.0 && speed2 > 0.01) {
+                let width = wide + 0.25 * down;
+                let off = dot(rel, side) / width;
+                let wake = exp(-off * off) * exp(-down / (8.0 * wide));
+                stir += wake;
+                shed += 0.3 * wake;
+            }
+        } else {
+            // Under the surface: a stone of its own size, the weaker the deeper.
+            let radius = max(min(o1.x, o1.y) + o1.z, 0.1);
+            let d = (e + radius) / radius;
+            let hump = (1.0 - d * d) * exp(-d * d) * exp(-o1.w / radius);
+            push += u_ws.u_force.x * STONE_PUSH * speed2 * hump;
+            shed += max(hump, 0.0) * exp(-o1.w / 0.3);
+        }
+    }
+    stir = min(stir, 1.5);
+    // Turbulence, carried with the water: renewed a little every step with noise as broad as a boil.
     let seed = u_ws.u_force.w;
     let shift = vec2<f32>(hash12(vec2<f32>(seed, 1.7)), hash12(vec2<f32>(seed, 9.2)));
     // (Boils a stride across with ones a foot across among them.)
     let fresh = ((textureSampleLevel(u_noise_texture, u_noise_sampler, xz / 7.0 + shift, 0.0).b - 0.5)
                + (textureSampleLevel(u_noise_texture, u_noise_sampler, xz.yx / 3.1 - shift.yx, 0.0).b - 0.5) * 0.6) * 6.0;
     let renew = dt / TURBULENCE_LIFE;
-    let turbulence = clamp(s.z * (1.0 - renew) + fresh * sqrt(2.0 * renew), -3.0, 3.0);
+    let turbulence = clamp(s.z * (1.0 - renew) + fresh * sqrt(2.0 * renew) * (1.0 + 2.0 * stir), -3.0, 3.0);
     // A bed is not rough alike all over: boulders here, gravel there. The same noise read broad and fixed in
     // place says which, so a river has its riffles and, between them, its glassy runs.
     let bed = clamp((textureSampleLevel(u_noise_texture, u_noise_sampler, xz / 90.0 + vec2<f32>(0.21, 0.67), 0.0).b - 0.5) * 7.0 + 1.0, 0.1, 2.6);
-    let rough = speed2 * (0.03 + 0.22 * field.w) * bed;
+    let rough = speed2 * ((0.03 + 0.22 * field.w) * bed + 0.2 * stir);
     push += u_ws.u_force.y * rough * turbulence;
     // The stone of this cell of the bed, if it has one: up over its top, down round it, nothing a few
     // radii out (a profile whose sum over the plane is nought).
@@ -179,7 +245,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // all over, it would be carried into an even grey: a streak needs a source the water passes in a
     // moment); the turbulence's gusts make the rest.
     let running = smoothstep(0.2, 0.6, sqrt(speed2));
-    let churn = u_ws.u_force.z * field.w * (0.05 + STONE_FOAM * max(stone, 0.0) + 0.5 * max(turbulence, 0.0) * bed) * running;
+    let churn = u_ws.u_force.z * field.w * (0.05 + STONE_FOAM * max(stone, 0.0) + 0.5 * max(turbulence, 0.0) * bed) * running
+              + OBSTACLE_FOAM * shed * smoothstep(0.3, 1.2, sqrt(speed2));
     let foam = clamp(s.w * exp(-dt / FOAM_LIFE) + dt * (churn + 1.5 * breaking), 0.0, 1.5);
     return vec4<f32>(height, rate, turbulence, foam);
 }

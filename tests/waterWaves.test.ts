@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-    createWaveSimGrid, stepWaveSim, waveKernelIndex, waveKernelSymbol, waveSimKernel,
-    WAVE_SIM_CELL, WAVE_SIM_DEPTHS, WAVE_SIM_DT, WAVE_SIM_GRAVITY, WAVE_SIM_REACH, WAVE_SIM_TAPS,
+    createWaveSimGrid, obstacleWavePush, stepWaveSim, waveKernelIndex, waveKernelSymbol, waveSimKernel,
+    OBSTACLE_WAVE_REACH, WAVE_SIM_CELL, WAVE_SIM_DEPTHS, WAVE_SIM_DT, WAVE_SIM_GRAVITY, WAVE_SIM_REACH, WAVE_SIM_TAPS,
 } from '../src/water/waveSim';
 import { catmullRomWeights } from '../src/core/math';
 import { waterFoamPixels, WATER_FOAM_SIZE } from '../src/water/waterTextures';
@@ -149,6 +149,58 @@ describe('the wave scheme', () => {
         expect(lopsided).toBeGreaterThan(0.7);
         expect(lopsided).toBeLessThan(1.4);
     });
+
+    it('piles water against a post standing in a current, drops it behind, and leaves a wake that stands below it', () => {
+        // A post 1 m across in water running 2 m/s along +x (what waterWaveStep.wgsl does round a static collider).
+        const nx = 150, nz = 80, kernel = waveSimKernel(0.8), speed = 2;
+        const px = 40, pz = nz / 2, radius = 0.5 / WAVE_SIM_CELL;
+        const force = new Float32Array(nx * nz), solid = new Uint8Array(nx * nz);
+        let total = 0, strongest = 0;
+        for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
+            const dx = x - px, dz = z - pz, d = Math.hypot(dx, dz);
+            const e = (d - radius) * WAVE_SIM_CELL;
+            if (e < 0) { solid[z * nx + x] = 1; continue; }
+            // The face's outward normal against the current (+x).
+            const f = obstacleWavePush(e, d > 0 ? dx / d : 0, speed * speed);
+            force[z * nx + x] = f; total += f; strongest = Math.max(strongest, Math.abs(f));
+        }
+        // Up before it, down behind it: no water added.
+        expect(Math.abs(total)).toBeLessThan(strongest * 0.02);
+        const step = { kernel, force, solid, damping: 0.6, viscosity: 0.04, flowX: speed };
+        const river = createWaveSimGrid(nx, nz);
+        for (let s = 0; s < 240; s++) stepWaveSim(river, step);
+        const eta = (x: number, z: number) => river.eta[Math.round(z) * nx + Math.round(x)];
+        // Nothing inside it.
+        for (let i = 0; i < solid.length; i++) if (solid[i]) expect(river.eta[i]).toBe(0);
+        // Piled against the face the water runs into: a share of the velocity head (20 cm at 2 m/s), and
+        // dropped behind it.
+        const face = eta(px - radius - OBSTACLE_WAVE_REACH / WAVE_SIM_CELL / 2, pz);
+        expect(face).toBeGreaterThan(0.02);
+        expect(face).toBeLessThan(0.25);
+        expect(eta(px + radius + 1, pz)).toBeLessThan(0);
+        // The waves are all below it: none run up a current this fast.
+        const energy = (x0: number, x1: number) => {
+            let e = 0;
+            for (let z = 0; z < nz; z++) for (let x = x0; x < x1; x++) e += river.eta[z * nx + x] ** 2;
+            return e;
+        };
+        expect(energy(px + 8, px + 60)).toBeGreaterThan(50 * energy(px - 36, px - 8));
+        // And they stand: half a second on, the wake is where it was.
+        const then = Float32Array.from(river.eta);
+        for (let s = 0; s < 30; s++) stepWaveSim(river, step);
+        let moved = 0, stood = 0;
+        for (let z = 0; z < nz; z++) for (let x = px + 8; x < px + 40; x++) {
+            moved += (river.eta[z * nx + x] - then[z * nx + x]) ** 2; stood += then[z * nx + x] ** 2;
+        }
+        expect(Math.sqrt(moved / stood)).toBeLessThan(0.15);
+        // It spreads as it goes, as a wake does: wider a few metres down than beside the post.
+        const spread = (x: number) => {
+            let e = 0, ez = 0;
+            for (let z = 0; z < nz; z++) { const v = river.eta[z * nx + x] ** 2; e += v; ez += v * (z - pz) ** 2; }
+            return Math.sqrt(ez / Math.max(e, 1e-12));
+        };
+        expect(spread(px + 50)).toBeGreaterThan(spread(px + 8));
+    }, 60_000);
 });
 
 describe('the water foam texture', () => {
