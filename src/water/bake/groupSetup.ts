@@ -250,7 +250,9 @@ export function prepareWaterGroup(members: readonly WaterGroupMember[], boundary
             const wx = x0 + x * cell, wz = z0 + z * cell;
             let level = NaN;
             if (finite.length && waterColumnAt(finite, wx, wz, col)) level = col.surface;
-            else if (sea) level = sea.level;
+            // The sea is what lies under its level outside the system's own lakes: a deep lake's bed below the
+            // sea (a crater, a fjord's basin) is still the lake's, not a hole the sea drains it into.
+            else if (sea && inLake[i] < 0 && lakeOf[i] < 0) level = sea.level;
             if (level === level && level > bed[i] + DRY) { kind[i] = CELL_HELD; target[i] = level; owner[i] = 0; started[i] = 0; }
         }
     }

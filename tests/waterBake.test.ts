@@ -5,7 +5,7 @@ import { Scene } from '../src/core/scene/scene';
 import { WaterVolumeNode } from '../src/core/scene/nodes/waterVolumeNode';
 import { ColliderNode } from '../src/core/scene/nodes/colliderNode';
 import { normaliseWaterBody, resolveWaterBody } from '../src/water/waterShapes';
-import { bakeWater, riverDischarge, ShallowWaterBake, CELL_LEAK, CELL_WALL } from '../src/water/bake/shallowWater';
+import { bakeWater, riverDischarge, ShallowWaterBake, CELL_HELD, CELL_LEAK, CELL_WALL, CELL_WATER } from '../src/water/bake/shallowWater';
 import { transportFoam } from '../src/water/bake/foam';
 import { prepareWaterBake, prepareWaterGroup } from '../src/water/bake/groupSetup';
 import { sceneObstacles, obstacleSpan } from '../src/water/bake/obstacles';
@@ -250,6 +250,32 @@ describe('the water flow bake', { timeout: 120000 }, () => {
         expect(at(l, outside, 0).wet).toBe(0);
         expect(at(l, outside, 0).surface).toBe(at(a, outside, 0).surface);
         expect(at(a, outside, 0).edge).toBeGreaterThan(2);
+    });
+
+    it('keeps a lake whose bed lies under the sea its own: the sea holds only what is outside the lakes', () => {
+        // A crater lake 10 m over the sea, its bowl 20 m under it, draining down a river into the sea.
+        const sea = resolveWaterBody(normaliseWaterBody({ type: 'ocean' }), FRAME, 'sea')!;
+        const lake = resolveWaterBody(normaliseWaterBody({ type: 'lake', depth: 3 }), { position: [0, 10, 0], scale: [2, 1, 2] }, 'lake')!;
+        const reachX = (lake.max[0] - lake.min[0]) / 2;
+        const outlet = resolveWaterBody(normaliseWaterBody({ type: 'river', points: [
+            { pos: [reachX + 2, 9.6, 0], width: 6, depth: 1, flowSpeed: 1.5 }, { pos: [reachX + 60, -1, 0], width: 6, depth: 1, flowSpeed: 1.5 },
+        ] }), FRAME, 'outlet', { start: lake })!;
+        const ground = (x: number, z: number) => {
+            const r = Math.hypot(x, z) / reachX;
+            if (r < 1) return -20 + 29 * r * r;
+            if (Math.abs(z) < 4 && x > 0) return 9 - 12 * Math.min(1, (x - reachX) / 60);
+            return 12;
+        };
+        const setup = prepareWaterGroup([{ body: lake }, { body: outlet, from: 'lake' }], [sea], ground, [], { maxRes: 160 });
+        const cellAt = (x: number, z: number) => Math.round((z - setup.originZ) / setup.cell) * setup.nx + Math.round((x - setup.originX) / setup.cell);
+        // The bowl's middle, 20 m under the sea, is the lake's water at the lake's level, not the sea's.
+        const middle = cellAt(0, 0);
+        expect(setup.kind[middle]).toBe(CELL_WATER);
+        expect(setup.target[middle]).toBeCloseTo(10, 3);
+        // Where the river reaches the sea, the sea holds it.
+        const mouth = cellAt(reachX + 58, 0);
+        expect(setup.kind[mouth]).toBe(CELL_HELD);
+        expect(setup.target[mouth]).toBe(0);
     });
 
     it('leaves what floats no gap where one water meets the next: both reach across the mouth', () => {
