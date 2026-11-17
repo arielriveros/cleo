@@ -45,7 +45,7 @@ import { houseColliders } from './houses.mjs'
 import { addLods, placeableCopy } from './lods.mjs'
 import { buildKnight } from './knight.mjs'
 import { buildHollow, buildStrongKnight } from './enemies.mjs'
-import { WATER_SOURCE, WATER_UNIFORMS } from './water.mjs'
+import { POND_WATER_LOOK } from './pondWater.mjs'
 import { boundsOf, convexShape, geometryJson, mergeParts, partsOf, readGltf } from './meshes.mjs'
 import { buildBarrel, buildSkullCave } from './setPieces.mjs'
 import { buildCampfire, buildStandingTorch, buildWallTorch, rayHit } from './torches.mjs'
@@ -823,13 +823,8 @@ const placeFire = (kind, key, ...args) => linkInstance(FIRE_TEMPLATES[kind], FIR
 
 // ----- water ---------------------------------------------------------------------------------------
 //
-// A forward, TRANSPARENT custom material (tools/valley/water.glsl): normal-mapped waves, Fresnel
-// reflection of the pond's light probe, a sun glint, refraction of the basin floor with depth
-// absorption, shore foam and a soft edge. Its WGSL is translated here, offline, because a published game
-// has no translator and renders a custom material on WebGPU only from the WGSL it was saved with.
-
-const WATER_FOLDER = '/Environment/Water'
-const WATER_NORMAL = tex('water_nor.png', `${WATER_FOLDER}/Textures`, 'Water Normal')
+// The pond is a Water node drawing its own surface (render/water.ts) with a Water material: refraction of
+// the basin floor with depth absorption, reflection of the sky, sun glint, shore foam, caustics, rain rings.
 
 function translateCustom(request) {
   const res = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx',
@@ -858,20 +853,14 @@ ${res.stderr}`)
   return JSON.parse(res.stdout.slice(res.stdout.indexOf('{')))
 })()
 
-const WATER_MAT = (() => {
-  const compiled = translateCustom({ renderMode: 'forward', fragmentSource: WATER_SOURCE, uniforms: WATER_UNIFORMS })
-  const properties = Object.fromEntries(WATER_UNIFORMS.filter(u => !u.type.startsWith('sampler')).map(u => [u.name, u.value]))
-  MATERIAL_FOLDERS.Water = `${WATER_FOLDER}/Materials`
-  return material('valley:water', 'Water', {
-    type: compiled.type, customMaterial: true,
-    compiledWgsl: compiled.wgsl, compiledWgslType: compiled.type, compiledWgslHash: compiled.hash,
-    renderMode: 'forward', baseType: null, fragmentSource: WATER_SOURCE, uniforms: WATER_UNIFORMS,
-    properties, textures: { normalMap: WATER_NORMAL },
-    // Not probeable: a probe capture has no scene buffers to refract, and the pond probe should see
-    // the sky and the banks, not the water it is lighting.
-    config: { side: 'double', wireframe: false, transparent: true, castShadow: false, probeable: false },
-  }, [WATER_NORMAL])
-})()
+// Parsed as a WaterMaterial (graphics/material.ts) by its `waterMaterial` flag; the look's missing fields
+// take water/waterLook.ts's defaults. The base shading is only what a model it is dropped on would show.
+MATERIAL_FOLDERS['Pond Water'] = '/Environment/Water/Materials'
+const POND_WATER_MAT = material('valley:pond-water', 'Pond Water', {
+  type: 'basic', color: POND_WATER_LOOK.shallowColor, opacity: 0.75, hasTexture: false,
+  config: { side: 'front', wireframe: false, transparent: true, castShadow: false, probeable: true },
+  waterMaterial: true, look: POND_WATER_LOOK,
+}, [])
 
 
 // =====================================================================================================
@@ -1750,20 +1739,12 @@ function landscapeNode() {
   })
 }
 
-function pondWater() {
-  return node('Pond Water', 'model', {
-    id: id('pond:water'), position: [POND.x, POND_LEVEL, POND.z],
-    variables: vars({ __materialId: WATER_MAT }),
-    model: { geometry: waterPlane(POND_HALF, 8), material: matJson(WATER_MAT) },
-    animationMappings: null, stateMachine: null, ragdoll: null,
-  })
-}
-
 /**
- * The pond's water, as physics sees it: a box from below the basin floor up to the water level. Every
- * dynamic body in it is buoyed by its mass against the water it displaces; it feeds the surface's
- * ripple uniforms, and throws the FX Creator's Water Splash where something enters it and a smaller
- * Water Step at a wading character's feet. Characters are not buoyed (their capsules are mostly air).
+ * The pond's water: a box from below the basin floor up to the water level, its surface drawn by the node
+ * itself where the basin holds it (the landscape clips the box to the pond). Every dynamic body in it is
+ * buoyed by its mass against the water it displaces, and it throws the FX Creator's Water Splash where
+ * something enters it and a smaller Water Step at a wading character's feet. Characters are not buoyed
+ * (their capsules are mostly air).
  */
 function pondVolume() {
   const floor = POND_FLOOR - 0.3
@@ -1774,7 +1755,8 @@ function pondVolume() {
     waterVolume: {
       size: [2 * POND_HALF, Math.round(depth * 1000) / 1000, 2 * POND_HALF],
       ...PRESETS.water, affectCharacters: false,
-      surfaceNodeId: id('pond:water'), splashTemplate: 'Water Splash', wadeSplashTemplate: 'Water Step', enabled: true,
+      splashTemplate: 'Water Splash', wadeSplashTemplate: 'Water Step', enabled: true,
+      windSpeed: 2, waterMaterialId: POND_WATER_MAT, waterMaterial: matJson(POND_WATER_MAT),
     },
   })
 }
@@ -2349,7 +2331,7 @@ function valleyScene() {
       linkInstance(LEVEL.player, player),
       sun, sky, skyLight, clouds, wind, timeOfDay,
       landscapeNode(),
-      souls.group('water', 'Water', [pondWater(), pondVolume(), pondZone(), ...floaters()]),
+      souls.group('water', 'Water', [pondVolume(), pondZone(), ...floaters()]),
       souls.group('light-probes', 'Light Probes', [valleyProbe(), ...localProbes()]),
       souls.group('buildings', 'Buildings', placedBuildings),
       souls.group('exposure-volumes', 'Exposure Volumes', exposureVolumes()),

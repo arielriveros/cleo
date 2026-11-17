@@ -38,6 +38,11 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
     const manifest = () => read('manifest.json');
     const scene = () => read('scenes', `${manifest().mainSceneId}.json`);
     const nodes = () => allNodes(scene().scene);
+    /** The pond's surface: the top of the water volume that draws it, over the volume's centre. */
+    const pondSurface = () => {
+        const v = nodes().find(n => n.type === 'waterVolume' && n.name === 'Pond Water Volume');
+        return { position: [v.position[0], v.position[1] + v.waterVolume.size[1] / 2, v.position[2]] };
+    };
     const landscape = () => nodes().find(n => n.type === 'landscape');
     const terrain = () => landscape().terrain;
     const library = (name: string) => read('libraries', `${name}.json`);
@@ -436,8 +441,10 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
 
 
     it('fills the pond with water that stays below every bank, under a probe it reflects', () => {
-        const water = nodes().find(n => n.name === 'Pond Water');
-        const [px, level, pz] = water.position;
+        const volume = nodes().find(n => n.type === 'waterVolume' && n.name === 'Pond Water Volume');
+        const [px, , pz] = volume.position;
+        const level = volume.position[1] + volume.waterVolume.size[1] / 2;
+        const water = { position: [px, level, pz] };
         for (let a = 0; a < 360; a += 5) {
             const r = 10.5;
             expect(level, `bank at ${a}°`).toBeLessThan(heightAt(px + Math.cos(a * Math.PI / 180) * r, pz + Math.sin(a * Math.PI / 180) * r));
@@ -596,29 +603,26 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         for (const pole of poles.children) expect(lightsOf(pole).map(l => l.castShadows), pole.name).toEqual([true]);
     });
 
-    it('gives the water a transparent forward custom material with WGSL a published WebGPU game can use', async () => {
-        const water = nodes().find(n => n.name === 'Pond Water');
-        const asset = library('materials').find((m: any) => m.id === water.variables.__materialId.value);
-        const m = asset.material;
-        expect(asset.name).toBe('Water');
-        expect([m.customMaterial, m.renderMode, m.config.transparent, m.config.probeable]).toEqual([true, 'forward', true, false]);
-        const { WATER_SOURCE, WATER_UNIFORMS } = await import('../tools/valley/water.mjs');
-        expect(m.fragmentSource).toBe(WATER_SOURCE);
-        expect(m.uniforms.map((u: any) => u.name)).toEqual(WATER_UNIFORMS.map((u: any) => u.name));
-        expect(asset.textureIds).toContain(m.textures.normalMap);
-        const { customWgslHash } = await import('../src/graphics/systems/customShaders');
-        expect(m.compiledWgsl).toContain('@fragment');
-        expect(m.compiledWgslHash).toBe(customWgslHash('forward', m.fragmentSource, m.uniforms));
-        const { CustomMaterial } = await import('../src/graphics/material');
-        expect(m.compiledWgslType).toBe(CustomMaterial.parse(m).type);
+    it('draws the pond with a Water material the volume embeds and links', async () => {
+        const volume = nodes().find(n => n.type === 'waterVolume' && n.name === 'Pond Water Volume');
+        const v = volume.waterVolume;
+        const asset = library('materials').find((m: any) => m.id === v.waterMaterialId);
+        expect(asset?.name).toBe('Pond Water');
+        expect(asset.material.waterMaterial).toBe(true);
+        expect(v.waterMaterial.look).toEqual(asset.material.look);
+        const { Material, WaterMaterial } = await import('../src/graphics/material');
+        expect(Material.parse(v.waterMaterial)).toBeInstanceOf(WaterMaterial);
+        // The old custom-material plane is gone: the node draws its own surface.
+        expect(nodes().some(n => n.name === 'Pond Water')).toBe(false);
+        expect(library('materials').some((m: any) => m.name === 'Water' && m.material.customMaterial)).toBe(false);
     });
 
-    it('buoys the pond through a water volume whose surface is the water mesh, feeding its ripples', () => {
-        const water = nodes().find(n => n.name === 'Pond Water');
+    it('buoys the pond through a water volume that draws its own surface', () => {
         const volume = nodes().find(n => n.type === 'waterVolume');
         expect(volume.name).toBe('Pond Water Volume');
         const v = volume.waterVolume;
-        expect(v.surfaceNodeId).toBe(water.id);
+        expect(v.surfaceNodeId ?? null).toBeNull();
+        const water = { position: [volume.position[0], volume.position[1] + v.size[1] / 2, volume.position[2]] };
         expect(v.affectCharacters).toBe(false);
         expect(v.density).toBe(1000);
         // Its top face is the water level, and it reaches below the deepest point of the basin.
@@ -667,7 +671,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
 
 
     it('drops props of different densities into the pond, above the water', () => {
-        const water = nodes().find(n => n.name === 'Pond Water');
+        const water = pondSurface();
         // Each prop is a model in a Collider of its own, which places it (its scale too) and carries its mass.
         const named = (name: string) => colliderHolding(name);
         const density = (n: any) => {
@@ -685,15 +689,6 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(density(named('Floating Crate'))).toBeLessThan(500);
         expect(density(named('Floating Log'))).toBeLessThan(1000);
         expect(density(named('Iron Chest'))).toBeGreaterThan(1000);   // the one that sinks
-    });
-
-    it('carries ripple slots instead of foam on the water material', () => {
-        const water = nodes().find(n => n.name === 'Pond Water');
-        const asset = library('materials').find((m: any) => m.id === water.variables.__materialId.value);
-        const names = asset.material.uniforms.map((u: any) => u.name);
-        for (let i = 0; i < 12; i++) expect(names).toContain(`ripple${i}`);
-        for (const foam of ['foamColor', 'foamWidth', 'foamAmount']) expect(names).not.toContain(foam);
-        expect(asset.material.fragmentSource).not.toMatch(/foam/i);
     });
 
     it('leaves the cliff notch bare: no cave, no door to another scene, no torches at it', () => {
@@ -770,7 +765,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(script.source).toContain(`lightningLight: string = '${light.name}'`);
         // The pond's own splash effect, on its water, as the camera comes over it.
         const splashes = tour.sequence.tracks.find((t: any) => t.type === 'spawn');
-        const pond = nodes().find(n => n.name === 'Pond Water');
+        const pond = pondSurface();
         const template = library('templates').find((t: any) => t.name === 'Water Splash');
         expect(template).toBeDefined();
         expect(splashes.sections.length).toBeGreaterThanOrEqual(3);
@@ -833,7 +828,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             expect(nearest, s.name).toBeLessThan(30);
         }
         // Above the ground (and the pond's surface), everywhere but inside the house.
-        const water = nodes().find(n => n.name === 'Pond Water');
+        const water = pondSurface();
         for (const { shot, p } of samples) {
             if (INTERIOR_SHOTS.includes(shot)) continue;
             let floor = heightAt(p[0], p[2]);
@@ -890,7 +885,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         for (const name of [...GRASS_LAYERS, ...TREE_LAYERS]) expect(layerNames.has(name), name).toBe(true);
         expect(bound('landscape').type).toBe('landscape');
         // The pond's calm is a field its node has; the overcast greys the sun's own keyed colour at the storm.
-        expect(bound('pond').model.material.properties.waveStrength).toBeGreaterThan(0.08);
+        expect(bound('pond').waterVolume.waterMaterial.look.detailStrength).toBeGreaterThan(0.25);
         const sunColor = (seq.tracks.find(t => t.id === 'sun-color') as any).sections[0].curve.keys;
         const colorAt = (t: number) => { let v = sunColor[0].v; for (const k of sunColor) if (k.t <= t) v = k.v; return v as number[]; };
         const warmth = (c: number[]) => c[0] - c[2];

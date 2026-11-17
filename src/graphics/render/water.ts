@@ -93,7 +93,9 @@ export class WaterPasses {
     public renderWater(scene: Scene): void {
         const nodes: WaterVolumeNode[] = [];
         for (const node of scene.waterVolumes as Set<WaterVolumeNode>)
-            if (node.enabled && node.visible && node.shapes.length) nodes.push(node);
+            // A legacy volume drawing its water with a Surface model (surfaceNodeId) keeps that look: drawing
+            // a surface of its own too would put two waters on top of each other.
+            if (node.enabled && node.visible && node.shapes.length && !node.surfaceNodeId) nodes.push(node);
         this._forget(scene);
         this.tilesDrawn = 0;
         if (!nodes.length) return;

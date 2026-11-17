@@ -176,7 +176,7 @@ What moves through the water disturbs it.
 |---|---|
 | **Splash** | Template spawned at the surface where something enters the water or wades through it. |
 | **Wading splash** | Template for the footsteps of a character wading. Same as Splash when not set. |
-| **Surface model** | Legacy: a model drawing the water whose custom material declares `vec4` uniforms `ripple0` … `ripple11`, filled with rings from whatever moves through. |
+| **Surface model** | Legacy: a model drawing the water whose custom material declares `vec4` uniforms `ripple0` … `ripple11`, filled with rings from whatever moves through. While one is set the node draws no surface of its own, so an older scene keeps its look; clear it to switch to the Water material. |
 
 ## Scripting
 

@@ -582,7 +582,7 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
                 {(templates ?? []).map((t: any) => <option key={t.id} value={t.name}>{t.name}</option>)}
               </Select>
             </PropertyRow>
-            <PropertyRow label='Surface model' hint='Legacy: a model drawing the water whose custom material declares vec4 uniforms ripple0..ripple11, filled with ripples from what moves through.'>
+            <PropertyRow label='Surface model' hint='Legacy: a model drawing the water whose custom material declares vec4 uniforms ripple0..ripple11, filled with ripples from what moves through. While one is set, the node draws no surface of its own.'>
               <NodeRefInput value={node.surfaceNodeId} scene={editorScene} filter={n => n instanceof ModelNode}
                 onChange={v => set('surfaceNodeId', v)} />
             </PropertyRow>

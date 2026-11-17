@@ -74,8 +74,8 @@
     {
       "id": "pond",
       "name": "Pond",
-      "nodeType": "model",
-      "path": "Water/Pond Water"
+      "nodeType": "waterVolume",
+      "path": "Water/Pond Water Volume"
     },
     {
       "id": "sun",
@@ -3997,7 +3997,7 @@
       "id": "pond-waves",
       "name": "Pond calm",
       "type": "property",
-      "path": "model.material.properties.waveStrength",
+      "path": "waterMaterial.look.detailStrength",
       "valueType": "number",
       "slot": "pond",
       "sections": [
@@ -4010,22 +4010,22 @@
             "keys": [
               {
                 "t": 0,
-                "v": 0.32,
+                "v": 1.0,
                 "interp": "linear"
               },
               {
                 "t": 4,
-                "v": 0.08,
+                "v": 0.25,
                 "interp": "linear"
               },
               {
                 "t": 29,
-                "v": 0.08,
+                "v": 0.25,
                 "interp": "linear"
               },
               {
                 "t": 37,
-                "v": 0.32,
+                "v": 1.0,
                 "interp": "linear"
               }
             ]
