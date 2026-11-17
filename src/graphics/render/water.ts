@@ -14,6 +14,7 @@ import type { FullscreenPasses } from './fullscreenPasses';
 import { sizedTarget } from './featureSubsystems';
 import { ViewProjection } from './viewProjection';
 import { buildWaterInfo, type GroundSampler, type WaterInfo } from '../../water/waterInfo';
+import { WATER_DETAIL_SIZE, waterDetailPixels } from '../../water/waterTextures';
 import { sceneGround } from '../../water/ground';
 import { decodeWaterBake } from '../../water/bake/waterBakeFormat';
 import { GiBakeRegistry } from './gi/giBakeRegistry';
@@ -157,7 +158,7 @@ export class WaterPasses {
             }
             pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
                 this._targets.sceneDepth.depth, fbo.colors[0], env.cube ?? this._bindGroups.fallbackCube,
-                water.tex0 ?? this._fallbackInfo(), water.tex1 ?? this._fallbackInfo(),
+                water.tex0 ?? this._fallbackInfo(), water.tex1 ?? this._fallbackInfo(), this._detail(),
             ]));
             for (const tile of tiles) {
                 sm.setUniform('u_tile', [tile.x0, tile.z0, tile.size, SKIRT]);
@@ -327,6 +328,17 @@ export class WaterPasses {
         } else {
             device.writeTexture(tex.rhiTexture, data, nx, nz, 0, 0);
         }
+    }
+
+    private _detailTexture: Texture | null = null;
+    /** The small-wave and foam texture (water/waterTextures.ts), made on first use, mipmapped, tiled. */
+    private _detail(): Texture {
+        if (!this._detailTexture) {
+            const tex = new Texture({ mipMap: true, wrapping: 'repeat' });
+            tex.createFromData(waterDetailPixels(), WATER_DETAIL_SIZE, WATER_DETAIL_SIZE, 'repeat');
+            this._detailTexture = tex;
+        }
+        return this._detailTexture;
     }
 
     private _fallback: Texture | null = null;

@@ -119,7 +119,38 @@ export function badlands(): WorldDoc {
   });
 }
 
+/**
+ * An island in open sea: a dome of land a kilometre across rising to a peak, a lake in a basin on its
+ * shoulder and a tarn on the other, a river from the peak into the lake and another from the lake down to the
+ * sea, eroded. The sea
+ * is everything below `seaLevel`; the lake comes out of the water pass (priority flood) where the basin
+ * holds water. What the Island example is built from (tools/island/).
+ */
+export function island(): WorldDoc {
+  const world = doc('temperate', { heightScale: 320, seaLevel: 0.1, seed: 7 }, g => {
+    const dome = g.add('gradient', { mode: 'radial', from: -0.45, to: 0.42, extent: 0.6, center: [0.5, 0.5] }, 'Island dome');
+    const relief = g.add('fractal', { fractal: 'fbm', scale: 3.5, octaves: 3, gain: 0.4, amplitude: 0.11, warp: 1.1, seed: 3 }, 'Coastline relief');
+    const land = g.add('combine', { op: 'add', strength: 1 }, 'Land');
+    const peak = g.add('mountain', { center: [0.43, 0.4], radius: 0.22, height: 0.48, sharpness: 1.4, ridges: 0.2 }, 'Peak');
+    const ridge = g.add('ridge', { points: [[0.43, 0.4], [0.32, 0.52], [0.3, 0.64]], width: 0.06, height: 0.12 }, 'West ridge');
+    const basin = g.add('crater', { center: [0.6, 0.58], radius: 0.075, depth: 0.11, rim: 0.025 }, 'Lake basin');
+    const tarn = g.add('crater', { center: [0.36, 0.62], radius: 0.045, depth: 0.08, rim: 0.02 }, 'Tarn basin');
+    const scree = g.add('thermal', { iterations: 30, talus: 38, rate: 0.5 }, 'Scree');
+    const erode = g.add('erosionFilter', filter('soft', { spacing: 200, depth: 0.09, valleyLevel: 0.1, peakLevel: 0.7 }), 'Erosion');
+    const upper = g.add('river', { points: [[0.45, 0.45], [0.5, 0.5], [0.545, 0.535], [0.575, 0.56]], width: 0.006, bank: 0.012, bedStart: 0.42, bedEnd: 0.2 }, 'Peak river');
+    const lower = g.add('river', { points: [[0.675, 0.64], [0.72, 0.69], [0.75, 0.76], [0.79, 0.83], [0.84, 0.9]], width: 0.008, bank: 0.016, bedStart: 0.3, bedEnd: 0.04 }, 'Lake outflow');
+    const out = g.add('output');
+    g.link(dome, land, 'a').link(relief, land, 'b');
+    g.chain(land, peak, ridge, basin, tarn, scree, erode, upper, lower);
+    g.link(lower, out, OUTPUT_PORT);
+  });
+  // Small basins count: a tarn of a hectare is a lake here.
+  world.water = { ...world.water, lakes: { ...world.water.lakes, minArea: 6000, minDepth: 2 } };
+  return world;
+}
+
 export const WORLD_PRESETS: readonly Preset<() => WorldDoc>[] = [
+  { id: 'island', label: 'Island (sea, lake, rivers)', params: island },
   { id: 'coastal-range', label: 'Coastal range (mountain, beach, road, cliff)', params: coastalRange },
   { id: 'alpine', label: 'Alpine massif', params: alpineMassif },
   { id: 'hills', label: 'Rolling hills', params: rollingHills },

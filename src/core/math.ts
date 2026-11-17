@@ -1096,6 +1096,58 @@ export function closedSplineXZ(points: readonly (readonly number[])[], spacing =
 }
 
 // =================================================================================================
+// FFT
+// =================================================================================================
+
+/**
+ * In-place radix-2 FFT of `re.length` complex values (re, im); the inverse when `inverse` (unscaled: the
+ * caller divides by n if it wants the true inverse). The length must be a power of two.
+ */
+export function fftRadix2(re: Float64Array, im: Float64Array, inverse: boolean): void {
+    const n = re.length;
+    for (let i = 1, j = 0; i < n; i++) {
+        let bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) {
+            let t = re[i]; re[i] = re[j]; re[j] = t;
+            t = im[i]; im[i] = im[j]; im[j] = t;
+        }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+        const ang = (2 * Math.PI) / len * (inverse ? 1 : -1);
+        const wr = Math.cos(ang), wi = Math.sin(ang);
+        for (let i = 0; i < n; i += len) {
+            let cr = 1, ci = 0;
+            for (let k = 0; k < len / 2; k++) {
+                const a = i + k, b = a + len / 2;
+                const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+                re[b] = re[a] - tr; im[b] = im[a] - ti;
+                re[a] += tr; im[a] += ti;
+                const ncr = cr * wr - ci * wi;
+                ci = cr * wi + ci * wr;
+                cr = ncr;
+            }
+        }
+    }
+}
+
+/** 2D FFT in place over a `size` x `size` row-major grid (both axes, radix-2). */
+export function fft2d(re: Float64Array, im: Float64Array, size: number, inverse: boolean): void {
+    const rr = new Float64Array(size), ri = new Float64Array(size);
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) { rr[x] = re[y * size + x]; ri[x] = im[y * size + x]; }
+        fftRadix2(rr, ri, inverse);
+        for (let x = 0; x < size; x++) { re[y * size + x] = rr[x]; im[y * size + x] = ri[x]; }
+    }
+    for (let x = 0; x < size; x++) {
+        for (let y = 0; y < size; y++) { rr[y] = re[y * size + x]; ri[y] = im[y * size + x]; }
+        fftRadix2(rr, ri, inverse);
+        for (let y = 0; y < size; y++) { re[y * size + x] = rr[y]; im[y * size + x] = ri[y]; }
+    }
+}
+
+// =================================================================================================
 // Half floats
 // =================================================================================================
 

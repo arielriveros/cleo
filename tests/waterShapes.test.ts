@@ -262,3 +262,20 @@ describe('physics on a baked flow', () => {
         GiBakeRegistry.delete('wb-test');
     });
 });
+
+describe('the water detail texture', () => {
+    it('is deterministic, varied, and tiles (its slopes wrap)', async () => {
+        const { waterDetailPixels, WATER_DETAIL_SIZE: n } = await import('../src/water/waterTextures');
+        const a = waterDetailPixels(), b = waterDetailPixels();
+        expect(a).toEqual(b);
+        let min = 255, max = 0, foam = 0;
+        for (let i = 0; i < n * n; i++) { min = Math.min(min, a[i * 4]); max = Math.max(max, a[i * 4]); if (a[i * 4 + 2] > 128) foam++; }
+        expect(max - min).toBeGreaterThan(120);           // real slopes, not a flat map
+        expect(foam / (n * n)).toBeGreaterThan(0.03);     // a web, not nothing
+        expect(foam / (n * n)).toBeLessThan(0.6);         // and not solid foam
+        // Wrapping: the first and last columns' heights are neighbours on a periodic field.
+        let jump = 0;
+        for (let y = 0; y < n; y++) jump = Math.max(jump, Math.abs(a[(y * n) * 4 + 3] - a[(y * n + n - 1) * 4 + 3]));
+        expect(jump).toBeLessThan(60);
+    });
+});

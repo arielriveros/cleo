@@ -30,6 +30,9 @@ const MAX_REFLECTION_LOD: f32 = 4.0;
 @group(0) @binding(7) var u_info0_sampler: sampler;
 @group(0) @binding(8) var u_info1_texture: texture_3d<f32>;         // wave share, foam, bed, wet
 @group(0) @binding(9) var u_info1_sampler: sampler;
+// The detail texture (water/waterTextures.ts): RG small-wave slope, B foam web, A small-wave height. Tiled.
+@group(0) @binding(10) var u_detail_texture: texture_2d<f32>;
+@group(0) @binding(11) var u_detail_sampler: sampler;
 
 // Vertex stage ONLY (a block read from both stages is a GLSL link error).
 struct WaterVertexUniforms {
@@ -233,25 +236,35 @@ fn valueNoise(p: vec2<f32>) -> f32 {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
+/** One tap of the detail texture at world `p` with a tile `scale` metres across, at mip `lod`. */
+fn detailTap(p: vec2<f32>, scale: f32, lod: f32) -> vec4<f32> {
+    return textureSampleLevel(u_detail_texture, u_detail_sampler, p / scale, lod);
+}
+
 /**
- * The gradient of the small ripples at `p` (metres): eight directional wavelets of falling size, spread
- * round the compass and leaning downwind. Their slope, not their height, is all the shading needs.
+ * The small waves at `p`: xy their slope (d/dx, d/dz), z the foam web there, w their height. Two layers of
+ * the detail texture, the long one running with the wind and a third the size crossing it, each drifting at
+ * its waves' own deep-water speed, so the pattern never repeats visibly or slides as a whole.
  */
-fn detailGradient(p: vec2<f32>, t: f32, scale: f32, windDir: vec2<f32>) -> vec2<f32> {
-    var g = vec2<f32>(0.0);
-    let base = atan2(windDir.y, windDir.x);
-    for (var i = 0; i < 8; i++) {
-        let fi = f32(i);
-        let ang = base + (hash12(vec2<f32>(fi, 3.7)) - 0.5) * 2.4;
-        let dir = vec2<f32>(cos(ang), sin(ang));
-        let len = scale * pow(0.72, fi);
-        let k = 6.283185 / len;
-        let omega = sqrt(9.81 * k);
-        let amp = 0.035 * len;
-        let th = k * dot(dir, p) - omega * t + hash12(vec2<f32>(fi, 9.1)) * 6.283;
-        g += dir * (k * amp * cos(th));
-    }
-    return g;
+fn smallWaves(p: vec2<f32>, t: f32, scale: f32, windDir: vec2<f32>, lod: f32) -> vec4<f32> {
+    let side = vec2<f32>(-windDir.y, windDir.x);
+    let s1 = scale;
+    let s2 = scale * 0.37;
+    let c1 = sqrt(9.81 * s1 / 6.283);
+    let c2 = sqrt(9.81 * s2 / 6.283);
+    // Layer 1 in the wind's frame (the texture's waves run along its diagonal), layer 2 turned 60 degrees.
+    let q1 = vec2<f32>(dot(p, windDir), dot(p, side)) - vec2<f32>(c1 * t * 0.35, 0.0);
+    let d2 = normalize(windDir * 0.5 + side * 0.866);
+    let x2 = vec2<f32>(-d2.y, d2.x);
+    let q2 = vec2<f32>(dot(p, d2), dot(p, x2)) - vec2<f32>(c2 * t * 0.35, 0.0) + vec2<f32>(0.37, 0.61) * s2;
+    let a = detailTap(q1, s1, lod);
+    let b = detailTap(q2, s2, max(0.0, lod - 1.4));
+    // Slopes back into world axes (each layer's own frame rotated back).
+    let sa = (a.xy - vec2<f32>(0.5)) * 2.0;
+    let sb = (b.xy - vec2<f32>(0.5)) * 2.0;
+    let ga = windDir * sa.x + side * sa.y;
+    let gb = d2 * sb.x + x2 * sb.y;
+    return vec4<f32>(ga + gb * 0.6, max(a.z, b.z * 0.8), a.w * 0.7 + b.w * 0.3);
 }
 
 /** Rings from raindrops on standing water (chunks/terrainWeather.wgsl rippleLayer's wavelets, scaled up). */
@@ -419,25 +432,37 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     // A skirt only fills the cracks between tiles out on open water; at the shore it would hang into view.
     if (in.skirt > 0.0 && edge < u_wf.u_fInfoOrigin.z * 3.0) { discard; }
 
-    // Normal: the waves', then the ripples riding the current, the wind's roughening and the rain's rings.
-    let windDir = select(vec2<f32>(0.0, 1.0), normalize(u_wf.u_windParams.xy), length(u_wf.u_windParams.xy) > 1e-4);
+    // Normal: the waves', then the small waves riding the current and the wind, and the rain's rings.
+    let windDir = select(vec2<f32>(0.70710678, 0.70710678), normalize(u_wf.u_windParams.xy), length(u_wf.u_windParams.xy) > 1e-4);
     let windAmount = u_wf.u_windParams.z * u_wf.u_windParams.w;
-    let strength = u_wf.u_surfaceParams.w * (0.35 + min(windAmount, 15.0) * 0.08);
-    let scale = u_wf.u_detailParams.x;
-    // Two phases of the flow map (Vlachos), half a cycle apart, so the ripples move with the river and
-    // never stretch out: each phase restarts while the other carries the look.
+    let strength = u_wf.u_surfaceParams.w * (0.55 + min(windAmount, 15.0) * 0.06);
+    let scale = max(u_wf.u_detailParams.x, 0.05) * 4.0;
+    let toCam0 = cam - in.worldPos;
+    let dist0 = length(toCam0);
+    // The mip the footprint calls for: a texel of the long layer against a pixel at this distance, longer
+    // at a grazing angle. Past it the averaged slopes turn into roughness instead of shimmering.
+    let pixel = dist0 * 2.0 / max(abs(u_wf.u_ssrProjection[1][1]) * u_wf.u_resolution.y, 1.0);
+    let grazing = max(abs(toCam0.y) / max(dist0, 1e-3), 0.12);
+    let lod = clamp(log2(pixel / grazing / (scale / 256.0)), 0.0, 8.0);
+    // Two phases of the flow map (Vlachos), half a cycle apart, so the small waves move with the river and
+    // never stretch: each phase restarts while the other carries the look.
     let f = flow * u_wf.u_detailParams.y;
     let cycle = 2.0;
     let ph0 = fract(t / cycle);
     let ph1 = fract(t / cycle + 0.5);
     let wgt = abs(ph0 * 2.0 - 1.0);
-    let g0 = detailGradient(in.rest.xy - f * ph0 * cycle, t, scale, windDir);
-    let g1 = detailGradient(in.rest.xy - f * ph1 * cycle + vec2<f32>(3.7, 1.9), t, scale, windDir);
-    var g = mix(g0, g1, wgt) * strength;
+    var small = smallWaves(in.rest.xy - f * ph0 * cycle, t, scale, windDir, lod);
+    if (length(f) > 1e-3) {
+        small = mix(small, smallWaves(in.rest.xy - f * ph1 * cycle + vec2<f32>(3.7, 1.9) * scale, t, scale, windDir, lod), wgt);
+    }
+    var g = small.xy * strength;
     let weather = precipitationAt(in.worldPos);
     let still = 1.0 - smoothstep(0.1, 0.8, length(flow));
-    if (weather.x > 0.0 && u_wf.u_detailParams.z > 0.0) {
-        g += rainRings(in.worldPos.xz, u_ww.u_weatherInfo.y, weather.x * 0.8) * u_wf.u_detailParams.z;
+    // Rain rings are centimetres across: past a couple of centimetres a pixel they would only sparkle, so
+    // they fade out with distance (the drops' roughening is still there, in the wind's term).
+    let ringFade = 1.0 - smoothstep(0.012, 0.045, pixel / grazing);
+    if (weather.x > 0.0 && u_wf.u_detailParams.z > 0.0 && ringFade > 0.0) {
+        g += rainRings(in.worldPos.xz, u_ww.u_weatherInfo.y, weather.x * 0.8) * u_wf.u_detailParams.z * ringFade;
     }
     var N = normalize(in.normal + vec3<f32>(-g.x, 0.0, -g.y));
     if (!front) { N = -N; }
@@ -445,7 +470,10 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     let viewDist = length(toCam);
     let V = toCam / max(viewDist, 1e-4);
     let NoV = clamp(dot(N, V), 1e-3, 1.0);
-    var roughness = clamp(u_wf.u_absorption.w + min(windAmount, 20.0) * 0.004, 0.02, 1.0);
+    // Roughness: the surface's own, the wind's, and the small waves the mip has averaged away (their
+    // slope variance does not vanish with distance, it becomes a broader highlight).
+    let lodRough = (1.0 - exp(-lod * 0.45)) * 0.22 * strength;
+    var roughness = clamp(sqrt(u_wf.u_absorption.w * u_wf.u_absorption.w + lodRough * lodRough) + min(windAmount, 20.0) * 0.003, 0.02, 1.0);
 
     // Snow on still water: slush, then ice where it lies long enough (the weather's snow amount).
     let snowAt = weatherAt(in.worldPos).snow;
@@ -505,26 +533,31 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     let a = max(roughness * roughness, 0.002);
     let spec = u_wf.u_sunColor.rgb * pre * ggx(max(dot(N, H), 0.0), a) * F * NoL * 0.25 / max(NoV, 0.05);
 
-    var color = mix(under, reflected, F) + spec;
+    // Light through the thin tops of the waves (subsurface scattering): seen against the sun, a crest
+    // glows the water's shallow colour. Strongest looking toward the sun, on what stands above the rest
+    // level, and in clear water.
+    let crestHeight = clamp((in.worldPos.y - surface) * 0.8 + small.w * 0.35, 0.0, 1.0);
+    let back = pow(clamp(dot(V, -L) * 0.5 + 0.5, 0.0, 1.0), 4.0);
+    let sss = u_wf.u_shallowColor.rgb * u_wf.u_sunColor.rgb * pre * back * crestHeight * 0.35
+            * (1.0 - turbidity * 0.6) * select(0.0, 1.0, front);
 
-    // Foam: along the shore (and in thin water), on breaking crests, and where the current tumbles.
+    var color = mix(under + sss, reflected, F) + spec;
+
+    // Foam: along the shore (and in thin water), on breaking crests, and where the current tumbles. Each
+    // source says how much foam there is; the bubble web of the detail texture says where it holds, so a
+    // little foam is a lace of lines and a lot is solid white, never a soft blur.
     let shoreW = u_wf.u_foamColor.w;
-    let fn0 = valueNoise(in.rest.xy * 1.7 - flow * t * 0.6 + vec2<f32>(t * 0.05, 0.0));
-    let fn1 = valueNoise(in.rest.xy * 4.3 + flow * t * 0.3);
-    let foamTex = smoothstep(0.35, 0.75, fn0 * 0.6 + fn1 * 0.4);
-    var foam = 0.0;
+    var amount = 0.0;
     if (shoreW > 0.0) {
         let near = min(edge, thickness * 2.0);
         let band = 1.0 - smoothstep(0.0, shoreW, near);
-        // Surf lines that run in toward the shore.
-        let surf = 0.5 + 0.5 * sin(edge * 2.2 - t * 1.6 + fn0 * 3.0);
-        foam = max(foam, band * mix(0.6, 1.0, surf));
+        // Surf lines running in toward the shore, broken up by the web.
+        let surf = 0.5 + 0.5 * sin(edge * 2.5 - t * 1.6 + small.w * 4.0);
+        amount = max(amount, band * mix(0.55, 1.0, surf));
     }
-    foam = max(foam, smoothstep(0.35, 0.9, in.rest.z) * u_wf.u_foamParams.x);
-    foam = max(foam, foamBake * u_wf.u_foamParams.y);
-    foam = clamp(foam * foamTex * 1.2, 0.0, 1.0);
-    // A waterfall: where the surface drops steeply the water tumbles white, in streaks that run down the
-    // fall (along the flow, fast), thinning to clear sheets between them.
+    amount = max(amount, smoothstep(0.3, 0.85, in.rest.z) * u_wf.u_foamParams.x);
+    amount = max(amount, foamBake * u_wf.u_foamParams.y);
+    // A waterfall: where the surface drops steeply the water tumbles white, in streaks racing down the fall.
     let fall = smoothstep(0.6, 1.6, in.slope) * u_wf.u_foamParams.y;
     if (fall > 0.0) {
         let along = select(vec2<f32>(0.0, 1.0), normalize(flow), length(flow) > 1e-3);
@@ -532,9 +565,13 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
         let sx = dot(in.rest.xy, across);
         let sy = dot(in.rest.xy, along);
         let streak = valueNoise(vec2<f32>(sx * 3.0, sy * 0.6 - t * 3.5)) * 0.65 + valueNoise(vec2<f32>(sx * 9.0, sy * 1.5 - t * 6.0)) * 0.35;
-        foam = max(foam, fall * smoothstep(0.3, 0.7, streak));
+        amount = max(amount, fall * (0.5 + 0.5 * streak));
     }
-    let foamLit = u_wf.u_foamColor.rgb * (u_wf.u_ambient.rgb + u_wf.u_sunColor.rgb * NoL) * pre * 0.32;
+    let web = small.z;
+    var foam = smoothstep(1.0 - amount, 1.0 - amount + 0.35, web * 0.75 + amount * 0.45);
+    foam *= smoothstep(0.0, 0.08, amount);
+    // Foam is a rough white scatterer: lit by the sun as it falls (not by the rippled normal) and the sky.
+    let foamLit = u_wf.u_foamColor.rgb * (u_wf.u_ambient.rgb + u_wf.u_sunColor.rgb * max(L.y, 0.0)) * pre * 0.3;
     color = mix(color, foamLit, foam * select(0.0, 1.0, front));
 
     // Ice and slush: snow-coloured, lit, the water's own look gone under it.
