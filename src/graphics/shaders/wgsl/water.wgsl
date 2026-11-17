@@ -28,6 +28,14 @@
 // tumbles; rain rings it, snow settles as slush and ice on still water. The surface is drawn into the
 // scene before the fog and the temporal resolve, so it is fogged and filtered like everything else.
 //
+// LIVE WAVES: round the camera, flowing water also carries a simulation of surface waves riding its current
+// (render/waterWaves.ts, water/waveSim.ts): wave trains standing below drops, wakes off the banks, the boil
+// of fast water. Its heights lift the vertices, its slopes join the waves', its foam is the foam there, and
+// its turbulence says where the ripples lie (smooth on a boil, crowded at its edge).
+//
+// FOAM is drawn from an amount with the foam texture (water/waterTextures.ts waterFoamPixels): thick foam
+// where it lasts, textured with its bubbles; lace and loose bubbles where it is thin (foamCover).
+//
 // No implicit derivatives (every fetch is explicit-level), so the module translates to GLSL as it is.
 
 const PI: f32 = 3.14159265;
@@ -53,9 +61,15 @@ const MAX_REFLECTION_LOD: f32 = 4.0;
 @group(0) @binding(7) var u_info0_sampler: sampler;
 @group(0) @binding(8) var u_info1_texture: texture_3d<f32>;         // surface (fine), foam, bed, wet
 @group(0) @binding(9) var u_info1_sampler: sampler;
-// The detail texture (water/waterTextures.ts): B is the foam web. Tiled, mipmapped.
+// The detail texture (water/waterTextures.ts): R, G the slopes of a field of ripples. Tiled, mipmapped.
 @group(0) @binding(10) var u_detail_texture: texture_2d<f32>;
 @group(0) @binding(11) var u_detail_sampler: sampler;
+// The live waves round the camera (render/waterWaves.ts): height (m), rate (m/s), turbulence, foam.
+@group(0) @binding(12) var u_live_texture: texture_2d<f32>;
+@group(0) @binding(13) var u_live_sampler: sampler;
+// The foam texture (waterTextures.ts waterFoamPixels): bubbles, lace, where foam lasts, grain. Tiled, mipmapped.
+@group(0) @binding(14) var u_foam_texture: texture_2d<f32>;
+@group(0) @binding(15) var u_foam_sampler: sampler;
 
 // Vertex stage ONLY (a block read from both stages is a GLSL link error).
 struct WaterVertexUniforms {
@@ -73,6 +87,7 @@ struct WaterVertexUniforms {
     u_vCamera: vec4<f32>,         // camera position
     u_vSurf: vec4<f32>,           // surf: frequency (rad/s), amplitude (m), 1 = on (an ocean with a shore grid)
     u_vFlow: vec4<f32>,           // how far the waves ride the current, the speed a river's waves are built for (0: wind waves)
+    u_vLive: vec4<f32>,           // the live waves' window: origin x, origin z (m), 1 / side (1/m), strength (0: none)
 };
 @group(1) @binding(0) var<uniform> u_wv: WaterVertexUniforms;
 
@@ -107,6 +122,8 @@ struct WaterFragmentUniforms {
     u_fWaveK: array<vec4<f32>, 40>,
     u_fWaveParams: vec4<f32>,     // count, -, height scale, the waves' height deviation (m, at full scale)
     u_fSurf: vec4<f32>,           // as u_vSurf
+    u_fLive: vec4<f32>,           // as u_vLive
+    u_fLiveGrid: vec4<f32>,       // the live waves' grid: 1 / texels a side, metres a texel, 1 = this water is a river
 };
 @group(1) @binding(1) var<uniform> u_wf: WaterFragmentUniforms;
 
@@ -211,6 +228,52 @@ fn valueNoiseGrad(p: vec2<f32>) -> vec3<f32> {
     let k = a - b - c + d;
     let v = a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y;
     return vec3<f32>(v, du.x * ((b - a) + k * u.y), du.y * ((c - a) + k * u.x));
+}
+
+/** A turn of 0.6 rad: the foam texture's copies are read turned against each other, so they never line up. */
+const FOAM_TURN: vec2<f32> = vec2<f32>(0.8253356, 0.5646425);
+
+/**
+ * How much of the water foam covers at `p` (m, carried with the water) where `amount` (0..1) of it lies, drawn
+ * with the foam texture (water/waterTextures.ts) over `size` metres. Foam is a web: a little of it is a few
+ * broken strands, more a net with round holes, more still white with holes in it. Three copies of the texture
+ * make it, turned against each other: one the tile's size is the web; one several tiles wide says where the
+ * foam is thick and where thin, and its own web, weighed in with the tile's, breaks that one up so no two
+ * tiles are filled alike; one finer is the web inside the web, and the bubbles on top. Too far off to tell
+ * the web, the amount itself.
+ */
+fn foamCover(p: vec2<f32>, amount: f32, size: f32, footprint: f32) -> f32 {
+    if (amount <= 0.0) { return 0.0; }
+    let lodWide = log2(max(footprint / (size / 512.0), 1e-6));
+    let far = smoothstep(3.5, 5.5, lodWide);
+    if (far >= 1.0) { return amount; }
+    let wide = textureSampleLevel(u_foam_texture, u_foam_sampler, p / size, max(lodWide, 0.0));
+    let lodNear = lodWide + 1.3219;
+    let turned = vec2<f32>(p.x * FOAM_TURN.x - p.y * FOAM_TURN.y, p.x * FOAM_TURN.y + p.y * FOAM_TURN.x);
+    let near = textureSampleLevel(u_foam_texture, u_foam_sampler, turned / (size * 0.4) + vec2<f32>(0.37, 0.61), max(lodNear, 0.0));
+    let nearIn = 1.0 - smoothstep(3.0, 5.0, lodNear);
+    let back = vec2<f32>(p.x * FOAM_TURN.x + p.y * FOAM_TURN.y, p.y * FOAM_TURN.x - p.x * FOAM_TURN.y);
+    let broad = textureSampleLevel(u_foam_texture, u_foam_sampler, back / (size * 3.3) + vec2<f32>(0.13, 0.71), max(lodWide - 1.7225, 0.0));
+    // How much of it is here: every place has some, the thick ones more.
+    let local = amount * mix(0.35, 1.8, broad.b);
+    // The web: the tile's, weighed with the broad copy's (and the sum of two evenly spread values, which
+    // crowds toward the middle, spread evenly again), with the finer copy's inside it. The higher of two
+    // evenly spread values is above a level more often than either is, so the level is raised to keep the
+    // share covered.
+    let sum = 0.62 * wide.g + 0.38 * broad.g;
+    var even = (2.0 * sum - 0.38) / 1.24;
+    if (sum < 0.38) { even = sum * sum / 0.4712; } else if (sum > 0.62) { even = 1.0 - (1.0 - sum) * (1.0 - sum) / 0.4712; }
+    let lace = max(even, near.g * nearIn);
+    let open = max(1.0 - local, 0.0);
+    let level = mix(open, sqrt(open), nearIn) - max(local - 1.0, 0.0);
+    let soft = 0.025 + 0.25 * clamp(lodWide / 5.0, 0.0, 1.0);
+    let body = smoothstep(level - soft, level + soft, lace);
+    // Thickest along a strand's middle; loose bubbles off its edge; its surface its own bubbles.
+    let thick = smoothstep(level, level + 0.3, lace);
+    let loose = smoothstep(level - 0.16, level - 0.02, lace) * smoothstep(0.55, 0.8, near.r) * nearIn * 0.55;
+    let surface = mix(0.92, 0.76 + 0.24 * max(near.r, near.a * 0.7), nearIn);
+    let cover = max(body * (0.72 + 0.28 * thick) * surface, loose) * smoothstep(0.0, 0.04, local);
+    return mix(clamp(cover, 0.0, 1.0), amount, far);
 }
 
 /** Where wave `i`, `lambda` metres long, reads the crest-bending noise at rest point `p0` (waves.ts waveBend). */
@@ -415,6 +478,19 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
         lift = waveHeight(xz - ride * ph.a, t, scale, cell) * ph.wa + waveHeight(xz - ride * ph.b + FLOW_APART, t, scale, cell) * ph.wb;
     } else {
         lift = waveHeight(xz, t, scale, cell);
+    }
+    // The live waves round the camera: read over the mesh's own cell, so a coarse mesh takes their mean.
+    if (u_wv.u_vLive.w > 0.0 && !ocean) {
+        let luv = (xz - u_wv.u_vLive.xy) * u_wv.u_vLive.z;
+        let inside = min(min(luv.x, luv.y), min(1.0 - luv.x, 1.0 - luv.y));
+        if (inside > 0.0) {
+            let o = 0.25 * cell * u_wv.u_vLive.z;
+            let h = textureSampleLevel(u_live_texture, u_live_sampler, luv + vec2<f32>(o, o), 0.0).x
+                  + textureSampleLevel(u_live_texture, u_live_sampler, luv + vec2<f32>(-o, o), 0.0).x
+                  + textureSampleLevel(u_live_texture, u_live_sampler, luv + vec2<f32>(o, -o), 0.0).x
+                  + textureSampleLevel(u_live_texture, u_live_sampler, luv + vec2<f32>(-o, -o), 0.0).x;
+            lift += 0.25 * h * u_wv.u_vLive.w * smoothstep(0.0, 0.08, inside) * fade;
+        }
     }
     var p = vec3<f32>(xz.x, surface + lift, xz.y);
     // Over the beach the surf takes over from the waves, as physics/water/surf.ts adds it to what floats.
@@ -757,6 +833,45 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let waveSd = max(u_wf.u_fWaveParams.w * scale, 1e-3);
     let crest = clamp(0.5 + waves.height / (4.0 * waveSd), 0.0, 1.0);
     var slope = in.grad + waves.slope;
+    // The live waves round the camera: their slopes, their foam, and the turbulence that stirs them.
+    var live = vec4<f32>(0.0);
+    var liveIn = 0.0;
+    if (u_wf.u_fLive.w > 0.0 && !ocean) {
+        let luv = (in.rest.xy - u_wf.u_fLive.xy) * u_wf.u_fLive.z;
+        let inside = min(min(luv.x, luv.y), min(1.0 - luv.x, 1.0 - luv.y));
+        if (inside > 0.0) {
+            liveIn = smoothstep(0.0, 0.08, inside);
+            let st = u_wf.u_fLiveGrid.x;
+            live = textureSampleLevel(u_live_texture, u_live_sampler, luv, 0.0);
+            let lx = textureSampleLevel(u_live_texture, u_live_sampler, luv + vec2<f32>(st, 0.0), 0.0).x
+                   - textureSampleLevel(u_live_texture, u_live_sampler, luv - vec2<f32>(st, 0.0), 0.0).x;
+            let lz = textureSampleLevel(u_live_texture, u_live_sampler, luv + vec2<f32>(0.0, st), 0.0).x
+                   - textureSampleLevel(u_live_texture, u_live_sampler, luv - vec2<f32>(0.0, st), 0.0).x;
+            // A pixel too coarse for the simulation's texels cannot draw their slopes.
+            let seen = 1.0 - smoothstep(u_wf.u_fLiveGrid.y, 4.0 * u_wf.u_fLiveGrid.y, footprint);
+            slope += vec2<f32>(lx, lz) / (2.0 * u_wf.u_fLiveGrid.y) * (u_wf.u_fLive.w * liveIn * seen);
+        }
+    }
+    // Ripples on running water: the small waves its turbulence and the wind keep on it, a field of them made
+    // from a spectrum (the detail texture's slopes) at two sizes, carried with the current. More of them the
+    // faster the water runs; and a boil, where water wells up, is smooth, its ripples crowded at its edge.
+    let running = length(flow);
+    if (moving && u_wf.u_surfaceParams.w > 0.0) {
+        let span = max(u_wf.u_detailParams.x, 0.05) * 3.0;
+        let lod = clamp(log2(footprint / (span / 256.0)), 0.0, 8.0);
+        let pa = in.rest.xy - f * ph.a;
+        let pb = in.rest.xy - f * ph.b + FLOW_APART;
+        let a0 = textureSampleLevel(u_detail_texture, u_detail_sampler, pa / span, lod).xy - vec2<f32>(0.5);
+        let b0 = textureSampleLevel(u_detail_texture, u_detail_sampler, pb / span, lod).xy - vec2<f32>(0.5);
+        // The finer copy is turned a quarter round, so the two never line up.
+        let a1 = textureSampleLevel(u_detail_texture, u_detail_sampler, pa.yx / (span * 0.31) + vec2<f32>(0.37, 0.11), lod + 1.7).yx - vec2<f32>(0.5);
+        let b1 = textureSampleLevel(u_detail_texture, u_detail_sampler, pb.yx / (span * 0.31) + vec2<f32>(0.37, 0.11), lod + 1.7).yx - vec2<f32>(0.5);
+        let ripple = (a0 + a1 * 0.7) * ph.wa + (b0 + b1 * 0.7) * ph.wb;
+        let stirred = mix(1.0, 0.35 + 1.5 * smoothstep(0.7, -0.5, live.z), liveIn);
+        // A lake's slow drift raises none: its ripples are the wind's, in its waves.
+        let much = u_wf.u_surfaceParams.w * (0.25 + 0.75 * smoothstep(0.1, 1.8, running)) * stirred * smoothstep(0.08, 0.4, running);
+        slope += ripple * (1.1 * much);
+    }
     let weather = precipitationAt(in.worldPos);
     let still = 1.0 - smoothstep(0.1, 0.8, length(flow));
     // Rain rings are centimetres across: past a couple of centimetres a pixel they would only sparkle, so
@@ -829,7 +944,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let sigma = absorb + vec3<f32>(turbidity / clarity + 0.15 / clarity);
     // Fast water is churned: air and silt in it scatter the light, so it lightens toward its shallow colour and
     // hides what is under it (Unreal's river material does the same with its velocity scattering).
-    let rush = clamp(smoothstep(0.6, 3.0, length(flow)) * u_wf.u_misc.y, 0.0, 1.0);
+    // So is water with air in it: under its foam, and between the foam's streaks, whitewater is pale and
+    // milky, not clear. How much air: the foam it carries (the live simulation's round the camera, the
+    // bake's past it).
+    let aired = clamp(mix(foamBake, live.w, liveIn) * u_wf.u_foamParams.y * 1.3, 0.0, 1.0) * smoothstep(0.15, 0.5, length(flow));
+    let rush = clamp(max(smoothstep(0.6, 3.0, length(flow)), aired * 0.9) * u_wf.u_misc.y, 0.0, 1.0);
     let transmit = exp(-sigma * thickness) * (1.0 - 0.5 * rush);
     // The light going down into the water (the sky's and the sun's, by its height and its shadow), and the
     // share of it the water scatters back up: the shallow and deep colours are that share (reflectances,
@@ -942,7 +1061,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         } else {
             // Lines running in toward the shore (the phase falls as the distance does), broken by the ripples.
             let lines = 0.5 + 0.5 * sin(edge * 2.5 + t * 1.6 + waves.height / waveSd * 0.8);
-            amount = max(amount, band * mix(0.55, 1.0, lines));
+            // Along a river the bank's foam is no even hem: it gathers in the slack places and is swept clean
+            // in between (a slow noise along the bank, drifting), and it is the water's, not the wet ground's
+            // past its edge (where a baked surface is carried on under the bank).
+            var patchy = 1.0;
+            if (u_wf.u_fLiveGrid.z > 0.5) {
+                let n0 = valueNoise(in.rest.xy * 0.8 + vec2<f32>(t * 0.07, -t * 0.05));
+                let n1 = valueNoise(in.rest.xy * 2.3 - vec2<f32>(t * 0.11, t * 0.04));
+                patchy = smoothstep(0.45, 0.7, n0 * 0.7 + n1 * 0.3) * smoothstep(-0.5 * u_wf.u_fInfoOrigin.z, 0.0, edge);
+            }
+            amount = max(amount, band * mix(0.55, 1.0, lines) * patchy);
         }
     }
     // Whitecaps: where the long waves crowd the short ones hardest, on their crests.
@@ -957,47 +1085,37 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let streak = valueNoise(vec2<f32>(sx * 3.0, sy * 0.6 - t * 3.5)) * 0.65 + valueNoise(vec2<f32>(sx * 9.0, sy * 1.5 - t * 6.0)) * 0.35;
         amount = max(amount, fall * (0.5 + 0.5 * streak));
     }
-    // The current's own foam: what the water churned up upstream and carried here (the bake's foam, made
-    // and transported by the simulation; the analytic river's where it runs fast or drops). Gone where the
-    // water is nearly still: foam that sits does not read as a river's. Never a solid white sheet: the
-    // whitest water still shows its lace, and with it which way it runs.
-    let churn = clamp(foamBake * u_wf.u_foamParams.y * 1.6, 0.0, 0.8) * smoothstep(0.15, 0.5, length(flow));
-    if (amount > 0.0 || churn > 0.0) {
-        // The web drifts with the water, sampled at the mip the footprint calls for, on the same two phases
-        // as the waves: one phase alone would jump back every cycle.
-        let webScale = max(u_wf.u_detailParams.x, 0.05) * 4.0;
-        let webLod = clamp(log2(footprint / (webScale / 256.0)), 0.0, 8.0);
-        let webA = textureSampleLevel(u_detail_texture, u_detail_sampler, (in.rest.xy - f * ph.a) / webScale, webLod).z;
-        var webB = webA;
-        if (moving) { webB = textureSampleLevel(u_detail_texture, u_detail_sampler, (in.rest.xy - f * ph.b + FLOW_APART) / webScale, webLod).z; }
-        var foam = 0.0;
-        if (amount > 0.0) {
-            let web = mix(webA, webB, ph.fade);
-            foam = smoothstep(1.0 - amount, 1.0 - amount + 0.35, web * 0.75 + amount * 0.45) * smoothstep(0.0, 0.08, amount);
+    // The current's own foam: what the water churned up upstream and carried here. Round the camera it is the
+    // live simulation's, carried and drawn out into streaks by the current itself; past it, the bake's foam,
+    // streaked by noise smeared along the flow. Gone where the water is nearly still: foam that sits does not
+    // read as a river's.
+    // However much there is, it never sheets the water over: the whitest rapid is rafts and streaks with
+    // pale water between them (the share it covers grows with the amount and levels off under two thirds).
+    let flowing = smoothstep(0.15, 0.5, running);
+    // (The simulation's foam settles at about a third of the bake's figure on the whole, in streaks; past
+    // it the bake's own is drawn to match.)
+    let churnFar = 0.66 * (1.0 - exp(-2.4 * foamBake * 0.35 * u_wf.u_foamParams.y)) * flowing;
+    let churnLive = 0.66 * (1.0 - exp(-2.4 * live.w * u_wf.u_foamParams.y)) * flowing;
+    if (amount > 0.0 || churnFar > 0.0 || churnLive > 0.0) {
+        // The foam's texture drifts with the water, on the same two phases as the waves: one phase alone
+        // would jump back every cycle. Each is drawn from its amount, then the two are cross-faded, so the
+        // bubbles stay crisp through the fade.
+        let pa = in.rest.xy - f * ph.a;
+        var pb = pa;
+        if (moving) { pb = in.rest.xy - f * ph.b + FLOW_APART; }
+        var farA = churnFar;
+        var farB = churnFar;
+        if (churnFar > 0.0 && liveIn < 1.0) {
+            let along = normalize(flow + vec2<f32>(1e-5, 0.0));
+            farA = churnFar * (0.45 + 1.1 * whiteStreaks(pa, along));
+            farB = churnFar * (0.45 + 1.1 * whiteStreaks(pb, along));
         }
-        if (churn > 0.0) {
-            // Whitewater is streaks and rafts drawn out along the current, laced with bubbles, not a web of
-            // even cells: smooth noise smeared a couple of metres along the flow (whiteStreaks), broken into
-            // rafts by a slower, broader noise and edged with the bubble web at a third of its size. On the
-            // two phases of the flow, each cross-faded AFTER it is thresholded, so the lace stays crisp
-            // through the fade. `cover` is the share of the water it whitens.
-            let along = normalize(flow);
-            let pa = in.rest.xy - f * ph.a;
-            let pb = in.rest.xy - f * ph.b + FLOW_APART;
-            let lace = webScale * 0.3;
-            let laceLod = clamp(log2(footprint / (lace / 256.0)), 0.0, 8.0);
-            let la = textureSampleLevel(u_detail_texture, u_detail_sampler, pa / lace, laceLod).z;
-            let lb = textureSampleLevel(u_detail_texture, u_detail_sampler, pb / lace, laceLod).z;
-            let na = whiteStreaks(pa, along) * 0.55 + valueNoise(pa * 0.4 + vec2<f32>(11.3, 5.1)) * 0.2 + la * 0.25;
-            let nb = whiteStreaks(pb, along) * 0.55 + valueNoise(pb * 0.4 + vec2<f32>(7.9, 14.2)) * 0.2 + lb * 0.25;
-            let cover = churn * 0.8;
-            let lo = 1.0 - cover;
-            // Too far to tell a streak from the next: the share alone.
-            let far = smoothstep(0.25, 1.2, footprint);
-            let sa = mix(smoothstep(lo - 0.1, lo + 0.1, na), cover, far);
-            let sb = mix(smoothstep(lo - 0.1, lo + 0.1, nb), cover, far);
-            foam = max(foam, mix(sa, sb, ph.fade) * smoothstep(0.0, 0.08, churn));
-        }
+        // The foam texture's tile (the material's Foam size): at a metre and a half its web's widest holes
+        // are a hand across and its bubbles a centimetre or two.
+        let size = max(u_wf.u_detailParams.x, 0.05);
+        let fa = foamCover(pa, max(amount, mix(farA, churnLive, liveIn)), size, footprint);
+        let fb = foamCover(pb, max(amount, mix(farB, churnLive, liveIn)), size, footprint);
+        let foam = mix(fa, fb, ph.fade);
         // Foam is a rough white scatterer: lit by the sun as it falls (not by the rippled normal) and the sky.
         let foamLit = u_wf.u_foamColor.rgb * (u_wf.u_ambient.rgb + u_wf.u_sunColor.rgb * sunUp * sunVis) * pre * 0.3;
         color = mix(color, foamLit, foam * select(1.0, 0.0, below));

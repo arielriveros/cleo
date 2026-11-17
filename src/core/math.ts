@@ -933,6 +933,20 @@ export function evaluateGradient(gradient: Gradient, t: number): [number, number
 // Splines
 // =================================================================================================
 
+/**
+ * A Catmull-Rom cubic's four weights at `t` (0..1) between the second and third of four evenly spaced samples.
+ * They sum to 1, and at `t` = 0 the second sample is returned as it is: what a grid is resampled with when a
+ * linear lookup would smear it (water/waveSim.ts carries its waves with it).
+ */
+export function catmullRomWeights(t: number, out: number[] = [0, 0, 0, 0]): number[] {
+    const t2 = t * t, t3 = t2 * t;
+    out[0] = -0.5 * t3 + t2 - 0.5 * t;
+    out[1] = 1.5 * t3 - 2.5 * t2 + 1;
+    out[2] = -1.5 * t3 + 2 * t2 + 0.5 * t;
+    out[3] = 0.5 * t3 - 0.5 * t2;
+    return out;
+}
+
 /** A 3D point or vector as a plain tuple. */
 export type Vec3Tuple = [number, number, number];
 

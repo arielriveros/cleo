@@ -601,11 +601,27 @@ describe('the water detail texture', () => {
         const { waterDetailPixels, WATER_DETAIL_SIZE: n } = await import('../src/water/waterTextures');
         const a = waterDetailPixels(), b = waterDetailPixels();
         expect(a).toEqual(b);
-        let min = 255, max = 0, foam = 0;
-        for (let i = 0; i < n * n; i++) { min = Math.min(min, a[i * 4]); max = Math.max(max, a[i * 4]); if (a[i * 4 + 2] > 128) foam++; }
+        let min = 255, max = 0;
+        for (let i = 0; i < n * n; i++) { min = Math.min(min, a[i * 4]); max = Math.max(max, a[i * 4]); }
         expect(max - min).toBeGreaterThan(120);           // real slopes, not a flat map
-        expect(foam / (n * n)).toBeGreaterThan(0.03);     // a web, not nothing
-        expect(foam / (n * n)).toBeLessThan(0.6);         // and not solid foam
+        // The boils (blue): about 0.5, with real swing. Neither they nor the small waves (alpha) have a
+        // direction: they change as fast one way as another, or water carried down a river is combed into rows.
+        let sum = 0, sq = 0, alongX = 0, alongZ = 0, windX = 0, windZ = 0;
+        for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+            const at = (xx: number, yy: number, c: number) => a[(((yy + n) % n) * n + ((xx + n) % n)) * 4 + c] / 255;
+            const v = at(x, y, 2);
+            sum += v; sq += v * v;
+            alongX += (at(x + 1, y, 2) - v) ** 2; alongZ += (at(x, y + 1, 2) - v) ** 2;
+            // Along the tile's two diagonals for the small waves.
+            windX += (at(x + 1, y + 1, 3) - at(x, y, 3)) ** 2; windZ += (at(x + 1, y - 1, 3) - at(x, y, 3)) ** 2;
+        }
+        const mean = sum / (n * n), sd = Math.sqrt(sq / (n * n) - mean * mean);
+        expect(Math.abs(mean - 0.5)).toBeLessThan(0.02);
+        expect(sd).toBeGreaterThan(0.08);
+        expect(alongX / alongZ).toBeGreaterThan(0.85);
+        expect(alongX / alongZ).toBeLessThan(1.18);
+        expect(windX / windZ).toBeGreaterThan(0.85);
+        expect(windX / windZ).toBeLessThan(1.18);
         // Wrapping: the first and last columns' heights are neighbours on a periodic field.
         let jump = 0;
         for (let y = 0; y < n; y++) jump = Math.max(jump, Math.abs(a[(y * n) * 4 + 3] - a[(y * n + n - 1) * 4 + 3]));

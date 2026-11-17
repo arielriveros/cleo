@@ -281,9 +281,10 @@ function WaterSurface({ node, changed }: { node: WaterVolumeNode; changed: () =>
         {slider('screenReflections', 'Screen reflections', 'How much the screen-space reflection of the scene is used over the sky.', 0, 1, 0.05)}
         {slider('refraction', 'Refraction', 'How far what is under the surface bends with the waves.', 0, 2, 0.05)}
         {slider('detailStrength', 'Ripples', 'Strength of the waves under a metre long: the ripples the wind raises on the waves. 1 is the wind\u2019s own.', 0, 2, 0.05)}
-        {slider('detailScale', 'Foam size', 'Metres across the bubble web the foam is drawn with.', 0.1, 10, 0.1)}
+        {slider('detailScale', 'Foam size', 'Metres across the piece of web the foam is drawn from: its widest holes are about a seventh of that.', 0.1, 10, 0.1)}
         {slider('flowStrength', 'Flow', 'How far the waves and foam ride the current, so a river visibly runs.', 0, 2, 0.05)}
         {slider('flowScatter', 'Churn', 'How much fast water lightens and clouds, as churned water does.', 0, 2, 0.05)}
+        {slider('liveWaves', 'Live waves', 'How tall the simulated waves on flowing water stand round the camera: the boil of fast water, the wake below every stone, waves standing below a drop. 0: none.', 0, 2, 0.05)}
         {color('foamColor', 'Foam colour', 'The colour of the foam.')}
         {slider('shoreFoam', 'Shore foam', 'Metres of foam along the shore and in thin water.', 0, 10, 0.1)}
         {slider('crestFoam', 'Crest foam', 'Foam on breaking wave crests.', 0, 1, 0.05)}

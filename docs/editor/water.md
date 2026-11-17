@@ -74,7 +74,9 @@ With none, the water takes the default clear-lake look. The menu beside the pick
 
 The surface is single-layer water: what is under it is seen through it, bent by the waves and dimmed and
 tinted by the water it crosses, with caustics on the bed; it reflects the scene (screen-space) over the sky;
-and foam gathers on the shore, on breaking crests and in rapids. Rain from a Weather volume rings it, snow
+and foam gathers on the shore, on breaking crests and in rapids, drawn as foam lies on water: a few broken
+strands where there is a little, a web with round holes where there is more, white rafts of bubbles where it
+is thick. Rain from a Weather volume rings it, snow
 settles on still water as slush and then ice, and the scene's wind roughens it. Seen from below, it
 reflects the water back outside Snell's window.
 
@@ -89,14 +91,15 @@ reflects the water back outside Snell's window.
 | **Roughness** | How blurred the reflections are: 0 a mirror. Wind adds to it. |
 | **Screen reflections** | How much the screen-space reflection of the scene is used over the sky. Needs Screen-Space Reflections on in the Renderer settings. |
 | **Refraction** | How far what is under the surface bends with the waves. |
-| **Ripples** | Strength of the waves under a metre long: the ripples the wind raises on the waves. 1 is the wind's own; floating bodies do not feel them. |
-| **Foam size** | Metres across the bubble web the foam is drawn with. |
+| **Ripples** | Strength of the waves under a metre long: the ripples the wind raises on the waves, and on running water the ripples the current raises, carried along with it and busiest where the water boils. 1 is the wind's own; floating bodies do not feel them. |
+| **Foam size** | Metres across the piece of web the foam is drawn from: its widest holes are about a seventh of that, its bubbles a hundredth. |
 | **Flow** | How far the waves, the foam and the caustics ride the current, so a river visibly runs: 1 carries them at the water's own speed. Floating bodies ride the waves where the surface draws them. |
-| **Churn** | How much fast water lightens and clouds, as churned water does: a rapid reads pale against the dark, clear pool below it. 0: speed does not show in the colour. |
+| **Churn** | How much fast water lightens and clouds, as churned water does: a rapid reads pale against the dark, clear pool below it, and water with foam on it is milky between the foam's strands. 0: speed does not show in the colour. |
+| **Live waves** | How tall the simulated waves on flowing water stand round the camera (see Live waves, below): the boil of fast water, the wake below every stone, waves standing below a drop. 0: none, and with no river asking for them nothing is simulated. |
 | **Foam colour** | The colour of the foam. |
 | **Shore foam** | Metres of foam along the shore and in thin water, with surf lines running in; on an ocean, the foam of its breaking surf. |
 | **Crest foam** | Foam on breaking wave crests. |
-| **Rapids foam** | Foam where the water runs fast or drops: rapids, weirs, waterfalls. With a flow bake it is the foam the bake made and carried, so it trails downstream of a drop or a rock: streaks and rafts drawn out along the current, laced with bubbles, never a solid white sheet, and gone where the water is nearly still. |
+| **Rapids foam** | Foam where the water runs fast or drops: rapids, weirs, waterfalls. With a flow bake it is made where the bake found the water white and carried by the current: round the camera it trails from each stone of the bed in a streak that fades over a few seconds, broken into lace; farther off it is the bake's own foam, streaked along the flow. Never a solid white sheet, and gone where the water is nearly still. |
 | **Caustics** | Brightness of the light the waves focus on the bed. |
 | **Caustics size** | Metres between the caustic lines. |
 | **Rain rings** | How much rain from a Weather volume rings the surface. |
@@ -205,6 +208,43 @@ width at 3), and they run every way. Each stretch has the waves of its own speed
 pool, with the baked current where there is a flow bake and the drawn **Flow speed** where there is none.
 They ride downstream with the water, and the banks calm them within a stride. A river shows only the fields
 that shape them: **Height**, **Wave speed**, **Shore fade** and the swell.
+
+### Live waves
+
+Round the camera, flowing water also carries waves that are simulated every frame, not drawn from a formula:
+real surface waves on the baked current. The model is Jeschke and Wojtan's (2023): the flow bake is the bulk
+of the water, and on it ride waves that obey water's own rule, each wavelength running at the speed its length
+and the depth under it give, carried downstream by the current. That rule is what makes water in a river look
+like a river: a wave that runs upstream exactly as fast as the current runs down stays where it is. So the
+waves are raised where a river raises them, and then left to the water:
+
+- **Stones.** The bed is taken to have stones a foot or two across just under the surface, one to every ten
+  square metres or so, too small for the bake's grid. The water rides up over each and drops behind it, and in
+  fast water each leaves the V of a wake standing below it. They are not drawn: the bed shows none.
+- **Turbulence.** Fast water over a rough bed boils: a surface that heaves at random, carried with the
+  current, hardest where the bake found the water losing its energy, in riffles with glassy runs between.
+- **The bulk flow's turns.** Where the baked current speeds up or slows down sharply (the lip of a drop, the
+  foot of one) the surface cannot follow, and a train of waves stands below.
+
+A wave that steepens past what water holds breaks: it is damped, and leaves foam. The foam the stones and the
+boil churn up, where the bake found the water white, is carried by the same current and fades over a few
+seconds, so it lies in streaks. The surface is lifted by these waves, lit by their slopes, and takes its
+**Rapids foam** from them; **Live waves** on the Water material sets their height, and 0 turns them off.
+
+What to know:
+
+- They cover a square about 77 m across, set a little ahead of the camera, in cells of 15 cm. Water that
+  comes into it starts level and takes a second or two to be raised. Past it the river draws
+  its formula waves and the bake's own foam, as before; the join is faded over the last few metres.
+- A lake or pool joined to a river is in the same simulation, so the river's waves and foam run out into it.
+  An ocean keeps its own waves.
+- With no flow bake there is still a current to ride (the drawn **Flow speed**) and the stones still raise
+  wakes, but there is no foam to carry: the bake is what says where water turns white.
+- **Floating bodies do not feel them.** Buoyancy rides the river's formula waves and the baked current, as
+  before: these are for the eye.
+- They run at sixty steps a second, two a frame at most: under 30 frames a second they slow down rather than
+  cost more.
+- They need float render targets that can be filtered. A device without them draws the river as before.
 
 ### Surf
 

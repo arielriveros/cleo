@@ -14,7 +14,9 @@ import type { FullscreenPasses } from './fullscreenPasses';
 import { sizedTarget } from './featureSubsystems';
 import { ViewProjection } from './viewProjection';
 import { buildWaterInfo, heightQuantum, splitHeight, type WaterInfo } from '../../water/waterInfo';
-import { WATER_DETAIL_SIZE, waterDetailPixels } from '../../water/waterTextures';
+import { WATER_DETAIL_SIZE, WATER_FOAM_SIZE, waterDetailPixels, waterFoamPixels } from '../../water/waterTextures';
+import { WAVE_SIM_CELL, WAVE_SIM_SIZE } from '../../water/waveSim';
+import { WaterWaveSim, WAVE_SIM_SIDE, type WaveSimWater } from './waterWaves';
 import { selectOceanTiles, type OceanTile } from '../../water/oceanLod';
 import { sceneGround } from '../../water/ground';
 import { decodeWaterBake } from '../../water/bake/waterBakeFormat';
@@ -39,8 +41,8 @@ export interface WaterPassesHost {
     ssrForward(): readonly number[];
 }
 
-/** Quads across a tile at each level of detail. */
-const TILE_LODS = [64, 32, 16, 8];
+/** Quads across a tile at each level of detail. The first is for the tiles under the camera: fine enough to lift by the live waves. */
+const TILE_LODS = [128, 64, 32, 16, 8];
 /** Metres the skirt under each tile's edge hangs, covering cracks between tiles of different density. */
 const SKIRT = 0.3;
 /** Seconds between rebuilds of a node's water info while it is being edited (a gizmo drag). */
@@ -80,6 +82,8 @@ export class WaterPasses {
     private readonly _wind = createWindSample();
     /** Tiles drawn last frame, for stats and tests. */
     public tilesDrawn = 0;
+    /** The live waves on flowing water round the camera (render/waterWaves.ts). */
+    private _liveSim: WaterWaveSim | null = null;
 
     constructor(private readonly _host: WaterPassesHost,
                 private readonly _view: FrameView,
@@ -103,6 +107,9 @@ export class WaterPasses {
         if (!nodes.length) return;
         const meshes = this._ensureMeshes();
         const ground = sceneGround(scene);
+        // The live waves, before the surface's own pass opens: they record passes of their own. Only where a
+        // river runs: still water raises none.
+        this._liveWaves(nodes, ground);
 
         // The opaque scene's colour, for refraction: the transparents' copy, taken earlier here.
         const w = this._host.renderWidth, h = this._host.renderHeight;
@@ -171,9 +178,16 @@ export class WaterPasses {
                 const c = cam.position, col = node.columnAt(c[0], c[2], clock);
                 if (col && c[1] < col.surface && c[1] > col.floor - 1) under = { node, level: col.surface, look };
             }
+            // The live waves' window, for the water that carries them (an ocean has waves of its own).
+            const live = this._liveSim && this._liveSim.live && oceanLevel === null ? look.liveWaves : 0;
+            const window = this._liveSim && live > 0 ? [this._liveSim.origin[0], this._liveSim.origin[1], 1 / WAVE_SIM_SIDE, live] : [0, 0, 1, 0];
+            sm.setUniform('u_vLive', window);
+            sm.setUniform('u_fLive', window);
+            sm.setUniform('u_fLiveGrid', [1 / WAVE_SIM_SIZE, WAVE_SIM_CELL, body && body.type === 'river' ? 1 : 0, 0]);
             pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
                 this._targets.sceneDepth.depth, fbo.colors[0], env.cube ?? this._bindGroups.fallbackCube,
                 water.tex0 ?? this._fallbackInfo(), water.tex1 ?? this._fallbackInfo(), this._detail(),
+                this._liveSim && live > 0 ? this._liveSim.texture : this._detail(), this._foam(),
             ]));
             for (const tile of tiles) {
                 const quads = TILE_LODS[tile.lod];
@@ -217,6 +231,33 @@ export class WaterPasses {
     }
 
     private readonly _invScratch = mat4.create();
+
+    /**
+     * Step the live waves for this frame (render/waterWaves.ts): over every water with a grid, when a river
+     * is among them. They follow the camera, on the water's own clock.
+     */
+    private _liveWaves(nodes: readonly WaterVolumeNode[], ground: ReturnType<typeof sceneGround>): void {
+        const waters: WaveSimWater[] = [];
+        let river = false;
+        for (const node of nodes) {
+            const body = node.resolved();
+            if (!body || (body.type === 'ocean' && body.endless)) continue;
+            const water = this._waterOf(node, ground);
+            if (!water.info || !water.tex0 || !water.tex1) continue;
+            waters.push({ info: water.info, tex0: water.tex0, tex1: water.tex1 });
+            // A river with its Live waves at nought asks for none: with no other, nothing is simulated.
+            river = river || (node.flowReference() > 0 && WaterPasses._lookOf(node).liveWaves > 0);
+        }
+        if (!river || !WaterWaveSim.supported) {
+            if (this._liveSim) this._liveSim.update(NaN, 0, 0, 0, 0, []);
+            return;
+        }
+        if (!this._liveSim) this._liveSim = new WaterWaveSim(this._passes, this._fullscreen);
+        const cam = this._view.camera;
+        // The camera looks down its view matrix's third row, negated.
+        const v = cam.viewMatrix;
+        this._liveSim.update(waterTime(this._view.windTime), cam.position[0], cam.position[2], -v[2], -v[10], waters, this._detail());
+    }
 
     // ---- per node ---------------------------------------------------------------------------------
 
@@ -391,9 +432,10 @@ export class WaterPasses {
 
     private _detailTexture: Texture | null = null;
     /**
-     * The foam texture (water/waterTextures.ts), made on first use, tiled, and MIPMAPPED: the shader picks a
-     * level by distance, and an unfilled level is black (a raw-bytes upload fills level 0 only), so it goes
-     * up the way an image does, which builds the chain on both backends.
+     * The detail texture (water/waterTextures.ts: the ripples' slopes, and the noise the live waves'
+     * turbulence is renewed with), made on first use, tiled, and MIPMAPPED: the shader picks a level by
+     * distance, and an unfilled level is black (a raw-bytes upload fills level 0 only), so it goes up the
+     * way an image does, which builds the chain on both backends.
      */
     private _detail(): Texture {
         if (!this._detailTexture) {
@@ -402,6 +444,17 @@ export class WaterPasses {
             this._detailTexture = tex;
         }
         return this._detailTexture;
+    }
+
+    private _foamTexture: Texture | null = null;
+    /** The foam texture (water/waterTextures.ts): what an amount of foam is drawn with. Made and uploaded as the detail texture is. */
+    private _foam(): Texture {
+        if (!this._foamTexture) {
+            const tex = new Texture({ mipMap: true, wrapping: 'repeat' });
+            tex.createFromPixels(new Uint8ClampedArray(waterFoamPixels().buffer), WATER_FOAM_SIZE, WATER_FOAM_SIZE);
+            this._foamTexture = tex;
+        }
+        return this._foamTexture;
     }
 
     private _fallback: Texture | null = null;
@@ -439,7 +492,7 @@ export class WaterPasses {
         };
         const lodFor = (d: number, size: number) => {
             const r = d / Math.max(size, 1);
-            return r < 1.5 ? 0 : r < 4 ? 1 : r < 10 ? 2 : 3;
+            return r < 0.75 ? 0 : r < 1.5 ? 1 : r < 4 ? 2 : r < 10 ? 3 : 4;
         };
         if (info && info.tilesX > 0) {
             const span = info.tileCells * info.cell;

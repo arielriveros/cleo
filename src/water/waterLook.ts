@@ -26,12 +26,14 @@ export interface WaterLook {
     refraction: number;
     /** 0..2: strength of the waves under a metre long, the ripples on top of the waves (physics never feels them). */
     detailStrength: number;
-    /** Metres: size of the bubble web the foam is drawn with. */
+    /** Metres across the tile of web the foam is drawn from (its widest holes a seventh of that), and a third of the ripples' tile. */
     detailScale: number;
     /** 0..2: how far the waves and foam ride the current (rivers). */
     flowStrength: number;
     /** 0..2: how much fast water lightens and clouds, as churned water does (rivers). */
     flowScatter: number;
+    /** 0..2: how tall the live waves round the camera stand (render/waterWaves.ts). 0: none are drawn. */
+    liveWaves: number;
     /** Linear RGB of foam. */
     foamColor: [number, number, number];
     /** Metres of foam along the shore. */
@@ -81,6 +83,7 @@ export const DEFAULT_WATER_LOOK: WaterLook = {
     detailScale: 1.5,
     flowStrength: 1,
     flowScatter: 1,
+    liveWaves: 1,
     foamColor: [0.9, 0.93, 0.95],
     shoreFoam: 0.6,
     crestFoam: 0.5,
@@ -120,6 +123,7 @@ export function normaliseWaterLook(v: any): WaterLook {
         detailScale: pos(v?.detailScale, d.detailScale, 50) || 0.05,
         flowStrength: pos(v?.flowStrength, d.flowStrength, 2),
         flowScatter: pos(v?.flowScatter, d.flowScatter, 2),
+        liveWaves: pos(v?.liveWaves, d.liveWaves, 2),
         foamColor: rgb(v?.foamColor, d.foamColor),
         shoreFoam: pos(v?.shoreFoam, d.shoreFoam, 20),
         crestFoam: unit(v?.crestFoam, d.crestFoam),
