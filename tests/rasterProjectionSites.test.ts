@@ -84,6 +84,9 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // Every decal box: the DBuffer and emissive passes (before the resolve, jittered) AND the
             // editor overlay (after it, not) — the `beginModel` situation, decided by the flag.
             '_setDecalUniforms',
+            // Water surfaces (WaterPasses.renderWater): drawn into the scene before the fog and the
+            // resolve, so the glints and shorelines are TAA input like the ground they meet.
+            'renderWater',
 
             // --- After the resolve: the flag is already false, and these must stay put. ---
             '_drawSkeletonOverlay',

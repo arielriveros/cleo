@@ -22,6 +22,7 @@ import { GiBakeRegistry } from './gi/giBakeRegistry';
 import { DEFAULT_WATER_LOOK, type WaterLook } from '../../water/waterLook';
 import { GERSTNER_MAX_WAVES, type GerstnerWave } from '../../physics/water/gerstner';
 import { waterTime } from '../../physics/water/waterClock';
+import { surfOf } from '../../physics/water/surf';
 import { createWindSample, sampleWindField } from '../../core/wind/windField';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
@@ -161,6 +162,8 @@ export class WaterPasses {
             const heightScale = node.waveWindScale();
             let up = node.waveAmplitude, side = 0;
             for (const w of waves) { up += w.amplitude * heightScale; side += w.steepness * w.wavelength / (2 * Math.PI * waves.length); }
+            // An ocean's surf stands taller than its waves over the beach.
+            if (oceanLevel !== null && info) up += 1.5 * surfOf(waves, heightScale, this._surf).amplitude;
             const tiles = this._tilesOf(node, info, oceanLevel, up, side);
             if (!tiles.length) continue;
             // The waves' clock: the physics' drawn time while the game runs (so floaters ride what is drawn),
@@ -251,6 +254,11 @@ export class WaterPasses {
         sm.setUniform('u_fWavePhase', phase);
         sm.setUniform('u_fWaveParams', [n, t, heightScale, node.shoreFade]);
         sm.setUniform('u_swell', [node.waveAmplitude, node.waveFrequency, amplitude * heightScale, 0]);
+        // The surf over the beach (physics/water/surf.ts): an ocean with a shore grid has it, from its waves.
+        const surf = surfOf(waves, heightScale, this._surf);
+        const surfOn = oceanLevel !== null && !!info ? 1 : 0;
+        sm.setUniform('u_vSurf', [surf.omega, surf.amplitude, surfOn, 0]);
+        sm.setUniform('u_fSurf', [surf.omega, surf.amplitude, surfOn, 0]);
         const cam = this._view.camera.position;
         sm.setUniform('u_viewPos', [cam[0], cam[1], cam[2], t]);
 
@@ -298,6 +306,7 @@ export class WaterPasses {
         void scene;
     }
 
+    private readonly _surf = { omega: 0, amplitude: 0 };
     private readonly _waveDir = new Float32Array(GERSTNER_MAX_WAVES * 4);
     private readonly _wavePhase = new Float32Array(GERSTNER_MAX_WAVES * 4);
 
@@ -318,7 +327,7 @@ export class WaterPasses {
     private _waterOf(node: WaterVolumeNode, ground: ReturnType<typeof sceneGround>): NodeWater {
         let water = this._nodes.get(node);
         const key = `${node.resolveKey()}|${ground.key}`;
-        const now = performance.now() / 1000;
+        const now = performance.now() / 1000; // wall-clock: throttles CPU rebuilds of the grid, not a look
         // A current bake replaces the analytic grid; a stale one (the shapes changed since) is ignored.
         const bake = node.bakeId ? this._bakeOf(node.bakeId) : null;
         const baked = bake && bake.signature === node.bakeSignature() ? bake : null;

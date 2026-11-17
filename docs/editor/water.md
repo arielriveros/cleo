@@ -76,8 +76,8 @@ reflects the water back outside Snell's window.
 | Field | What it does |
 |---|---|
 | **Shallow colour** | The tint of light scattered near the surface: what shallow water looks like. |
-| **Deep colour** | The colour deep water takes: light scattered back from far down. |
-| **Absorption** | How fast each colour dies with depth (brighter is absorbed faster). Clear water loses red first, so its depths turn blue-green. |
+| **Deep colour** | The colour deep water takes: the share of the light going down that the water scatters back up. A real sea's is a few percent, in the blue, so open water is dark and takes most of its colour from the sky it reflects. |
+| **Absorption** | How fast each colour dies with depth (brighter is absorbed faster). Clear water loses red first, so its depths turn blue-green. The bed darkens with depth twice over: the light going down to it and coming back up. |
 | **Murkiness** | Suspended silt: murky water hides the bed a short way down. |
 | **Clarity** | Metres you can see down before the scattering hides the bed. |
 | **Reflectivity** | Reflectance looking straight down (water is 0.02); grazing reflection rises toward a mirror by Fresnel. |
@@ -88,7 +88,7 @@ reflects the water back outside Snell's window.
 | **Ripple size** | Metres across the small ripples. |
 | **Flow** | How far the ripples and foam ride the current, so a river visibly runs. |
 | **Foam colour** | The colour of the foam. |
-| **Shore foam** | Metres of foam along the shore and in thin water, with surf lines running in. |
+| **Shore foam** | Metres of foam along the shore and in thin water, with surf lines running in; on an ocean, the foam of its breaking surf. |
 | **Crest foam** | Foam on breaking wave crests. |
 | **Rapids foam** | Foam where the water runs fast or drops: rapids, weirs, waterfalls. |
 | **Caustics** | Brightness of the light the waves focus on the bed. |
@@ -154,6 +154,16 @@ Gerstner waves shaped by the wind: the longer and stronger the wind blows over o
 taller and faster they are. A lake or pool limits them to what its size lets build; an endless ocean lets
 them grow fully developed; a river carries only a small share of them. Floating bodies ride the same waves the
 surface draws.
+
+### Surf
+
+On a landscape, an ocean's waves break on its beaches. Over the last few metres of depth the open sea's waves
+give way to surf: breakers at the sea's own period that slow as the water shallows, so their crests bunch up
+and turn to follow the shore; that grow as they come in and break where they stand about as tall as the water
+is deep; and that run up the beach and drain back, foaming as they break and as each one spends itself on the
+sand. Calm seas lap; a strong wind's sea pounds. The surf comes in sets, bigger and smaller, differing along
+the shore. Floating bodies in it rise with each breaker, are carried in on it and drawn back by the backwash.
+Nothing to set: the waves decide it.
 
 | Field | What it does |
 |---|---|

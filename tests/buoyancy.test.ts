@@ -199,9 +199,10 @@ describe('water motion', () => {
         expect(fromRiver).toBe(0);
     });
 
-    it('fades the waves out on an ocean beach for physics as the surface does', async () => {
+    it('fades the waves out on an ocean beach for physics as the surface does, the surf running in instead', async () => {
         const { waterSpecColumn } = await import('../src/physics/waterSurface');
         const { gerstnerWavesForWind } = await import('../src/physics/water/gerstner');
+        const { surfOf } = await import('../src/physics/water/surf');
         const ocean = { id: 'o', type: 'ocean' as const, priority: 0, order: 0, min: [-1e7, -50, -1e7] as [number, number, number],
             max: [1e7, 0, 1e7] as [number, number, number], level: 0, floor: -50, outline: [], samples: [], cell: 1, grid: {}, endless: true, waveFactor: 1 };
         // A shore grid: land at x >= 100, the bed rising toward it.
@@ -223,8 +224,20 @@ describe('water motion', () => {
             for (let t = 0; t < 12; t += 0.25) { const s = waterSpecColumn(spec, x, 4, t)!.surface; lo = Math.min(lo, s); hi = Math.max(hi, s); }
             return hi - lo;
         };
-        expect(swing(98)).toBeLessThan(swing(20) * 0.1);   // at the waterline, barely any
         expect(swing(20)).toBeGreaterThan(0.2);
+        // At the waterline the sea's waves are gone; what moves the water is the surf, no taller than its
+        // run-up: 0.78 of the depth (0.4 m here) plus half the sea's amplitude, trough to crest.
+        const a = surfOf(spec.waves, 1).amplitude;
+        expect(swing(98)).toBeGreaterThan(0.02);
+        expect(swing(98)).toBeLessThanOrEqual(2 * (0.39 * 0.4 + 0.5 * a) + 1e-6);
+        // And floaters there are carried in with each breaker and out with the backwash.
+        let inward = 0, outward = 0;
+        for (let t = 0; t < 12; t += 0.25) {
+            const v = waterSpecColumn(spec, 90, 4, t)!.waveVX ?? 0;
+            inward = Math.max(inward, v); outward = Math.min(outward, v);
+        }
+        expect(inward).toBeGreaterThan(0.05);
+        expect(outward).toBeLessThan(-0.05);
     });
 
     it('runs the waves on the physics\u2019 drawn time while it steps, else on the render clock', async () => {

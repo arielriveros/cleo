@@ -63,6 +63,7 @@ struct WaterVertexUniforms {
     u_waveParams: vec4<f32>,      // count, time (s, wave speed applied), height scale, shore fade (m)
     u_swell: vec4<f32>,           // amplitude (m), frequency (Hz), summed wave amplitude (m)
     u_vCamera: vec4<f32>,         // camera position
+    u_vSurf: vec4<f32>,           // surf: frequency (rad/s), amplitude (m), 1 = on (an ocean with a shore grid)
 };
 @group(1) @binding(0) var<uniform> u_wv: WaterVertexUniforms;
 
@@ -98,6 +99,7 @@ struct WaterFragmentUniforms {
     u_fWaveParams: vec4<f32>,     // count, -, height scale, -
     u_ripple: vec4<f32>,          // longest ripple (m), slope of each, wavelength ratio, count
     u_rippleDir: vec4<f32>,       // dir x, dir z (the waves' heading)
+    u_fSurf: vec4<f32>,           // as u_vSurf
 };
 @group(1) @binding(1) var<uniform> u_wf: WaterFragmentUniforms;
 
@@ -150,6 +152,85 @@ fn insideInfo(uvw: vec3<f32>) -> bool {
 /** How much of a wave of length `lambda` a grid of `cell` metres (or a pixel of that footprint) draws. */
 fn bandLimit(lambda: f32, cell: f32) -> f32 {
     return smoothstep(2.0 * cell, 4.0 * cell, lambda);
+}
+
+fn hash12(p: vec2<f32>) -> f32 {
+    var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+fn hash11(x: f32) -> f32 {
+    return hash12(vec2<f32>(x, x * 1.618 + 0.37));
+}
+
+fn valueNoise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let a = hash12(i);
+    let b = hash12(i + vec2<f32>(1.0, 0.0));
+    let c = hash12(i + vec2<f32>(0.0, 1.0));
+    let d = hash12(i + vec2<f32>(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// ---- surf (physics/water/surf.ts surfAt, operation for operation) ---------------------------------------
+//
+// The sea's waves as they run in over a beach: one train of breakers at the sea's period whose phase is the
+// time left to reach the shore (2 * distance / sqrt(g * depth) over a planar beach), so the crests slow,
+// bunch up and follow the depth contours; growing as the water shoals, breaking at 0.78 of the depth, running
+// up the beach and draining back, the crest sharpening and leaning shoreward as it breaks.
+
+struct Surf {
+    height: f32,
+    /** d height / dt on the waves' clock (the slope is this times the travel time's gradient). */
+    rate: f32,
+    /** 0 offshore of the surf, 1 where it breaks. */
+    breaking: f32,
+    /** 0 on a crest, growing behind it. */
+    phase: f32,
+    /** Metres: the breakers' length here. */
+    wavelength: f32,
+};
+
+fn surfTravelTime(edge: f32, depth: f32) -> f32 {
+    return 2.0 * max(edge, 0.0) / sqrt(9.81 * max(depth, 0.1));
+}
+
+/** The surf at rest point `p`, `edge` metres from the shore and `depth` deep; `s` = (frequency, amplitude, on). */
+fn surfAt(s: vec4<f32>, p: vec2<f32>, t: f32, edge: f32, depth: f32) -> Surf {
+    var r: Surf;
+    r.height = 0.0;
+    r.rate = 0.0;
+    r.breaking = 0.0;
+    r.phase = 0.0;
+    r.wavelength = 1e4;
+    if (s.z < 0.5 || s.y <= 0.0 || s.x <= 0.0) { return r; }
+    // Sets: the breakers come in groups of about seven, the groups differing along the shore.
+    let group = 0.6 + 0.4 * sin(s.x * t / 7.3 + 6.2831853 * valueNoise(p / 90.0));
+    let a0 = s.y * group;
+    let hb = max(2.0 * a0 / 0.78, 0.05);
+    let h = max(depth, 0.0);
+    if (h >= 8.0 * hb) { return r; }
+    let inW = clamp((8.0 * hb - h) / (4.0 * hb), 0.0, 1.0);
+    let fadeIn = inW * inW * (3.0 - 2.0 * inW);
+    let b = clamp((4.0 * hb - h) / (3.0 * hb), 0.0, 1.0);
+    let shoal = a0 * pow(4.0 * hb / max(h, hb), 0.25);
+    let a = fadeIn * min(shoal, 0.78 * 0.5 * h + 0.5 * a0);
+    let theta = s.x * (t + surfTravelTime(edge, depth)) + 2.5 * valueNoise(vec2<f32>(p.x / 37.0 + 17.3, p.y / 37.0));
+    let q = 0.5 * b;
+    let k = 0.45 * b;
+    let st = sin(theta);
+    let ct = cos(theta);
+    let phase = theta + q * st + k * ct;
+    let dPhase = 1.0 + q * ct - k * st;
+    r.height = a * cos(phase);
+    r.rate = -a * sin(phase) * dPhase * s.x;
+    r.breaking = b * fadeIn;
+    r.phase = phase - 6.2831853 * floor(phase / 6.2831853);
+    r.wavelength = 6.2831853 * sqrt(9.81 * max(h, 0.1)) / s.x;
+    return r;
 }
 
 // ---- Gerstner waves (physics/water/gerstner.ts gerstnerDisplacement, operation for operation) -----------
@@ -230,6 +311,11 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
     let scale = u_wv.u_waveParams.z * share * fade * fade * (3.0 - 2.0 * fade) * cap;
     let t = u_wv.u_waveParams.y;
     var p = vec3<f32>(xz.x, surface, xz.y) + gerstnerOffset(xz.x, xz.y, t, scale, cell);
+    // Over the beach the surf takes over from the waves, as physics/water/surf.ts adds it to what floats.
+    if (ocean) {
+        let sf = surfAt(u_wv.u_vSurf, xz, t, edge, depth);
+        p.y += sf.height * bandLimit(sf.wavelength, cell);
+    }
     if (u_wv.u_swell.x > 0.0) {
         p.y += u_wv.u_swell.x * sin(t * u_wv.u_swell.y * PI * 2.0 + xz.x * 0.37 + xz.y * 0.29);
     }
@@ -250,6 +336,14 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
 
 // ---- fragment helpers -----------------------------------------------------------------------------
 
+/** The surf's travel time to the shore at rest point `xz`, from the ocean's shore grid (physics: waterSurface.ts). */
+fn oceanTravelTime(xz: vec2<f32>) -> f32 {
+    let c = clamp(infoUvw(xz, u_wf.u_fInfoOrigin, u_wf.u_fInfoSize), vec3<f32>(0.0), vec3<f32>(1.0));
+    let e = textureSampleLevel(u_info0_texture, u_info0_sampler, c, 0.0).w;
+    let bed = textureSampleLevel(u_info1_texture, u_info1_sampler, c, 0.0).z + u_wf.u_fInfoSize.z;
+    return surfTravelTime(e, u_wf.u_fOcean.x - bed);
+}
+
 fn linearDepth(d: f32) -> f32 {
     let n = u_wf.u_depthParams.x;
     let f = u_wf.u_depthParams.y;
@@ -260,27 +354,6 @@ fn linearDepth(d: f32) -> f32 {
 
 fn sceneDepthAt(uv: vec2<f32>) -> f32 {
     return linearDepth(textureSampleLevel(u_sceneDepth_texture, u_sceneDepth_sampler, uv, 0));
-}
-
-fn hash12(p: vec2<f32>) -> f32 {
-    var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
-
-fn hash11(x: f32) -> f32 {
-    return hash12(vec2<f32>(x, x * 1.618 + 0.37));
-}
-
-fn valueNoise(p: vec2<f32>) -> f32 {
-    let i = floor(p);
-    let f = fract(p);
-    let u = f * f * (3.0 - 2.0 * f);
-    let a = hash12(i);
-    let b = hash12(i + vec2<f32>(1.0, 0.0));
-    let c = hash12(i + vec2<f32>(0.0, 1.0));
-    let d = hash12(i + vec2<f32>(1.0, 1.0));
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
 /** What the waves give the pixel at rest point `p`: xy slope (d/dx, d/dz), z crest compression, w unresolved slope variance. */
@@ -522,6 +595,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var edge = 1e4;
     var foamBake = 0.0;
     var wet = 1.0;
+    var seaDepth = 1e4;
     let uvw = infoUvw(in.rest.xy, u_wf.u_fInfoOrigin, u_wf.u_fInfoSize);
     let hasInfo = u_wf.u_fInfoOrigin.w > 0.5;
     if (hasInfo && (insideInfo(uvw) || !ocean)) {
@@ -529,6 +603,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let i0 = textureSampleLevel(u_info0_texture, u_info0_sampler, c, 0.0);
         let i1 = textureSampleLevel(u_info1_texture, u_info1_sampler, c, 0.0);
         edge = i0.w;
+        if (ocean) { seaDepth = max(0.0, u_wf.u_fOcean.x - (i1.z + u_wf.u_fInfoSize.z)); }
         if (!ocean) {
             surface = i0.x + u_wf.u_fInfoSize.z;
             flow = i0.yz;
@@ -580,13 +655,32 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (weather.x > 0.0 && u_wf.u_detailParams.z > 0.0 && ringFade > 0.0) {
         slope += rainRings(in.worldPos.xz, u_ww.u_weatherInfo.y, weather.x * 0.8) * u_wf.u_detailParams.z * ringFade;
     }
+    // The surf's slope: its rate of rise times the travel time's gradient, from the shore grid a cell either way.
+    var surf: Surf;
+    surf.breaking = 0.0;
+    surf.phase = 0.0;
+    var surfVariance = 0.0;
+    var toShore = vec2<f32>(0.0);
+    if (ocean && u_wf.u_fSurf.z > 0.5 && seaDepth < 1e3) {
+        surf = surfAt(u_wf.u_fSurf, in.rest.xy, t, edge, seaDepth);
+        if (surf.breaking > 0.0 || surf.height != 0.0) {
+            let d = u_wf.u_fInfoOrigin.z;
+            let tx = (oceanTravelTime(in.rest.xy + vec2<f32>(d, 0.0)) - oceanTravelTime(in.rest.xy - vec2<f32>(d, 0.0))) / (2.0 * d);
+            let tz = (oceanTravelTime(in.rest.xy + vec2<f32>(0.0, d)) - oceanTravelTime(in.rest.xy - vec2<f32>(0.0, d))) / (2.0 * d);
+            let w = smoothstep(2.0 * footprint, 6.0 * footprint, surf.wavelength);
+            slope += surf.rate * vec2<f32>(tx, tz) * w;
+            let ss = surf.rate * length(vec2<f32>(tx, tz));
+            surfVariance = (1.0 - w * w) * 0.5 * ss * ss;
+            if (length(vec2<f32>(tx, tz)) > 1e-6) { toShore = -normalize(vec2<f32>(tx, tz)); }
+        }
+    }
     var N = normalize(vec3<f32>(-slope.x, 1.0 - waves.z, -slope.y));
     if (below) { N = -N; }
     let NoV = clamp(dot(N, V), 1e-3, 1.0);
 
     // Roughness: the surface's own (a floor, so the sun never collapses to a single pixel), the rain's,
     // and every slope too small for this pixel to draw (Bruneton: their variance is the highlight's width).
-    let unresolved = waves.w + rip.z * strength * strength + weather.x * 0.01 * u_wf.u_detailParams.z;
+    let unresolved = waves.w + rip.z * strength * strength + weather.x * 0.01 * u_wf.u_detailParams.z + surfVariance;
     let base = max(u_wf.u_absorption.w * u_wf.u_absorption.w, 0.02);
     var alpha = sqrt(base * base + unresolved);
 
@@ -621,21 +715,39 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Absorption and scattering (Beer-Lambert): murky water scatters back long before it reaches the bed.
     let turbidity = u_wf.u_shallowColor.w;
     let clarity = max(u_wf.u_deepColor.w, 0.05);
-    let sigma = u_wf.u_absorption.rgb * (1.0 + turbidity * 3.0) + vec3<f32>(turbidity / clarity + 0.15 / clarity);
+    let absorb = u_wf.u_absorption.rgb * (1.0 + turbidity * 3.0);
+    let sigma = absorb + vec3<f32>(turbidity / clarity + 0.15 / clarity);
     let transmit = exp(-sigma * thickness);
-    let lightIn = (u_wf.u_ambient.rgb + u_wf.u_sunColor.rgb * sunUp * 0.6 * mix(0.35, 1.0, sunVis)) * pre;
-    let scatter = mix(u_wf.u_shallowColor.rgb, u_wf.u_deepColor.rgb, clamp(1.0 - exp(-thickness / clarity), 0.0, 1.0)) * lightIn;
-    // Caustics on the bed, as deep as the sun reaches: the bed's own colour brightened where the waves
-    // above focus the sun on it.
+    // The light going down into the water (the sky's and the sun's, by its height and its shadow), and the
+    // share of it the water scatters back up: the shallow and deep colours are that share (reflectances,
+    // as an ocean's is a few percent in the blue), and what leaves a surface lit by an irradiance E is
+    // E / pi of radiance. So deep water stays as dark as a real sea's, and the sky it reflects, not paint,
+    // gives it its colour away from the vertical.
+    let lightIn = (u_wf.u_ambient.rgb + u_wf.u_sunColor.rgb * sunUp * mix(0.35, 1.0, sunVis)) * pre;
+    let scatter = mix(u_wf.u_shallowColor.rgb, u_wf.u_deepColor.rgb, clamp(1.0 - exp(-thickness / clarity), 0.0, 1.0)) * lightIn / PI;
+    // The bed is lit THROUGH the water above it, as well as seen through it: the sun's light comes down a
+    // path bent by refraction (Snell, 1.33), the sky's from every way (on average some 1.2 of the depth),
+    // so a deep bed darkens and turns blue-green twice over, down and back up. Forward scattering keeps
+    // most of the scattered light going down: half of the scattering counts against it.
+    var down = vec3<f32>(1.0);
     var caustic = vec3<f32>(0.0);
-    if (u_wf.u_foamParams.z > 0.0 && !farScene && !below) {
+    if (!farScene && !below) {
         let bed = cam - V * (behind * toPath);
         let underBy = max(0.0, surface - bed.y);
-        let cScale = max(u_wf.u_foamParams.w, 0.05);
-        let c = causticAt(bed.xz / cScale * 2.0 + flow * t * 0.3, t * 0.8);
-        caustic = vec3<f32>(c * u_wf.u_foamParams.z * 1.5 * sunUp * sunVis) * exp(-sigma * underBy) * smoothstep(0.0, 0.3, underBy);
+        let cosT = sqrt(max(1.0 - (1.0 - sunUp * sunUp) / 1.7689, 0.05));
+        let sunLight = luminance(u_wf.u_sunColor.rgb) * sunUp * sunVis;
+        let sunShare = sunLight / max(sunLight + luminance(u_wf.u_ambient.rgb), 1e-4);
+        let path = underBy * (sunShare / cosT + (1.0 - sunShare) * 1.2);
+        down = exp(-(absorb + vec3<f32>(0.5 * (turbidity / clarity + 0.15 / clarity))) * path);
+        // Caustics on the bed, as deep as the sun reaches: the bed's own colour brightened where the
+        // waves above focus the sun on it.
+        if (u_wf.u_foamParams.z > 0.0) {
+            let cScale = max(u_wf.u_foamParams.w, 0.05);
+            let c = causticAt(bed.xz / cScale * 2.0 + flow * t * 0.3, t * 0.8);
+            caustic = vec3<f32>(c * u_wf.u_foamParams.z * 1.5 * sunUp * sunVis) * exp(-sigma * underBy) * smoothstep(0.0, 0.3, underBy);
+        }
     }
-    let under = refracted * (vec3<f32>(1.0) + caustic) * transmit + scatter * (vec3<f32>(1.0) - transmit);
+    let under = refracted * down * (vec3<f32>(1.0) + caustic) * transmit + scatter * (vec3<f32>(1.0) - transmit);
 
     // Reflection: the screen-space march where it finds something, the sky or environment cube under it.
     // A reflected ray that points down would only meet the next wave; the sky that wave reflects is the
@@ -648,9 +760,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let ssr = screenReflection(in.worldPos, R0, surface);
         reflected = mix(reflected, ssr.rgb, ssr.a * u_wf.u_surfaceParams.y);
     }
-    // Fresnel over a rough surface (Bruneton 2010): the mean over the slopes this pixel cannot see.
+    // Fresnel over a rough surface (Bruneton 2010): the mean over the slopes this pixel cannot see, with
+    // their spread along the view (half the total variance: the slopes are about as rough every way).
     let F0 = u_wf.u_surfaceParams.x;
-    let sd = sqrt(unresolved);
+    let sd = sqrt(unresolved * 0.5);
     var F = F0 + (1.0 - F0) * pow(1.0 - NoV, 5.0 * exp(-2.69 * sd)) / (1.0 + 22.7 * pow(sd, 1.5));
     // Thin water at the shore barely reflects, so the shoreline fades instead of drawing a hard line.
     F *= smoothstep(0.0, 0.08, thickness + select(0.0, 1.0, below));
@@ -693,12 +806,21 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // little foam is a lace of lines and a lot is solid white, never a soft blur.
     let shoreW = u_wf.u_foamColor.w;
     var amount = 0.0;
+    var surfAmount = 0.0;
     if (shoreW > 0.0) {
         let near = min(edge, thickness * 2.0);
         let band = 1.0 - smoothstep(0.0, shoreW, near);
-        // Surf lines running in toward the shore, broken up by the ripples.
-        let surf = 0.5 + 0.5 * sin(edge * 2.5 - t * 1.6 + rip.w * 30.0);
-        amount = max(amount, band * mix(0.55, 1.0, surf));
+        if (surf.breaking > 0.0) {
+            // A sea's surf: the swash white as each breaker runs up the beach and spent as it drains back,
+            // and each breaking crest whitening, its foam trailing it seaward as the bore runs on.
+            let swash = 0.5 + 0.5 * cos(surf.phase - 0.6);
+            let trail = pow(0.5 + 0.5 * cos(surf.phase - 0.9), 4.0);
+            surfAmount = max(band * mix(0.15, 0.8, swash), surf.breaking * surf.breaking * trail * 0.85 * min(shoreW, 1.0));
+        } else {
+            // Lines running in toward the shore (the phase falls as the distance does), broken by the ripples.
+            let lines = 0.5 + 0.5 * sin(edge * 2.5 + t * 1.6 + rip.w * 30.0);
+            amount = max(amount, band * mix(0.55, 1.0, lines));
+        }
     }
     amount = max(amount, smoothstep(0.3, 0.85, waves.z) * u_wf.u_foamParams.x);
     amount = max(amount, foamBake * u_wf.u_foamParams.y);
@@ -713,15 +835,32 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         amount = max(amount, fall * (0.5 + 0.5 * streak));
     }
     if (amount > 0.0) {
-        // The web drifts with the water, sampled at the mip the footprint calls for.
+        // The web drifts with the water, sampled at the mip the footprint calls for, on the same two phases
+        // as the ripples: one phase alone would jump back every cycle.
         let webScale = max(u_wf.u_detailParams.x, 0.05) * 4.0;
         let webLod = clamp(log2(footprint / (webScale / 256.0)), 0.0, 8.0);
-        let web = textureSampleLevel(u_detail_texture, u_detail_sampler, (in.rest.xy - f * ph0 * cycle) / webScale, webLod).z;
+        var web = textureSampleLevel(u_detail_texture, u_detail_sampler, (in.rest.xy - f * ph0 * cycle) / webScale, webLod).z;
+        if (length(f) > 1e-3) {
+            let web1 = textureSampleLevel(u_detail_texture, u_detail_sampler, (in.rest.xy - f * ph1 * cycle + vec2<f32>(3.7, 1.9)) / webScale, webLod).z;
+            web = mix(web, web1, wgt);
+        }
         var foam = smoothstep(1.0 - amount, 1.0 - amount + 0.35, web * 0.75 + amount * 0.45);
         foam *= smoothstep(0.0, 0.08, amount);
         // Foam is a rough white scatterer: lit by the sun as it falls (not by the rippled normal) and the sky.
         let foamLit = u_wf.u_foamColor.rgb * (u_wf.u_ambient.rgb + u_wf.u_sunColor.rgb * sunUp * sunVis) * pre * 0.3;
         color = mix(color, foamLit, foam * select(1.0, 0.0, below));
+    }
+    if (surfAmount > 0.0 && !below) {
+        // Surf foam is sheets and patches with holes in them, not a web of bubbles: smooth noise at three
+        // scales, thresholded by how much there is, carried in and out with the swash (its pattern moves
+        // shoreward as the water rises), so the beach's foam flows rather than sits.
+        let q = in.rest.xy + toShore * (surf.height * 3.0);
+        let n = valueNoise(q * 0.45) * 0.5 + valueNoise(q * 1.3 + vec2<f32>(7.1, 2.9)) * 0.3 + valueNoise(q * 3.7 + vec2<f32>(3.3, 8.6)) * 0.2;
+        let th = 1.0 - 0.7 * surfAmount;
+        var sfoam = smoothstep(th - 0.04, th + 0.04, n);
+        sfoam *= smoothstep(0.0, 0.1, surfAmount);
+        let foamLit = u_wf.u_foamColor.rgb * (u_wf.u_ambient.rgb + u_wf.u_sunColor.rgb * sunUp * sunVis) * pre * 0.3;
+        color = mix(color, foamLit, sfoam);
     }
 
     // Ice and slush: snow-coloured, lit, the water's own look gone under it.

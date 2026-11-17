@@ -1,6 +1,7 @@
 import type { BuoyancyVolume, WaterColumnSample } from './buoyancy';
 import { gerstnerSurfaceAt, type GerstnerSurface, type GerstnerWave } from './water/gerstner';
 import { waterColumnAt, type ResolvedWaterShape, type WaterColumn } from './water/waterColumn';
+import { addSurf, surfOf, surfTravelTime, type SurfWave } from './water/surf';
 
 // A water node as plain data, and the surface it waves. Shared by the scene's WaterVolumeNode and the
 // physics worker (physics/worker/), which buoys bodies in a thread that has no scene: both build the
@@ -149,6 +150,14 @@ export function waveHeight(spec: WaterSpec, x: number, z: number, time: number, 
 }
 
 const _shore = [0, 0];
+const _shoreAt = [0, 0];
+const _surf: SurfWave = { omega: 0, amplitude: 0 };
+
+/** The surf's travel time to the shore at (x, z) from the shore grid (water.wgsl oceanTravelTime); `fallback` outside it. */
+function shoreTravelTime(g: WaterShoreGrid, level: number, x: number, z: number, fallback: number): number {
+    if (!sampleShoreGrid(g, x, z, _shoreAt)) return fallback;
+    return surfTravelTime(_shoreAt[0], level - _shoreAt[1]);
+}
 
 /**
  * The water at (x, z) at `time`: surface (waves included), its resting height, bed, flow, and the waves'
@@ -182,6 +191,19 @@ export function waterSpecColumn(spec: WaterSpec, x: number, z: number, time: num
     }
     col.rest = col.surface;
     const w = waveAt(spec, x, z, time, col.edge, col.waveFactor, depth, _surface);
+    // Over the beach, the surf (water/surf.ts), as the renderer draws it: its slope from the travel time's
+    // gradient, a grid cell either way.
+    if (ocean && spec.shoreGrid && Number.isFinite(depth) && spec.waves && spec.waves.length) {
+        const s = surfOf(spec.waves, spec.waveScale ?? 1, _surf);
+        if (s.amplitude > 0 && depth < 8 * Math.max(2 * s.amplitude / 0.78, 0.05)) {
+            const g = spec.shoreGrid, d = g.cell, level = col.surface;
+            const t0 = surfTravelTime(col.edge, depth);
+            const tx = (shoreTravelTime(g, level, x + d, z, t0) - shoreTravelTime(g, level, x - d, z, t0)) / (2 * d);
+            const tz = (shoreTravelTime(g, level, x, z + d, t0) - shoreTravelTime(g, level, x, z - d, t0)) / (2 * d);
+            const speed = spec.waveSpeed ?? 1;
+            addSurf(s, x, z, time * speed, speed, col.edge, depth, tx, tz, w);
+        }
+    }
     col.surface += w.height;
     col.waveVX = w.vx; col.waveVY = w.vy; col.waveVZ = w.vz; col.waveK = w.k;
     if (!spec.currents) { col.flowX = 0; col.flowZ = 0; }
@@ -206,6 +228,8 @@ export function buoyancyVolumeFromSpec(spec: WaterSpec, time: number): BuoyancyV
     // Waves can lift the surface above the resting box: widen the reject by their reach.
     let reach = Math.max(0, spec.waveAmplitude);
     for (const w of spec.waves ?? []) reach += w.amplitude * (spec.waveScale ?? 1);
+    // The surf over a beach stands taller still (water/surf.ts: at most 1.41 times its amplitude, in sets).
+    if (spec.shoreGrid && spec.waves && spec.waves.length) reach += 1.5 * surfOf(spec.waves, spec.waveScale ?? 1, _surf).amplitude;
     return {
         id: spec.id, yieldsTo: spec.yieldsTo,
         min: spec.min, max: [spec.max[0], spec.max[1] + reach, spec.max[2]], density: spec.density,
