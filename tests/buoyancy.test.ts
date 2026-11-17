@@ -238,6 +238,11 @@ describe('water motion', () => {
         }
         expect(inward).toBeGreaterThan(0.05);
         expect(outward).toBeLessThan(-0.05);
+        // Inland there is no sea at all (two cells past the shore, as the surface is drawn), so a river
+        // running down to it is not the sea's along its whole length.
+        expect(waterSpecColumn(spec, 99, 4, 0)).not.toBeNull();
+        expect(waterSpecColumn(spec, 112, 4, 0)).toBeNull();
+        expect(waterSpecColumn(spec, 180, 4, 0)).toBeNull();
     });
 
     it('runs the waves on the physics\u2019 drawn time while it steps, else on the render clock', async () => {

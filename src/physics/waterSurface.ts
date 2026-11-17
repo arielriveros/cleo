@@ -185,6 +185,10 @@ export function waterSpecColumn(spec: WaterSpec, x: number, z: number, time: num
     // The ocean knows where the beach is: the waves shoal over it and the bed is the sea floor there.
     let depth = Infinity;
     if (ocean && spec.shoreGrid && sampleShoreGrid(spec.shoreGrid, x, z, _shore)) {
+        // Inland there is no sea: the surface is not drawn there either (water.wgsl discards it two cells in
+        // from the shore). Without this the sea would claim every point of the land, and a river that runs
+        // into it would give way to it along its whole length.
+        if (_shore[0] < -2 * spec.shoreGrid.cell) return null;
         col.edge = _shore[0];
         depth = Math.max(0, col.surface - _shore[1]);
     }

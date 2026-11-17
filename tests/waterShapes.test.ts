@@ -144,6 +144,72 @@ describe('water bodies', () => {
         expect(cellAt(0, 21).edge).toBeGreaterThan(1.5);   // the river's end there is no shore
     });
 
+    it('a river never rises along its course, whatever its points say, and does not overshoot them', () => {
+        // Drawn climbing in the middle (12 after 10, 6 after 4): the water cannot.
+        const river = resolve({ type: 'river', points: [10, 12, 4, 6, 0].map((y, i) => ({ pos: [0, y, i * 30], width: 4, depth: 1, flowSpeed: 1 })) });
+        const ys = river.samples.map(q => q.y);
+        for (let i = 1; i < ys.length; i++) expect(ys[i]).toBeLessThanOrEqual(ys[i - 1] + 1e-9);
+        expect(Math.max(...ys)).toBeCloseTo(10, 6);
+        expect(Math.min(...ys)).toBeCloseTo(0, 6);
+        // A long level reach and then a drop: a spline through the heights would bulge above 10 before it
+        // falls, and dip below 0 after.
+        const step = resolve({ type: 'river', points: [10, 10, 0, 0].map((y, i) => ({ pos: [0, y, i * 30], width: 4, depth: 1, flowSpeed: 1 })) });
+        for (const q of step.samples) { expect(q.y).toBeLessThanOrEqual(10 + 1e-9); expect(q.y).toBeGreaterThanOrEqual(-1e-9); }
+    });
+
+    it('a river drawn below the lake it runs into is backed up to the lake, never lifted to it at the end', () => {
+        const lake = new WaterVolumeNode('lake', { waterType: 'lake' });
+        lake.setPosition([0, 6, 80]);
+        // Its last points lie 4 m and 8 m under the lake's surface.
+        const river = new WaterVolumeNode('river', { waterType: 'river', points: [
+            { pos: [0, 20, 0], width: 4, depth: 1, flowSpeed: 1 }, { pos: [0, 10, 25], width: 4, depth: 1, flowSpeed: 1 },
+            { pos: [0, 2, 50], width: 4, depth: 1, flowSpeed: 1 }, { pos: [0, -2, 66], width: 4, depth: 1, flowSpeed: 1 },
+        ] });
+        river.flowsInto = lake.id;
+        sceneOf(lake, river);
+        const ys = river.resolved()!.samples.map(q => q.y);
+        for (let i = 1; i < ys.length; i++) expect(ys[i]).toBeLessThanOrEqual(ys[i - 1] + 1e-9);
+        expect(Math.min(...ys)).toBeCloseTo(6, 6);
+        expect(ys.at(-1)).toBeCloseTo(6, 6);
+        // And a river out of a lake starts at the lake's level, however low its first point was drawn.
+        const out = new WaterVolumeNode('out', { waterType: 'river', points: [
+            { pos: [0, 1, 96], width: 4, depth: 1, flowSpeed: 1 }, { pos: [0, 0, 140], width: 4, depth: 1, flowSpeed: 1 },
+        ] });
+        out.flowsFrom = lake.id;
+        sceneOf(lake, out);
+        const os = out.resolved()!.samples.map(q => q.y);
+        expect(os[0]).toBeCloseTo(6, 6);
+        expect(Math.max(...os)).toBeCloseTo(6, 6);
+        expect(os.at(-1)).toBeCloseTo(0, 6);
+    });
+
+    it('a lake has no shore where a river runs into it', async () => {
+        const { buildWaterInfo } = await import('../src/water/waterInfo');
+        const lake = new WaterVolumeNode('lake', { waterType: 'lake' });
+        lake.setPosition([0, 0, 30]);
+        const river = new WaterVolumeNode('river', { waterType: 'river', points: [
+            { pos: [0, 2, -10], width: 6, depth: 1, flowSpeed: 1 }, { pos: [0, 0.2, 20], width: 6, depth: 1, flowSpeed: 1 },
+        ] });
+        river.flowsInto = lake.id;
+        sceneOf(lake, river);
+        expect(lake.joinedRivers()).toEqual([river]);
+        expect(river.beside()).toEqual([]);
+        const mouth = river.resolved()!.samples.at(-1)!;
+        const edgeAt = (info: NonNullable<ReturnType<typeof buildWaterInfo>>, x: number, z: number) =>
+            info.info0[(Math.round((z - info.originZ) / info.cell) * info.nx + Math.round((x - info.originX) / info.cell)) * 4 + 3];
+        const alone = buildWaterInfo(lake.resolvedShapes(), null)!;
+        const joined = buildWaterInfo(lake.resolvedShapes(), null, { beside: lake.beside() })!;
+        // Just inside the lake at the mouth: the lake's own outline is the shore without the river; with it,
+        // the nearest shore is the river's bank (half its width away, and a little along).
+        expect(edgeAt(alone, mouth.x, mouth.z)).toBeLessThan(3);
+        expect(edgeAt(joined, mouth.x, mouth.z)).toBeGreaterThan(edgeAt(alone, mouth.x, mouth.z) + 1);
+        expect(edgeAt(joined, mouth.x, mouth.z)).toBeGreaterThan(3);
+        // The lake's key changes when the river does, so its grid is rebuilt.
+        const key = lake.besideKey();
+        river.points = [{ pos: [3, 2, -10], width: 6, depth: 1, flowSpeed: 1 }, { pos: [0, 0.2, 20], width: 6, depth: 1, flowSpeed: 1 }];
+        expect(lake.besideKey()).not.toBe(key);
+    });
+
     it('an endless ocean is everywhere, a pool only inside itself', () => {
         const ocean: ResolvedWaterShape = resolve({ type: 'ocean' }, placed([0, -1, 0]));
         expect(waterColumnAt([ocean], 5000, -9000)!.surface).toBe(-1);
@@ -289,6 +355,31 @@ describe('water physics', () => {
         for (let i = 0; i < 300; i++) p.update(1 / 60);
         expect(crate.position.z).toBeGreaterThan(-15);
         expect(crate.position.y).toBeGreaterThan(-0.5);
+    });
+
+    it('a river that runs into the sea carries a crate down its whole length, not only at its mouth', () => {
+        // The sea is everywhere under the river (no landscape says where the land is), 6 m below its head.
+        const sea = new WaterVolumeNode('sea', { waterType: 'ocean', waveAmplitude: 0 });
+        const river = new WaterVolumeNode('river', {
+            waterType: 'river', points: [
+                { pos: [0, 6, -80], width: 10, depth: 2, flowSpeed: 2 },
+                { pos: [0, 0, 40], width: 10, depth: 2, flowSpeed: 2 },
+            ],
+            waveAmplitude: 0,
+        });
+        river.flowsInto = sea.id;
+        sceneOf(sea, river);
+        const p = new PhysicsSystem({ gravity: [0, -9.81, 0], backend: TEST_PHYSICS });
+        p.initialize();
+        (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null, waterVolumes: new Set([sea, river]) };
+        const at = river.columnAt(0, -60)!;
+        const crate = makeBody(box(0.5, 0.5, 0.5), { mass: 250, position: [0, at.surface + 0.2, -60] });
+        p.addBody(crate);
+        for (let i = 0; i < 300; i++) p.update(1 / 60);
+        // Carried downstream on the river's own surface, well above the sea under it.
+        expect(crate.position.z).toBeGreaterThan(-54);
+        expect(crate.position.y).toBeGreaterThan(river.columnAt(0, crate.position.z)!.surface - 0.6);
+        expect(crate.position.y).toBeGreaterThan(1.5);
     });
 });
 

@@ -399,6 +399,35 @@ export class WaterVolumeNode extends Node {
         return out;
     }
 
+    /** The rivers that run into this water or out of it: those whose Flows into or Flows from names it. */
+    public joinedRivers(): WaterVolumeNode[] {
+        const out: WaterVolumeNode[] = [];
+        for (const n of ((this._scene as any)?.waterVolumes ?? []) as Iterable<WaterVolumeNode>) {
+            if (n !== this && n.waterType === 'river' && (n.flowsInto === this.id || n.flowsFrom === this.id)) out.push(n);
+        }
+        return out;
+    }
+
+    /**
+     * The water that carries on from this water's edge: the rivers running into it or out of it, resolved.
+     * Where they stand, this water's edge is no shore (water/waterInfo.ts buildWaterInfo `beside`).
+     */
+    public beside(): ResolvedWaterShape[] {
+        if (this._water.type === 'river') return [];
+        const out: ResolvedWaterShape[] = [];
+        for (const n of this.joinedRivers()) {
+            const r = RESOLVING.has(n) ? null : n.resolved();
+            if (r) out.push(r);
+        }
+        return out;
+    }
+
+    /** What {@link beside} depends on: the joined rivers' own keys. */
+    public besideKey(): string {
+        if (this._water.type === 'river') return '';
+        return this.joinedRivers().map(n => n.resolveKey()).join(';');
+    }
+
     /**
      * Everything the resolved body depends on: the body, the node's placement and, for a river, the same of
      * the water it joins (a lake that moves moves the river's mouth). Compare it to know when to rebuild.

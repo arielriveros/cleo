@@ -1,4 +1,4 @@
-import { Spline3, closedSplineXZ, finiteOr, type Vec3Tuple } from '../core/math';
+import { Spline3, closedSplineXZ, evaluateKeyedNumber, finiteOr, type KeyedCurve, type Vec3Tuple } from '../core/math';
 import {
     bucketKey, closestOnSegmentXZ, pointInPolygonXZ, riverColumn, type ResolvedWaterShape, type WaterColumn,
 } from '../physics/water/waterColumn';
@@ -259,9 +259,12 @@ function resolveRiver(body: WaterBody, frame: WaterFrame, targets: WaterTargets,
     const sx = Math.abs(frame.scale[0]), sz = Math.abs(frame.scale[2]), sy = Math.abs(frame.scale[1]);
     const lateral = (sx + sz) / 2;
     const raw = body.points.map(p => ({ ...p, pos: toWorld(frame, p.pos) }));
-    // A connected end takes the surface of what it flows into (or out of), so the two meet.
-    if (raw.length && targets.start) { const q = raw[0].pos; q[1] = levelOn(targets.start, q[0], q[2]); }
-    if (raw.length && targets.end) { const q = raw[raw.length - 1].pos; q[1] = levelOn(targets.end, q[0], q[2]); }
+    // A connected end takes the surface of what it flows into (or out of), so the two meet. Those two levels
+    // also bound the whole river: it never stands above the water it flows from, nor below the water it
+    // flows into, which backs up its channel as far as the channel lies under it.
+    let fromLevel = Infinity, intoLevel = -Infinity;
+    if (raw.length && targets.start) { const q = raw[0].pos; fromLevel = q[1] = levelOn(targets.start, q[0], q[2]); }
+    if (raw.length && targets.end) { const q = raw[raw.length - 1].pos; intoLevel = q[1] = levelOn(targets.end, q[0], q[2]); }
     // An end that stops short of the lake or pool it connects to carries on into it: one more point, on
     // its surface just past its shore, so the river visibly flows in (and out of, for a start).
     const reach = (target: ResolvedWaterShape | null | undefined, end: boolean) => {
@@ -275,12 +278,24 @@ function resolveRiver(body: WaterBody, frame: WaterFrame, targets: WaterTargets,
     };
     reach(targets.end, true);
     reach(targets.start, false);
+    // Water runs downhill: the surface never rises along the course, whatever the points say. A point
+    // drawn higher than the one before it is taken down to it.
+    let above = Infinity;
+    for (const p of raw) {
+        const y = Math.min(above, Math.max(intoLevel, Math.min(fromLevel, p.pos[1])));
+        p.pos[1] = y;
+        above = y;
+    }
     // Spline3 drops consecutive duplicates; drop the same ones here so control indices line up.
     const kept = raw.filter((p, i) => i === 0 || Math.hypot(p.pos[0] - raw[i - 1].pos[0], p.pos[1] - raw[i - 1].pos[1], p.pos[2] - raw[i - 1].pos[2]) > 1e-6);
     if (kept.length < 2) return;
     const spline = new Spline3(kept.map(p => p.pos));
     const total = spline.length;
     const controlDist = kept.map((_, i) => spline.distanceAtPoint(i));
+    // The height between the points: a monotone curve (core/math.ts, Fritsch-Carlson), level at each end.
+    // The spline through the points would overshoot, lifting the water before a drop and dipping it under
+    // the lake it runs into.
+    const profile: KeyedCurve = { keys: kept.map((p, i) => ({ t: controlDist[i], v: p.pos[1] })) };
     const count = Math.max(2, Math.min(8192, Math.ceil(total / RIVER_SPACING) + 1));
     const p: Vec3Tuple = [0, 0, 0], t: Vec3Tuple = [0, 0, 0];
     let seg = 0;
@@ -299,7 +314,7 @@ function resolveRiver(body: WaterBody, frame: WaterFrame, targets: WaterTargets,
         const width = (a.width + (b.width - a.width) * s) * lateral;
         maxWidth = Math.max(maxWidth, width);
         out.samples.push({
-            x: p[0], y: p[1], z: p[2], dist: d, width,
+            x: p[0], y: evaluateKeyedNumber(profile, d, p[1]), z: p[2], dist: d, width,
             depth: (a.depth + (b.depth - a.depth) * s) * sy,
             speed: a.flowSpeed + (b.flowSpeed - a.flowSpeed) * s,
             tx: t[0] / tl, tz: t[2] / tl,

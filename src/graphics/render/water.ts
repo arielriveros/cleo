@@ -306,7 +306,7 @@ export class WaterPasses {
     /** The node's water info and textures, rebuilt when its shapes, placement or the ground under it change. */
     private _waterOf(node: WaterVolumeNode, ground: ReturnType<typeof sceneGround>): NodeWater {
         let water = this._nodes.get(node);
-        const key = `${node.resolveKey()}|${ground.key}`;
+        const key = `${node.resolveKey()}|${ground.key}|${node.besideKey()}`;
         const now = performance.now() / 1000; // wall-clock: throttles CPU rebuilds of the grid, not a look
         // A current bake replaces the analytic grid; a stale one (the shapes changed since) is ignored.
         const bake = node.bakeId ? this._bakeOf(node.bakeId) : null;
@@ -317,7 +317,7 @@ export class WaterPasses {
         const body = node.resolved();
         const info = baked ? baked.info
             : body && body.type === 'ocean' && body.endless ? node.oceanShoreInfo()
-            : buildWaterInfo(node.resolvedShapes(), ground.sample, { handOver: node.handOver() });
+            : buildWaterInfo(node.resolvedShapes(), ground.sample, { handOver: node.handOver(), beside: node.beside() });
         const keyNow = fullKey;
         if (!water) { water = { key, info: null, tex0: null, tex1: null, builtAt: now }; this._nodes.set(node, water); }
         water.key = keyNow;

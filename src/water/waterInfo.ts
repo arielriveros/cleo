@@ -83,9 +83,12 @@ export function chamferDistance(mask: Uint8Array, nx: number, nz: number, cell: 
  * The analytic water info of `shapes` (world space) over the ground `ground`. Null when there is nothing
  * finite to cover (no shapes, or only an endless ocean, which the renderer draws without a grid).
  * `handOver`: other water this water gives way to where they overlap (see {@link handOverWaterInfo}).
+ * `beside`: other water that carries on from this one's edge (the rivers running into a lake or out of it):
+ * where it stands, this water's edge is no shore.
  */
 export function buildWaterInfo(shapes: readonly ResolvedWaterShape[], ground: GroundSampler | null,
-                               options: { maxRes?: number; minCell?: number; handOver?: readonly ResolvedWaterShape[] } = {}): WaterInfo | null {
+                               options: { maxRes?: number; minCell?: number; handOver?: readonly ResolvedWaterShape[];
+                                          beside?: readonly ResolvedWaterShape[] } = {}): WaterInfo | null {
     const endless = shapes.find(s => s.type === 'ocean' && s.endless) ?? null;
     const finite = shapes.filter(s => !(s.type === 'ocean' && s.endless));
     if (!finite.length) return null;
@@ -159,7 +162,8 @@ export function buildWaterInfo(shapes: readonly ResolvedWaterShape[], ground: Gr
         tileCells: 0, tilesX: 0, tilesZ: 0, tileWet: new Uint8Array(0), tileMinY: new Float32Array(0), tileMaxY: new Float32Array(0),
         oceanLevel: endless ? endless.level : null, source: 'analytic',
     };
-    if (options.handOver && options.handOver.length) handOverWaterInfo(info, options.handOver, ground);
+    if ((options.handOver && options.handOver.length) || (options.beside && options.beside.length))
+        handOverWaterInfo(info, options.handOver ?? [], ground, options.beside ?? []);
     else tileWaterInfo(info);
     return info;
 }
@@ -168,24 +172,27 @@ export function buildWaterInfo(shapes: readonly ResolvedWaterShape[], ground: Gr
  * Hands the cells of `info` that lie in other water over to it: a river's mouth inside the lake it flows
  * into, its source inside the lake it drains. There the other node's water is the water: the cells are not
  * drawn (wet 0), and they count as water for the shore distance, so the river's edge there is no shore and
- * grows no foam. In place; re-tiles.
+ * grows no foam. Cells in the water `beside` it (a lake's rivers) count as water for the shore distance too,
+ * but stay this water's where it has them: a river's mouth is no shore of the lake. In place; re-tiles.
  */
-export function handOverWaterInfo(info: WaterInfo, handOver: readonly ResolvedWaterShape[], ground: GroundSampler | null): void {
+export function handOverWaterInfo(info: WaterInfo, handOver: readonly ResolvedWaterShape[], ground: GroundSampler | null,
+                                  beside: readonly ResolvedWaterShape[] = []): void {
     const { nx, nz, cell, info0, info1 } = info;
     const n = nx * nz;
-    const wet = new Uint8Array(n), handed = new Uint8Array(n);
+    const wet = new Uint8Array(n), handed = new Uint8Array(n), more = new Uint8Array(n);
     const col: WaterColumn = { shape: -1, surface: 0, floor: 0, flowX: 0, flowZ: 0, edge: 0, waveFactor: 1 };
     for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
         const i = z * nx + x;
         wet[i] = info1[i * 4 + 3] > 0.5 ? 1 : 0;
         const wx = info.originX + x * cell, wz = info.originZ + z * cell;
-        const c = waterColumnAt(handOver, wx, wz, col);
-        if (!c) continue;
         const g = ground ? ground(wx, wz) : null;
-        if (g === null || g < c.surface - 0.02) handed[i] = 1;
+        const c = handOver.length ? waterColumnAt(handOver, wx, wz, col) : null;
+        if (c && (g === null || g < c.surface - 0.02)) handed[i] = 1;
+        const b = !wet[i] && beside.length ? waterColumnAt(beside, wx, wz, col) : null;
+        if (b && (g === null || g < b.surface - 0.02)) more[i] = 1;
     }
     const mask = new Uint8Array(n);
-    for (let i = 0; i < n; i++) mask[i] = wet[i] | handed[i];
+    for (let i = 0; i < n; i++) mask[i] = wet[i] | handed[i] | more[i];
     const { dist } = chamferDistance(mask, nx, nz, cell);
     let minY = Infinity, maxY = -Infinity;
     for (let i = 0; i < n; i++) {

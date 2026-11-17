@@ -281,6 +281,9 @@ function columnOf(v: BuoyancyVolume, x: number, z: number, out: WaterColumnSampl
     return true;
 }
 
+/** Metres the joined water may stand below a water's own surface and still be the water there. */
+const YIELD_BELOW = 0.05;
+
 /** The one water at (x, z) among `volumes` into `node` (see the header: whose water a point is in). */
 function waterAt(volumes: readonly BuoyancyVolume[], x: number, z: number, node: PatchNode): void {
     let n = 0;
@@ -293,9 +296,14 @@ function waterAt(volumes: readonly BuoyancyVolume[], x: number, z: number, node:
         const va = volumes[_candidates[a].volume];
         let yields = false;
         if (va.yieldsTo && va.yieldsTo.length) {
+            // A water gives way to the water it joins only where that water really stands: at its own level
+            // or above. A river still running down toward a lake or the sea far below it is the water there.
+            const own = _candidates[a].sample.rest ?? _candidates[a].sample.surface;
             for (let b = 0; b < n && !yields; b++) {
                 const id = volumes[_candidates[b].volume].id;
-                if (b !== a && id !== undefined && va.yieldsTo.includes(id)) yields = true;
+                if (b === a || id === undefined || !va.yieldsTo.includes(id)) continue;
+                const other = _candidates[b].sample.rest ?? _candidates[b].sample.surface;
+                if (other >= own - YIELD_BELOW) yields = true;
             }
         }
         if (yields) continue;
