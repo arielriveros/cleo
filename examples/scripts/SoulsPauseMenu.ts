@@ -1,4 +1,5 @@
-import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode, find, attribute } from 'cleo'
+import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode } from 'cleo'
+import { find, attribute } from 'cleo/decorators'
 
 /**
  * Hollow Keep — the pause menu. Attach to the `PauseMenu` node, a screen-space UI Root authored hidden,

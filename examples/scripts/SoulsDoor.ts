@@ -1,4 +1,5 @@
-import { Node, save, find, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { save, find, attribute } from 'cleo/decorators'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**

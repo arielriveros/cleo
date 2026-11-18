@@ -3,7 +3,7 @@ import { Node } from '../src/core/scene/nodes/node';
 import { Scene } from '../src/core/scene/scene';
 import { attachScriptFactory, routeTrigger } from '../src/core/scene/nodes/nodeScripting';
 import { GameEvents } from '../src/core/scripting/scriptEvents';
-import { buildFactoryBody, compileScript, listScriptImports } from '../src/core/scripting/scriptRuntime';
+import { buildFactoryBody, compileScript, listScriptImports, resolveScriptModule } from '../src/core/scripting/scriptRuntime';
 import { lowerScriptDecorators } from '../src/core/scripting/scriptDecoratorLowering';
 import { child, find, onAction, save, options, pick, attribute, scriptMembersOf, membersOfNode } from '../src/core/scripting/decorators';
 import { Logger } from '../src/core/logger';
@@ -53,7 +53,8 @@ describe('lowering', () => {
 
     it('keeps every line and column of the author\'s source', () => {
         const src = [
-            `import { Node, child, save } from 'cleo'`,
+            `import { Node } from 'cleo'`,
+            `import { child, save } from 'cleo/decorators'`,
             `export default class A extends Node {`,
             `  @child('Muzzle') muzzle?: Node`,
             `  @save`,
@@ -61,12 +62,12 @@ describe('lowering', () => {
             `}`,
         ].join('\n');
         const out = lowerScriptDecorators(src).split('\n');
-        expect(out).toHaveLength(6);
-        expect(out[2].indexOf('muzzle')).toBe(src.split('\n')[2].indexOf('muzzle'));
-        expect(out[3].trim()).toBe('');
-        expect(out[5]).toMatch(/^;static\{__cleoImport\("cleo"\)\.applyScriptDecorators\(this,\[.*\]\)\}\}$/);
-        expect(out[5]).toContain(`[[child('Muzzle')],"field","muzzle",1]`);
-        expect(out[5]).toContain(`[[save],"field","kills",0]`);
+        expect(out).toHaveLength(7);
+        expect(out[3].indexOf('muzzle')).toBe(src.split('\n')[3].indexOf('muzzle'));
+        expect(out[4].trim()).toBe('');
+        expect(out[6]).toMatch(/^;static\{__cleoImport\("cleo"\)\.applyScriptDecorators\(this,\[.*\]\)\}\}$/);
+        expect(out[6]).toContain(`[[child('Muzzle')],"field","muzzle",1]`);
+        expect(out[6]).toContain(`[[save],"field","kills",0]`);
     });
 
     it('does not mistake an @ in a string, template, regex or comment for a decorator', () => {
@@ -108,7 +109,8 @@ describe('lowering', () => {
     });
 
     it('compiles for publishing (buildFactoryBody) into plain JS', () => {
-        const body = buildFactoryBody(`import { Node, child, onAction } from 'cleo'
+        const body = buildFactoryBody(`import { Node } from 'cleo'
+import { child, onAction } from 'cleo/decorators'
 export default class A extends Node {
   @child('X') x?: Node
   @onAction('Jump') jump() {}
@@ -118,7 +120,7 @@ export default class A extends Node {
     });
 
     it('still lists a decorated script\'s imports', () => {
-        expect(listScriptImports(`import { Node, save } from 'cleo'\nimport { m } from '@/Shared/Math'\nexport default class A extends Node { @save x = m }`))
+        expect(listScriptImports(`import { Node } from 'cleo'\nimport { save } from 'cleo/decorators'\nimport { m } from '@/Shared/Math'\nexport default class A extends Node { @save x = m }`))
             .toEqual(['/Shared/Math']);
     });
 });
@@ -126,7 +128,8 @@ export default class A extends Node {
 describe('@child and @find through the script runtime', () => {
     it('fills a direct child before onConstruct', () => {
         const node = scripted(`
-            import { Node, child } from 'cleo'
+            import { Node } from 'cleo'
+            import { child } from 'cleo/decorators'
             export default class A extends Node {
               @child('Muzzle') muzzle?: Node
               seen = ''
@@ -140,7 +143,8 @@ describe('@child and @find through the script runtime', () => {
         const near = tree('Fill');
         const deep = tree('Fill');
         const node = scripted(`
-            import { Node, child } from 'cleo'
+            import { Node } from 'cleo'
+            import { child } from 'cleo/decorators'
             export default class A extends Node {
               @child('Fill') fill?: Node
               @child('Bar/Fill') barFill?: Node
@@ -154,7 +158,8 @@ describe('@child and @find through the script runtime', () => {
     it('finds a node anywhere in the scene with @find', () => {
         const gm = new Node('GameManager');
         const node = scripted(`
-            import { Node, find } from 'cleo'
+            import { Node } from 'cleo'
+            import { find } from 'cleo/decorators'
             export default class A extends Node { @find('GameManager') private _gm: Node | null = null }`,
             new Node('subject'), new Scene(), [tree('World', gm)]);
         expect(node._gm).toBe(gm);
@@ -165,7 +170,8 @@ describe('@child and @find through the script runtime', () => {
         const node = tree('Gun', tree('Muzzle'));
         scene.addNode(node);
         attachScriptFactory(node, compileScript(`
-            import { Node, child } from 'cleo'
+            import { Node } from 'cleo'
+            import { child } from 'cleo/decorators'
             export default class A extends Node { @child('Muzzle') muzzle?: Node }`));
         const mine = new Node('Mine');
         (node as any).muzzle = mine;
@@ -181,7 +187,8 @@ describe('@child and @find through the script runtime', () => {
         const node = new Node('subject');
         scene.addNode(node);
         attachScriptFactory(node, compileScript(`
-            import { Node, find } from 'cleo'
+            import { Node } from 'cleo'
+            import { find } from 'cleo/decorators'
             export default class A extends Node {
               @find('Late') late?: Node
               atStart = ''
@@ -194,7 +201,8 @@ describe('@child and @find through the script runtime', () => {
     it('reports a missing reference once, unless the field is declared optional', () => {
         const warn = vi.spyOn(Logger, 'warn').mockImplementation(() => {});
         const source = `
-            import { Node, child, find } from 'cleo'
+            import { Node } from 'cleo'
+            import { child, find } from 'cleo/decorators'
             export default class A extends Node {
               @child('MissingRequired') required!: Node
               @child('MissingOptional') maybe?: Node
@@ -210,7 +218,8 @@ describe('@child and @find through the script runtime', () => {
 
     it('combines a base class\'s decorators with the derived class\'s', () => {
         const node = scripted(`
-            import { Node, child, find } from 'cleo'
+            import { Node } from 'cleo'
+            import { child, find } from 'cleo/decorators'
             class Base extends Node {
               @find('GameManager') gm?: Node
               @child('Model') model?: Node
@@ -228,7 +237,8 @@ describe('@child and @find through the script runtime', () => {
 describe('@onAction through the script runtime', () => {
     function actor(): any {
         return scripted(`
-            import { Node, onAction } from 'cleo'
+            import { Node } from 'cleo'
+            import { onAction } from 'cleo/decorators'
             export default class A extends Node {
               log: string[] = []
               @onAction('Jump') jump(state) { this.log.push('jump:' + state.phase + ':' + this.name) }
@@ -270,7 +280,8 @@ describe('@onAction through the script runtime', () => {
         const errors: string[] = [];
         vi.spyOn(Logger, 'error').mockImplementation(((m: unknown) => { errors.push(String(m)); }) as any);
         const node = scripted(`
-            import { Node, onAction } from 'cleo'
+            import { Node } from 'cleo'
+            import { onAction } from 'cleo/decorators'
             export default class A extends Node {
               ok = 0
               @onAction('Jump') boom() { throw new Error('boom') }
@@ -287,7 +298,8 @@ describe('decorators with standard semantics', () => {
     it('records @save, @options and @pick for the engine to read', () => {
         const node = new Node('n');
         attachScriptFactory(node, compileScript(`
-            import { Node, save, options, pick } from 'cleo'
+            import { Node } from 'cleo'
+            import { save, options, pick } from 'cleo/decorators'
             export default class A extends Node {
               list: string[] = ['a']
               @save @options('list') choice = 'a'
@@ -367,7 +379,8 @@ describe('decorators with standard semantics', () => {
 describe('@onEvent, @every, @onEnter / @onExit', () => {
     it('@onEvent listens while the node is awake, with the payload', () => {
         const node = scripted(`
-            import { Node, onEvent } from 'cleo'
+            import { Node } from 'cleo'
+            import { onEvent } from 'cleo/decorators'
             export default class A extends Node {
               got = []
               @onEvent('Hurt') hurt(p) { this.got.push(p) }
@@ -388,7 +401,8 @@ describe('@onEvent, @every, @onEnter / @onExit', () => {
 
     it('@every runs on the period, in unpaused game time, and stops on despawn', () => {
         const node = scripted(`
-            import { Node, every } from 'cleo'
+            import { Node } from 'cleo'
+            import { every } from 'cleo/decorators'
             export default class A extends Node {
               ticks = 0
               @every(0.5) tick() { this.ticks++ }
@@ -404,7 +418,8 @@ describe('@onEvent, @every, @onEnter / @onExit', () => {
 
     it('@onEnter / @onExit filter by name or variable, on the node or an ancestor', () => {
         const node = scripted(`
-            import { Node, onEnter, onExit } from 'cleo'
+            import { Node } from 'cleo'
+            import { onEnter, onExit } from 'cleo/decorators'
             export default class A extends Node {
               log = []
               @onEnter() any(o) { this.log.push('any:' + o.name) }
@@ -428,7 +443,8 @@ describe('@onHold and @onTap', () => {
     const input = () => InputSystem.instance as any;
     function actor(): any {
         return scripted(`
-            import { Node, onHold, onTap } from 'cleo'
+            import { Node } from 'cleo'
+            import { onHold, onTap } from 'cleo/decorators'
             export default class A extends Node {
               log: string[] = []
               @onHold('Roll', 0.5) sprint() { this.log.push('hold') }
@@ -478,7 +494,8 @@ describe('@attribute', () => {
     it('records its group and options, bare or called, through the script compile', () => {
         const node = new Node('n');
         attachScriptFactory(node, compileScript(`
-            import { Node, attribute } from 'cleo'
+            import { Node } from 'cleo'
+            import { attribute } from 'cleo/decorators'
             export default class A extends Node {
               @attribute speed = 1
               @attribute('Combat') damage = 2
@@ -497,5 +514,28 @@ describe('@attribute', () => {
         class Native extends Node { @attribute speed = 1; @attribute('Combat') damage = 2; }
         expect(scriptMembersOf(Native).filter(m => m.kind === 'attribute').map((m: any) => `${m.field}:${m.group ?? ''}`).sort())
             .toEqual(['damage:Combat', 'speed:']);
+    });
+});
+
+describe("the 'cleo/decorators' module", () => {
+    const NAMES = ['attribute', 'child', 'every', 'find', 'onAction', 'onEnter', 'onEvent', 'onExit', 'onHold', 'onTap', 'options', 'pick', 'save'];
+
+    it('is what scripts import the decorators from', () => {
+        expect(Object.keys(resolveScriptModule('cleo/decorators')).sort()).toEqual(NAMES);
+        expect(resolveScriptModule('cleo/decorators').save).toBe(save);
+    });
+
+    it("is not part of 'cleo', which still has what the compile calls", () => {
+        const cleo = resolveScriptModule('cleo');
+        for (const name of NAMES) expect(Object.keys(cleo), name).not.toContain(name);
+        expect(typeof cleo.applyScriptDecorators).toBe('function');
+    });
+
+    it("fails a script still importing one from 'cleo' as it loads, saying where it went", () => {
+        const node = new Node('n');
+        expect(() => attachScriptFactory(node, compileScript(`
+            import { Node, save } from 'cleo'
+            export default class A extends Node { @save kills = 0 }`)))
+            .toThrow(`'save' is imported from 'cleo/decorators' now, not 'cleo': import { save } from 'cleo/decorators'`);
     });
 });

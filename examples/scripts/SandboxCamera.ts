@@ -1,4 +1,5 @@
-import { CameraRigNode, MathUtils, attribute, lerp } from 'cleo'
+import { CameraRigNode, MathUtils, lerp } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * The Sandbox camera: one Camera Rig with two framings. It sits over the shoulder, and pulls out to third person

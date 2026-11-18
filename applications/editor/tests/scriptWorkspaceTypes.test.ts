@@ -336,7 +336,8 @@ export default class Hero extends Node { ${wrong} }
     await writeFile(typesFile, projectTypesDeclaration([], ['Jump', 'Gameplay/Jump']), 'utf-8');
     try {
       const head = `
-import { Node, child, find, onAction, onHold, onTap, onEvent, every, onEnter, onExit, attribute, save, options, pick } from 'cleo'
+import { Node } from 'cleo'
+import { child, find, onAction, onHold, onTap, onEvent, every, onEnter, onExit, attribute, save, options, pick } from 'cleo/decorators'
 import type { ActionState } from 'cleo'
 export default class Hero extends Node {
 `;
@@ -379,6 +380,14 @@ export default class Hero extends Node {
         await writeScript('Player/Hero.ts', `${head}  ${wrong}\n}`);
         expect((await typecheck()).ok, wrong).toBe(false);
       }
+
+      // The decorators are 'cleo/decorators' only: one imported from 'cleo' is an error naming the module.
+      await writeScript('Player/Hero.ts', `
+import { Node, save } from 'cleo'
+export default class Hero extends Node { @save hp = 100 }`);
+      const old = await typecheck();
+      expect(old.ok).toBe(false);
+      expect(old.out).toMatch(/TS2305|has no exported member/);
     } finally {
       await rm(typesFile, { force: true });
     }

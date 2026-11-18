@@ -97,7 +97,8 @@ export default class Hollow extends EnemyBase { … }
 ## Fields, and how they reach the inspector
 
 ```ts
-import { Node, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 export default class SpawnerNode extends Node {
   /** Template to instantiate. */

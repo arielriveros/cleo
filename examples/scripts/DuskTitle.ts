@@ -1,4 +1,5 @@
-import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode, attribute } from 'cleo'
+import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * Duskwell -- the title screen. Attach to the `Title` screen-space UI Root, authored hidden:

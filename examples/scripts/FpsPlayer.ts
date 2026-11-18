@@ -1,4 +1,5 @@
-import { CameraRigNode, Game, Input, ModelNode, Node, onAction, attribute } from 'cleo'
+import { CameraRigNode, Game, Input, ModelNode, Node } from 'cleo'
+import { onAction, attribute } from 'cleo/decorators'
 import type { Animator } from 'cleo'
 import FpsCombatantNode from '@/FPS/Scripts/FpsCombatant'
 import { WEAPONS, aimDirection, approach, clamp, combatantOf, findByVariable, findDescendant, lerp, manager, playCue } from '@/FPS/Scripts/FpsShared'

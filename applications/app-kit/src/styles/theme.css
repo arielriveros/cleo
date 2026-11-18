@@ -110,6 +110,7 @@ body { font-size: var(--text-ui); }
   --code-comment:  106 153  85;  /* #6a9955 */
   --code-type:      78 201 176;  /* #4ec9b0 */
   --code-function: 220 220 170;  /* #dcdcaa */
+  --code-decorator: 228 143 199; /* #e48fc7, the script editor's decorator rose */
 }
 
 @layer base {
@@ -190,6 +191,7 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: none;
 .cleo-code-comment  { color: rgb(var(--code-comment)); font-style: italic; }
 .cleo-code-type     { color: rgb(var(--code-type)); }
 .cleo-code-function { color: rgb(var(--code-function)); }
+.cleo-code-decorator { color: rgb(var(--code-decorator)); }
 @keyframes cleo-docs-flash {
   0%, 35% { background-color: rgb(var(--selected) / 0.28); box-shadow: 0 0 0 4px rgb(var(--selected) / 0.28); }
   100%    { background-color: transparent; box-shadow: 0 0 0 4px transparent; }

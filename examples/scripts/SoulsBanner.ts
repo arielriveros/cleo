@@ -1,4 +1,5 @@
-import { Node, UIRootNode, UITextNode, child, attribute } from 'cleo'
+import { Node, UIRootNode, UITextNode } from 'cleo'
+import { child, attribute } from 'cleo/decorators'
 
 /**
  * Hollow Keep — the big centre-screen banners: YOU DIED, BONFIRE LIT, VICTORY ACHIEVED. Attach to the

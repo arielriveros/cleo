@@ -1,4 +1,8 @@
 // Decorators for script classes: what a field or method of a script means to the engine and the editor.
+// Scripts import them from 'cleo/decorators' (src/decorators.ts), not from the 'cleo' barrel; the barrel keeps
+// only the machinery below (applyScriptDecorators, membersOfNode, …).
+//
+//   import { child, find, onAction, save } from 'cleo/decorators'
 //
 //   export default class Turret extends Node {
 //     @child('Muzzle') private _muzzle?: Node            // filled in before onConstruct / onStart
@@ -14,6 +18,12 @@
 // compiling a script class used directly as a Node subclass). The engine reads it back with
 // membersOfNode() — nodeScripting.ts fills the references, scene.ts routes the actions — and the editor's
 // reflection reads the same decorators from the source text.
+//
+// Their doc comments are what the script editors show on hover, in signature help and in the `@` completion
+// list, so: a first sentence that stands alone, an `@param` for every parameter, and examples as inline code
+// whose `@` comes right after the opening backtick. TypeScript starts a tag at any `@` that begins a line or
+// follows a space -- inside backticks and ``` fences too -- and the hover then shows the rest as that tag
+// (tests/decoratorDocs.test.ts holds the line).
 //
 // A leaf: type-only imports.
 import type { Node } from '../scene/nodes/node';
@@ -95,14 +105,35 @@ function needName(label: string, value: unknown): string {
 }
 
 /**
- * Fills the field with the nearest node named `name` under this one, before `onConstruct` and again
- * before `onStart` while it is still empty. Breadth-first: a direct child wins over a deeper one.
- * A path narrows it: `'HealthBar/Fill'` is the `Fill` nearest under the `HealthBar` nearest.
+ * A decorator for a class field, such as `@save` or what `@child('Muzzle')` returns.
  *
- * Declare the field `name?:` when the node may legitimately be missing; otherwise a missing one is
- * reported (once) before `onStart`. A value already in the field (assigned, or restored by a save) is kept.
+ * `Allowed` is the field types it accepts, so a `@child` on a number field is a type error; `Owner` is what
+ * the class itself must have (`@options('list')` needs a `list` field).
  */
-export function child(name: string) {
+export type FieldDecorator<Allowed = unknown, Owner = unknown> =
+    <This extends Owner, V extends Allowed>(value: undefined, context: ClassFieldDecoratorContext<This, V>) => void;
+
+/**
+ * A decorator for a class method, such as what `@onAction('Jump')` returns. `Args` is what the method is
+ * called with: a method may take fewer, never more.
+ */
+export type MethodDecorator<Args extends unknown[] = []> =
+    <This>(method: (this: This, ...args: Args) => unknown, context: ClassMethodDecoratorContext<This>) => void;
+
+/**
+ * Fills the field with the nearest node called `name` under this one, before `onConstruct` and again before
+ * `onStart` while it is still empty.
+ *
+ * Breadth-first, so a direct child wins over a deeper one. Declare the field `name?:` when the node may be
+ * missing; otherwise a missing one is reported once, before `onStart`. A value already in the field (assigned,
+ * or restored by a save) is kept.
+ *
+ * - `@child('Muzzle') private _muzzle?: Node` — the Muzzle under this node
+ * - `@child('HealthBar/Fill') fill: Node` — the Fill nearest under the HealthBar nearest
+ *
+ * @param name The node's name, or a path of names separated by `/`. Written out, not a variable.
+ */
+export function child(name: string): FieldDecorator<Node | null | undefined> {
     const target = needName('@child', name);
     return function <This, V extends Node | null | undefined>(_value: undefined, context: ClassFieldDecoratorContext<This, V>): void {
         record('@child', context, { kind: 'child', field: memberName('@child', context, 'field'), name: target });
@@ -110,10 +141,14 @@ export function child(name: string) {
 }
 
 /**
- * Fills the field with the node named `name` anywhere in the scene (`findNode`), at the same moments as
- * {@link child} and with the same rules.
+ * Fills the field with the node called `name` anywhere in the scene (`findNode`), at the same moments and
+ * with the same rules as `@child`.
+ *
+ * - `@find('GameManager') private _gm: Node | null = null`
+ *
+ * @param name The node's name. Written out, not a variable.
  */
-export function find(name: string) {
+export function find(name: string): FieldDecorator<Node | null | undefined> {
     const target = needName('@find', name);
     return function <This, V extends Node | null | undefined>(_value: undefined, context: ClassFieldDecoratorContext<This, V>): void {
         record('@find', context, { kind: 'find', field: memberName('@find', context, 'field'), name: target });
@@ -121,12 +156,20 @@ export function find(name: string) {
 }
 
 /**
- * Calls the method when the input action changes — by default when it is pressed (see {@link ActionWhen}).
- * `action` is an action's name (`'Jump'`) or map-qualified (`'Gameplay/Jump'`). The method gets the
- * action's {@link ActionState}. Like `onAction`, nothing is delivered while the game is paused, and a
- * script may also keep its own `onAction`.
+ * Calls the method when the input action is pressed, or at the change `when` names.
+ *
+ * The method gets the action's `ActionState`. As with an `onAction` handler, nothing is delivered while the
+ * game is paused, and a script may keep its own `onAction` as well.
+ *
+ * - `@onAction('Jump') jump(state: ActionState) { … }` — pressed
+ * - `@onAction('Jump', 'released') land() { … }` — released
+ *
+ * @param action The action's name (`'Jump'`), or map-qualified (`'Gameplay/Jump'`): one the project's input
+ * map declares.
+ * @param when `'started'` (the press, the default), `'released'`, `'performed'` (the action completing) or
+ * `'changed'` (every change).
  */
-export function onAction(action: ActionName, when: ActionWhen = 'started') {
+export function onAction(action: ActionName, when: ActionWhen = 'started'): MethodDecorator<[state: ActionState]> {
     const name = needName('@onAction', action);
     return function <This>(_method: (this: This, state: ActionState) => unknown, context: ClassMethodDecoratorContext<This>): void {
         record('@onAction', context, { kind: 'action', method: memberName('@onAction', context, 'method'), action: name, when });
@@ -134,10 +177,15 @@ export function onAction(action: ActionName, when: ActionWhen = 'started') {
 }
 
 /**
- * Calls the method when a game event of that name is emitted (`GameEvents.emit(name, payload)`), with the
- * payload. Listens while the node is awake: from its spawn until it despawns or is removed.
+ * Calls the method with the payload whenever a game event of that name is emitted, while the node is awake.
+ *
+ * Listens from the node's spawn until it despawns or is removed: no setup in `onStart`, no cleanup.
+ *
+ * - `@onEvent('PlayerDied') died(info) { … }` — for `GameEvents.emit('PlayerDied', info)` anywhere
+ *
+ * @param name The event's name, as `GameEvents.emit` sends it.
  */
-export function onEvent(name: string) {
+export function onEvent(name: string): MethodDecorator<[payload: any]> {
   const event = needName('@onEvent', name);
   return function <This>(_method: (this: This, payload: any) => unknown, context: ClassMethodDecoratorContext<This>): void {
     record('@onEvent', context, { kind: 'event', method: memberName('@onEvent', context, 'method'), name: event });
@@ -146,8 +194,12 @@ export function onEvent(name: string) {
 
 /**
  * Calls the method every `seconds` of unpaused game time, from the node's spawn until it despawns.
+ *
+ * - `@every(0.5) think() { … }` — twice a second
+ *
+ * @param seconds The period, in seconds of game time; above 0.
  */
-export function every(seconds: number) {
+export function every(seconds: number): MethodDecorator {
   if (!(typeof seconds === 'number' && seconds > 0)) throw new TypeError('@every needs a period in seconds, above 0');
   return function <This>(_method: (this: This) => unknown, context: ClassMethodDecoratorContext<This>): void {
     record('@every', context, { kind: 'every', method: memberName('@every', context, 'method'), seconds });
@@ -155,29 +207,48 @@ export function every(seconds: number) {
 }
 
 /**
- * Calls the method when a trigger overlap begins with another node: this node's own trigger (a Trigger node,
- * or its Collider with a trigger), or one this node walks into. `filter` narrows who: a node name, or the name
- * of a variable the other node has set (`'isPlayer'`); the other node or any of its ancestors may match.
- * Without a filter, anything.
+ * Calls the method with the other node when a trigger overlap with it begins, in 3D and 2D.
+ *
+ * The overlap is one `onTriggerEnter` would report: this node's own trigger (a Trigger node, or its Collider
+ * with a trigger), or one this node walks into.
+ *
+ * - `@onEnter('Player') hit(other: Node) { … }` — the Player, or anything inside it
+ * - `@onEnter() any(other: Node) { … }` — anything
+ *
+ * @param filter Who counts: a node's name, or the name of a variable the other node has set (`'isEnemy'`),
+ * matched on the other node or any of its ancestors. Empty (the default) for anything.
  */
-export function onEnter(filter: string = '') {
+export function onEnter(filter: string = ''): MethodDecorator<[other: Node]> {
   return function <This>(_method: (this: This, other: Node) => unknown, context: ClassMethodDecoratorContext<This>): void {
     record('@onEnter', context, { kind: 'enter', method: memberName('@onEnter', context, 'method'), filter });
   };
 }
 
-/** Like {@link onEnter}, when the overlap ends. */
-export function onExit(filter: string = '') {
+/**
+ * Calls the method with the other node when a trigger overlap with it ends: `@onEnter`'s counterpart.
+ *
+ * - `@onExit('Player') left(other: Node) { … }`
+ *
+ * @param filter Who counts, as for `@onEnter`. Empty (the default) for anything.
+ */
+export function onExit(filter: string = ''): MethodDecorator<[other: Node]> {
   return function <This>(_method: (this: This, other: Node) => unknown, context: ClassMethodDecoratorContext<This>): void {
     record('@onExit', context, { kind: 'exit', method: memberName('@onExit', context, 'method'), filter });
   };
 }
 
 /**
- * Calls the method once per press, at the moment the action has been held for `seconds` (default 0.5). It
- * fires again only after a release and a new press. Nothing is delivered while the game is paused.
+ * Calls the method once per press, at the moment the action has been held for `seconds`.
+ *
+ * It fires again only after a release and a new press, and a press that becomes a hold gets no `@onTap`.
+ * Nothing is delivered while the game is paused.
+ *
+ * - `@onHold('Roll', 0.5) sprint(state: ActionState) { … }`
+ *
+ * @param action The action's name, or map-qualified (`'Gameplay/Roll'`).
+ * @param seconds How long the press must last, in seconds; 0.5 by default.
  */
-export function onHold(action: ActionName, seconds: number = 0.5) {
+export function onHold(action: ActionName, seconds: number = 0.5): MethodDecorator<[state: ActionState]> {
   const name = needName('@onHold', action);
   return function <This>(_method: (this: This, state: ActionState) => unknown, context: ClassMethodDecoratorContext<This>): void {
     record('@onHold', context, { kind: 'hold', method: memberName('@onHold', context, 'method'), action: name, seconds });
@@ -185,10 +256,16 @@ export function onHold(action: ActionName, seconds: number = 0.5) {
 }
 
 /**
- * Calls the method when the action is RELEASED, if it was held no longer than `maxSeconds` (default 0.25): a
- * tap. A longer press is a hold (see {@link onHold}) and gets no tap.
+ * Calls the method when the action is released after a press no longer than `maxSeconds`: a tap.
+ *
+ * A longer press is a hold (see `@onHold`) and gets no tap. Nothing is delivered while the game is paused.
+ *
+ * - `@onTap('Roll') roll(state: ActionState) { … }`
+ *
+ * @param action The action's name, or map-qualified (`'Gameplay/Roll'`).
+ * @param maxSeconds The longest press that still counts as a tap, in seconds; 0.25 by default.
  */
-export function onTap(action: ActionName, maxSeconds: number = 0.25) {
+export function onTap(action: ActionName, maxSeconds: number = 0.25): MethodDecorator<[state: ActionState]> {
   const name = needName('@onTap', action);
   return function <This>(_method: (this: This, state: ActionState) => unknown, context: ClassMethodDecoratorContext<This>): void {
     record('@onTap', context, { kind: 'tap', method: memberName('@onTap', context, 'method'), action: name, maxSeconds });
@@ -216,20 +293,48 @@ export interface AttributeOptions {
     multiline?: boolean;
 }
 
+/** What `attribute` is: the bare decorator, and the two ways of calling it with a group or options. */
+export interface AttributeDecorator {
+    /**
+     * Shows the field in the inspector's Behaviors panel, in its Attributes section.
+     *
+     * - `@attribute speed = 4`
+     */
+    <This, V>(value: undefined, context: ClassFieldDecoratorContext<This, V>): void;
+    /**
+     * Shows the field in the inspector's Behaviors panel, in a collapsible section titled `group`.
+     *
+     * - `@attribute('Combat') damage = 10` — a "Combat" section
+     * - `@attribute('Combat', { min: 0, max: 1, step: 0.05 }) crit = 0.1` — a slider in it
+     *
+     * @param group The section's title; sections appear in the order their first field is declared. Without
+     * one, the Attributes section.
+     * @param options How the row shows: label, range, read-only, showIf, colour, multiline.
+     */
+    (group?: string, options?: AttributeOptions): FieldDecorator;
+    /**
+     * Shows the field in the inspector's Behaviors panel, in its Attributes section, the way `options` say.
+     *
+     * - `@attribute({ readonly: true }) kills = 0`
+     * - `@attribute({ label: 'Tint', color: true }) private _tint = [1, 1, 1]`
+     *
+     * @param options How the row shows: label, range, read-only, showIf, colour, multiline.
+     */
+    (options: AttributeOptions): FieldDecorator;
+}
+
 /**
- * Shows the field in the inspector (the Behaviors panel), whatever its access: public, protected or
- * private. A field without it is the script's own business and is not shown, saved per node or overridden
- * by templates. The field's doc comment becomes the row's tooltip.
+ * Shows the field in the inspector (the Behaviors panel), whatever its access: public, protected or private.
  *
- *   @attribute speed = 4                                  // in the Attributes section
- *   @attribute('Combat') damage = 10                      // in a "Combat" section
- *   @attribute('Combat', { min: 0, max: 1 }) crit = 0.1   // a slider
- *   @attribute({ readonly: true }) hp = 100
+ * A field without it is the script's own state: not shown, not stored per node, not overridden by templates.
+ * The field's doc comment becomes the row's tooltip. Arguments must be literals.
+ *
+ * - `@attribute maxHp = 100` — in the Attributes section
+ * - `@attribute('Combat') damage = 10` — in a "Combat" section
+ * - `@attribute('Combat', { min: 0, max: 1 }) crit = 0.1` — a slider
+ * - `@attribute({ readonly: true }) hp = 100` — shown, not editable
  */
-export function attribute<This, V>(value: undefined, context: ClassFieldDecoratorContext<This, V>): void;
-export function attribute(group?: string, options?: AttributeOptions): <This, V>(value: undefined, context: ClassFieldDecoratorContext<This, V>) => void;
-export function attribute(options: AttributeOptions): <This, V>(value: undefined, context: ClassFieldDecoratorContext<This, V>) => void;
-export function attribute(group?: unknown, options?: unknown): any {
+export const attribute: AttributeDecorator = function attribute(group?: unknown, options?: unknown): any {
     const apply = (name: string | undefined, opts: AttributeOptions) =>
         function <This, V>(_value: undefined, context: ClassFieldDecoratorContext<This, V>): void {
             record('@attribute', context, { kind: 'attribute', field: memberName('@attribute', context, 'field'), group: name, options: opts });
@@ -242,23 +347,42 @@ export function attribute(group?: unknown, options?: unknown): any {
     const name = typeof group === 'string' ? group : undefined;
     const opts = ((group && typeof group === 'object' ? group : options) ?? {}) as AttributeOptions;
     return apply(name, opts);
-}
+} as AttributeDecorator;
 
-/** Keeps the field in saves (`SaveGame`, and a scene's memory between visits). */
-export function save<This, V>(_value: undefined, context: ClassFieldDecoratorContext<This, V>): void {
+/**
+ * Keeps the field in saves: `SaveGame` files, and a scene's memory between visits.
+ *
+ * - `@save kills = 0`
+ * - `@save` and `@pick('sound')` on one field: a picked sound that is kept by saves
+ */
+export const save: FieldDecorator = function save<This, V>(_value: undefined, context: ClassFieldDecoratorContext<This, V>): void {
     record('@save', context, { kind: 'save', field: memberName('@save', context, 'field') });
-}
+};
 
-/** Has the inspector offer the entries of the `list` field (a public `string[]`) for this string field. */
-export function options<K extends string>(list: K) {
+/**
+ * Has the inspector offer the entries of another field, a public `string[]`, for this string field.
+ *
+ * - `weapons: string[] = ['Sword', 'Axe']` then `@options('weapons') weapon = 'Sword'`
+ *
+ * @param list The name of that `string[]` field. Naming a field that is not a list is a type error.
+ */
+export function options<K extends string>(list: K): FieldDecorator<string | null | undefined, { [P in K]: readonly string[] }> {
     const field = needName('@options', list);
     return function <This extends { [P in K]: readonly string[] }, V extends string | null | undefined>(_value: undefined, context: ClassFieldDecoratorContext<This, V>): void {
         record('@options', context, { kind: 'options', field: memberName('@options', context, 'field'), list: field });
     };
 }
 
-/** Has the inspector offer the names of `kind` this node can reach for a string (or string list) field. */
-export function pick(kind: ScriptPickKind) {
+/**
+ * Has the inspector offer the names of one kind this node can reach, for a string or string-list field.
+ *
+ * - `@pick('clip') attackClip = 'Attack'` — the clips of this node's character
+ * - `@pick('sound') hitSounds: string[] = []`
+ *
+ * @param kind What the field names: `'clip'`, `'sound'`, `'socket'`, `'template'`, `'node'`, `'trigger'` or
+ * `'spriteClip'`.
+ */
+export function pick(kind: ScriptPickKind): FieldDecorator<string | readonly string[] | null | undefined> {
     const what = needName('@pick', kind) as ScriptPickKind;
     return function <This, V extends string | readonly string[] | null | undefined>(_value: undefined, context: ClassFieldDecoratorContext<This, V>): void {
         record('@pick', context, { kind: 'pick', field: memberName('@pick', context, 'field'), pick: what });

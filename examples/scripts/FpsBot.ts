@@ -1,4 +1,5 @@
-import { Logger, ModelNode, Node, setMoveWorld, attribute } from 'cleo'
+import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
+import { attribute } from 'cleo/decorators'
 import type { Animator } from 'cleo'
 import FpsCombatantNode from '@/FPS/Scripts/FpsCombatant'
 import { angleDiff, clamp, combatantOf, distance3, findByVariable, findDescendant, hostile, manager, planarDistance, yawTo } from '@/FPS/Scripts/FpsShared'

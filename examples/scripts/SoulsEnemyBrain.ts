@@ -1,4 +1,5 @@
-import { ControllerNode, Node, attribute } from 'cleo'
+import { ControllerNode, Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * Hollow Keep — an enemy's brain script. Attach to the `Brain` child (the LAST child) of every enemy

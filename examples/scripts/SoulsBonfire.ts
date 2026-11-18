@@ -1,4 +1,5 @@
-import { Node, save, find, child, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { save, find, child, attribute } from 'cleo/decorators'
 
 /**
  * Hollow Keep — a bonfire. Attach to the bonfire's root node.

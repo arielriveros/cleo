@@ -676,7 +676,8 @@ export function scriptClassName(name: string): string {
  * Controller one shows `onThink` writing intent, which is the whole extension point for custom AI.
  */
 const CONTROL_STARTERS: Partial<Record<ScriptBaseType, (className: string, base: string) => string>> = {
-  character: (className, base) => `import { Logger, attribute, onAction, ${base} } from 'cleo'
+  character: (className, base) => `import { Logger, ${base} } from 'cleo'
+import { attribute, onAction } from 'cleo/decorators'
 
 // ${className} runs on a Character — a pawn whose walking, turning and jumping the ENGINE owns.
 //
@@ -703,7 +704,8 @@ export default class ${className} extends ${base} {
   }
 }
 `,
-  controller: (className, base) => `import { Logger, attribute, ${base} } from 'cleo'
+  controller: (className, base) => `import { Logger, ${base} } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 // ${className} runs on a Controller — the thing that DRIVES a Character.
 //
@@ -731,7 +733,8 @@ export default class ${className} extends ${base} {
   }
 }
 `,
-  characterBody2D: (className, base) => `import { Input, Logger, attribute, ${base} } from 'cleo'
+  characterBody2D: (className, base) => `import { Input, Logger, ${base} } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 // ${className} runs on a Character Body 2D -- a 2D pawn whose walking, flying and jumping the ENGINE owns,
 // driven by a Controller (Player: Move and Jump; AI: a brain) exactly as a 3D Character is.
@@ -830,8 +833,9 @@ ${body}
 `
   }
 
-  const imports = base === 'Node' ? 'Input, Logger, Node, attribute, onAction' : `Input, Logger, Node, attribute, onAction, ${base}`
+  const imports = base === 'Node' ? 'Input, Logger, Node' : `Input, Logger, Node, ${base}`
   return `import { ${imports} } from 'cleo'
+import { attribute, onAction } from 'cleo/decorators'
 
 // ${className} runs on every node this script is attached to. Handlers are method overrides; class fields are
 // the node's state. Mark one @attribute to show it in the inspector (the Behaviors panel), whatever its access;

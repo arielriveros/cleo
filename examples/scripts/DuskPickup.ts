@@ -1,4 +1,5 @@
-import { Node, TriggerNode, attribute } from 'cleo'
+import { Node, TriggerNode } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * Duskwell -- something lying in the world for the player to take. Attach to an Area 2D that sees the

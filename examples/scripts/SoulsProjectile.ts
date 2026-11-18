@@ -1,4 +1,5 @@
-import { Node, find, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { find, attribute } from 'cleo/decorators'
 import type { TemplateName } from 'cleo'
 import { playDetached } from '@/Core/Scripts/SoulsAudio'
 import { hurtboxQuery, hurtboxTargets } from '@/Core/Scripts/SoulsHitbox'

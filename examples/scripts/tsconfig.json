@@ -18,6 +18,8 @@
     "baseUrl": ".",
     "paths": {
       "cleo": ["../../dist/cleo"],
+      // `cleo/decorators` and any other engine sub-path, as node_modules/cleo/<path> resolves them in the editor.
+      "cleo/*": ["../../dist/*"],
       // The scripts import each other by their path in the Hollow Keep Assets tree; on disk they are flat.
       "@/Core/Scripts/*": ["./*"],
       "@/FPS/Scripts/*": ["./*"],

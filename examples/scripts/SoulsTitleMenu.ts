@@ -1,4 +1,5 @@
-import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode, attribute } from 'cleo'
+import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * Hollow Keep — the title menu: Continue from the last bonfire, or start a new game. Attach to the `TitleMenu`

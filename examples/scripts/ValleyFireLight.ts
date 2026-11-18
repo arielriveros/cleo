@@ -1,4 +1,5 @@
-import { Node, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * Valley — a fire's light: torches, braziers, fire pits, candles, the bonfire. Attach to the fire's root;

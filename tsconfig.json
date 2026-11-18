@@ -39,8 +39,9 @@
   // backend is NOT among them — nothing imports it yet — so it has to be named here or it is
   // typechecked by nothing at all. Nor is src/modules/loaders.ts (the published player's feature loaders: the full
   // engine installs every feature through ./modules/all.ts instead), and the player imports it from dist/.
+  // src/decorators.ts ('cleo/decorators' in scripts) is reached through cleoCore.ts, and named for clarity.
   "files": [
-    "src/cleo.ts", "src/glsl.d.ts", "src/webgpu.d.ts", "src/webglHandles.d.ts", "src/wgsl.d.ts",
+    "src/cleo.ts", "src/decorators.ts", "src/glsl.d.ts", "src/webgpu.d.ts", "src/webglHandles.d.ts", "src/wgsl.d.ts",
     "src/graphics/rhi/webgpu/webgpuDevice.ts", "src/graphics/rhi/webgpu/webgpuShaderProgram.ts",
     "src/modules/loaders.ts"
   ],

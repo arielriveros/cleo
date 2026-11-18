@@ -1,11 +1,13 @@
 # Decorators
 
 Decorators say what a field or method of a script *means*, in one line above it: find this node for me,
-call this method on that input, keep this value in saves. They are imported from `cleo` like anything
-else, and the editors check them: a misspelt action or a `@child` on a number field is a type error.
+call this method on that input, keep this value in saves. They have a module of their own,
+`cleo/decorators`, and the editors check them: a misspelt action or a `@child` on a number field is a type
+error.
 
 ```ts
-import { CharacterNode, Node, child, find, onAction, save } from 'cleo'
+import { Node } from 'cleo'
+import { child, find, onAction, save } from 'cleo/decorators'
 
 export default class TurretNode extends Node {
   @child('Muzzle') private _muzzle?: Node             // the Muzzle under this node
@@ -18,6 +20,11 @@ export default class TurretNode extends Node {
 
 Decorators go on a class's **fields and methods** — not on the class, a `static` member, a `#private`
 member, a computed name or an accessor; the script compile says so, with the line, if you try.
+
+In the Script editor, type `@` where a field or method goes: the list holds the decorators, those that fit
+the member below first, each with its documentation. Picking one writes its arguments for you to fill in,
+offers the input map's actions inside `@onAction('…')`, and adds it to the `cleo/decorators` import. Hovering
+a decorator shows its documentation, and inside its parentheses the editor shows what each argument means.
 
 ## Finding nodes: `@child` and `@find`
 
@@ -147,6 +154,9 @@ simplest way to say the same thing as `@pick`.
 
 - Decorators change nothing about how a script runs: the class is still never constructed, and its
   methods are still copied onto the node. They record what you wrote; the engine acts on it.
+- They are imported from `cleo/decorators`, not `cleo`. A script that still imports one from `cleo` is a
+  type error in the editors, and in Play it stops as it loads with
+  `'save' is imported from 'cleo/decorators' now, not 'cleo'`.
 - A derived script inherits its base's decorators. Decorating the same field or method again overrides
   the base's.
 - A decorator's arguments must be written out (`'Muzzle'`, not a variable): the editor reads them from the

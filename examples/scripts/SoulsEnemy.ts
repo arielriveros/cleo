@@ -1,4 +1,5 @@
-import { Logger, ModelNode, Node, setMoveWorld, find, child, attribute } from 'cleo'
+import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
+import { find, child, attribute } from 'cleo/decorators'
 import type { AnimationTriggerInfo, SocketName, TriggerName } from 'cleo'
 import { clamp, num, planarDistance } from '@/Core/Scripts/SoulsMath'
 import { Swing, bladeCapsule, closeSwing, hurtboxQuery, hurtboxTargets, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'

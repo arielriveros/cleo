@@ -1,4 +1,5 @@
-import { Input, Node, UIButtonNode, UIRootNode, UITextNode, attribute } from 'cleo'
+import { Input, Node, UIButtonNode, UIRootNode, UITextNode } from 'cleo'
+import { attribute } from 'cleo/decorators'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**

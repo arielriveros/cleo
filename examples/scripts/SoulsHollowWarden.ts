@@ -1,4 +1,5 @@
-import { Node, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 import type { TemplateName, TriggerName } from 'cleo'
 import SoulsEnemyNode from '@/Characters/Enemies/Base Enemy/Scripts/SoulsEnemy'
 import { playSound } from '@/Core/Scripts/SoulsAudio'

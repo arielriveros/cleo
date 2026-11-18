@@ -85,6 +85,9 @@ export function scriptModulesVersion(): number {
     return moduleVersion;
 }
 
+/** The script decorators' own module (src/decorators.ts, registered by cleoCore.ts). */
+const DECORATORS = 'cleo/decorators';
+
 function buildCleoModule(base: ScriptModule): ScriptModule {
     const out: ScriptModule = { ...base };
     for (const api of liveFeatureApis())
@@ -103,6 +106,17 @@ function buildCleoModule(base: ScriptModule): ScriptModule {
             get() { throw new Error(`'${name}' belongs to the ${label} feature, which this game was published without (Project ▸ Features).`); },
         });
     }
+    // The script decorators left the barrel for 'cleo/decorators'. A script still importing one from 'cleo'
+    // compiles to `const { save } = __cleoImport('cleo')`, so the read below fails it as it loads, saying where
+    // the name went, rather than leaving `undefined` for applyScriptDecorators to trip over. Non-enumerable,
+    // like the names above: nothing that walks the module's values (nodeScripting's engine prototypes) sees them.
+    for (const name of Object.keys(modules.get(DECORATORS) ?? {})) {
+        if (name in out) continue;
+        Object.defineProperty(out, name, {
+            enumerable: false, configurable: true,
+            get() { throw new Error(`'${name}' is imported from 'cleo/decorators' now, not 'cleo': import { ${name} } from 'cleo/decorators'`); },
+        });
+    }
     return out;
 }
 
@@ -116,10 +130,15 @@ function builtinModule(specifier: string): ScriptModule | undefined {
     return cleoModule;
 }
 
-/** Makes `exports` importable from scripts as `specifier`. src/cleo.ts registers itself as 'cleo'. */
+/**
+ * Makes `exports` importable from scripts as `specifier`. src/cleoCore.ts registers itself as 'cleo' and the
+ * decorators as 'cleo/decorators'; src/cleo.ts registers the full engine over 'cleo'.
+ */
 export function registerScriptModule(specifier: string, exports: ScriptModule): void {
     modules.set(specifier, exports);
-    if (specifier === 'cleo') { cleoModule = null; moduleVersion++; }
+    // Any built-in may change what 'cleo' holds: the decorators' names are left on it as pointers.
+    cleoModule = null;
+    moduleVersion++;
 }
 
 /**

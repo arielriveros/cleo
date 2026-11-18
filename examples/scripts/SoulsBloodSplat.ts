@@ -1,4 +1,5 @@
-import { Node, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 import { clamp, num } from '@/Core/Scripts/SoulsMath'
 
 /**

@@ -1,4 +1,4 @@
-import { attribute } from 'cleo'
+import { attribute } from 'cleo/decorators'
 import type { TemplateName } from 'cleo'
 import SoulsEnemyNode from '@/Characters/Enemies/Base Enemy/Scripts/SoulsEnemy'
 

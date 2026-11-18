@@ -1,4 +1,5 @@
-import { AnimatedSpriteNode, CharacterBody2DNode, Game, Input, Node, save, child, attribute } from 'cleo'
+import { AnimatedSpriteNode, CharacterBody2DNode, Game, Input, Node } from 'cleo'
+import { save, child, attribute } from 'cleo/decorators'
 
 /**
  * Duskwell -- the player: the warrior of the Medieval Warrior pack. Attach to the `Player` Character Body 2D;

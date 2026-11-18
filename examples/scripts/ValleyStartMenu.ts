@@ -1,4 +1,5 @@
-import { Game, Input, InputSystem, Node, SequenceNode, UIButtonNode, UIRootNode, attribute } from 'cleo'
+import { Game, Input, InputSystem, Node, SequenceNode, UIButtonNode, UIRootNode } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * The Valley — the start menu. Attach to the `Start Menu` node, a screen-space UI Root that is shown when

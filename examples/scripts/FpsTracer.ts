@@ -1,4 +1,5 @@
-import { Node, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * FPS example — a tracer round. The shooter instantiates one at the muzzle, turned along the shot, and sets

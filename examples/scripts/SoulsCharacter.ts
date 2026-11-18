@@ -1,4 +1,5 @@
-import { CharacterNode, Logger, ModelNode, Node, Shape, moveWorldDirection, resolveSocketOwner, setMoveWorld, find, attribute } from 'cleo'
+import { CharacterNode, Logger, ModelNode, Node, Shape, moveWorldDirection, resolveSocketOwner, setMoveWorld } from 'cleo'
+import { find, attribute } from 'cleo/decorators'
 import type { AnimationTriggerInfo, Animator, SocketName, TemplateName, TriggerName } from 'cleo'
 import { clamp } from '@/Core/Scripts/SoulsMath'
 import { bladeCapsule, disarmHitbox, ensureHurtbox, setHurtboxEnabled } from '@/Core/Scripts/SoulsHitbox'

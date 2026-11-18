@@ -1,4 +1,5 @@
-import { AnimatedSpriteNode, Logger, Node, SaveGame, TriggerNode, save, child, attribute } from 'cleo'
+import { AnimatedSpriteNode, Logger, Node, SaveGame, TriggerNode } from 'cleo'
+import { save, child, attribute } from 'cleo/decorators'
 
 /**
  * Duskwell -- a checkpoint: a lamp the player lights by walking past it. Attach to an Area 2D that sees the

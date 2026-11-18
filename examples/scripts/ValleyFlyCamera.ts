@@ -1,4 +1,5 @@
-import { CameraRigNode, Input, attribute } from 'cleo'
+import { CameraRigNode, Input } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * Valley — a free-flying camera for looking round the scenery in Play. Attach to a Camera Rig with a

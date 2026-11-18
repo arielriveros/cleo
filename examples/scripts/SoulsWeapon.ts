@@ -1,4 +1,5 @@
-import { Node, find, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { find, attribute } from 'cleo/decorators'
 import type { NodeName, SoundName, TemplateName } from 'cleo'
 import { num, statBonus } from '@/Core/Scripts/SoulsMath'
 import { playSound } from '@/Core/Scripts/SoulsAudio'

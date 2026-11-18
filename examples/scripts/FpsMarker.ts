@@ -1,4 +1,5 @@
-import { Node, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * FPS example — a marker the Game Manager reads. Attach to a Spawn Point or Cover Point template:

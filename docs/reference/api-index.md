@@ -1,7 +1,8 @@
 # Reference — API index
 
 Everything exported from the `cleo` module, grouped. This is what
-`import { … } from 'cleo'` resolves to inside a script.
+`import { … } from 'cleo'` resolves to inside a script. The script decorators are a module of their own,
+`cleo/decorators`: see [Decorators: cleo/decorators](#decorators-cleodecorators), under Scripting.
 
 Types are marked *(type)*; everything else is a value you can call, construct or read. Most of what
 a game needs is in the first four sections — the rest exists because the editor is written against
@@ -79,10 +80,9 @@ Layout helpers: `uiSetRect`, `uiSolveRect`, `uiRootScale`, `uiProjectToScreen`, 
 | `setScriptProvider`, `resolveNodeScript` | The no-eval path a published build uses. |
 | `attachScriptFactory`, `unwrapScriptNode` | Bind a factory to a node. |
 | `getData`, `setData`, `bindDataAccessors`, `canAccessVariable` | The variable access boundary. |
-| `child`, `find`, `onAction`, `onHold`, `onTap`, `onEvent`, `every`, `onEnter`, `onExit`, `attribute`, `save`, `options`, `pick` | Script decorators. See [Decorators](../scripting/decorators.md). |
 | `GameEvents` | Named messages between scripts: `emit`, `on`, `off`. What `@onEvent` listens to. |
 | `applyScriptDecorators`, `scriptMembersOf`, `membersOfNode` | What the script compile calls, and how the engine reads a class's decorators back. |
-| `AttributeOptions` *(type)* | What `@attribute` takes besides its group: label, range, read-only, showIf, colour, multiline. |
+| `lowerScriptDecorators`, `decoratorSiteAt` | How the compile rewrites decorators, and where the script editor's `@` completion applies. |
 | `ActionName` / `ProjectActions` / `ScriptPickKind` *(types)* | An input action's name, checked against the project's input map. |
 | `SaveGame` | Save slots, globals, loading and migrations. See [Saving and loading](../scripting/save-game.md). |
 | `setSaveStore`, `getSaveStore` | Install where saves go (hosts: the player, the editor's Play). |
@@ -92,6 +92,23 @@ Layout helpers: `uiSetRect`, `uiSolveRect`, `uiRootScale`, `uiProjectToScreen`, 
 | `SaveDocument` / `SaveSlotInfo` / `SceneMemory` / `SaveStore` *(types)* | |
 | `NodeVariable` / `NodeVariableType` / `NodeVariableAccess` *(types)* | |
 | `ScriptModule` / `ScriptFactory` *(types)* | |
+
+### Decorators: `cleo/decorators`
+
+What `import { … } from 'cleo/decorators'` resolves to. They are not in `cleo`: a script that still imports
+one from there fails to load, with an error saying where it went.
+
+| Export | What it is |
+|---|---|
+| `child`, `find` | Fill a field with a node found by name: under this one, or anywhere in the scene. |
+| `onAction`, `onHold`, `onTap` | Call a method on an input action: a press (or another change), a hold, a tap. |
+| `onEvent`, `every` | Call a method on a `GameEvents` message, or every so many seconds of game time. |
+| `onEnter`, `onExit` | Call a method when a trigger overlap begins or ends. |
+| `attribute`, `save`, `options`, `pick` | Show a field in the inspector, keep it in saves, offer its values from a list or by kind. |
+| `ActionWhen` / `AttributeOptions` *(types)* | Which change of an action `@onAction` answers; how an `@attribute` row shows. |
+| `FieldDecorator` / `MethodDecorator` / `AttributeDecorator` *(types)* | What the decorators are, as types. |
+
+See [Decorators](../scripting/decorators.md).
 
 ## Input
 

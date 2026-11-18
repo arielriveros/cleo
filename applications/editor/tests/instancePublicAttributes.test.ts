@@ -12,7 +12,8 @@ import { innerAttributeSections, setInstanceAttribute, settableOnInstance } from
 // in the template). The instance root's Behaviors panel lists every inner behavior's public attributes, and a
 // value set there is that placement's override at the inner node's path.
 
-const PLAYER = `import { Node, attribute } from 'cleo'
+const PLAYER = `import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 export default class Player extends Node {
   @attribute('Gait') public walkScale: number = 0.38
   @attribute('Gait') backScale: number = 0.8
@@ -21,12 +22,14 @@ export default class Player extends Node {
   public leanLeft: number = 0
   private _lean: number = 0
 }`
-const CAMERA = `import { Node, attribute } from 'cleo'
+const CAMERA = `import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 export default class Camera extends Node {
   @attribute('Framing') public shoulderArm: number = 1.9
   @attribute('Switch') private switchSeconds: number = 0.35
 }`
-const NOTHING_PUBLIC = `import { Node, attribute } from 'cleo'
+const NOTHING_PUBLIC = `import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 export default class Prop extends Node {
   @attribute private spin: number = 1
 }`

@@ -1,4 +1,5 @@
-import { Node, UIProgressBarNode, UIRootNode, UITextNode, attribute } from 'cleo'
+import { Node, UIProgressBarNode, UIRootNode, UITextNode } from 'cleo'
+import { attribute } from 'cleo/decorators'
 import { WEAPONS, angleDiff, clamp, manager, yawTo } from '@/FPS/Scripts/FpsShared'
 
 /**
