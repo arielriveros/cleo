@@ -5,7 +5,8 @@ import { useHistory } from '../HistoryContext'
 import { sortEvents, type ClipEvent } from '../../utils/clipEvents'
 import type { StoredClip } from '../../utils/animationAssets'
 
-// The editor's only writes to a clip: its events, its root-motion flag, and dropping a legacy edit stack.
+// The editor's only writes to a clip: its events, its foot-lock windows, its root-motion flag, and dropping a
+// legacy edit stack.
 // Motion itself is authored in Cleo Creator.
 //
 // Every write goes straight into the `.anim` in the library (`editSharedClip`), which re-resolves the clip on
@@ -14,7 +15,7 @@ import type { StoredClip } from '../../utils/animationAssets'
 // being edited at all. Undo is a hand-built entry on the active tab's stack — the scene recorder cannot see
 // a library asset.
 
-export type ClipPatch = Partial<Pick<StoredClip, 'rootMotion' | 'events' | 'edits'>>
+export type ClipPatch = Partial<Pick<StoredClip, 'rootMotion' | 'events' | 'edits' | 'footLocks'>>
 
 const NONE: readonly ClipEvent[] = []
 

@@ -221,7 +221,7 @@ describe('the Animate wizard is gone', () => {
   it('nothing builds or opens it', () => {
     expect(existsSync(join(SRC, 'features', 'characterAnimation', 'AnimateCharacterWizard.tsx'))).toBe(false)
     expect(existsSync(join(SRC, 'utils', 'animatorTemplates.ts'))).toBe(false)
-    expect(read('features', 'nodeInspector', 'propertyEditors', 'AnimationSlot.tsx')).not.toContain('Wizard')
+    expect(read('features', 'nodeInspector', 'propertyEditors', 'CharacterRows.tsx')).not.toContain('Wizard')
     expect(read('features', 'EngineContext.tsx')).not.toContain('animateCharacter')
     expect(read('features', 'EditorSessionsContext.tsx')).not.toContain('animateCharacter')
   })

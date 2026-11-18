@@ -45,6 +45,17 @@ import { clamp, finiteOr, RAD2DEG } from "../math";
 export const FACING_MODES = ['aim', 'velocity', 'none'] as const;
 export type FacingMode = typeof FACING_MODES[number];
 
+/**
+ * What `moveDir` (the blend-space direction) reads: the INPUT's direction, or the body's actual TRAVEL. They differ
+ * whenever the velocity has to catch up with a new input, which an `acceleration` makes it do: the legs then play
+ * the new direction while the body still goes the old way, and the feet slide sideways ("ice").
+ */
+export const MOVE_DIR_SOURCES = ['input', 'velocity'] as const;
+export type MoveDirSource = typeof MOVE_DIR_SOURCES[number];
+
+/** Past this angle between the velocity and the input, turn friction does not turn the velocity: it brakes through. */
+export const TURN_FRICTION_MAX_ANGLE = 135;
+
 export interface LocomotionTuning {
     walkSpeed: number;
     runSpeed: number;
@@ -60,9 +71,16 @@ export interface LocomotionTuning {
      * Seconds the aim must stay past the threshold before a 90-degree turn engages, so the clip is chosen
      * from where the aim SETTLES rather than from the frame it first crossed. A camera swept round to the
      * back crosses 90 long before it reaches 180; picking the clip at that crossing meant the 180 never
-     * played. Past 135 the turn engages at once — the choice can no longer get bigger. 0 disables.
+     * played. Past 135 the turn engages after `turnSettleFarSeconds` instead — the choice can no longer get
+     * bigger. 0 disables. At most 5 s: a character that looks round with its head before its body turns
+     * (a look-at layer) waits a second or more.
      */
     turnSettleSeconds: number;
+    /**
+     * Seconds the aim must stay past 135 degrees before the 180 turn engages. 0 (the default) engages it at
+     * once, as it always did; a look-at character waits a little here too, so its head is seen to turn first.
+     */
+    turnSettleFarSeconds: number;
     /** Time constant, seconds, smoothing `moveDir` so a blend probe glides between strafes. */
     directionSmoothing: number;
     /**
@@ -79,6 +97,16 @@ export interface LocomotionTuning {
      * characters are normally authored. A value below about `g * sin(slope)` cannot climb that slope.
      */
     acceleration: number;
+    /**
+     * Per second: how fast a moving body's velocity TURNS toward a new direction, keeping its speed (the ground
+     * friction of Unreal's CharacterMovement, 8 there). **0 is off**: `acceleration` alone then moves the velocity
+     * in a straight line toward the new one, which at 11 m/s2 takes half a second to turn a jog by 90 degrees,
+     * dipping to 70% of the speed halfway, while the body coasts on its old heading. A reversal (past
+     * {@link TURN_FRICTION_MAX_ANGLE}) is never turned, only braked through by `acceleration`. Grounded only.
+     */
+    turnFriction: number;
+    /** See {@link MoveDirSource}. 'input', the default, is the original behaviour. */
+    moveDirSource: MoveDirSource;
     /** 0..1 of steering authority while airborne. 1 is full control, matching the original script. */
     airControl: number;
     /** Seconds after leaving the ground during which a jump still launches. */
@@ -99,8 +127,11 @@ export const LOCOMOTION_DEFAULTS: LocomotionTuning = {
     turnThreshold: 90,
     turnReleaseAngle: 10,
     turnSettleSeconds: 0.12,
+    turnSettleFarSeconds: 0,
     directionSmoothing: 0.12,
     acceleration: 0,
+    turnFriction: 0,
+    moveDirSource: 'input',
     airControl: 1,
     coyoteSeconds: 0.12,
     jumpLockoutSeconds: 0.15,
@@ -120,9 +151,13 @@ export function locomotionTuning(over?: Partial<LocomotionTuning> | null): Locom
         turnThreshold,
         // Strictly below the threshold, or a turn releases on the frame it engages and nothing ever turns.
         turnReleaseAngle: clamp(finiteOr(o.turnReleaseAngle, d.turnReleaseAngle), 0, turnThreshold - 0.5),
-        turnSettleSeconds: clamp(finiteOr(o.turnSettleSeconds, d.turnSettleSeconds), 0, 1),
+        turnSettleSeconds: clamp(finiteOr(o.turnSettleSeconds, d.turnSettleSeconds), 0, 5),
+        turnSettleFarSeconds: clamp(finiteOr(o.turnSettleFarSeconds, d.turnSettleFarSeconds), 0, 5),
         directionSmoothing: Math.max(0, finiteOr(o.directionSmoothing, d.directionSmoothing)),
         acceleration: Math.max(0, finiteOr(o.acceleration, d.acceleration)),
+        turnFriction: Math.max(0, finiteOr(o.turnFriction, d.turnFriction)),
+        moveDirSource: (MOVE_DIR_SOURCES as readonly string[]).includes(o.moveDirSource as string)
+            ? o.moveDirSource as MoveDirSource : d.moveDirSource,
         airControl: clamp(finiteOr(o.airControl, d.airControl), 0, 1),
         coyoteSeconds: clamp(finiteOr(o.coyoteSeconds, d.coyoteSeconds), 0, 1),
         jumpLockoutSeconds: clamp(finiteOr(o.jumpLockoutSeconds, d.jumpLockoutSeconds), 0, 2),
@@ -345,6 +380,35 @@ export function stepLocomotion(
         }
     }
 
+    // ----- turn friction --------------------------------------------------------------------------
+    // The velocity TURNED toward the commanded direction by a share of the angle between them, its speed kept,
+    // before the ramp closes what is left (the speed). In the plane the two span, which is the surface frame
+    // when there is one. A reversal is left to the ramp: it brakes through zero, as a running turn or a stop
+    // expects. With `acceleration: 0` the ramp snaps to the target anyway, so this changes nothing.
+    if (tuning.turnFriction > 0 && tuning.acceleration > 0 && dt > 0 && moving && sense.grounded) {
+        const curSpeed = Math.hypot(curX, curY, curZ);
+        const tgtSpeed = Math.hypot(targetX, targetY, targetZ);
+        if (curSpeed > 1e-6 && tgtSpeed > 1e-6) {
+            const cx = curX / curSpeed, cy = curY / curSpeed, cz = curZ / curSpeed;
+            const tx = targetX / tgtSpeed, ty = targetY / tgtSpeed, tz = targetZ / tgtSpeed;
+            const cos = clamp(cx * tx + cy * ty + cz * tz, -1, 1);
+            const angle = Math.acos(cos);
+            if (angle > 1e-6 && angle <= TURN_FRICTION_MAX_ANGLE * Math.PI / 180) {
+                // The unit vector at right angles to the velocity, toward the target, in their plane.
+                let px = tx - cx * cos, py = ty - cy * cos, pz = tz - cz * cos;
+                const pLen = Math.hypot(px, py, pz);
+                if (pLen > 1e-9) {
+                    px /= pLen; py /= pLen; pz /= pLen;
+                    const turned = angle * (1 - Math.exp(-tuning.turnFriction * dt));
+                    const c = Math.cos(turned), sn = Math.sin(turned);
+                    curX = curSpeed * (cx * c + px * sn);
+                    curY = curSpeed * (cy * c + py * sn);
+                    curZ = curSpeed * (cz * c + pz * sn);
+                }
+            }
+        }
+    }
+
     // ----- acceleration ramp ----------------------------------------------------------------------
     // 0 snaps, which reproduces the original exactly; above 0 it makes the engine's existing
     // `planarAcceleration` / `isAccelerating` builtins mean something for start/stop states.
@@ -421,7 +485,17 @@ export function stepLocomotion(
         // NEGATED because these angles are counter-clockwise: moving right is a clockwise offset from
         // forward and so reads negative. Verify with W → 0, D → -90, A → +90, S → ±180.
         const relative = Math.atan2(-moveRight, moveForward) * RAD2DEG;
-        const target = shortestAngle(relative + shortestAngle(intent.basisYaw - sense.bodyYaw));
+        let target = shortestAngle(relative + shortestAngle(intent.basisYaw - sense.bodyYaw));
+        if (tuning.moveDirSource === 'velocity') {
+            // The heading the body really travels at this frame (its steering velocity, flattened), in the
+            // same counter-clockwise yaw. Below a tenth of the commanded speed (setting off, the zero of a
+            // reversal) there is no travel worth reading, and the input stands in.
+            const along = targetX * ux + targetY * uy + targetZ * uz;
+            const tvx = targetX - ux * along, tvz = targetZ - uz * along;
+            if (speed > 0 && Math.hypot(tvx, targetY - uy * along, tvz) > speed * 0.1) {
+                target = shortestAngle(Math.atan2(tvx, tvz) * RAD2DEG - sense.bodyYaw);
+            }
+        }
         const a = tuning.directionSmoothing > 0 && dt > 0
             ? 1 - Math.exp(-dt / tuning.directionSmoothing)
             : 1;
@@ -461,7 +535,7 @@ export function stepLocomotion(
             if (Math.abs(diff) >= tuning.turnThreshold) {
                 // Wait for the aim to settle before choosing 90 vs 180 — unless it is already past 135.
                 next.turnPending = state.turnPending + dt;
-                if (far || next.turnPending >= tuning.turnSettleSeconds) {
+                if (next.turnPending >= (far ? tuning.turnSettleFarSeconds : tuning.turnSettleSeconds)) {
                     next.turning = true;
                     next.turnPending = 0;
                     next.turnCode = side * (far ? 2 : 1);

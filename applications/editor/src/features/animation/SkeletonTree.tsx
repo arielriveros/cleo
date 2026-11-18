@@ -5,7 +5,6 @@ import { getAnimationTarget, buildJointTree, jointLabel, JointTreeNode } from '.
 import { useElementSize } from '@cleo/app-kit/utils/useElementSize'
 import { useScopedDndManager } from '../../utils/treeDnd'
 import { useTreeFocusGuard } from '../../utils/treeFocusGuard'
-import IkRigPanel from './IkRigPanel'
 import { SectionTitle, TextInput } from '@cleo/app-kit/ui'
 
 // Left-sidebar skeleton hierarchy for the Animation Editor: a react-arborist tree that is READ-ONLY, since
@@ -178,11 +177,6 @@ export default function SkeletonTree() {
             {JointRowView}
           </Tree>
         }
-      </div>
-      {/* Below the tree rather than in its own panel: assigning a bone to a role is a two-step gesture that
-          starts with a click in the tree above, so the two have to be visible at once. */}
-      <div className='shrink-0 border-t border-fg/[0.06]'>
-        <IkRigPanel skin={target.skin} selectedJoint={selectedJoint} />
       </div>
     </div>
   )

@@ -37,6 +37,11 @@ export interface EditorPrefs {
   scriptDebugWith: ScriptDebugger;
   /** The local port VS Code attaches to (Attach to the Cleo game). */
   vscodeDebugPort: number;
+  /**
+   * Options ▸ Editor ▸ Viewport ▸ Play ▸ Release mouse: the key (a `KeyboardEvent.code`) that lets the mouse go in
+   * Play. The browser also lets it go on Esc, except in fullscreen Play, where the game holds every key.
+   */
+  releaseMouseKey: string;
 }
 
 export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
@@ -50,10 +55,13 @@ export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   pinPerformanceInPlay: false,
   scriptDebugWith: 'cleo',
   vscodeDebugPort: DEFAULT_VSCODE_DEBUG_PORT,
+  releaseMouseKey: 'Escape',
 };
 
 const KEY = 'cleo_editor_prefs_v1';
 const COMMAND = /^[\w.+-]+$/;   // the desktop side's SAFE_COMMAND
+/** A `KeyboardEvent.code`: letters and digits only (KeyW, Escape, Backquote, F1, Numpad0...). */
+const KEY_CODE = /^[A-Za-z][A-Za-z0-9]{1,24}$/;
 
 /** A stored blob read tolerantly: unknown keys dropped, bad values back to the default. */
 export function parseEditorPrefs(raw: unknown): EditorPrefs {
@@ -74,6 +82,7 @@ export function parseEditorPrefs(raw: unknown): EditorPrefs {
     scriptDebugWith: o.scriptDebugWith === 'vscode' ? 'vscode' : 'cleo',
     vscodeDebugPort: typeof o.vscodeDebugPort === 'number' && Number.isInteger(o.vscodeDebugPort) && o.vscodeDebugPort >= 1024 && o.vscodeDebugPort <= 65535
       ? o.vscodeDebugPort : d.vscodeDebugPort,
+    releaseMouseKey: typeof o.releaseMouseKey === 'string' && KEY_CODE.test(o.releaseMouseKey) ? o.releaseMouseKey : d.releaseMouseKey,
   };
 }
 

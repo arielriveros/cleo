@@ -50,6 +50,16 @@
       "sceneCount": 1,
       "textureCount": 168,
       "createdAt": 1790000000000
+    },
+    {
+      "slug": "sandbox",
+      "name": "Sandbox",
+      "description": "A locomotion sandbox in the style of Advanced Locomotion System v4: a mannequin that walks and jogs in eight directions facing the camera, sprints freely, sets off, stops and turns round with their own clips, leans into curves, turns in place when you look away, jumps, falls and lands soft or hard, with its feet planted and locked by IK on ramps, stairs and bumps. Two camera rigs (V switches). All of it is the animator, the Character node and one input-only script.",
+      "order": 5,
+      "bytes": 13294459,
+      "sceneCount": 1,
+      "textureCount": 4,
+      "createdAt": 1795100000000
     }
   ]
 }

@@ -242,9 +242,8 @@ export default function RigInspector() {
           )}
         </div>
 
-        {/* Foot IK is NOT duplicated here. `IkRigPanel` already sits under the bone tree in the Skeleton
-            panel, where it belongs: assigning a bone to a role starts with a click in that tree, so the two
-            have to be visible at once. The rig tab shows that panel the same way the animation tab does. */}
+        {/* Foot IK is NOT duplicated here: it is the Foot Placement tab beside this one (rig/FootPlacementPanel),
+            with the bone tree up on the left, since assigning a bone to a role starts with a click in that tree. */}
 
         {models.length > 0 && runtimeModelId && (
           <Button variant='subtle' className='w-full py-1.5' onClick={() => enterModelEditor(runtimeModelId)}>

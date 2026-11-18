@@ -16,7 +16,8 @@ import { editorPrefsStore, useEditorPrefs } from './editorPrefs'
 
 type Page = 'renderer' | 'performance' | 'runtime'
 
-export default function EngineOptionsPanel() {
+/** `active`: whether the panel is on screen (its dock tab selected). The Performance page samples only then. */
+export default function EngineOptionsPanel({ active = true }: { active?: boolean } = {}) {
   const [page, setPage] = useOptionsPage<Page>('engine', 'renderer')
   const { projectSettings } = useCleoEngine()
   const { pinPerformanceInPlay } = useEditorPrefs()
@@ -36,7 +37,7 @@ export default function EngineOptionsPanel() {
     >
       {page === 'renderer' && <RendererSettingsPanel leftOut={leftOut} />}
       {page === 'performance' && (
-        <PerformancePanel physicsThread={{
+        <PerformancePanel active={active} physicsThread={{
           project: projectSettings.engine.physicsWorker,
           read: physicsWorkerOverrideSource,
           write: storePhysicsWorkerOverride,

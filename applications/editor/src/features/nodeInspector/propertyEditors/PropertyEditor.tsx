@@ -1,6 +1,5 @@
-import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, WeatherNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OcclusionVolumeNode, ExposureVolumeNode, GIVolumeNode, VolumetricFogNode, ClothNode, SequenceNode, Camera2DNode, Room2DNode, ParallaxLayerNode, CharacterBody2DNode, Body2DNode, ColliderNode, TriggerNode, ModelNode } from 'cleo'
+import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, WeatherNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OcclusionVolumeNode, ExposureVolumeNode, GIVolumeNode, VolumetricFogNode, ClothNode, SequenceNode, Camera2DNode, Room2DNode, ParallaxLayerNode, CharacterBody2DNode, Body2DNode, ColliderNode, TriggerNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
-import AnimationSlot from './AnimationSlot'
 import RigSlot from './RigSlot';
 import ModelSlot from './ModelSlot'
 import SocketAttachSlot from './SocketAttachSlot'
@@ -37,7 +36,6 @@ import TilemapEditor from './TilemapEditor'
 import { Camera2DEditor, Room2DEditor, ParallaxLayerEditor } from './Camera2DEditors'
 import { CharacterBody2DEditor, Body2DEditor } from './Physics2DEditors'
 import { ColliderEditor, TriggerEditor } from '../physicsEditors/ColliderEditor'
-import RagdollEditor, { isRagdollModel } from '../physicsEditors/RagdollEditor'
 import LandscapeEditor from './LandscapeEditor'
 import SceneSettings from './SceneSettings'
 import UIEditor from './UIEditor'
@@ -90,10 +88,11 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
               where linking, save propagation and deletion work. */}
           { nodeSupportsMaterial(props.node) && <fieldset disabled={lock.locked} title={lock.locked ? lock.reason : undefined} className='border-0 m-0 p-0 min-w-0'><MaterialSlot node={props.node} /></fieldset> }
           {/* A node that IS a skinned model, or is the ROOT of an instance holding one — `ownSkinnedModelNodeOf`,
-              never a subtree search, so a section is about the selected node rather than anything below it.
-              Both render away otherwise. Between them these are the only animation-related sections on a
-              model node: the rig owns the clips, the node owns the machine that names them. */}
-          { !root && <fieldset disabled={lock.locked} title={lock.locked ? lock.reason : undefined} className='border-0 m-0 p-0 min-w-0'><RigSlot node={props.node} /><AnimationSlot node={props.node} /></fieldset> }
+              never a subtree search, so the section is about the selected node rather than anything below it.
+              It renders away otherwise. The only animation and ragdoll section on a model node: the skeleton
+              owns the clips, animators and ragdoll profile, and its "This character" rows hold what the node
+              decides for itself (which animator, clip overrides, ragdoll mass and push). */}
+          { !root && <fieldset disabled={lock.locked} title={lock.locked ? lock.reason : undefined} className='border-0 m-0 p-0 min-w-0'><RigSlot node={props.node} /></fieldset> }
           { props.node.nodeType === 'sprite' && <SpriteEditor node={props.node as SpriteNode} /> }
           { props.node.nodeType === 'animatedSprite' && <AnimatedSpriteEditor /> }
           { props.node.nodeType === 'light' && <LightEditor node={props.node as LightNode} /> }
@@ -125,8 +124,6 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'body2D' && <Body2DEditor key={props.node.id} node={props.node as Body2DNode} /> }
           { props.node.nodeType === 'collider' && <ColliderEditor key={props.node.id} node={props.node as ColliderNode} /> }
           { props.node.nodeType === 'trigger' && <TriggerEditor key={props.node.id} node={props.node as TriggerNode} /> }
-          {/* How a skinned character falls when it goes limp: the model's own, so it is in its Properties. */}
-          { !root && isRagdollModel(props.node) && <RagdollEditor key={props.node.id} node={props.node as ModelNode} /> }
           { props.node.nodeType === 'landscape' && <LandscapeEditor key={props.node.id} node={props.node as LandscapeNode} /> }
           { props.node.nodeType === 'volumetricClouds' && <VolumetricCloudsEditor node={props.node as VolumetricCloudsNode} /> }
           { props.node.nodeType === 'skyAtmosphere' && <SkyAtmosphereEditor node={props.node as SkyAtmosphereNode} /> }

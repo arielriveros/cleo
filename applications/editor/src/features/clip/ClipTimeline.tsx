@@ -3,7 +3,9 @@ import { useCleoEngine } from '../EngineContext'
 import { useClip } from './ClipContext'
 import { getAnimationTarget } from '../animation/skeleton'
 import { applyPreviewClips } from './clipPreview'
+import { rememberPreviewHome, returnPreviewHome } from './previewHome'
 import ClipEventsTrack, { TRACK_GUTTER, TRACK_TAIL } from '../animation/ClipEventsTrack'
+import ClipFootLocksTrack from '../animation/ClipFootLocksTrack'
 import type { AnimationAsset } from '../../utils/animationAssets'
 import { Button, NumberInput, Select, Toggle, cn } from '@cleo/app-kit/ui'
 import { clamp } from '@cleo/app-kit/utils/math'
@@ -15,12 +17,12 @@ import { clamp } from '@cleo/app-kit/utils/math'
 // character, and dockview would otherwise unmount it the moment the user looked at the Logger.
 
 /**
- * What decides the pose a clip asset produces: every clip's curves, edit stack and root-motion flag, by
- * identity. Events are left out on purpose — an events write replaces the asset object, and re-binding the
- * preview for it would stop playback for a change that moves no bone.
+ * What decides the pose a clip asset produces: every clip's curves, edit stack, root-motion flag and foot-lock
+ * windows (foot placement holds the feet by them), by identity. Events are left out on purpose — an events write
+ * replaces the asset object, and re-binding the preview for it would stop playback for a change that moves no bone.
  */
 function poseParts(asset: AnimationAsset | null): unknown[] {
-  return asset ? asset.clips.flatMap(c => [c.name, c.samplers, c.channels, c.edits, c.rootMotion]) : []
+  return asset ? asset.clips.flatMap(c => [c.name, c.samplers, c.channels, c.edits, c.rootMotion, c.footLocks]) : []
 }
 const sameParts = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((x, i) => x === b[i])
 
@@ -57,6 +59,9 @@ export default function ClipTimeline() {
     const parts = poseParts(asset)
     if (applied.current.key === key && sameParts(applied.current.parts, parts)) return
     applied.current = { key, parts }
+    // A clip change starts where the character stands, not where the last clip's root motion took it.
+    rememberPreviewHome(target.node)
+    returnPreviewHome(target.node)
     const bound = applyPreviewClips(target, asset, clipName, { time: timeRef.current, loop })
     setDuration(target.animator.duration)
     if (bound && bound !== clipName) selectClip(bound)
@@ -64,9 +69,12 @@ export default function ClipTimeline() {
     lastRef.current = performance.now()
   })
 
-  // Leave the character in bind pose on the way out, as every other animation surface does.
-  useEffect(() => () => { getAnimationTarget(editorScene, skeletonTargetId)?.animator.showBindPose() },
-    [editorScene, skeletonTargetId])
+  // Leave the character in bind pose, and where it stood, on the way out, as every other animation surface does.
+  useEffect(() => () => {
+    const t = getAnimationTarget(editorScene, skeletonTargetId)
+    t?.animator.showBindPose()
+    if (t) returnPreviewHome(t.node)
+  }, [editorScene, skeletonTargetId])
 
   useEffect(() => {
     const onChanged = () => setDuration(getAnimationTarget(editorScene, skeletonTargetId)?.animator.duration ?? 0)
@@ -84,7 +92,10 @@ export default function ClipTimeline() {
         const dt = Math.min((now - lastRef.current) / 1000, 0.1)
         lastRef.current = now
         if (playingRef.current && !scrubbingRef.current) {
+          const before = t.animator.currentTime
           t.animator.update(dt)
+          // A loop starts over where the character stood: root motion would walk it out of the picture.
+          if (t.animator.loop && t.animator.currentTime < before) returnPreviewHome(t.node)
           setTime(t.animator.currentTime)
           setDuration(t.animator.duration)
         }
@@ -110,6 +121,7 @@ export default function ClipTimeline() {
   const clips = asset.clips.map(c => c.name)
 
   const bind = (name: string) => {
+    returnPreviewHome(target.node)
     animator.playAnimationByName(name, loop, false)
     animator.pause()
     animator.seek(0)
@@ -127,10 +139,12 @@ export default function ClipTimeline() {
     setPlaying(true)
   }
   const onPause = () => { animator.pause(); setPlaying(false) }
-  const onStop = () => { animator.stop(); animator.showBindPose(); setPlaying(false); setTime(0) }
+  const onStop = () => { animator.stop(); animator.showBindPose(); returnPreviewHome(target.node); setPlaying(false); setTime(0) }
 
   const onScrub = (v: number) => {
     scrubbingRef.current = true
+    // A scrub poses the clip in place (seeking applies no root motion), so where it stands is home.
+    returnPreviewHome(target.node)
     if (clipName && animator.currentAnimation?.name !== clipName) animator.playAnimationByName(clipName, loop, false)
     animator.pause()
     animator.seek(v)
@@ -199,6 +213,8 @@ export default function ClipTimeline() {
 
       {/* The clip's events: they fire wherever it plays. Written to the .anim, so nothing to save. */}
       <ClipEventsTrack assetId={asset.id} clipName={clipName ?? undefined} duration={duration} time={time} onSeek={onScrub} />
+      {/* When each foot is planted and may be locked by foot placement, also on the .anim. */}
+      <ClipFootLocksTrack asset={asset} clipName={clipName ?? undefined} duration={duration} time={time} onSeek={onScrub} />
     </div>
   )
 }

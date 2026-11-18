@@ -3,7 +3,7 @@ import { useCleoEngine } from '../EngineContext'
 import type {
   AnimationStateMachine, AnimationParameter, AnimationState,
   AnimationTransition, AnimationCondition, AnimationConditionGroup, AnimationConditionNode,
-  AnimationParameterType, AnimationLayer, AnimationSlotDef, EventActionBinding,
+  AnimationParameterType, AnimationLayer, AnimationSlotDef, EventActionBinding, AnimationStateGroup,
 } from 'cleo'
 import { isConditionGroup } from 'cleo'
 import { getAnimationTarget, accessibleNodeVariables, AccessibleVariable, AnimationTarget } from './skeleton'
@@ -16,6 +16,13 @@ import type { BoneMaskAsset } from '../../utils/boneMasks'
 import type { PoseAsset } from '../../utils/poseAssets'
 import { liftMachineEvents } from '../../utils/clipEvents'
 import { toast } from '@cleo/app-kit/feedback/toastStore'
+import {
+  layerView, writeLayer, groupsOf, groupOf as groupOfIn, createGroup as createGroupIn, setGroupFields,
+  removeGroup as removeGroupIn, moveToGroup as moveToGroupIn, renameStateInGroups, dropStatesFromGroups,
+  isGroupName, nameTaken,
+} from './stateGroups'
+
+export { layerView, writeLayer }
 
 // Shared editing session for the Animation State Machine: the node-graph and the sidebar inspector edit the
 // SAME machine, so the working copy `sm`, the selection, the view toggle and every mutator live here.
@@ -28,6 +35,13 @@ import { toast } from '@cleo/app-kit/feedback/toastStore'
 export type SMSelection =
   | { kind: 'state'; name: string }
   | { kind: 'transition'; a: string; b: string }
+  /** A state group (its node in the graph). */
+  | { kind: 'group'; name: string }
+  /**
+   * A line in the graph that stands for several transitions: a group's states' ways out to one place, say.
+   * `from`/`to` are the drawn ends (a group standing for its states); the inspector lists what it stands for.
+   */
+  | { kind: 'summary'; from: string; to: string }
   | null
 
 /** Canonical (order-independent) identity for a link, so A→B and B→A resolve to the same selection. */
@@ -105,8 +119,27 @@ interface StateMachineContextValue {
   stateIndex: (name: string) => number
   /** Assign x/y to several states in one update (used for first-time graph auto-layout). */
   commitLayout: (coords: Record<string, { x: number; y: number }>) => void
-  /** Atomically remove states (by name) + whole links in a single update (graph delete). */
-  deleteElements: (stateNames: string[], links: [string, string][]) => void
+  /**
+   * Atomically remove states and groups (by name), whole links, and exact transitions (`from`/`to` pairs) in a
+   * single update (graph delete). A group goes with its states.
+   */
+  deleteElements: (stateNames: string[], links: [string, string][], exact?: [string, string][]) => void
+
+  /** The active layer's state groups. */
+  groups: AnimationStateGroup[]
+  /** The group a state is in, if any. */
+  groupOf: (state: string) => AnimationStateGroup | undefined
+  /** Group these states under a new group (selected), each leaving any group it was in. Returns its name. */
+  createGroup: (members: string[]) => string | null
+  /** Rename a group (followed into its transitions and the selection), set its entry, or move it. */
+  setGroup: (name: string, patch: Partial<AnimationStateGroup>) => void
+  /** Ungroup (keep its states and what its transitions did) or delete (with its states). */
+  removeGroup: (name: string, mode: 'ungroup' | 'delete') => void
+  /** Put a state in a group, or in none. */
+  moveToGroup: (state: string, group: string | null) => void
+  /** The group the graph has opened, or null for the whole layer. */
+  openGroup: string | null
+  setOpenGroup: (name: string | null) => void
 
   /** Every link in the machine, each with whichever of its two directions exist. */
   links: SMLink[]
@@ -237,6 +270,9 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const layerIdx = activeLayer > 0 && activeLayer <= (fullSm.layers?.length ?? 0) ? activeLayer : 0
   const sm = layerView(fullSm, layerIdx)
   const [graphView, setGraphView] = useState(true)
+  const [openGroupState, setOpenGroup] = useState<string | null>(null)
+  // A group that is no longer there (removed, or on another layer) closes by itself.
+  const openGroup = openGroupState && isGroupName(sm, openGroupState) ? openGroupState : null
   const [simulate, setSimulate] = useState(false)
   const [, force] = useState(0)
   // Bumped when physics changes (a Collider added or removed above the character), to invalidate accessVars.
@@ -282,6 +318,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     }
     setSm(loaded)
     setActiveLayerState(0)
+    setOpenGroup(null)
     const entry = existing?.states.find((s: AnimationState) => s.isEntry)?.name ?? existing?.states[0]?.name ?? null
     setSelection(entry ? { kind: 'state', name: entry } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -312,6 +349,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const setActiveLayer = (i: number) => {
     setActiveLayerState(i)
     setSelection(null)
+    setOpenGroup(null)
   }
   const addLayer = () => {
     const names = (fullSm.layers ?? []).map(l => l.name)
@@ -467,22 +505,35 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
 
   // ---- States ----
   const addState = (pos?: { x: number; y: number }) => {
-    const name = uniqueName('State', sm.states.map(s => s.name))
-    updateLayer(prev => ({
-      ...prev,
-      states: [...prev.states, { name, clipName: clips[0] ?? '', loop: true, speed: 1, isEntry: prev.states.length === 0, x: pos?.x, y: pos?.y }],
-    }))
+    const name = uniqueName('State', [...sm.states.map(s => s.name), ...groupsOf(sm).map(g => g.name)])
+    // Added while a group is open, it is one of that group's.
+    const into = openGroup
+    updateLayer(prev => {
+      const next = {
+        ...prev,
+        states: [...prev.states, { name, clipName: clips[0] ?? '', loop: true, speed: 1, isEntry: prev.states.length === 0, x: pos?.x, y: pos?.y }],
+      }
+      return into ? moveToGroupIn(next, name, into) : next
+    })
     setSelection({ kind: 'state', name })
   }
   const setState = (i: number, patch: Partial<AnimationState>) => {
     const oldName = sm.states[i]?.name
+    // A state may not take a group's name: a transition naming it would mean both.
+    if (patch.name && patch.name !== oldName && isGroupName(sm, patch.name)) {
+      const { name: _taken, ...rest } = patch
+      if (!Object.keys(rest).length) return
+      patch = rest
+    }
     updateLayer(prev => {
       let states = prev.states.map((s, idx) => idx === i ? { ...s, ...patch } : s)
       if (patch.isEntry) states = states.map((s, idx) => ({ ...s, isEntry: idx === i })) // single entry
       if (!patch.name || patch.name === oldName) return { ...prev, states }
+      const groups = renameStateInGroups(prev.groups, oldName, patch.name)
       return {
         ...prev,
         states,
+        ...(groups ? { groups } : {}),
         transitions: prev.transitions.map(t => ({
           ...t,
           from: t.from === oldName ? patch.name! : t.from,
@@ -501,34 +552,101 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }
   const removeState = (i: number) => {
     const name = sm.states[i].name
-    updateLayer(prev => ({
-      ...prev,
-      states: prev.states.filter((_, idx) => idx !== i),
-      transitions: prev.transitions.filter(t => t.from !== name && t.to !== name),
-    }))
+    updateLayer(prev => {
+      const groups = dropStatesFromGroups(prev.groups, new Set([name]))
+      return {
+        ...prev,
+        states: prev.states.filter((_, idx) => idx !== i),
+        transitions: prev.transitions.filter(t => t.from !== name && t.to !== name),
+        ...(groups ? { groups } : {}),
+      }
+    })
     if (selection?.kind === 'state' && selection.name === name) setSelection(null)
     if (selection?.kind === 'transition' && (selection.a === name || selection.b === name)) setSelection(null)
   }
   // Silent: the graph's one-time auto-layout runs from an effect on open, so marking dirty here would make
   // merely LOOKING at a coordinate-less machine claim unsaved edits.
+  // Groups lay out too: a group with no coordinates is placed where its states are.
   const commitLayout = (coords: Record<string, { x: number; y: number }>) =>
-    updateLayer(prev => ({ ...prev, states: prev.states.map(s => coords[s.name] ? { ...s, x: coords[s.name].x, y: coords[s.name].y } : s) }), { silent: true })
-  const deleteElements = (stateNames: string[], removedLinks: [string, string][]) => {
+    updateLayer(prev => {
+      const states = prev.states.map(s => coords[s.name] ? { ...s, x: coords[s.name].x, y: coords[s.name].y } : s)
+      const groups = prev.groups?.map(g => coords[g.name] ? { ...g, x: coords[g.name].x, y: coords[g.name].y } : g)
+      return { ...prev, states, ...(groups ? { groups } : {}) }
+    }, { silent: true })
+  const deleteElements = (stateNames: string[], removedLinks: [string, string][], exact: [string, string][] = []) => {
     // The Any State node is not a state: selecting it with others and pressing Delete keeps it (and its
-    // transitions); they are removed one link at a time.
-    const names = new Set(stateNames.filter(n => n !== ANY_STATE))
+    // transitions); they are removed one link at a time. A group goes with its states.
+    const picked = stateNames.filter(n => n !== ANY_STATE)
+    const groupNames = new Set(picked.filter(n => isGroupName(sm, n)))
+    const names = new Set(picked)
+    for (const g of groupsOf(sm)) if (groupNames.has(g.name)) g.states.forEach(m => names.add(m))
     const keys = new Set(removedLinks.map(([a, b]) => linkKey(a, b).join('|')))
-    updateLayer(prev => ({
-      ...prev,
-      states: prev.states.filter(s => !names.has(s.name)),
-      transitions: prev.transitions.filter(t =>
-        !keys.has(linkKey(t.from, t.to).join('|')) && !names.has(t.from) && !names.has(t.to)),
-    }))
-    if ((selection?.kind === 'state' && names.has(selection.name)) ||
+    const exactKeys = new Set(exact.map(([from, to]) => `${from}>${to}`))
+    updateLayer(prev => {
+      const groups = dropStatesFromGroups(prev.groups?.filter(g => !groupNames.has(g.name)), names)
+      const next: AnimationStateMachine = {
+        ...prev,
+        states: prev.states.filter(s => !names.has(s.name)),
+        transitions: prev.transitions.filter(t =>
+          !keys.has(linkKey(t.from, t.to).join('|')) && !exactKeys.has(`${t.from}>${t.to}`)
+          && !names.has(t.from) && !names.has(t.to)),
+        groups,
+      }
+      if (!groups?.length) delete next.groups
+      return next
+    })
+    const gone = (n: string) => names.has(n)
+    if ((selection?.kind === 'state' && gone(selection.name)) ||
+        (selection?.kind === 'group' && gone(selection.name)) ||
+        (selection?.kind === 'summary' && (gone(selection.from) || gone(selection.to))) ||
         (selection?.kind === 'transition' &&
-          (keys.has(linkKey(selection.a, selection.b).join('|')) || names.has(selection.a) || names.has(selection.b))))
+          (keys.has(linkKey(selection.a, selection.b).join('|')) || gone(selection.a) || gone(selection.b))))
       setSelection(null)
   }
+
+  // ---- Groups ----
+  const groups = groupsOf(sm)
+  const groupOf = (state: string) => groupOfIn(sm, state)
+  const createGroup = (members: string[]): string | null => {
+    const made = createGroupIn(sm, members)
+    if (!made) return null
+    updateLayer(prev => createGroupIn(prev, members, made.name)?.view ?? prev)
+    setSelection({ kind: 'group', name: made.name })
+    return made.name
+  }
+  const setGroup = (name: string, patch: Partial<AnimationStateGroup>) => {
+    const rename = patch.name !== undefined && patch.name !== name
+    if (rename && (!patch.name || nameTaken(sm, patch.name, name))) {
+      // Typed into a clash (or emptied): keep everything else the patch says.
+      const { name: _taken, ...rest } = patch
+      if (Object.keys(rest).length) updateLayer(prev => setGroupFields(prev, name, rest))
+      return
+    }
+    updateLayer(prev => setGroupFields(prev, name, patch))
+    if (!rename) return
+    const to = patch.name!
+    const swap = (n: string) => (n === name ? to : n)
+    if (selection?.kind === 'group' && selection.name === name) setSelection({ kind: 'group', name: to })
+    else if (selection?.kind === 'summary' && (selection.from === name || selection.to === name))
+      setSelection({ kind: 'summary', from: swap(selection.from), to: swap(selection.to) })
+    else if (selection?.kind === 'transition' && (selection.a === name || selection.b === name)) {
+      const [a, b] = linkKey(swap(selection.a), swap(selection.b))
+      setSelection({ kind: 'transition', a, b })
+    }
+    if (openGroup === name) setOpenGroup(to)
+  }
+  const removeGroup = (name: string, mode: 'ungroup' | 'delete') => {
+    const members = new Set(groupsOf(sm).find(g => g.name === name)?.states ?? [])
+    updateLayer(prev => removeGroupIn(prev, name, mode))
+    const touches = (n: string) => n === name || (mode === 'delete' && members.has(n))
+    if ((selection?.kind === 'group' && selection.name === name) ||
+        (selection?.kind === 'state' && touches(selection.name)) ||
+        (selection?.kind === 'summary' && (touches(selection.from) || touches(selection.to))) ||
+        (selection?.kind === 'transition' && (touches(selection.a) || touches(selection.b))))
+      setSelection(null)
+    if (openGroup === name) setOpenGroup(null)
+  }
+  const moveToGroup = (state: string, group: string | null) => updateLayer(prev => moveToGroupIn(prev, state, group))
 
   // ---- Transitions (addressed by from/to; the array index never leaves this file) ----
   const findT = (list: AnimationTransition[], from: string, to: string) => list.findIndex(t => t.from === from && t.to === to)
@@ -699,6 +817,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     apply, paramOf,
     addParam, setParam, removeParam, setEventActions, addTriggerParam,
     addState, setState, removeState, stateIndex, commitLayout, deleteElements,
+    groups, groupOf, createGroup, setGroup, removeGroup, moveToGroup, openGroup, setOpenGroup,
     links, linkOf, addTransition, setTransition, removeTransition, removeLink,
     addCondition, addGroup, setCondition, setGroupOp, removeNode, setTransitionCondition,
     renameClip, deleteClip,
@@ -706,22 +825,6 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
-}
-
-/** Layer `i`'s view of a machine: its states and transitions over the machine's shared everything-else. */
-export function layerView(sm: AnimationStateMachine, i: number): AnimationStateMachine {
-  if (i <= 0) return sm
-  const layer = sm.layers?.[i - 1]
-  if (!layer) return sm
-  return { ...sm, states: layer.states, transitions: layer.transitions }
-}
-
-/** Write a layer view back into the machine. The inverse of {@link layerView}. */
-export function writeLayer(sm: AnimationStateMachine, i: number, view: AnimationStateMachine): AnimationStateMachine {
-  if (i <= 0) return { ...view, layers: sm.layers, slots: view.slots ?? sm.slots }
-  const layers = (sm.layers ?? []).map((l, idx) => (idx === i - 1 ? { ...l, states: view.states, transitions: view.transitions } : l))
-  // Everything that is not the layer's own states/transitions stays the machine's.
-  return { ...sm, parameters: view.parameters, events: view.events, layers }
 }
 
 export function uniqueName(base: string, existing: string[]): string {

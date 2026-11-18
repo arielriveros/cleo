@@ -352,6 +352,15 @@ export class InputSystem {
     public get preventDefault(): boolean { return this._device.preventDefault; }
     public set preventDefault(value: boolean) { this._device.preventDefault = value; }
 
+    /**
+     * The key (`KeyboardEvent.code`) that lets the pointer go while it is locked; Esc by default. The browser also
+     * lets it go on Esc, except under the Keyboard Lock (fullscreen Play), where this key is the only way out.
+     */
+    public get releaseKey(): string | null { return this._device.releaseKey; }
+    public set releaseKey(code: string | null) { this._device.releaseKey = code || null; }
+    /** Whether the game holds the whole keyboard from the browser right now (fullscreen, pointer locked). */
+    public get isKeyboardLocked(): boolean { return this._device.isKeyboardLocked; }
+
     public requestPointerLock(): void { this._device.requestPointerLock(); }
     public releasePointerLock(): void { this._device.releasePointerLock(); }
     public get isPointerLocked(): boolean { return this._device.isPointerLocked; }

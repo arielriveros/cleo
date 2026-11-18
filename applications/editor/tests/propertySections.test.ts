@@ -3,7 +3,7 @@ import { AnimatedModel, ModelNode, Node } from 'cleo'
 import { modelNodeOf, ownModelNodeOf, ownSkinnedModelNodeOf, skinnedModelNodeOf } from '../src/utils/models'
 
 /**
- * Which nodes the inspector's Model and Animation sections apply to.
+ * Which nodes the inspector's Model and Skeleton sections apply to.
  *
  * Both used to ask "does this node's SUBTREE contain a model?", which is far too generous a reading of
  * a question about the SELECTED node. Two independent false positives came out of it:

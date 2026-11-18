@@ -6,6 +6,7 @@ import { NumberInput, TextInput, Toggle, VectorInput, Select, StringListInput, C
 import { SaveIcon, AttributesIcon, AttributeGroupIcon } from '../sectionIcons'
 import type { ScriptVarSchema } from '../../../utils/scripts'
 import { isOverridden, setFieldOverride } from '../../../utils/templateOverrides'
+import { INSTANCE_LOCKED_TIP, setInstanceAttribute, settableOnInstance } from '../../../utils/instanceAttributes'
 import OverrideMark from '../OverrideMark'
 import { useVariantBase } from '../useVariantBase'
 import { deepClone } from '@cleo/app-kit/utils/deepClone'
@@ -25,8 +26,21 @@ const vecToHex = (v: unknown): string => {
 /**
  * `overridable`: the node is inside a placed template instance, so an edited value is recorded as that
  * placement's override (templateOverrides.ts) and survives the instance being rebuilt from its template.
+ *
+ * `lockPrivate`: inside an instance, only the attributes the script declares public are the placement's to
+ * set (instanceAttributes.ts); private and protected ones are shown, disabled, as the template has them.
+ *
+ * `section`: one inner node's public attributes, shown on its instance root as a single section with this
+ * heading (the node's path and script), the groups as sub-headings. `persistScope` keeps each such section's
+ * open state apart from the root's own and from each other's.
  */
-export default function ScriptAttributesEditor(props: { node: Node; overridable?: boolean }) {
+export default function ScriptAttributesEditor(props: {
+  node: Node
+  overridable?: boolean
+  lockPrivate?: boolean
+  section?: string
+  persistScope?: string
+}) {
   const { eventEmitter, scriptAssetOf, revertTemplateOverride, editorScene, rigs, animations, templates, animControllers } = useCleoEngine()
   const asset = scriptAssetOf(props.node)
   const [values, setValues] = useState<Record<string, any>>({})
@@ -34,7 +48,7 @@ export default function ScriptAttributesEditor(props: { node: Node; overridable?
   const origin = useVariantBase(props.node)
   const inherited = origin && origin.baseNode !== 'added' ? origin.baseNode : null
 
-  const visible: ScriptVarSchema[] = (asset?.variables ?? []).filter(v => !v.hidden)
+  const visible: ScriptVarSchema[] = (asset?.variables ?? []).filter(v => !v.hidden && (!props.section || settableOnInstance(v)))
   // A field that is not an attribute is never shown, but one tagged @save is still part of what a save keeps: named.
   const hiddenSaved = (asset?.variables ?? []).filter(v => v.hidden && v.save && !v.ref).map(v => v.name)
   // @child / @find fields: filled with a node by the engine, so shown as what they look for, not as values.
@@ -52,9 +66,17 @@ export default function ScriptAttributesEditor(props: { node: Node; overridable?
 
   if (!asset) return null
 
+  const locked = (v: ScriptVarSchema) => !!props.lockPrivate && !settableOnInstance(v)
+
   const setValue = (name: string, value: any) => {
-    (props.node as any)[name] = value
-    if (props.overridable) setFieldOverride(props.node, name, value)
+    if (props.lockPrivate) {
+      // Only what the placement may set: a disabled row cannot get here, but nothing else may either.
+      const v = asset.variables.find(f => f.name === name)
+      if (!v || !setInstanceAttribute(props.node, v, value)) return
+    } else {
+      (props.node as any)[name] = value
+      if (props.overridable) setFieldOverride(props.node, name, value)
+    }
     setValues(prev => ({ ...prev, [name]: value }))
     // Mark the scene dirty so the value persists (fan-out reads native fields at save/play time).
     eventEmitter.emit('SCENE_CHANGED')
@@ -175,10 +197,14 @@ export default function ScriptAttributesEditor(props: { node: Node; overridable?
             <SaveIcon />
           </span>
         )}
-        <fieldset disabled={!!a.readonly} className={cn('flex-1 min-w-0 border-0 m-0 p-0', a.readonly && 'opacity-70')}
-          title={a.readonly ? 'Read-only: the script shows this value without letting it be edited' : undefined}>
-          {renderValue(v)}
-        </fieldset>
+        {locked(v)
+          ? <div className='flex-1 min-w-0' title={INSTANCE_LOCKED_TIP}>
+              <fieldset disabled className='min-w-0 border-0 m-0 p-0 opacity-60 pointer-events-none'>{renderValue(v)}</fieldset>
+            </div>
+          : <fieldset disabled={!!a.readonly} className={cn('flex-1 min-w-0 border-0 m-0 p-0', a.readonly && 'opacity-70')}
+              title={a.readonly ? 'Read-only: the script shows this value without letting it be edited' : undefined}>
+              {renderValue(v)}
+            </fieldset>}
         {props.overridable && isOverridden(props.node, v.name) &&
           <OverrideMark onRevert={() => revertTemplateOverride(props.node, v.name)} />}
         {!props.overridable && variantOverrides(v) &&
@@ -199,9 +225,32 @@ export default function ScriptAttributesEditor(props: { node: Node; overridable?
     else groups.push([g, [v]])
   }
 
+  // Each node's sections remember their own open state; the root's keep the keys they always had.
+  const scope = props.persistScope ? `@${props.persistScope}` : ''
+
+  if (props.section) {
+    return (
+      <Collapsable title={props.section} icon={<AttributesIcon />} badge={visible.length} persistKey={`attributes${scope}`}
+        doc='editor/scene-authoring::Public attributes'>
+        <div className='w-full p-2'>
+          {ungrouped.filter(shown).map(row)}
+          {groups.map(([name, fields]) => (
+            <div key={name}>
+              <div className={cn(labelClass, 'flex items-center gap-1.5 mt-1 mb-1.5 text-dim')}>
+                <span className='inline-flex w-[13px] h-[13px] [&>svg]:w-full [&>svg]:h-full'><AttributeGroupIcon /></span>
+                {name}
+              </div>
+              {fields.filter(shown).map(row)}
+            </div>
+          ))}
+        </div>
+      </Collapsable>
+    )
+  }
+
   return (
     <>
-      <Collapsable title='Attributes' icon={<AttributesIcon />} badge={ungrouped.length || undefined} persistKey='attributes'>
+      <Collapsable title='Attributes' icon={<AttributesIcon />} badge={ungrouped.length || undefined} persistKey={`attributes${scope}`}>
         <div className='w-full p-2'>
           {visible.length === 0 && <p className='mb-2 text-ui-sm text-dim'>No attributes. Mark a field @attribute in the script to show it here.</p>}
           {ungrouped.filter(shown).map(row)}
@@ -213,7 +262,7 @@ export default function ScriptAttributesEditor(props: { node: Node; overridable?
       </Collapsable>
       {groups.map(([name, fields]) => (
         <Collapsable key={name} title={name} icon={<AttributeGroupIcon />} badge={fields.length}
-          persistKey={`attrGroup:${name}`} doc='editor/scripting-workflow::Attributes'>
+          persistKey={`attrGroup:${name}${scope}`} doc='editor/scripting-workflow::Attributes'>
           <div className='w-full p-2'>{fields.filter(shown).map(row)}</div>
         </Collapsable>
       ))}

@@ -93,7 +93,7 @@ describe('merging static colliders', () => {
 });
 
 const EXAMPLES = join(__dirname, '..', 'applications', 'editor', 'public', 'examples');
-const THREE_D = ['dungeon', 'valley', 'firing-line'].filter(n => existsSync(join(EXAMPLES, n, 'scenes')));
+const THREE_D = ['dungeon', 'valley', 'firing-line', 'sandbox'].filter(n => existsSync(join(EXAMPLES, n, 'scenes')));
 
 describe.each(THREE_D)('the %s example', (name) => {
     const scenes = readdirSync(join(EXAMPLES, name, 'scenes')).map(f => JSON.parse(readFileSync(join(EXAMPLES, name, 'scenes', f), 'utf8')));

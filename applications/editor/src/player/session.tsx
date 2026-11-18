@@ -89,6 +89,15 @@ function fail(err: unknown): void {
   showError(err);
 }
 
+/** The editor's release-mouse key, as features/options/editorPrefs.ts stores it; Escape when unreadable. */
+function editorReleaseKey(): string {
+  try {
+    const stored = JSON.parse(localStorage.getItem('cleo_editor_prefs_v1') ?? 'null')?.releaseMouseKey;
+    if (typeof stored === 'string' && /^[A-Za-z][A-Za-z0-9]{1,24}$/.test(stored)) return stored;
+  } catch { /* storage blocked, or not JSON */ }
+  return 'Escape';
+}
+
 /** The stored game: a Blob, read a range at a time from IndexedDB's copy (an ArrayBuffer from an older editor). */
 async function boot(stored: Blob | ArrayBuffer): Promise<void> {
   booting = true;
@@ -115,6 +124,9 @@ async function boot(stored: Blob | ArrayBuffer): Promise<void> {
       onError: fail,
     });
     setState({ phase: handle.engine.isPaused ? 'paused' : 'running', scene: handle.currentSceneName() });
+    // The editor's release-mouse key (Options ▸ Editor ▸ Viewport ▸ Play), from its own storage: this window is
+    // the editor's origin on the web. The desktop window may not see it, and keeps Esc.
+    handle.engine.input.releaseKey = editorReleaseKey();
     hideLoadingWhenSmooth();
   } catch (err) {
     fail(err);

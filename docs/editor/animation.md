@@ -10,8 +10,8 @@ one tab per skeleton. It has four parts, switched from the bar under the tab str
 | **Animator** | The graph that decides which clip plays: states, transitions, parameters, layers and action slots. |
 | **Blend Spaces** | Clips mixed by speed, direction or any other parameter — see [Blend spaces](#blend-spaces). |
 
-Opening any of these — double-clicking a `.rig`, `.anim`, `.animator` or `.blendspace`, or **Edit
-Animation** in a character's **Animation** section — opens that skeleton's workspace on the right
+Opening any of these — double-clicking a `.rig`, `.anim`, `.animator` or `.blendspace`, or the ✎ on a
+character's **Animator** row (its inspector's Skeleton section) — opens that skeleton's workspace on the right
 part. The workspace is **one document**: its tab shows ● while anything in it is unsaved, and
 **Save** (the button on the bar, or Ctrl+S) saves every unsaved part at once. Closing the tab closes
 every part, with one prompt.
@@ -31,7 +31,7 @@ The runtime API is in [Animation (scripting)](../scripting/animation.md).
 
 The workspace's **Skeleton** part edits what every character built on the skeleton shares. Pick a
 bone in the **Skeleton** panel's bone tree or in the viewport; [foot placement](#foot-placement) is set
-up under that tree. Properties holds, from the top:
+up in the **Foot Placement** tab beside Properties, with the tree still up. Properties holds, from the top:
 
 - **Preview character** — which character built on the skeleton the preview shows. Every one of them
   plays the skeleton's clips, so the choice only changes what you look at. With no character on the
@@ -67,11 +67,11 @@ The **Clip** panel holds:
 - **Preview character** — with more than one character on the skeleton, which one plays the clip.
 - **Root motion** — below.
 
-**Timeline**, in the bottom strip, plays and scrubs the clip on the preview character, with the clip's
-**Events** track under the scrubber.
+**Timeline**, in the bottom strip, plays and scrubs the clip on the preview character. Under the scrubber are the
+clip's **Events** track and its [foot-lock rows](#foot-lock-windows).
 
 A clip synced from Cleo Creator (in `/Creator`) belongs to the Creator, which re-makes it on every sync:
-only its events can be changed here, and those survive the next sync.
+only its events and foot-lock windows can be changed here, and those survive the next sync.
 
 ### Root motion
 
@@ -149,10 +149,59 @@ no transition drawn. Set it with the state's **Enter on trigger**.
 layer is in, the moment its conditions hold. Nothing transitions into it, and it cannot be deleted.
 
 Each frame the first of these that holds wins: an Any State transition, then a state's own trigger
-(states higher in the list first), then a transition out of the current state.
+(states higher in the list first), then a transition out of the current state, then one out of its
+[group](#state-groups).
 
 The toolbar carries a tab strip — **Base | *layer* … | + Layer** — that picks which
 [layer](#layers-and-bone-masks) the canvas shows. The highlighted state is that layer's current one.
+
+### State groups
+
+A graph with every turn, stop and landing drawn out is a tangle: each of them has its own way into the air
+and its own way back into the run. A **group** puts several states under one name and draws them as one
+node.
+
+- **Out of a group.** A transition from a group fires from any of its states. A state's own
+  transitions are tried first; the group's come after them.
+- **Into a group.** A transition into a group enters its **entry** state (its first state, unless you
+  pick one).
+
+So the four turns in place share one way into a jump, one into a fall and one into the run. Each turn
+keeps its own way back to Idle when it ends.
+
+**Drawn as one node.** The group shows its name and how many states it holds, then a row of **ports**:
+
+- on its left, one per outside state its transitions come from;
+- on its right, one per place they go.
+
+A line from a port stands for every transition between those two ends. Select it and the inspector
+lists them, each one click from its own settings. A **dashed** line is the group's own transition, from
+or to the group itself.
+
+**Opening a group.** Double-click a group, or use the open button, to see inside it:
+
+- its states;
+- a stand-in for each outside end (double-click one to go to it);
+- **Any state in *group***, where the group's own transitions start.
+
+The breadcrumb in the toolbar goes back to the whole layer. A state added while a group is open is one of
+its states.
+
+**Making and changing groups:**
+
+- **Group.** Select states (Ctrl+click, or Shift+drag a box), then use the group button on the toolbar
+  or **Group** on a state's right-click menu.
+- **Move to *group*** and **Take out of group** are on the right-click menu too. So is the state's
+  **Group** field in the inspector.
+- **New transitions.** Drag from a group's top-right handle to add a transition out of it, or onto its
+  top-left one to add one into it.
+- **Ungroup** puts the states back on the graph and keeps what the group did. Each state gets the
+  group's ways out as its own (after the ones it had), and a transition into the group goes to its entry
+  state.
+- **Delete.** Delete on a group removes it with its states.
+
+Groups are per layer. Names are unique across states and groups: a transition that names one means only
+that.
 
 ### The inspector
 
@@ -181,7 +230,22 @@ between two states, with its conditions.
 | **Start at** | Clip seconds to start from: one segment of a longer clip. A transition that waits for the clip end at that segment's end hands over to the next. |
 | **Extract root travel** | On a layer: the clip's ground travel is collected for a script's `consumeRootMotion()` instead of moving anything, and the root is held over the start spot. A roll that covers exactly the ground the dive does. |
 | **Foot-placement weight**, optionally from a parameter | How strongly foot placement applies in this state. On a layer it applies as far as the layer shows: a roll at 0 eases foot placement out and back in with the layer. |
+| **lock** | Foot locking in this state, when the skeleton has it on (default on). Off, the state plants no foot, and a foot locked when it was entered fades back to the animation: a standing Idle whose small weight shifts should not be pinned. |
+| **Hold** (the planted-feet icon beside **lock**) | Base layer only. While this state plays, the Character it animates stops steering: no speed, no turning; gravity is kept. Only the clip's [root motion](#root-motion) moves it. For a clip that must not travel with the speed it came in with or with the stick, a hard landing say. Its way out should wait on the input (**MoveInput**), not on speed, which is 0 meanwhile. |
+| **Group** | The [group](#state-groups) it is in, when the layer has any. The group's own transitions leave from this state too, after its own. |
 | **Links** | The states this one connects to, and which way (→ out, ← in, ⇄ both). Drag from the state's right handle in the graph to add one. |
+
+**A selected group:**
+
+| Field | Meaning |
+|---|---|
+| **Name** | No state or other group may have it. A rename follows into every transition from or to the group. |
+| Open, Ungroup, Delete | Open it in the graph; ungroup it (its states keep its transitions); delete it with its states (asks first). |
+| **Entry** | The state a transition into the group enters. |
+| **States** | Its states, each a click from its own settings. Each row has buttons to make that state the entry or take it out of the group. **+ state** adds one. |
+| **Its own transitions** | The transitions from and to the group itself, each a click from its settings. |
+
+**A selected line that stands for several transitions** (a group's ports) lists them; pick one to edit it.
 
 **A selected transition:**
 
@@ -231,14 +295,14 @@ skeleton.
 
 ### Using one on a character
 
-A character runs either **its own animator** or a **shared** one, picked at the top of its
-**Animation** section in the inspector.
+A character runs either **its own animator** or a **shared** one, picked on the **Animator** row of its
+inspector's Skeleton section (under **This character**).
 
 | Control | Does |
 |---|---|
-| **Its own animator** / **Shared: *name*** | Which animator the character runs. Shared animators on the character's skeleton are offered, plus any with none. |
-| **Edit Animation** | Opens the workspace on it. |
-| **Clip overrides (this character only)** | Every clip the shared animator plays, each with an optional replacement. A crawler on the shared zombie animator can swap its Walk for a crawl. This is Unity's Override Controller. |
+| **Its own** / **Shared: *name*** | Which animator the character runs. Shared animators on the character's skeleton are offered, plus any with none. |
+| ✎ | Opens the workspace on it. |
+| **Clip overrides (this character only)** | Every clip the shared animator plays, each with an optional replacement: the row says how many are swapped, click it to list them. A crawler on the shared zombie animator can swap its Walk for a crawl. This is Unity's Override Controller. |
 
 While editing a linked character, the bar above **Save** names the shared animator. Saving writes the
 asset, and **every character using it updates**. **Detach** stops following it: the character keeps
@@ -374,6 +438,27 @@ embedded in a model rather than kept in a `.anim` shows its events, read-only.
 > marker fires twice. A marker on a clip embedded in the model has no `.anim` to move to: it stays on
 > the animator, still fires, and shows on the track as a hollow circle.
 
+## Foot-lock windows
+
+[Foot locking](#foot-placement) holds a planted foot on its spot while the body moves or turns over it. On its own
+it decides by itself when a foot is planted. A clip can say instead, with **foot-lock windows**: per foot, the
+spans of the clip in which that foot may lock. They are what to tune when feet stick to the floor too long, or let
+go too early.
+
+The Timeline shows one **Lock L** / **Lock R** row per foot, under the Events track:
+
+- **Drag** on an empty part of a row to draw a span. Drag a span's **end** to move it, its **middle** to slide it.
+  **Right-click** a span to remove it. A press without a drag scrubs, as on the Events track. Times snap to 1/60 s.
+- **Detect** (the magnifier) sets the row from the clip itself: each span runs from the ball of the foot coming
+  down until the heel has lifted 3 cm. The foot then follows the animation through the push-off instead of
+  sticking until the toe leaves the ground.
+- **Automatic** (the circular arrow) removes the row's spans. With none set, the animator decides by itself, as it
+  always did. A row with every span removed is different: that foot never locks in this clip.
+
+While a blend space plays, the samples that weigh most decide. While two states cross-fade, the two sides count by
+the blend. Each change is written to the clip's `.anim` at once and can be undone. Windows are in the clip's time as
+it plays, and they work on any character the clip is retargeted onto.
+
 ### Event actions
 
 A marker says WHEN; the animator says WHAT. In the Parameters panel's **Event actions** section, add an
@@ -462,12 +547,43 @@ A clip that is much shorter than the blend space's median foot-slides; the panel
 
 An analytic two-bone solver that plants feet on uneven ground.
 
-Set it up under the **Skeleton** tree: select a joint — from the tree or by clicking it in the
-viewport — and assign it a role, **Thigh / Shin / Foot / Toe**, per leg. There is a `⤓`
-name-matched auto-guess and a validation report.
+Set it up in the Skeleton part's **Foot Placement** tab, beside Properties: select a joint — from the
+bone tree on the left or by clicking it in the viewport — and assign it a role, **Thigh / Shin / Foot /
+Toe**, per leg. There is a `⤓` name-matched auto-guess and a validation report.
 
 It is stored on the **skeleton**, so every character built on it gets it. Per-state strength comes
 from the state's foot-placement weight.
+
+**Foot locking** (the **Foot locking** group under the tuning values) keeps a foot the animation has
+planted where it is on the ground, and pointing the way it was, while the body moves or turns over it.
+Without it a character that turns while it walks (following the camera, curving a run) carries its planted
+feet round with it and looks as if it is on ice. **Lock** is the strength, 0 to 1 (0 is off).
+
+- **Planting.** A foot plants when it is down (its ankle on the ground, its ball within **Plant height** of
+  the lowest foot) and the clip holds it still: rising or sinking slower than **Plant speed**, and crossing the
+  ground slower than that plus 1.5 times the body's own speed. A swing crosses the ground at about twice the
+  body's speed.
+- **Holding.** What is held is the ball of the foot, which stays down through heel-off. The foot also keeps its
+  planted heading, up to 40 degrees off the animation's.
+- **Letting go.** When the clip lifts it, or when the body has left it more than **Let go at** behind. A lock
+  letting go never pulls the leg straighter than 97% of its length (or than the clip has it): it gives way
+  instead, so a release still running as the leg swings does not drag it straight and snap the knee after it.
+- **Catch below.** While the pose still blends in a clip with no foot-lock windows (setting off out of Idle, which
+  slides the feet as it blends), a foot sliding over the ground faster than this is not caught: it plants once it
+  has slowed. Blank or 0 catches any.
+
+**Blending** (the group under Foot locking) is how a lock comes in and goes out, for every lock on the skeleton:
+
+| Setting | Does |
+|---|---|
+| **In** | Seconds a planting foot takes to settle into its lock. It is held where it was as it planted, and the lock's weight rises over this time, so a foot that plants mid-slide slows to a stop instead of stopping dead. 0 locks it the frame it plants. |
+| **Out** | Seconds a lifted foot takes to blend back to the animation. |
+| **Curve** | The shape of both: **Linear**, or **Smooth**, which starts and ends gently so neither shows as a kink in the foot's path. |
+
+A foot that plants again while it is still being let go keeps its spot and blends back in from where it is.
+
+Locking follows foot placement: a state with no foot placement locks nothing, and a state's **lock** switch turns
+it off there (Idle, typically).
 
 ## Sockets
 

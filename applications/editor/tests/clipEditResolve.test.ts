@@ -114,6 +114,13 @@ describe('the edit stack in resolveAnimationAsset', () => {
     expect(chanFor(out, 3)).toBeTruthy()
   })
 
+  it('carries the clip foot-lock windows through the retarget onto the character', () => {
+    registerRigResolver(() => rig())
+    const clip = { ...leftArmClip(), footLocks: { 'foot.L': [[0, 0.4]] as [number, number][], 'foot.R': [] } }
+    const out = resolveAnimationAsset(assetOf([clip]), liveSkin())
+    expect(out[0].footLocks).toEqual({ 'foot.L': [[0, 0.4]], 'foot.R': [] })
+  })
+
   it('still stamps assetId, so an edited clip is never serialized into a scene', () => {
     registerRigResolver(() => rig())
     const out = resolveAnimationAsset(assetOf([leftArmClip([{ kind: 'mirror', axis: 'x' }])]), liveSkin())

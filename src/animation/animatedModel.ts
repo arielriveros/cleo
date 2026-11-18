@@ -41,6 +41,13 @@ export interface Animation {
      * name; both fire.)
      */
     events?: { time: number; name: string }[];
+    /**
+     * Foot-lock windows: per foot, the spans of this clip's time (seconds, as it plays) in which that foot is
+     * planted and foot locking may hold it. Keyed by the foot's humanoid slot (`foot.L`), else its bone name
+     * (see footLockWindows.ts). An empty list never locks that foot; a foot with no entry is detected by the
+     * Animator as it plays.
+     */
+    footLocks?: Record<string, [number, number][]>;
 }
 
 // Skinning data structures

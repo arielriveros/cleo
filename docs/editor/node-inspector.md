@@ -17,7 +17,7 @@ Every selection is composed the same way:
 Selecting the scene **root** shows [Scene settings](scene-authoring.md#scene-settings) instead.
 
 > On a node inside a placed template instance, only the Transform, the instance root's **name** and
-> **script field values** are editable; they become that instance's overrides, each with a **revert**
+> **public script attribute values** are editable; they become that instance's overrides, each with a **revert**
 > marker. Everything else is disabled: open the template to change it. A notice in the panel says so
 > and offers **Revert all**.
 >
@@ -29,18 +29,29 @@ Selecting the scene **root** shows [Scene settings](scene-authoring.md#scene-set
 |---|---|---|
 | **Model** | Nodes with geometry | Which model asset it came from, and a jump into the model editor. |
 | **Material** | Model nodes, decals | Linked material thumbnail, edit / unlink / create. **One slot per submesh** on a merged import. A decal takes **PBR materials only**: linking any other kind is refused with a message. |
-| **Skeleton** | Nodes that are, or contain, a skinned model | The skeleton asset the character's clips, animators and blend spaces come from, with a ✎ into the rig editor. The list holds only the character's own skeleton and the skeletons it has been retargeted to. **Retarget skeleton…** adds another: pick a skeleton that has clips, check the mapping (**Map bones…** drags bones between the two), and **Use skeleton** saves the mapping on the character's own skeleton and switches it over. Sockets, foot IK and the ragdoll keep following the character's own bones. |
-| **Animation** | Nodes that are, or contain, a skinned model | Which animator it runs — **its own** or a [shared one](animation.md#shared-animators); **Edit Animation** into the workspace; and, on a shared animator, **Clip overrides (this character only)**. |
+| **Skeleton** | Nodes that are, or contain, a skinned model | The skeleton asset the character's clips, animators and blend spaces come from, with a ✎ into the rig editor. The list holds only the character's own skeleton and the skeletons it has been retargeted to. **Retarget skeleton…** adds another: pick a skeleton that has clips, check the mapping (**Map bones…** drags bones between the two), and **Use skeleton** saves the mapping on the character's own skeleton and switches it over. Sockets, foot IK and the ragdoll keep following the character's own bones. Under it, **This character** holds the little the character decides for itself; see [This character](#this-character). |
 | **Save** | Any non-UI node | What the game's saves keep of this node. **Saved** keeps its transform, whether it is spawned, its body's motion and its variables, and remembers when it is removed; on a template's root it makes every copy a script instantiates a Saved one. **Saved fields** lists its script's `@save` fields, which are kept whether or not it is Saved. **Custom state** shows when its script has an `onSave`. See [Saving and loading](../scripting/save-game.md). |
 | **Socket** | Any non-UI node, when a character with sockets is in reach or the node is already attached | Pins the node to a bone [socket](animation.md#sockets) on a character's skeleton — the sword in the hand: a target (**Nearest character above**, or a specific character) and a socket. |
 | **Behaviors** | Any node | Not in Properties: the separate **Behaviors** panel, with the script slot and that node's values for the script's attributes. See [Scripting workflow](scripting-workflow.md#the-behaviors-panel). |
 | **Collider** | Collider nodes | The rigid body: mass, surface, layers, constraints, and its shapes. See [Collider](physics.md#collider). |
 | **Trigger** | Trigger nodes | The sensor: its layers and shapes in a 3D scene, its box in a 2D one. See [Trigger](physics.md#trigger). |
-| **Ragdoll** | Skinned models | How the character falls when it goes limp. See [Ragdoll](physics.md#ragdoll). |
 
-> The Model and Animation sections appear only on the node that actually has the mesh, or on the
+> The Model and Skeleton sections appear only on the node that actually has the mesh, or on the
 > root of a placed model instance. They no longer appear on cameras, spatial sounds or any ancestor
 > above a mesh — those were showing because a debug helper counted as a child.
+
+### This character
+
+A skinned model's clips, animators, blend spaces, foot placement and ragdoll belong to its skeleton, and are
+authored in the [Skeleton part](animation.md#the-skeleton-part). The Skeleton section's **This character** rows hold
+what each character decides for itself:
+
+| Row | What it does |
+|---|---|
+| **Animator** | Which animator it runs: **its own**, or a [shared one](animation.md#shared-animators). Drop an Animator from Assets on it to use that one. ✎ opens it in the workspace; saving a shared one updates every character that uses it. |
+| **Clip overrides** | On a shared animator: how many of its clips this character swaps for others. Click to list them, each with the clip that plays instead, or **(same)**. |
+| **Ragdoll mass** | Multiplies the skeleton's ragdoll mass for this character. ✎ opens the skeleton, whose **Ragdoll** tab authors the bodies and joints. Not shown for a generic ragdoll. |
+| **Ragdoll push** | A velocity, in m/s, added to the upper body as it starts to fall, in the character's own frame (left, up, forward). |
 
 > A node **attached to a socket** has its transform rewritten every frame, so editing its Transform
 > while attached does nothing visible. Move the socket's offset in the rig editor instead, or set the

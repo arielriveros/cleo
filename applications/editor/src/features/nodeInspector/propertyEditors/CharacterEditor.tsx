@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
-import { CharacterNode, CHARACTER_PRESETS, FACING_MODES, type CharacterPreset } from 'cleo'
+import { CharacterNode, CHARACTER_PRESETS, FACING_MODES, MOVE_DIR_SOURCES, type CharacterPreset } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { useCleoEngine } from '../../EngineContext'
 import { DocScope, PresetMenu, SectionTitle, SegmentedControl, Slider, Toggle, cn, labelClass } from '@cleo/app-kit/ui'
 import { hintAffordance } from '@cleo/app-kit/ui/Field'
 import { CharacterIcon } from '../sectionIcons'
 
-const SETTLE_HINT = 'Seconds the aim must stay past the threshold before a 90-degree turn engages, so a camera swept round to the back plays the 180 instead of a 90. Past 135 degrees the turn starts at once.'
+const SETTLE_HINT = 'Seconds the aim must stay past the threshold before a 90-degree turn engages, so a camera swept round to the back plays the 180 instead of a 90. Longer lets a look-at layer turn the head before the body follows.'
+const FAR_SETTLE_HINT = 'Seconds the aim must stay past 135 degrees before the 180 turn engages. 0 turns at once.'
 const ACCEL_HINT = 'Units per second squared. 0 snaps to full speed, which is what a keyboard character usually wants; above 0 makes the engine’s isAccelerating / isDecelerating animation builtins meaningful.'
+const FRICTION_HINT = 'Per second: how fast a moving character turns its velocity toward a new direction, keeping its speed (Unreal calls it ground friction; 8 there). 0 leaves turning to Acceleration, which is slower and loses speed through the turn: the character coasts on its old heading, as if on ice. A reversal is braked through, never turned. Needs an Acceleration.'
+const DIRECTION_HINT = 'What moveDir, the blend-space direction, reads. Input: the way the player pushes. Velocity: the way the body really travels, which an Acceleration makes lag the input; reading the input then plays the new direction while the body still goes the old way, and the feet slide.'
 const DRIVE_HINT = 'Run locomotion with nothing possessing this character. Off by default, so an unpossessed character is inert and cannot fight physics for its own velocity.'
 
 interface CharacterState {
   walkSpeed: number; runSpeed: number; jumpSpeed: number
-  turnSpeed: number; turnThreshold: number; turnReleaseAngle: number; turnSettleSeconds: number
-  directionSmoothing: number; acceleration: number; airControl: number
+  turnSpeed: number; turnThreshold: number; turnReleaseAngle: number; turnSettleSeconds: number; turnSettleFarSeconds: number
+  directionSmoothing: number; acceleration: number; turnFriction: number; moveDirSource: string; airControl: number
   coyoteSeconds: number; jumpBufferSeconds: number; jumpLockoutSeconds: number
   facingMode: string; driveWhenUnpossessed: boolean
 }
@@ -22,8 +25,9 @@ function readNode(node: CharacterNode): CharacterState {
   return {
     walkSpeed: node.walkSpeed, runSpeed: node.runSpeed, jumpSpeed: node.jumpSpeed,
     turnSpeed: node.turnSpeed, turnThreshold: node.turnThreshold, turnReleaseAngle: node.turnReleaseAngle,
-    turnSettleSeconds: node.turnSettleSeconds,
-    directionSmoothing: node.directionSmoothing, acceleration: node.acceleration, airControl: node.airControl,
+    turnSettleSeconds: node.turnSettleSeconds, turnSettleFarSeconds: node.turnSettleFarSeconds,
+    directionSmoothing: node.directionSmoothing, acceleration: node.acceleration, turnFriction: node.turnFriction,
+    moveDirSource: node.moveDirSource, airControl: node.airControl,
     coyoteSeconds: node.coyoteSeconds, jumpBufferSeconds: node.jumpBufferSeconds,
     jumpLockoutSeconds: node.jumpLockoutSeconds,
     facingMode: node.facingMode, driveWhenUnpossessed: node.driveWhenUnpossessed,
@@ -65,6 +69,7 @@ export default function CharacterEditor(props: { node: CharacterNode }) {
           {slider('Walk', 'walkSpeed', 0, 20, 0.1)}
           {slider('Run', 'runSpeed', 0, 30, 0.1)}
           {slider('Acceleration', 'acceleration', 0, 100, 0.5, 1, ACCEL_HINT)}
+          {slider('Turn Friction', 'turnFriction', 0, 30, 0.5, 1, FRICTION_HINT)}
           {slider('Air Control', 'airControl', 0, 1, 0.01)}
 
           <SectionTitle title='Facing' className='mt-3 mb-1' />
@@ -77,11 +82,20 @@ export default function CharacterEditor(props: { node: CharacterNode }) {
           </div>
           {slider('Turn Speed', 'turnSpeed', 0, 1440, 10, 0)}
           {slider('Direction Smooth', 'directionSmoothing', 0, 1, 0.01)}
+          <div className='mb-2 flex items-center gap-2'>
+            <span className={cn(labelClass, 'w-[112px] shrink-0', hintAffordance(DIRECTION_HINT))} title={DIRECTION_HINT}>Direction From</span>
+            <SegmentedControl
+              value={state.moveDirSource}
+              options={MOVE_DIR_SOURCES.map(m => ({ value: m, label: m[0].toUpperCase() + m.slice(1) }))}
+              onChange={(v) => apply({ moveDirSource: v })}
+            />
+          </div>
 
           <SectionTitle title='Turn in place' className='mt-3 mb-1' />
           {slider('Threshold', 'turnThreshold', 1, 180, 1, 0)}
           {slider('Release', 'turnReleaseAngle', 0, Math.max(1, state.turnThreshold - 1), 1, 0)}
-          {slider('Settle', 'turnSettleSeconds', 0, 0.5, 0.01, 2, SETTLE_HINT)}
+          {slider('Settle', 'turnSettleSeconds', 0, 3, 0.01, 2, SETTLE_HINT)}
+          {slider('Settle past 135', 'turnSettleFarSeconds', 0, 3, 0.01, 2, FAR_SETTLE_HINT)}
 
           <SectionTitle title='Jump' className='mt-3 mb-1' />
           {slider('Speed', 'jumpSpeed', 0, 20, 0.1)}

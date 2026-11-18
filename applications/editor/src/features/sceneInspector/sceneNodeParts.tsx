@@ -6,7 +6,9 @@ import {
   CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, ExposureVolumeIcon, GiVolumeIcon, VolumetricFogIcon, SkyboxIcon, SkyLightIcon, CloudsIcon, WindIcon, WeatherIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
   SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon, CharacterBody2DIcon, Collider2DIcon, ColliderIcon, TriggerIcon,
+  TemplateIcon,
 } from './nodeIcons'
+import { nodeTypeLabel } from './nodeTypeCatalog'
 import { Glyph } from './iconBase';
 import { UI_ICONS } from './uiIcons';
 import { hoveredScriptStore, useHoveredScript } from './hoveredScriptStore';
@@ -35,6 +37,26 @@ const TYPE_ICONS: Record<string, () => JSX.Element> = {
 /** The glyph a node type is drawn with, UI elements included; undefined for a type with none (a plain node). */
 export const typeIconFor = (type: string): (() => JSX.Element) | undefined =>
   isUINodeType(type) ? UI_ICONS[type] : TYPE_ICONS[type];
+
+/**
+ * The glyph at the head of a tree row or a Graph view card. A template instance's root shows the template
+ * glyph, not its own type's (a Player placed as a Collider is a Player, not a Collider), and the tooltip names
+ * the template and what its root is.
+ */
+export function NodeTypeGlyph({ type, templateId, className = 'align-middle' }: { type: string; templateId?: string; className?: string }) {
+  const { templates } = useCleoEngine()
+  const box = `inline-flex w-4 h-4 mr-1.5 items-center justify-center ${className}`
+  if (templateId) {
+    const name = templates.find(t => t.id === templateId)?.name
+    return (
+      <span className={box} title={`Template instance${name ? `: ${name}` : ''} (${nodeTypeLabel(type)} root)`}>
+        <TemplateIcon />
+      </span>
+    )
+  }
+  const TypeIcon = typeIconFor(type)
+  return TypeIcon ? <span className={box}><TypeIcon /></span> : null
+}
 
 export const PenIcon = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

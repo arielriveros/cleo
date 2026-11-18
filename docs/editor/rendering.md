@@ -561,7 +561,13 @@ The editor's reference grid, on the XZ or XY plane. Editor-only: never rendered 
 The **Performance** page, beside Renderer: what the frame costs, and where. The **Show in Play** lock
 at its top keeps the page docked beside the viewport in Play, which otherwise hides every editor panel,
 so you can read the game's own frames while you play. It is remembered on this machine, for every
-project; click it again (in Play or out) to unlock. Its sections, in order:
+project; click it again (in Play or out) to unlock.
+
+The page measures only while it is on screen. Behind another tab, or on another page, nothing is sampled, and
+the **Timer queries** and the script/animator split are off. Both switches keep what you set and come back on
+when the page shows again.
+
+Its sections, in order:
 
 - **Frame** — the frame time and FPS, a frame-time graph against a 60, 120 or 144 Hz budget line,
   and the p50, p95 and worst frame, and the time scale (with the lowest it dipped to since the last refresh, so a hit-stop shows). The mean alone hides hitching: a flat 12 ms and a 9 ms mean with

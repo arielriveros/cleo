@@ -729,3 +729,278 @@ describe('Animator — foot IK on a slope', () => {
     }
 });
 
+
+/**
+ * Foot locking: a foot the animation has planted holds its spot and heading in the WORLD while the body moves
+ * or turns over it, and lets go when the animation lifts it. Here the ground is at 0 and the feet are animated
+ * at 0, so their target is 0.1 (footHeight) and the knees have slack for the foot to be left behind.
+ */
+describe('Animator — foot locking', () => {
+    const LOCK: IkRig = { ...RIG2, footLock: 1 };
+
+    function lockRig(rig: IkRig, clip?: Animation, extra: Animation[] = []) {
+        const skin = makeSkin(rig);
+        const a = new Animator({ skin, animations: [clip ?? idleClip(), ...extra] } as unknown as AnimatedModel);
+        const stub = stubPhysics(0);
+        const flags = { grounded: true };
+        (stub.physics as any).isGrounded = () => flags.grounded;
+        const node: any = {
+            worldTransform: mat4.create(), scene: { physics: stub.physics },
+            ownBody: true, body: { mass: 75 }, parent: null, position: vec3.create(),
+        };
+        a.setNode(node);
+        a.playAnimationByName(clip?.name ?? 'idle', true, false);
+        /** The node's world: yaw (degrees) about the origin, then a translation. */
+        const place = (yaw: number, x = 0, z = 0) => {
+            const m = mat4.fromTranslation(mat4.create(), [x, 0, z]);
+            node.worldTransform = mat4.rotateY(m, m, yaw * Math.PI / 180);
+        };
+        const world = (joint: number) => vec3.transformMat4(vec3.create(), jointPos(a, joint), node.worldTransform);
+        return { a, node, flags, place, world };
+    }
+
+    const heading = (from: vec3, to: vec3) => Math.atan2(to[0] - from[0], to[2] - from[2]) * 180 / Math.PI;
+
+    it('is off by default: no lock fields and footLock 0 pose the same, bit for bit', () => {
+        const plain = lockRig(RIG2), off = lockRig({ ...RIG2, footLock: 0, lockSpeed: 9, lockDistance: 9 });
+        for (let f = 0; f < 40; f++) {
+            for (const r of [plain, off]) { r.place(f); step(r.a); }
+            expect(Array.from(off.a.getFinalBoneMatrices()[FOOT_R])).toEqual(Array.from(plain.a.getFinalBoneMatrices()[FOOT_R]));
+        }
+    });
+
+    it('holds a planted foot where it is while the body turns over it, and slides without the lock', () => {
+        const locked = lockRig(LOCK), free = lockRig(RIG2);
+        for (const r of [locked, free]) { r.place(0); step(r.a); step(r.a); }
+        const start = locked.world(FOOT_R);
+        for (let f = 1; f <= 30; f++) for (const r of [locked, free]) { r.place(f); step(r.a); }
+        expect(vec3.distance(locked.world(FOOT_R), start)).toBeLessThan(0.01);
+        expect(vec3.distance(free.world(FOOT_R), start)).toBeGreaterThan(0.08);
+    });
+
+    it('keeps the planted heading too', () => {
+        const r = lockRig(LOCK), free = lockRig(RIG2);
+        for (const q of [r, free]) { q.place(0); step(q.a); step(q.a); }
+        const before = heading(r.world(FOOT_R), r.world(TOE_R));
+        for (let f = 1; f <= 30; f++) for (const q of [r, free]) { q.place(f); step(q.a); }
+        expect(Math.abs(heading(r.world(FOOT_R), r.world(TOE_R)) - before)).toBeLessThan(2);
+        expect(Math.abs(heading(free.world(FOOT_R), free.world(TOE_R)) - before)).toBeGreaterThan(25);
+    });
+
+    it('never locks a foot the animation moves over the ground', () => {
+        // The right foot sweeps 0.6 in 0.25 s (2.4 m/s), back and forth: a swing at ground height.
+        const sweep: Animation = {
+            name: 'sweep',
+            samplers: [
+                { input: [0, 1], output: [0, 2, 0, 0, 2, 0], interpolation: 'LINEAR' },
+                { input: [0, 0.25, 0.5], output: [0.2, 0, -0.3, 0.2, 0, 0.3, 0.2, 0, -0.3], interpolation: 'LINEAR' },
+            ],
+            channels: [
+                { samplerIndex: 0, targetNodeIndex: HIPS, targetPath: 'translation' },
+                { samplerIndex: 1, targetNodeIndex: THIGH_R, targetPath: 'translation' },
+            ],
+        };
+        const locked = lockRig(LOCK, sweep), free = lockRig(RIG2, sweep);
+        for (let f = 0; f < 30; f++) {
+            for (const r of [locked, free]) step(r.a);
+            expect(vec3.distance(locked.world(FOOT_R), free.world(FOOT_R))).toBeLessThan(0.02);
+        }
+    });
+
+    it('lets a lifted foot go over lockRelease, back to where the animation has it', () => {
+        // Still for a second, then the right thigh lifts 0.3 in 0.1 s; meanwhile the body turns.
+        const lift: Animation = {
+            name: 'lift',
+            samplers: [
+                { input: [0, 2], output: [0, 2, 0, 0, 2, 0], interpolation: 'LINEAR' },
+                { input: [0, 1, 1.1, 2], output: [0.2, 0, 0, 0.2, 0, 0, 0.2, 0.3, 0, 0.2, 0.3, 0], interpolation: 'LINEAR' },
+            ],
+            channels: [
+                { samplerIndex: 0, targetNodeIndex: HIPS, targetPath: 'translation' },
+                { samplerIndex: 1, targetNodeIndex: THIGH_R, targetPath: 'translation' },
+            ],
+        };
+        const locked = lockRig(LOCK, lift), free = lockRig(RIG2, lift);
+        const dt = 1 / 60;
+        let start: vec3 | null = null;
+        for (let t = 0; t < 1.45; t += dt) {
+            const yaw = t < 0.5 ? 0 : (t - 0.5) * 30;
+            for (const r of [locked, free]) { r.place(yaw); step(r.a, dt); }
+            if (!start && t > 0.1) start = locked.world(FOOT_R);
+            if (t > 0.95 && t < 0.98) expect(vec3.distance(locked.world(FOOT_R), start!)).toBeLessThan(0.01);
+        }
+        // 0.35 s after the lift began: released, so it is where the animation (and the turned body) has it.
+        expect(vec3.distance(locked.world(FOOT_R), free.world(FOOT_R))).toBeLessThan(0.005);
+    });
+
+    it('lets go when the body leaves the foot more than lockDistance behind', () => {
+        const r = lockRig({ ...LOCK, lockDistance: 0.2 }), free = lockRig(RIG2);
+        for (const q of [r, free]) { q.place(0); step(q.a); step(q.a); }
+        const start = r.world(FOOT_R);
+        // 0.3 m/s: slow enough that the still animation reads as planted, so only the distance lets it go.
+        let x = 0;
+        for (let f = 0; f < 36; f++) { x += 0.3 / 60; for (const q of [r, free]) { q.place(0, x); step(q.a); } }
+        expect(vec3.distance(r.world(FOOT_R), start)).toBeLessThan(0.01);   // 0.18 m behind: held
+        for (let f = 0; f < 18; f++) { x += 0.3 / 60; for (const q of [r, free]) { q.place(0, x); step(q.a); } }
+        // Past 0.2 at f = 40, faded out over 0.15 s: back near the animation (then planted afresh).
+        expect(vec3.distance(r.world(FOOT_R), free.world(FOOT_R))).toBeLessThan(0.03);
+    });
+
+    it('drops the lock at once on a teleport', () => {
+        const r = lockRig(LOCK), free = lockRig(RIG2);
+        for (const q of [r, free]) { q.place(0); step(q.a); step(q.a); q.place(0, 5, 2); step(q.a); }
+        expect(vec3.distance(r.world(FOOT_R), free.world(FOOT_R))).toBeLessThan(1e-4);
+    });
+
+    it('holds nothing in the air, and plants afresh on landing', () => {
+        const r = lockRig(LOCK), free = lockRig(RIG2);
+        for (const q of [r, free]) { q.place(0); step(q.a); step(q.a); }
+        r.flags.grounded = false; free.flags.grounded = false;
+        for (let f = 1; f <= 20; f++) for (const q of [r, free]) { q.place(f * 2); step(q.a); }
+        r.flags.grounded = true; free.flags.grounded = true;
+        for (const q of [r, free]) step(q.a);
+        // Landed with the body turned 40 degrees: the foot is where the animation has it, not back at the old spot.
+        expect(vec3.distance(r.world(FOOT_R), free.world(FOOT_R))).toBeLessThan(1e-3);
+    });
+
+    it('plants nothing in a state with its lock off, and lets go of what it held over lockRelease', () => {
+        const machine = (entry: string) => ({
+            parameters: [{ name: 'Stand', type: 'bool', default: false }],
+            states: [
+                { name: 'Move', clipName: 'idle', loop: true, speed: 1, isEntry: entry === 'Move' },
+                { name: 'Stand', clipName: 'idle', loop: true, speed: 1, footLock: false, isEntry: entry === 'Stand' },
+            ],
+            transitions: [{ from: 'Move', to: 'Stand', conditions: [], condition: { op: 'and', children: [{ param: 'Stand', op: 'true' }] }, blendTime: 0 }],
+            events: [],
+        }) as any;
+        const r = lockRig({ ...LOCK, lockRelease: 0.2 }), free = lockRig(RIG2), standing = lockRig(LOCK);
+        r.a.setStateMachine(machine('Move'));
+        standing.a.setStateMachine(machine('Stand'));
+        free.a.setStateMachine(machine('Move'));
+        for (const q of [r, free, standing]) { q.place(0); stepSm(q.a); stepSm(q.a); stepSm(q.a); }
+        const start = r.world(FOOT_R);
+        let yaw = 0;
+        for (let f = 0; f < 10; f++) { yaw += 1; for (const q of [r, free, standing]) { q.place(yaw); stepSm(q.a); } }
+        expect(vec3.distance(r.world(FOOT_R), start), 'held while moving').toBeLessThan(0.01);
+        // A state without the lock never planted anything.
+        expect(vec3.distance(standing.world(FOOT_R), free.world(FOOT_R))).toBeLessThan(1e-4);
+        r.a.setBool('Stand', true);
+        for (let f = 0; f < 4; f++) { yaw += 1; for (const q of [r, free]) { q.place(yaw); stepSm(q.a); } }
+        const mid = vec3.distance(r.world(FOOT_R), free.world(FOOT_R));
+        expect(mid, 'fading, not snapped').toBeGreaterThan(0.005);
+        for (let f = 0; f < 14; f++) { yaw += 1; for (const q of [r, free]) { q.place(yaw); stepSm(q.a); } }
+        expect(vec3.distance(r.world(FOOT_R), free.world(FOOT_R)), 'let go').toBeLessThan(1e-4);
+    });
+
+    /** A still two-second clip carrying foot-lock windows. */
+    const windowed = (name: string, footLocks: Record<string, [number, number][]>): Animation => ({
+        name, footLocks,
+        samplers: [{ input: [0, 2], output: [0, 2, 0, 0, 2, 0], interpolation: 'LINEAR' }],
+        channels: [{ samplerIndex: 0, targetNodeIndex: HIPS, targetPath: 'translation' }],
+    });
+
+    it('holds a foot only inside its clip window, and lets go at its end with the foot still down', () => {
+        const r = lockRig({ ...LOCK, lockRelease: 0.1 }, windowed('w', { 'foot.R': [[0, 0.5]], 'foot.L': [[0, 2]] }));
+        const free = lockRig(RIG2, windowed('w', {}));
+        let yaw = 0, t = 0, start: vec3 | null = null;
+        for (; t < 0.45; t += 1 / 60) {
+            yaw += 1;
+            for (const q of [r, free]) { q.place(yaw); step(q.a); }
+            if (!start) start = r.world(FOOT_R);
+        }
+        expect(vec3.distance(r.world(FOOT_R), start!), 'held inside the window').toBeLessThan(0.01);
+        for (; t < 0.75; t += 1 / 60) { yaw += 1; for (const q of [r, free]) { q.place(yaw); step(q.a); } }
+        // Released after the window, though the animation never lifted the foot.
+        expect(vec3.distance(r.world(FOOT_R), free.world(FOOT_R)), 'let go').toBeLessThan(1e-3);
+    });
+
+    it('never locks a foot whose clip lists no window for it', () => {
+        const r = lockRig(LOCK, windowed('w', { 'foot.R': [] })), free = lockRig(RIG2, windowed('w', {}));
+        for (let f = 0; f < 40; f++) {
+            for (const q of [r, free]) { q.place(f); step(q.a); }
+            expect(vec3.distance(r.world(FOOT_R), free.world(FOOT_R))).toBeLessThan(1e-4);
+        }
+    });
+
+    it('detects a foot by itself when its clip has windows only for the other', () => {
+        const r = lockRig(LOCK, windowed('w', { 'foot.L': [] })), auto = lockRig(LOCK, windowed('w', {}));
+        for (let f = 0; f < 40; f++) {
+            for (const q of [r, auto]) { q.place(f); step(q.a); }
+            expect(Array.from(r.a.getFinalBoneMatrices()[FOOT_R])).toEqual(Array.from(auto.a.getFinalBoneMatrices()[FOOT_R]));
+        }
+    });
+
+    it('lets the weightier samples of a blend space decide', () => {
+        const field = (x: number) => {
+            const never = windowed('never', { 'foot.R': [] }), always = windowed('always', { 'foot.R': [[0, 2]] });
+            const r = lockRig(LOCK, never, [always]);
+            r.a.playField({ mode: '1d', xAxis: { name: 'x', min: 0, max: 1, smoothing: 0 }, weightSmoothing: 0,
+                samples: [{ clipName: 'never', x: 0 }, { clipName: 'always', x: 1 }] } as any, x);
+            return r;
+        };
+        const mostlyNever = field(0.2), mostlyAlways = field(0.8), free = lockRig(RIG2);
+        let start: vec3 | null = null;
+        for (let f = 0; f < 30; f++) {
+            for (const q of [mostlyNever, mostlyAlways, free]) { q.place(f); step(q.a); }
+            if (!start) start = mostlyAlways.world(FOOT_R);
+        }
+        expect(vec3.distance(mostlyAlways.world(FOOT_R), start!), 'the "always" samples hold it').toBeLessThan(0.01);
+        expect(vec3.distance(mostlyNever.world(FOOT_R), free.world(FOOT_R)), 'the "never" samples do not').toBeLessThan(1e-3);
+    });
+
+    it('blends a sliding foot to a stop over lockBlendIn instead of catching it in one frame', () => {
+        // The right foot creeps forward 0.2 m/s in the clip: planted by detection, so the lock holds it.
+        const creep: Animation = {
+            name: 'creep',
+            samplers: [
+                { input: [0, 2], output: [0, 2, 0, 0, 2, 0], interpolation: 'LINEAR' },
+                { input: [0, 2], output: [0.2, 0, 0, 0.2, 0, 0.4], interpolation: 'LINEAR' },
+            ],
+            channels: [
+                { samplerIndex: 0, targetNodeIndex: HIPS, targetPath: 'translation' },
+                { samplerIndex: 1, targetNodeIndex: THIGH_R, targetPath: 'translation' },
+            ],
+        };
+        const moves = (rig: IkRig) => {
+            const r = lockRig(rig, creep);
+            const out: number[] = [];
+            let prev: vec3 | null = null;
+            for (let f = 0; f < 20; f++) {
+                r.place(0); step(r.a);
+                const at = r.world(FOOT_R);
+                if (prev) out.push(vec3.distance(at, prev));
+                prev = at;
+            }
+            return out;
+        };
+        const snap = moves(LOCK), eased = moves({ ...LOCK, lockBlendIn: 0.2, lockBlendCurve: 'smooth' });
+        const free = 0.2 / 60;
+        // Snapping: stopped from the frame it plants. Easing: still moving at first, slower and slower, then still.
+        expect(snap[2]).toBeLessThan(free * 0.05);
+        expect(eased[2]).toBeGreaterThan(free * 0.5);
+        expect(eased[8]).toBeLessThan(eased[2]);
+        expect(eased[17]).toBeLessThan(free * 0.05);
+    });
+
+    it('keeps a foot planted that the clip itself turns against the body (a root-motion turn)', () => {
+        // The clip turns the hips -30 degrees while the body yaws +30: the right foot stays put in the world.
+        const half = (deg: number) => { const r = deg * Math.PI / 360; return [0, Math.sin(r), 0, Math.cos(r)]; };
+        const turn: Animation = {
+            name: 'turn',
+            samplers: [
+                { input: [0, 2], output: [0, 2, 0, 0, 2, 0], interpolation: 'LINEAR' },
+                { input: [0, 1], output: [...half(0), ...half(-30)], interpolation: 'LINEAR' },
+            ],
+            channels: [
+                { samplerIndex: 0, targetNodeIndex: HIPS, targetPath: 'translation' },
+                { samplerIndex: 1, targetNodeIndex: HIPS, targetPath: 'rotation' },
+            ],
+        };
+        const r = lockRig(LOCK, turn);
+        let t = 0;
+        r.place(0); step(r.a); t += 1 / 60;
+        const start = r.world(FOOT_R);
+        for (; t < 0.95; t += 1 / 60) { r.place(t * 30); step(r.a); }
+        expect(vec3.distance(r.world(FOOT_R), start)).toBeLessThan(0.01);
+    });
+});

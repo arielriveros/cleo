@@ -1,14 +1,14 @@
-import { mat4, quat, vec3 } from 'gl-matrix';
+import { mat3, mat4, quat, vec3 } from 'gl-matrix';
 import { AnimatedModel, Animation, AnimationSampler, AnimationChannel, Skin } from './animatedModel';
 import {
     AnimationField, AnimationFieldAxis, FieldWeight, fieldWeights, rateScaleOf, phaseOffsetOf,
     axisSmoothing, axisDeadzone, axisWrapSpan, weightSmoothing,
 } from './animationField';
-import { clamp, dampTime, dampWrapped, decomposeTRS, wrapSpan } from '../core/math';
+import { clamp, dampTime, dampWrapped, decomposeTRS, DEG2RAD, planarSignedAngle, wrapSpan } from '../core/math';
 import { skeletonTopology, SkeletonTopology, isAncestorJoint, subtreeOrder } from './skeletonTopology';
 import { findKey, findKeyLinear, isSorted } from './keyframes';
 import { bakeCubicSpline } from './samplerBake';
-import { solveTwoBone, kneePole, ikTuning, validateIkRig, swingReleaseWeight, IkFootChain, IkRig, IkRigValidation } from './ik';
+import { solveTwoBone, kneePole, ikTuning, validateIkRig, swingReleaseWeight, stepFootLock, footLockWeight, FOOT_LOCK_MAX_TWIST, IkFootChain, IkRig, IkRigValidation } from './ik';
 import { Node } from '../core/scene/nodes/node';
 import { ModelNode } from '../core/scene/nodes/modelNode';
 import { canAccessVariable } from '../core/scene/nodes/nodeVariables';
@@ -18,6 +18,7 @@ import { Logger } from '../core/logger';
 import { LogTally, plural } from '../core/logTally';
 import { rootMotionNodeOf, rootParentRotation, rootParentScale } from './clipEdit';
 import { normalizeBoneName } from './boneNames';
+import { footLockAt, footLockKey } from './footLockWindows';
 // The condition model and evaluator live in core/conditions.ts — they read a table of named values and
 // answer yes or no, which has nothing to do with animation, and the behavior state machine needs the
 // same latching. See that module for why the band is centred and why latches refresh machine-wide.
@@ -172,6 +173,18 @@ export interface AnimationState {
      * parameter keeps the static weight rather than reading 0.
      */
     ikWeightParam?: string;
+    /**
+     * Foot locking in this state, when the skeleton's rig has it (`IkRig.footLock`). Default on. Off, the state
+     * plants no foot, and a foot locked when it was entered fades back to the animation over `lockRelease`: a
+     * character standing in Idle, say, whose small weight shifts should not be pinned.
+     */
+    footLock?: boolean;
+    /**
+     * Hold the character still while this state plays: the Character it animates stops steering (no planar
+     * velocity, no turning; gravity kept), so only the clip's root motion moves it. For a clip that must not
+     * travel with whatever speed the body had or the stick asks for, a hard landing say. Base layer only.
+     */
+    holdMovement?: boolean;
     /** Link to the Pose asset (and pose within it) this state holds. Authoring-side only, like `fieldId`. */
     poseRef?: { assetId: string; poseId: string };
     /**
@@ -287,6 +300,8 @@ export interface AnimationStateMachine {
     states: AnimationState[];
     /** The BASE layer's transitions. */
     transitions: AnimationTransition[];
+    /** The base layer's state groups: see {@link AnimationStateGroup}. */
+    groups?: AnimationStateGroup[];
     events: AnimationEventMarker[];
     /**
      * What an event does: event name -> actions (a sound, a particle burst, a light flash, a spawned template), run by
@@ -311,6 +326,27 @@ export interface AnimationStateMachine {
     clipOverrides?: Record<string, string>;
 }
 
+/**
+ * A group of states on one layer: drawn as one node in the editor, and a name transitions can use.
+ *
+ *   - A transition FROM the group fires from whichever of its states is playing, after that state's own
+ *     transitions (a state's own way out wins over its group's): the way into the air, say, written once for every
+ *     state in the group.
+ *   - A transition TO the group enters its `entry` state (its first, when unset).
+ *
+ * A state belongs to at most one group, and group names do not repeat state names.
+ */
+export interface AnimationStateGroup {
+    name: string;
+    /** Member state names. */
+    states: string[];
+    /** The state a transition into the group enters. Default: the first member. */
+    entry?: string;
+    /** Graph position (authoring only). */
+    x?: number;
+    y?: number;
+}
+
 /** How a layer or slot combines with the pose beneath it. */
 export type AnimationBlendMode = 'override' | 'additive';
 
@@ -323,6 +359,8 @@ export interface AnimationLayer {
     name: string;
     states: AnimationState[];
     transitions: AnimationTransition[];
+    /** The layer's state groups: see {@link AnimationStateGroup}. */
+    groups?: AnimationStateGroup[];
     /** 0..1, default 1. */
     weight?: number;
     /** Parameter to read the weight from each frame. Overrides `weight`. */
@@ -688,6 +726,9 @@ const MIX_T = vec3.create(), MIX_S = vec3.create(), MIX_R = quat.create();
 const BL_T0 = vec3.create(), BL_R0 = quat.create(), BL_S0 = vec3.create();
 const BL_T1 = vec3.create(), BL_R1 = quat.create(), BL_S1 = vec3.create();
 const ADD_INV = quat.create(), ADD_DELTA = quat.create(), ADD_ID = quat.create();
+// A field's additive reference (see `_fieldReference`): its mix, and the hemisphere it is summed in.
+const REF_T = vec3.create(), REF_R = quat.create(), REF_HEMI = quat.create();
+const FIELD_REF = { t: REF_T, r: REF_R };
 
 // Foot IK scratch: the solve runs per character per frame and used to allocate ~60 vectors and matrices.
 const IK_WORLD_TO_MODEL = mat4.create();
@@ -697,8 +738,28 @@ const IK_HIT_MODEL = vec3.create(), IK_TMP = vec3.create(), IK_SHIFT = vec3.crea
 const IK_INV = mat4.create(), IK_FRAME = mat4.create(), IK_ROT = mat4.create(), IK_AROUND = mat4.create();
 const IK_NEW_GLOBAL = mat4.create();
 const IK_HIP = vec3.create(), IK_KNEE = vec3.create(), IK_ANKLE = vec3.create(), IK_EASED = vec3.create();
+const IK_UNLOCKED = vec3.create(), IK_LOCK_PULL = vec3.create(), IK_LOCK_FROM_HIP = vec3.create();
+/**
+ * The furthest a foot lock that is letting go may stretch a leg, as a share of its length (unless the animation
+ * already has it straighter). Near full extension a knee swings a long way for a little reach: a release still
+ * pulling a swinging foot back toward its spot dragged the leg straight after it, and the knee snapped 4 to 10 cm
+ * in a frame as it let go. A HELD foot may stretch the leg all the way: holding a foot the body moves away from
+ * (a change of direction) is what the lock is for. Between the two, by how far the lock has let go.
+ */
+const LOCK_MAX_STRETCH = 0.97;
 const IK_ALIGN = quat.create(), IK_PARTIAL = quat.create(), IK_COUNTER = quat.create(), IK_HALF = quat.create();
 const IK_QID = quat.create();
+const IK_LOCK_M3 = mat3.create(), IK_LOCK_M3_INV = mat3.create(), IK_LOCK_ORIGIN = vec3.create();
+const IK_LOCK_FREE = vec3.create(), IK_LOCK_FREE_WORLD = vec3.create(), IK_LOCK_DIR = vec3.create();
+const IK_LOCK_D = vec3.create(), IK_LOCK_D2 = vec3.create(), IK_LOCK_Q = quat.create(), IK_TWIST = quat.create();
+const IK_LOCK_POINT = vec3.create(), IK_LOCK_MODEL = vec3.create(), IK_LOCK_SPAN = vec3.create();
+/** Below this share of its length lying along the ground, a foot's heading is not read (it stands on its toe). */
+const FOOT_LOCK_LEVEL = 0.5;
+/** The along-the-ground part of `v`, as a tuple (no allocation of a vec3). */
+const planarOf = (v: vec3, up: vec3): [number, number, number] => {
+    const d = vec3.dot(v, up);
+    return [v[0] - up[0] * d, v[1] - up[1] * d, v[2] - up[2] * d];
+};
 
 /** One foot's plan for this frame, pooled per animator. See `_applyFootIk`. */
 interface FootPlan {
@@ -711,6 +772,35 @@ interface FootPlan {
     along: number;
     /** The animated ankle's height along `up` — where the CLIP put it, before any ground is consulted. */
     height: number;
+    /**
+     * Foot locking: where the ANKLE must go to put the planted point back on its spot (model space), and how
+     * much of that applies (0 = unlocked). `lockPlanar`: only along the ground (a toe lock: the clip and the
+     * ground decide the height, the heel lifting as animated while the ball stays down).
+     */
+    lockPoint: vec3;
+    lockWeight: number;
+    lockPlanar: boolean;
+    /** The planted heading, ankle to toe, flattened (model space). Zero-length without a toe. */
+    lockDir: vec3;
+}
+
+/**
+ * One foot's lock (foot locking, `IkRigTuning.footLock`). WORLD space: the planted spot must stay where it is
+ * on the ground while the character carries model space away from it.
+ */
+interface FootLockState {
+    /** 0..1 progress of the lock (its weight through the rig's curve); see stepFootLock. */
+    alpha: number;
+    /** Between its plant and its release, whatever the weight has reached. */
+    planted: boolean;
+    /** Where the ankle is planted. */
+    point: vec3;
+    /** The planted heading, ankle to toe, flattened and unit; zero-length without a toe. */
+    dir: vec3;
+    /** The animated locked point (toe or ankle) last frame (model space) and the model's origin then (world), for its ground speed. */
+    prevPoint: vec3;
+    prevOrigin: vec3;
+    hasPrev: boolean;
 }
 
 // One clip contributing to a field blend. `bones` is SHARED with the Animator's per-clip cache and must
@@ -780,6 +870,13 @@ export class Animator {
     private _activeTrigger: string | null = null;
     /** Layer states whose clip the model lacks, warned about once each. */
     private _warnedMissingLayerClip: Set<string> | null = null;
+    /**
+     * The machine was set while the model had no clips at all: shared clips (the skeleton's) are attached after
+     * the model is parsed, so every state was entered with nothing to play. The first frame the clips are there,
+     * the machine is entered again (`_catchUpClips`), and nothing is reported meanwhile: no clips at all is
+     * "not yet", not a missing clip.
+     */
+    private _setWhileClipsPending = false;
     /**
      * Fired transitions whose triggers are lowered once the base AND every layer have evaluated this frame
      * (see checkTriggers), so a trigger two layers read fires both. Null outside that pass: consume at once.
@@ -901,6 +998,16 @@ export class Animator {
     // Per foot: the last surface its ray found, so a foot losing its ground has something to fade towards.
     // WORLD space, re-transformed each frame — a model-space memory would be carried by the character.
     private _ikFootHits: Map<number, { point: vec3; normal: vec3 }> = new Map();
+    /** Per foot (keyed like `_ikFootWeights`): its foot lock, while one is held or fading out. */
+    private _ikFootLocks: Map<number, FootLockState> = new Map();
+    /** Per foot node: the key its clip foot-lock windows are stored under (footLockWindows.ts). */
+    private _footLockKeys: Map<number, string> = new Map();
+    /**
+     * The share of the pose, at the last `_footLockWindow`, that has no foot-lock windows for that foot (a
+     * cross-fade still showing Idle, say). Where it is above 0 the animation slides the feet as it blends, and a
+     * lock does not catch a foot sliding faster than `lockCatchSpeed`.
+     */
+    private _footLockUnwindowed = 0;
     /** Foot plans, pooled across frames. */
     private readonly _ikPlans: FootPlan[] = [];
     /**
@@ -916,6 +1023,12 @@ export class Animator {
     /** The field being cross-faded OUT of, mirroring _previousBones for the single-clip path. */
     private _previousFieldEntries: FieldEntry[] | null = null;
     private _previousFieldPhase: number = 0;
+    /**
+     * The outgoing side of a cross-fade that INTERRUPTED another one: the pose that was on screen, per bone,
+     * frozen. Taking the interrupted blend's target as the outgoing side instead would drop everything it was
+     * still fading out of in one frame. Read before `_previousFieldEntries` / `_previousBones`; never advances.
+     */
+    private _frozenPrevious: Map<string, mat4> | null = null;
 
     // ---- Root motion ----
     // For a clip flagged `rootMotion`, the root bone's per-frame delta drives the character and the bone
@@ -983,12 +1096,9 @@ export class Animator {
             animators: 1, joints: this._skin?.joints.length ?? 0, animations: animatedModel.animations.length,
         });
 
-        // If model has animations, set the first one as default
-        if (animatedModel.animations.length > 0) {
-            this.playAnimation(0);
-        } else {
-            Logger.warn('AnimatedModel has no animations', 'Animation');
-        }
+        // If model has animations, set the first one as default. None yet is not reported: a model on shared
+        // clips gets them after it is built.
+        if (animatedModel.animations.length > 0) this.playAnimation(0);
     }
     
     /** Play the animation at `animationIndex`. */
@@ -1011,8 +1121,15 @@ export class Animator {
         const blendOut = blend && (this._fieldEntries !== null
             || (!!this._currentAnimation && (this._currentAnimation !== animation || sameClipBlend)));
 
-        if (blendOut) {
+        if (blendOut && this._isBlending) {
+            // Interrupting a cross-fade: fade out of what is on screen, not out of the blend's target alone.
+            this._freezeOutgoingPose();
+            this._previousLoop = this._loop;
+            this._currentBlendTime = 0;
+            this._activeBlendTime = this._blendTime; // a transition may override this right after
+        } else if (blendOut) {
             // Store current animation state for blending
+            this._frozenPrevious = null;
             this._previousAnimation = this._currentAnimation;
             this._previousBones = new Map(this._bones);
             this._capturePreviousField();
@@ -1030,6 +1147,7 @@ export class Animator {
             this._isBlending = false;
             this._previousAnimation = null;
             this._previousFieldEntries = null;
+            this._frozenPrevious = null;
         }
 
         this._clearField();
@@ -1056,7 +1174,7 @@ export class Animator {
         
         const animationIndex = this._animatedModel.animations.findIndex(anim => anim.name === name);
         if (animationIndex === -1) {
-            Logger.warn(`Animation "${name}" not found`, 'Animation');
+            if (!this._clipsPending()) Logger.warn(`Animation "${name}" not found`, 'Animation');
             return;
         }
         
@@ -1168,9 +1286,18 @@ export class Animator {
         blendOverride?: number,
     ): void {
         if (!this._animatedModel) return;
+        // A layer coming out of an empty state shows again, as `_playClip` does for a clip.
+        this._overlayEmpty = false;
 
         const hadSource = this._fieldEntries !== null || this._currentAnimation !== null;
-        if (blend && hadSource) {
+        if (blend && hadSource && this._isBlending) {
+            // Interrupting a cross-fade: see _playClip.
+            this._freezeOutgoingPose();
+            this._previousLoop = this._loop;
+            this._currentBlendTime = 0;
+            this._activeBlendTime = blendOverride !== undefined ? Math.max(0, blendOverride) : this._blendTime;
+        } else if (blend && hadSource) {
+            this._frozenPrevious = null;
             this._previousAnimation = this._currentAnimation;
             this._previousBones = new Map(this._bones);
             this._capturePreviousField();
@@ -1185,6 +1312,7 @@ export class Animator {
             this._isBlending = false;
             this._previousAnimation = null;
             this._previousFieldEntries = null;
+            this._frozenPrevious = null;
         }
 
         const sameField = field === this._fieldDef;
@@ -1415,7 +1543,7 @@ export class Animator {
     // Name a field clip the model does not have, once per clip name. The set clears when the field
     // changes, so the warning fires again after a re-import if it is still wrong.
     private _warnMissingFieldClip(clipName: string): void {
-        if (this._warnedMissingClips.has(clipName)) return;
+        if (this._clipsPending() || this._warnedMissingClips.has(clipName)) return;
         this._warnedMissingClips.add(clipName);
         const available = this._animatedModel?.animations.map(a => a.name).join(', ') || '(none)';
         Logger.warn(
@@ -1513,6 +1641,7 @@ export class Animator {
     // Local transform of a bone in the OUTGOING pose source during a cross-fade. Its weights are a
     // frozen snapshot, so they cannot cross and no dominant clip is tracked.
     private _previousLocal(key: string): mat4 | null {
+        if (this._frozenPrevious) return this._frozenPrevious.get(key) ?? null;
         if (this._previousFieldEntries) return this._fieldLocal(this._previousFieldEntries, key, null);
         return this._previousBones.get(key)?.localTransform ?? null;
     }
@@ -1655,6 +1784,7 @@ export class Animator {
             this._updateRagdollMatrices();
             return;
         }
+        if (this._setWhileClipsPending) this._catchUpClips();
         this._capturePreviousPose(deltaTime);
         // A layer's animator poses whenever the animator it belongs to does; see _skipPose.
         if (!this._isOverlay) {
@@ -1770,15 +1900,18 @@ export class Animator {
         this._deltaTime = deltaTime * this._speed;
         this._frameDelta = deltaTime;
 
-        // Update blend time if blending
+        // Update blend time if blending. In playback time (a state played faster blends in faster), except for a
+        // HELD state, at speed 0: it still blends in, over the blend's seconds, or it never would and its pose
+        // would stay the one it blended from (a held blend space of look poses on a layer added nothing).
         if (this._isBlending) {
-            this._currentBlendTime += this._deltaTime;
+            this._currentBlendTime += this._speed > 0 ? this._deltaTime : this._frameDelta;
             if (this._currentBlendTime >= this._activeBlendTime) {
                 // Blend complete
                 this._isBlending = false;
                 this._previousAnimation = null;
                 this._previousBones.clear();
                 this._previousFieldEntries = null;
+                this._frozenPrevious = null;
             }
         }
 
@@ -2107,6 +2240,33 @@ export class Animator {
         void curTime;
     }
 
+    /**
+     * A cross-fade is interrupted by another: freeze the pose on screen (the base cross-fade's mix, per bone,
+     * exactly what `_sourceLocal` returns) as the outgoing side, and drop the clips it was mixed from, so
+     * nothing outgoing advances or carries a root pin. Layers and IK go on top afterwards as usual.
+     */
+    private _freezeOutgoingPose(): void {
+        const frozen = new Map<string, mat4>();
+        const skin = this._skin;
+        if (skin) {
+            const add = (nodeIndex: number) => {
+                const key = boneKey(nodeIndex);
+                if (frozen.has(key)) return;
+                const local = this._sourceLocal(nodeIndex);
+                if (local) frozen.set(key, mat4.clone(local));
+            };
+            for (const joint of skin.joints) add(joint.nodeIndex);
+            for (const chain of this._topology().parentChain) for (const nodeIndex of chain) add(nodeIndex);
+        }
+        this._frozenPrevious = frozen;
+        this._previousAnimation = null;
+        this._previousBones = new Map();
+        this._previousFieldEntries = null;
+        this._prevRootBoneName = null;
+        this._previousAdvancing = false;
+        this._isBlending = true;
+    }
+
     // Remember the current clip's root pin as the outgoing one. Called as a cross-fade starts, BEFORE the
     // incoming clip re-arms (and overwrites) the root-motion reference.
     private _capturePreviousRootPin(): void {
@@ -2131,6 +2291,7 @@ export class Animator {
     private _finishBlend(): void {
         if (!this._isBlending) return;
         this._isBlending = false;
+        this._frozenPrevious = null;
         this._previousAnimation = null;
         this._previousBones.clear();
         this._previousFieldEntries = null;
@@ -2145,6 +2306,8 @@ export class Animator {
             // A different skeleton means the damped IK state describes bones that may no longer exist.
             this._ikFootWeights.clear();
             this._ikFootHits.clear();
+            this._ikFootLocks.clear();
+            this._footLockKeys.clear();
             this._ikHipOffset = 0;
         }
         return this._topologyCache;
@@ -2281,6 +2444,28 @@ export class Animator {
         return actions * this._stateIkWeightOfState();
     }
 
+    /**
+     * Tell the character this animator animates whether its current state holds it still (`holdMovement`): the
+     * first ancestor with an `animationHold` field (a CharacterNode), as root motion finds its body. Written every
+     * evaluation, so leaving the state lets go on the next frame.
+     */
+    private _publishMovementHold(): void {
+        if (this._isOverlay || !this._node) return;
+        const sm = this._stateMachine;
+        const state = sm && this._currentStateName ? this._stateByName(sm, this._currentStateName) : null;
+        const hold = !!state?.holdMovement;
+        let n: Node | null = this._node.parent;
+        while (n && typeof (n as { animationHold?: unknown }).animationHold !== 'boolean') n = n.parent;
+        if (n) (n as unknown as { animationHold: boolean }).animationHold = hold;
+    }
+
+    /** Whether the current base-layer state allows foot locking (a cross-fade's TARGET decides). */
+    private _stateFootLock(): boolean {
+        const sm = this._stateMachine;
+        const state = sm && this._currentStateName ? this._stateByName(sm, this._currentStateName) : null;
+        return state?.footLock !== false;
+    }
+
     private _stateIkWeightOfState(): number {
         const sm = this._stateMachine;
         const state = sm && this._currentStateName ? this._stateByName(sm, this._currentStateName) : null;
@@ -2403,13 +2588,16 @@ export class Animator {
             if (!ground || next <= 1e-3) {
                 // Spent: drop the memory rather than leave a stale point to be resurrected after a teleport.
                 this._ikFootHits.delete(key);
+                this._ikFootLocks.delete(key);
                 continue;
             }
 
             const plan = plans[planCount] ??= { chain, ankle: vec3.create(), target: vec3.create(),
-                                                normal: vec3.create(), weight: 0, along: 0, height: 0 };
+                                                normal: vec3.create(), weight: 0, along: 0, height: 0,
+                                                lockPoint: vec3.create(), lockWeight: 0, lockDir: vec3.create(), lockPlanar: false };
             planCount++;
             plan.chain = chain;
+            plan.lockWeight = 0;
             const ankle = mat4.getTranslation(plan.ankle, ankleGlobal);
             const hitModel = vec3.transformMat4(IK_HIT_MODEL, ground.point, worldToModel);
             const normalModel = vec3.transformMat4(plan.normal, ground.normal, worldToModel);
@@ -2431,16 +2619,40 @@ export class Animator {
         let ref = Infinity;
         for (let i = 0; i < planCount; i++) ref = Math.min(ref, plans[i].height);
 
-        // A released foot must not be solved AT ALL: `solveTwoBone` clamps to `maxReach`, so even an
-        // identity solve pulls a straight leg in by a couple of millimetres. Compacted in place.
-        let activeCount = 0;
         for (let i = 0; i < planCount; i++) {
             const plan = plans[i];
             // The release only stops a lifted foot being pulled DOWN. A foot inside the ground is pushed out
             // of it mid-swing too, or a stride over rising ground clips through it. No jump where `along`
             // changes sign: the correction there is zero either way.
             if (plan.along <= 0) plan.weight *= swingReleaseWeight(plan.height - ref, tuning.swingRelease);
-            if (plan.weight > 1e-3) {
+        }
+
+        // ---- Pass 1c: foot locking -------------------------------------------------------------------
+        // A foot the animation has planted holds its spot and heading while the body moves or turns over it,
+        // and lets go when the animation lifts it. Not in the air: there is nothing to stand on.
+        if (tuning.footLock > 0 && !airborne) {
+            const origin = mat4.getTranslation(IK_LOCK_ORIGIN, nodeWorld);
+            mat3.fromMat4(IK_LOCK_M3, nodeWorld);
+            mat3.fromMat4(IK_LOCK_M3_INV, worldToModel);
+            // "Down" is measured on the point that holds the ground (the toe where there is one), against the
+            // lowest such point, as swing release measures the ankles.
+            let lowest = Infinity;
+            for (let i = 0; i < planCount; i++) lowest = Math.min(lowest, vec3.dot(this._lockedPoint(plans[i], globalTransforms, IK_LOCK_POINT), up));
+            const allowed = this._stateFootLock();
+            for (let i = 0; i < planCount; i++) {
+                this._lockFoot(plans[i], lowest, origin, nodeWorld, worldToModel, up, upWorld, tuning, dt, globalTransforms, allowed);
+            }
+        } else if (this._ikFootLocks.size > 0) {
+            this._ikFootLocks.clear();
+        }
+
+        // A released foot must not be solved AT ALL: `solveTwoBone` clamps to `maxReach`, so even an
+        // identity solve pulls a straight leg in by a couple of millimetres. Compacted in place. A foot whose
+        // lock is still fading out stays, though swing release has let go of its height.
+        let activeCount = 0;
+        for (let i = 0; i < planCount; i++) {
+            const plan = plans[i];
+            if (plan.weight > 1e-3 || plan.lockWeight > 1e-3) {
                 if (activeCount !== i) { plans[i] = plans[activeCount]; plans[activeCount] = plan; }
                 activeCount++;
             }
@@ -2494,7 +2706,7 @@ export class Animator {
         for (let i = 0; i < activeCount; i++) {
             const plan = plans[i];
             this._solveLeg(plan.chain, plan.target, plan.normal, plan.weight, up, forward, tuning,
-                localTransforms, globalTransforms, topo);
+                localTransforms, globalTransforms, topo, plan.lockWeight, plan.lockPoint, plan.lockDir, plan.lockPlanar);
         }
         // Every change above re-accumulated what it moved, so the globals are already final.
         return true;
@@ -2574,6 +2786,10 @@ export class Animator {
         localTransforms: Map<number, mat4>,
         globalTransforms: Map<number, mat4>,
         topo: SkeletonTopology,
+        lockWeight: number = 0,
+        lockPoint: vec3 | null = null,
+        lockDir: vec3 | null = null,
+        lockPlanar: boolean = false,
     ): void {
         const hipG = globalTransforms.get(chain.thigh), kneeG = globalTransforms.get(chain.shin);
         const ankleG = globalTransforms.get(chain.foot);
@@ -2584,6 +2800,30 @@ export class Animator {
 
         // Ease by the foot's weight rather than snapping: ikWeight = 0 is exactly the animated pose.
         const eased = vec3.lerp(IK_EASED, ankle, target, weight);
+        // A locked foot goes where it was planted. An ankle lock includes the height (on a slope the ground under
+        // the animated ankle is not the ground the foot stands on); a toe lock moves the foot along the ground only.
+        if (lockWeight > 0 && lockPoint) {
+            const unlocked = vec3.copy(IK_UNLOCKED, eased);
+            if (lockPlanar) {
+                const along = vec3.sub(IK_LOCK_D, lockPoint, eased);
+                vec3.scaleAndAdd(along, along, up, -vec3.dot(along, up));
+                vec3.scaleAndAdd(eased, eased, along, lockWeight);
+            } else vec3.lerp(eased, eased, lockPoint, lockWeight);
+            // Letting go, never stretched further by the lock than LOCK_MAX_STRETCH (or the animation's own
+            // stretch): the target stops where the line from the unlocked target toward the lock leaves that reach.
+            const legLength = vec3.distance(hip, knee) + vec3.distance(knee, ankle);
+            const reach = Math.max(LOCK_MAX_STRETCH * legLength, vec3.distance(hip, unlocked));
+            if (vec3.distance(hip, eased) > reach) {
+                const pull = vec3.sub(IK_LOCK_PULL, eased, unlocked);
+                const from = vec3.sub(IK_LOCK_FROM_HIP, unlocked, hip);
+                const a = vec3.dot(pull, pull), b = vec3.dot(pull, from), c = vec3.dot(from, from) - reach * reach;
+                // |from + t pull| = reach, for t in [0, 1]: c <= 0 (the unlocked target is within reach), so real.
+                const t = a > 1e-12 ? clamp((-b + Math.sqrt(Math.max(0, b * b - a * c))) / a, 0, 1) : 0;
+                // How far the lock has let go: 0 held (the leg may go straight), 1 gone (the cap in full).
+                const letGo = tuning.footLock > 0 ? 1 - clamp(lockWeight / tuning.footLock, 0, 1) : 1;
+                vec3.scaleAndAdd(eased, unlocked, pull, 1 - letGo * (1 - t));
+            }
+        }
 
         const solve = solveTwoBone({ root: hip, mid: knee, tip: ankle, target: eased,
                                      pole: kneePole(hip, knee, ankle, forward) });
@@ -2609,6 +2849,213 @@ export class Animator {
                 this._reaccumulate(localTransforms, globalTransforms, topo, chain.toe);
             }
         }
+
+        // A locked foot keeps the heading it was planted with: the body turns over it, the foot does not. Not while
+        // the foot stands steeply on its toe, whose flattened direction is noise.
+        if (lockWeight > 0 && lockDir && chain.toe !== undefined && vec3.squaredLength(lockDir) > 0) {
+            const toeG = globalTransforms.get(chain.toe), footG = globalTransforms.get(chain.foot);
+            const dir = toeG && footG ? vec3.sub(IK_LOCK_D, mat4.getTranslation(IK_LOCK_D, toeG), mat4.getTranslation(IK_LOCK_D2, footG)) : null;
+            const level = dir ? Math.hypot(...planarOf(dir, up)) > vec3.length(dir) * FOOT_LOCK_LEVEL : false;
+            if (dir && level) {
+                const angle = clamp(planarSignedAngle(dir, lockDir, up), -FOOT_LOCK_MAX_TWIST, FOOT_LOCK_MAX_TWIST) * lockWeight;
+                if (Math.abs(angle) > 1e-4) {
+                    quat.setAxisAngle(IK_TWIST, up, angle * DEG2RAD);
+                    this._rotateGlobal(chain.foot, IK_TWIST, localTransforms, globalTransforms, topo);
+                    this._reaccumulate(localTransforms, globalTransforms, topo, chain.foot);
+                }
+            }
+        }
+    }
+
+    /**
+     * What the posed clips say about one foot (by its node): the weighted share of them inside a foot-lock window
+     * for it, or null when too little of the pose has windows for that foot (under half its weight) and the foot is
+     * left to detection. Weighted as the base pose is: a blend space's samples each at their own time, a cross-fade's
+     * two sides by the blend. A frozen interrupted pose and a pose state carry no windows.
+     */
+    private _footLockWindow(footNode: number): number | null {
+        let key = this._footLockKeys.get(footNode);
+        if (key === undefined) {
+            key = footLockKey(this._skin?.nodeNames?.get(footNode) ?? String(footNode));
+            this._footLockKeys.set(footNode, key);
+        }
+        let total = 0, withData = 0, inside = 0;
+        const add = (clip: Animation | null, time: number, w: number) => {
+            if (!(w > 0)) return;
+            total += w;
+            const v = clip ? footLockAt(clip, key!, time) : null;
+            if (v === null) return;
+            withData += w;
+            inside += v * w;
+        };
+        const addField = (entries: FieldEntry[], phase: number, scale: number) => {
+            for (const e of entries) {
+                let p = phase + e.phaseOffset;
+                if (p > 1) p -= 1;
+                add(e.animation, p * e.duration, e.weight * scale);
+            }
+        };
+        const f = this._isBlending
+            ? (this._activeBlendTime > 0 ? Math.min(this._currentBlendTime / this._activeBlendTime, 1) : 1)
+            : 1;
+        if (this._fieldEntries) addField(this._fieldEntries, this._fieldPhase, f);
+        else add(this._currentAnimation, this._currentTime, f);
+        if (this._isBlending && f < 1) {
+            if (this._frozenPrevious) total += 1 - f;
+            else if (this._previousFieldEntries) addField(this._previousFieldEntries, this._previousFieldPhase, 1 - f);
+            else add(this._previousAnimation, this._previousTime, 1 - f);
+        }
+        this._footLockUnwindowed = total > 0 ? Math.max(0, 1 - withData / total) : 0;
+        if (!(total > 0) || withData < total * 0.5) return null;
+        return inside / withData;
+    }
+
+    /** The point of a foot that holds the ground (model space, as animated): its toe, or its ankle without one. */
+    private _lockedPoint(plan: FootPlan, globalTransforms: Map<number, mat4>, out: vec3): vec3 {
+        const toeG = plan.chain.toe !== undefined ? globalTransforms.get(plan.chain.toe) : undefined;
+        return toeG ? mat4.getTranslation(out, toeG) : vec3.copy(out, plan.ankle);
+    }
+
+    /**
+     * Foot locking for one foot, after swing release has set its height weight: decide whether the animation
+     * has it planted, step its lock (`stepFootLock`), and hand the solve where the ankle must go.
+     *
+     * What is locked is the point that holds the ground: the TOE (the ball of the foot) where the leg has one,
+     * else the ankle. The ball stays down through heel-off, so a toe lock holds the foot until it really leaves
+     * the ground, while the heel still rises as animated; an ankle lock would let go at heel-off, or pin the heel.
+     *
+     * Planted means down at the lowest foot, held still vertically by the clip, and not swinging over the ground.
+     * "Over the ground" is the animated point's travel WITHOUT the body's rotation: R·(p - p') + (origin - origin').
+     * A straight cycle on a body that turns reads still, which is exactly the foot the turn would otherwise sweep
+     * round (the glide); a root-motion turn's planted foot reads r·omega, slow; a swing reads twice the body's
+     * speed, which is where the line is drawn (see below).
+     */
+    private _lockFoot(
+        plan: FootPlan,
+        lowest: number,
+        origin: vec3,
+        nodeWorld: mat4,
+        worldToModel: mat4,
+        up: vec3,
+        upWorld: vec3,
+        tuning: ReturnType<typeof ikTuning>,
+        dt: number,
+        globalTransforms: Map<number, mat4>,
+        allowed: boolean,
+    ): void {
+        const key = plan.chain.foot;
+        let lock = this._ikFootLocks.get(key);
+        if (!lock) {
+            lock = { alpha: 0, planted: false, point: vec3.create(), dir: vec3.create(), prevPoint: vec3.create(),
+                     prevOrigin: vec3.create(), hasPrev: false };
+            this._ikFootLocks.set(key, lock);
+        }
+        const toeG = plan.chain.toe !== undefined ? globalTransforms.get(plan.chain.toe) : undefined;
+        const point = this._lockedPoint(plan, globalTransforms, IK_LOCK_POINT);
+
+        // Where that point would be shown without the lock (the height correction applied), in the world.
+        const free = vec3.scaleAndAdd(IK_LOCK_FREE, point, up, plan.along * plan.weight);
+        const freeWorld = vec3.transformMat4(IK_LOCK_FREE_WORLD, free, nodeWorld);
+        // The animated heading in the world, ankle to toe, flattened. Zero-length without a toe, and while the foot
+        // is pitched steeply (toe-off): its flattened direction then says nothing about where it points.
+        const dirWorld = vec3.set(IK_LOCK_DIR, 0, 0, 0);
+        if (toeG) {
+            vec3.sub(dirWorld, point, plan.ankle);
+            vec3.transformMat3(dirWorld, dirWorld, IK_LOCK_M3);
+            const length = vec3.length(dirWorld);
+            vec3.scaleAndAdd(dirWorld, dirWorld, upWorld, -vec3.dot(dirWorld, upWorld));
+            if (vec3.length(dirWorld) > Math.max(1e-6, length * FOOT_LOCK_LEVEL)) vec3.normalize(dirWorld, dirWorld);
+            else vec3.set(dirWorld, 0, 0, 0);
+        }
+        const hasDir = vec3.squaredLength(dirWorld) > 0;
+
+        // dt 0 is a scrub: the lock holds as it is.
+        if (dt > 0) {
+            let prevAlpha = lock.alpha;
+            let lockable = false;
+            let slide = 0;
+            // The clips' own word, where they have it: inside a foot-lock window the foot is planted, outside it
+            // is not, whatever it looks like.
+            const authored = this._footLockWindow(key);
+            if (lock.hasPrev) {
+                const d = vec3.sub(IK_LOCK_D, point, lock.prevPoint);
+                // How fast the CLIP lifts or lowers the foot (model space, so a body climbing a ramp is not it).
+                const rise = Math.abs(vec3.dot(d, up)) / dt;
+                vec3.transformMat3(d, d, IK_LOCK_M3);
+                const body = vec3.sub(IK_LOCK_D2, origin, lock.prevOrigin);
+                vec3.add(d, d, body);
+                vec3.scaleAndAdd(d, d, upWorld, -vec3.dot(d, upWorld));
+                vec3.scaleAndAdd(body, body, upWorld, -vec3.dot(body, upWorld));
+                // Looser for a foot already held, so noise round the thresholds does not let it go and re-plant.
+                const held = lock.planted;
+                const slack = held ? 1.5 : 1;
+                // Planted: down, held still vertically, and not swinging over the ground. A swing crosses the
+                // ground at about twice the body's speed and a planted foot at about none, so the line is the
+                // body's own speed (1.5x): that also takes a planted foot the animation is sliding because it
+                // plays another direction than the body goes (a blend still catching up with a turn), which is
+                // exactly a foot to hold. To PLANT, the ankle must also be on its ground (a run's lower foot in
+                // the flight phase is the lowest foot, but in the air); a held foot keeps its lock through
+                // heel-off, its ball still down. A state without locking plants nothing; what it inherits fades.
+                const ground = vec3.length(d) / dt, bodySpeed = vec3.length(body) / dt;
+                slide = ground;
+                const down = vec3.dot(point, up) - lowest < tuning.lockHeight * slack
+                    && (held || plan.along > -tuning.lockHeight);
+                // Held, the ball of the foot only has to stay down: it rocks up and down a little as the foot rolls
+                // onto it, which is no reason to let go.
+                lockable = allowed && down && (held || rise < tuning.lockSpeed)
+                    && ground < (tuning.lockSpeed + 1.5 * bodySpeed) * slack;
+                // Nothing walks that far in one frame: a teleport or a respawn. Let go at once, not over lockRelease.
+                if (vec3.length(d) > tuning.lockDistance) { lock.alpha = 0; lock.planted = false; prevAlpha = 0; }
+            }
+            if (authored !== null) lockable = allowed && authored >= 0.5;
+            // Not caught sliding fast while the pose still blends in a clip without windows (see `lockCatchSpeed`):
+            // it plants once it has slowed. A held foot stays held; a blend space catching up with a turn, all of
+            // it windowed, still catches the foot it slides, which is the foot to hold.
+            if (!lock.planted && tuning.lockCatchSpeed > 0 && slide >= tuning.lockCatchSpeed && this._footLockUnwindowed > 1e-3) lockable = false;
+            let stray = 0;
+            if (prevAlpha > 0) {
+                const off = vec3.sub(IK_LOCK_D, freeWorld, lock.point);
+                vec3.scaleAndAdd(off, off, upWorld, -vec3.dot(off, upWorld));
+                // Distance only: the heading lock is clamped to FOOT_LOCK_MAX_TWIST instead, and past it the foot
+                // turns with the animation (a strafe turns its feet out) while its spot stays held.
+                stray = vec3.length(off) / tuning.lockDistance;
+            }
+            if (stepFootLock(lock, lockable, stray, dt, tuning) === 'plant') {
+                // Planted where the foot is SHOWN: a re-plant while the last lock is still fading out starts
+                // from there, not from the animation, or the foot would pop.
+                const shown = footLockWeight(prevAlpha, tuning.lockBlendCurve) * tuning.footLock;
+                if (prevAlpha > 0) vec3.lerp(lock.point, freeWorld, lock.point, shown);
+                else vec3.copy(lock.point, freeWorld);
+                if (!hasDir) vec3.set(lock.dir, 0, 0, 0);
+                else if (prevAlpha > 0 && vec3.squaredLength(lock.dir) > 0) {
+                    const angle = planarSignedAngle(dirWorld, lock.dir, upWorld) * shown;
+                    vec3.transformQuat(lock.dir, dirWorld, quat.setAxisAngle(IK_LOCK_Q, upWorld, angle * DEG2RAD));
+                } else vec3.copy(lock.dir, dirWorld);
+            }
+            vec3.copy(lock.prevPoint, point);
+            vec3.copy(lock.prevOrigin, origin);
+            lock.hasPrev = true;
+        }
+
+        const weight = footLockWeight(lock.alpha, tuning.lockBlendCurve) * tuning.footLock;
+        plan.lockWeight = weight;
+        plan.lockPlanar = !!toeG;
+        if (weight <= 0) return;
+        const lockModel = vec3.transformMat4(IK_LOCK_MODEL, lock.point, worldToModel);
+        if (vec3.squaredLength(lock.dir) > 0) {
+            const dir = vec3.transformMat3(plan.lockDir, lock.dir, IK_LOCK_M3_INV);
+            vec3.scaleAndAdd(dir, dir, up, -vec3.dot(dir, up));
+            if (vec3.length(dir) > 1e-6) vec3.normalize(dir, dir); else vec3.set(dir, 0, 0, 0);
+        } else vec3.set(plan.lockDir, 0, 0, 0);
+        if (!toeG) { vec3.copy(plan.lockPoint, lockModel); return; }
+        // A toe lock: the ankle goes where the animated foot, turned to the planted heading about the toe, puts
+        // its toe on the planted spot. (`_solveLeg` turns the foot by the same angle once the leg is solved.)
+        const span = vec3.sub(IK_LOCK_SPAN, point, plan.ankle);
+        if (hasDir && vec3.squaredLength(plan.lockDir) > 0) {
+            const angle = clamp(planarSignedAngle(span, plan.lockDir, up), -FOOT_LOCK_MAX_TWIST, FOOT_LOCK_MAX_TWIST);
+            vec3.transformQuat(span, span, quat.setAxisAngle(IK_LOCK_Q, up, angle * DEG2RAD));
+        }
+        vec3.sub(plan.lockPoint, lockModel, span);
     }
 
     // Apply a MODEL-space rotation to one joint by rewriting its LOCAL transform
@@ -2656,6 +3103,7 @@ export class Animator {
         const duration = this._getAnimationDuration();
         this._currentTime = Math.max(0, Math.min(time, duration));
         this._isBlending = false;
+        this._frozenPrevious = null;
         if (this._fieldEntries) {
             // A field's clock is its normalized phase; the caller's seconds are relative to the
             // current weighted duration.
@@ -2783,9 +3231,32 @@ export class Animator {
         this._stateFlips.length = 0;
         this._warnedPingPong = false;
         this._overlays = [];
+        this._setWhileClipsPending = false;
         if (!sm) return;
         for (const p of sm.parameters) this._paramValues.set(p.name, p.default);
+        this._setWhileClipsPending = !this._isOverlay && this._clipsPending();
         this._buildOverlays(sm);
+        this.resetStateMachine();
+    }
+
+    /** No clips at all on the model yet: shared clips still to be attached (see `_setWhileClipsPending`). */
+    private _clipsPending(): boolean {
+        return (this._animatedModel?.animations?.length ?? 0) === 0;
+    }
+
+    /**
+     * The machine was set before the model had clips, and now it has them: enter it again, its layers rebuilt (an
+     * empty layer's presence is decided as it is built), its parameters kept. Once.
+     */
+    private _catchUpClips(): void {
+        if (!this._setWhileClipsPending || this._clipsPending() || !this._stateMachine) return;
+        this._setWhileClipsPending = false;
+        this._warnedMissingClips.clear();
+        this._fieldBoneCache.clear();
+        this._clearField();
+        this._overlays = [];
+        this._buildOverlays(this._stateMachine);
+        this._currentStateName = null;
         this.resetStateMachine();
     }
 
@@ -2869,8 +3340,11 @@ export class Animator {
         if (!sm) return '';
         const lines: string[] = [];
         for (const [a, b] of [[from, to], [to, from]]) {
-            const t = sm.transitions.find(x => x.from === a && x.to === b)
-                ?? sm.transitions.find(x => x.from === '*' && x.to === b);
+            const groupA = this._groupOf(a)?.name, groupB = this._groupOf(b)?.name;
+            const into = (x: AnimationTransition) => x.to === b || (!!groupB && x.to === groupB && this._resolveTarget(groupB) === b);
+            const t = sm.transitions.find(x => x.from === a && into(x))
+                ?? (groupA ? sm.transitions.find(x => x.from === groupA && into(x)) : undefined)
+                ?? sm.transitions.find(x => x.from === '*' && into(x));
             if (!t) { lines.push(`${a} -> ${b}: (no transition)`); continue; }
             const parts: string[] = [];
             forEachCondition(t.condition, t.conditions, c => parts.push(this._describeCondition(c)));
@@ -3001,6 +3475,7 @@ export class Animator {
     }
 
     private _warnMissingLayerClip(state: AnimationState): void {
+        if (this._clipsPending()) return;
         this._warnedMissingLayerClip ??= new Set();
         if (this._warnedMissingLayerClip.has(state.name)) return;
         this._warnedMissingLayerClip.add(state.name);
@@ -3157,11 +3632,29 @@ export class Animator {
             }
         }
         for (const t of sm.transitions) if (t.from === this._currentStateName && this._tryTransition(t, duration)) return;
+        // Then the group's: a way out written once for every state in it.
+        const group = this._groupOf(this._currentStateName);
+        if (group) for (const t of sm.transitions) if (t.from === group.name && this._tryTransition(t, duration)) return;
+    }
+
+    /** The group a state belongs to on this machine, if any. */
+    private _groupOf(stateName: string | null): AnimationStateGroup | null {
+        if (!stateName) return null;
+        for (const g of this._stateMachine?.groups ?? []) if (g.states.includes(stateName)) return g;
+        return null;
+    }
+
+    /** The state a transition's `to` enters: the name itself, or a group's entry state. */
+    private _resolveTarget(name: string): string {
+        if (this._stateMachine?.states.some(s => s.name === name)) return name;
+        const group = this._stateMachine?.groups?.find(g => g.name === name);
+        if (!group) return name;
+        return group.entry && group.states.includes(group.entry) ? group.entry : (group.states[0] ?? name);
     }
 
     // Fire `t` if it can: its source, its dwell, its exit time and its conditions all allow it.
     private _tryTransition(t: AnimationTransition, duration: number): boolean {
-        if (t.to === this._currentStateName && !(t.from === '*' && t.canTransitionToSelf)) return false;
+        if (this._resolveTarget(t.to) === this._currentStateName && !(t.from === '*' && t.canTransitionToSelf)) return false;
 
         // Before the conditions, so a trigger is not consumed by a transition that cannot fire yet.
         if (t.minDwell && this._stateTime < t.minDwell) return false;
@@ -3187,8 +3680,9 @@ export class Animator {
         else consumeTriggers(this._conditionCtx, t.condition, t.conditions);
         // A trigger-less transition (a sheathe going on into the draw) carries the one that started it.
         if (trigger) this._activeTrigger = trigger;
-        this._enterState(t.to, blendTime);
-        if (this._stateMachine?.states.find(s => s.name === t.to)?.isEntry) this._activeTrigger = null;
+        const to = this._resolveTarget(t.to);
+        this._enterState(to, blendTime);
+        if (this._stateMachine?.states.find(s => s.name === to)?.isEntry) this._activeTrigger = null;
     }
 
     /**
@@ -3292,7 +3786,7 @@ export class Animator {
         if (!this._animatedModel) return;
         (sm.layers ?? []).forEach((layer, i) => {
             const child = this._createOverlayAnimator();
-            child.setStateMachine({ parameters: [], states: layer.states, transitions: layer.transitions, events: sm.events });
+            child.setStateMachine({ parameters: [], states: layer.states, transitions: layer.transitions, groups: layer.groups, events: sm.events });
             child._paramValues = this._paramValues;
             // A layer that starts on a clip is simply there from the first frame; fading it in would show
             // the base for a beat on every scene load.
@@ -3437,10 +3931,40 @@ export class Animator {
         return local;
     }
 
-    // The additive reference for a bone: the current clip's first frame.
+    // The additive reference for a bone: the current clip's first frame, or a field's (`_fieldReference`).
     private _additiveReference(nodeIndex: number): { t: vec3; r: quat } | null {
-        const bone = this._bones.get(boneKey(nodeIndex));
+        const key = boneKey(nodeIndex);
+        if (this._fieldEntries) return this._fieldReference(this._fieldEntries, key);
+        const bone = this._bones.get(key);
         return bone ? bone.startTR() : null;
+    }
+
+    // A field's additive reference for a bone: each sample's first frame, mixed by the samples' weights as the
+    // pose is (`_fieldLocal`), so a blend space of pose clips adds what each adds over its own start: the delta
+    // of the mix is the mix of the deltas. Before this an additive layer playing a field added nothing (the
+    // field owns no `_bones`). Null when no weighted sample animates the bone. Shared scratch: used at once.
+    private _fieldReference(entries: FieldEntry[], key: string): { t: vec3; r: quat } | null {
+        let total = 0, anchored = false;
+        vec3.set(REF_T, 0, 0, 0);
+        quat.set(REF_R, 0, 0, 0, 0);   // an accumulator, not a rotation yet
+        for (const e of entries) {
+            const bone = e.bones.get(key);
+            if (!bone || !(e.weight > 0)) continue;
+            const start = bone.startTR();
+            if (!anchored) { quat.copy(REF_HEMI, start.r); anchored = true; }
+            const w = quat.dot(REF_HEMI, start.r) < 0 ? -e.weight : e.weight;
+            vec3.scaleAndAdd(REF_T, REF_T, start.t, e.weight);
+            REF_R[0] += start.r[0] * w;
+            REF_R[1] += start.r[1] * w;
+            REF_R[2] += start.r[2] * w;
+            REF_R[3] += start.r[3] * w;
+            total += e.weight;
+        }
+        if (!anchored || total <= 0) return null;
+        vec3.scale(REF_T, REF_T, 1 / total);
+        if (quat.length(REF_R) < 1e-8) quat.copy(REF_R, REF_HEMI);
+        quat.normalize(REF_R, REF_R);
+        return FIELD_REF;
     }
 
     // base + w x (layer - reference), per component: the rotation delta `inverse(ref) x layer` goes on the
@@ -3651,9 +4175,9 @@ export class Animator {
     public triggerInfo(trigger: string): AnimationTriggerInfo | null {
         const sm = this._stateMachine;
         if (!sm || !trigger) return null;
-        const machines: { layer: string | null; states: AnimationState[]; transitions: AnimationTransition[] }[] = [
-            ...[...(sm.layers ?? [])].reverse().map(l => ({ layer: l.name, states: l.states, transitions: l.transitions })),
-            { layer: null, states: sm.states, transitions: sm.transitions },
+        const machines: { layer: string | null; states: AnimationState[]; transitions: AnimationTransition[]; groups?: AnimationStateGroup[] }[] = [
+            ...[...(sm.layers ?? [])].reverse().map(l => ({ layer: l.name, states: l.states, transitions: l.transitions, groups: l.groups })),
+            { layer: null, states: sm.states, transitions: sm.transitions, groups: sm.groups },
         ];
         const reads = (t: AnimationTransition) => {
             let hit = false;
@@ -3668,6 +4192,9 @@ export class Animator {
                 fromAnywhere = !!to;
             }
             if (!to) to = m.transitions.find(t => t.from !== '*' && reads(t))?.to;
+            // A transition into a group enters its entry state.
+            const group = to ? m.groups?.find(g => g.name === to) : undefined;
+            if (group) to = group.entry && group.states.includes(group.entry) ? group.entry : group.states[0];
             const state = to ? m.states.find(s => s.name === to) : undefined;
             if (!state) continue;
             const clip = state.clipName && !state.field && !state.pose ? state.clipName : '';
@@ -3847,6 +4374,7 @@ export class Animator {
         // While ragdolling, ignore animation triggers (and don't fall back to T-pose).
         if (this._ragdollActive) return;
         if (!this._animatedModel) return;
+        this._catchUpClips();
 
         // The state machine, when present, is the source of truth for what plays.
         if (this._stateMachine) {
@@ -3867,6 +4395,7 @@ export class Animator {
                 this._pendingTriggerConsumes = null;
             }
             for (const t of fired) consumeTriggers(this._conditionCtx, t.condition, t.conditions);
+            this._publishMovementHold();
             return;
         }
 
@@ -3945,12 +4474,14 @@ export class Animator {
         // The bind pose is un-IK'd, and this writes bone matrices without going through _recomputePose.
         this._ikFootWeights.clear();
         this._ikFootHits.clear();
+        this._ikFootLocks.clear();
         this._ikHipOffset = 0;
 
         // Stop any playing animation
         this._playing = false;
         // A surviving _isBlending would have _recomputePose mix the old clips back in next frame.
         this._isBlending = false;
+        this._frozenPrevious = null;
         this._previousAnimation = null;
         this._previousBones.clear();
         this._previousFieldEntries = null;

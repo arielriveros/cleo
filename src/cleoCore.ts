@@ -154,10 +154,10 @@ export {
 } from "./core/control/intent";
 export type { ControlIntent, IntentRequest, PlayerReading, Vec2 as ControlVec2 } from "./core/control/intent";
 export {
-    FACING_MODES, LOCOMOTION_DEFAULTS, locomotionTuning, createLocomotionState, stepLocomotion,
+    FACING_MODES, MOVE_DIR_SOURCES, TURN_FRICTION_MAX_ANGLE, LOCOMOTION_DEFAULTS, locomotionTuning, createLocomotionState, stepLocomotion,
 } from "./core/control/locomotion";
 export type {
-    FacingMode, LocomotionTuning, LocomotionSense, LocomotionState, LocomotionOutput,
+    FacingMode, MoveDirSource, LocomotionTuning, LocomotionSense, LocomotionState, LocomotionOutput,
 } from "./core/control/locomotion";
 export {
     STEERING_DEFAULTS, steeringTuning, createSteeringState, seek, flee, arrive, pursue, followTarget,
@@ -299,7 +299,10 @@ export {
     mirrorPairs, mirrorAxisOf, rootMotionNodeOf, rootParentRotation, clipDuration, resetClipEditWarnings,
 } from "./animation/clipEdit";
 export type { ClipEdit, ClipEditContext, PoseBone, MirrorAxis } from "./animation/clipEdit";
-export { swingReleaseWeight } from "./animation/ik";
+export { swingReleaseWeight, stepFootLock, footLockWeight, FOOT_LOCK_MAX_TWIST, FOOT_LOCK_CURVES } from "./animation/ik";
+export { footLockKey, footLockAt, normalizeFootLockSpans, shrinkFootLockSpans, detectFootLockWindows, humanoidFeet } from "./animation/footLockWindows";
+export type { FootLockWindows, FootLockDetectOptions } from "./animation/footLockWindows";
+export type { FootLockStep, FootLockCurve } from "./animation/ik";
 export { Animator, isConditionGroup, NODE_BUILTINS } from "./animation/animator";
 export type { NodeBuiltinName } from "./animation/animator";
 export { parseEventActions, runEventActions, resolveTarget, drawnWorldPosition } from "./animation/eventActions";
@@ -336,6 +339,7 @@ export type {
     AnimationVariableBinding,
     AnimationEventMarker,
     AnimationLayer,
+    AnimationStateGroup,
     AnimationSlotDef,
     AnimationBlendMode,
     AnimationPose,

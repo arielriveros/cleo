@@ -80,8 +80,35 @@ editor writes them to `.cleo/types/project.d.ts` as the animators change; a proj
 all takes any string. In the inspector, a `TriggerName` field is picked from the character's triggers,
 never typed.
 
+**State groups.** A machine (and each layer) may group states, to keep a big graph readable and to share the
+transitions its states have in common:
+
+```ts
+interface AnimationStateGroup { name: string; states: string[]; entry?: string; x?: number; y?: number }
+interface AnimationStateMachine { groups?: AnimationStateGroup[] /* ... */ }   // AnimationLayer has groups too
+```
+
+- **Out of a group.** A transition whose `from` is a group's name fires from any of its states. A state's own
+  transitions are tried first, so a state can override its group's way out.
+- **Into a group.** A transition whose `to` is a group enters its `entry` state (its first, if none).
+- **Names.** A state belongs to one group at most, and no group shares a name with a state.
+
+`currentStateName` is always a state, never a group.
+
+**Holding the character still.** A state with `holdMovement: true` stops the character's own movement while it
+plays: the [Character](characters-and-controllers.md) above the model steers as if its input were zero, with no
+acceleration ramp and no facing turn, so its ground speed goes to 0 at once and gravity carries on. The clip's
+root motion still moves it. A hard landing that crouches where it came down, whatever the stick says, is the
+case. The animator reaches the Character as root motion reaches its body: the first ancestor with an
+`animationHold` field (`CharacterNode.animationHold`, set each frame, read-only to scripts).
+
 A character running a [shared animator](../editor/animation.md#shared-animators) holds a resolved
-copy of it, so all of the above works the same either way. `getStateMachine()` returns that copy; its
+copy of it, so all of the above works the same either way.
+
+**Clips that come later.** A model on its skeleton's shared clips is built with none: they are attached after it
+is parsed. A machine set while the model has no clips at all reports nothing, and is entered again, its layers
+rebuilt and its parameters kept, the first frame the clips are there. A model that has clips but lacks the one a
+state names still warns. `getStateMachine()` returns that copy; its
 `controllerId` says which shared animator it came from.
 
 ## Layers
@@ -107,6 +134,16 @@ onUpdate() {
 
 A layer whose weight is driven by a parameter ignores `setLayerWeight` — the parameter wins. Set the
 parameter instead.
+
+**A blend space on a layer.** A layer's state can be a [blend space](#blend-spaces), as a base state can. On an
+**additive** layer each sample adds what it moves over its own first frame, mixed by the samples' weights. A
+look-at is the usual case: pose clips (rest at frame 0, the look after it) at the corners and edges of a yaw x pitch
+range, the axes reading where the aim is off the body, the weight up while the character stands still.
+
+Play such a blend space at **speed 0**, with each sample's `phaseOffset` at 0.5: its poses are then sampled half way
+in and held, and its weights still follow the axes every frame. Looping instead, it wraps back to the clips' first
+frame (the rest the delta is taken from) once a cycle, and the pose snaps toward centre for a few frames. A state
+held at speed 0 still blends in over its transition's seconds.
 
 ## One-shots in the graph
 
@@ -332,9 +369,60 @@ interface IkRig { hips?: number; feet: IkFootChain[] }     // node indices into 
 ```
 
 `IK_DEFAULTS`: `footHeight 0.1`, `traceUp 0.5`, `traceDown 0.6`, `swingRelease 0.2`,
-`maxHipDrop 0.5`, `maxSlopeDeg 45`, `smoothing 0.12`.
+`maxHipDrop 0.5`, `maxSlopeDeg 45`, `smoothing 0.12`, and foot locking: `footLock 0` (off),
+`lockSpeed 0.5`, `lockHeight 0.03`, `lockRelease 0.15`, `lockDistance 0.35`, `lockBlendIn 0`,
+`lockBlendCurve 'linear'`, `lockCatchSpeed 0`.
 
-Functions: `solveTwoBone`, `applyTwoBone`, `ikTuning`, `validateIkRig`, `swingReleaseWeight`.
+**Foot locking** (`footLock` above 0) keeps a foot the animation has planted on its spot and heading in
+the world while the body moves or turns over it, which is what stops a character gliding when it turns
+while it walks. A foot plants when it is down (ankle on its ground, ball within `lockHeight` of the
+lowest foot) and the animation holds it still: rising or sinking slower than `lockSpeed`, and crossing
+the ground (the body's own turning left out) slower than `lockSpeed` plus 1.5 times the body's speed.
+The ball of the foot is held, through heel-off, and its heading up to `FOOT_LOCK_MAX_TWIST` (40 degrees).
+It lets go over `lockRelease` seconds when the animation lifts it, or when it is left more than
+`lockDistance` from where the animation has it, and at once when the body jumps further than that in one
+frame (a teleport). A state with no foot placement has no locking either, nor one whose
+`AnimationState.footLock` is `false`.
+
+A held foot may pull its leg straight; one being let go never pulls it past 97% of its length (or past the clip's
+own stretch), by how far it has been let go. `lockCatchSpeed` (m/s, 0 off) keeps a lock from catching a foot that
+slides faster than that while the pose still blends in a clip with no windows (a cross-fade out of Idle): caught,
+it stops dead and the leg is left stretched after it. The knee is solved toward the clip's own bend, turning to
+`forward` smoothly as that bend shrinks or points behind: a hard switch flipped a strafe's knee, which swings out
+past sideways.
+
+**Blending a lock.** `lockBlendIn` (seconds) eases a planting foot into its lock: the point it is held at is where
+the foot was shown as it planted, and the lock's weight rises from 0 over `lockBlendIn`, so a foot that plants
+mid-slide slows to a stop instead of stopping dead. `lockRelease` is the way out. `lockBlendCurve` shapes both:
+`'linear'`, or `'smooth'` (eased in and out, `footLockWeight(alpha, 'smooth')` is smoothstep). A foot that plants
+again while it is still being let go keeps its point and rises from where it is. With `lockBlendIn` 0 a lock is
+on the frame the foot plants, as before.
+
+**Foot-lock windows.** A clip may say when each foot is planted, instead of leaving it to the detection above:
+
+```ts
+interface Animation { footLocks?: Record<string, [number, number][]> }   // per foot, spans in clip seconds
+```
+
+- **Keys.** A foot's key is its humanoid slot (`footLockKey('mixamorig:LeftFoot')` is `'foot.L'`), or the bone name
+  on a rig that is not humanoid.
+- **Inside a span** the foot plants and is held. When the span ends it lets go over `lockRelease`, even with the
+  foot still down.
+- **Missing vs empty.** An empty list never locks that foot; a foot with no entry is detected as above.
+- **Blends.** Weighted as the pose is: a blend space's samples each at their own time, a cross-fade's two sides by
+  the blend. A foot whose posed clips have no windows for it, over half their weight, is detected.
+
+Helpers in `footLockWindows.ts`:
+- `detectFootLockWindows(clip, skin, { heelLift })`: spans from the ball coming down to the heel lifting
+  `heelLift` (3 cm);
+- `shrinkFootLockSpans(windows, keep)`: each span cut to its middle `keep` share (0 to 1), spans left shorter
+  than 0.06 s dropped, for clips whose feet should lock for less of each stance;
+- `footLockAt(clip, key, time)`;
+- `normalizeFootLockSpans(spans, duration)`;
+- `humanoidFeet(skin)`.
+
+Functions: `solveTwoBone`, `applyTwoBone`, `ikTuning`, `validateIkRig`, `swingReleaseWeight`,
+`stepFootLock`, `footLockWeight`; `FOOT_LOCK_CURVES` lists the curves.
 
 ## Root motion
 
@@ -347,6 +435,10 @@ root motion entirely, and so does everything above the base layer: a layer or an
 the character. Either can EXTRACT its clip's ground travel instead — a layer state with
 `extractRootMotion`, an action with `rootMotion: true` — for a script to read with
 `consumeRootMotion()` and move the body by, through its own collision.
+
+On a [Character](characters-and-controllers.md), root motion ADDS to the character's own movement. A state
+whose clip should be the only thing moving it (a hard landing, a stagger) sets `holdMovement`
+([Holding the character still](#driving-a-state-machine)).
 
 ## Ragdolls
 

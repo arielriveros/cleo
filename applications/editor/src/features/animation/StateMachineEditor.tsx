@@ -6,13 +6,16 @@ import { NODE_BUILTINS, isConditionGroup } from 'cleo'
 import { AccessibleVariable, UNSIGNED_BUILTINS } from './skeleton'
 import FieldDebugReadout from './FieldDebugReadout'
 import type { AnimationFieldAsset } from '../../utils/animationFields'
-import { useStateMachine, ANY_STATE } from './StateMachineContext'
+import { useStateMachine, ANY_STATE, linkKey } from './StateMachineContext'
+import { entryOf, transitionsBetween } from './stateGroups'
+import { transitionLabel } from './StateGraph'
+import { HoldIcon, IntoGroupIcon, OutOfGroupIcon, UngroupIcon, EntryIcon } from './groupIcons'
 import ConditionTree from './ConditionTree'
 import { AssetDropRow, LayerSection, SlotsSection } from './LayerPanels'
 import { EventActionsSection } from './EventActionsPanel'
 import AnimationAssetPicker from './AnimationAssetPicker'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { BoltIcon, Button, cn, ComboSelect, controlClass, FileButton, hintClass, NumberInput, OptionalNumberInput, SectionTitle, SegmentedControl, Select, TextInput, Toggle } from '@cleo/app-kit/ui'
+import { BoltIcon, Button, ButtonWithConfirm, cn, ComboSelect, controlClass, FileButton, hintClass, JOINED_DIVIDER_CLASS, JOINED_GROUP_CLASS, NumberInput, OptionalNumberInput, SectionTitle, SegmentedControl, Select, TextInput, Toggle } from '@cleo/app-kit/ui'
 import { clamp } from '@cleo/app-kit/utils/math';
 import { promptDialog } from '@cleo/app-kit/feedback/dialogStore'
 
@@ -129,7 +132,7 @@ export function ClipsPanel() {
 
         {/* Clips already in the library, linked rather than re-imported — the same affordance a texture
             slot gives: pick one, or drag it in from Assets. */}
-        {/* Read-only here; minting happens in onNeedRig — see AnimationSlot. */}
+        {/* Read-only here; minting happens in onNeedRig — see CharacterRows. */}
         <AnimationAssetPicker
           className='mt-1'
           rigId={rigOfModel ?? null}
@@ -202,7 +205,7 @@ export function StateMachinePanel() {
       <LayerSection />
       <Collapsable title='Selected' defaultOpen>
         <div className='p-2 flex flex-col gap-2'>
-          {!selection && <p className='text-ui-sm text-muted'>Select a state or transition in the graph.</p>}
+          {!selection && <p className='text-ui-sm text-muted'>Select a state, a group or a transition in the graph.</p>}
           {selection?.kind === 'state' && selection.name === ANY_STATE && (
             <p className='text-ui-sm text-muted'>
               <b>Any State</b> — a transition from here fires whichever state this layer is in, the moment its
@@ -211,6 +214,8 @@ export function StateMachinePanel() {
             </p>
           )}
           {selection?.kind === 'state' && <SelectedState />}
+          {selection?.kind === 'group' && <SelectedGroup />}
+          {selection?.kind === 'summary' && <SelectedSummary />}
           {selection?.kind === 'transition' && <SelectedTransition />}
         </div>
       </Collapsable>
@@ -221,7 +226,10 @@ export function StateMachinePanel() {
 
 // ---- Selected state details -----------------------------------------------------------------------
 function SelectedState() {
-  const { sm, selection, clips, setState, removeState, stateIndex, links, animationFields, fieldOf, poseAssets, activeLayer, addTriggerParam } = useStateMachine()
+  const {
+    sm, selection, setSelection, clips, setState, removeState, stateIndex, links, animationFields, fieldOf, poseAssets,
+    activeLayer, addTriggerParam, groups, groupOf, moveToGroup,
+  } = useStateMachine()
   if (selection?.kind !== 'state') return null
   const i = stateIndex(selection.name)
   if (i < 0) return null
@@ -279,6 +287,36 @@ function SelectedState() {
         ? <p className='text-ui-xs text-success'>▶ Entry state — the character starts here.</p>
         : <Button size='sm' variant='subtle' className='self-start' title='Start the character in this state'
             onClick={() => setState(i, { isEntry: true })}>▶ Make this the entry state</Button>}
+
+      {/* Which group it is in: a group's own transitions leave from each of its states. */}
+      {groups.length > 0 && (() => {
+        const home = groupOf(s.name)
+        return (
+          <>
+            <div className='flex items-center gap-1'>
+              <span className='text-ui-xs text-muted w-[42px] shrink-0'
+                title='The state group this state is in. A transition from a group fires from any of its states, after the state’s own.'>Group</span>
+              <Select className={cn(tight, 'flex-1 min-w-0')} value={home?.name ?? ''}
+                onChange={e => moveToGroup(s.name, e.target.value || null)}>
+                <option value=''>(none)</option>
+                {groups.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
+              </Select>
+              {home && (
+                <Button variant='ghost' size='sm' className='shrink-0' title={`Select ${home.name}`}
+                  onClick={() => setSelection({ kind: 'group', name: home.name })}>
+                  <span className='inline-block w-3.5 h-3.5'><IntoGroupIcon /></span>
+                </Button>
+              )}
+            </div>
+            {home && (
+              <p className={hintClass}>
+                {home.name}’s own transitions leave from here too, after this state’s own.
+                {entryOf(home) === s.name && ' A transition into the group enters here.'}
+              </p>
+            )}
+          </>
+        )
+      })()}
 
       <EnterOnTrigger triggers={s.triggers ?? []} params={sm.parameters.filter(p => p.type === 'trigger')}
         onChange={triggers => setState(i, { triggers: triggers.length ? triggers : undefined })}
@@ -470,6 +508,22 @@ function SelectedState() {
               value={s.ikWeight ?? 1}
               onChange={v => setState(i, { ikWeight: v === undefined ? undefined : clamp(v, 0, 1) })} />}
         <span className='text-dim'>{!s.ikWeightParam && s.ikWeight === undefined ? '(on)' : ''}</span>
+        <span title={'Foot locking in this state, when the skeleton has it on: a planted foot keeps its spot while the body '
+          + 'moves or turns over it. Turn it off for a standing state whose small weight shifts should not be pinned; a foot '
+          + 'locked when the state is entered then fades back to the animation.'}>
+          <Toggle label='lock' checked={s.footLock !== false}
+            onChange={c => setState(i, { footLock: c ? undefined : false })} className='text-ui-xs' />
+        </span>
+        {/* Base layer only: a layer's state does not move the character. */}
+        {activeLayer === 0 && (
+          <span title={'Hold the character still while this state plays: the Character it animates stops steering (no '
+            + 'speed, no turning; gravity kept), so only the clip’s root motion moves it. For a clip that must not travel '
+            + 'with the speed it came in with or the stick, a hard landing say.'}>
+            <Toggle doc={false} checked={!!s.holdMovement} className='text-ui-xs'
+              label={<span className='inline-block w-3.5 h-3.5 align-[-2px]'><HoldIcon /></span>}
+              onChange={c => setState(i, { holdMovement: c || undefined })} />
+          </span>
+        )}
       </div>
 
       <SectionTitle title='Links' className='mt-1' />
@@ -631,9 +685,114 @@ function disjointReciprocal(fwd: any, bwd: any): { fwd: string[]; bwd: string[] 
   return { fwd: fp, bwd: bp }
 }
 
+// ---- Selected group ------------------------------------------------------------------------------------
+function SelectedGroup() {
+  const {
+    sm, selection, setSelection, groups, groupOf, setGroup, removeGroup, moveToGroup, openGroup, setOpenGroup, paramOf,
+  } = useStateMachine()
+  if (selection?.kind !== 'group') return null
+  const g = groups.find(x => x.name === selection.name)
+  if (!g) return null
+  const entry = entryOf(g)
+  const own = sm.transitions.filter(t => t.from === g.name || t.to === g.name)
+  const free = sm.states.filter(st => !groupOf(st.name))
+  const icon = (C: (p: React.SVGProps<SVGSVGElement>) => JSX.Element) => <span className='inline-block w-4 h-4'><C /></span>
+  const strip = 'flex items-center justify-center px-1.5 py-1 text-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:pointer-events-none'
+  const pickTransition = (from: string, to: string) => { const [a, b] = linkKey(from, to); setSelection({ kind: 'transition', a, b }) }
+
+  return (
+    <div className='flex flex-col gap-2'>
+      <div className='flex items-center gap-1'>
+        <TextInput className={cn(tight, 'flex-1 min-w-0')} title='Group name: no state or other group may have it' value={g.name}
+          onChange={v => setGroup(g.name, { name: v })} />
+        <div className={JOINED_GROUP_CLASS}>
+          <button type='button' className={strip} disabled={openGroup === g.name} title='Open it in the graph'
+            onClick={() => setOpenGroup(g.name)}>{icon(IntoGroupIcon)}</button>
+          <button type='button' className={cn(strip, JOINED_DIVIDER_CLASS)}
+            title='Ungroup: its states back on the graph, each keeping the group’s transitions as its own'
+            onClick={() => removeGroup(g.name, 'ungroup')}>{icon(UngroupIcon)}</button>
+        </div>
+        <ButtonWithConfirm variant='remove' size='sm' title='Delete the group AND its states' onClick={() => removeGroup(g.name, 'delete')}>✕</ButtonWithConfirm>
+      </div>
+      <p className={hintClass}>
+        A transition from the group fires from any of its states, after that state’s own ways out; one into the
+        group enters its entry state.
+      </p>
+
+      <div className='flex items-center gap-1'>
+        <span className='text-ui-xs text-muted w-[42px] shrink-0' title='The state a transition into the group enters'>Entry</span>
+        <Select className={cn(tight, 'flex-1 min-w-0')} value={entry ?? ''} disabled={!g.states.length}
+          onChange={e => setGroup(g.name, { entry: e.target.value || undefined })}>
+          {g.states.map(m => <option key={m} value={m}>{m}{!g.entry && m === g.states[0] ? ' (first)' : ''}</option>)}
+        </Select>
+      </div>
+
+      <SectionTitle title='States' className='mt-1' />
+      {g.states.length === 0 && <p className={hintClass}>No states: nothing to enter, nothing to leave from.</p>}
+      {g.states.map(m => (
+        <div key={m} className='flex items-center gap-1 text-ui-sm'>
+          <button type='button' className='flex-1 truncate text-left text-muted hover:text-fg' title={`Select ${m}`}
+            onClick={() => setSelection({ kind: 'state', name: m })}>{m}</button>
+          {m === entry
+            ? <span className='w-5 h-5 p-0.5 text-success' title='The entry state'><EntryIcon /></span>
+            : <Button variant='ghost' size='sm' title='Make it the group’s entry state' onClick={() => setGroup(g.name, { entry: m })}>
+                <span className='inline-block w-3.5 h-3.5'><EntryIcon /></span>
+              </Button>}
+          <Button variant='ghost' size='sm' title='Take it out of the group' onClick={() => moveToGroup(m, null)}>
+            <span className='inline-block w-3.5 h-3.5'><OutOfGroupIcon /></span>
+          </Button>
+        </div>
+      ))}
+      {free.length > 0 && (
+        <Select className={cn(tight, 'self-start')} value='' title='Put another state in this group'
+          onChange={e => { if (e.target.value) moveToGroup(e.target.value, g.name) }}>
+          <option value=''>+ state…</option>
+          {free.map(st => <option key={st.name} value={st.name}>{st.name}</option>)}
+        </Select>
+      )}
+
+      <SectionTitle title='Its own transitions' className='mt-1' />
+      {own.length === 0
+        ? <p className={cn(hintClass, 'text-ui-sm')}>None. Drag from the group’s top-right handle in the graph (or, opened, from “Any state in {g.name}”) to add one.</p>
+        : own.map(t => (
+            <button type='button' key={`${t.from}>${t.to}`} className='flex items-center gap-1 text-ui-sm text-muted hover:text-fg text-left'
+              title='Edit this transition' onClick={() => pickTransition(t.from, t.to)}>
+              <span className='text-dim w-[26px] text-center'>{t.from === g.name ? '→' : '←'}</span>
+              <span className='truncate flex-1'>{t.from === g.name ? (t.to === ANY_STATE ? 'Any State' : t.to) : (t.from === ANY_STATE ? 'Any State' : t.from)}</span>
+              <span className='text-ui-xs text-dim truncate max-w-[50%]'>{transitionLabel(t, paramOf)}</span>
+            </button>
+          ))}
+    </div>
+  )
+}
+
+/** A line in the graph that stands for several transitions: each, one click from its inspector. */
+function SelectedSummary() {
+  const { sm, selection, setSelection, paramOf } = useStateMachine()
+  if (selection?.kind !== 'summary') return null
+  const list = transitionsBetween(sm, selection.from, selection.to)
+  const name = (n: string) => (n === ANY_STATE ? 'Any State' : n)
+  return (
+    <div className='flex flex-col gap-1'>
+      <p className='text-ui-sm text-muted'>
+        <b>{name(selection.from)}</b> <span className='text-dim'>→</span> <b>{name(selection.to)}</b>: this line stands
+        for {list.length === 1 ? 'one transition' : `${list.length} transitions`}. Pick one to edit it.
+      </p>
+      {list.map(t => (
+        <button type='button' key={`${t.from}>${t.to}`} className='flex items-center gap-1 text-ui-sm text-muted hover:text-fg text-left border border-control rounded px-1.5 py-1'
+          title='Edit this transition'
+          onClick={() => { const [a, b] = linkKey(t.from, t.to); setSelection({ kind: 'transition', a, b }) }}>
+          <span className='truncate flex-1'>{name(t.from)} <span className='text-dim'>→</span> {name(t.to)}</span>
+          <span className='text-ui-xs text-dim truncate max-w-[50%]'>{transitionLabel(t, paramOf) || 'always'}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ---- Selected transition (a LINK: up to one transition each way) -------------------------------------
 function SelectedTransition() {
-  const { selection, linkOf, addTransition, setTransition, removeTransition } = useStateMachine()
+  const { selection, linkOf, addTransition, setTransition, removeTransition, groups } = useStateMachine()
   if (selection?.kind !== 'transition') return null
   const link = linkOf(selection.a, selection.b)
   if (!link) return null
@@ -676,6 +835,13 @@ function SelectedTransition() {
           alternating frames — which shows up as the character vibrating, not as a state problem.
           {' '}Give each condition a <b>tolerance</b> (0.1 is plenty for a speed), separate the two
           thresholds, or set <b>stay at least</b> below.
+        </p>
+      )}
+      {groups.some(g => g.name === link.a || g.name === link.b) && (
+        <p className={hintClass}>
+          {[link.a, link.b].filter(n => groups.some(g => g.name === n)).map(n => <b key={n}>{n} </b>)}
+          is a group: from it, a transition fires from any of its states (after that state’s own); into it, it enters
+          its entry state.
         </p>
       )}
       {dirs.map(({ from, to, t }) => (

@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
-import { IK_DEFAULTS } from 'cleo'
-import type { IkRig, IkFootChain, Skin } from 'cleo'
+import { IK_DEFAULTS, FOOT_LOCK_CURVES } from 'cleo'
+import type { IkRig, IkFootChain, Skin, FootLockCurve } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
-import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { jointLabel } from './skeleton'
-import { Button, cn, controlClass } from '@cleo/app-kit/ui'
+import { Button, Select, cn, controlClass } from '@cleo/app-kit/ui'
 import { guessFootPlacement } from '../../utils/footPlacementAuto'
 
-// Foot-IK rig authoring, under the skeleton tree. Bones are assigned by hand: select a joint (SELECT_JOINT,
-// from the tree or the viewport) and click the role it fills; the ⤓ button offers a name-matched guess.
-// Everything writes through commitIkRig, which lands on the SKELETON, so every character on it inherits it.
+// Foot-IK rig authoring: the Skeleton part's Foot Placement tab (rig/FootPlacementPanel), beside Skeleton while
+// the bone tree stays up on the left. Bones are assigned by hand: select a joint (SELECT_JOINT, from the tree or
+// the viewport) and click the role it fills; the ⤓ button offers a name-matched guess. Everything writes through
+// commitIkRig, which lands on the SKELETON, so every character on it inherits it.
+
+/** How each blend curve reads in the Curve picker. */
+const CURVE_LABELS: Record<FootLockCurve, string> = { linear: 'Linear', smooth: 'Smooth (eases in and out)' }
 
 /** The tuning inputs stay raw (uncontrolled, commit on blur, blank = default), in the library's control chrome. */
 const input = cn(controlClass, 'px-1 py-0.5')
@@ -122,7 +125,7 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
   const hips = nameOfNode(current.hips)
 
   return (
-    <Collapsable title='Foot Placement' badge={current.feet.length || undefined}>
+    <div>
       <div className='flex flex-col gap-2 p-2'
         title='Select a bone, then click the role it fills. Runs in Play only — the editor has no physics to stand on.'>
         <div className='flex items-center gap-1'>
@@ -202,7 +205,37 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
             {num('Smoothing', 'smoothing', 'Seconds for a foot to fade in or out as it finds and loses ground. Too low and a foot snaps at the lip of a ledge.')}
           </div>
         )}
+
+        {current.feet.length > 0 && (
+          <div className='mt-1 flex flex-col gap-1 border-t border-control pt-2'>
+            <span className='text-ui-xs text-muted'>Foot locking</span>
+            {num('Lock', 'footLock', 'How firmly a foot the animation has planted keeps its spot and heading on the ground while the body moves or turns over it, 0 to 1. Stops a character that turns while it walks from gliding as if on ice. 0 turns locking off.')}
+            {num('Plant speed', 'lockSpeed', 'A foot plants when the clip rises or lowers it slower than this (metres a second), and moves it over the ground slower than this plus 1.5 times the body’s own speed: a swing crosses the ground at about twice the body’s speed. The body turning is not counted, so a foot the turn would sweep round still plants.')}
+            {num('Plant height', 'lockHeight', 'A foot plants only this close to the lowest foot. Lower it if a foot stays stuck as the heel lifts; raise it if feet never lock.', 0.01)}
+            {num('Catch below', 'lockCatchSpeed', 'While the pose still blends in a clip with no foot-lock windows (setting off out of Idle), a foot sliding over the ground faster than this (metres a second) is not caught by the lock: it plants once it has slowed. Catching it stops it dead and leaves the leg stretched after it until the lock lets go. Blank or 0 catches any.', 0.1)}
+            {num('Let go at', 'lockDistance', 'How far the body may leave a planted foot behind before it lets go and steps. A body that jumps further than this in one frame (a teleport) lets go at once. The heading is held up to 40 degrees, and turns with the clip past that.')}
+          </div>
+        )}
+
+        {current.feet.length > 0 && (
+          <div className='mt-1 flex flex-col gap-1 border-t border-control pt-2'>
+            <span className='text-ui-xs text-muted'
+              title='How a lock comes in and goes out. A foot that plants mid-slide is eased to a stop instead of stopping dead, and a lifted foot is eased back to the animation.'>
+              Blending
+            </span>
+            {num('In', 'lockBlendIn', 'Seconds a planting foot takes to settle into its lock. While it does, the foot still slides a little, slower each frame. 0 locks it the frame it plants.', 0.01)}
+            {num('Out', 'lockRelease', 'Seconds a lifted foot takes to blend from where it was planted back to the animation.', 0.01)}
+            <label className='flex items-center gap-1 text-ui-xs'
+              title='The shape of both blends. Smooth starts and ends gently, so neither the plant nor the release shows as a kink in the foot’s path; Linear moves at one rate throughout.'>
+              <span className='w-[74px] shrink-0 text-muted'>Curve</span>
+              <Select className='flex-1' value={current.lockBlendCurve ?? IK_DEFAULTS.lockBlendCurve}
+                onChange={e => write({ ...current, lockBlendCurve: e.target.value === IK_DEFAULTS.lockBlendCurve ? undefined : e.target.value as FootLockCurve })}>
+                {FOOT_LOCK_CURVES.map(c => <option key={c} value={c}>{CURVE_LABELS[c]}</option>)}
+              </Select>
+            </label>
+          </div>
+        )}
       </div>
-    </Collapsable>
+    </div>
   )
 }

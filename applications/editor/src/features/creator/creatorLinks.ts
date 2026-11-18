@@ -105,22 +105,27 @@ export function isWorldImportData(fileName: string): boolean {
   return /_splat_\d+\.png$/i.test(fileName) || /_weight_\d+_.*\.png$/i.test(fileName)
 }
 
-type StoredClipEvents ={ name: string; events?: { time: number; name: string }[] }
+type StoredClipEvents ={ name: string; events?: { time: number; name: string }[]; footLocks?: Record<string, [number, number][]> }
 
 /**
- * Carry the events the project gave a Creator clip onto its next bake.
+ * Carry the events and foot-lock windows the project gave a Creator clip onto its next bake.
  *
- * Cleo Creator does not author events -- they are placed in the editor, on the clip -- so a re-sync must not
- * replace them. Each incoming clip keeps the events of the existing clip of the same name; when both sides
- * hold a single clip (a Motion asset, whose clip is named after the asset) it keeps that clip's, so renaming
- * the asset in the Creator does not lose them. An existing clip with no `events` field at all takes the
- * incoming ones (a Character's clips pass imported events through); an empty list is a choice and is kept.
+ * Cleo Creator authors neither -- they are placed in the editor, on the clip -- so a re-sync must not replace
+ * them. Each incoming clip keeps those of the existing clip of the same name; when both sides hold a single clip
+ * (a Motion asset, whose clip is named after the asset) it keeps that clip's, so renaming the asset in the Creator
+ * does not lose them. An existing clip with no `events` field at all takes the incoming ones (a Character's clips
+ * pass imported events through); an empty list is a choice and is kept. Foot locks likewise.
  */
 export function keepClipEvents<C extends StoredClipEvents>(incoming: readonly C[], existing: readonly StoredClipEvents[] | undefined): C[] {
   if (!existing?.length) return [...incoming]
   return incoming.map(c => {
     const prev = existing.find(e => e.name === c.name) ?? (incoming.length === 1 && existing.length === 1 ? existing[0] : undefined)
-    if (!prev || prev.events === undefined) return c
-    return { ...c, events: prev.events.map(e => ({ ...e })) }
+    if (!prev) return c
+    let out = c
+    if (prev.events !== undefined) out = { ...out, events: prev.events.map(e => ({ ...e })) }
+    if (prev.footLocks !== undefined) {
+      out = { ...out, footLocks: Object.fromEntries(Object.entries(prev.footLocks).map(([k, v]) => [k, v.map(s => [s[0], s[1]] as [number, number])])) }
+    }
+    return out
   })
 }

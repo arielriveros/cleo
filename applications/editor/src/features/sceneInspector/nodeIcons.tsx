@@ -13,6 +13,13 @@ import { Glyph as S } from './iconBase';
 export const EmptyIcon = () => (
   <S><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" /><path d="M12 3v4M12 17v4M3 12h4M17 12h4" /></S>
 );
+/**
+ * Template instance: a sheet stamped from the one behind it. The scene tree draws it in place of the
+ * instance root's own type glyph, since what the row IS is a placement of the template, whatever its root.
+ */
+export const TemplateIcon = () => (
+  <S><path d="M8 3.5h10.5a2 2 0 0 1 2 2V16" opacity="0.6" /><rect x="3.5" y="7" width="13.5" height="13.5" rx="2" fill="currentColor" fillOpacity="0.18" /><path d="M7 12h6.5M7 15.5h4" /></S>
+);
 /** Collider: an isometric box drawn as its wire edges, hatched -- a solid body of shapes. */
 export const ColliderIcon = () => (
   <S><path d="M12 3 20.5 7.5v9L12 21 3.5 16.5v-9Z" /><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" /><path d="M6 12.5l3 1.6M6 15.5l3 1.6" opacity="0.6" /></S>

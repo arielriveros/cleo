@@ -9,6 +9,7 @@ import AiBrainTabView from '../ai/AiBrainTabView';
 import AiBrainInspector from '../ai/AiBrainInspector';
 import RigInspector from '../rig/RigInspector';
 import RagdollPanel from '../rig/RagdollPanel';
+import FootPlacementPanel from '../rig/FootPlacementPanel';
 import BoneMasksPanel from '../rig/BoneMasksPanel';
 import ClipInspector from '../clip/ClipInspector';
 import ClipTimeline from '../clip/ClipTimeline';
@@ -325,15 +326,22 @@ function TilemapLayersDockPanel(_: IDockviewPanelProps) { return <SidePanel><Til
 // Landscape mode's two panels, the same arrangement. The viewport keeps a slim toolbar for the essentials.
 function LandscapeToolsDockPanel(_: IDockviewPanelProps) { return <SidePanel><LandscapeToolsPanel /></SidePanel>; }
 function LandscapeLayersDockPanel(_: IDockviewPanelProps) { return <SidePanel><LandscapeLayersPanel /></SidePanel>; }
-// Rig mode's two tabs beside Properties (titled Skeleton). Both read the dock-wide RigProvider session, and
-// the ragdoll's viewport overlay listens for its events, so neither needs the inspector it used to sit in.
+// Rig mode's tabs beside Properties (titled Skeleton). Ragdoll and Bone Masks read the dock-wide RigProvider
+// session, and the ragdoll's viewport overlay listens for its events, so neither needs the inspector it used to
+// sit in; Foot Placement writes the skeleton through commitIkRig, as it did under the bone tree.
+function RigFootPlacementPanel(_: IDockviewPanelProps) { return <SidePanel><FootPlacementPanel /></SidePanel>; }
 function RigRagdollPanel(_: IDockviewPanelProps) { return <SidePanel><div className='p-2'><RagdollPanel /></div></SidePanel>; }
 function RigBoneMasksPanel(_: IDockviewPanelProps) { return <SidePanel><div className='p-2'><BoneMasksPanel /></div></SidePanel>; }
 // The three Options-mode panels. Each owns its page switcher and scrolling, so none takes a SidePanel.
 function OptionsDockFrame({ children }: { children: ReactNode }) {
   return <div className="flex flex-col h-full w-full bg-surface-raised overflow-hidden">{children}</div>;
 }
-function EngineOptionsDockPanel(_: IDockviewPanelProps) { return <OptionsDockFrame><EngineOptionsPanel /></OptionsDockFrame>; }
+// The Engine panel tells its Performance page whether it is on screen: a dock tab behind another stays mounted,
+// and the page would otherwise keep sampling and profiling every frame for nobody.
+function EngineOptionsDockPanel(props: IDockviewPanelProps) {
+  const active = useIsSelectedTab(props.api);
+  return <OptionsDockFrame><EngineOptionsPanel active={active} /></OptionsDockFrame>;
+}
 function EditorOptionsDockPanel(_: IDockviewPanelProps) { return <OptionsDockFrame><EditorOptionsPanel /></OptionsDockFrame>; }
 function ProjectOptionsDockPanel(_: IDockviewPanelProps) { return <OptionsDockFrame><ProjectOptionsPanel /></OptionsDockFrame>; }
 
@@ -386,6 +394,7 @@ const panelComponents = {
   tilemapLayers: TilemapLayersDockPanel,
   landscapeTools: LandscapeToolsDockPanel,
   landscapeLayers: LandscapeLayersDockPanel,
+  rigFootPlacement: RigFootPlacementPanel,
   rigRagdoll: RigRagdollPanel,
   rigBoneMasks: RigBoneMasksPanel,
   optionsEngine: EngineOptionsDockPanel,

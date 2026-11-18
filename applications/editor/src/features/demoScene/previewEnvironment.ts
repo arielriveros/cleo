@@ -1,4 +1,5 @@
-import { Scene, Skybox, SkyboxNode, Texture, Loader } from 'cleo';
+import { Scene, Skybox, SkyboxNode, SkyAtmosphereNode, Texture, Loader } from 'cleo';
+import type { Node } from 'cleo';
 import rightUrl from '../../images/cubemap/right.jpg';
 import leftUrl from '../../images/cubemap/left.jpg';
 import topUrl from '../../images/cubemap/top.jpg';
@@ -42,6 +43,18 @@ let previewSkybox: Skybox | null = null;
  * unless `skybox: false` a SkyboxNode draws it as the background. Thumbnail scenes pass `skybox: false`.
  * Resolves once the environment is applied; never rejects — a failed load leaves the scene as-is.
  */
+/** Whether anything in `scene` other than the editor's own nodes is a sky (a sky atmosphere or a skybox). */
+export function hasOwnSky(scene: Scene): boolean {
+  const stack: Node[] = [...(scene.root.children as Node[])];
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (n.name.startsWith('__editor__')) continue;
+    if (n instanceof SkyAtmosphereNode || n instanceof SkyboxNode) return true;
+    stack.push(...(n.children as Node[]));
+  }
+  return false;
+}
+
 export async function applyPreviewEnvironment(
   scene: Scene,
   opts?: { skybox?: boolean; silently?: <T>(fn: () => T) => T },
@@ -57,7 +70,9 @@ export async function applyPreviewEnvironment(
     const run = opts?.silently ?? (<T,>(fn: () => T): T => fn());
     run(() => {
       scene.environmentMap = envmap;
-      if (opts?.skybox !== false) {
+      // Not over a sky of the scene's own: a template that IS an environment (a sky atmosphere, a skybox)
+      // is previewed under its own sky, not the editor's.
+      if (opts?.skybox !== false && !hasOwnSky(scene)) {
         // Each scene needs its own Skybox: initializeSkybox() is per-node lazy VAO setup, and sharing
         // one instance would re-initialize the same mesh.
         // Drawn from the env map's own cube: the same six faces, uploaded once rather than twice.

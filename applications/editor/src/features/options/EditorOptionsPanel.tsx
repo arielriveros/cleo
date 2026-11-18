@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Button, Field, Hint, NumberInput, SegmentedControl, Section, Slider, TextInput, cn } from '@cleo/app-kit/ui'
+import { Button, Field, Hint, NumberInput, SegmentedControl, Section, Select, Slider, TextInput, cn } from '@cleo/app-kit/ui'
+import { KEY_CODES, sourceLabel } from 'cleo'
+import { useRebindCapture } from '../input/useRebindCapture'
 import { isDesktop } from '../publish/publishClient'
 import { useScriptWorkspace } from '../scriptWorkspace/ScriptWorkspaceContext'
 import { codeThemeStore, useCodeTheme, type CodeThemeName } from '@cleo/app-kit/code/codeThemeStore'
@@ -252,6 +254,43 @@ function DebuggingSection({ desktop }: { desktop: boolean }) {
   )
 }
 
+const ListenIcon = () => (
+  <svg viewBox='0 0 16 16' width='12' height='12' fill='none' stroke='currentColor' strokeWidth='1.5' aria-hidden>
+    <circle cx='8' cy='8' r='5.5' /><circle cx='8' cy='8' r='2' fill='currentColor' />
+  </svg>
+)
+
+/**
+ * Play ▸ Release mouse: the key that lets the mouse go while the game has it. Picked from the list (the only way to
+ * pick Esc, which cancels a Listen) or by pressing it. Esc lets the mouse go in any case outside fullscreen: the
+ * browser does that itself.
+ */
+function ReleaseMouseKeyField() {
+  const prefs = useEditorPrefs()
+  const capture = useRebindCapture()
+  const listening = capture.listeningFor === 'releaseMouseKey'
+  const code = prefs.releaseMouseKey
+  const listen = async () => {
+    const source = await capture.start('releaseMouseKey', { device: 'key' })
+    if (source && source.device === 'key') editorPrefsStore.set({ releaseMouseKey: source.code })
+  }
+  return (
+    <Field label='Release mouse' labelClassName={OPTION_LABEL}>
+      <div className='flex items-center gap-1 min-w-0'
+        title='The key that lets the mouse go in Play. Outside fullscreen the browser lets it go on Esc as well; in fullscreen Play the game holds every key, so this one alone does.'>
+        <Select className='flex-1 min-w-0' value={code} onChange={e => editorPrefsStore.set({ releaseMouseKey: e.target.value })}>
+          {!(KEY_CODES as readonly string[]).includes(code) && <option value={code}>{code}</option>}
+          {KEY_CODES.map(k => <option key={k} value={k}>{sourceLabel({ device: 'key', code: k })}</option>)}
+        </Select>
+        <Button size='icon' variant={listening ? 'primary' : 'ghost'} onClick={listening ? capture.cancel : listen}
+          title={listening ? 'Press the key (Escape cancels)' : 'Press a key to use it'}>
+          <ListenIcon />
+        </Button>
+      </div>
+    </Field>
+  )
+}
+
 function ViewportOptions() {
   const prefs = useEditorPrefs()
   const d = DEFAULT_EDITOR_PREFS
@@ -285,9 +324,14 @@ function ViewportOptions() {
         </Field>
       </Section>
 
+      <Section title='Play'>
+        <ReleaseMouseKeyField />
+      </Section>
+
       <Button size='sm' variant='ghost' onClick={() => editorPrefsStore.set({
         cameraFlySpeed: d.cameraFlySpeed, cameraLookSensitivity: d.cameraLookSensitivity,
         snapTranslate: d.snapTranslate, snapRotateDeg: d.snapRotateDeg, snapScale: d.snapScale,
+        releaseMouseKey: d.releaseMouseKey,
       })}>
         Reset viewport options
       </Button>

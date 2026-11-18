@@ -10,6 +10,7 @@ import { combineBounds } from '../../utils/modelThumbnails';
 import { createAssetEditScene } from '../demoScene/createAssetEditScene';
 import { createAnimationEditorScene } from '../demoScene/createAnimationEditorScene';
 import { buildSkeletonProxy } from '../demoScene/skeletonProxy';
+import { rememberPreviewHome } from '../clip/previewHome';
 import type { EditorTab } from '../engineContextTypes';
 
 type TabRuntime = { scene: Scene; rootId: string; previewModelId?: string; skinnedId?: string };
@@ -120,6 +121,9 @@ export function useClipEditor(deps: {
 
     scene.start();
     skinned?.animator?.showBindPose();
+    // Where the character stands before anything plays: a root-motion clip moves this node, and the transports
+    // put it back here (previewHome).
+    if (skinned) rememberPreviewHome(skinned);
     // `skinnedId` addresses the ModelNode itself, not the holder: the skeleton tree and the bone overlay
     // need a node carrying a skin, and `rootId` is the holder above it.
     return { scene, rootId: holder.id, previewModelId: model?.id, skinnedId: skinned?.id };
