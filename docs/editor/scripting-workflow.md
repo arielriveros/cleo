@@ -37,8 +37,10 @@ One script asset can be attached to many nodes. It is shared: editing it changes
 
 The panel works on the selected node: which script it runs, and that node's own values for the
 script's attributes. The source itself is edited in the script's tab, not here. On a node inside a placed
-template instance the script is the template's, so only the attribute values stay editable, and each edit
-becomes that instance's override.
+template instance the script is the template's, so only the values of its **public** attributes stay
+editable, and each edit becomes that instance's override; private and protected ones are set in the
+template. The instance root also lists the public attributes of every behavior inside it
+([public attributes](scene-authoring.md#templates)).
 
 **Script** — the slot that links a script asset to the node. **+ Create Script** makes a new
 class-based script for it and opens it; **Link existing…** lists the scripts whose base class can sit

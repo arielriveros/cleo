@@ -14,7 +14,7 @@ import { useScopedDndManager } from '../../utils/treeDnd';
 import { useTreeFocusGuard } from '../../utils/treeFocusGuard';
 import { Button, TextInput } from '@cleo/app-kit/ui';
 import { filterSceneTree, nameMatches, type NodeDescription } from './sceneGraphLayout';
-import { Chevron, GraphViewIcon, NodeControls, RenameField, typeIconFor } from './sceneNodeParts';
+import { Chevron, GraphViewIcon, NodeControls, NodeTypeGlyph, RenameField } from './sceneNodeParts';
 import SceneGraphView, { type GraphMove } from './SceneGraphView';
 
 /** The panel's two views of one hierarchy. The choice is kept across sessions. */
@@ -80,7 +80,6 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
   // UI elements are tinted so a HUD subtree is distinguishable from world geometry. A SELECTED row drops
   // the tint for the standard indigo fill and white text: selection must never be ambiguous.
   const isUI = isUINodeType(data.type);
-  const TypeIcon = typeIconFor(data.type);
   // A node of a feature the project leaves out (Project ▸ Features) stays in the scene, but a published game
   // drops it: the row says so.
   const offFeature = useProjectFeatures().offFeatureOfNodeType(data.type);
@@ -114,7 +113,7 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
       <div className={`flex items-center min-w-0 flex-1 ${data.spawnOnStart === false || offFeature ? 'opacity-50' : ''}`}
            title={offFeature ? `Not shipped: the ${offFeature.label} feature is off for this project (Project ▸ Features)`
              : data.spawnOnStart === false ? 'Dormant until a script spawns it' : undefined}>
-        { TypeIcon && <span className='inline-flex w-4 h-4 mr-1.5 align-middle items-center justify-center'><TypeIcon /></span> }
+        <NodeTypeGlyph type={data.type} templateId={data.templateId} />
         { node.isEditing ? <RenameInput node={node} /> : <span className={`truncate ${offFeature ? 'line-through' : ''}`}>{data.name}</span> }
       </div>
       <NodeControls data={data} />

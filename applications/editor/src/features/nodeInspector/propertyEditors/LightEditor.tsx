@@ -16,6 +16,9 @@ type Punctual = PointLight | Spotlight | AreaLight;
 
 const CONE_HINT = 'Half-angles in degrees. Full brightness inside the inner cone, falling to nothing at the outer one. Narrowing the cone does not brighten the light — intensity is in lumens either way, so beam shape and brightness are independent.';
 
+/** The light's sliders share one label width, wide enough for "Angular Radius": the Slider's own 70 px cut it to "Angular R...". */
+const SLIDER_LABEL = 'w-[112px]'
+
 export default function LightEditor(props: {node: LightNode}) {
   const eventEmitter = useEventBus();
   const light = props.node.light;
@@ -196,9 +199,9 @@ export default function LightEditor(props: {node: LightNode}) {
 
       { isSpot &&
         <Section title='Cone'>
-          <Slider label='Inner Angle' min={0} max={80} step={0.5} value={values.cutOff}
+          <Slider label='Inner Angle' labelClassName={SLIDER_LABEL} min={0} max={80} step={0.5} value={values.cutOff}
             title={CONE_HINT} onChange={(v) => set({ cutOff: v })} />
-          <Slider label='Outer Angle' min={0} max={80} step={0.5} value={values.outerCutOff}
+          <Slider label='Outer Angle' labelClassName={SLIDER_LABEL} min={0} max={80} step={0.5} value={values.outerCutOff}
             title={CONE_HINT} onChange={(v) => set({ outerCutOff: v })} />
         </Section>
       }
@@ -229,7 +232,7 @@ export default function LightEditor(props: {node: LightNode}) {
 
       { isDirectional &&
         <Section title='Source'>
-          <Slider label='Angular Radius' min={0} max={0.1} step={0.001} value={values.angularRadius}
+          <Slider label='Angular Radius' labelClassName={SLIDER_LABEL} min={0} max={0.1} step={0.001} value={values.angularRadius}
             title={'Apparent radius in radians; the real sun is 0.00465. It sets how broad the sun’s reflection is — most visible on smooth, polished surfaces, barely at all on rough ones. It also softens shadow edges, but only proportionally.'}
             onChange={(v) => set({ angularRadius: v })} />
         </Section>

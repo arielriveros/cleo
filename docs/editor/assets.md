@@ -39,7 +39,7 @@ the project, e.g. **Valley Files**.
 | **Script** | `.script` | **+ Add** | [Script mode](scripting-workflow.md) | attached to nodes |
 | **Animation** | `.anim` | **+ Add** (pick a `.fbx`/`.glb`/`.gltf`), or [Cleo Creator](../creator/motion.md) | The [clip player](animation.md#the-clip-player) — clips stay in source-rig space | rig clip lists, state machines |
 | **Rig** | `.rig` | Model or animation import — one per distinct skeleton | [Rig mode](animation.md): clips, retargeting, IK, sockets, bone masks, poses | models built on that skeleton |
-| **Animator** | `.animator` | **+ Add**, the workspace's **Animator ▾ → + New Animator**, or **Share…** in the Animator | [Character Animation workspace](animation.md#shared-animators), previewed on a character on its skeleton | characters' **Animation** section |
+| **Animator** | `.animator` | **+ Add**, the workspace's **Animator ▾ → + New Animator**, or **Share…** in the Animator | [Character Animation workspace](animation.md#shared-animators), previewed on a character on its skeleton | characters' **Animator** row (their Skeleton section) |
 | **Bone Mask** | `.mask` | The rig editor's **Bone Masks** tab | Rig mode, **Bone Masks** tab | controller layers and action slots |
 | **Pose Asset** | `.pose` | [Cleo Creator ▸ Motion](../creator/motion.md#poses), synced into `/Creator/Poses` | Rig mode, **Poses** section | controller pose states |
 | **Blend Space** | `.blendspace` | The workspace's **Blend Spaces ▾ → + New Blend Space** | The Character Animation workspace | a state in an animator |
@@ -162,7 +162,7 @@ to acquire either.
 | A particle system | A Particle System node's **Effect** slot | Copies the effect onto the node and links it |
 | A sequence | The viewport | Adds a Sequence node playing it |
 | A sequence | A Sequence node's **Timeline** slot | Copies the sequence onto the node and links it |
-| An animation controller | A character's **Animation** section | Runs it on that character |
+| An animation controller | A character's **Animator** row (its Skeleton section) | Runs it on that character |
 | A bone mask | A controller layer's or action slot's **Mask** row | Sets the mask |
 | A pose asset | A state's **Plays** row | Makes the state hold that asset's first pose |
 | A scene node | The Assets panel | Saves it as a template |

@@ -174,6 +174,17 @@ describe('keepClipEvents', () => {
     expect(keepClipEvents(incoming, [bake('Idle', [])])[0].events).toEqual([]);
   });
 
+  it('keeps the foot-lock windows the project drew, as it keeps events', () => {
+    const withLocks = (name: string, footLocks?: Record<string, [number, number][]>) => ({ ...bake(name), ...(footLocks ? { footLocks } : {}) });
+    const prev = [withLocks('Walk', { 'foot.L': [[0.1, 0.4]], 'foot.R': [] })];
+    const out = keepClipEvents([withLocks('Walk')], prev);
+    expect(out[0].footLocks).toEqual({ 'foot.L': [[0.1, 0.4]], 'foot.R': [] });
+    out[0].footLocks!['foot.L'][0][0] = 9;
+    expect(prev[0].footLocks!['foot.L'][0][0]).toBe(0.1);
+    // A clip the project never drew any on takes none.
+    expect(keepClipEvents([withLocks('Run')], [withLocks('Run')])[0].footLocks).toBeUndefined();
+  });
+
   it('does not share the arrays it copies', () => {
     const prev = [bake('Walk', [{ time: 0.5, name: 'step' }])];
     const out = keepClipEvents([bake('Walk')], prev);

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { vec3 } from 'gl-matrix';
 import {
-    kneePole, solveTwoBone, applyTwoBone, ikTuning, validateIkRig, swingReleaseWeight,
+    kneePole, solveTwoBone, applyTwoBone, ikTuning, validateIkRig, swingReleaseWeight, stepFootLock, footLockWeight,
     IK_DEFAULTS, DEFAULT_MAX_REACH, TwoBoneSolve, IkRig,
 } from '../src/animation/ik';
 import { skeletonTopology, isAncestorJoint } from '../src/animation/skeletonTopology';
@@ -381,6 +381,35 @@ describe('kneePole', () => {
         const pole = kneePole([0, 2, 0], [0, 1, -0.3], [0, 0, 0], fwd)!;
         expect(pole[2]).toBeGreaterThan(0);
     });
+    it('keeps a strafing knee bent out sideways, even a little behind', () => {
+        // A sideways step swings the knee out past the line across the body. Read as "behind", it used to be sent
+        // straight ahead: the knee jumped 20 to 35 cm whenever a lock or foot placement solved the leg.
+        const pole = kneePole([0, 2, 0], [0.4, 1, -0.1], [0, 0, 0], fwd)!;
+        expect(pole[0]).toBeGreaterThan(0.8);
+        expect(pole[2]).toBeLessThan(0);
+    });
+    it('turns the pole smoothly as a knee swings from ahead to behind, never by a jump', () => {
+        let prev: vec3 | null = null, worst = 0;
+        for (let deg = 0; deg <= 180; deg += 1) {
+            const a = deg * Math.PI / 180;
+            const pole = kneePole([0, 2, 0], [0.3 * Math.sin(a), 1, 0.3 * Math.cos(a)], [0, 0, 0], fwd)!;
+            const dir = vec3.normalize(vec3.create(), vec3.sub(vec3.create(), pole, [0.3 * Math.sin(a), 1, 0.3 * Math.cos(a)]));
+            if (prev) worst = Math.max(worst, Math.acos(Math.min(1, vec3.dot(prev, dir))) * 180 / Math.PI);
+            prev = dir;
+        }
+        // A degree of bend turned at a time: the pole turns a few degrees at most, never flips.
+        expect(worst).toBeLessThan(8);
+        // And as the bend shrinks toward straight.
+        let last: vec3 | null = null, worstSize = 0;
+        for (let k = 0; k <= 100; k++) {
+            const off = 0.15 * k / 100;
+            const pole = kneePole([0, 2, 0], [off, 1, 0], [0, 0, 0], fwd)!;
+            const dir = vec3.normalize(vec3.create(), vec3.sub(vec3.create(), pole, [off, 1, 0]));
+            if (last) worstSize = Math.max(worstSize, Math.acos(Math.min(1, vec3.dot(last, dir))) * 180 / Math.PI);
+            last = dir;
+        }
+        expect(worstSize).toBeLessThan(8);
+    });
     it('makes mirrored near-straight legs bend the same way', () => {
         // Noise of opposite sign in each leg: the old pose-derived axis bent them opposite ways.
         const solveKnee = (dx: number) => {
@@ -394,3 +423,72 @@ describe('kneePole', () => {
     });
 });
 
+
+describe('stepFootLock', () => {
+    const tuning = { lockRelease: 0.2 };
+
+    it('plants a free foot at full alpha, then holds it', () => {
+        const lock = { alpha: 0 };
+        expect(stepFootLock(lock, true, 0, 0.1, tuning)).toBe('plant');
+        expect(lock.alpha).toBe(1);
+        expect(stepFootLock(lock, true, 0.5, 0.1, tuning)).toBe('hold');
+    });
+
+    it('fades out over lockRelease once the foot lifts, and never fades IN', () => {
+        const lock = { alpha: 1 };
+        expect(stepFootLock(lock, false, 0, 0.1, tuning)).toBe('release');
+        expect(lock.alpha).toBeCloseTo(0.5);
+        expect(stepFootLock(lock, false, 0, 0.1, tuning)).toBe('drop');
+        expect(lock.alpha).toBe(0);
+    });
+
+    it('re-plants a foot that lands again while still fading out', () => {
+        const lock = { alpha: 0.4 };
+        expect(stepFootLock(lock, true, 0.3, 0.1, tuning)).toBe('plant');
+        expect(lock.alpha).toBe(1);
+    });
+
+    it('lets go of a planted foot left too far behind, and drops it at once past twice that', () => {
+        const lock = { alpha: 1 };
+        expect(stepFootLock(lock, true, 1.2, 0.1, tuning)).toBe('release');
+        expect(stepFootLock(lock, true, 1.3, 0.05, tuning)).toBe('release');
+        const teleported = { alpha: 1 };
+        expect(stepFootLock(teleported, true, 2.5, 0.01, tuning)).toBe('drop');
+        expect(teleported.alpha).toBe(0);
+        // A foot already lifting swings far from its lock by nature: it fades out instead of snapping.
+        const lifting = { alpha: 0.6 };
+        expect(stepFootLock(lifting, false, 2.5, 0.02, tuning)).toBe('release');
+        expect(lifting.alpha).toBeCloseTo(0.5);
+    });
+
+    it('blends into a lock over lockBlendIn, and a foot planted again mid-release keeps its point', () => {
+        const blend = { lockRelease: 0.2, lockBlendIn: 0.1 };
+        const lock = { alpha: 0, planted: false };
+        expect(stepFootLock(lock, true, 0, 0.05, blend)).toBe('plant');
+        expect(lock.alpha).toBeCloseTo(0.5);
+        expect(lock.planted).toBe(true);
+        expect(stepFootLock(lock, true, 0, 0.05, blend)).toBe('hold');
+        expect(lock.alpha).toBeCloseTo(1);
+        expect(stepFootLock(lock, false, 0, 0.1, blend)).toBe('release');
+        expect(lock.planted).toBe(false);
+        expect(lock.alpha).toBeCloseTo(0.5);
+        // Down again before it has gone: the same lock, rising again from where it was.
+        expect(stepFootLock(lock, true, 0.3, 0.025, blend)).toBe('hold');
+        expect(lock.alpha).toBeCloseTo(0.75);
+    });
+
+    it('eases the lock weight with the smooth curve, and leaves it straight by default', () => {
+        expect(footLockWeight(0.25, 'linear')).toBeCloseTo(0.25);
+        expect(footLockWeight(0.25, 'smooth')).toBeCloseTo(0.15625);
+        expect(footLockWeight(1, 'smooth')).toBe(1);
+        expect(ikTuning({ feet: [] }).lockBlendCurve).toBe('linear');
+        expect(ikTuning({ feet: [] }).lockBlendIn).toBe(0);
+    });
+
+    it('fills the lock tuning in, off by default', () => {
+        const t = ikTuning({ feet: [] });
+        expect(t.footLock).toBe(0);
+        expect(ikTuning({ feet: [], footLock: 3 }).footLock).toBe(1);
+        expect(t.lockDistance).toBeGreaterThan(0);
+    });
+});

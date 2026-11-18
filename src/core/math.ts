@@ -312,6 +312,20 @@ export function signedAngleBetween(from: vec3, to: vec3, up: vec3): number {
 }
 
 /**
+ * {@link signedAngleBetween} without allocating, for per-frame, per-joint use: the signed angle from `from` to
+ * `to` about `up` (unit), in DEGREES, both flattened onto the plane first. 0 when either flattens to nothing.
+ */
+export function planarSignedAngle(from: ArrayLike<number>, to: ArrayLike<number>, up: ArrayLike<number>): number {
+    const fu = from[0] * up[0] + from[1] * up[1] + from[2] * up[2];
+    const tu = to[0] * up[0] + to[1] * up[1] + to[2] * up[2];
+    const ax = from[0] - up[0] * fu, ay = from[1] - up[1] * fu, az = from[2] - up[2] * fu;
+    const bx = to[0] - up[0] * tu, by = to[1] - up[1] * tu, bz = to[2] - up[2] * tu;
+    if (ax * ax + ay * ay + az * az < 1e-12 || bx * bx + by * by + bz * bz < 1e-12) return 0;
+    const cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx;
+    return Math.atan2(cx * up[0] + cy * up[1] + cz * up[2], ax * bx + ay * by + az * bz) * RAD2DEG;
+}
+
+/**
  * Split a velocity into how fast it travels ALONG a facing and how fast it slides ACROSS it. Both signed;
  * `forward` is negative when backpedalling. The lateral axis is `up x forward`, so `atan2(lateral, forward)`
  * in degrees equals {@link signedAngleBetween}`(forward, v, up)` and positive lateral is LEFT under standard

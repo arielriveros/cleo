@@ -182,6 +182,20 @@ function linkInstance(template: VariantSource, copy: any): void {
     copy.variables[OVERRIDES_VAR] = { type: 'string', value: JSON.stringify(overrides), access: 'private' }
 }
 
+/**
+ * Make ONE subtree a template and stamp it, in place, as that template's instance: a character placed once, say,
+ * that should still be a template so more can be placed and each can set its own public attributes. `node` keeps
+ * its ids and transform; the template gets the content at the origin on ids derived from `id`.
+ */
+export function templatizeSubtree(node: any, id: string, name: string): MadeTemplate['template'] {
+  const template: MadeTemplate['template'] = { id, name, nodeJson: asTemplateJson(node, id, name), scripts: {}, textureIds: [] }
+  const tex = new Set<string>()
+  collectTextureIds(template.nodeJson, tex)
+  template.textureIds = [...tex]
+  linkInstance(template, node)
+  return template
+}
+
 // ----- the pass -------------------------------------------------------------------------------------------
 
 /**

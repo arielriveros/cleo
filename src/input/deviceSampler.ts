@@ -34,6 +34,7 @@ import type { DeviceSnapshot } from "./resolveActions";
 import type { TouchGestureConfig, VirtualControl } from "./actionMap";
 import { DEFAULT_TOUCH_CONFIG } from "./actionMap";
 import { isTextEntryEvent, isTextEntryTarget } from "./textEntry";
+import { createPointerSpikeFilter, pointerSpike } from "./pointerFilter";
 
 /** What the sampler asks its owner before deciding whether to swallow a browser default. */
 export type BoundCodeTest = (code: string) => boolean;
@@ -44,8 +45,9 @@ export type BoundCodeTest = (code: string) => boolean;
  * function key: Ctrl+D (bookmark), Ctrl+S (save page), Ctrl+F, Ctrl+P, F1, F3... are the browser talking over a
  * game that is not listening for them. What stays reachable is what a developer or player needs: DevTools (F12,
  * Ctrl+Shift+I/J/C), reload (F5, Ctrl+R), and the window's own shortcuts the page cannot cancel anyway.
- * (Ctrl+W, Ctrl+T, Ctrl+N and Ctrl+Tab are not cancellable by a page in a normal tab, whatever this says: keep
- * them off a game's own bindings.)
+ * (Ctrl+W, Ctrl+T, Ctrl+N and Ctrl+Tab are not cancellable by a page in a normal tab, whatever this says. In
+ * fullscreen, with the pointer locked, the sampler takes the whole keyboard with the Keyboard Lock API instead: see
+ * {@link shouldLockKeyboard}.)
  */
 export function shouldCancelKeyDefault(
     e: { code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean },
@@ -59,6 +61,18 @@ export function shouldCancelKeyDefault(
     return mod || e.altKey || /^F\d{1,2}$/.test(e.code);
 }
 
+/**
+ * Whether the game should hold the whole keyboard with the Keyboard Lock API (`navigator.keyboard.lock()`), so the
+ * browser's own shortcuts (Ctrl+W, Ctrl+T, Ctrl+N, Esc) reach the game instead: while it owns the keyboard
+ * (`preventDefault`), the pointer is locked to it and the page is fullscreen, the only state in which a browser
+ * honours the lock. Leaving fullscreen then takes holding Esc, and the pointer is let go by the release key.
+ */
+export function shouldLockKeyboard(state: { preventDefault: boolean; pointerLocked: boolean; fullscreen: boolean }): boolean {
+    return state.preventDefault && state.pointerLocked && state.fullscreen;
+}
+
+type KeyboardLockApi = { lock?: (codes?: string[]) => Promise<void>; unlock?: () => void };
+
 export class DeviceSampler {
     private _canvas: HTMLElement | null = null;
     private _abort: AbortController | null = null;
@@ -66,6 +80,8 @@ export class DeviceSampler {
     private readonly _keys = new Set<string>();
     private readonly _mouseButtons = new Set<MouseButton>();
     private _pointerLocked = false;
+    /** Chromium's pointer-lock glitches: see pointerFilter.ts. */
+    private readonly _spikes = createPointerSpikeFilter();
     private _pointerOverCanvas = false;
     private _deltaX = 0;
     private _deltaY = 0;
@@ -82,8 +98,20 @@ export class DeviceSampler {
     private _touchConfig: TouchGestureConfig = { ...DEFAULT_TOUCH_CONFIG };
 
     private _snapshot: DeviceSnapshot = createDeviceSnapshot();
+    private _preventDefault = false;
+    /** Whether the Keyboard Lock is held (see {@link shouldLockKeyboard}). */
+    private _keyboardLocked = false;
     /** Swallow the browser's default action for keys the action map actually binds. Off by default. */
-    public preventDefault = false;
+    public get preventDefault(): boolean { return this._preventDefault; }
+    public set preventDefault(value: boolean) {
+        this._preventDefault = value;
+        this._syncKeyboardLock();
+    }
+    /**
+     * A key (`KeyboardEvent.code`) that lets the pointer go while it is locked. The browser lets it go on Esc
+     * regardless, except under the Keyboard Lock, where this is the only way out. Null: none of the game's own.
+     */
+    public releaseKey: string | null = 'Escape';
     /** Whether a click on the canvas should request pointer lock. Off by default. */
     public pointerLockOnClick = false;
     /** Asked whether a code is bound, so `preventDefault` stays narrow. Defaults to "nothing is". */
@@ -128,6 +156,7 @@ export class DeviceSampler {
 
         document.addEventListener('pointerlockchange', this._onPointerLockChange, options);
         document.addEventListener('pointerlockerror', this._onPointerLockError, options);
+        document.addEventListener('fullscreenchange', this._onFullscreenChange, options);
     }
 
     /** Detach every listener and forget all held state. Total, unlike the old `clear()`. */
@@ -135,6 +164,7 @@ export class DeviceSampler {
         this._abort?.abort();
         this._abort = null;
         this._canvas = null;
+        this._setKeyboardLock(false);
         this.resetState();
     }
 
@@ -219,17 +249,56 @@ export class DeviceSampler {
      * exit, so a caller must not assume it succeeded.
      */
     public requestPointerLock(): void {
-        const canvas = this._canvas as HTMLElement & { requestPointerLock?: () => Promise<void> | void };
+        type Lockable = HTMLElement & { requestPointerLock?: (options?: { unadjustedMovement?: boolean }) => Promise<void> | void };
+        const canvas = this._canvas as Lockable | null;
         if (!canvas || document.pointerLockElement === canvas) return;
+        const plain = () => {
+            try {
+                const result = canvas.requestPointerLock?.() as Promise<void> | undefined;
+                result?.catch(() => { /* denied — usually a too-soon re-lock; carry on uncaptured */ });
+            } catch { /* older browsers throw rather than rejecting */ }
+        };
         try {
-            const result = canvas.requestPointerLock?.() as Promise<void> | undefined;
-            result?.catch(() => { /* denied — usually a too-soon re-lock; carry on uncaptured */ });
-        } catch { /* older browsers throw rather than rejecting */ }
+            // Raw input where the platform has it: no OS acceleration, and no cursor warp behind the lock, which
+            // is where most of Chromium's huge one-off movementX readings come from. A platform without it
+            // rejects (NotSupportedError) and gets the ordinary lock; one that ignores the option returns no
+            // promise and simply locks.
+            const result = canvas.requestPointerLock?.({ unadjustedMovement: true }) as Promise<void> | undefined;
+            result?.catch((error: unknown) => {
+                if ((error as { name?: string })?.name === 'NotSupportedError') plain();
+            });
+        } catch { plain(); }
     }
 
     public releasePointerLock(): void {
         try { if (document.pointerLockElement) document.exitPointerLock(); } catch { /* ignore */ }
         this._pointerLocked = false;
+        this._syncKeyboardLock();
+    }
+
+    /** Whether the whole keyboard is held from the browser right now (Keyboard Lock). */
+    public get isKeyboardLocked(): boolean { return this._keyboardLocked; }
+
+    /** Take or give back the keyboard as {@link shouldLockKeyboard} says, where the browser has the API. */
+    private _syncKeyboardLock(): void {
+        const doc = typeof document !== 'undefined' ? document as Document & { fullscreenElement?: Element | null } : null;
+        const fullscreen = !!doc?.fullscreenElement;
+        this._setKeyboardLock(shouldLockKeyboard({ preventDefault: this._preventDefault, pointerLocked: this._pointerLocked, fullscreen }));
+    }
+
+    private _setKeyboardLock(on: boolean): void {
+        if (on === this._keyboardLocked) return;
+        const api = typeof navigator !== 'undefined' ? (navigator as Navigator & { keyboard?: KeyboardLockApi }).keyboard : undefined;
+        if (on) {
+            if (!api?.lock) return;
+            this._keyboardLocked = true;
+            // Every key: Ctrl+W and the rest, and Esc, which the release key stands in for.
+            try { api.lock().catch(() => { this._keyboardLocked = false; }); }
+            catch { this._keyboardLocked = false; }
+        } else {
+            this._keyboardLocked = false;
+            try { api?.unlock?.(); } catch { /* ignore */ }
+        }
     }
 
     // ----- Handlers -----------------------------------------------------------------------------
@@ -238,6 +307,12 @@ export class DeviceSampler {
     // method would lose `this` and could not be removed by identity either.
 
     private _onKeyDown = (event: KeyboardEvent): void => {
+        // The way out of the pointer lock: the browser's own Esc, and (the only one, under the Keyboard Lock) this.
+        if (this._pointerLocked && this.releaseKey && event.code === this.releaseKey && !event.repeat) {
+            this.releasePointerLock();
+            event.preventDefault();
+            return;
+        }
         // Typing, not playing: the letter belongs to the field (see the module comment).
         if (isTextEntryEvent(event)) return;
         // A repeat is the OS auto-repeating a held key. The down-set already has it, and letting it
@@ -288,8 +363,14 @@ export class DeviceSampler {
         // `movementX/Y` in both modes, not just under lock: it is relative motion either way, and it is
         // the only reading that exists while the cursor is hidden. Accumulated, so several events
         // arriving inside one frame all count rather than the last one winning.
-        this._deltaX += event.movementX || 0;
-        this._deltaY += event.movementY || 0;
+        const dx = event.movementX || 0, dy = event.movementY || 0;
+        // Under lock, one glitched reading is a camera swung half round in a frame: dropped (pointerFilter.ts).
+        // So is the first reading after the lock is taken or released, either way.
+        const filtered = this._pointerLocked || this._spikes.dropNext;
+        if (!(filtered && pointerSpike(this._spikes, dx, dy))) {
+            this._deltaX += dx;
+            this._deltaY += dy;
+        }
         // Under lock there is no cursor and `clientX/Y` is meaningless, so the position is left alone.
         if (!this._pointerLocked) this._updatePosition(event);
     };
@@ -334,11 +415,18 @@ export class DeviceSampler {
 
     private _onPointerLockChange = (): void => {
         this._pointerLocked = document.pointerLockElement === this._canvas;
+        // The first reading after a lock change is measured across the cursor's jump into (or out of) the lock.
+        this._spikes.dropNext = true;
+        this._spikes.recent.length = 0;
+        this._syncKeyboardLock();
     };
 
     private _onPointerLockError = (): void => {
         this._pointerLocked = false;
+        this._syncKeyboardLock();
     };
+
+    private _onFullscreenChange = (): void => { this._syncKeyboardLock(); };
 
     private _updatePosition(event: MouseEvent): void {
         this._updateNormalized(event.clientX, event.clientY);

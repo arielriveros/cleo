@@ -82,7 +82,8 @@ Hover a name in the stopped script to see its value. Only plain names and member
 
 ## The Debugger panel
 
-The Debugger panel sits in the bottom strip beside Logger. It comes forward on its own when the game stops.
+The Debugger panel sits in the bottom strip beside Logger while a game plays in a window or a script is open in a
+tab; otherwise it is out of the way. It comes forward on its own when the game stops.
 
 | Control | Key | Does |
 |---|---|---|

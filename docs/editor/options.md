@@ -100,7 +100,7 @@ How the built-in code editor looks.
 
 ### Viewport
 
-How the editor camera moves and how gizmos snap.
+How the editor camera moves, how gizmos snap and how Play lets the mouse go.
 
 **Editor camera**
 
@@ -115,6 +115,17 @@ The move, rotate and scale steps a gizmo drag snaps to while Ctrl is held.
 
 - **Move step** / **Rotate step** / **Scale step** — in metres, degrees and scale units: 1 m, 15°
   and 0.1 by default.
+
+**Play**
+
+The game's hold on the mouse and keyboard in Play, in the viewport and in a Play window.
+
+- **Release mouse** — the key that lets the mouse go while the game has it, Esc by default. Pick it
+  from the list, or press the target icon and then the key. Outside fullscreen the browser also lets
+  the mouse go on Esc. In fullscreen Play (the icon at the viewport's top right, in the browser) the game
+  holds every key, browser shortcuts such as Ctrl+W included, so this key alone lets the mouse go, and
+  holding Esc leaves fullscreen. Outside fullscreen the browser keeps Ctrl+W, Ctrl+T and Ctrl+N, so the
+  editor asks before the tab closes while a game plays.
 
 ## Project
 

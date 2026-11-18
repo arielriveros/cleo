@@ -35,7 +35,7 @@ import {
   type PreviewShape, type TerrainPreview,
 } from './demoScene/previewShapes';
 import { createAnimationEditorScene } from './demoScene/createAnimationEditorScene';
-import { createAssetEditScene } from './demoScene/createAssetEditScene';
+import { createAssetEditScene, yieldPreviewLight } from './demoScene/createAssetEditScene';
 import { parseByType, regenerateIds, stripDebug } from "../utils/nodeSubtree";
 import { cryptoRandomId } from "../utils/ids";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR, templateInstanceRootOf } from "../utils/templates";
@@ -565,7 +565,7 @@ const EngineContext = createContext<{
   adoptRigController: (modelId: string, onlyRoot?: Node | null) => number;
   /** Rename a clip inside a shared `.anim` asset, or toggle its root motion. */
   /** Write one clip of a `.anim` in the library and re-resolve it everywhere it plays. */
-  editSharedClip: (animationId: string, clipName: string, patch: Partial<Pick<StoredClip, 'name' | 'rootMotion' | 'events' | 'edits'>>) => void;
+  editSharedClip: (animationId: string, clipName: string, patch: Partial<Pick<StoredClip, 'name' | 'rootMotion' | 'events' | 'edits' | 'footLocks'>>) => void;
   modelSession: ModelEditSession | null;
   /** Node id of the active LOD level's root in the model tab scene (viewport drop parent), or null. */
   modelEditTargetId: string | null;
@@ -1197,6 +1197,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Gizmo snap steps follow Options ▸ Editor ▸ Viewport.
   useEffect(() => {
     const sync = () => { const p = getEditorPrefs(); setGizmoSnapSteps({ translate: p.snapTranslate, rotateDeg: p.snapRotateDeg, scale: p.snapScale }); };
+    sync();
+    return editorPrefsStore.subscribe(sync);
+  }, []);
+  // The key that lets the mouse go in Play, from Options ▸ Editor ▸ Viewport ▸ Play, live. It only matters while
+  // the pointer is locked, so it is set always rather than on Play.
+  useEffect(() => {
+    const sync = () => { InputSystem.instance.releaseKey = getEditorPrefs().releaseMouseKey; };
     sync();
     return editorPrefsStore.subscribe(sync);
   }, []);
@@ -2787,6 +2794,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // asset. Patched in place, not re-instantiated: a rebuild regenerates node ids, and instantiateTemplate
       // has just re-keyed template.scripts onto the ids it created.
       const templateRoot = scene.getNodeById(rootId);
+      // A template with its own sun (an Environment) is lit by it, not by the viewing light.
+      withoutDirty(() => yieldPreviewLight(scene, templateRoot));
       if (templateRoot) {
         withoutDirty(() => {
           const refreshed = refreshModelClips(templateRoot, modelsRef.current, animationsRef.current);
@@ -3126,7 +3135,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!bare.length) return 0;
     const controller = pickControllerForRig(model.rigId, animControllersRef.current, usage);
     if (!controller) {
-      Logger.warn(`"${model.name}" has no animation controller, so it will hold its bind pose. Assign one in its Animation section.`, 'Editor');
+      Logger.warn(`"${model.name}" has no animation controller, so it will hold its bind pose. Assign one on the Animator row of its Skeleton section.`, 'Editor');
       return 0;
     }
     for (const skinned of bare) skinned.animator!.setStateMachine(instantiateController(controller, machineLibs()));
@@ -3231,7 +3240,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    * Must write the LIBRARY asset: clips resolved from an asset carry `assetId` and AnimatedModel.serialize
    * drops those, so the embedded-clip helpers patch a list the clip does not live in.
    */
-  const editSharedClip = (animationId: string, clipName: string, patch: Partial<Pick<StoredClip, 'name' | 'rootMotion' | 'events' | 'edits'>>) => {
+  const editSharedClip = (animationId: string, clipName: string, patch: Partial<Pick<StoredClip, 'name' | 'rootMotion' | 'events' | 'edits' | 'footLocks'>>) => {
     const anim = animationsRef.current.find(a => a.id === animationId);
     if (!anim) return;
     const clips = anim.clips.map(c => (c.name === clipName ? { ...c, ...patch } : c));
@@ -6626,8 +6635,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // This used to be `registerKeyPress('Escape', ...)`, which was a silent no-op: Escape was not
         // in the old 51-key whitelist, so the callback was never registered and never fired.
         escapeSubRef.current?.();
+        // UI/Cancel (Escape, a pad's B) lets the mouse go only while Escape is the release key: set to another,
+        // that key alone does (the input system's releaseKey), so a fullscreen game keeps Esc for itself.
         escapeSubRef.current = simulate ? null : InputSystem.instance.onAction('UI/Cancel', (state) => {
-          if (state.started) InputSystem.instance.releasePointerLock();
+          if (state.started && getEditorPrefs().releaseMouseKey === 'Escape') InputSystem.instance.releasePointerLock();
         });
       }
       else if (state === 'pause') {
@@ -7128,8 +7139,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // features/unloadGuard.ts. What is left for `beforeunload` is the browser's tab close and its reload
   // button — the two the page genuinely cannot own.
   const hasUnsavedWork = savingState === 'saving' || Object.keys(dirtyTabs).length > 0;
+  // And while a game plays in the browser: outside fullscreen Chrome keeps Ctrl+W, Ctrl+T and Ctrl+N from the page,
+  // so a game that walks on Ctrl and W would close the editor mid-play. Not in the desktop shell, which binds none
+  // of them and would ask about unsaved work there is none of.
+  const playingInBrowser = isPlayMode && !isSimulating && !getShellBridge();
+  const blocksUnload = hasUnsavedWork || playingInBrowser;
   useEffect(() => {
-    if (!hasUnsavedWork) return;
+    if (!blocksUnload) return;
     const handler = (e: BeforeUnloadEvent) => {
       // Stand down for a reload the editor asked for: it has already put the same question in a dialog
       // of its own, and letting this fire too would stack the native box on top of the answer.
@@ -7139,7 +7155,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [hasUnsavedWork]);
+  }, [blocksUnload]);
 
   // Publish what is unsaved for the code that can discard the page but is not a component: the project
   // switch and the bundle import, both plain async functions in utils/.

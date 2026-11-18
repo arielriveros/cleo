@@ -50,6 +50,12 @@ export type StoredClip = {
    * action slot. Seconds on the clip as it plays (after its edits). `onAnimationEvent(name, clip)`.
    */
   events?: { time: number; name: string }[]
+  /**
+   * Foot-lock windows owned by the clip: per foot (its humanoid slot, `foot.L`, else its bone name), the spans in
+   * which that foot is planted and foot locking may hold it. Seconds on the clip as it plays, like `events`. An
+   * empty list never locks that foot; a foot with no entry is left to the animator. See footLockWindows.ts.
+   */
+  footLocks?: Record<string, [number, number][]>
 }
 
 /**

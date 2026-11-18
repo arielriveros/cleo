@@ -17,11 +17,12 @@ import RetargetMapper from '../../rig/RetargetMapper'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { Button, Hint, Select, cn, hintClass, valueClass } from '@cleo/app-kit/ui'
 import { RigIcon } from '../sectionIcons'
+import CharacterRows from './CharacterRows'
 
 // The skeleton a character uses, as an inspector slot — shaped like MaterialSlot and AiBrainSlot.
 //
-// The rig is what owns the clips, animators and blend spaces, so this is where you choose which set a
-// character plays. The list is the model's OWN skeleton plus the skeletons it has been retargeted to —
+// The rig is what owns the clips, animators, blend spaces and ragdoll, so this is where you choose which set a
+// character plays; its "This character" rows (CharacterRows) hold the little the character decides for itself. The list is the model's OWN skeleton plus the skeletons it has been retargeted to —
 // never every rig in the project, most of which would play as a tangle of mismatched bones. Another
 // skeleton is added with "Retarget skeleton…": pick it, review the bone mapping, and use it.
 
@@ -117,8 +118,8 @@ export default function RigSlot(props: { node: Node }) {
     else { setRetargetFrom(id); setPending([]) }
   })
 
-  // Rendered away rather than disabled, exactly as AnimationSlot does: a rig means nothing on a node with
-  // no skeleton, and a model that is not in the library has nothing to hang the link on.
+  // Rendered away rather than disabled: a rig means nothing on a node with no skeleton, and a model that is
+  // not in the library has nothing to hang the link on.
   if (!modelNode || !model) return null
 
   const rig = model.rigId ? rigs.find(r => r.id === model.rigId) : undefined
@@ -237,6 +238,8 @@ export default function RigSlot(props: { node: Node }) {
           )}
         </div>
       )}
+
+      <CharacterRows modelNode={modelNode} rigId={rig?.id} />
     </div>
     </Collapsable>
   )

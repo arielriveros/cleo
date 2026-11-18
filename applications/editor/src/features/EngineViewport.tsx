@@ -23,6 +23,7 @@ import DebugOverlay from "./logger/DebugOverlay";
 import AnimationSkeletonTool from "./animation/AnimationSkeletonTool";
 import AnimationPlayer from "./animation/AnimationPlayer";
 import DebugVisibilityMenu from "./DebugVisibilityMenu";
+import PlayFullscreenButton, { canPlayFullscreen } from "./PlayFullscreenButton";
 import PreviewShapeSwitch from './PreviewShapeSwitch';
 import DebugSkeletonOverlay from "./DebugSkeletonOverlay";
 import DebugAnimationOverlay from "./DebugAnimationOverlay";
@@ -487,6 +488,8 @@ export default function EngineViewport() {
                 {(editorMode === 'material' || editorMode === 'terrainMaterial') && !isPlayMode && (
                     <PreviewShapeSwitch kind={editorMode} />
                 )}
+                {/* Play in fullscreen, where the game takes every key (Ctrl+W included). Web only. */}
+                {isPlayMode && !isSimulating && canPlayFullscreen() && <PlayFullscreenButton target={viewportRef} />}
                 {/* The debug menu stays available during play so Runtime toggles can be flipped live. */}
                 {editorMode !== 'options' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && (
                     <DebugVisibilityMenu />

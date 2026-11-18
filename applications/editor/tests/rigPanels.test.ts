@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-// The Skeleton part's Ragdoll and Bone Masks are tabs of their own beside Properties. Source-text checks, for
+// The Skeleton part's Foot Placement, Ragdoll and Bone Masks are tabs of their own beside Properties. Source-text checks, for
 // the reason editorModeReachability.test.ts gives: DockLayout and the rig panels pull in dockview and the
 // engine. A dock panel missing from any one of these places fails silently — absent from every layout,
 // leaking into other modes, or rendering nothing.
@@ -12,10 +12,10 @@ const read = (...p: string[]) => readFileSync(join(SRC, ...p), 'utf-8').replace(
 const DOCK = () => read('features', 'layout', 'DockLayout.tsx')
 const PANELS = () => read('features', 'layout', 'panels.tsx')
 
-describe('the rig mode has Ragdoll and Bone Masks tabs', () => {
+describe('the rig mode has Foot Placement, Ragdoll and Bone Masks tabs', () => {
   it('declares them, shows them only in rig mode, and puts them in the default tree', () => {
     const dock = DOCK()
-    expect(dock).toMatch(/const RIG_PANELS = \['rigRagdoll', 'rigBoneMasks'\] as const/)
+    expect(dock).toMatch(/const RIG_PANELS = \['rigFootPlacement', 'rigRagdoll', 'rigBoneMasks'\] as const/)
     expect(dock).toMatch(/const CHROME_PANELS = \[[\s\S]*\.\.\.RIG_PANELS[\s\S]*\] as const/)
     expect(dock).toContain("if (mode !== 'rig') for (const id of RIG_PANELS) hidden.add(id)")
     // Tabbed beside Properties, which rig mode keeps as Skeleton.
@@ -23,11 +23,12 @@ describe('the rig mode has Ragdoll and Bone Masks tabs', () => {
   })
 
   it('registers a component and a title for each', () => {
+    expect(PANELS()).toMatch(/rigFootPlacement: RigFootPlacementPanel/)
     expect(PANELS()).toMatch(/rigRagdoll: RigRagdollPanel/)
     expect(PANELS()).toMatch(/rigBoneMasks: RigBoneMasksPanel/)
     const titles = read('features', 'layout', 'panelTitles.ts')
-    expect(titles).toContain("rigRagdoll: 'Ragdoll', rigBoneMasks: 'Bone Masks'")
-    expect(titles).toContain("rigRagdoll: 'editor/physics', rigBoneMasks: 'editor/animation'")
+    expect(titles).toContain("rigFootPlacement: 'Foot Placement', rigRagdoll: 'Ragdoll', rigBoneMasks: 'Bone Masks'")
+    expect(titles).toContain("rigFootPlacement: 'editor/animation', rigRagdoll: 'editor/physics', rigBoneMasks: 'editor/animation'")
   })
 
   it('takes them out of the Skeleton inspector', () => {
@@ -55,13 +56,29 @@ describe('the rig mode has Ragdoll and Bone Masks tabs', () => {
     expect(read('features', 'animation', 'SkeletonTree.tsx')).toContain('eventEmitter.on(QUERY_SELECTED_JOINT, onQuery)')
   })
 
-  it('bumped the layout version, since a stored tree cannot gain the two panels', () => {
-    expect(DOCK()).toMatch(/const LAYOUT_VERSION = (2[2-9]|[3-9]\d)/)
+  it('bumped the layout version, since a stored tree cannot gain the panels', () => {
+    // 28 is Foot Placement's.
+    expect(DOCK()).toMatch(/const LAYOUT_VERSION = (2[8-9]|[3-9]\d)/)
+  })
+
+  it('moves foot placement out from under the bone tree into its tab, open, with its blending', () => {
+    // Under the tree it was in the Animator and Clip parts too, a collapsed section at the bottom of the tree.
+    const tree = read('features', 'animation', 'SkeletonTree.tsx')
+    expect(tree).not.toContain('<IkRigPanel')
+    const tab = read('features', 'rig', 'FootPlacementPanel.tsx')
+    expect(tab).toContain('<IkRigPanel skin={target.skin} selectedJoint={selectedJoint} />')
+    // A tab: it asks the tree which bone is selected when it mounts behind another one.
+    expect(tab).toContain('eventEmitter.emit(QUERY_SELECTED_JOINT)')
+    const panel = read('features', 'animation', 'IkRigPanel.tsx')
+    expect(panel).not.toContain('Collapsable')
+    for (const key of ["'lockBlendIn'", "'lockRelease'", 'lockBlendCurve', 'FOOT_LOCK_CURVES']) expect(panel, key).toContain(key)
+    const renderers = DOCK().slice(DOCK().indexOf('function assertRenderers'), DOCK().indexOf('function loadLayouts'))
+    expect(renderers).not.toContain("'rigFootPlacement'")
   })
 
   it('a double-clicked mask or pose lands on the tab that edits it, expanded', () => {
     const dock = DOCK()
-    expect(dock).toContain("e?.kind === 'boneMask' ? 'rigBoneMasks' : e?.kind === 'pose' ? 'properties' : null")
+    expect(dock).toContain("e?.kind === 'boneMask' ? 'rigBoneMasks' : e?.kind === 'pose' ? 'properties' : e?.kind === 'ragdoll' ? 'rigRagdoll' : null")
     expect(dock).toContain("eventEmitter.on('FOCUS_RIG_ASSET', onFocus)")
     // From another mode the request waits for the rig layout.
     expect(dock).toContain("if (editorMode === 'rig' && rigTab) api.getPanel(rigTab)?.api.setActive()")

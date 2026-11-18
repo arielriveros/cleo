@@ -135,7 +135,7 @@ export function ownModelNodeOf(node: Node | null | undefined): ModelNode | null 
   return modelInstanceRootOf(node) === node ? modelNodeOf(node) : null
 }
 
-/** {@link ownModelNodeOf} for skinned models — what the Animation section applies to. */
+/** {@link ownModelNodeOf} for skinned models — what the Skeleton section (and its character rows) applies to. */
 export function ownSkinnedModelNodeOf(node: Node | null | undefined): ModelNode | null {
   if (!node) return null
   if (node instanceof ModelNode) return skinnedModelNodeOf(node)

@@ -12,7 +12,7 @@ const dock = readFileSync(join(__dirname, '../src/features/layout/DockLayout.tsx
 describe('the Performance page lock in Play', () => {
   it('keeps only the Engine options panel up in Play when locked', () => {
     expect(dock).toContain("return pinPerformance ? hidden.filter(id => id !== 'optionsEngine') : hidden;")
-    expect(dock).toContain('hiddenPanelIds(editorMode, isPlayMode, isSimulating, pinPerformanceInPlay)')
+    expect(dock).toContain('hiddenPanelIds(editorMode, isPlayMode, isSimulating, pinPerformanceInPlay, showDebuggerRef.current)')
   })
 
   it('docks it beside the viewport, open on Performance, and follows the lock live', () => {

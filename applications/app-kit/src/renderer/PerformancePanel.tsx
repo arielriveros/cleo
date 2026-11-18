@@ -169,15 +169,28 @@ const LockGlyph = ({ open }: { open: boolean }) => (
   </svg>
 );
 
-export default function PerformancePanel({ physicsThread, playPin }: { physicsThread?: PhysicsThreadControl; playPin?: PlayPinControl } = {}) {
+/**
+ * The page's two profiler switches (Timer queries, the script/animator split) as the user left them, for the
+ * session. They are what the page WANTS: the profilers run only while the page is shown, and are off whenever it
+ * is hidden or closed. `null` until the page first mounts, which takes whatever the engine has then.
+ */
+const wanted: { timer: boolean | null; detail: boolean | null } = { timer: null, detail: null };
+
+/**
+ * `active`: whether the page is on screen. A host whose page can sit behind another tab (the editor's Engine
+ * options tab) passes it, and nothing is sampled or profiled while it is false. Defaults to shown.
+ */
+export default function PerformancePanel({ physicsThread, playPin, active = true }: {
+  physicsThread?: PhysicsThreadControl; playPin?: PlayPinControl; active?: boolean;
+} = {}) {
   const { instance } = useEngineHost();
   const renderer: any = instance?.renderer ?? null;
 
-  const [enabled, setEnabled] = useState(() => gpuProfiler.enabled);
+  const [enabled, setEnabled] = useState(() => (wanted.timer ??= gpuProfiler.enabled));
   const [budgetHz, setBudgetHz] = useState(120);
   const [quality, setQuality] = useState<string>(() => renderer?.quality ?? 'high');
   const [renderScale, setRenderScale] = useState<number>(() => renderer?.renderScale ?? 1);
-  const [detail, setDetail] = useState(sceneStatsDetail.enabled);
+  const [detail, setDetail] = useState(() => (wanted.detail ??= sceneStatsDetail.enabled));
   // Mirror of renderer.passEnabled so the switches re-render. The renderer stays the source of truth
   // and is written through setPassEnabled.
   const [passes, setPasses] = useState<Record<string, boolean>>({});
@@ -199,13 +212,26 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
   /** Bumped by the physics-thread switch, which changes nothing the refresh would otherwise re-read soon. */
   const [, setThreadTick] = useState(0);
 
-  // The backend's own step split costs a few performance.now() per substep: measured only while this is open.
+  // The backend's own step split costs a few performance.now() per substep: measured only while this is shown.
   useEffect(() => {
     const physics: any = instance?.physics;
-    if (!physics) return;
+    if (!physics || !active) return;
     physics.profileStep = true;
     return () => { physics.profileStep = false; };
-  }, [instance]);
+  }, [instance, active]);
+
+  // The GPU timer queries and the per-node script/animator timing run only while the page is shown and wanted:
+  // hidden behind another tab, or closed, nothing reads them, and both cost every frame.
+  useEffect(() => {
+    if (!active || !enabled) return;
+    gpuProfiler.enabled = true;
+    return () => { gpuProfiler.enabled = false; };
+  }, [active, enabled]);
+  useEffect(() => {
+    if (!active || !detail) return;
+    sceneStatsDetail.enabled = true;
+    return () => { sceneStatsDetail.enabled = false; };
+  }, [active, detail]);
 
   useEffect(() => {
     if (!renderer) return;
@@ -215,9 +241,16 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
   }, [renderer]);
 
   useEffect(() => {
+    // Nothing is sampled behind another tab: the loop below reads the renderer, the profilers, physics and every
+    // texture, and sets dozens of fields of state, each refresh.
+    if (!active) return;
     let raf = 0;
-    // The engine accounts every loop turn whether or not this page is open: start from now.
+    // The engine accounts every loop turn whether or not this page is open: start from now. The same for the
+    // refresh window, which would otherwise count the time the page was hidden as one long frame.
     frameAccount.drain();
+    last.current = performance.now();
+    frames.current = 0;
+    acc.current = 0;
     const tick = () => {
       const now = performance.now();
       acc.current += now - last.current;
@@ -412,7 +445,7 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [renderer, instance]);
+  }, [renderer, instance, active]);
 
   const budgetMs = 1000 / budgetHz;
   // A vsynced frame sits AT the budget, not under it, so an exact comparison flickers red.
@@ -584,7 +617,7 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
         <Button
           variant='ghost'
           className='w-full justify-start p-0 border-0 rounded-none font-normal text-ui-sm leading-5 hover:bg-transparent'
-          onClick={() => { sceneStatsDetail.enabled = !detail; setDetail(!detail); }}
+          onClick={() => { wanted.detail = !detail; setDetail(!detail); }}
           title="Times each node's onUpdate and animator separately. Costs ~240ns per node per frame, which inflates the Scene total while enabled."
         >
           {detail ? '− hide script/animator split' : '+ script/animator split'}
@@ -649,7 +682,7 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
         <Toggle
           label='Timer queries'
           checked={enabled}
-          onChange={v => { gpuProfiler.enabled = v; setEnabled(v); }}
+          onChange={v => { wanted.timer = v; setEnabled(v); }}
           title='Times each render pass on the GPU (WebGPU timestamp queries, or EXT_disjoint_timer_query_webgl2 on WebGL2), filed under the scope that contains it.'
         />
         {!gpuProfiler.available && (

@@ -115,6 +115,45 @@ The default `Look` binding already handles both cases: mouse movement drives it 
 locked **or** while the left button is held, and never when the cursor is merely passing over the
 page.
 
+The lock asks for raw mouse input where the browser has it (no OS acceleration), and the engine drops
+the glitched readings Chromium sometimes reports under a lock: the first movement after the lock is
+taken or released, and a single huge jump out of nowhere (over 150 px and eight times anything in the
+movements just before it). Those used to swing a camera half round in one frame. A real fast flick
+builds up over several movements and is never dropped.
+
+### Letting the mouse go
+
+```ts
+InputSystem.releaseKey: string | null   // a key code, 'Escape' by default; null = none
+InputSystem.releasePointerLock(): void
+```
+
+While the pointer is locked, a press of the release key lets the mouse go. The press is used up
+there: no action and no `isKeyDown` sees it. Unlocked, the release key is an ordinary key again. The
+editor sets it from **Options ▸ Editor ▸ Viewport ▸ Play ▸ Release mouse**, for Play in the editor and
+for Play in a window.
+
+### Browser shortcuts
+
+`preventDefault` keeps most keys from the browser while the game owns the keyboard (Space does not
+scroll, Ctrl+S does not save the page). A few it cannot stop: in a normal tab Chrome keeps **Ctrl+W**,
+**Ctrl+T**, **Ctrl+N** and **Ctrl+Tab** from the page, so a game that walks on Ctrl and W closes the tab.
+
+In fullscreen the engine can take those as well. While the game owns the keyboard, the pointer is
+locked **and** the page is fullscreen, the input system holds the whole keyboard (the browser's
+Keyboard Lock, where the browser has it). It lets the keyboard go as soon as any of the three ends.
+Under the lock the browser no longer frees the mouse on Esc: the release key does that, and holding
+Esc leaves fullscreen.
+
+```ts
+InputSystem.isKeyboardLocked: boolean   // the whole keyboard is held right now
+```
+
+A game's own fullscreen button (`element.requestFullscreen()` from a click) is all a published web
+build needs. In the editor, Play has a fullscreen icon in the viewport's top-right corner. Outside
+fullscreen the editor asks before the tab closes while a game plays. The desktop app binds none of
+these keys, so none of this is needed there.
+
 ## The authored map
 
 ```ts

@@ -190,7 +190,7 @@ A pawn: it turns a control intent into velocity and facing. It does not read inp
 
 **Tuning:** `walkSpeed = 1.5`, `runSpeed = 4`, `jumpSpeed = 4`, `turnSpeed = 540`,
 `turnThreshold = 90`, `turnReleaseAngle = 10`, `directionSmoothing = 0.12`, `acceleration = 0`,
-`airControl = 1`, `coyoteSeconds = 0.12`, `jumpBufferSeconds = 0.15`, `jumpLockoutSeconds = 0.15`,
+`turnFriction = 0`, `moveDirSource` (`'input' | 'velocity'`, default `'input'`), `airControl = 1`, `coyoteSeconds = 0.12`, `jumpBufferSeconds = 0.15`, `jumpLockoutSeconds = 0.15`,
 `facingMode` (`'aim' | 'velocity' | 'none'`), `driveWhenUnpossessed = false`.
 
 ```ts

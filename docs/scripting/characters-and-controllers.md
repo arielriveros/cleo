@@ -46,8 +46,8 @@ used to have, and the copy silently stops moving.
 interface ControlIntent {
   move: [number, number]       // desired movement, in the basis below
   basisYaw: number             // the yaw `move` is expressed relative to
-  aimYaw: number
-  aimPitch: number
+  aimYaw: number               // where to face, world degrees
+  aimPitch: number             // where to look vertically, degrees, + down (as CameraRigNode)
   look: [number, number]       // this frame's look delta
   sprint: boolean
   crouch: boolean
@@ -57,6 +57,9 @@ interface ControlIntent {
 
 const INTENT_REQUESTS = ['jump', 'interact', 'primary', 'secondary']
 ```
+
+A player Controller takes the aim from its camera rig as the rig stands once Look has steered it this frame:
+`aimYaw` (and `basisYaw`) from its yaw, `aimPitch` from its pitch. A look-at reads both.
 
 Requests are **buffered**, not booleans: each carries a time-to-live, which is what gives jump
 buffering (press slightly early, still jump on landing) for free.
@@ -104,15 +107,35 @@ The **Turn in place** group is [below](#turn-in-place), and **Animator outputs**
 | `turnSpeed` | `540` | Degrees/s the body swings to the aim **while moving**. |
 | `turnThreshold` | `90` | Aim-vs-body angle that triggers a turn-in-place. |
 | `turnReleaseAngle` | `10` | Deadzone at which the turn is considered done. |
-| `turnSettleSeconds` | `0.12` | **Settle** in the inspector. How long the aim must stay past the threshold before a 90° turn engages. See below. |
+| `turnSettleSeconds` | `0.12` | **Settle** in the inspector. How long the aim must stay past the threshold before a 90° turn engages, up to 5 s. See below. |
+| `turnSettleFarSeconds` | `0` | **Settle past 135** in the inspector. How long the aim must stay past 135° before the 180° turn engages; `0` engages it at once. |
 | `directionSmoothing` | `0.12` | Seconds the blend-space direction axis takes to glide. |
 | `acceleration` | `0` | Units/s^2, measured **along the ground**. `0` reaches commanded speed immediately. See below. |
+| `turnFriction` | `0` | **Turn Friction**. Per second: how fast a moving body's velocity turns toward a new direction, keeping its speed. See [Turning](#turning). |
+| `moveDirSource` | `'input'` | **Direction From**: `'input' \| 'velocity'`. What `moveDir` reads. See [Turning](#turning). |
 | `airControl` | `1` | Steering while airborne, as the share of the gap to the steered velocity closed per **second**: `1` steers freely, `0` keeps the launch velocity, `0.5` halves the gap in a second at any frame rate. |
 | `coyoteSeconds` | `0.12` | |
 | `jumpBufferSeconds` | `0.15` | |
 | `jumpLockoutSeconds` | `0.15` | |
 | `facingMode` | `'aim'` | `'aim' \| 'velocity' \| 'none'`. |
 | `driveWhenUnpossessed` | `false` | |
+
+### Turning
+
+With an `acceleration`, the velocity has to catch up with a new direction, and two settings decide how that looks.
+
+- **`turnFriction`** turns the velocity toward the input, keeping its speed: at 8 (Unreal's default ground
+  friction), a quarter turn is mostly done in a quarter of a second. At 0, `acceleration` alone moves the velocity
+  in a straight line to the new one. That is slower (half a second for a jog at 11 m/s^2), and the speed dips to
+  70% halfway while the body coasts on its old heading, which reads as ice. A reversal (past 135 degrees) is never
+  turned, only braked through, so a running turn or a stop still sees the body slow down first. It has no effect
+  with `acceleration: 0`, which snaps.
+- **`moveDirSource: 'velocity'`** makes `moveDir` the body's actual direction of travel instead of the input's. With
+  `'input'`, a blend space plays the new direction the moment the stick moves, while the body is still travelling
+  the old way, and the feet slide sideways until the velocity catches up. Below a tenth of the commanded speed (as
+  it sets off, or at the zero of a reversal) the input stands in.
+
+Both are off by default, which is the original behaviour.
 
 ### Turn-in-place
 
@@ -124,8 +147,9 @@ turn chatter.
 
 - **The choice of clip waits for the aim to settle.** A camera swept round to the back crosses 90°
   long before it reaches 180°; picking the clip at that crossing would always play the 90. So a turn
-  engages only once the aim has stayed past the threshold for `turnSettleSeconds` — or at once, past
-  135°, where it can only be the 180. `0` disables the wait.
+  engages only once the aim has stayed past the threshold for `turnSettleSeconds` — or, past 135°, where
+  it can only be the 180, for `turnSettleFarSeconds` (at once by default). `0` disables the wait. A
+  character with a look-at layer waits longer (a second, say) so its head is seen to turn before its body.
 - **The clip is chosen once**, when the turn engages, and held until it releases.
 - **A turn releases** when the body is within `turnReleaseAngle` of the aim — or when it has
   **overshot** it, so a latched turn cannot keep rotating the body further away. If the aim is still

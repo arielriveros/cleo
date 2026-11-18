@@ -1,5 +1,5 @@
 import { quat, vec3 } from 'gl-matrix';
-import { clamp, nonNegativeOr } from '../core/math';
+import { clamp, nonNegativeOr, smoothstep } from '../core/math';
 
 // ---------------------------------------------------------------------------
 // Inverse kinematics. Pure vec3/quat maths — no GL, no scene, no engine imports.
@@ -57,6 +57,43 @@ export interface IkRigTuning {
     maxSlopeDeg: number;
     /** Seconds, as a time constant, for the per-foot weight and the hip offset to follow their targets. */
     smoothing: number;
+    /**
+     * Foot locking, 0..1 (Advanced Locomotion System's): how firmly a foot the animation has planted holds its
+     * spot and heading on the ground while the body moves or turns over it. Without it a planted foot rides
+     * round with a turning body and the character glides. 0, the default, is off.
+     */
+    footLock: number;
+    /**
+     * World units per second. A foot plants when the animation lifts or lowers it slower than this, and moves it
+     * over the ground slower than this plus 1.5 times the body's own speed: a swing crosses the ground at twice
+     * the body's speed, a planted foot at none (or, while a blend catches up with a turn, at the slide it is
+     * given, which is the foot to hold).
+     */
+    lockSpeed: number;
+    /** ...and holds it no higher than this above the lowest animated foot (the swing-release reference). */
+    lockHeight: number;
+    /** Seconds a lifted foot takes to blend from where it was planted back to where the animation has it. */
+    lockRelease: number;
+    /**
+     * Seconds a foot takes to blend INTO its lock once it plants: its slide eased to a stop rather than caught in
+     * one frame. 0, the default, locks at once.
+     */
+    lockBlendIn: number;
+    /** How the lock weight runs between 0 and 1, both ways: straight (`'linear'`, the default) or eased (`'smooth'`). */
+    lockBlendCurve: FootLockCurve;
+    /**
+     * The fastest a foot may be sliding over the ground (world units a second) for a lock to catch it. A foot the
+     * animation slides faster (a cross-fade into a run still blending in the standing pose, a blend catching up
+     * with a turn) plants once it has slowed. Catching it stops the foot dead in a few frames and leaves the leg
+     * stretched after it until the lock lets go: a snap each way. 0, the default, catches any.
+     */
+    lockCatchSpeed: number;
+    /**
+     * The farthest a planted foot may be left from where the animation has it (world units) before it lets go.
+     * Its heading is held up to {@link FOOT_LOCK_MAX_TWIST} degrees off the animation's, and turns with the
+     * animation past that. A body that jumps further than this in one frame (a teleport) lets go at once.
+     */
+    lockDistance: number;
 }
 
 export const IK_DEFAULTS: IkRigTuning = {
@@ -70,7 +107,28 @@ export const IK_DEFAULTS: IkRigTuning = {
     maxHipDrop: 0.5,
     maxSlopeDeg: 45,
     smoothing: 0.12,
+    footLock: 0,
+    lockSpeed: 0.5,
+    lockHeight: 0.03,
+    lockRelease: 0.15,
+    lockDistance: 0.35,
+    lockBlendIn: 0,
+    lockBlendCurve: 'linear',
+    lockCatchSpeed: 0,
 };
+
+/** The shape of a foot lock's blend: see `IkRigTuning.lockBlendCurve`. */
+export type FootLockCurve = 'linear' | 'smooth';
+export const FOOT_LOCK_CURVES: readonly FootLockCurve[] = ['linear', 'smooth'];
+
+/** A lock's weight for its 0..1 progress, by the rig's curve. */
+export function footLockWeight(alpha: number, curve: FootLockCurve): number {
+    const a = clamp(alpha, 0, 1);
+    return curve === 'smooth' ? a * a * (3 - 2 * a) : a;
+}
+
+/** The most a locked foot is turned from its animated heading, in degrees; past it the foot turns with the clip. */
+export const FOOT_LOCK_MAX_TWIST = 40;
 
 /** One leg: three joints, plus the toe when the rig has one. NODE indices, matching `Skin.joints[].nodeIndex`. */
 export interface IkFootChain {
@@ -97,7 +155,65 @@ export function ikTuning(rig: IkRig | null | undefined): IkRigTuning {
         maxHipDrop: nonNegativeOr(rig?.maxHipDrop, IK_DEFAULTS.maxHipDrop),
         maxSlopeDeg: nonNegativeOr(rig?.maxSlopeDeg, IK_DEFAULTS.maxSlopeDeg),
         smoothing: nonNegativeOr(rig?.smoothing, IK_DEFAULTS.smoothing),
+        footLock: clamp(nonNegativeOr(rig?.footLock, IK_DEFAULTS.footLock), 0, 1),
+        lockSpeed: nonNegativeOr(rig?.lockSpeed, IK_DEFAULTS.lockSpeed),
+        lockHeight: nonNegativeOr(rig?.lockHeight, IK_DEFAULTS.lockHeight),
+        lockRelease: nonNegativeOr(rig?.lockRelease, IK_DEFAULTS.lockRelease),
+        lockDistance: Math.max(1e-3, nonNegativeOr(rig?.lockDistance, IK_DEFAULTS.lockDistance)),
+        lockBlendIn: nonNegativeOr(rig?.lockBlendIn, IK_DEFAULTS.lockBlendIn),
+        lockBlendCurve: FOOT_LOCK_CURVES.includes(rig?.lockBlendCurve as FootLockCurve) ? rig!.lockBlendCurve as FootLockCurve : IK_DEFAULTS.lockBlendCurve,
+        lockCatchSpeed: nonNegativeOr(rig?.lockCatchSpeed, IK_DEFAULTS.lockCatchSpeed),
     };
+}
+
+/** What a foot lock does this frame: see {@link stepFootLock}. */
+export type FootLockStep = 'plant' | 'hold' | 'release' | 'drop';
+
+/**
+ * One frame of a foot lock: its 0..1 progress `alpha` (the weight, through the rig's curve) and whether the foot is
+ * `planted` (between its plant and its release, whatever the weight has reached).
+ *
+ *   `lockable`  the animation has the foot planted this frame (its window, or detection);
+ *   `stray`     how far the animated foot has got from the lock, as a share of `lockDistance`. Ignored while
+ *               nothing is locked.
+ *
+ * Updates `lock` and returns what to do with the lock point:
+ *
+ *   plant    take a new one, where the foot is SHOWN now, so nothing jumps;
+ *   hold     keep it (alpha rising over `lockBlendIn`, or already 1);
+ *   release  keep it while alpha falls over `lockRelease`: the foot lifted, or was left too far behind;
+ *   drop     forget it, alpha 0 (faded out, or a planted foot strayed past twice the limit: a teleport).
+ *
+ * With a blend-in, a foot planted again while its last lock is still fading keeps that lock and rises again from
+ * where it is: the foot is shown part-way to that point, so any other point would make it jump. Without one (the
+ * default) it re-plants where it is shown, at full weight, as foot locking always has.
+ */
+export function stepFootLock(
+    lock: { alpha: number; planted?: boolean },
+    lockable: boolean,
+    stray: number,
+    dt: number,
+    tuning: Pick<IkRigTuning, 'lockRelease'> & Partial<Pick<IkRigTuning, 'lockBlendIn'>>,
+): FootLockStep {
+    const held = lock.alpha > 0;
+    const blendIn = tuning.lockBlendIn ?? 0;
+    // Only a foot still planted in the animation is dropped for straying: one already lifting swings away from
+    // its lock fast by nature, and must finish fading out rather than snap.
+    if (held && lockable && stray > 2) { lock.alpha = 0; lock.planted = false; return 'drop'; }
+    if (lockable && (!held || stray <= 1)) {
+        lock.planted = true;
+        if (blendIn > 0) {
+            lock.alpha = Math.min(1, lock.alpha + Math.max(0, dt) / blendIn);
+            return held ? 'hold' : 'plant';
+        }
+        if (lock.alpha >= 1) return 'hold';
+        lock.alpha = 1;
+        return 'plant';
+    }
+    lock.planted = false;
+    if (!held) return 'drop';
+    lock.alpha = tuning.lockRelease > 0 ? Math.max(0, lock.alpha - Math.max(0, dt) / tuning.lockRelease) : 0;
+    return lock.alpha > 0 ? 'release' : 'drop';
 }
 
 /** One thing wrong with a rig, in words a person can act on. */
@@ -222,6 +338,12 @@ export function swingReleaseWeight(lift: number, swingRelease: number): number {
  * `minBend` (a fraction of the leg's length), or when the clip's knee points BEHIND the character, the
  * knee is sent along `forward` instead: both legs fold the same way, the way knees do.
  *
+ * Never by a switch: the pole turns from the clip's bend to `forward` over a band of bend size (half `minBend` to
+ * `minBend`) and of direction (a knee out to the side, even a little behind it, is a strafe's real step; one
+ * pointing well behind, past about 115 degrees, is a straight leg's noise). A hard switch at "behind" flipped a
+ * strafing knee that swung out sideways from its bend to straight ahead and back as it crossed the line: the knee
+ * jumped 20 to 30 cm in a frame whenever a foot lock or foot placement was solving the leg.
+ *
  * `forward` is the character's facing in the same space as the joints, flattened onto the ground plane.
  * Returns undefined when there is nothing to go on, so the solver falls back to the pose.
  */
@@ -235,11 +357,25 @@ export function kneePole(root: vec3, mid: vec3, tip: vec3, forward: vec3, minBen
     // The knee's offset from the hip-ankle line: the direction the clip bends it.
     const bend = vec3.scaleAndAdd(vec3.create(), toMid, axis, -vec3.dot(toMid, axis));
     const bendLen = vec3.length(bend);
-    const hasForward = vec3.length(forward) > 1e-8;
-    if (bendLen > minBend * legLen && (!hasForward || vec3.dot(bend, forward) >= 0))
-        return vec3.scaleAndAdd(vec3.create(), mid, bend, legLen / bendLen);
-    if (!hasForward) return undefined;
-    return vec3.scaleAndAdd(vec3.create(), mid, forward, legLen / vec3.length(forward));
+    const forwardLen = vec3.length(forward);
+    if (forwardLen <= 1e-8) return bendLen > minBend * legLen ? vec3.scaleAndAdd(vec3.create(), mid, bend, legLen / bendLen) : undefined;
+    const ahead = vec3.scale(vec3.create(), forward, 1 / forwardLen);
+    if (bendLen <= 1e-8) return vec3.scaleAndAdd(vec3.create(), mid, ahead, legLen);
+    const along = vec3.scale(vec3.create(), bend, 1 / bendLen);
+    // How far to trust the clip's bend: by its size, and by how far round from `forward` it points (fully to about
+    // 105 degrees, not at all past about 150).
+    const cos = vec3.dot(along, ahead);
+    const trust = smoothstep(minBend * 0.5, minBend, bendLen / legLen) * smoothstep(-0.85, -0.25, cos);
+    // Turned from `forward` toward the bend by that share of the angle between them, about their common axis: a
+    // straight blend of two far-apart directions would do most of its turning in the middle of the band.
+    const turnAxis = vec3.cross(vec3.create(), ahead, along);
+    const sin = vec3.length(turnAxis);
+    const dir = vec3.copy(vec3.create(), trust >= 1 ? along : ahead);
+    if (trust > 0 && trust < 1 && sin > 1e-6) {
+        const angle = Math.atan2(sin, cos) * trust;
+        vec3.transformQuat(dir, ahead, quat.setAxisAngle(quat.create(), vec3.scale(turnAxis, turnAxis, 1 / sin), angle));
+    } else if (trust > 0 && trust < 1 && cos > 0) vec3.copy(dir, along);
+    return vec3.scaleAndAdd(vec3.create(), mid, dir, legLen);
 }
 
 /** Any axis perpendicular to `v`. Used only when a limb is straight and has no bend plane of its own. */

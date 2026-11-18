@@ -12,7 +12,7 @@ import {
   CARD_H, CARD_W, STACK_INDENT, V_GAP, layoutSceneGraph, nearestInDirection, zoneAt,
   type Direction, type DropZone, type GraphCard, type NodeDescription, type SceneGraphLayout,
 } from './sceneGraphLayout'
-import { Chevron, NodeControls, RenameField, typeIconFor } from './sceneNodeParts'
+import { Chevron, NodeControls, NodeTypeGlyph, RenameField } from './sceneNodeParts'
 
 // The Scene panel's Graph view: the same hierarchy as the tree, drawn top-down with xyflow.
 //
@@ -84,7 +84,6 @@ function SceneGraphCard({ data }: NodeProps) {
   // UI elements are tinted so a HUD subtree is distinguishable from world geometry; a SELECTED card drops
   // the tint for the standard selection fill, exactly as a tree row does.
   const isUI = isUINodeType(desc.type);
-  const TypeIcon = typeIconFor(desc.type);
 
   return (
     <div
@@ -121,7 +120,7 @@ function SceneGraphCard({ data }: NodeProps) {
       {/* Dormant nodes (spawnOnStart off) read as "present but asleep", as in the tree. */}
       <div className={cn('flex items-center min-w-0 flex-1', desc.spawnOnStart === false && 'opacity-50')}
            title={desc.spawnOnStart === false ? 'Dormant until a script spawns it' : undefined}>
-        { TypeIcon && <span className='inline-flex w-4 h-4 mr-1.5 shrink-0 items-center justify-center'><TypeIcon /></span> }
+        <NodeTypeGlyph type={desc.type} templateId={desc.templateId} className='shrink-0' />
         { editing
           ? <RenameField initial={desc.name} className='nodrag nopan nowheel'
                          onSubmit={(name) => ui.onSubmitRename(desc.id, name)} onCancel={ui.onCancelRename} />

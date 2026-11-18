@@ -278,16 +278,17 @@ separate panel — a banner, a flag, a cape — add a [Cloth](node-inspector.md#
 
 How a skinned model falls when a script turns it into a ragdoll, with
 `scene.physics.startRagdoll(modelNode, options)` — the usual substitute for, or ending to, a death
-animation. It is a section of a skinned model's Properties.
+animation. It is the skeleton's: authored in its [Ragdoll panel](#the-ragdoll-panel-rig-editor), with only
+a character's mass and push in its Properties (the Skeleton section's
+[This character](node-inspector.md#this-character) rows).
 
-**Source** — which of three ragdolls the character falls with, decided by its rig. The fields below it
-change with the source, and **Edit ragdoll in rig** opens the rig whenever the model has one.
+**Source** — which of three ragdolls the character falls with, decided by its rig:
 
 | Source | When | What it is |
 |---|---|---|
 | **Rig profile** | Its rig has parts authored in the rig editor's **Ragdoll** panel | Exactly what was authored: shaped body parts, real masses, knees and elbows that only bend one way. |
 | **Automatic humanoid** | No authored parts, and the skeleton has recognizable hips and legs | 16 body parts fitted to the bones. Open the rig to see the parts or customize them. |
-| **Generic** | Anything else | A sphere on every substantial bone, tuned by the fields in this section. Authoring parts on the rig gives a better fall. |
+| **Generic** | Anything else | A sphere on every substantial bone. Authoring parts on the rig gives a better fall. |
 
 The humanoid ragdoll (authored or automatic) is built per body *segment*, not per bone:
 
@@ -298,15 +299,16 @@ The humanoid ragdoll (authored or automatic) is built per body *segment*, not pe
 - the other joints are cones centred on a natural resting direction, so an arm bound in a T-pose rests lower;
 - limbs collide with each other and with the torso.
 
-Its node settings:
+A character's own settings, in its Properties:
 
-- **Mass Scale** — multiplies the profile's total mass.
-- **Push** — a velocity, in m/s, added to the upper body as it starts falling, in the character's own
-  frame (left, up, forward). A negative forward value topples it backwards.
+- **Ragdoll mass** — multiplies the profile's total mass. A generic ragdoll has no profile, so it has no
+  mass scale either.
+- **Ragdoll push** — a velocity, in m/s, added to the upper body as it starts falling, in the character's
+  own frame (left, up, forward). A negative forward value topples it backwards. On a generic ragdoll it is
+  the knockback impulse on its root bone.
 
-The generic ragdoll has its own fields instead: the joint type (a free, stable ball, or a cone-twist
-with cone and twist limits and a stiffness), damping, bone mass and radius scale, self collision, and a
-knockback impulse applied to its root bone in world space.
+A generic ragdoll's joints (ball or cone-twist, damping, bone mass, radius) keep what earlier projects stored
+on the node, but are no longer edited there: author parts on the rig instead.
 
 ### The Ragdoll panel (rig editor)
 

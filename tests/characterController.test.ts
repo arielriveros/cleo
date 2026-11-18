@@ -449,6 +449,22 @@ describe('a controller parented under its own pawn', () => {
         expect(character.isControlled).toBe(true);
     });
 
+    it('aims the pawn where the rig looks, its pitch included, the same frame', () => {
+        // The intent's aimPitch was never written, so a look-at could turn a character's head round but never
+        // up or down. And the yaw was read before the rig was steered, a frame late.
+        const { scene, character, rig } = actor();
+        rig.setOrbit(37, -20);
+        scene.update(1 / 60, 0, false);
+        expect(character.intent.aimYaw).toBeCloseTo(rig.yaw, 6);
+        expect(character.intent.basisYaw).toBeCloseTo(rig.yaw, 6);
+        expect(character.intent.aimPitch).toBeCloseTo(rig.pitch, 6);
+        expect(rig.pitch).toBeCloseTo(-20, 6);
+        rig.setOrbit(-50, 25);
+        scene.update(1 / 60, 0, false);
+        expect(character.intent.aimYaw).toBeCloseTo(-50, 6);
+        expect(character.intent.aimPitch).toBeCloseTo(25, 6);
+    });
+
     it('still reports its controller after a respawn', () => {
         // Despawning the pawn despawns the controller with it, which detaches. The possession cache used
         // to survive that, so the fast path in `_resolvePossessed` skipped re-establishing the

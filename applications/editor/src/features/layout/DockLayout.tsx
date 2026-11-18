@@ -13,6 +13,7 @@ import { cleoDockTheme as cleoTheme, lockAnchorPanel } from '@cleo/app-kit/layou
 import { setOptionsPage } from '@cleo/app-kit/ui/OptionsShell';
 import { useEditorPrefs } from '../options/editorPrefs';
 import { scriptDebugger } from '../scriptDebugger/debugSession';
+import { useWindowPlay } from '../playWindow/windowPlay';
 
 // Per-project. Both live keys resolve through lsScope, so deleting a project takes them with it.
 const dockLayoutKey = () => lsKey(LS_KEYS.dockLayout);
@@ -55,7 +56,9 @@ const OLD_DOCK_LAYOUT_KEYS = [
 // Properties, and a ragdoll is its model's. A tree stored at 24 names a panel that no longer exists.
 // 26: the script Debugger arrived in the bottom strip beside Logger; a tree stored at 25 has nowhere for it.
 // 27: the Saves panel (the project's Play saves) joined the bottom strip; a tree stored at 26 has nowhere for it.
-const LAYOUT_VERSION = 27;
+// 28: foot placement left the bone tree for a Foot Placement tab of its own beside Skeleton in the rig mode; a
+// tree stored at 27 has nowhere for it.
+const LAYOUT_VERSION = 28;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -121,10 +124,11 @@ const TILEMAP_PANELS = ['tilePalette', 'tilemapLayers'] as const;
 const LANDSCAPE_PANELS = ['landscapeTools', 'landscapeLayers'] as const;
 
 /**
- * Rig-mode panels: the skeleton's ragdoll and its bone masks, tabbed beside Properties (titled Skeleton) so
- * each gets the whole rail instead of a stretch of one long inspector. Shown only in rig mode.
+ * Rig-mode panels: the skeleton's foot placement, its ragdoll and its bone masks, tabbed beside Properties
+ * (titled Skeleton) so each gets the whole rail instead of a stretch of one long inspector, while the bone tree
+ * stays up on the left for the pick-a-bone gestures. Shown only in rig mode.
  */
-const RIG_PANELS = ['rigRagdoll', 'rigBoneMasks'] as const;
+const RIG_PANELS = ['rigFootPlacement', 'rigRagdoll', 'rigBoneMasks'] as const;
 
 /** The two Add palettes, stacked as tabs above the Scene tree. Ordinary chrome, shown wherever the tree is. */
 const ADD_PANELS = ['sceneAdd', 'uiAdd'] as const;
@@ -281,6 +285,18 @@ function assertRenderers(api: DockviewApi) {
   }
 }
 
+/**
+ * Put the Debugger back in the bottom strip when it should be up and is not: a tree saved while it was out of
+ * the way has no Debugger in it. Added inactive, so whatever tab is showing stays; a breakpoint brings it up.
+ */
+function syncDebugger(api: DockviewApi, show: boolean) {
+  if (!show || api.getPanel('debugger') || !api.getPanel('logger')) return;
+  api.addPanel({
+    id: 'debugger', component: 'debugger', title: PANEL_TITLES['debugger'],
+    position: { referencePanel: 'logger', direction: 'within' }, inactive: true,
+  });
+}
+
 function loadLayouts(): LayoutStore['layouts'] {
   try {
     const raw = localStorage.getItem(dockLayoutKey());
@@ -334,7 +350,9 @@ function relayout(api: DockviewApi) {
  * Which panels a given mode / play state hides. A group is hidden once by default and a mode opts out, so
  * a new mode-specific group cannot leak into unrelated modes.
  */
-export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: boolean = false, pinPerformance: boolean = false): readonly string[] {
+export function hiddenPanelIds(
+  mode: EditorMode, playing: boolean, simulating: boolean = false, pinPerformance: boolean = false, showDebugger: boolean = true,
+): readonly string[] {
   // Options mode is the only branch that keeps the options panels, alone over the live viewport.
   if (mode === 'options') return CHROME_PANELS;
   // Play strips the chrome AND every mode-specific panel. Simulate does not: nobody is possessed, so the
@@ -428,6 +446,9 @@ export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: b
       break;
   }
 
+  // The Debugger is for scripts: it is up while a game plays in a window (where a breakpoint stops it) or a
+  // script is open in a tab, and out of the way otherwise. See `syncDebugger`.
+  if (!showDebugger) hide('debugger');
   // The Add palettes build into the AUTHORED scene, which is not the one on screen while Simulating.
   if (simulating) hide(...ADD_PANELS);
   // The Sequencer previews and edits the authored scene too.
@@ -437,8 +458,14 @@ export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: b
 }
 
 export default function DockLayout() {
-  const { eventEmitter, editorMode, isPlayMode, isSimulating } = useCleoEngine();
+  const { eventEmitter, editorMode, isPlayMode, isSimulating, tabs } = useCleoEngine();
   const { pinPerformanceInPlay } = useEditorPrefs();
+  const windowPlaying = useWindowPlay().active;
+  const showDebugger = windowPlaying || tabs.some(t => t.kind === 'script');
+  // Read by applyRestriction through a ref, so the Debugger coming and going does not rebuild the whole tree:
+  // the effect after applyRestriction adds or closes that one panel.
+  const showDebuggerRef = useRef(showDebugger);
+  showDebuggerRef.current = showDebugger;
   const [api, setApi] = useState<DockviewApi | null>(null);
   // The controller's own memory of the last commit, not derived state: the effect needs the OUTGOING mode
   // to know which key to save the tree under before it swaps trees.
@@ -476,9 +503,10 @@ export default function DockLayout() {
       // The timeline is Sequencer mode's work surface.
       : editorMode === 'sequence' ? 'sequencer'
       : bottomTabRef.current;
-    const panel = dock.getPanel(want);
+    // The remembered tab may be the Debugger while it is out of the way: the Logger stands in for it.
+    const panel = dock.getPanel(want) ?? (want === 'debugger' ? dock.getPanel('logger') : undefined);
     // Read the group directly rather than activeBottomTab(), which only knows the two persisted ids.
-    if (panel && panel.group?.activePanel?.id !== want) panel.api.setActive();
+    if (panel && panel.group?.activePanel?.id !== panel.id) panel.api.setActive();
   }, [editorMode]);
 
   // Legacy cleanup only. The mode controller below owns every path that builds a tree and runs immediately
@@ -516,8 +544,23 @@ export default function DockLayout() {
    */
   const applyRestriction = useCallback((dock: DockviewApi) => {
     for (const id of Object.keys(PANEL_TITLES)) dock.getPanel(id)?.api.setTitle(panelTitle(id, editorMode));
-    for (const id of hiddenPanelIds(editorMode, isPlayMode, isSimulating, pinPerformanceInPlay)) dock.getPanel(id)?.api.close();
+    const hidden = hiddenPanelIds(editorMode, isPlayMode, isSimulating, pinPerformanceInPlay, showDebuggerRef.current);
+    for (const id of hidden) dock.getPanel(id)?.api.close();
+    syncDebugger(dock, !hidden.includes('debugger'));
   }, [editorMode, isPlayMode, isSimulating, pinPerformanceInPlay]);
+
+  // The Debugger comes and goes with window play and the script tabs, whatever the mode: add or close just that
+  // panel, without the rebuild a mode change does.
+  useEffect(() => {
+    if (!api) return;
+    withProgrammaticLayout(() => {
+      const hidden = hiddenPanelIds(editorMode, isPlayMode, isSimulating, pinPerformanceInPlay, showDebugger);
+      if (hidden.includes('debugger')) api.getPanel('debugger')?.api.close();
+      else syncDebugger(api, true);
+    });
+    // Only the flip: a mode change runs applyRestriction, which reads the same value through the ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, showDebugger]);
 
   // Mode/play controller. One path serves mode->mode, mode->play and play->mode: bank the outgoing mode's
   // arrangement, put the incoming mode's tree up, then restrict it. applyRestriction must run even on a
@@ -633,11 +676,12 @@ export default function DockLayout() {
   }, [api]);
 
   // A double-clicked mask or pose opens in the rig editor: bring up the tab that edits it. Which item is
-  // focused inside that tab is RigContext's `focus`, which outlives the panel being mounted.
+  // focused inside that tab is RigContext's `focus`, which outlives the panel being mounted. A character's
+  // Ragdoll row asks for the Ragdoll tab the same way.
   useEffect(() => {
     if (!api) return;
     const onFocus = (e: { kind?: string } | undefined) => {
-      const tab = e?.kind === 'boneMask' ? 'rigBoneMasks' : e?.kind === 'pose' ? 'properties' : null;
+      const tab = e?.kind === 'boneMask' ? 'rigBoneMasks' : e?.kind === 'pose' ? 'properties' : e?.kind === 'ragdoll' ? 'rigRagdoll' : null;
       if (!tab) return;
       if (keyRef.current === 'rig' && !playingRef.current) api.getPanel(tab)?.api.setActive();
       else pendingRigTabRef.current = tab;

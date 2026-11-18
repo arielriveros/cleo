@@ -1,4 +1,5 @@
 import { Scene, LightNode, DirectionalLight } from 'cleo';
+import type { Node } from 'cleo';
 import { ensureEditorCamera } from './createEmptyScene';
 import { applyPreviewEnvironment } from './previewEnvironment';
 
@@ -26,4 +27,22 @@ export function createAssetEditScene(scene: Scene, silently?: <T>(fn: () => T) =
   scene.addNode(light);
 
   return applyPreviewEnvironment(scene, { silently });
+}
+
+/**
+ * Take the viewing light out of an asset-edit scene whose content has a sun of its own (an Environment template):
+ * the first directional light is the one the sky and the shadows use, and the viewing light was added first.
+ */
+export function yieldPreviewLight(scene: Scene, content: Node | null | undefined): void {
+  if (!content) return;
+  const stack: Node[] = [content];
+  let sun = false;
+  while (stack.length && !sun) {
+    const n = stack.pop()!;
+    if (n instanceof LightNode && n.light instanceof DirectionalLight) sun = true;
+    stack.push(...(n.children as Node[]));
+  }
+  if (!sun) return;
+  const light = scene.root.children.find(n => n.name === PREVIEW_LIGHT_NAME);
+  if (light) scene.removeNode(light);
 }

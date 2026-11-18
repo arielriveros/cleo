@@ -5,10 +5,10 @@ import { Node } from "./node";
 import { CHARACTER_PRESETS, type CharacterPreset } from "./characterPresets";
 import { applyPreset } from "../../presets";
 import {
-    createLocomotionState, locomotionTuning, stepLocomotion, FACING_MODES,
+    createLocomotionState, locomotionTuning, stepLocomotion, FACING_MODES, MOVE_DIR_SOURCES,
 } from "../../control/locomotion";
 import type {
-    FacingMode, LocomotionSense, LocomotionState, LocomotionTuning,
+    FacingMode, LocomotionSense, LocomotionState, LocomotionTuning, MoveDirSource,
 } from "../../control/locomotion";
 import { consumeRequest, createIntent, decayRequests } from "../../control/intent";
 import type { ControlIntent } from "../../control/intent";
@@ -119,10 +119,24 @@ export class CharacterNode extends Node {
     public turnReleaseAngle: number = 10;
     /** Seconds the aim must hold past the threshold before a 90 turn engages, so a sweep to 180 plays the 180. */
     public turnSettleSeconds: number = 0.12;
+    /** Seconds the aim must hold past 135 degrees before the 180 turn engages. 0 engages it at once. */
+    public turnSettleFarSeconds: number = 0;
     /** Seconds of smoothing on {@link moveDir}, so a blend probe glides between strafes. */
     public directionSmoothing: number = 0.12;
     /** Units/s² the planar speed ramps at. 0 snaps, which is what a keyboard controller usually wants. */
     public acceleration: number = 0;
+    /**
+     * Per second: how fast a moving body's velocity turns toward a new direction, keeping its speed (Unreal's
+     * ground friction, 8 there). 0 leaves turning to {@link acceleration}, which is slower and dips the speed.
+     */
+    public turnFriction: number = 0;
+    /** What {@link moveDir} reads: the input's direction, or the body's actual travel. See `MoveDirSource`. */
+    public moveDirSource: MoveDirSource = 'input';
+    /**
+     * Set by the animator while its state holds this character still (`AnimationState.holdMovement`): the
+     * character then stops steering, and only root motion moves it. Runtime only, never saved.
+     */
+    public animationHold: boolean = false;
     /** 0..1 of steering authority while airborne. */
     public airControl: number = 1;
     /** Seconds after walking off an edge during which a jump still launches. */
@@ -198,8 +212,11 @@ export class CharacterNode extends Node {
             turnThreshold: this.turnThreshold,
             turnReleaseAngle: this.turnReleaseAngle,
             turnSettleSeconds: this.turnSettleSeconds,
+            turnSettleFarSeconds: this.turnSettleFarSeconds,
             directionSmoothing: this.directionSmoothing,
             acceleration: this.acceleration,
+            turnFriction: this.turnFriction,
+            moveDirSource: this.moveDirSource,
             airControl: this.airControl,
             coyoteSeconds: this.coyoteSeconds,
             jumpLockoutSeconds: this.jumpLockoutSeconds,
@@ -235,7 +252,12 @@ export class CharacterNode extends Node {
             return;
         }
 
-        const out = stepLocomotion(this._intent, this._sense(delta), this.tuning, this._locomotion);
+        // Held by the animation: no move, stopped at once, facing left alone. The intent itself is untouched, so
+        // a jump request still waits in it for when the hold ends.
+        const held = this.animationHold;
+        const intent = held ? { ...this._intent, move: [0, 0] as [number, number], sprint: false } : this._intent;
+        const tuning = held ? { ...this.tuning, acceleration: 0, facingMode: 'none' as const } : this.tuning;
+        const out = stepLocomotion(intent, this._sense(delta), tuning, this._locomotion);
         this._locomotion = out.next;
 
         this.velocity = out.velocity as [number, number, number];
@@ -338,8 +360,11 @@ export class CharacterNode extends Node {
             turnThreshold: this.turnThreshold,
             turnReleaseAngle: this.turnReleaseAngle,
             turnSettleSeconds: this.turnSettleSeconds,
+            turnSettleFarSeconds: this.turnSettleFarSeconds,
             directionSmoothing: this.directionSmoothing,
             acceleration: this.acceleration,
+            turnFriction: this.turnFriction,
+            moveDirSource: this.moveDirSource,
             airControl: this.airControl,
             coyoteSeconds: this.coyoteSeconds,
             jumpBufferSeconds: this.jumpBufferSeconds,
@@ -361,8 +386,11 @@ export class CharacterNode extends Node {
         node.turnThreshold = finiteOr(json.turnThreshold, node.turnThreshold);
         node.turnReleaseAngle = finiteOr(json.turnReleaseAngle, node.turnReleaseAngle);
         node.turnSettleSeconds = finiteOr(json.turnSettleSeconds, node.turnSettleSeconds);
+        node.turnSettleFarSeconds = finiteOr(json.turnSettleFarSeconds, node.turnSettleFarSeconds);
         node.directionSmoothing = finiteOr(json.directionSmoothing, node.directionSmoothing);
         node.acceleration = finiteOr(json.acceleration, node.acceleration);
+        node.turnFriction = finiteOr(json.turnFriction, node.turnFriction);
+        if ((MOVE_DIR_SOURCES as readonly string[]).includes(json.moveDirSource)) node.moveDirSource = json.moveDirSource;
         node.airControl = finiteOr(json.airControl, node.airControl);
         node.coyoteSeconds = finiteOr(json.coyoteSeconds, node.coyoteSeconds);
         node.jumpBufferSeconds = finiteOr(json.jumpBufferSeconds, node.jumpBufferSeconds);

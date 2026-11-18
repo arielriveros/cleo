@@ -217,7 +217,7 @@ types under their historical `Animation*` names.
 | Blend spaces | `fieldWeights`, `rateScaleOf`, `phaseOffsetOf`, `coincidentSamples`, `axisSmoothing`, `axisDeadzone`, `axisWrapSpan`, `weightSmoothing`, `DEFAULT_AXIS_SMOOTHING`, `DEFAULT_WEIGHT_SMOOTHING`, and the types `AnimationField`, `AnimationFieldMode`, `AnimationFieldAxis`, `AnimationFieldSample`, `FieldWeight`. |
 | Retargeting | `remapAnimationToSkin`, `buildBoneMapping`, `applyManualMapping`, `mappingReport`, `retargetAnimation`, `describeRetarget`, `humanoidRigOf`, `normalizeBoneName`, `humanoidSlotOf`, plus `AnimationCompatibility`, `HierarchyMismatch`, `BoneMapping`, `BoneMappingEntry`, `BoneMatchKind`. |
 | Skeleton | `skeletonTopology`, `isAncestorJoint`, `nearestCommonAncestor`, `SkeletonTopology` *(type)*. |
-| Foot IK | `solveTwoBone`, `applyTwoBone`, `ikTuning`, `validateIkRig`, `swingReleaseWeight`, `IK_DEFAULTS`, `DEFAULT_MAX_REACH`, and the types `IkRig`, `IkFootChain`, `IkRigTuning`, `IkRigProblem`, `IkRigValidation`, `TwoBoneSolve`, `TwoBoneResult`. |
+| Foot IK | `solveTwoBone`, `applyTwoBone`, `ikTuning`, `validateIkRig`, `swingReleaseWeight`, `stepFootLock` (one frame of foot locking), the foot-lock windows (`detectFootLockWindows`, `footLockAt`, `footLockKey`, `normalizeFootLockSpans`, `humanoidFeet`, the type `FootLockWindows`), `IK_DEFAULTS`, `DEFAULT_MAX_REACH`, `FOOT_LOCK_MAX_TWIST`, and the types `IkRig`, `IkFootChain`, `IkRigTuning`, `IkRigProblem`, `IkRigValidation`, `TwoBoneSolve`, `TwoBoneResult`, `FootLockStep`. |
 
 ## Graphics
 

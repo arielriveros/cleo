@@ -173,7 +173,7 @@ disturb your layout.
 | Centre | **Viewport** (locked) |
 | Left rail (20%) | The *Scene Elements* or *UI Elements* palette (both in a template) above the *Scene* tree |
 | Right rail (25%) | *Properties*, *Behaviors*, plus any mode-specific panels |
-| Bottom strip (30%) | *Logger*, *Assets*, the *Debugger*, *Saves*, the *Sequencer* (Sequencer mode), and in animation-field mode the *Blend Space* plot |
+| Bottom strip (30%) | *Logger*, *Assets*, the *Debugger* (while a game plays in a window or a script is open), *Saves*, the *Sequencer* (Sequencer mode), and in animation-field mode the *Blend Space* plot |
 
 ### Every panel
 
@@ -195,7 +195,7 @@ disturb your layout.
 | **Behaviors** | Script slot, and the node's values for the script's attributes. |
 | **Logger** | The console. |
 | **Assets** | The asset explorer. |
-| **Debugger** | Stop, step and continue a game playing in a window; its call stack, variables and every breakpoint. Desktop app. See [Debugging scripts](debugging.md). |
+| **Debugger** | Stop, step and continue a game playing in a window; its call stack, variables and every breakpoint. Shown while a game plays in a window or a script is open in a tab. Desktop app. See [Debugging scripts](debugging.md). |
 | **Saves** | The saves the game wrote while it played in the editor, newest first: inspect one, play from it, export, import or delete. See [Saves](saves.md). |
 | **Sequencer** | The timeline of the sequence asset the tab edits: tracks, sections and keys, a scrubbable preview over the open scene. Sequencer mode only. See [Sequencer](sequencer.md). |
 | **Clips** | The animator's clips (animator mode). |
@@ -210,6 +210,7 @@ disturb your layout.
 | **Layers** | The tilemap layer stack. |
 | **Landscape Tools** | The brush, its tools and their settings (landscape mode). |
 | **Landscape Layers** | The landscape's base and paint layer stack (landscape mode). |
+| **Foot Placement** | The skeleton's foot placement: its legs, their tuning, foot locking and how a lock blends in and out (rig tab, beside Skeleton). See [Foot placement](animation.md#foot-placement). |
 | **Ragdoll** | The skeleton's ragdoll — its parts, their joints, and a Test drop (rig tab, beside Skeleton). See [The Ragdoll panel](physics.md#the-ragdoll-panel-rig-editor). |
 | **Bone Masks** | The skeleton's bone masks, which animator layers and action slots pick from (rig tab, beside Skeleton). See [Bone masks](animation.md#bone-masks). |
 | **Engine** | Renderer, Performance and Runtime pages (options mode). |

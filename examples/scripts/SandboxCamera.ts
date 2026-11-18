@@ -1,0 +1,75 @@
+import { CameraRigNode, MathUtils, attribute, lerp } from 'cleo'
+
+/**
+ * The Sandbox camera: one Camera Rig with two framings. It sits over the shoulder, and pulls out to third person
+ * while the character sprints. Attach to the character's **Camera Rig**.
+ *
+ * The boom (arm length, the side offset of the camera, the height it orbits at) eases between the two over
+ * `switchSeconds`, starting and ending gently either way. Where the camera looks stays the Controller's: it turns the rig from the Look input, and this
+ * script never touches yaw or pitch. No action switches the framing; the character's sprint does. It is read from
+ * the Character the rig belongs to (the one under the Collider above it): its script's `sprinting`.
+ *
+ * The framing distances are the character's (a taller one wants a higher pivot and a longer arm), so they are
+ * public: each copy of the Player template can set its own. How the switch feels is the behavior's, so it is
+ * private: set once, here.
+ */
+export default class SandboxCameraNode extends CameraRigNode {
+    /** Third person (while sprinting): how far behind the character the camera sits (m). */
+    @attribute('Framing', { min: 0.5, max: 12, step: 0.05 })
+    public thirdPersonArm: number = 3.4
+
+    /** Over the shoulder: how far behind (m). */
+    @attribute('Framing', { min: 0.5, max: 12, step: 0.05 })
+    public shoulderArm: number = 1.9
+
+    /** Over the shoulder: how far to the right of the character the camera sits (m). */
+    @attribute('Framing', { min: 0, max: 2, step: 0.05 })
+    public shoulderOffset: number = 0.5
+
+    /** How high over the character's feet the camera orbits (m). */
+    @attribute('Framing', { min: 0, max: 4, step: 0.05 })
+    public pivotHeight: number = 1.45
+
+    /** Seconds the switch between the two framings takes, either way. */
+    @attribute('Switch', { min: 0, max: 5, step: 0.05 })
+    private switchSeconds: number = 2
+
+    /** Seconds the third-person framing stays after a sprint ends, so letting go for a moment does not swing it. */
+    @attribute('Switch', { min: 0, max: 2, step: 0.05 })
+    private sprintHold: number = 0.4
+
+    private _sinceSprint: number = 1e9
+    /** Where the switch is: 0 over the shoulder, 1 third person. It moves at an even rate; the framing eases. */
+    private _mix: number = 0
+
+    onStart() {
+        // Start framed, not easing in from the rig's authored values.
+        this._frame(0, true)
+    }
+
+    onUpdate(delta: number) {
+        const character = this.collider?.character as unknown as { sprinting?: boolean } | null | undefined
+        this._sinceSprint = character?.sprinting ? 0 : this._sinceSprint + delta
+        this._frame(delta, false)
+    }
+
+    /** Whether the camera is (heading) out to third person: while sprinting, and `sprintHold` after. */
+    get wide(): boolean {
+        return this._sinceSprint <= this.sprintHold
+    }
+
+    private _frame(delta: number, snap: boolean) {
+        const target = this.wide ? 1 : 0
+        const step = snap || this.switchSeconds <= 0 ? 1 : delta / this.switchSeconds
+        this._mix = target > this._mix ? Math.min(target, this._mix + step) : Math.max(target, this._mix - step)
+        // Eased in and out: the boom sets off and arrives gently. A switch reversed half way turns back from where
+        // it is.
+        const k = MathUtils.smoothstep(0, 1, this._mix)
+        this.armLength = lerp(this.shoulderArm, this.thirdPersonArm, k)
+        // Socket +X is the rig's left: the right shoulder is negative.
+        this.socketOffset[0] = lerp(-this.shoulderOffset, 0, k)
+        this.socketOffset[1] = lerp(0.1, 0.15, k)
+        this.socketOffset[2] = 0
+        this.followOffset[1] = lerp(this.pivotHeight + 0.05, this.pivotHeight, k)
+    }
+}

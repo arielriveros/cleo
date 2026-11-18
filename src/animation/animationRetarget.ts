@@ -872,11 +872,13 @@ export function retargetAnimation(
 // `rootMotion` is a property of the CLIP, not of the skeleton it is playing on, so it must survive the
 // retarget. It used to be dropped, which silently disabled root motion on every shared `.anim` clip that had
 // a source skin. `assetId` is deliberately NOT carried: the resolve layer stamps it (see animationResolve.ts),
-// and only a clip that came from an asset should have one. Clip-owned event markers are timing, not bones.
+// and only a clip that came from an asset should have one. Clip-owned event markers are timing, not bones, and so
+// are foot-lock windows: keyed by humanoid slot, they mean the same foot on the target skeleton.
 function finishClip(clip: Animation, samplers: AnimationSampler[], channels: AnimationChannel[]): Animation {
     return {
         name: clip.name, samplers, channels, rootMotion: clip.rootMotion,
         ...(clip.events?.length ? { events: clip.events.map(e => ({ ...e })) } : {}),
+        ...(clip.footLocks ? { footLocks: Object.fromEntries(Object.entries(clip.footLocks).map(([k, v]) => [k, v.map(s => [s[0], s[1]] as [number, number])])) } : {}),
     };
 }
 

@@ -252,6 +252,9 @@ A template is a saved node subtree — a prefab.
 
 **Placing one:** drag it from Assets into the viewport or the tree.
 
+**In the tree** a placed instance is one row, drawn with the template icon rather than its root's type; hover
+the icon for the template's name and what its root is. The row's ✎ opens the template.
+
 **Editing one:** open the template asset, which opens [Template mode](modes.md) — a throwaway scene
 rooted at the template's root.
 
@@ -262,13 +265,31 @@ rooted at the template's root.
 **Overrides — what each instance keeps of its own.** Besides its transform, an instance may differ
 from its template in:
 - the **name of its root** (rename it in the tree or the inspector; the children keep the template's names);
-- the **value of any script attribute**, on its root or on any node inside it (edit it in the Behaviors panel).
+- the **value of a public script attribute**, on its root or on any node inside it (edit it in the
+  Behaviors panel).
 
 These are recorded on the instance as **overrides** and replayed whenever the instance is rebuilt from
 its template, so editing the template never wipes them. An overridden value shows a **revert** marker
 that puts the template's value back; **Revert all** in the template-instance banner drops them all. A
 field you have not overridden follows the template: change its default in the template and every
 instance that kept the default changes too.
+
+**Public attributes** — which script attributes a placement may set is the script's call, made by each
+field's own accessor. A `public` attribute (or one with no modifier) belongs to the **character**: every
+placement sets its own, like a Player's walk speed or its camera's arm length. A `private` or `protected`
+one belongs to the **behavior**: it is set once, in the template, for every placement, like how the stick
+feels or how long a camera switch takes. On an instance the private rows are shown but disabled.
+
+```ts
+@attribute('Framing') public shoulderArm: number = 1.9     // each Player sets its own
+@attribute('Switch') private switchSeconds: number = 0.35  // set in the template
+```
+
+Selecting an instance's **root** shows, in the Behaviors panel after the root's own behavior, a section
+for every node inside it whose behavior has public attributes, headed with that node's path and its
+script (`Player/Camera Rig · SandboxCamera`). So a character's whole per-placement set is edited in one
+place, without selecting the nodes that carry it; each value is an override like any other, with its
+revert marker. A template instance nested inside another is left out: select it to set its own.
 
 Placed instances are rebuilt when the template changes, with fresh node ids and internal references
 remapped so each copy points at its own parts. This is why anything that references a node inside a

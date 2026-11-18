@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, Handle, Position,
   MarkerType, useNodesState, useEdgesState, useReactFlow,
@@ -29,6 +29,14 @@ import { MenuItem } from '@cleo/app-kit/ui'
  * `FloatingEdge` draws it as a single line for one direction or two parallel lines for both. Deleting
  * an edge therefore removes both directions; dropping just one is the sidebar's job. This mirrors how
  * an author thinks about a pair of states rather than how the data is stored.
+ *
+ * ## Ported nodes
+ *
+ * A node with `ports` (a state GROUP standing for several states) draws a row per port, an input on its
+ * left for each outside node its lines come from and an output on its right for each one they go to, plus
+ * one handle each way for a new connection. A link that names a `sourceHandle`/`targetHandle` is drawn
+ * handle to handle instead of floating along the borders, so a group's lines leave from the row that says
+ * where they go.
  */
 
 const NODE_W = 156
@@ -64,6 +72,17 @@ export interface GraphNodeModel {
   badgeTitle?: string
   badgeTone?: BadgeTone
   /**
+   * Draw this node as a GROUP: its rows of ports instead of a subtitle and badge. Inputs on the left,
+   * outputs on the right; each port's `id` is its handle's.
+   */
+  ports?: { inputs: GraphPort[]; outputs: GraphPort[] }
+  /** False: the right-click menu offers no "Set as entry" for this node (a group, a stand-in). */
+  entryable?: boolean
+  /** False keeps a drag from moving it for good: it springs back on the next render (a stand-in). */
+  draggable?: boolean
+  /** What "Delete …" calls this node in its menu, when not the canvas's noun. */
+  noun?: string
+  /**
    * What KIND of thing this node is, for styling only.
    *
    * The fuzzy canvas needs it: a variable and a rule are both nodes there, and telling them apart by
@@ -73,7 +92,15 @@ export interface GraphNodeModel {
   kind?: GraphNodeKind
 }
 
-export type GraphNodeKind = 'default' | 'accent' | 'muted'
+/** `proxy`: a stand-in for something drawn elsewhere (an outside state inside an opened group). */
+export type GraphNodeKind = 'default' | 'accent' | 'muted' | 'proxy'
+
+export interface GraphPort {
+  /** The handle id. */
+  id: string
+  label: string
+  title?: string
+}
 
 export interface GraphLinkModel {
   a: string
@@ -82,6 +109,28 @@ export interface GraphLinkModel {
   backward: boolean
   /** Short summary of the gate, drawn on the line. */
   label: string
+  /** The edge's identity when `a|b` is not unique (several lines join one pair) or not what it stands for. */
+  key?: string
+  /** The node ids it joins, when they are not `a`/`b` (a stand-in node for an outside state). */
+  nodeA?: string
+  nodeB?: string
+  /** Attach to these handles (a group's ports) instead of floating along the node borders. */
+  sourceHandle?: string
+  targetHandle?: string
+  /** Drawn dashed: a group's own transition. */
+  dashed?: boolean
+  /** False keeps Delete from removing it (a line that stands for several transitions). Default true. */
+  deletable?: boolean
+}
+
+/** An extra row of the right-click menu: the caller's own action on a node. */
+export interface GraphMenuItem {
+  label: string
+  icon?: ReactNode
+  title?: string
+  danger?: boolean
+  disabled?: boolean
+  onClick(): void
 }
 
 export interface MachineGraphProps {
@@ -91,13 +140,34 @@ export interface MachineGraphProps {
   activeId?: string | null
   selectedNode?: string | null
   selectedLink?: { a: string; b: string } | null
+  /** Highlights the link with this `key`; wins over `selectedLink` for links that have a key. */
+  selectedLinkKey?: string | null
 
   onMoveNode(id: string, x: number, y: number): void
+  /**
+   * Every node a drag moved, at once (a multi-selection dragged together). Without it, `onMoveNode` is
+   * called once per node.
+   */
+  onMoveNodes?(moves: { id: string; x: number; y: number }[]): void
   onConnect(from: string, to: string): void
-  /** One call, so deleting a node and the edges it cascades is a single atomic update. */
-  onDelete(nodeIds: string[], links: [string, string][]): void
+  /**
+   * One call, so deleting a node and the edges it cascades is a single atomic update. `keys` are the
+   * `key`s of the deleted links that have one.
+   */
+  onDelete(nodeIds: string[], links: [string, string][], keys?: string[]): void
   onSelectNode(id: string | null): void
-  onSelectLink(a: string, b: string): void
+  onSelectLink(a: string, b: string, key?: string): void
+  /** A node was double-clicked (a group opens). */
+  onNodeDoubleClick?(id: string): void
+  /**
+   * What the canvas is showing (a layer, a group opened in it). When it changes the view is fitted to the new
+   * nodes: a group's states were laid out for the whole graph, so they open spread across it otherwise.
+   */
+  viewKey?: string
+  /** Every node now selected, a multi-selection included (Ctrl+click, Shift+drag a box). */
+  onSelectionChange?(ids: string[]): void
+  /** Rows the right-click menu adds for a node, after the canvas's own. */
+  menuItems?(id: string): GraphMenuItem[]
   onAddNode(x: number, y: number): void
   onSetEntry(id: string): void
   onRemoveNode(id: string): void
@@ -120,6 +190,7 @@ export interface MachineGraphProps {
 }
 
 interface NodeData extends Record<string, unknown> {
+  ports?: { inputs: GraphPort[]; outputs: GraphPort[] }
   label: string
   subtitle: string
   subtitleMissing: boolean
@@ -142,6 +213,7 @@ const KIND_CLASS: Record<GraphNodeKind, string> = {
   default: 'bg-control',
   accent: 'bg-primary/25',
   muted: 'bg-surface-raised',
+  proxy: 'bg-surface-sunken border-dashed opacity-80',
 }
 
 const TONE_CLASS: Record<BadgeTone, string> = {
@@ -186,14 +258,60 @@ function GraphNode({ data, selected }: NodeProps) {
   )
 }
 
-const nodeTypes = { state: GraphNode }
+/**
+ * A group: its name and member count, then a row per port. Inputs sit on the left edge, outputs on the right;
+ * the header's own pair of handles takes a NEW connection (into the group, out of the group).
+ */
+function GroupNode({ data, selected }: NodeProps) {
+  const d = data as NodeData
+  const border = d.active ? 'border-highlight' : selected ? 'border-selected' : 'border-primary/60'
+  const inputs = d.ports?.inputs ?? [], outputs = d.ports?.outputs ?? []
+  const rows = Math.max(inputs.length, outputs.length)
+  const handle = '!bg-primary !w-2 !h-2'
+  return (
+    <div className={`rounded-md border-2 ${border} bg-surface-raised text-fg shadow-panel`} style={{ width: NODE_W + 24 }}>
+      <div className='relative px-2 py-1 border-b border-border flex items-center gap-1 bg-primary/15'>
+        <Handle type='target' id='in' position={Position.Left} className={handle} title='Into the group: enters its entry state' />
+        <GroupGlyph />
+        <span className='text-ui font-semibold truncate flex-1' title={d.label}>{d.label}</span>
+        <span className='text-ui-2xs text-dim shrink-0' title={d.subtitle}>{d.badge}</span>
+        <Handle type='source' id='out' position={Position.Right} className={handle} title='Out of the group: fires from any of its states' />
+      </div>
+      {rows === 0
+        ? <div className='px-2 py-1 text-ui-xs text-dim'>{d.subtitle}</div>
+        : Array.from({ length: rows }, (_, k) => {
+            const i = inputs[k], o = outputs[k]
+            return (
+              <div key={k} className='relative flex items-center gap-1 px-2 text-ui-2xs text-muted' style={{ height: PORT_ROW }}>
+                <span className='flex-1 truncate' title={i?.title}>{i?.label ?? ''}</span>
+                <span className='flex-1 truncate text-right' title={o?.title}>{o?.label ?? ''}</span>
+                {i && <Handle type='target' id={i.id} position={Position.Left} className='!bg-control-hover !w-1.5 !h-1.5' />}
+                {o && <Handle type='source' id={o.id} position={Position.Right} className='!bg-control-hover !w-1.5 !h-1.5' />}
+              </div>
+            )
+          })}
+    </div>
+  )
+}
+
+/** Height of one port row: the handle sits in the middle of it. */
+const PORT_ROW = 16
+
+/** Stacked boxes: a group of states. */
+export const GroupGlyph = () => (
+  <svg viewBox='0 0 24 24' className='w-3.5 h-3.5 shrink-0 text-primary' fill='none' stroke='currentColor' strokeWidth='1.8' aria-hidden>
+    <rect x='3' y='7' width='13' height='10' rx='2' /><path d='M8 4h11a2 2 0 0 1 2 2v9' />
+  </svg>
+)
+
+const nodeTypes = { state: GraphNode, group: GroupNode }
 const edgeTypes = { transition: FloatingEdge }
 
 function Flow(props: MachineGraphProps) {
   const {
-    nodes: model, links, activeId = null, selectedNode = null, selectedLink = null,
-    onMoveNode, onConnect, onDelete, onSelectNode, onSelectLink, onAddNode, onSetEntry, onRemoveNode,
-    toolbar, hint, allowEntry = true, nodeNoun = 'state',
+    nodes: model, links, activeId = null, selectedNode = null, selectedLink = null, selectedLinkKey = null,
+    onMoveNode, onMoveNodes, onConnect, onDelete, onSelectNode, onSelectLink, onAddNode, onSetEntry, onRemoveNode,
+    onNodeDoubleClick, onSelectionChange, menuItems, toolbar, hint, allowEntry = true, nodeNoun = 'state', viewKey,
   } = props
 
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([])
@@ -205,16 +323,32 @@ function Flow(props: MachineGraphProps) {
     minimapMask: token('--scrim', 0.5),
     minimapNode: token('--control-hover'),
   }), [])
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, fitView } = useReactFlow()
+
+  // A new view (another layer, a group opened or left): fit it, once its nodes have been measured.
+  const viewKeyRef = useRef(viewKey)
+  useEffect(() => {
+    if (viewKeyRef.current === viewKey) return
+    viewKeyRef.current = viewKey
+    let raf = requestAnimationFrame(() => { raf = requestAnimationFrame(() => { void fitView({ padding: 0.2, duration: 200 }) }) })
+    return () => cancelAnimationFrame(raf)
+  }, [viewKey, fitView])
 
   useEffect(() => {
-    setNodes(model.map(n => ({
+    // A rebuild keeps a multi-selection that holds the selected node (a group drag just committed);
+    // a selection moved elsewhere from outside the canvas starts afresh.
+    setNodes(prev => {
+      const was = new Set(prev.filter(n => n.selected).map(n => n.id))
+      const keep = selectedNode !== null && was.has(selectedNode)
+      return model.map(n => ({
       id: n.id,
-      type: 'state',
+      type: n.ports ? 'group' : 'state',
       position: { x: n.x, y: n.y },
-      selected: selectedNode === n.id,
+      selected: selectedNode === n.id || (keep && was.has(n.id)),
       deletable: n.deletable ?? true,
+      draggable: n.draggable ?? true,
       data: {
+        ports: n.ports,
         label: n.label ?? n.id,
         subtitle: n.subtitle ?? '',
         subtitleMissing: !!n.subtitleMissing,
@@ -231,7 +365,8 @@ function Flow(props: MachineGraphProps) {
         chipIcon: n.chipIcon,
         chipsTitle: n.chipsTitle,
       } as NodeData,
-    })))
+    }))
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, selectedNode])
 
@@ -242,22 +377,30 @@ function Flow(props: MachineGraphProps) {
     const labelFill = token('--text')
     const labelBg = token('--bg', 0.85)
     setEdges(links.map(l => {
-      const isSelected = !!selectedLink
-        && ((selectedLink.a === l.a && selectedLink.b === l.b)
-          || (selectedLink.a === l.b && selectedLink.b === l.a))
+      const isSelected = l.key !== undefined && selectedLinkKey !== null
+        ? selectedLinkKey === l.key
+        : !!selectedLink
+          && ((selectedLink.a === l.a && selectedLink.b === l.b)
+            || (selectedLink.a === l.b && selectedLink.b === l.a))
+      const source = l.nodeA ?? l.a, target = l.nodeB ?? l.b
+      const ported = l.sourceHandle !== undefined || l.targetHandle !== undefined
       return {
-        id: `${l.a}|${l.b}`,
-        type: 'transition',
-        source: l.a,
-        target: l.b,
+        id: l.key ?? `${l.a}|${l.b}`,
+        // A ported line runs handle to handle (xyflow's own bezier); the rest float along the borders.
+        type: ported ? 'default' : 'transition',
+        source,
+        target,
+        ...(l.sourceHandle !== undefined ? { sourceHandle: l.sourceHandle } : {}),
+        ...(l.targetHandle !== undefined ? { targetHandle: l.targetHandle } : {}),
         label: l.label,
         selected: isSelected,
+        deletable: l.deletable ?? true,
         markerEnd: l.forward ? arrow : undefined,
         markerStart: l.backward ? arrow : undefined,
-        data: { a: l.a, b: l.b, forward: l.forward, backward: l.backward },
+        data: { a: l.a, b: l.b, key: l.key, forward: l.forward, backward: l.backward },
         // Light up whichever direction could actually fire from where the machine currently is.
-        animated: activeId === l.a ? l.forward : activeId === l.b ? l.backward : false,
-        style: { stroke: isSelected ? selectedStroke : undefined },
+        animated: activeId === source ? l.forward : activeId === target ? l.backward : false,
+        style: { stroke: isSelected ? selectedStroke : undefined, ...(l.dashed ? { strokeDasharray: '5 4' } : {}) },
         labelStyle: { fontSize: 10, fill: labelFill },
         labelBgStyle: { fill: labelBg },
         labelBgPadding: [4, 2] as [number, number],
@@ -265,7 +408,7 @@ function Flow(props: MachineGraphProps) {
       }
     }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [links, selectedLink, activeId])
+  }, [links, selectedLink, selectedLinkKey, activeId])
 
   // Patched in place rather than rebuilt, so the highlight cannot reset a drag in progress.
   useEffect(() => {
@@ -273,9 +416,13 @@ function Flow(props: MachineGraphProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId])
 
-  const handleDragStop = useCallback((_: unknown, node: RFNode) => {
-    onMoveNode(node.id, Math.round(node.position.x), Math.round(node.position.y))
-  }, [onMoveNode])
+  // Every node the drag moved: a multi-selection dragged together moves them all, not just the one grabbed.
+  const handleDragStop = useCallback((_: unknown, node: RFNode, dragged?: RFNode[]) => {
+    const all = dragged?.length ? dragged : [node]
+    const moves = all.map(n => ({ id: n.id, x: Math.round(n.position.x), y: Math.round(n.position.y) }))
+    if (onMoveNodes) onMoveNodes(moves)
+    else for (const m of moves) onMoveNode(m.id, m.x, m.y)
+  }, [onMoveNode, onMoveNodes])
 
   const handleConnect = useCallback((c: Connection) => {
     // A self-transition can never fire and draws as an invisible stub behind the node, so refuse it
@@ -286,10 +433,13 @@ function Flow(props: MachineGraphProps) {
 
   const handleDelete = useCallback(({ nodes: dn, edges: de }: { nodes: RFNode[]; edges: RFEdge[] }) => {
     const ids = dn.map(n => n.id)
+    // A keyed line says exactly what it stands for, so it is reported by key alone.
+    const keys = de.map(e => (e.data as { key?: string })?.key).filter((k): k is string => typeof k === 'string')
     const removed = de
+      .filter(e => typeof (e.data as { key?: string })?.key !== 'string')
       .map(e => [(e.data as { a?: string })?.a, (e.data as { b?: string })?.b] as [string, string])
       .filter(([a, b]) => typeof a === 'string' && typeof b === 'string')
-    if (ids.length || removed.length) onDelete(ids, removed)
+    if (ids.length || removed.length || keys.length) onDelete(ids, removed, keys)
   }, [onDelete])
 
   const handleNodeContextMenu = useCallback((e: React.MouseEvent, node: RFNode) => {
@@ -318,9 +468,16 @@ function Flow(props: MachineGraphProps) {
         onConnect={handleConnect}
         onDelete={handleDelete}
         onNodeClick={(_, node) => { onSelectNode(node.id); setMenu(null) }}
+        onNodeDoubleClick={(e, node) => {
+          if (!onNodeDoubleClick) return
+          // Not also a double-click on the canvas, which would add a state under the pointer.
+          e.stopPropagation()
+          onNodeDoubleClick(node.id)
+        }}
+        onSelectionChange={onSelectionChange ? ({ nodes: sel }) => onSelectionChange(sel.map(n => n.id)) : undefined}
         onEdgeClick={(_, edge) => {
-          const { a, b } = (edge.data ?? {}) as { a?: string; b?: string }
-          if (a && b) onSelectLink(a, b)
+          const { a, b, key } = (edge.data ?? {}) as { a?: string; b?: string; key?: string }
+          if (a && b) onSelectLink(a, b, key)
           setMenu(null)
         }}
         onNodeContextMenu={handleNodeContextMenu}
@@ -344,8 +501,10 @@ function Flow(props: MachineGraphProps) {
 
       {menu && entry && (
         <NodeMenu
-          id={menu.id} x={menu.x} y={menu.y} isEntry={!!entry.isEntry}
-          allowEntry={allowEntry} noun={nodeNoun}
+          id={entry.label ?? menu.id} x={menu.x} y={menu.y} isEntry={!!entry.isEntry}
+          allowEntry={allowEntry && entry.entryable !== false} noun={entry.noun ?? nodeNoun}
+          deletable={entry.deletable !== false}
+          extra={menuItems?.(menu.id) ?? []}
           onSetEntry={() => { onSetEntry(menu.id); setMenu(null) }}
           onRemove={() => { onRemoveNode(menu.id); setMenu(null) }}
           onClose={() => setMenu(null)} />
@@ -356,8 +515,9 @@ function Flow(props: MachineGraphProps) {
 
 /** Right-click menu on a node. Positioned in client space, so it is a sibling of the graph, not a child. */
 function NodeMenu(
-  { id, x, y, isEntry, allowEntry, noun, onSetEntry, onRemove, onClose }: {
+  { id, x, y, isEntry, allowEntry, noun, deletable, extra, onSetEntry, onRemove, onClose }: {
     id: string; x: number; y: number; isEntry: boolean; allowEntry: boolean; noun: string
+    deletable: boolean; extra: GraphMenuItem[]
     onSetEntry(): void; onRemove(): void; onClose(): void
   },
 ) {
@@ -378,7 +538,14 @@ function NodeMenu(
             {isEntry ? '▶ Entry state' : 'Set as entry'}
           </MenuItem>
         )}
-        <MenuItem danger onClick={onRemove}>Delete {noun}</MenuItem>
+        {extra.map(item => (
+          <MenuItem key={item.label} icon={item.icon} title={item.title} danger={item.danger} disabled={item.disabled}
+            className='disabled:hover:bg-transparent'
+            onClick={() => { item.onClick(); onClose() }}>
+            {item.label}
+          </MenuItem>
+        ))}
+        {deletable && <MenuItem danger onClick={onRemove}>Delete {noun}</MenuItem>}
       </div>
     </>
   )

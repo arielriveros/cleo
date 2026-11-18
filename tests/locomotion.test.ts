@@ -646,6 +646,30 @@ describe('facing and turn-in-place', () => {
         expect(requests[requests.length - 1]).toBe(1);
     });
 
+    it('waits turnSettleFarSeconds past 135 degrees, and engages at once there by default', () => {
+        /** Frames (at 60 fps) until the turn engages with the aim held at -170, and the clip it picks. */
+        const engage = (far?: number) => {
+            const t = tuning({ turnThreshold: 70, turnSettleSeconds: 1, ...(far === undefined ? {} : { turnSettleFarSeconds: far }) });
+            let state = createLocomotionState();
+            for (let i = 0; i < 120; i++) {
+                const intent = createIntent();
+                intent.aimYaw = -170;
+                const out = stepLocomotion(intent, sense(), t, state);
+                state = out.next;
+                if (out.turnRequest !== 0) return { frame: i, request: out.turnRequest };
+            }
+            return { frame: -1, request: 0 };
+        };
+        expect(engage()).toEqual({ frame: 0, request: 2 });
+        const waited = engage(0.35);
+        expect(waited.request).toBe(2);
+        expect(waited.frame).toBeGreaterThanOrEqual(19);
+        expect(waited.frame).toBeLessThanOrEqual(22);
+        // The near window may now be long, for a look-at character's head to turn first.
+        expect(tuning({ turnSettleSeconds: 3 }).turnSettleSeconds).toBe(3);
+        expect(tuning({ turnSettleSeconds: 9 }).turnSettleSeconds).toBe(5);
+    });
+
     it('forgets a pending turn when the aim comes back inside the threshold', () => {
         const t = tuning({ turnThreshold: 90, turnSettleSeconds: 0.12 });
         const out = createIntent(); out.aimYaw = -100;
@@ -780,5 +804,74 @@ describe('totality and purity', () => {
         odd.speedScale = NaN;
         const out = stepLocomotion(odd, sense({ up: [0, 0, 0], velocity: [1, 2, 3] }), tuning(), createLocomotionState());
         expect(out.velocity.every(Number.isFinite)).toBe(true);
+    });
+});
+
+// With an acceleration, a new direction has to be caught up with. Turn friction turns the velocity toward it,
+// keeping its speed (Unreal's ground friction); without it the ramp moves the velocity along the CHORD, which is
+// slow and dips the speed, and the body coasts on its old heading meanwhile. moveDirSource 'velocity' makes the
+// blend direction that real travel rather than the input, so the legs do not play a direction the body is not
+// going yet.
+describe('turning under acceleration', () => {
+    const heading = (v: number[]) => Math.atan2(v[0], v[2]) * 180 / Math.PI;
+    /** Run with the velocity fed back, the body facing +Z: the heading still to turn and the slowest speed seen. */
+    function turn(t: LocomotionTuning, frames: number, from: [number, number, number], intent: ControlIntent) {
+        let state = createLocomotionState(), velocity = from, slowest = Infinity;
+        let out = stepLocomotion(intent, sense({ velocity }), t, state);
+        for (let i = 0; i < frames; i++) {
+            out = stepLocomotion(intent, sense({ velocity }), t, state);
+            state = out.next;
+            velocity = [out.velocity[0], 0, out.velocity[2]];
+            slowest = Math.min(slowest, Math.hypot(...velocity));
+        }
+        return { velocity, slowest, out };
+    }
+
+    it('turns a quarter turn quickly and keeps the speed with friction, and coasts and slows without it', () => {
+        const left = moving(1, 0);   // world +X
+        const withFriction = turn(tuning({ walkSpeed: 4, acceleration: 11.3, turnFriction: 8 }), 15, [0, 0, 4], left);
+        const without = turn(tuning({ walkSpeed: 4, acceleration: 11.3 }), 15, [0, 0, 4], left);
+        // A quarter of a second in.
+        expect(90 - heading(withFriction.velocity)).toBeLessThan(15);
+        expect(withFriction.slowest).toBeGreaterThan(4 * 0.9);
+        expect(90 - heading(without.velocity)).toBeGreaterThan(35);
+        expect(without.slowest).toBeLessThan(4 * 0.75);
+    });
+
+    it('never turns a reversal: it brakes through it exactly as without friction', () => {
+        const back = moving(0, -1);
+        const a = stepLocomotion(back, sense({ velocity: [0, 0, 4] }), tuning({ walkSpeed: 4, acceleration: 11.3, turnFriction: 8 }), createLocomotionState());
+        const b = stepLocomotion(back, sense({ velocity: [0, 0, 4] }), tuning({ walkSpeed: 4, acceleration: 11.3 }), createLocomotionState());
+        expect(a.velocity).toEqual(b.velocity);
+    });
+
+    it('is off by default, and does nothing without an acceleration (the step snaps)', () => {
+        const left = moving(1, 0);
+        const plain = stepLocomotion(left, sense({ velocity: [0, 0, 4] }), tuning({ walkSpeed: 4, acceleration: 11.3 }), createLocomotionState());
+        const off = stepLocomotion(left, sense({ velocity: [0, 0, 4] }), tuning({ walkSpeed: 4, acceleration: 11.3, turnFriction: 0 }), createLocomotionState());
+        expect(off.velocity).toEqual(plain.velocity);
+        const snap = stepLocomotion(left, sense({ velocity: [0, 0, 4] }), tuning({ walkSpeed: 4, turnFriction: 8 }), createLocomotionState());
+        expect(snap.velocity[0]).toBeCloseTo(4, 6);
+        expect(snap.velocity[2]).toBeCloseTo(0, 6);
+        expect(LOCOMOTION_DEFAULTS.turnFriction).toBe(0);
+        expect(LOCOMOTION_DEFAULTS.moveDirSource).toBe('input');
+    });
+
+    it('reads moveDir from the travel with moveDirSource velocity, and from the input by default', () => {
+        const left = moving(1, 0);   // +90 for a body facing +Z
+        const base = { walkSpeed: 4, acceleration: 11.3, directionSmoothing: 0 };
+        const byInput = stepLocomotion(left, sense({ velocity: [0, 0, 4] }), tuning(base), createLocomotionState());
+        const byTravel = stepLocomotion(left, sense({ velocity: [0, 0, 4] }), tuning({ ...base, moveDirSource: 'velocity' }), createLocomotionState());
+        expect(byInput.moveDir).toBeCloseTo(90, 5);
+        // Still travelling almost straight ahead: a degree or two to the left.
+        expect(byTravel.moveDir).toBeGreaterThan(0);
+        expect(byTravel.moveDir).toBeLessThan(5);
+        expect(byTravel.moveDir).toBeCloseTo(heading(byTravel.velocity), 5);
+    });
+
+    it('lets the input stand in for the direction while setting off', () => {
+        const left = moving(1, 0);
+        const out = stepLocomotion(left, sense(), tuning({ walkSpeed: 4, acceleration: 11.3, directionSmoothing: 0, moveDirSource: 'velocity' }), createLocomotionState());
+        expect(out.moveDir).toBeCloseTo(90, 5);
     });
 });

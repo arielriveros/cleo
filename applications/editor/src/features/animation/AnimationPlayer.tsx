@@ -3,6 +3,7 @@ import { useCleoEngine } from '../EngineContext'
 import { getAnimationTarget } from './skeleton'
 import { useStateMachine } from './StateMachineContext'
 import ClipEventsTrack, { TRACK_GUTTER, TRACK_TAIL } from './ClipEventsTrack'
+import { rememberPreviewHome, returnPreviewHome } from '../clip/previewHome'
 import { Button, NumberInput, Select, Toggle, cn } from '@cleo/app-kit/ui'
 import { clamp } from '@cleo/app-kit/utils/math';
 
@@ -48,6 +49,9 @@ export default function AnimationPlayer() {
   // On (re)entry, park on the first clip's first frame in bind pose.
   useEffect(() => {
     if (!target) return
+    // Root motion moves the model node itself: remember where it stands, to put it back (see previewHome).
+    rememberPreviewHome(target.node)
+    returnPreviewHome(target.node)
     const first = target.model.animations[0]?.name ?? ''
     setClip(first)
     if (first) {
@@ -60,8 +64,8 @@ export default function AnimationPlayer() {
     setPlaying(false)
     setTime(0)
     lastRef.current = performance.now()
-    // Leave the model in bind pose when exiting the Animation Editor.
-    return () => { target.animator.showBindPose() }
+    // Leave the model in bind pose, where it stood, when exiting the Animation Editor.
+    return () => { target.animator.showBindPose(); returnPreviewHome(target.node) }
   }, [skeletonTargetId])
 
   // Per-frame drive loop.
@@ -74,8 +78,13 @@ export default function AnimationPlayer() {
         const dt = Math.min((now - lastRef.current) / 1000, 0.1)
         lastRef.current = now
         if (playingRef.current && !scrubbingRef.current) {
-          if (simulateRef.current && t.animator.hasStateMachine) t.animator.checkTriggers()
+          const simulating = simulateRef.current && t.animator.hasStateMachine
+          if (simulating) t.animator.checkTriggers()
+          const before = t.animator.currentTime
           t.animator.update(dt)
+          // A looping clip starts over where the character stood. Not while simulating the machine: a state
+          // change restarts the clock too, and there the root motion of one state carries into the next.
+          if (!simulating && t.animator.loop && t.animator.currentTime < before) returnPreviewHome(t.node)
           setTime(t.animator.currentTime)
           setDuration(t.animator.duration)
         }
@@ -101,6 +110,7 @@ export default function AnimationPlayer() {
   const legacy = sm.events.filter(e => e.clipName === clip).map(e => ({ time: e.time, name: e.eventName }))
 
   const selectClip = (name: string) => {
+    returnPreviewHome(target.node)
     setClip(name)
     setSimulate(false)
     animator.playAnimationByName(name, loop, false)
@@ -128,11 +138,14 @@ export default function AnimationPlayer() {
   const onStop = () => {
     animator.stop()
     animator.showBindPose()
+    returnPreviewHome(target.node)
     setPlaying(false)
     setTime(0)
   }
   const onScrub = (v: number) => {
     scrubbingRef.current = true
+    // A scrub poses the clip in place (seeking applies no root motion), so where it stands is home.
+    returnPreviewHome(target.node)
     if (clip && animator.currentAnimation?.name !== clip) animator.playAnimationByName(clip, loop, false)
     animator.pause()
     animator.seek(v)

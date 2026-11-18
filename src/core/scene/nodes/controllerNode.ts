@@ -575,6 +575,10 @@ export class ControllerNode extends Node {
         // Steer the camera BEFORE the pawn consumes the intent, so the strafe matches this frame's look
         // rather than the previous one's.
         if (!flat && this.driveAimTarget && this.controlSource !== 'none' && !authoring.enabled) this._driveAim(delta);
+        // A player aims where the rig now looks: its yaw as steered THIS frame (the basis was read before the
+        // steer, so a turning camera used to lag a frame), and its pitch, which nothing passed on before, so a
+        // character could look round but never up or down.
+        if (!flat && this.controlSource === 'player' && !authoring.enabled) this._aimFromRig();
 
         this._publish(pawn);
 
@@ -583,6 +587,15 @@ export class ControllerNode extends Node {
             try { this.onThink(delta); }
             catch (e) { logScriptError(`Error in onThink function for node ${this._name}`, e, 'Script'); }
         }
+    }
+
+    /** The intent's aim from the aim rig: its world yaw (also the move basis) and its pitch (positive down). */
+    private _aimFromRig(): void {
+        const node = this._resolveAimNode();
+        if (!(node instanceof CameraRigNode)) return;
+        this._intent.basisYaw = node.yaw;
+        this._intent.aimYaw = node.yaw;
+        this._intent.aimPitch = node.pitch;
     }
 
     private _readPlayer(): void {

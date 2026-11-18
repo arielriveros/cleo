@@ -30,8 +30,9 @@ The **Examples** tab lists example projects with a thumbnail, a description, a s
 count. Opening one downloads it and adds it as a **new project** — your existing projects are
 untouched. Anything over 25 MB asks first.
 
-Examples are the fastest way to see a working setup. Two are documented in depth:
+Examples are the fastest way to see a working setup. These are documented in depth:
 
+- [Sandbox](sandbox-example.md), locomotion in the style of Advanced Locomotion System v4
 - [Third-person strafe character](../../examples/scripts/README.md)
 - [Valley](../../examples/scripts/SOULS_DEMO.md), the souls-like example game
 
