@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { VehicleNode, WheelNode } from 'cleo'
+import { VehicleNode, WheelNode, VEHICLE_PRESETS, applyVehiclePreset, type Node, type VehiclePreset } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { useCleoEngine } from '../../EngineContext'
-import { Button, CloseIcon, DocScope, SectionTitle, SegmentedControl, Slider, TextInput, Toggle, cn, labelClass } from '@cleo/app-kit/ui'
+import { Button, CloseIcon, DocScope, PresetMenu, SectionTitle, SegmentedControl, Slider, TextInput, Toggle, VectorInput, cn, labelClass } from '@cleo/app-kit/ui'
 import { JOINED_DIVIDER_CLASS, JOINED_GROUP_CLASS } from '@cleo/app-kit/ui/SegmentedControl'
 import { hintAffordance } from '@cleo/app-kit/ui/Field'
 import { AxleIcon, VehicleIcon, WheelIcon } from '../sectionIcons'
+import { useHistory } from '../../HistoryContext'
+import NodeRefInput from '../NodeRefInput'
 
 // The Vehicle and Wheel nodes' panels (docs/editor/vehicles.md). A vehicle is built here step by step: its
 // wheels are added from the Wheels list, its power chosen under Drive, and its meshes are the developer's own.
@@ -17,6 +19,8 @@ const REVERSE_HINT = "The throttle held against the way it rolls brakes first, t
 const LSD_HINT = 'Limited-slip differentials send torque to the wheel that grips. Off: open differentials, a spinning wheel takes it all.'
 const CAST_HINT = "What each wheel finds the ground with. Cylinder follows kerbs and bumps by the tyre's real shape (Jolt); the Cannon and Rapier backends cast a ray whatever is chosen."
 const DRIVEN_HINT = 'The engine turns this wheel. Wheels side by side share an axle and its differential.'
+const LEAN_HINT = 'Hold it upright and lean it into turns, for a vehicle on two wheels in line (a motorcycle). It also narrows the steering at speed to what the lean can hold.'
+const CLUTCH_HINT = 'How hard the clutch couples the engine to the wheels. A heavy vehicle needs a strong one: a weak clutch slips under the load and the engine barely moves it. Jolt only: on Rapier and Cannon the clutch couples at once.'
 const ITEM = 'flex items-center justify-center w-[30px] h-[24px] text-muted hover:text-fg hover:bg-control'
 const DRIVES = [
   { value: 'none', label: 'None', title: 'Nothing drives it: it rolls, steers and brakes, pushed or towed (a trailer, a cart)' },
@@ -55,8 +59,25 @@ const vehicleOf = (node: WheelNode): VehicleNode | null => {
 
 export function VehicleEditor(props: { node: VehicleNode }) {
   const n = props.node
-  const { isPlayMode } = useCleoEngine()
+  const { isPlayMode, eventEmitter, editorScene } = useCleoEngine()
+  const history = useHistory()
   const apply = useFields(n, () => n.rebuild())
+  const [kept, setKept] = useState<string[]>([])
+  useEffect(() => { setKept([]) }, [n])
+
+  // One undo step: the vehicle, its chassis and every wheel are snapshotted before the preset touches them.
+  const applyPreset = (preset: VehiclePreset) => {
+    history.transaction(`Vehicle preset: ${preset.label}`, async track => {
+      await track(n)
+      if (n.collider && n.collider !== (n as Node)) await track(n.collider)
+      for (const w of n.wheels) await track(w)
+      const result = applyVehiclePreset(n, preset, { remove: node => editorScene?.removeNode(node) })
+      setKept(result ? result.kept.map(w => w.name) : [])
+    }).then(() => {
+      eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: n })
+      eventEmitter.emit('PHYSICS_CHANGED')
+    }).catch(err => console.error(err))
+  }
   const slider = (label: string, k: keyof VehicleNode & string, min: number, max: number, step: number, fixed = 0, hint?: string) => (
     <Slider label={label} min={min} max={max} step={step} value={(n as any)[k] as number} title={hint}
       labelClassName='w-[112px]' readout={v => v.toFixed(fixed)} onChange={v => apply({ [k]: v })} />
@@ -66,10 +87,12 @@ export function VehicleEditor(props: { node: VehicleNode }) {
       label={<span className={cn(labelClass, hintAffordance(hint))} title={hint}>{label}</span>} />
   )
   return (
-    <Collapsable title='Vehicle' icon={<VehicleIcon />} persistKey='vehicle'>
+    <Collapsable title='Vehicle' icon={<VehicleIcon />} persistKey='vehicle'
+      right={<PresetMenu presets={VEHICLE_PRESETS} onApply={applyPreset} title='Vehicle presets: settings, wheel layout and chassis (your meshes are kept)' />}>
       <DocScope page='editor/vehicles' section='vehicle'>
         <div className='w-full p-2'>
           {!n.collider && <p className='text-ui-sm text-muted mb-2'>Put it in a Collider with mass: that is its chassis.</p>}
+          {kept.length > 0 && <p className='text-ui-sm text-warning mb-2'>Kept {kept.join(', ')}: the preset has no place for {kept.length === 1 ? 'it' : 'them'}, but {kept.length === 1 ? 'it carries' : 'they carry'} a mesh. Delete {kept.length === 1 ? 'it' : 'them'} if not wanted.</p>}
 
           <SectionTitle title='Wheels' className='mt-1 mb-1' />
           <WheelList vehicle={n} />
@@ -97,7 +120,8 @@ export function VehicleEditor(props: { node: VehicleNode }) {
             {slider('Shift down', 'shiftDownRpm', 500, 8000, 100)}
             {slider('Shift time', 'shiftTime', 0, 2, 0.05, 2)}
             {slider('Final drive', 'finalDrive', 1, 10, 0.01, 2)}
-            {slider('Reverse ratio', 'reverseRatio', 0.5, 6, 0.01, 2)}
+            {slider('Reverse ratio', 'reverseRatio', 0.5, 8, 0.01, 2)}
+            {slider('Clutch', 'clutchStrength', 1, 500, 1, 0, CLUTCH_HINT)}
             <GearRatios node={n} onChange={gears => apply({ gearRatios: gears })} />
             {toggle('Limited slip', 'limitedSlip', LSD_HINT)}
           </>}
@@ -111,11 +135,48 @@ export function VehicleEditor(props: { node: VehicleNode }) {
               onChange={v => apply({ cast: v })} />
           </div>
 
+          <SectionTitle title='Lean' className='mt-3 mb-1' />
+          {toggle('Lean into turns', 'lean', LEAN_HINT)}
+          {n.lean && <>
+            {slider('Max lean', 'maxLean', 5, 80, 1)}
+            {slider('Lean spring', 'leanSpring', 0, 20000, 100)}
+            {slider('Lean damping', 'leanDamping', 0, 5000, 50)}
+          </>}
+
+          <SectionTitle title='Hitch' className='mt-3 mb-1' />
+          <HitchFields vehicle={n} onChange={patch => apply(patch)} />
+
           <SectionTitle title='Live' className='mt-3 mb-1' />
           <LiveReadout node={n} live={isPlayMode} />
         </div>
       </DocScope>
     </Collapsable>
+  )
+}
+
+/** What tows it: a vehicle's chassis (or its Vehicle node), never its own; and where it is hitched. */
+function HitchFields({ vehicle, onChange }: { vehicle: VehicleNode; onChange: (patch: Record<string, unknown>) => void }) {
+  const { editorScene } = useCleoEngine()
+  const own = vehicle.collider
+  const towable = (node: Node) => {
+    if (node === vehicle || node === own) return false
+    for (let p: Node | null = node; p; p = p.parent) if (p === own) return false
+    return node.nodeType === 'vehicle' || (node.nodeType === 'collider' && ((node as unknown as { mass: number }).mass ?? 0) > 0)
+  }
+  return (
+    <div className='mb-2 flex flex-col gap-1'>
+      <label className='flex items-center gap-2'>
+        <span className={cn(labelClass, 'w-[112px]')}>Towed by</span>
+        {editorScene && <NodeRefInput className='flex-1 min-w-0' value={vehicle.hitchTarget} scene={editorScene} filter={towable}
+          placeholder='Not hitched' onChange={id => onChange({ hitchTarget: id })} />}
+      </label>
+      <label className='flex items-center gap-2'>
+        <span className={cn(labelClass, 'w-[112px]')}>Hitch point</span>
+        <VectorInput className='flex-1' value={[...vehicle.hitchPoint]} step={0.05}
+          onChange={v => onChange({ hitchPoint: [v[0], v[1], v[2]] })} />
+      </label>
+      {vehicle.hitchTarget && <p className='text-ui-sm text-muted'>In Play a ball joint joins the two chassis where the hitch point is when the scene starts: place it at the towing vehicle's tow ball.</p>}
+    </div>
   )
 }
 
@@ -127,10 +188,13 @@ function WheelList({ vehicle }: { vehicle: VehicleNode }) {
   const { eventEmitter, editorScene } = useCleoEngine()
   useSceneVersion()
   const wheels = vehicle.wheels
-  // The Vehicle stays selected, so wheel after wheel can be added; a row selects its wheel.
+  const history = useHistory()
+  // The Vehicle stays selected, so wheel after wheel can be added; a row selects its wheel. One undo step each.
   const add = (count: number) => {
-    for (let i = 0; i < count; i++) vehicle.addWheel()
-    vehicle.rebuild()
+    history.transaction(count === 1 ? 'Add wheel' : 'Add axle', async () => {
+      for (let i = 0; i < count; i++) vehicle.addWheel()
+      vehicle.rebuild()
+    }).catch(err => console.error(err))
   }
   return (
     <div className='mb-2'>

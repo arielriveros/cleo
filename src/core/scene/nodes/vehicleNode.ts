@@ -2,6 +2,7 @@ import { quat, vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 import { WheelNode } from "./wheelNode";
+import { applyVehiclePreset } from "./vehiclePresets";
 import { DEG2RAD, finiteOr } from "../../math";
 import { Input } from "../../../input/inputApi";
 import { Vehicle } from "../../../physics/vehicle";
@@ -9,6 +10,7 @@ import {
     WHEEL_DEFAULTS, type VehicleCast, type VehicleDesc, type VehicleDrive, type WheelDesc, type VehicleDifferentialDesc, type VehicleAntiRollBarDesc,
 } from "../../../physics/pal/vehicle/vehicleDesc";
 import type { PhysicsBody } from "../../../physics/physicsBody";
+import type { JointHandle } from "../../../physics/pal/types";
 
 const CASTS: readonly VehicleCast[] = ['ray', 'sphere', 'cylinder'];
 const DRIVES: readonly VehicleDrive[] = ['none', 'engine', 'motors'];
@@ -53,6 +55,12 @@ export class VehicleNode extends Node {
     public shiftDownRpm: number = 2000;
     /** Seconds a gear change takes. */
     public shiftTime: number = 0.5;
+    /**
+     * How hard the clutch couples the engine to the wheels (Jolt's units, kg·m²/s). A heavy vehicle needs a strong
+     * one: a weak clutch slips under the load and the engine barely moves it. The shared drivetrain on Rapier and
+     * Cannon couples at once.
+     */
+    public clutchStrength: number = 10;
     /** Limited-slip differentials (torque shifts to the slower wheel); off = open. */
     public limitedSlip: boolean = true;
     /** N/m resisting body roll, per axle; 0 = none. */
@@ -65,6 +73,26 @@ export class VehicleNode extends Node {
     public autoReverse: boolean = true;
     /** Drive from the player's input: `Move` (x steers, y drives), `Jump` holds the hand brake. */
     public playerInput: boolean = false;
+
+    // ---- lean (a motorcycle; serialized) ----
+
+    /** Hold it upright and lean it into turns: for a vehicle on two wheels in line. */
+    public lean: boolean = false;
+    /** Most it leans, DEGREES. */
+    public maxLean: number = 45;
+    /** N·m per radian pulling it toward the lean, and N·m·s per radian/s damping its roll. */
+    public leanSpring: number = 5000;
+    public leanDamping: number = 1000;
+
+    // ---- hitch (a trailer; serialized) ----
+
+    /**
+     * The vehicle that tows it: the id of that vehicle's Collider (or of its Vehicle node). In Play a ball joint
+     * joins the two chassis at {@link hitchPoint}, where that point is when the scene starts. Null: not hitched.
+     */
+    public hitchTarget: string | null = null;
+    /** Where it is hitched, in this node's frame (a trailer's tongue, ahead of its chassis). */
+    public hitchPoint: [number, number, number] = [0, 0, 2.2];
 
     // ---- the driver (runtime, never serialized) ----
 
@@ -80,6 +108,8 @@ export class VehicleNode extends Node {
     private _vehicle: Vehicle | null = null;
     private _wheels: WheelNode[] = [];
     private _chassis: PhysicsBody | null = null;
+    /** The hitch's joint and the two bodies it was made between (it is made again if either changes). */
+    private _hitch: { joint: JointHandle; own: number; tower: number } | null = null;
     /** The vehicle's up, forward and axle (up × forward), in the chassis's frame. */
     private readonly _vUp = vec3.fromValues(0, 1, 0);
     private readonly _vForward = vec3.fromValues(0, 0, 1);
@@ -114,6 +144,19 @@ export class VehicleNode extends Node {
     public rebuild(): void {
         if (this._vehicle) this._scene?.physics?.removeVehicle(this._vehicle);
         this._vehicle = null;
+        this._unhitch();
+    }
+
+    /** The Collider of the vehicle that tows it ({@link hitchTarget}), or null. */
+    public get towedBy(): Node | null {
+        const target = this.hitchTarget ? this._scene?.getNodeById(this.hitchTarget) : null;
+        const chassis = target?.collider ?? null;
+        return chassis && chassis !== this.collider ? chassis : null;
+    }
+
+    /** One of the presets (vehiclePresets.ts) by id: its settings, wheel layout and chassis. False for an unknown id. */
+    public applyPreset(id: string): boolean {
+        return !!applyVehiclePreset(this, id);
     }
 
     /**
@@ -150,6 +193,33 @@ export class VehicleNode extends Node {
         if (this._vehicle) this._scene?.physics?.removeVehicle(this._vehicle);
         this._vehicle = null;
         this._chassis = null;
+        this._unhitch();
+    }
+
+    /**
+     * The hitch's ball joint, made once both chassis have bodies, at where the hitch point is now: measured from
+     * each body's node origin in its own frame, so the joint holds the two as they stand when it is made.
+     */
+    private _syncHitch(body: PhysicsBody): void {
+        const physics = this._scene?.physics;
+        const collider = this.collider, towerNode = this.towedBy, tower = towerNode?.ownBody ?? null;
+        if (!physics || !collider || !tower || !tower.world || tower === body) { this._unhitch(); return; }
+        const h = this._hitch;
+        if (h && h.own === body.handle && h.tower === tower.handle && body.world?.hasBody(body.handle) && tower.world.hasBody(tower.handle)) return;
+        this._unhitch();
+        const point = vec3.transformMat4(vec3.create(), this.hitchPoint, this.worldTransform);
+        const anchor = (node: Node): [number, number, number] => {
+            const inv = quat.invert(quat.create(), node.worldQuaternion), p = node.worldPosition;
+            const a = vec3.transformQuat(vec3.create(), [point[0] - p[0], point[1] - p[1], point[2] - p[2]], inv);
+            return [a[0], a[1], a[2]];
+        };
+        const joint = physics.addJoint(body, tower, { kind: 'ball', anchorA: anchor(collider), anchorB: anchor(towerNode!), collideConnected: false });
+        if (joint !== null) this._hitch = { joint, own: body.handle, tower: tower.handle };
+    }
+
+    private _unhitch(): void {
+        if (this._hitch) this._scene?.physics?.removeJoint(this._hitch.joint);
+        this._hitch = null;
     }
 
     private _drive(): void {
@@ -178,6 +248,7 @@ export class VehicleNode extends Node {
         v.brake = this.brake;
         v.handBrake = this.handBrake;
         v.autoReverse = this.autoReverse;
+        if (this.hitchTarget || this._hitch) this._syncHitch(body);
         this._poseWheels(v);
     }
 
@@ -273,11 +344,13 @@ export class VehicleNode extends Node {
             transmission: {
                 gearRatios: this.gearRatios, reverseGearRatios: [-Math.abs(this.reverseRatio)],
                 switchTime: this.shiftTime, shiftUpRpm: this.shiftUpRpm, shiftDownRpm: this.shiftDownRpm,
+                clutchStrength: this.clutchStrength,
             },
             differentials,
             differentialLimitedSlipRatio: this.limitedSlip ? 1.4 : Infinity,
             antiRollBars,
             maxPitchRollAngle: Math.min(180, Math.max(1, this.maxPitchRoll)) * DEG2RAD,
+            lean: this.lean ? { maxAngle: this.maxLean * DEG2RAD, spring: this.leanSpring, damping: this.leanDamping } : undefined,
             cast: this.cast,
         };
     }
@@ -289,9 +362,11 @@ export class VehicleNode extends Node {
             drive: this.drive,
             maxTorque: this.maxTorque, minRpm: this.minRpm, maxRpm: this.maxRpm,
             gearRatios: [...this.gearRatios], reverseRatio: this.reverseRatio, finalDrive: this.finalDrive,
-            shiftUpRpm: this.shiftUpRpm, shiftDownRpm: this.shiftDownRpm, shiftTime: this.shiftTime,
+            shiftUpRpm: this.shiftUpRpm, shiftDownRpm: this.shiftDownRpm, shiftTime: this.shiftTime, clutchStrength: this.clutchStrength,
             limitedSlip: this.limitedSlip, antiRoll: this.antiRoll, cast: this.cast, maxPitchRoll: this.maxPitchRoll,
             autoReverse: this.autoReverse, playerInput: this.playerInput,
+            lean: this.lean, maxLean: this.maxLean, leanSpring: this.leanSpring, leanDamping: this.leanDamping,
+            hitchTarget: this.hitchTarget, hitchPoint: [...this.hitchPoint],
         };
     }
 
@@ -311,6 +386,7 @@ export class VehicleNode extends Node {
         node.shiftUpRpm = positive(json.shiftUpRpm, node.shiftUpRpm);
         node.shiftDownRpm = positive(json.shiftDownRpm, node.shiftDownRpm);
         node.shiftTime = nonNegative(json.shiftTime, node.shiftTime);
+        node.clutchStrength = positive(json.clutchStrength, node.clutchStrength);
         node.limitedSlip = bool(json.limitedSlip, node.limitedSlip);
         node.antiRoll = nonNegative(json.antiRoll, node.antiRoll);
         if (CASTS.includes(json.cast)) node.cast = json.cast;
@@ -318,6 +394,14 @@ export class VehicleNode extends Node {
         node.autoReverse = bool(json.autoReverse, node.autoReverse);
         node.playerInput = bool(json.playerInput, node.playerInput);
         if (DRIVES.includes(json.drive)) node.drive = json.drive;
+        node.lean = bool(json.lean, node.lean);
+        node.maxLean = Math.min(85, positive(json.maxLean, node.maxLean));
+        node.leanSpring = nonNegative(json.leanSpring, node.leanSpring);
+        node.leanDamping = nonNegative(json.leanDamping, node.leanDamping);
+        if (typeof json.hitchTarget === 'string' && json.hitchTarget) node.hitchTarget = json.hitchTarget;
+        else if (json.hitchTarget === null) node.hitchTarget = null;
+        if (Array.isArray(json.hitchPoint) && json.hitchPoint.length === 3)
+            node.hitchPoint = [finiteOr(json.hitchPoint[0], 0), finiteOr(json.hitchPoint[1], 0), finiteOr(json.hitchPoint[2], 0)];
     }
 
     public static parse(parent: Node, json: any): void {

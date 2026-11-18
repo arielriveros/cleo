@@ -508,6 +508,14 @@ this.scene.physics.addVehicle(chassisBody, car)
 car.throttle = 1
 ```
 
+A preset lays a Vehicle node out in one call: its settings, wheels and chassis (`VEHICLE_PRESETS` lists them):
+
+```ts
+vehicle.applyPreset('bike')        // two wheels in line, leaning into turns
+trailer.applyPreset('trailer')
+trailer.hitchTarget = car.id       // towed from the next Play
+```
+
 With electric motors instead of an engine, give the wheels that drive a `motorTorque` (N·m) and a
 `motorMaxSpeed` (rad/s at the wheel), and set `drive: 'motors'`:
 

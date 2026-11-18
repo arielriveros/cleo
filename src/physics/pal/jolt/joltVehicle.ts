@@ -7,6 +7,7 @@ import {
     W_POINT, W_STEER, wheelOffset,
 } from '../vehicle/vehicleState';
 import type { Jolt } from './load';
+import { LeanController, type LeanWheel } from '../vehicle/leanController';
 import { clampTo } from '../math';
 
 /** Jolt's "open differential" is FLT_MAX; Infinity is kept out of the WASM side. */
@@ -28,6 +29,9 @@ export class JoltVehicle {
     private readonly _listener: JoltNS.VehicleConstraintStepListener;
     private readonly _wheels: JoltNS.WheelWV[];
     private _disposed = false;
+    private _lean: LeanController | null = null;
+    private _leanWheels: LeanWheel[] = [];
+    private readonly _impulse = [0, 0, 0];
 
     /**
      * @param layer the object layer the wheels' casts collide as: the chassis's own
@@ -39,6 +43,8 @@ export class JoltVehicle {
         public readonly vehicle: NormalizedVehicle,
         layer: number,
         casts: readonly ('ray' | 'sphere' | 'cylinder')[],
+        /** The chassis's principal inertia, its own axes: what the lean controller turns. */
+        inertia: ArrayLike<number> = [1, 1, 1],
     ) {
         const J = _J, v = vehicle;
         const temps: unknown[] = [];
@@ -82,7 +88,22 @@ export class JoltVehicle {
             });
         }
 
-        const controller = new J.WheeledVehicleControllerSettings();
+        // A leaning vehicle is Jolt's motorcycle: the same wheeled controller, its steering narrowed at speed to
+        // what the lean can hold. Its own lean controller is switched off below: the shared one (leanController.ts)
+        // holds the lean, as on every other backend.
+        let controller: JoltNS.WheeledVehicleControllerSettings;
+        if (v.lean) {
+            const m = new J.MotorcycleControllerSettings();
+            m.mMaxLeanAngle = v.lean.maxAngle;
+            m.mLeanSpringConstant = v.lean.spring;
+            m.mLeanSpringDamping = v.lean.damping;
+            m.mLeanSpringIntegrationCoefficient = v.lean.integration;
+            m.mLeanSpringIntegrationCoefficientDecay = v.lean.integrationDecay;
+            m.mLeanSmoothingFactor = v.lean.smoothing;
+            controller = m;
+        } else {
+            controller = new J.WheeledVehicleControllerSettings();
+        }
         const e = controller.mEngine, t = controller.mTransmission;
         e.mMaxTorque = v.engine.maxTorque;
         e.mMinRPM = v.engine.minRpm;
@@ -130,6 +151,11 @@ export class JoltVehicle {
         this._listener = new J.VehicleConstraintStepListener(constraint);
         _system.AddStepListener(this._listener);
         this._controller = J.castObject(constraint.GetController(), J.WheeledVehicleController);
+        if (v.lean) {
+            J.castObject(constraint.GetController(), J.MotorcycleController).EnableLeanController(false);
+            this._lean = new LeanController(v, inertia);
+            this._leanWheels = v.wheels.map(() => ({ contact: false, suspensionForce: 0 }));
+        }
         this._wheels = v.wheels.map((_, i) => J.castObject(constraint.GetWheel(i), J.WheelWV));
     }
 
@@ -168,6 +194,31 @@ export class JoltVehicle {
             out[o + W_LONG_SLIP] = contact ? w.mLongitudinalSlip : 0;
             out[o + W_LAT_SLIP] = contact ? w.mLateralSlip : 0;
         }
+    }
+
+    /**
+     * Before a substep: the lean controller's angular impulse (leanController.ts), from the last step's wheels
+     * (Jolt's suspension lambda is that step's impulse, so over `dt` its force) and the chassis's motion.
+     */
+    public preStep(dt: number): void {
+        if (!this._lean || !(dt > 0)) return;
+        for (let i = 0; i < this._wheels.length; i++) {
+            const w = this._wheels[i], o = this._leanWheels[i];
+            o.contact = w.HasContact();
+            o.suspensionForce = o.contact ? Math.abs(w.GetSuspensionLambda()) / dt : 0;
+        }
+        let steer = 0;
+        for (const w of this._wheels) { const s = w.GetSteerAngle(); if (Math.abs(s) > Math.abs(steer)) steer = s; }
+        // Each read copied at once: the bindings hand back one shared temporary per type, which the next call of
+        // that type overwrites (the linear and angular velocities are both a Vec3).
+        const b = this._body, q = b.GetRotation(), rotation = [q.GetX(), q.GetY(), q.GetZ(), q.GetW()];
+        const lv = b.GetLinearVelocity(), linear = [lv.GetX(), lv.GetY(), lv.GetZ()];
+        const av = b.GetAngularVelocity(), angular = [av.GetX(), av.GetY(), av.GetZ()];
+        const j = this._impulse;
+        if (!this._lean.impulse(dt, this._leanWheels, steer, rotation, linear, angular, j)) return;
+        const J = this._J, v = new J.Vec3(j[0], j[1], j[2]);
+        this._system.GetBodyInterfaceNoLock().AddAngularImpulse(b.GetID(), v);
+        J.destroy(v);
     }
 
     /** Take it out of the system and free it. Safe to call twice. */

@@ -79,7 +79,7 @@ Feature `vehicles`. See [Vehicles](../editor/vehicles.md).
 
 ```ts
 drive: 'none' | 'engine' | 'motors'
-maxTorque: number ; minRpm: number ; maxRpm: number
+maxTorque: number ; minRpm: number ; maxRpm: number ; clutchStrength: number
 gearRatios: number[] ; reverseRatio: number ; finalDrive: number
 shiftUpRpm: number ; shiftDownRpm: number ; shiftTime: number
 limitedSlip: boolean ; antiRoll: number ; maxPitchRoll: number   // degrees
@@ -91,6 +91,10 @@ get vehicle: Vehicle | null      // built when the scene runs
 get wheels: WheelNode[]
 rebuild(): void                  // after changing wheels or settings in Play
 addWheel(): WheelNode            // at the chassis's next free corner, no mesh
+lean: boolean ; maxLean: number ; leanSpring: number ; leanDamping: number   // maxLean in degrees
+hitchTarget: string | null ; hitchPoint: [x, y, z]   // what tows it (a vehicle's id), where
+get towedBy: Node | null
+applyPreset(id): boolean         // 'car' 'sportsCar' 'kart' 'truck' 'bus' 'offRoad' 'bike' 'trailer'
 ```
 
 ### WheelNode — `'wheel'` *(unreleased)*

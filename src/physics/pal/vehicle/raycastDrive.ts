@@ -3,6 +3,7 @@ import { rotate } from '../shapeBounds';
 import type { Out, V3 } from '../types';
 import type { NormalizedVehicle, NormalizedWheel, VehicleInput } from './vehicleDesc';
 import { wheelRight } from './vehicleDesc';
+import { LeanController, leanSteerLimit, pitchRollLimitImpulse, wheelBaseOf, type LeanWheel } from './leanController';
 import {
     VH_GEAR, VH_RPM, VH_SPEED, VH_WHEELS, W_ANGLE, W_CONTACT, W_LAT_SLIP, W_LENGTH, W_LONG_SLIP, W_NORMAL, W_OMEGA,
     W_POINT, W_STEER, wheelOffset,
@@ -36,6 +37,8 @@ export interface RaycastWheelReading {
     /** World space; meaningful in contact. */
     point: [number, number, number];
     normal: [number, number, number];
+    /** What the tyre pushed sideways along its axle (the wheel's right) in the update, N·s. */
+    sideImpulse: number;
 }
 
 /** The chassis's centre of mass, rotation and velocities, world space, as the backend reads them. */
@@ -94,6 +97,8 @@ function peak(points: readonly (readonly [number, number])[]): number {
 }
 
 const TWO_PI = Math.PI * 2;
+/** How far up toward the centre of mass both Bullet ports push a tyre's side force: Rapier's fixed 0.1, cannon's as set. */
+export const BULLET_ROLL_INFLUENCE = 0.1;
 const RPM_PER_RAD_S = 60 / TWO_PI;
 /** Below this ground speed (m/s) a wheel's slips read 0: they are ratios that blow up at rest. */
 const SLIP_SPEED = 0.5;
@@ -146,6 +151,11 @@ export class RaycastDrive {
     private _freeRpm: number;
     private readonly _mass: number;
     private readonly _inertia: [number, number, number];
+    // The lean controller (vehicle.lean), and what it reads of each wheel.
+    private readonly _lean: LeanController | null;
+    private readonly _leanWheels: LeanWheel[];
+    private readonly _wheelBase: number;
+    private readonly _upright = [0, 0, 0];
     private readonly _v = [0, 0, 0];
     private readonly _f = [0, 0, 0];
     private readonly _r = [0, 0, 0];
@@ -159,6 +169,10 @@ export class RaycastDrive {
         this.vehicle = vehicle;
         this._mass = chassisMass;
         this._inertia = [inertia[0], inertia[1], inertia[2]];
+        // Along the vehicle, front-most wheel to rear-most, at full extension: what limits a lean's steering.
+        this._wheelBase = wheelBaseOf(vehicle);
+        this._lean = vehicle.lean ? new LeanController(vehicle, this._inertia) : null;
+        this._leanWheels = vehicle.wheels.map(() => ({ contact: false, suspensionForce: 0 }));
         const n = vehicle.wheels.length, up = vehicle.up;
         this.tuning = vehicle.wheels.map(w => {
             const r = [w.position[0] - centerOfMass[0], w.position[1] - centerOfMass[1], w.position[2] - centerOfMass[2]];
@@ -192,7 +206,7 @@ export class RaycastDrive {
 
         for (let i = 0; i < wheels.length; i++) {
             // Jolt's convention: right input turns the wheel by −right × lock about its up.
-            this._steer[i] = -right * wheels[i].maxSteerAngle;
+            this._steer[i] = -right * Math.min(wheels[i].maxSteerAngle, leanSteerLimit(v, this._wheelBase, this._speed));
             this.steering[i] = this._steer[i];
         }
 
@@ -367,6 +381,32 @@ export class RaycastDrive {
         }
     }
 
+    /**
+     * What holds the chassis up this substep, as one angular impulse (world space) into `out`; false for none.
+     * The lean controller (vehicle.lean; leanController.ts) and the pitch/roll limit (vehicle.maxPitchRollAngle),
+     * which Jolt has natively and the Bullet ports do not. After the native update, with its readings and the
+     * chassis's motion.
+     */
+    public uprightImpulse(dt: number, readings: readonly RaycastWheelReading[], chassis: ChassisMotion, out: Out): boolean {
+        if (!(dt > 0)) return false;
+        let any = false;
+        out[0] = out[1] = out[2] = 0;
+        const j = this._upright;
+        if (this._lean) {
+            for (let i = 0; i < readings.length; i++) {
+                this._leanWheels[i].contact = readings[i].contact;
+                this._leanWheels[i].suspensionForce = readings[i].suspensionForce;
+            }
+            if (this._lean.impulse(dt, this._leanWheels, this._steerOf(), chassis.rotation, chassis.linear, chassis.angular, j)) {
+                out[0] += j[0]; out[1] += j[1]; out[2] += j[2]; any = true;
+            }
+        }
+        if (pitchRollLimitImpulse(this.vehicle, this._inertia, dt, chassis.rotation, chassis.angular, j)) {
+            out[0] += j[0]; out[1] += j[1]; out[2] += j[2]; any = true;
+        }
+        return any;
+    }
+
     /** Wheel i's forward and axle, world space, turned by its steering. */
     private _wheelAxes(i: number, q: ArrayLike<number>, f: Out, r: Out): void {
         const v = this.vehicle, s = this._steer[i];
@@ -376,6 +416,13 @@ export class RaycastDrive {
         rotate(q, fx, fy, fz, f);
         // The axle is forward × up.
         rotate(q, fy * up[2] - fz * up[1], fz * up[0] - fx * up[2], fx * up[1] - fy * up[0], r);
+    }
+
+    /** The steering's angle: the most-steered wheel's, signed. */
+    private _steerOf(): number {
+        let best = 0;
+        for (const s of this._steer) if (Math.abs(s) > Math.abs(best)) best = s;
+        return best;
     }
 
     private _ratio(gear: number): number {

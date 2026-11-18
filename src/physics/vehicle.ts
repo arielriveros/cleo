@@ -119,7 +119,7 @@ export class Vehicle {
         if (!this._built || this._world !== world || this._built.chassis !== body.handle || !world.hasBody(this._built.chassis)) {
             this._unbuild();
             try {
-                this._built = { handle: world.createVehicle({ ...this.vehicle, chassis: body.handle }), chassis: body.handle };
+                this._built = { handle: world.createVehicle({ ...this.vehicle, lean: this.vehicle.lean ?? undefined, chassis: body.handle }), chassis: body.handle };
                 this._world = world;
             } catch {
                 this._built = null;

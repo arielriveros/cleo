@@ -18,6 +18,7 @@ export class RapierVehicle {
     private readonly _up = [0, 0, 0];
     private readonly _hard = [0, 0, 0];
     private readonly _spent: number[] = [];
+    private readonly _lean = [0, 0, 0];
 
     /**
      * @param groups the chassis's interaction groups: the wheels meet what the chassis meets
@@ -47,7 +48,7 @@ export class RapierVehicle {
             c.setWheelFrictionSlip(i, t.frictionSlip);
             c.setWheelSideFrictionStiffness(i, 1);
         });
-        this._readings = vehicle.wheels.map(w => ({ contact: false, length: w.suspensionMaxLength, suspensionForce: 0, point: [0, 0, 0], normal: [0, 0, 0] }));
+        this._readings = vehicle.wheels.map(w => ({ contact: false, length: w.suspensionMaxLength, suspensionForce: 0, point: [0, 0, 0], normal: [0, 0, 0], sideImpulse: 0 }));
     }
 
     public setInput(input: VehicleInput): void { Object.assign(this.drive.input, input); }
@@ -68,6 +69,7 @@ export class RapierVehicle {
             r.contact = c.wheelIsInContact(i);
             r.length = c.wheelSuspensionLength(i) ?? this.vehicle.wheels[i].suspensionMaxLength;
             r.suspensionForce = r.contact ? c.wheelSuspensionForce(i) ?? 0 : 0;
+            r.sideImpulse = r.contact ? c.wheelSideImpulse(i) ?? 0 : 0;
             const p = c.wheelContactPoint(i), nrm = c.wheelContactNormal(i);
             if (p) { r.point[0] = p.x; r.point[1] = p.y; r.point[2] = p.z; }
             if (nrm) { r.normal[0] = nrm.x; r.normal[1] = nrm.y; r.normal[2] = nrm.z; }
@@ -80,6 +82,10 @@ export class RapierVehicle {
         drive.holdBrakes(this._readings, this._motion, spent, (x, y, z, p) =>
             this.chassis.applyImpulseAtPoint({ x, y, z }, { x: p[0], y: p[1], z: p[2] }, true));
         this._readMotion();
+        if (drive.uprightImpulse(dt, this._readings, this._motion, this._lean)) {
+            this.chassis.applyTorqueImpulse({ x: this._lean[0], y: this._lean[1], z: this._lean[2] }, true);
+            this._readMotion();
+        }
         drive.finish(dt, this._readings, this._motion);
     }
 

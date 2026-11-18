@@ -567,7 +567,8 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
     public createVehicleFromRecord(chassis: BodyHandle, vehicle: NormalizedVehicle): VehicleHandle {
         const e = this._entry(chassis);
         if (e.type !== 'dynamic') throw new Error("physics: a vehicle's chassis must be a dynamic body");
-        const made = new JoltVehicle(this._J, this._system, e.body, vehicle, this._layer(e.group, e.mask), JOLT_CAPABILITIES.vehicleCasts);
+        const inertia = this.getMassProperties(chassis, { mass: 0, centerOfMass: [0, 0, 0], inertia: [0, 0, 0] }).inertia;
+        const made = new JoltVehicle(this._J, this._system, e.body, vehicle, this._layer(e.group, e.mask), JOLT_CAPABILITIES.vehicleCasts, inertia);
         const id = this._nextVehicle++;
         this._vehicles.set(id, { input: { forward: 0, right: 0, brake: 0, handBrake: 0 }, landed: null, vehicle: made, chassis });
         return id as VehicleHandle;
@@ -617,7 +618,10 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         this.onPreSubstep?.(dt);
         this._rows = [];
         // A world that steps reads its own vehicles again, not what a copy's step landed.
-        for (const e of this._vehicles.values()) e.landed = null;
+        for (const e of this._vehicles.values()) {
+            e.landed = null;
+            if (this._entries.get(e.chassis)?.enabled) e.vehicle.preStep(dt);
+        }
         if (dt > 0) this._native.jolt!.Step(dt, 1);
         this._time += dt;
         this._version++;

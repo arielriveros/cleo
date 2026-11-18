@@ -275,6 +275,59 @@ describe.each(BACKENDS)('vehicle on %s', kind => {
         expect(Math.abs(state(w, v)[VH_SPEED])).toBeLessThan(0.2);
     });
 
+    /** A motorcycle: two wheels in line, the rear one driven, tipped a little so it cannot balance by symmetry. */
+    function bike(w: PhysicsWorld, lean: boolean) {
+        const body = w.createBody({
+            position: [0, 1.1, 0], rotation: [0, 0, 0, 1], mass: 220, linearDamping: 0, angularDamping: 0,
+            colliders: [{ shape: { kind: 'box', halfExtents: [0.175, 0.3, 0.9] } }],
+        });
+        const wheel = (z: number, steer: number) => ({
+            // Attached above the chassis's middle: the body rides low between the wheels, as a motorcycle's does.
+            position: [0, 0.2, z] as V3, radius: 0.32, width: 0.15, suspensionMinLength: 0.2, suspensionMaxLength: 0.5,
+            suspensionFrequency: 1.8, suspensionDamping: 0.6, maxSteerAngle: steer, maxHandBrakeTorque: 0,
+        });
+        const v = w.createVehicle({
+            chassis: body, wheels: [wheel(0.7, 0.5), wheel(-0.7, 0)],
+            engine: { maxTorque: 120, maxRpm: 10000 }, transmission: { shiftUpRpm: 8500, shiftDownRpm: 4000 },
+            differentials: [{ leftWheel: 1, rightWheel: -1 }],
+            // Without lean, a ray each: Jolt's cylinder tyres are wide enough to hold a low bike up by themselves.
+            ...(lean ? { lean: {}, maxPitchRollAngle: Math.PI / 3 } : { cast: 'ray' as const }),
+        });
+        w.setAngularVelocity(body, 0, 0, 0.4);
+        return { body, v };
+    }
+    /** Degrees the chassis is rolled from upright (its side axis off the horizontal; pitch is not roll). */
+    function tilt(w: PhysicsWorld, h: BodyHandle): number {
+        const [, , , x, y, z, qw] = pose(w, h);
+        // The chassis's +X in world space; its height is the roll.
+        const sideY = 2 * (x * y + qw * z);
+        return Math.abs(Math.asin(Math.max(-1, Math.min(1, sideY)))) * 180 / Math.PI;
+    }
+
+    it('keeps a bike upright and leans it into turns with its lean controller', () => {
+        const w = make(), { body, v } = bike(w, true);
+        let worst = 0;
+        for (let i = 0; i < 120; i++) { w.step(H); worst = Math.max(worst, tilt(w, body)); }
+        expect(worst).toBeLessThan(15);
+        w.setVehicleInput(v, { ...IDLE, forward: 0.6 });
+        run(w, 4);
+        expect(state(w, v)[VH_SPEED]).toBeGreaterThan(5);
+        expect(tilt(w, body)).toBeLessThan(15);
+        // Into a right turn: it leans (toward the inside) and comes round without falling.
+        w.setVehicleInput(v, { ...IDLE, forward: 0.4, right: 0.5 });
+        worst = 0;
+        for (let i = 0; i < 180; i++) { w.step(H); worst = Math.max(worst, tilt(w, body)); }
+        expect(worst).toBeLessThan(60);
+        expect(heading(w, body)[0]).toBeLessThan(-0.1);
+        expect(state(w, v)[wheelOffset(0) + W_CONTACT] + state(w, v)[wheelOffset(1) + W_CONTACT]).toBe(2);
+    });
+
+    it('lets a bike with no lean controller fall over', () => {
+        const w = make(), { body } = bike(w, false);
+        run(w, 4);
+        expect(tilt(w, body)).toBeGreaterThan(45);
+    });
+
     it('refuses a static chassis and a vehicle with no wheels', () => {
         const w = make();
         const fixed = w.createBody({ position: [0, 5, 0], rotation: [0, 0, 0, 1], mass: 0, colliders: [{ shape: { kind: 'box', halfExtents: [1, 1, 1] } }] });

@@ -6,5 +6,7 @@ export { Vehicle } from "../../physics/vehicle";
 export type { VehicleWheelState } from "../../physics/vehicle";
 export type {
     VehicleDesc, WheelDesc, VehicleEngineDesc, VehicleTransmissionDesc, VehicleDifferentialDesc, VehicleAntiRollBarDesc,
-    VehicleCast, VehicleInput,
+    VehicleCast, VehicleInput, VehicleDrive, VehicleLeanDesc,
 } from "../../physics/pal/vehicle/vehicleDesc";
+export { VEHICLE_PRESETS, applyVehiclePreset } from "../../core/scene/nodes/vehiclePresets";
+export type { VehiclePreset, VehiclePresetResult, WheelSlot } from "../../core/scene/nodes/vehiclePresets";

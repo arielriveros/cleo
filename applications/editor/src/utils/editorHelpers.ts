@@ -35,6 +35,7 @@ import {
   ColliderNode,
   TriggerNode,
   WheelNode,
+  VehicleNode,
 } from 'cleo';
 import type { FoliageCollision } from 'cleo';
 import type { NavObstacle, TriangleSoup } from 'cleo';
@@ -90,6 +91,8 @@ const BODY_PREFIX = '__debug__body_';
 const TRIGGER_PREFIX = '__debug__trigger_';
 /** A Vehicle's wheel: its tyre's circle and its suspension's reach, in the colliders' red. */
 const WHEEL_PREFIX = '__debug__wheel_';
+/** A hitched Vehicle's hitch point: where the ball joint holds it to what tows it. */
+const HITCH_PREFIX = '__debug__hitch_';
 const SHAPE_PREFIX = '__debug__shape_';
 /** An owner's shapes merged into one wireframe (see buildMergedShapeWire). */
 const MERGED_SHAPES = '__debug__shapes';
@@ -1429,6 +1432,26 @@ function ensureWheelDebug(scene: Scene, wheel: WheelNode) {
   node.onUpdate = place;
 }
 
+/** A cross at a hitched Vehicle's hitch point, turned with the vehicle. */
+function ensureHitchDebug(scene: Scene, vehicle: VehicleNode) {
+  const name = `${HITCH_PREFIX}${vehicle.id}`;
+  let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
+  if (!existing) {
+    const r = 0.15;
+    const positions: [number, number, number][] = [[-r, 0, 0], [r, 0, 0], [0, -r, 0], [0, r, 0], [0, 0, -r], [0, 0, r]];
+    existing = wireModel(name, { positions, indices: [0, 1, 2, 3, 4, 5] }, [1, 0, 0]);
+    scene.addNode(existing);
+  }
+  const node = existing;
+  const place = () => {
+    const m = vehicle.worldTransform, h = vehicle.hitchPoint;
+    node.setPosition([0, 1, 2].map(k => m[k] * h[0] + m[4 + k] * h[1] + m[8 + k] * h[2] + m[12 + k]) as unknown as Vec.vec3);
+    node.setQuaternion(vehicle.worldQuaternion);
+  };
+  place();
+  node.onUpdate = place;
+}
+
 function ensureDecalBox(scene: Scene, decal: DecalNode, frame: DecalOverlayFrame) {
   const name = `${DECALBOX_PREFIX}${decal.id}`;
   let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
@@ -1663,7 +1686,10 @@ export function reconcileEditorHelpers(
   }
   // 4.1 Vehicle wheels (red, with the colliders): where each tyre is and how far its spring reaches.
   if (show('colliders')) {
-    for (const node of nodes) if (node instanceof WheelNode && !node.markForRemoval) ensureWheelDebug(scene, node);
+    for (const node of nodes) {
+      if (node instanceof WheelNode && !node.markForRemoval) ensureWheelDebug(scene, node);
+      else if (node instanceof VehicleNode && node.hitchTarget && !node.markForRemoval) ensureHitchDebug(scene, node);
+    }
   }
   // 4a. Foliage colliders (orange) on the scattered instances near the camera.
   if (show('foliageColliders')) {
@@ -1749,6 +1775,9 @@ export function reconcileEditorHelpers(
       const id = node.name.slice(BODY_PREFIX.length);
       const owner = scene.getNodeById(id);
       if (!show('colliders') || !(owner instanceof ColliderNode) || owner.markForRemoval) drop();
+    } else if (node.name.startsWith(HITCH_PREFIX)) {
+      const owner = scene.getNodeById(node.name.slice(HITCH_PREFIX.length));
+      if (!show('colliders') || !(owner instanceof VehicleNode) || !owner.hitchTarget || owner.markForRemoval) drop();
     } else if (node.name.startsWith(WHEEL_PREFIX)) {
       const owner = scene.getNodeById(node.name.slice(WHEEL_PREFIX.length));
       if (!show('colliders') || !(owner instanceof WheelNode) || owner.markForRemoval) drop();

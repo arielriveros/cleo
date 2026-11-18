@@ -2,7 +2,7 @@ import { Body, RaycastResult, RaycastVehicle, Vec3, WheelInfo } from 'cannon-es'
 import type { Out } from '../types';
 import type { NormalizedVehicle, VehicleInput } from '../vehicle/vehicleDesc';
 import { dominantAxis, wheelRight } from '../vehicle/vehicleDesc';
-import { RaycastDrive, type ChassisMotion, type RaycastWheelReading } from '../vehicle/raycastDrive';
+import { BULLET_ROLL_INFLUENCE, RaycastDrive, type ChassisMotion, type RaycastWheelReading } from '../vehicle/raycastDrive';
 import { CannonBody } from './cannonBody';
 
 /** The closest ground below a wheel: what the world casts for it (its own filtered ray, see CannonWorld). */
@@ -78,6 +78,7 @@ export class CannonVehicle {
     private static readonly _impulse = new Vec3();
     private static readonly _rel = new Vec3();
     private static readonly _up = new Vec3();
+    private static readonly _lean = [0, 0, 0];
 
     constructor(public readonly chassis: Body, public readonly vehicle: NormalizedVehicle, ray: WheelRay) {
         const com = chassis instanceof CannonBody ? chassis.centerOfMassOffset : new Vec3();
@@ -102,10 +103,10 @@ export class CannonVehicle {
                 dampingRelaxation: t.relaxation,
                 maxSuspensionForce: t.maxSuspensionForce,
                 frictionSlip: t.frictionSlip,
-                rollInfluence: 0.1,
+                rollInfluence: BULLET_ROLL_INFLUENCE,
             });
         });
-        this._readings = vehicle.wheels.map(w => ({ contact: false, length: w.suspensionMaxLength, suspensionForce: 0, point: [0, 0, 0], normal: [0, 0, 0] }));
+        this._readings = vehicle.wheels.map(w => ({ contact: false, length: w.suspensionMaxLength, suspensionForce: 0, point: [0, 0, 0], normal: [0, 0, 0], sideImpulse: 0 }));
     }
 
     public setInput(input: VehicleInput): void { Object.assign(this.drive.input, input); }
@@ -125,6 +126,8 @@ export class CannonVehicle {
             r.contact = w.isInContact;
             r.length = w.suspensionLength;
             r.suspensionForce = w.isInContact ? Math.min(w.suspensionForce, w.maxSuspensionForce) : 0;
+            // cannon's axle is the chassis's +index axis: along the wheels' right, its sign is _axleSign.
+            r.sideImpulse = w.isInContact ? w.sideImpulse * this._axleSign : 0;
             r.point[0] = hit.hitPointWorld.x; r.point[1] = hit.hitPointWorld.y; r.point[2] = hit.hitPointWorld.z;
             r.normal[0] = hit.hitNormalWorld.x; r.normal[1] = hit.hitNormalWorld.y; r.normal[2] = hit.hitNormalWorld.z;
         }
@@ -134,6 +137,9 @@ export class CannonVehicle {
         m.rotation[0] = b.quaternion.x; m.rotation[1] = b.quaternion.y; m.rotation[2] = b.quaternion.z; m.rotation[3] = b.quaternion.w;
         m.linear[0] = b.velocity.x; m.linear[1] = b.velocity.y; m.linear[2] = b.velocity.z;
         m.angular[0] = b.angularVelocity.x; m.angular[1] = b.angularVelocity.y; m.angular[2] = b.angularVelocity.z;
+        // An angular impulse as a torque over this substep: preStep runs before cannon integrates it.
+        const lean = CannonVehicle._lean;
+        if (drive.uprightImpulse(dt, this._readings, m, lean)) b.torque.set(b.torque.x + lean[0] / dt, b.torque.y + lean[1] / dt, b.torque.z + lean[2] / dt);
         drive.finish(dt, this._readings, m);
     }
 

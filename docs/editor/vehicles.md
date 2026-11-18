@@ -23,9 +23,38 @@ looks like.
 4. **Put your meshes** under the chassis (its body) and under each Wheel (its tyre). A mesh under a Wheel spins,
    steers and rides the suspension with it.
 
+Or start from one of the [Presets](#presets) in the Vehicle panel's **Presets ▾** menu: Car, Sports Car,
+Kart, Truck, Bus, Off-road, Bike or Trailer. A preset lays the vehicle out for you, wheels and chassis
+included, and keeps the meshes you have already put under its wheels.
+
 Press Play: with **Player input** on, **Move** drives and steers and **Jump** holds the hand brake.
 
 The scripting side is in [Motion and physics](../scripting/motion-and-physics.md#vehicles).
+
+## Presets
+
+The Vehicle panel's **Presets ▾** menu lays the vehicle out as one of these. Each sets the Vehicle's settings,
+its wheel layout and its chassis's mass and box:
+
+| Preset | Chassis | Wheels | Drive |
+|---|---|---|---|
+| **Car** | 1200 kg, 1.8 × 0.6 × 4 m | Four; the front axle steers 30°, the rear one drives and holds the hand brake | Engine, 500 N·m, five gears, limited slip |
+| **Sports Car** | 1300 kg, 1.9 × 0.5 × 4.4 m | Four; grippy, stiffly sprung, short travel | Engine, 700 N·m to 8000 RPM, six gears, rear-wheel drive |
+| **Kart** | 150 kg, 1.0 × 0.2 × 1.5 m | Four small ones, very stiff | Electric motors in the rear wheels, to 60 km/h |
+| **Truck** | 8000 kg, 2.4 × 1.2 × 8 m | Six on three axles; the front steers, both rear axles drive | Engine, 2000 N·m to 2800 RPM, six low gears |
+| **Bus** | 12000 kg, 2.5 × 1.6 × 11 m | Four; a long wheelbase, softly sprung | Engine, 1800 N·m, rear-wheel drive |
+| **Off-road** | 900 kg, 1.7 × 0.5 × 3.2 m | Four big ones; long, soft suspension, looser grip | Engine, 450 N·m, all-wheel drive, limited slip |
+| **Bike** | 220 kg, 0.35 × 0.6 × 1.8 m | Two in line; the front steers, the rear drives | Engine, 120 N·m to 10000 RPM; [leans](#lean) into turns |
+| **Trailer** | 600 kg, 1.6 × 0.6 × 2.4 m | Two on one axle, none steering | None; a [hitch](#hitch) point at its tongue. Set **Towed by** to the vehicle that pulls it |
+
+Applying a preset to a vehicle that already has wheels keeps them, and the meshes under them. The first wheel
+takes the preset's first place, the second its second, and so on: each moves to its new place, its mesh with
+it, and takes the preset's settings. Wheels it still lacks are added, with no mesh. Wheels beyond the preset's
+count are removed when nothing is under them; one that carries a mesh is kept, and the panel says so. A wheel
+you renamed keeps its name.
+
+A preset never chooses what the vehicle is hitched to, and only the Trailer sets **Player input** (off).
+Applying one is one undo step. From a script: `vehicle.applyPreset('bike')`.
 
 ## Vehicle
 
@@ -80,6 +109,7 @@ The automatic gearbox and the differentials behind it.
 | **Shift time** | Seconds a gear change takes, with no torque through the clutch. |
 | **Final drive** | The differentials' ratio. |
 | **Reverse ratio** | The reverse gear's ratio. |
+| **Clutch** | How hard the clutch couples the engine to the wheels. A heavy vehicle needs a strong one: a weak clutch slips under the load. Only Jolt models the clutch; on Rapier and Cannon it couples at once. |
 | **Gears** | The forward gears' ratios, first gear first. |
 | **Limited slip** | Limited-slip differentials send torque to the wheel that grips. Off: open differentials, where a spinning wheel takes all the torque. |
 
@@ -90,8 +120,23 @@ How it leans and what its wheels feel the ground with.
 | Setting | Meaning |
 |---|---|
 | **Anti-roll** | How hard each axle resists the body rolling in a turn, in N/m. `0` for none. |
-| **Max pitch / roll** | Most the chassis may tip from upright, in degrees. `180` lets it roll over. Only Jolt applies this. |
+| **Max pitch / roll** | Most the chassis may tip from upright, in degrees. `180` lets it roll over. |
 | **Ray** / **Sphere** / **Cylinder** | What each wheel finds the ground with: a ray down its centre, a sphere, or its own cylinder, which follows kerbs and bumps by the tyre's real shape. Only Jolt casts a sphere or a cylinder; the Cannon and Rapier backends always cast a ray. |
+
+### Lean
+
+For a vehicle on two wheels in line, a motorcycle: **Lean into turns** holds it upright and leans it into
+turns. The lean it aims for balances the turn its steering asks for at its speed, up to **Max lean**; **Lean
+spring** and **Lean damping** set how firmly it gets there. It also narrows the steering as speed rises, to
+what that lean can hold. Without it, a vehicle on two wheels in line falls over.
+
+### Hitch
+
+What tows it, for a trailer. **Towed by** names the vehicle that pulls it: pick it, or drop its chassis from
+the scene tree. **Hitch point** is where it is coupled, in the Vehicle's frame (a trailer's tongue, ahead of its
+chassis). In Play a ball joint joins the two chassis at that point, where it is when the scene starts, so place
+the trailer with its hitch point at the towing vehicle's tow ball. With the colliders overlay on, a red cross
+marks the hitch point.
 
 ### Live
 
@@ -161,5 +206,6 @@ Every backend builds the vehicle from the same description, using its own native
   spin, brakes as torques, anti-roll bars and the hand brake's hold on a slope.
 
 One tuning drives about the same on all three. Ride height matches to within a centimetre, braking
-distance to about 15%, and top speed after a few seconds to about 25%. Only Jolt casts a sphere or a
-cylinder and holds **Max pitch / roll**. See [Physics backends](../reference/physics-backends.md#vehicles).
+distance to about 15%, and top speed after a few seconds to about 25%. The lean controller is the same on
+all three. Only Jolt casts a sphere or a cylinder and models the clutch. See
+[Physics backends](../reference/physics-backends.md#vehicles).

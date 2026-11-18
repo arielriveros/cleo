@@ -66,6 +66,9 @@ export class WheelNode extends Node {
         quat.copy(this._parentInChassis, parentInChassis);
     }
 
+    /** @internal Forget the captured pose: the wheel was placed anew (a preset), and its pose now is the authored one. */
+    public _forgetRest(): void { this._restPosition = null; }
+
     /** @internal The authored pose, as captured (the node's own until it is). */
     public get _restLocalPosition(): vec3 { return this._restPosition ?? this.position; }
 

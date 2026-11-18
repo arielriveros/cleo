@@ -100,6 +100,26 @@ export interface VehicleAntiRollBarDesc {
     stiffness?: number;
 }
 
+/**
+ * A lean controller, for a vehicle on two wheels in line (a motorcycle): it holds the chassis upright and leans
+ * it into turns, toward where the tyres' forces point, as Jolt's MotorcycleController does (and on Jolt, is).
+ * It also narrows the steering as speed rises, to what that lean can hold.
+ */
+export interface VehicleLeanDesc {
+    /** Most it leans from upright, radians. Default 45°. */
+    maxAngle?: number;
+    /** N·m per radian it pulls toward the target lean, and N·m·s per radian/s it damps the roll. */
+    spring?: number;
+    damping?: number;
+    /** N·m per radian·s of the integrated lean error (0: none). */
+    integration?: number;
+    /** 0 .. 1: how much of last step's target lean is kept (the rest is this step's). Default 0.8. */
+    smoothing?: number;
+}
+
+export const LEAN_DEFAULTS = { maxAngle: 45 * Math.PI / 180, spring: 5000, damping: 1000, integration: 0, smoothing: 0.8, integrationDecay: 4 };
+export type NormalizedLean = typeof LEAN_DEFAULTS;
+
 /** What a wheel finds the ground with: a ray down its centre, a sphere, or its own cylinder. */
 export type VehicleCast = 'ray' | 'sphere' | 'cylinder';
 
@@ -127,6 +147,8 @@ export interface VehicleDesc {
     antiRollBars?: readonly VehicleAntiRollBarDesc[];
     /** Most the chassis may pitch or roll from upright, radians: past it the vehicle is held. Default π (free). */
     maxPitchRollAngle?: number;
+    /** Hold it upright and lean it into turns (a motorcycle). Default: none. */
+    lean?: VehicleLeanDesc;
     /** Default `'cylinder'`, where the backend can (capabilities.vehicleCasts); a ray otherwise. */
     cast?: VehicleCast;
 }
@@ -214,6 +236,7 @@ export interface NormalizedVehicle {
     antiRollBars: NormalizedAntiRollBar[];
     maxPitchRollAngle: number;
     cast: VehicleCast;
+    lean: NormalizedLean | null;
 }
 
 const finite = (v: unknown, fallback: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
@@ -326,13 +349,19 @@ export function normalizeVehicle(desc: Omit<VehicleDesc, 'chassis'>): Normalized
         clutchStrength: positive(t.clutchStrength, T.clutchStrength),
     };
     const differentials: NormalizedDifferential[] = (desc.differentials ?? [])
-        .map(d => ({
-            leftWheel: wheelIndex(d.leftWheel, n), rightWheel: wheelIndex(d.rightWheel, n),
+        .map(d => {
+            const leftWheel = wheelIndex(d.leftWheel, n), rightWheel = wheelIndex(d.rightWheel, n);
+            // A differential to one wheel gives it all the torque: Jolt would send the other half to the side
+            // that has none, and lose it.
+            const split = leftWheel < 0 ? 0 : rightWheel < 0 ? 1 : Math.min(1, nonNegative(d.leftRightSplit, D.leftRightSplit));
+            return {
+            leftWheel, rightWheel,
             ratio: positive(d.ratio, D.ratio),
-            leftRightSplit: Math.min(1, nonNegative(d.leftRightSplit, D.leftRightSplit)),
+            leftRightSplit: split,
             limitedSlipRatio: positiveOrInfinite(d.limitedSlipRatio, D.limitedSlipRatio),
             engineTorqueRatio: nonNegative(d.engineTorqueRatio, D.engineTorqueRatio),
-        }))
+            };
+        })
         .filter(d => d.leftWheel >= 0 || d.rightWheel >= 0);
     const antiRollBars: NormalizedAntiRollBar[] = (desc.antiRollBars ?? [])
         .map(b => ({ leftWheel: wheelIndex(b.leftWheel, n), rightWheel: wheelIndex(b.rightWheel, n), stiffness: nonNegative(b.stiffness, ANTI_ROLL_DEFAULTS.stiffness) }))
@@ -348,6 +377,14 @@ export function normalizeVehicle(desc: Omit<VehicleDesc, 'chassis'>): Normalized
         antiRollBars,
         maxPitchRollAngle: Math.min(Math.PI, positive(desc.maxPitchRollAngle, Math.PI)),
         cast: desc.cast === 'ray' || desc.cast === 'sphere' ? desc.cast : 'cylinder',
+        lean: desc.lean ? {
+            maxAngle: Math.min(Math.PI / 2 - 0.01, positive(desc.lean.maxAngle, LEAN_DEFAULTS.maxAngle)),
+            spring: nonNegative(desc.lean.spring, LEAN_DEFAULTS.spring),
+            damping: nonNegative(desc.lean.damping, LEAN_DEFAULTS.damping),
+            integration: nonNegative(desc.lean.integration, LEAN_DEFAULTS.integration),
+            smoothing: Math.min(0.99, nonNegative(desc.lean.smoothing, LEAN_DEFAULTS.smoothing)),
+            integrationDecay: LEAN_DEFAULTS.integrationDecay,
+        } : null,
     };
 }
 
