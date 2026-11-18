@@ -16,7 +16,7 @@ import crypto from 'node:crypto';
 import ts from 'typescript';
 
 /** Bumped when the index's shape changes: an old cache is then rebuilt. */
-const FORMAT = 1;
+const FORMAT = 2;
 const SIG_MAX = 300;
 const SEARCH_BUDGET = 3500;
 const SYMBOL_BUDGET = 8000;
@@ -24,7 +24,7 @@ const DOC_BUDGET = 6000;
 
 /**
  * @typedef {{ id: string, name: string, container: string | null, kind: string, sig: string, doc: string,
- *   src: string, base?: string, static?: boolean, access?: string, members?: number }} Entry
+ *   src: string, module?: string, base?: string, static?: boolean, access?: string, members?: number }} Entry
  * @typedef {{ id: string, file: string, title: string, text: string }} Section
  * @typedef {{ format: number, fingerprint: string, builtAt: string, entries: Entry[], sections: Section[] }} IndexData
  */
@@ -145,20 +145,27 @@ function srcOf(/** @type {string} */ fileName, /** @type {string} */ engineRoot)
 }
 
 /**
- * Index everything the `cleo` module exports, and the members of its classes, interfaces and namespaces.
+ * The modules a script imports from the engine, by their declaration file in dist: `cleo` itself, and the
+ * script decorators, which scripts import from 'cleo/decorators' (src/decorators.ts). An entry of any but the
+ * first carries its `module`, so the agent is told where to import it from.
+ */
+const MODULES = [['cleo', 'cleo.d.ts'], ['cleo/decorators', 'decorators.d.ts']];
+
+/**
+ * Index everything the `cleo` module (and 'cleo/decorators') exports, and the members of its classes,
+ * interfaces and namespaces.
  * @param {string} engineRoot @returns {Entry[]}
  */
 export function indexDeclarations(engineRoot) {
-    const barrel = path.join(engineRoot, 'dist', 'cleo.d.ts');
-    if (!fs.existsSync(barrel)) throw new Error(`The engine's type declarations are missing (${barrel}). Run "npm run build" in ${engineRoot}.`);
-    const program = ts.createProgram([barrel], {
+    const [main, ...more] = MODULES.map(([module, file]) => ({ module, file: path.join(engineRoot, 'dist', file) }));
+    if (!fs.existsSync(main.file)) throw new Error(`The engine's type declarations are missing (${main.file}). Run "npm run build" in ${engineRoot}.`);
+    // The others only where this engine has them: one built before 'cleo/decorators' still indexes.
+    const barrels = [main, ...more.filter(b => fs.existsSync(b.file))];
+    const program = ts.createProgram(barrels.map(b => b.file), {
         noEmit: true, skipLibCheck: true, noLib: true, types: [],
         target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Node10,
     });
     const checker = program.getTypeChecker();
-    const sf = program.getSourceFile(barrel);
-    const moduleSym = sf && checker.getSymbolAtLocation(sf);
-    if (!moduleSym) throw new Error(`Could not read ${barrel}.`);
 
     /** @type {Entry[]} */
     const entries = [];
@@ -202,49 +209,55 @@ export function indexDeclarations(engineRoot) {
         return count;
     };
 
-    for (const exp of checker.getExportsOfModule(moduleSym)) {
-        const sym = exp.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exp) : exp;
-        const decls = sym.declarations ?? [];
-        if (!decls.length) continue;
-        const name = exp.name;
-        // The declaration that says what it is: a class over its merged interface, a namespace last.
-        const decl = decls.find(d => ts.isClassDeclaration(d)) ?? decls.find(d => !ts.isModuleDeclaration(d) && !ts.isSourceFile(d)) ?? decls[0];
-        const src = srcOf(decl.getSourceFile().fileName, engineRoot);
-        const kind = kindOf(decl);
-        /** @type {Entry} */
-        const entry = { id: name, name, container: null, kind, sig: '', doc: decls.map(jsDocText).filter(Boolean).join('\n'), src };
+    for (const { module, file } of barrels) {
+        const sf = program.getSourceFile(file);
+        const moduleSym = sf && checker.getSymbolAtLocation(sf);
+        if (!moduleSym) throw new Error(`Could not read ${file}.`);
+        for (const exp of checker.getExportsOfModule(moduleSym)) {
+            const sym = exp.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exp) : exp;
+            const decls = sym.declarations ?? [];
+            if (!decls.length) continue;
+            const name = exp.name;
+            // The declaration that says what it is: a class over its merged interface, a namespace last.
+            const decl = decls.find(d => ts.isClassDeclaration(d)) ?? decls.find(d => !ts.isModuleDeclaration(d) && !ts.isSourceFile(d)) ?? decls[0];
+            const src = srcOf(decl.getSourceFile().fileName, engineRoot);
+            const kind = kindOf(decl);
+            /** @type {Entry} */
+            const entry = { id: name, name, container: null, kind, sig: '', doc: decls.map(jsDocText).filter(Boolean).join('\n'), src,
+                ...(module !== 'cleo' ? { module } : {}) };
 
-        if (ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl)) {
-            entry.sig = `${kind} ${name}${(decl.heritageClauses ?? []).map(h => ` ${oneLine(h.getText())}`).join('')}`;
-            const ext = decl.heritageClauses?.find(h => h.token === ts.SyntaxKind.ExtendsKeyword)?.types[0];
-            if (ext) entry.base = ext.expression.getText();
-            add(entry);
-            entry.members = addMembers(name, decls.filter(d => ts.isClassDeclaration(d) || ts.isInterfaceDeclaration(d))
-                .flatMap(d => [.../** @type {any} */ (d).members]), src);
-        } else if (ts.isFunctionDeclaration(decl)) {
-            entry.sig = cut(decls.filter(ts.isFunctionDeclaration).map(d => declText(d).replace(/^function\s+/, 'function ')).join(' | '), SIG_MAX * 2);
-            add(entry);
-        } else if (ts.isEnumDeclaration(decl)) {
-            entry.sig = `enum ${name} { ${decl.members.map(m => m.name.getText()).join(', ')} }`;
-            add(entry);
-        } else if (ts.isVariableDeclaration(decl)) {
-            entry.sig = `${kind} ${declText(decl)}`;
-            add(entry);
-        } else if (kind === 'namespace') {
-            entry.sig = `namespace ${name}`;
-            add(entry);
-            let count = 0;
-            for (const m of checker.getExportsOfModule(sym)) {
-                const ms = m.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(m) : m;
-                const md = ms.declarations?.[0];
-                if (!md || m.name.startsWith('_')) continue;
-                add({ id: `${name}.${m.name}`, name: m.name, container: name, kind: kindOf(md), sig: declText(md), doc: jsDocText(md), src: srcOf(md.getSourceFile().fileName, engineRoot) });
-                count++;
+            if (ts.isClassDeclaration(decl) || ts.isInterfaceDeclaration(decl)) {
+                entry.sig = `${kind} ${name}${(decl.heritageClauses ?? []).map(h => ` ${oneLine(h.getText())}`).join('')}`;
+                const ext = decl.heritageClauses?.find(h => h.token === ts.SyntaxKind.ExtendsKeyword)?.types[0];
+                if (ext) entry.base = ext.expression.getText();
+                add(entry);
+                entry.members = addMembers(name, decls.filter(d => ts.isClassDeclaration(d) || ts.isInterfaceDeclaration(d))
+                    .flatMap(d => [.../** @type {any} */ (d).members]), src);
+            } else if (ts.isFunctionDeclaration(decl)) {
+                entry.sig = cut(decls.filter(ts.isFunctionDeclaration).map(d => declText(d).replace(/^function\s+/, 'function ')).join(' | '), SIG_MAX * 2);
+                add(entry);
+            } else if (ts.isEnumDeclaration(decl)) {
+                entry.sig = `enum ${name} { ${decl.members.map(m => m.name.getText()).join(', ')} }`;
+                add(entry);
+            } else if (ts.isVariableDeclaration(decl)) {
+                entry.sig = `${kind} ${declText(decl)}`;
+                add(entry);
+            } else if (kind === 'namespace') {
+                entry.sig = `namespace ${name}`;
+                add(entry);
+                let count = 0;
+                for (const m of checker.getExportsOfModule(sym)) {
+                    const ms = m.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(m) : m;
+                    const md = ms.declarations?.[0];
+                    if (!md || m.name.startsWith('_')) continue;
+                    add({ id: `${name}.${m.name}`, name: m.name, container: name, kind: kindOf(md), sig: declText(md), doc: jsDocText(md), src: srcOf(md.getSourceFile().fileName, engineRoot) });
+                    count++;
+                }
+                entry.members = count;
+            } else {
+                entry.sig = declText(decl);
+                add(entry);
             }
-            entry.members = count;
-        } else {
-            entry.sig = declText(decl);
-            add(entry);
         }
     }
     return entries;
@@ -515,7 +528,12 @@ export class EngineApi {
         const head = e.container ? this.qualified(e, e.sig.split(' | ')[0]) : e.sig;
         const more = e.members ? ` (${e.members} members: engine_api {symbol:"${e.id}"})` : '';
         const doc = e.doc ? ` — ${firstSentence(e.doc)}` : '';
-        return cut(`${head}${doc}${more} [${e.src}]`, 420);
+        return cut(`${head}${doc}${more} [${this.where(e)}]`, 420);
+    }
+
+    /** Where a symbol is declared, and the module to import it from when that is not 'cleo'. @param {Entry} e */
+    where(e) {
+        return e.module ? `import from '${e.module}'; ${e.src}` : e.src;
     }
 
     /** @param {{ query?: string, symbol?: string, doc?: string, limit?: number }} args */
@@ -593,7 +611,7 @@ export class EngineApi {
         const e = found[0];
         const out = e.container
             ? [`${e.access === 'protected' ? 'protected ' : ''}${e.kind} of ${e.container}  [${e.src}]`, ...e.sig.split(' | ').map(s => this.qualified(e, s))]
-            : [`${e.sig}  [${e.src}]`];
+            : [`${e.sig}  [${this.where(e)}]`];
         if (e.doc) out.push(cut(e.doc, e.container ? 3000 : 1500));
         const entries = /** @type {IndexData} */ (this.data).entries;
         if (e.base) {

@@ -1,4 +1,5 @@
-import { Game, Logger, Node, SaveGame, attribute } from 'cleo'
+import { Game, Logger, Node, SaveGame } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * A way into another scene: the skull cave's mouth, the dungeon's way back out. Attach to a node with a

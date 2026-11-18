@@ -1,3 +1,4 @@
+/// <reference path="./monacoBasicLanguages.d.ts" />
 // One-time Monaco bootstrap for the script editor: compiler options, the engine's real types and the two
 // themes. Imported only from the lazily-loaded MonacoCodeEditor, so monaco-editor stays out of the
 // initial bundle.
@@ -28,9 +29,25 @@ import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
   },
 };
 
+import { language as typescriptGrammar } from 'monaco-editor/esm/vs/basic-languages/typescript/typescript.js';
 import { loadCleoTypes } from './cleoTypes';
 import { defineCleoThemes } from './monacoTheme';
 import { registerGlsl } from './glslMonaco';
+import { registerScriptCompletions } from './tsCompletions';
+
+/**
+ * Monaco's TypeScript grammar plus decorators: `@attribute`, `@onAction` as one `annotation` token, the token
+ * Monaco's Java grammar gives annotations, which the themes colour (monacoTheme.ts). First in `common`, so it
+ * wins over the operator rules; comments and strings are states of their own, so a doc comment's `@param`
+ * and an import path's `'@/Shared/Math'` keep their colours.
+ */
+function typescriptWithDecorators(): typeof typescriptGrammar {
+  const common = typescriptGrammar.tokenizer.common;
+  return {
+    ...typescriptGrammar,
+    tokenizer: { ...typescriptGrammar.tokenizer, common: [[/@\s*[a-zA-Z_$][\w$]*/, 'annotation'], ...common] },
+  };
+}
 
 let ready = false;
 
@@ -79,6 +96,10 @@ export function ensureMonaco(): typeof monaco {
   // hovers report the real member type and the engine's JSDoc.
 
   loadCleoTypes(monaco);
+  // TypeScript's completion list, with the script decorators after an `@` (tsCompletions.ts).
+  registerScriptCompletions(monaco);
+  // Set directly, before any model exists, it wins over the basic-language's lazily loaded grammar.
+  monaco.languages.setMonarchTokensProvider('typescript', typescriptWithDecorators());
   defineCleoThemes(monaco);
   registerGlsl(monaco);
 

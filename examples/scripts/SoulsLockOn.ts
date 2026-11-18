@@ -1,4 +1,5 @@
-import { CameraRigNode, Input, Node, dampTime, find, onAction, attribute } from 'cleo'
+import { CameraRigNode, Input, Node, dampTime } from 'cleo'
+import { find, onAction, attribute } from 'cleo/decorators'
 import { angleDiff, planarDistance, yawTo } from '@/Core/Scripts/SoulsMath'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 

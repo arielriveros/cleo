@@ -1,4 +1,5 @@
-import { Game, Input, Logger, Node, SaveGame, save, find, child, attribute } from 'cleo'
+import { Game, Input, Logger, Node, SaveGame } from 'cleo'
+import { save, find, child, attribute } from 'cleo/decorators'
 import type { TemplateName } from 'cleo'
 import { clamp, forwardYaw, num } from '@/Core/Scripts/SoulsMath'
 import { playSound, stopSound } from '@/Core/Scripts/SoulsAudio'

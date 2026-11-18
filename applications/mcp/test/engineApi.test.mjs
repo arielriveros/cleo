@@ -172,4 +172,7 @@ test('the real engine API indexes, and finds what a script needs', { skip: !fs.e
     assert.match((await api.answer({ query: 'rotate node' })).text, /Node\.rotateY\(/);
     const search = (await api.answer({ query: 'play animation action' })).text;
     assert.ok(search.length < 4000, `${search.length} characters`);
+    // The script decorators are 'cleo/decorators', and the answer says to import them from there.
+    if (fs.existsSync(path.join(REAL_ROOT, 'dist', 'decorators.d.ts')))
+        assert.match((await api.answer({ symbol: 'onAction' })).text, /import from 'cleo\/decorators'/);
 });

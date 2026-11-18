@@ -1,4 +1,5 @@
-import { SequenceNode, attribute } from 'cleo'
+import { SequenceNode } from 'cleo'
+import { attribute } from 'cleo/decorators'
 import type { SequenceScriptContext } from 'cleo'
 
 /**

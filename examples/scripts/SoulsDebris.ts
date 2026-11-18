@@ -1,4 +1,5 @@
-import { Node, Shape, attribute } from 'cleo'
+import { Node, Shape } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * The pieces of something that broke (see SoulsBreakable). Attach to the root of a template whose

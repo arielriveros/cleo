@@ -1,4 +1,5 @@
-import { Node, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * Valley — a fire-and-forget effect: the pond's splashes. Attach to the root of an effect template. On

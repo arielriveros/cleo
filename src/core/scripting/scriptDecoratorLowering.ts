@@ -278,3 +278,113 @@ export function lowerScriptDecorators(source: string): string {
         out = out.slice(0, at) + text + out.slice(at);
     return out;
 }
+
+/** Where a decorator is being typed (see {@link decoratorSiteAt}). */
+export interface DecoratorSite {
+    /** Offset of the `@`. */
+    at: number;
+    /** The part of the name typed so far (`'onA'` in `@onA`). */
+    typed: string;
+    /** What the decorator would decorate: the member written after the cursor, if there is one yet. */
+    member: 'field' | 'method' | null;
+}
+
+/**
+ * Whether the cursor at `offset` is in a member decorator being typed: just after an `@`, or after `@` and part
+ * of a name, at a member's place in a class body — not in a method body, an initializer's brackets, a string
+ * or a comment, and not before a class. The script editors' `@` completion asks this.
+ *
+ * Reads class bodies by the same rules as {@link lowerScriptDecorators} (`class` keyword, the heritage
+ * clause's brackets, strings, comments and regexes stepped over), and never throws: the source is half typed.
+ */
+export function decoratorSiteAt(source: string, offset: number): DecoratorSite | null {
+    let at = offset;
+    while (at > 0 && IDENT_PART.test(source[at - 1])) at--;
+    if (source[at - 1] !== '@') return null;
+    at--;
+    const typed = source.slice(at + 1, offset);
+    if (typed && !IDENT_START.test(typed[0])) return null;
+
+    // Walk to the `@`: one frame per open brace, each with its own count of open ( and [.
+    const stack: { isClass: boolean; brackets: number }[] = [];
+    let heritage: { depth: number } | null = null;
+    let prevToken = '';
+    let i = 0;
+    while (i < at) {
+        const c = source[i];
+        if (c === '/' && source[i + 1] === '/') { const nl = source.indexOf('\n', i); i = nl === -1 ? source.length : nl; continue; }
+        if (c === '/' && source[i + 1] === '*') { const end = source.indexOf('*/', i + 2); i = end === -1 ? source.length : end + 2; continue; }
+        if (c === '"' || c === "'" || c === '`') { i = skipString(source, i); prevToken = c; continue; }
+        if (c === '/' && isValuePosition(prevToken)) { i = skipRegex(source, i); prevToken = 'regex'; continue; }
+        const top = stack[stack.length - 1];
+        if (c === '{') {
+            const isClass = !!heritage && heritage.depth === 0;
+            if (isClass) heritage = null;
+            stack.push({ isClass, brackets: 0 });
+        } else if (c === '}') {
+            stack.pop();
+        } else if (heritage) {
+            if (c === '(' || c === '[' || c === '<') heritage.depth++;
+            else if (c === ')' || c === ']' || (c === '>' && source[i - 1] !== '=')) heritage.depth--;
+        } else if (top && (c === '(' || c === '[')) {
+            top.brackets++;
+        } else if (top && (c === ')' || c === ']')) {
+            top.brackets = Math.max(0, top.brackets - 1);
+        }
+        if (IDENT_START.test(c)) {
+            const word = wordAt(source, i);
+            if (word === 'class' && source[i - 1] !== '.') {
+                const next = source[skipTrivia(source, i + word.length)] ?? '';
+                if (IDENT_START.test(next) || next === '{') heritage = { depth: 0 };
+            }
+            prevToken = word;
+            i += word.length;
+            continue;
+        }
+        if (!/\s/.test(c)) prevToken = c;
+        i++;
+    }
+    // The walk stepped over a string or comment the `@` is inside of.
+    if (i > at) return null;
+    const frame = stack[stack.length - 1];
+    if (!frame?.isClass || heritage || frame.brackets > 0) return null;
+
+    return { at, typed, member: memberAfter(source, offset) };
+}
+
+/** The kind of member that starts after `from`, past any further decorators and modifiers; null if none yet. */
+function memberAfter(source: string, from: number): 'field' | 'method' | null {
+    // Past a decorator's arguments, if it has any, and the space after.
+    const pastArgs = (k: number) => {
+        const open = skipTrivia(source, k);
+        return skipTrivia(source, source[open] === '(' ? skipBalanced(source, open) : open);
+    };
+    // The rest of the name being typed (`@onA|ction('Jump')`), then any other decorators before the member.
+    let i = from;
+    while (IDENT_PART.test(source[i] ?? '')) i++;
+    i = pastArgs(i);
+    while (source[i] === '@') {
+        i = skipTrivia(source, i + 1);
+        while (IDENT_START.test(source[i] ?? '')) {
+            i += wordAt(source, i).length;
+            const dot = skipTrivia(source, i);
+            if (source[dot] !== '.') break;
+            i = skipTrivia(source, dot + 1);
+        }
+        i = pastArgs(i);
+    }
+    // Modifiers, then the name.
+    for (;;) {
+        const word = wordAt(source, i);
+        if (!word) break;
+        const after = skipTrivia(source, i + word.length);
+        if (!(MODIFIERS.has(word) || word === 'get' || word === 'set') || !startsMemberName(source, after)) break;
+        i = after;
+    }
+    if (source[i] === '*') return 'method';
+    const name = wordAt(source, i);
+    if (!name) return null;
+    let j = skipTrivia(source, i + name.length);
+    if (source[j] === '?' || source[j] === '!') j = skipTrivia(source, j + 1);
+    return source[j] === '(' || source[j] === '<' ? 'method' : 'field';
+}

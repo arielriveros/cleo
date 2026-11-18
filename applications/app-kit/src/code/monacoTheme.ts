@@ -26,6 +26,8 @@ interface MonacoPalette {
   type: string;
   operator: string;
   variable: string;
+  /** `@attribute`, `@onAction(...)`: the script decorators (the `annotation` token, monacoSetup.ts). */
+  decorator: string;
 }
 
 function darkPalette(): MonacoPalette {
@@ -62,6 +64,8 @@ function darkPalette(): MonacoPalette {
     type: '4ec9b0',
     operator: hex('--text-muted'),
     variable: hex('--text'),
+    // A rose of its own: apart from the indigo keywords, violet numbers and amber functions.
+    decorator: 'e48fc7',
   };
 }
 
@@ -98,6 +102,7 @@ function lightPalette(): MonacoPalette {
     type: '0f766e',
     operator: '6b7280',
     variable: '1f2430',
+    decorator: 'b3307a',
   };
 }
 
@@ -117,6 +122,7 @@ function toThemeData(p: MonacoPalette, base: 'vs' | 'vs-dark'): Monaco.editor.IS
       { token: 'delimiter', foreground: p.operator },
       { token: 'operator', foreground: p.operator },
       { token: 'function', foreground: p.func },
+      { token: 'annotation', foreground: p.decorator },
     ],
   };
 }

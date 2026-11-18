@@ -18,13 +18,14 @@ Engine conventions
 - Metres; +Y is up; a node faces +Z. Rotations are Euler DEGREES [x, y, z]; positive x pitch tilts the view down.
 - Lights are physical: directional in lux (sun about 100000), point/spot in lumens (about 1500 for a lamp). Exposure is the art control, so do not dim the sun to fix a bright image.
 - A script is one TypeScript class, default-exported, extending the type of the node it sits on:
-  import { Node, Logger, attribute } from 'cleo'
+  import { Node, Logger } from 'cleo'
+  import { attribute } from 'cleo/decorators'
   export default class SpinnerNode extends Node {
     @attribute speed = 90        // @attribute = a per-node inspector value
     private t = 0                // anything else is internal
     onUpdate(delta: number, time: number) { this.rotateY(this.speed * delta) }
   }
-  Handlers: onStart, onUpdate(delta, time), onCollision(other), onTriggerEnter(other), onTriggerExit(other), onSpawn, onDespawn. Import everything from 'cleo' (Input, Logger, Game, Vec...); there is no global object. Other scripts are imported by their asset path ('@/Shared/Math').
+  Handlers: onStart, onUpdate(delta, time), onCollision(other), onTriggerEnter(other), onTriggerExit(other), onSpawn, onDespawn. Import everything from 'cleo' (Input, Logger, Game, Vec...) except the decorators (@attribute, @onAction, @child, @save...), which come from 'cleo/decorators'; there is no global object. Other scripts are imported by their asset path ('@/Shared/Math').
 - Physics: a Collider node is the rigid body, its shapes are what collides, and everything under it moves with it (mass 0 = static). A Character goes under a Collider holding its capsule (angularConstraints [0,0,0]). Move a body through its velocity, not setPosition; face a world heading with setWorldYaw. A Trigger detects overlap; events fire on the Collider or Trigger itself. layer/mask filter what collides.
 - 2D scenes (dimension 2D): units, not metres (16 art pixels each), on the XY plane, +Y up. Build with camera2D, sprite/animatedSprite (assets:{tileset}), tilemap, body2D (props size), characterBody2D, room2D, parallaxLayer; a Trigger is a props size/offset box. 3D meshes and lights are not drawn there. Tilemaps collide on layer 1. Details: engine_api {"doc":"editor/tilemap-2d.md"}.
 - Animation one-shots play by action NAME (animator.playAction('Attack')); scripts never play clips directly.

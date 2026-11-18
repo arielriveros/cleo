@@ -1,4 +1,5 @@
-import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node, find, child, attribute } from 'cleo'
+import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node } from 'cleo'
+import { find, child, attribute } from 'cleo/decorators'
 
 /**
  * Duskwell -- a Ruin Guard: the knight of the Pixel Platformer set, gone dark. Attach to a walking

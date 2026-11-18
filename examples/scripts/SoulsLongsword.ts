@@ -1,4 +1,4 @@
-import { attribute } from 'cleo'
+import { attribute } from 'cleo/decorators'
 import SoulsWeaponNode from '@/Weapons/Base Weapon/Scripts/SoulsWeapon'
 
 /**

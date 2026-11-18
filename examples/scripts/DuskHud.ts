@@ -1,4 +1,5 @@
-import { Node, UIRootNode, UITextNode, child, attribute } from 'cleo'
+import { Node, UIRootNode, UITextNode } from 'cleo'
+import { child, attribute } from 'cleo/decorators'
 
 /**
  * Duskwell -- the HUD. Attach to the `HUD` screen-space UI Root; it reads the `Player` node every frame and

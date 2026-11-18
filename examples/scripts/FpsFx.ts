@@ -1,4 +1,5 @@
-import { Node, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * FPS example — a fire-and-forget effect (muzzle flash, impact, blood). Attach to the root of an effect

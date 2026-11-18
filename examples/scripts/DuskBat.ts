@@ -1,4 +1,5 @@
-import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node, TriggerNode, find, child, attribute } from 'cleo'
+import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node, TriggerNode } from 'cleo'
+import { find, child, attribute } from 'cleo/decorators'
 
 /**
  * Duskwell -- a bat. Attach to a flying Character Body 2D (no gravity, through one-way platforms) whose

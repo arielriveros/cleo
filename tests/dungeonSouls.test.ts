@@ -837,7 +837,8 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         expect(map.maps.map(m => m.name)).toEqual(['Gameplay', 'UI']);
         const actions = new Map(map.maps.flatMap(m => m.actions.map(a => [a.name, a] as const)));
         const used = new Set<string>();
-        for (const src of scriptSources()) for (const m of src.matchAll(/Input\.(?:started|pressed|released|heldSeconds|vector|device)\('([^']+)'\)/g)) used.add(m[1]);
+        // Read through Input, or bound with a decorator (@onAction('LightAttack'), @onHold, @onTap).
+        for (const src of scriptSources()) for (const m of src.matchAll(/Input\.(?:started|pressed|released|heldSeconds|vector|device)\('([^']+)'\)|@on(?:Action|Hold|Tap)\('([^']+)'/g)) used.add(m[1] ?? m[2]);
         expect(used.size).toBeGreaterThan(8);
         for (const name of used) {
             const action = actions.get(name);

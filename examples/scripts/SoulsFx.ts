@@ -1,4 +1,5 @@
-import { Node, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * Hollow Keep — a fire-and-forget effect. Attach to the root of an effect template (hit spark, bolt

@@ -10,7 +10,8 @@ import { buildGameData } from '../src/features/publish/buildGameData'
 // worth 2. The Behaviors panel writes the node's value and records it as that instance's override; a rebuild
 // from the template keeps it, the other instance follows the template, and Play gets each instance's value.
 
-const PICKUP = `import { Node, attribute } from 'cleo'
+const PICKUP = `import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 export default class Pickup extends Node {
   @attribute kind: string = 'diamond'
   @attribute amount: number = 1

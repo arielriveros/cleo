@@ -1,4 +1,5 @@
-import { Node, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * Valley — turns a windmill's sails. Attach to the `Sails` node, whose origin is the hub and whose local

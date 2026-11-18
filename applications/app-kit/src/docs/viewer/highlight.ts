@@ -2,7 +2,7 @@
 // and `glsl` (5); a full grammar would be wasted, and Monaco's colorizer needs Monaco loaded and themed.
 // One pass of a combined regex: comments, strings, numbers, then words classified by language.
 
-export type CodeTokenKind = 'keyword' | 'string' | 'number' | 'comment' | 'type' | 'function' | 'plain';
+export type CodeTokenKind = 'keyword' | 'string' | 'number' | 'comment' | 'type' | 'function' | 'decorator' | 'plain';
 
 export interface CodeToken {
   kind: CodeTokenKind;
@@ -30,11 +30,11 @@ const GLSL_TYPES = new Set([
   'sampler2DShadow', 'sampler3D', 'f32', 'i32', 'u32', 'vec2f', 'vec3f', 'vec4f', 'mat4x4f',
 ]);
 
-interface Grammar { keywords: Set<string>; types: Set<string>; strings: boolean }
+interface Grammar { keywords: Set<string>; types: Set<string>; strings: boolean; decorators: boolean }
 
 const GRAMMARS: Record<string, Grammar> = {
-  ts: { keywords: TS_KEYWORDS, types: TS_TYPES, strings: true },
-  glsl: { keywords: GLSL_KEYWORDS, types: GLSL_TYPES, strings: false },
+  ts: { keywords: TS_KEYWORDS, types: TS_TYPES, strings: true, decorators: true },
+  glsl: { keywords: GLSL_KEYWORDS, types: GLSL_TYPES, strings: false, decorators: false },
 };
 const ALIASES: Record<string, string> = {
   ts: 'ts', typescript: 'ts', js: 'ts', javascript: 'ts', tsx: 'ts', jsx: 'ts', json: 'ts',
@@ -50,7 +50,8 @@ const TOKEN = new RegExp([
   String.raw`(\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$))`,                        // 1 comment
   String.raw`('(?:\\.|[^'\\\n])*'?|"(?:\\.|[^"\\\n])*"?|\x60(?:\\.|[^\x60\\])*\x60?)`, // 2 string
   String.raw`(\b(?:0[xX][\da-fA-F_]+|\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?[fun]?)\b)`,    // 3 number
-  String.raw`([A-Za-z_$][\w$]*)`,                                             // 4 word
+  String.raw`(@[A-Za-z_$][\w$]*)`,                                            // 4 decorator
+  String.raw`([A-Za-z_$][\w$]*)`,                                             // 5 word
 ].join('|'), 'g');
 
 /** Split `code` into highlighted runs; an unknown language comes back as one plain run. */
@@ -69,10 +70,12 @@ export function highlight(code: string, lang: string | undefined): CodeToken[] {
   for (const m of code.matchAll(TOKEN)) {
     const start = m.index!;
     if (start > at) push('plain', code.slice(at, start));
-    const [whole, comment, str, num, word] = m;
+    const [whole, comment, str, num, decorator, word] = m;
     if (comment) push('comment', whole);
     else if (str) push(grammar.strings || !str.startsWith("'") ? 'string' : 'plain', whole);
     else if (num) push('number', whole);
+    // `@attribute`, `@onAction`: the script editor's decorator colour. Strings and comments matched first.
+    else if (decorator) push(grammar.decorators ? 'decorator' : 'plain', whole);
     else if (word) {
       const next = code.slice(start + whole.length).match(/^\s*(\(|<[A-Za-z])/);
       if (grammar.keywords.has(word)) push('keyword', whole);

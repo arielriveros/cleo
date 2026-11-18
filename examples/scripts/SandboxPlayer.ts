@@ -1,4 +1,5 @@
-import { CharacterNode, Input, attribute } from 'cleo'
+import { CharacterNode, Input } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * The Sandbox player: input only. Attach to the **Character** node ("Player").

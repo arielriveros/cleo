@@ -1,4 +1,5 @@
-import { CharacterNode, Logger, attribute } from 'cleo'
+import { CharacterNode, Logger } from 'cleo'
+import { attribute } from 'cleo/decorators'
 import type { Node, TemplateName } from 'cleo'
 import { WEAPONS, aimDirection, canDamage, clamp, combatantOf, manager, rotationOntoNormal, spreadDirection } from '@/FPS/Scripts/FpsShared'
 import type { WeaponSpec } from '@/FPS/Scripts/FpsShared'

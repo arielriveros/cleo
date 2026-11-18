@@ -1,4 +1,5 @@
-import { Node, save, find, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { save, find, attribute } from 'cleo/decorators'
 
 /**
  * Hollow Keep — the bloodstain left where the player died, holding every soul they carried. Attach to

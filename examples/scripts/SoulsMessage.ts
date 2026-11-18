@@ -1,4 +1,5 @@
-import { Node, find, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { find, attribute } from 'cleo/decorators'
 
 /**
  * Hollow Keep — a readable message on the ground: tutorial hints and lore. Attach to the message's root

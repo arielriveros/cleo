@@ -11,6 +11,8 @@ How to *write* a script is [Getting started](../scripting/getting-started.md).
 
 Opening a script asset puts the editor into **Script mode**: a full-panel code editor with the
 engine's complete typings loaded, so you get autocomplete and type errors against the real API.
+Typing `@` where a field or method goes lists the [decorators](../scripting/decorators.md), each with its
+documentation, and picking one adds it to the script's `cleo/decorators` import.
 
 A new script starts as a class extending `Node`. Change the base class to match the node it will sit
 on — `CharacterNode`, `UIRootNode`, `ControllerNode`, and so on. The base is resolved by class name.
@@ -59,7 +61,8 @@ state, and is neither shown nor stored per node. Name, type and access come from
 value is edited here, and the field's doc comment is the row's tooltip.
 
 ```ts
-import { Node, attribute } from 'cleo'
+import { Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 export default class SpawnerNode extends Node {
   /** Template to instantiate. */

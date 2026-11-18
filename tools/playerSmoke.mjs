@@ -96,6 +96,8 @@ async function run(c, port) {
         if (s.smoke.sceneFreed !== true) why.push(`the scene it left is still in memory after ${s.smoke.sceneFreedFrames} frames (${s.smoke.sceneFreed})`);
         if (s.smoke.fogVolumes !== (c.fog ? 1 : 0)) why.push(`${s.smoke.fogVolumes} fog volumes`);
         if (c.decals ? s.smoke.absent !== null : !/Decals feature/.test(s.smoke.absent ?? '')) why.push(`DecalNode: ${s.smoke.absent ?? 'defined'}`);
+        // A published script's decorators come from 'cleo/decorators', which the player registers itself.
+        if (s.smoke.decorators !== 'ok') why.push(`decorators: ${s.smoke.decorators}`);
         // SaveGame through the shell: a file in <profile>/saves, and, from the second game on, the one an
         // earlier game (another process) wrote, already listed when this one started.
         const sv = s.smoke.saves;

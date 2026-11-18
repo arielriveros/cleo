@@ -1,4 +1,5 @@
-import { Game, Logger, Node, attribute } from 'cleo'
+import { Game, Logger, Node } from 'cleo'
+import { attribute } from 'cleo/decorators'
 import type { TemplateName } from 'cleo'
 import { GAME_TYPES, GAME_TYPE_ALIASES, combatantOf, distance3, fps, findByVariable, planarDistance } from '@/FPS/Scripts/FpsShared'
 

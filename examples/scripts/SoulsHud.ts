@@ -1,4 +1,5 @@
-import { Node, UIProgressBarNode, UIRootNode, UITextNode, attribute } from 'cleo'
+import { Node, UIProgressBarNode, UIRootNode, UITextNode } from 'cleo'
+import { attribute } from 'cleo/decorators'
 
 /**
  * Hollow Keep — the PLAYER's HUD. Attach to the `HUD` node, a screen-space UI Root that is a CHILD of

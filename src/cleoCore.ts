@@ -436,11 +436,12 @@ export { logScriptError } from "./core/scripting/scriptErrors";
 // Typed name fields (clip/sound/socket/template/child): plain strings the inspector offers a picker for.
 export { SOUNDS_GROUP, ownedSoundsGroup } from "./core/scripting/fieldTypes";
 export type { ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, ProjectTriggers, SpriteClipName, ActionName, ProjectActions, ScriptPickKind } from "./core/scripting/fieldTypes";
-// Script decorators (@child, @find, @onAction, @save, @options, @pick), and what reads them back.
-export { child, find, onAction, onHold, onTap, onEnter, onExit, onEvent, every, attribute, save, options, pick, applyScriptDecorators, scriptMembersOf, membersOfNode, SCRIPT_METADATA } from "./core/scripting/decorators";
-export type { ActionWhen, ScriptMember, LoweredMember, AttributeOptions } from "./core/scripting/decorators";
+// What the script compile calls for decorators, and what reads them back. The decorators themselves (@child,
+// @onAction, @attribute, @save, …) are 'cleo/decorators' (./decorators.ts), registered at the end of this file.
+export { applyScriptDecorators, scriptMembersOf, membersOfNode, SCRIPT_METADATA } from "./core/scripting/decorators";
+export type { ScriptMember, LoweredMember } from "./core/scripting/decorators";
 export { GameEvents } from "./core/scripting/scriptEvents";
-export { lowerScriptDecorators } from "./core/scripting/scriptDecoratorLowering";
+export { lowerScriptDecorators, decoratorSiteAt, type DecoratorSite } from "./core/scripting/scriptDecoratorLowering";
 export { Game, setGameHost, setMovieRender, type MovieRenderInfo } from "./core/game";
 export { TimeDilation, type DilateOptions } from "./core/timeDilation";
 export { showLoadingOverlay, nextFrame, whenFramesSmooth } from "./core/loadingOverlay";
@@ -480,3 +481,7 @@ export {
 import * as CleoCoreAPI from "./cleoCore";
 import { registerScriptModule as registerCore } from "./core/scripting/scriptRuntime";
 registerCore('cleo', CleoCoreAPI);
+// `import { attribute, onAction } from 'cleo/decorators'`: the script decorators, kept out of the barrel. Here
+// rather than in cleo.ts so the published player has them too; the full engine adds nothing to them.
+import * as CleoDecoratorsAPI from "./decorators";
+registerCore('cleo/decorators', CleoDecoratorsAPI);

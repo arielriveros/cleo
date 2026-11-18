@@ -1,4 +1,5 @@
-import { CharacterNode, Logger, onAction, attribute } from 'cleo'
+import { CharacterNode, Logger } from 'cleo'
+import { onAction, attribute } from 'cleo/decorators'
 
 /**
  * Third-person STRAFE character — attach to the "Playable" root, on a **Character** node.

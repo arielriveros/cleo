@@ -78,6 +78,17 @@ const probe = (wantWorker: boolean) => `function(__cleoImport, __cleoExports) {
       decals: engine.scene.decals.size,
       fogVolumes: engine.scene.volumetricFogs.size,
       absent: (() => { try { void cleo.DecalNode; return null; } catch (e) { return String(e && e.message); } })(),
+      // The script decorators, from their own module, applied the way a published script's lowered class
+      // applies them: 'ok', or what went wrong.
+      decorators: (() => {
+        try {
+          const { onAction } = __cleoImport('cleo/decorators');
+          const Probe = class { jump() {} };
+          cleo.applyScriptDecorators(Probe, [[[onAction('Jump')], 'method', 'jump', 0]]);
+          const m = cleo.scriptMembersOf(Probe);
+          return m.length === 1 && m[0].kind === 'action' && m[0].action === 'Jump' ? 'ok' : JSON.stringify(m);
+        } catch (e) { return String(e && e.message); }
+      })(),
     };
     // Then leave this scene for an empty one, and report once it is collected (see SCENE_WATCH). This node
     // stays referenced on purpose, as a script callback never removed keeps its node: the scene must go anyway

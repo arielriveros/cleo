@@ -1,4 +1,5 @@
-import { Logger, Node, options, find, attribute } from 'cleo'
+import { Logger, Node } from 'cleo'
+import { options, find, attribute } from 'cleo/decorators'
 import type { TemplateName } from 'cleo'
 
 /**
