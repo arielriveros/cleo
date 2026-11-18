@@ -11,17 +11,46 @@ and Bullet all build vehicles this way. Wheels made as separate bodies joined to
 thin ground, bounce on mesh edges and sag as the solver softens the joints. Virtual wheels stay steady at
 any speed.
 
-Add one from the Add catalog's [Simulation](scene-authoring.md#simulation) category: **Vehicle** makes a car
-to start from. It has a 1200 kg box chassis, the Vehicle node, and four Wheels, each with a cylinder for a
-tyre. The rear wheels drive and hold the hand brake, the front ones steer, and **Player input** is on.
-Press Play and drive it with **Move**; **Jump** holds the hand brake.
+You build a vehicle step by step, and you decide what it is: how many wheels, what powers them, and what it
+looks like.
+
+1. **Add ▸ [Simulation](scene-authoring.md#simulation) ▸ Vehicle.** This gives a 1200 kg chassis (a Collider
+   with a box shape and no mesh) holding an empty Vehicle node, which is selected.
+2. **Add wheels** from the Vehicle's [Wheels](#wheels) list: one at a time, or an axle (a left and a right
+   wheel) at a time. Each goes to the chassis's next free corner, with no mesh. Move them where you want them.
+3. **Choose its [Drive](#drive):** none (a trailer or a cart), an engine and gearbox, or an electric motor in
+   each wheel.
+4. **Put your meshes** under the chassis (its body) and under each Wheel (its tyre). A mesh under a Wheel spins,
+   steers and rides the suspension with it.
+
+Press Play: with **Player input** on, **Move** drives and steers and **Jump** holds the hand brake.
 
 The scripting side is in [Motion and physics](../scripting/motion-and-physics.md#vehicles).
 
 ## Vehicle
 
-The Vehicle node holds the engine, the gearbox and the handling. The vehicle faces the node's **+Z**, with
+The Vehicle node holds its wheels, its drive and its handling. The vehicle faces the node's **+Z**, with
 **+Y** up. Its right is **-X**: in the engine, a right turn is a negative angle.
+
+### Wheels
+
+The Wheel nodes under the Vehicle, one row each: click a row to select that wheel, or its **✕** to remove it.
+Under the list, the wheel button adds one wheel and the axle button adds two, a left and a right. They fill the
+chassis's corners in order (measured from the chassis's box): left then right, the front axle first, then the
+back, then each further axle behind the last. The front axle steers. A new wheel has no mesh.
+
+### Drive
+
+What powers the vehicle:
+
+| Drive | Meaning |
+|---|---|
+| **None** | Nothing drives it. It rolls, steers and brakes: a trailer, a cart, something pushed or towed. |
+| **Engine** | An engine and an automatic gearbox, through differentials to the wheels marked **Driven**. The [Engine](#engine) and [Gearbox](#gearbox) settings appear. |
+| **Motors** | An electric motor in each wheel, with its own torque and top speed, set on the wheel ([Motor](#motor)). No gearbox. A wheel with no torque only rolls. |
+
+The motors all follow the one throttle: each pushes with its own torque up to its own top speed, but they cannot
+be driven separately (no tank steering).
 
 ### Driving
 
@@ -105,8 +134,17 @@ Whether the wheel steers or is driven, and how hard it brakes.
 | Setting | Meaning |
 |---|---|
 | **Steer angle** | Steering lock, in degrees. `0` for a wheel that does not steer. |
-| **Driven** | The engine turns this wheel. |
 | **Brake** / **Hand brake** | N·m at a full press. A hand brake of `0` leaves the wheel free. |
+| **Driven** | With the Engine drive: the engine turns this wheel. |
+
+### Motor
+
+With the Motors drive: this wheel's own electric motor.
+
+| Setting | Meaning |
+|---|---|
+| **Torque** | N·m at full throttle. `0`: the wheel has no motor and only rolls. |
+| **Top speed** | The fastest the motor turns the wheel, as the speed of the tyre's rim in km/h. |
 
 With **Colliders** on in the [debug overlays](scene-authoring.md#debug-overlays), each wheel draws in red:
 its tyre as a circle, and its suspension as a line up to where it is attached. The tick on the line marks

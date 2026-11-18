@@ -6,11 +6,14 @@ import { DEG2RAD, finiteOr } from "../../math";
 import { Input } from "../../../input/inputApi";
 import { Vehicle } from "../../../physics/vehicle";
 import {
-    WHEEL_DEFAULTS, type VehicleCast, type VehicleDesc, type WheelDesc, type VehicleDifferentialDesc, type VehicleAntiRollBarDesc,
+    WHEEL_DEFAULTS, type VehicleCast, type VehicleDesc, type VehicleDrive, type WheelDesc, type VehicleDifferentialDesc, type VehicleAntiRollBarDesc,
 } from "../../../physics/pal/vehicle/vehicleDesc";
 import type { PhysicsBody } from "../../../physics/physicsBody";
 
 const CASTS: readonly VehicleCast[] = ['ray', 'sphere', 'cylinder'];
+const DRIVES: readonly VehicleDrive[] = ['none', 'engine', 'motors'];
+/** A chassis with no box to measure: where addWheel puts wheels (half width, half height, half length). */
+const DEFAULT_CHASSIS: [number, number, number] = [0.9, 0.3, 2];
 /** Wheels this close along the vehicle (metres) share an axle. */
 const AXLE_TOLERANCE = 0.3;
 
@@ -28,6 +31,12 @@ const AXLE_TOLERANCE = 0.3;
  * same name would shadow a class one), so a script attached to it can drive it.
  */
 export class VehicleNode extends Node {
+    /**
+     * What powers it: an engine through a gearbox to the wheels marked `driven`, an electric motor in each
+     * wheel (its `motorTorque` and `motorTopSpeed`), or nothing: it rolls, steers and brakes, pushed or towed.
+     */
+    public drive: VehicleDrive = 'none';
+
     // ---- engine and gearbox (serialized) ----
 
     /** N·m at the torque curve's peak. */
@@ -105,6 +114,31 @@ export class VehicleNode extends Node {
     public rebuild(): void {
         if (this._vehicle) this._scene?.physics?.removeVehicle(this._vehicle);
         this._vehicle = null;
+    }
+
+    /**
+     * Add a wheel under it, with no mesh, at the chassis's next free corner: left (+X) then right, the first
+     * axle at the front, the second at the back, each further one behind that. Measured from the Collider's
+     * first box (a default car's size without one). The first axle steers.
+     */
+    public addWheel(): WheelNode {
+        const n = this.wheels.length, axle = Math.floor(n / 2), right = n % 2 === 1;
+        const [hw, hh, hd] = this._chassisHalfExtents();
+        const front = Math.max(0.3, hd - 0.7);
+        const z = axle === 0 ? front : axle === 1 ? -front : -front - (axle - 1) * 1.2;
+        const wheel = new WheelNode(`wheel ${n + 1}`);
+        wheel.setPosition([right ? -(hw - 0.1) : hw - 0.1, -hh - 0.2, z]);
+        wheel.steerAngle = axle === 0 ? 30 : 0;
+        this.addChild(wheel);
+        return wheel;
+    }
+
+    /** The Collider's first box, in this node's units (half extents), or a default car's. */
+    private _chassisHalfExtents(): [number, number, number] {
+        const shapes = (this.collider as unknown as { shapes?: { type: string; width?: number; height?: number; depth?: number }[] } | null)?.shapes;
+        const box = shapes?.find(s => s.type === 'box');
+        if (!box) return DEFAULT_CHASSIS;
+        return [(box.width ?? 1.8) / 2, (box.height ?? 0.6) / 2, (box.depth ?? 4) / 2];
     }
 
     public update(delta: number, time: number): void {
@@ -199,6 +233,9 @@ export class VehicleNode extends Node {
                 maxBrakeTorque: w.brakeTorque, maxHandBrakeTorque: w.handBrakeTorque,
                 longitudinalFriction: scale(WHEEL_DEFAULTS.longitudinalFriction),
                 lateralFriction: scale(WHEEL_DEFAULTS.lateralFriction),
+                motorTorque: w.motorTorque,
+                // m/s at the rim, as a wheel speed.
+                motorMaxSpeed: w.motorTopSpeed / w.radius,
             });
             along.push(vec3.dot(centre, this._vForward));
             across.push(vec3.dot(centre, right));
@@ -216,7 +253,7 @@ export class VehicleNode extends Node {
             return { left: sorted[0], right: sorted.length > 1 ? sorted[sorted.length - 1] : -1, all: sorted };
         });
         const differentials: VehicleDifferentialDesc[] = [];
-        for (const p of pairs) {
+        if (this.drive === 'engine') for (const p of pairs) {
             const driven = p.all.filter(i => wheels[i].driven);
             if (driven.length === 0) continue;
             const left = driven.includes(p.left) ? p.left : -1, right = p.right >= 0 && driven.includes(p.right) ? p.right : -1;
@@ -228,6 +265,7 @@ export class VehicleNode extends Node {
             : [];
 
         return {
+            drive: this.drive,
             up: [this._vUp[0], this._vUp[1], this._vUp[2]],
             forward: [this._vForward[0], this._vForward[1], this._vForward[2]],
             wheels: descs,
@@ -248,6 +286,7 @@ export class VehicleNode extends Node {
 
     protected _serializePayload(): any {
         return {
+            drive: this.drive,
             maxTorque: this.maxTorque, minRpm: this.minRpm, maxRpm: this.maxRpm,
             gearRatios: [...this.gearRatios], reverseRatio: this.reverseRatio, finalDrive: this.finalDrive,
             shiftUpRpm: this.shiftUpRpm, shiftDownRpm: this.shiftDownRpm, shiftTime: this.shiftTime,
@@ -278,11 +317,14 @@ export class VehicleNode extends Node {
         node.maxPitchRoll = Math.min(180, positive(json.maxPitchRoll, node.maxPitchRoll));
         node.autoReverse = bool(json.autoReverse, node.autoReverse);
         node.playerInput = bool(json.playerInput, node.playerInput);
+        if (DRIVES.includes(json.drive)) node.drive = json.drive;
     }
 
     public static parse(parent: Node, json: any): void {
         const node = new VehicleNode(json.name, json.id);
         VehicleNode.readSettings(node, json);
         Node.finishParse(node, parent, json);
+        // Saved before vehicles had a drive: its driven wheels were the engine's.
+        if (!DRIVES.includes(json.drive)) node.drive = node.wheels.some(w => w.driven) ? 'engine' : 'none';
     }
 }

@@ -37,6 +37,10 @@ export class WheelNode extends Node {
     public handBrakeTorque: number = 0;
     /** Scales the tyre's friction curves: 1 a road tyre on tarmac, below 1 worn or on a slippery surface. */
     public grip: number = 1;
+    /** Its electric motor, when its Vehicle's drive is `motors`: N·m at full throttle (0: no motor). */
+    public motorTorque: number = 300;
+    /** The motor's top speed, m/s at the tyre (27.8 = 100 km/h). */
+    public motorTopSpeed: number = 27.8;
 
     // ---- runtime (never serialized) ----
 
@@ -94,6 +98,7 @@ export class WheelNode extends Node {
             suspensionFrequency: this.suspensionFrequency, suspensionDamping: this.suspensionDamping,
             steerAngle: this.steerAngle, driven: this.driven,
             brakeTorque: this.brakeTorque, handBrakeTorque: this.handBrakeTorque, grip: this.grip,
+            motorTorque: this.motorTorque, motorTopSpeed: this.motorTopSpeed,
         };
     }
 
@@ -112,6 +117,8 @@ export class WheelNode extends Node {
         node.brakeTorque = nonNegative(json.brakeTorque, node.brakeTorque);
         node.handBrakeTorque = nonNegative(json.handBrakeTorque, node.handBrakeTorque);
         node.grip = finiteOr(json.grip, node.grip) > 0 ? finiteOr(json.grip, node.grip) : node.grip;
+        node.motorTorque = nonNegative(json.motorTorque, node.motorTorque);
+        node.motorTopSpeed = positive(json.motorTopSpeed, node.motorTopSpeed);
     }
 
     public static parse(parent: Node, json: any): void {

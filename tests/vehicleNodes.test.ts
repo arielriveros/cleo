@@ -156,6 +156,45 @@ describe(`a Vehicle node (${TEST_PHYSICS})`, () => {
         expect(worker.vehicle.vehicle!.wheel(2).grounded).toBe(true);
     });
 
+    it('loads a vehicle saved before drives as engine-driven, and saves its drive', async () => {
+        const { vehicle } = build();
+        expect(vehicle.drive).toBe('engine');
+        expect(((await vehicle.serialize()) as any).drive).toBe('engine');
+    });
+
+    it('adds wheels at the chassis corners, axle by axle, with no mesh', () => {
+        const root = new Node('root');
+        parseNodeJson(root, { ...car(), children: [{ type: 'vehicle', name: 'Vehicle', id: 'vehicle', position: [0, 0, 0], ...IDENT, children: [] }] });
+        const vehicle = root.getChildByName('Car')[0].getChildByName('Vehicle')[0] as VehicleNode;
+        expect(vehicle.drive).toBe('none');
+        const made = [vehicle.addWheel(), vehicle.addWheel(), vehicle.addWheel(), vehicle.addWheel(), vehicle.addWheel()];
+        expect(made.map(w => [...w.position].map(x => +x.toFixed(2)))).toEqual([
+            [0.8, -0.5, 1.3], [-0.8, -0.5, 1.3], [0.8, -0.5, -1.3], [-0.8, -0.5, -1.3], [0.8, -0.5, -2.5],
+        ]);
+        expect(made.map(w => w.steerAngle)).toEqual([30, 30, 0, 0, 0]);
+        expect(made.every(w => w.children.length === 0)).toBe(true);
+        expect(vehicle.wheels).toHaveLength(5);
+    });
+
+    it("drives on its wheels' motors, held to their top speed", () => {
+        const root = new Node('root');
+        parseNodeJson(root, floor());
+        parseNodeJson(root, { ...car(), children: [{ type: 'vehicle', name: 'Vehicle', id: 'vehicle', position: [0, 0, 0], ...IDENT, drive: 'motors', children: [] }] });
+        const vehicle = root.getChildByName('Car')[0].getChildByName('Vehicle')[0] as VehicleNode;
+        for (let i = 0; i < 4; i++) {
+            const w = vehicle.addWheel();
+            w.radius = 0.35;
+            w.motorTorque = i >= 2 ? 400 : 0;
+            w.motorTopSpeed = 10;
+        }
+        const { frame } = world(root);
+        frame(1);
+        vehicle.throttle = 1;
+        frame(7);
+        expect(vehicle.speed).toBeGreaterThan(8);
+        expect(vehicle.speed).toBeLessThan(10.5);
+    });
+
     it('goes when its node does, and comes back after a world clear', () => {
         const { p, vehicle, frame } = build();
         frame(0.5);

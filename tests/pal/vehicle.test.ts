@@ -237,6 +237,44 @@ describe.each(BACKENDS)('vehicle on %s', kind => {
         expect(replica.reportVehicles?.()).toBeUndefined();
     });
 
+    it('drives on electric motors in its wheels, each held to its top speed', () => {
+        const w = make(), body = chassis(w);
+        const desc = car(body);
+        // Motors in the rear wheels only: 400 N·m each, 30 rad/s (10.5 m/s on a 0.35 m wheel).
+        const wheels = desc.wheels.map((wh, i) => (i >= 2 ? { ...wh, motorTorque: 400, motorMaxSpeed: 30 } : wh));
+        const v = w.createVehicle({ ...desc, drive: 'motors', wheels, differentials: undefined });
+        run(w, 1.5);
+        w.setVehicleInput(v, { ...IDLE, forward: 1 });
+        run(w, 6);
+        const s = state(w, v);
+        expect(s[VH_SPEED]).toBeGreaterThan(8);
+        expect(s[VH_SPEED]).toBeLessThan(30 * 0.35 * 1.05);
+        // The front wheels only roll.
+        expect(s[wheelOffset(0) + W_OMEGA]).toBeCloseTo(s[VH_SPEED] / 0.35, 0);
+        // Stopped, then backward: the same motors in reverse.
+        w.setVehicleInput(v, { ...IDLE, brake: 1 });
+        run(w, 3);
+        w.setVehicleInput(v, { ...IDLE, forward: -1 });
+        run(w, 4);
+        expect(state(w, v)[VH_SPEED]).toBeLessThan(-3);
+    });
+
+    it('rolls, steers and brakes with no drive, but nothing pushes it', () => {
+        const w = make(), body = chassis(w);
+        const v = w.createVehicle({ ...car(body), drive: 'none' });
+        run(w, 1.5);
+        w.setVehicleInput(v, { ...IDLE, forward: 1 });
+        run(w, 3);
+        expect(Math.abs(state(w, v)[VH_SPEED])).toBeLessThan(0.1);
+        // Pushed, it rolls; braked, it stops.
+        w.setLinearVelocity(body, 0, 0, 8);
+        run(w, 1);
+        expect(state(w, v)[VH_SPEED]).toBeGreaterThan(5);
+        w.setVehicleInput(v, { ...IDLE, brake: 1 });
+        run(w, 3);
+        expect(Math.abs(state(w, v)[VH_SPEED])).toBeLessThan(0.2);
+    });
+
     it('refuses a static chassis and a vehicle with no wheels', () => {
         const w = make();
         const fixed = w.createBody({ position: [0, 5, 0], rotation: [0, 0, 0, 1], mass: 0, colliders: [{ shape: { kind: 'box', halfExtents: [1, 1, 1] } }] });

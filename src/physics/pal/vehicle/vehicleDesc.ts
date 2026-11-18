@@ -44,6 +44,10 @@ export interface WheelDesc {
     /** kg·m² of the wheel about its axle, and the fraction of its spin lost per second. */
     inertia?: number;
     angularDamping?: number;
+    /** With `drive: 'motors'`: this wheel's own motor, N·m at full throttle (0 or unset: not motored). */
+    motorTorque?: number;
+    /** With `drive: 'motors'`: the motor's top speed, rad/s at the wheel. Default 100 (126 km/h on a 0.35 m wheel). */
+    motorMaxSpeed?: number;
 }
 
 export interface VehicleEngineDesc {
@@ -99,9 +103,17 @@ export interface VehicleAntiRollBarDesc {
 /** What a wheel finds the ground with: a ray down its centre, a sphere, or its own cylinder. */
 export type VehicleCast = 'ray' | 'sphere' | 'cylinder';
 
+/**
+ * What powers it: an engine through a gearbox to the `differentials`, an electric motor in each wheel that
+ * has a `motorTorque`, or nothing (it rolls, steers and brakes).
+ */
+export type VehicleDrive = 'engine' | 'motors' | 'none';
+
 export interface VehicleDesc {
     /** The chassis: a dynamic body of this world. */
     chassis: BodyHandle;
+    /** Default: `'engine'` when there are differentials, `'none'` otherwise. */
+    drive?: VehicleDrive;
     /** The chassis's up and forward, in its frame. Default `[0, 1, 0]` and `[0, 0, 1]` (the engine's +Z forward). */
     up?: V3;
     forward?: V3;
@@ -233,9 +245,39 @@ export interface VehicleRecord {
     readonly vehicle: NormalizedVehicle;
 }
 
+/** Engine RPM at a motor's top speed: the model's limiter, where the motors' own speed limits land. */
+const MOTOR_RPM = 6000;
+const DEFAULT_MOTOR_SPEED = 100;
+
+/**
+ * Electric motors in the wheels as the engine model every backend already runs (Jolt's drivetrain, and the
+ * shared one): one engine of flat torque, one gear, and an open differential per motored wheel whose ratio
+ * puts that wheel's top speed at the engine's limiter and whose share gives it its own torque. Each wheel then
+ * pushes with its motor's torque up to its motor's speed. The motors share the one throttle.
+ */
+function motorsAsEngine(desc: Omit<VehicleDesc, 'chassis'>): Omit<VehicleDesc, 'chassis'> {
+    const engineOmega = MOTOR_RPM * Math.PI / 30;
+    const motored = desc.wheels.map((w, i) => ({ i, torque: w.motorTorque ?? 0, speed: w.motorMaxSpeed ?? DEFAULT_MOTOR_SPEED }))
+        .filter(m => m.torque > 0 && Number.isFinite(m.torque) && m.speed > 0 && Number.isFinite(m.speed));
+    if (motored.length === 0) return { ...desc, differentials: [] };
+    const ratios = motored.map(m => engineOmega / m.speed);
+    const shares = motored.map((m, k) => m.torque / ratios[k]);
+    const total = shares.reduce((a, b) => a + b, 0);
+    return {
+        ...desc,
+        engine: { maxTorque: total, minRpm: 1, maxRpm: MOTOR_RPM, torqueCurve: [[0, 1], [1, 1]], inertia: 0.05, angularDamping: 0 },
+        transmission: { gearRatios: [1], reverseGearRatios: [-1], switchTime: 0, clutchReleaseTime: 0, switchLatency: 0, shiftUpRpm: MOTOR_RPM * 2, shiftDownRpm: 0.5, clutchStrength: 100 },
+        differentials: motored.map((m, k) => ({ leftWheel: m.i, rightWheel: -1, ratio: ratios[k], limitedSlipRatio: Infinity, engineTorqueRatio: shares[k] / total })),
+        differentialLimitedSlipRatio: Infinity,
+    };
+}
+
 /** Every field of a vehicle set and in range. Throws on what cannot be fixed (no wheels). */
 export function normalizeVehicle(desc: Omit<VehicleDesc, 'chassis'>): NormalizedVehicle {
     if (!desc.wheels || desc.wheels.length === 0) throw new Error('physics: a vehicle needs at least one wheel');
+    const drive = desc.drive ?? ((desc.differentials?.length ?? 0) > 0 ? 'engine' : 'none');
+    if (drive === 'motors') desc = motorsAsEngine(desc);
+    else if (drive === 'none') desc = { ...desc, differentials: [] };
     const W = WHEEL_DEFAULTS, E = ENGINE_DEFAULTS, T = TRANSMISSION_DEFAULTS, D = DIFFERENTIAL_DEFAULTS;
     const wheels: NormalizedWheel[] = desc.wheels.map(w => {
         const min = nonNegative(w.suspensionMinLength, W.suspensionMinLength);

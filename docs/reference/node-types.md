@@ -78,6 +78,7 @@ A vehicle. It stands in its chassis Collider, and the WheelNodes under it are it
 Feature `vehicles`. See [Vehicles](../editor/vehicles.md).
 
 ```ts
+drive: 'none' | 'engine' | 'motors'
 maxTorque: number ; minRpm: number ; maxRpm: number
 gearRatios: number[] ; reverseRatio: number ; finalDrive: number
 shiftUpRpm: number ; shiftDownRpm: number ; shiftTime: number
@@ -89,6 +90,7 @@ get speed: number ; get rpm: number ; get gear: number
 get vehicle: Vehicle | null      // built when the scene runs
 get wheels: WheelNode[]
 rebuild(): void                  // after changing wheels or settings in Play
+addWheel(): WheelNode            // at the chassis's next free corner, no mesh
 ```
 
 ### WheelNode — `'wheel'` *(unreleased)*
@@ -100,7 +102,8 @@ radius: number ; width: number ; grip: number
 suspensionTravel: number ; suspensionLength: number
 suspensionFrequency: number ; suspensionDamping: number
 steerAngle: number               // degrees; 0 does not steer
-driven: boolean ; brakeTorque: number ; handBrakeTorque: number
+driven: boolean ; brakeTorque: number ; handBrakeTorque: number   // driven: the Engine drive
+motorTorque: number ; motorTopSpeed: number                         // the Motors drive; top speed in m/s at the rim
 ```
 
 Full API: [Node API](../scripting/node-api.md), [Lifecycle](../scripting/lifecycle.md),

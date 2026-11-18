@@ -142,7 +142,7 @@ and the volumes and cloth they act on.
 | **Wind** | Not placeable: one wind for the whole scene. Plants sway only where their material asks for it. |
 | **Weather** | A `40 × 20 × 40` box of rain or snow on the landscape and the plants inside it, and falling through it if you ask (**Falling**). Size it with the face handles; the presets set the weather. |
 | **Cloth** | A banner, 0.9 × 1.2 m, held along its top edge. Under a character, set **Ride On** to make it a cape. *(unreleased)* |
-| **Vehicle** | A car to start from: a 1200 kg box [chassis](vehicles.md) (a Collider) holding a Vehicle and four Wheels, each with a tyre. The rear wheels drive, the front ones steer, and **Player input** is on, so Play drives it with **Move** and **Jump**. *(unreleased)* |
+| **Vehicle** | A 1200 kg box [chassis](vehicles.md) (a Collider, no mesh) holding an empty Vehicle. Add its wheels and choose its drive from the Vehicle's Properties; the meshes are yours. *(unreleased)* |
 
 ### UI — Layout
 

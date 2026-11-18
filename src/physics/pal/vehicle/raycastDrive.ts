@@ -203,7 +203,9 @@ export class RaycastDrive {
         // below idle; with the clutch out it revs toward what the throttle asks.
         let clutchSpeed = 0;
         for (const d of this._drives) clutchSpeed += d.share * this._omega[d.wheel] * d.ratio;
-        const coupledRpm = Math.abs(clutchSpeed * gearRatio) * RPM_PER_RAD_S;
+        // Signed: positive while the wheels turn the way this gear drives them. Turning against it (reverse
+        // engaged while still rolling forward) the clutch slips and the engine still pushes.
+        const coupledRpm = clutchSpeed * gearRatio * RPM_PER_RAD_S;
         const e = v.engine;
         const wanted = e.minRpm + Math.abs(forward) * (e.maxRpm - e.minRpm);
         this._freeRpm += (wanted - this._freeRpm) * Math.min(1, dt / Math.max(1e-3, e.inertia * 0.6));
@@ -421,8 +423,8 @@ export class RaycastDrive {
         const t = this.vehicle.transmission;
         this._target = gear;
         this._latencyLeft = t.switchTime + t.clutchReleaseTime + t.switchLatency;
-        // Out of neutral the gear goes straight in: there is nothing to disengage.
-        if (this._gear === 0) {
+        // Out of neutral, or with no switch time, the gear goes straight in.
+        if (this._gear === 0 || t.switchTime <= 0) {
             this._gear = gear;
             this._releaseLeft = t.clutchReleaseTime;
             return;

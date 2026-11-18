@@ -508,6 +508,17 @@ this.scene.physics.addVehicle(chassisBody, car)
 car.throttle = 1
 ```
 
+With electric motors instead of an engine, give the wheels that drive a `motorTorque` (N·m) and a
+`motorMaxSpeed` (rad/s at the wheel), and set `drive: 'motors'`:
+
+```ts
+const rover = new Vehicle({
+  drive: 'motors',
+  wheels: [[0.6, 0, 0.8], [-0.6, 0, 0.8], [0.6, 0, -0.8], [-0.6, 0, -0.8]]
+    .map(position => ({ position: position as [number, number, number], motorTorque: 200, motorMaxSpeed: 20 })),
+})
+```
+
 Angles in a description are radians, and its frames are the chassis body's (measured from its node origin).
 The defaults are Jolt's. `scene.physics.removeVehicle(car)` takes it off.
 
