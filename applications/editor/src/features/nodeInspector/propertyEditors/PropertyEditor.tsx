@@ -1,4 +1,4 @@
-import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, WeatherNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OcclusionVolumeNode, ExposureVolumeNode, GIVolumeNode, VolumetricFogNode, ClothNode, SequenceNode, Camera2DNode, Room2DNode, ParallaxLayerNode, CharacterBody2DNode, Body2DNode, ColliderNode, TriggerNode, ModelNode } from 'cleo'
+import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, WeatherNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OcclusionVolumeNode, ExposureVolumeNode, GIVolumeNode, VolumetricFogNode, ClothNode, SequenceNode, Camera2DNode, Room2DNode, ParallaxLayerNode, CharacterBody2DNode, Body2DNode, ColliderNode, TriggerNode, ModelNode, VehicleNode, WheelNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import RigSlot from './RigSlot';
@@ -27,6 +27,7 @@ import SoundEditor from './SoundEditor'
 import ParticleSystemEditor from './ParticleSystemEditor'
 import ForceFieldEditor from './ForceFieldEditor'
 import ClothEditor from './ClothEditor'
+import { VehicleEditor, WheelEditor } from './VehicleEditor'
 import WaterVolumeEditor from './WaterVolumeEditor'
 import OcclusionVolumeEditor from './OcclusionVolumeEditor'
 import ExposureVolumeEditor from './ExposureVolumeEditor'
@@ -115,6 +116,8 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'particleSystem' && <ParticleSystemEditor key={props.node.id} node={props.node as ParticleSystemNode} /> }
           { props.node.nodeType === 'forceField' && <ForceFieldEditor key={props.node.id} node={props.node as ForceFieldNode} /> }
           { props.node.nodeType === 'cloth' && <ClothEditor key={props.node.id} node={props.node as ClothNode} /> }
+          { props.node.nodeType === 'vehicle' && <VehicleEditor key={props.node.id} node={props.node as VehicleNode} /> }
+          { props.node.nodeType === 'wheel' && <WheelEditor key={props.node.id} node={props.node as WheelNode} /> }
           { props.node.nodeType === 'waterVolume' && <WaterVolumeEditor key={props.node.id} node={props.node as WaterVolumeNode} /> }
           { props.node.nodeType === 'occlusionVolume' && <OcclusionVolumeEditor key={props.node.id} node={props.node as OcclusionVolumeNode} /> }
           { props.node.nodeType === 'tilemap' && <TilemapEditor node={props.node as TilemapNode} /> }

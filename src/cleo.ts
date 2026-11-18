@@ -20,6 +20,7 @@ export * from "./modules/fluids/api";
 export * from "./modules/decals/api";
 export * from "./modules/cloth/api";
 export * from "./modules/water/api";
+export * from "./modules/vehicles/api";
 // The particle modules also name a `RenderSettings` (an emitter's draw settings, particles/particleModules.ts);
 // the engine's own name is the renderer's.
 export type { RenderSettings } from "./cleoCore";

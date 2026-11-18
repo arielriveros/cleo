@@ -2,6 +2,7 @@ import { Body, Constraint } from 'cannon-es';
 import { PhysicsEventKind, type BodyHandle } from '../types';
 import type { LandedBody, MirrorDiff, ReplicaReport, WorldMirror } from '../replication';
 import type { CannonWorld } from './cannonWorld';
+import { VehicleMirror } from '../vehicle/vehicleCopy';
 import {
     BODY_ROW, STATE_STRIDE, WRITE_ANGVEL, WRITE_FORCE, WRITE_POSE, WRITE_SLEEP, WRITE_TORQUE, WRITE_VEL,
     encodeConfig, encodeConstraint, isCharacterBody, readState, shapeBuffers, type CannonChanges, type Op,
@@ -45,7 +46,11 @@ export class CannonMirror implements WorldMirror {
     private readonly _end = new Float64Array(13);
     private _cfgScratch = new Float64Array(64);
 
-    constructor(private readonly _world: CannonWorld) {}
+    private readonly _vehicles: VehicleMirror;
+
+    constructor(private readonly _world: CannonWorld) {
+        this._vehicles = new VehicleMirror(_world, h => this.slotOf(h));
+    }
 
     public handleOf(slot: number): BodyHandle | undefined {
         return this._slots[slot]?.body.id as BodyHandle | undefined;
@@ -135,7 +140,7 @@ export class CannonMirror implements WorldMirror {
         }
 
         const ops = [...constraintRemoves, ...removes, ...adds, ...configs, ...constraintAdds];
-        const changes: CannonChanges = { ops, writes: Float64Array.from(writes), writeCount: writes.length / (STATE_STRIDE + 2) };
+        const changes: CannonChanges = { ops, writes: Float64Array.from(writes), writeCount: writes.length / (STATE_STRIDE + 2), vehicles: this._vehicles.diff() };
         const transfer: ArrayBuffer[] = [changes.writes.buffer as ArrayBuffer];
         for (const op of ops) if (op.op === 'addBody' || op.op === 'config') {
             for (const s of op.config.shapes) transfer.push(...shapeBuffers(s.def));
@@ -219,12 +224,14 @@ export class CannonMirror implements WorldMirror {
             if (kind === PhysicsEventKind.ContactBegin) a.dispatchEvent({ type: 'collide', body: c, target: a, contact: null } as never);
             else this._world.raise(kind, a.id as BodyHandle, c.id as BodyHandle);
         }
+        this._vehicles.apply(report.vehicles);
         this._world.time = report.time;
         // The bodies were written behind the world's back: what caches their state must read it again.
         this._world.touch();
     }
 
     public clear(): void {
+        this._vehicles.clear();
         this._slotOf.clear();
         this._slots.length = 0;
         this._freeSlots.length = 0;

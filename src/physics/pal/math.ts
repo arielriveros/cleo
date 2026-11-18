@@ -25,3 +25,29 @@ export function rotateVec(q: ArrayLike<number>, qi: number, x: number, y: number
     out[oi + 1] = iy * qw + iw * -qy + iz * -qx - ix * -qz;
     out[oi + 2] = iz * qw + iw * -qz + ix * -qy - iy * -qx;
 }
+
+// The physics worker reaches nothing outside src/physics/ (tests/physicsWorkerParity.test.ts), so what the
+// vehicles step with in the worker is here rather than in core/math.ts.
+
+/** `v` held to [lo, hi]; a NaN becomes lo. */
+export function clampTo(v: number, lo: number, hi: number): number {
+    return v > lo ? (v < hi ? v : hi) : lo;
+}
+
+/**
+ * A piecewise-linear curve through `[x, y]` points sorted by x, at `x`: held at the first and last point's
+ * y outside them, 0 when there are none. What Jolt's LinearCurve computes (a tyre's friction against slip,
+ * an engine's torque against RPM), so the shared vehicle model reads the same numbers the native one does.
+ */
+export function evaluatePolyline(points: readonly (readonly [number, number])[], x: number): number {
+    const n = points.length;
+    if (n === 0) return 0;
+    if (x <= points[0][0]) return points[0][1];
+    const last = points[n - 1];
+    if (x >= last[0]) return last[1];
+    let i = 1;
+    while (i < n - 1 && x > points[i][0]) i++;
+    const a = points[i - 1], b = points[i];
+    const span = b[0] - a[0];
+    return span > 0 ? a[1] + (b[1] - a[1]) * (x - a[0]) / span : b[1];
+}

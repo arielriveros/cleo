@@ -2,6 +2,7 @@ import { PhysicsEventKind, type BodyHandle, type MassProperties } from '../types
 import type { LandedBody, MirrorDiff, ReplicaReport, WorldMirror } from '../replication';
 import { rotate } from '../shapeBounds';
 import type { DescribedJointRecord, DescribedWorld } from './describedWorld';
+import { VehicleMirror } from '../vehicle/vehicleCopy';
 import {
     BODY_ROW, STATE_STRIDE, WRITE_ANGVEL, WRITE_FORCE, WRITE_POSE, WRITE_SLEEP, WRITE_TORQUE, WRITE_VEL,
     type CopyOp, type DescribedChanges, type SlottedJointRecord,
@@ -39,7 +40,11 @@ export class DescribedMirror<J extends DescribedJointRecord> implements WorldMir
     private readonly _mass: MassProperties = { mass: 0, centerOfMass: [0, 0, 0], inertia: [0, 0, 0] };
     private readonly _v = [0, 0, 0];
 
-    constructor(private readonly _world: DescribedWorld<J>) {}
+    private readonly _vehicles: VehicleMirror;
+
+    constructor(private readonly _world: DescribedWorld<J>) {
+        this._vehicles = new VehicleMirror(_world, h => this._slotOf.get(h));
+    }
 
     public handleOf(slot: number): BodyHandle | undefined { return this._slots[slot]?.handle; }
     public slotOf(h: BodyHandle): number | undefined { return this._slotOf.get(h); }
@@ -125,7 +130,7 @@ export class DescribedMirror<J extends DescribedJointRecord> implements WorldMir
         for (const id of [...this._joints]) if (!live.has(id)) { jointRemoves.push({ op: 'removeJoint', id }); this._joints.delete(id); }
 
         const ops = [...jointRemoves, ...removes, ...adds, ...configs, ...jointAdds];
-        const changes: DescribedChanges<J> = { ops, writes: Float64Array.from(writes), writeCount: writes.length / (STATE_STRIDE + 2) };
+        const changes: DescribedChanges<J> = { ops, writes: Float64Array.from(writes), writeCount: writes.length / (STATE_STRIDE + 2), vehicles: this._vehicles.diff() };
         const transfer: ArrayBuffer[] = [changes.writes.buffer as ArrayBuffer];
         for (const op of ops) if (op.op === 'addBody') transfer.push(op.state.buffer as ArrayBuffer);
         return { changes, transfer, ops: ops.length, writes: changes.writeCount, released };
@@ -199,6 +204,7 @@ export class DescribedMirror<J extends DescribedJointRecord> implements WorldMir
             const a = this._slots[events[i + 1]]?.handle, c = this._slots[events[i + 2]]?.handle;
             if (a !== undefined && c !== undefined) w.raise(events[i] as PhysicsEventKind, a, c);
         }
+        this._vehicles.apply(report.vehicles);
         w.time = report.time;
         w.touch();
     }
@@ -216,6 +222,7 @@ export class DescribedMirror<J extends DescribedJointRecord> implements WorldMir
         this._slots.length = 0;
         this._freeSlots.length = 0;
         this._joints.clear();
+        this._vehicles.clear();
     }
 }
 

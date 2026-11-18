@@ -9,6 +9,9 @@ import type { DescribedWorld } from '../copy/describedWorld';
 import { boundingRadiusOf, collidersAabb, multiply, partShapeFor, rotate } from '../shapeBounds';
 import { fromX, matchedFrame } from '../jointFrames';
 import { jolt, type Jolt } from './load';
+import { JoltVehicle } from './joltVehicle';
+import { copyState, landState, type VehicleEntry } from '../vehicle/vehicleCopy';
+import { normalizeVehicle, type NormalizedVehicle, type VehicleDesc, type VehicleHandle, type VehicleInput, type VehicleRecord } from '../vehicle/vehicleDesc';
 
 // The Jolt backend (jolt-physics, JoltPhysics.js; see docs/reference/physics-backends.md for what its spike
 // found). Every layer convention holds as on cannon:
@@ -47,6 +50,8 @@ export const JOLT_CAPABILITIES: PhysicsCapabilities = {
     profilePhases: [],
     threadable: true,
     precision: 32,
+    vehicleCasts: ['ray', 'sphere', 'cylinder'],
+    nativeDrivetrain: true,
 };
 
 /** cannon's damping, `v *= (1 − d)^dt`, as Jolt's rate `c` in `v *= 1 − c·dt`: the same decay for small dt. */
@@ -143,6 +148,8 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
     private readonly _order: BodyHandle[] = [];
     private _bodyList: BodyHandle[] | null = null;
     private readonly _joints = new Map<number, { constraint: JoltNS.TwoBodyConstraint; record: JoltJointRecord }>();
+    private readonly _vehicles = new Map<number, VehicleEntry<JoltVehicle>>();
+    private _nextVehicle = 1;
     /** Body pairs ("lo,hi" handles) a joint keeps from colliding. */
     private readonly _noCollide = new Map<string, number>();
     /** Queued events: [kind, a, b] per event. */
@@ -233,6 +240,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         if (!e) return;
         // Jolt keeps a joint's bodies by pointer: its joints go first.
         for (const [id, j] of [...this._joints]) if (j.record.a === h || j.record.b === h) this.destroyJoint(id as JointHandle);
+        for (const [id, v] of [...this._vehicles]) if (v.chassis === h) this.destroyVehicle(id as VehicleHandle);
         const id = e.body.GetID();
         if (e.enabled) this._bi.RemoveBody(id);
         this._bi.DestroyBody(id);
@@ -549,11 +557,67 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         }
     }
 
+    // ---- vehicles ----
+
+    public createVehicle(desc: VehicleDesc): VehicleHandle {
+        return this.createVehicleFromRecord(desc.chassis, normalizeVehicle(desc));
+    }
+
+    /** Build a vehicle from its normalised description (createVehicle's, or a copy's on its own chassis). */
+    public createVehicleFromRecord(chassis: BodyHandle, vehicle: NormalizedVehicle): VehicleHandle {
+        const e = this._entry(chassis);
+        if (e.type !== 'dynamic') throw new Error("physics: a vehicle's chassis must be a dynamic body");
+        const made = new JoltVehicle(this._J, this._system, e.body, vehicle, this._layer(e.group, e.mask), JOLT_CAPABILITIES.vehicleCasts);
+        const id = this._nextVehicle++;
+        this._vehicles.set(id, { input: { forward: 0, right: 0, brake: 0, handBrake: 0 }, landed: null, vehicle: made, chassis });
+        return id as VehicleHandle;
+    }
+
+    public destroyVehicle(v: VehicleHandle): void {
+        const entry = this._vehicles.get(v);
+        if (!entry) return;
+        entry.vehicle.dispose();
+        this._vehicles.delete(v);
+    }
+
+    public setVehicleInput(v: VehicleHandle, input: VehicleInput): void {
+        const e = this._vehicle(v);
+        Object.assign(e.input, input);
+        e.vehicle.setInput(input);
+    }
+
+    public readVehicle(v: VehicleHandle, out: Out): void {
+        const e = this._vehicle(v);
+        if (e.landed) copyState(e.landed, out); else e.vehicle.read(out);
+    }
+
+    public vehicleInputOf(v: VehicleHandle): VehicleInput { return this._vehicle(v).input; }
+
+    public landVehicle(v: VehicleHandle, state: ArrayLike<number>, at: number): void { landState(this._vehicle(v), state, at); }
+
+    /** The vehicles, with what they were built from (for the worker's copy). */
+    public *vehicleRecords(): IterableIterator<[number, VehicleRecord]> {
+        for (const [id, v] of this._vehicles) yield [id, { chassis: v.chassis, vehicle: v.vehicle.vehicle }];
+    }
+
+    private _vehicle(v: VehicleHandle): VehicleEntry<JoltVehicle> {
+        const entry = this._vehicles.get(v);
+        if (!entry) throw new Error(`physics: no vehicle ${v} in this world`);
+        return entry;
+    }
+
+    private _dropVehicles(): void {
+        for (const { vehicle } of this._vehicles.values()) vehicle.dispose();
+        this._vehicles.clear();
+    }
+
     // ---- the step ----
 
     public step(dt: number): void {
         this.onPreSubstep?.(dt);
         this._rows = [];
+        // A world that steps reads its own vehicles again, not what a copy's step landed.
+        for (const e of this._vehicles.values()) e.landed = null;
         if (dt > 0) this._native.jolt!.Step(dt, 1);
         this._time += dt;
         this._version++;
@@ -616,6 +680,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
     }
 
     public clear(): void {
+        this._dropVehicles();
         this._native.jolt && this._freeWorld();
         this._entries.clear();
         this._byId.clear();
@@ -634,6 +699,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
 
     public dispose(): void {
         collected.unregister(this);
+        this._dropVehicles();
         this._freeWorld();
         freeNative(this._native);
         this._entries.clear();

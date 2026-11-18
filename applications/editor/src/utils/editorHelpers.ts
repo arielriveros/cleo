@@ -34,6 +34,7 @@ import {
   Body2DNode,
   ColliderNode,
   TriggerNode,
+  WheelNode,
 } from 'cleo';
 import type { FoliageCollision } from 'cleo';
 import type { NavObstacle, TriangleSoup } from 'cleo';
@@ -87,6 +88,8 @@ const SOUND_ICON = '__editor__SoundSprite';
 const SOUND_RADIUS = '__debug__SoundRadius';
 const BODY_PREFIX = '__debug__body_';
 const TRIGGER_PREFIX = '__debug__trigger_';
+/** A Vehicle's wheel: its tyre's circle and its suspension's reach, in the colliders' red. */
+const WHEEL_PREFIX = '__debug__wheel_';
 const SHAPE_PREFIX = '__debug__shape_';
 /** An owner's shapes merged into one wireframe (see buildMergedShapeWire). */
 const MERGED_SHAPES = '__debug__shapes';
@@ -1382,6 +1385,50 @@ function ensureNavVolumeBox(scene: Scene, navMesh: NavMeshNode, box: NavOverlayB
  * transform gizmo and the inspector's Size fields change the volume without emitting anything the
  * reconciler listens to. The closure is re-bound on every reconcile so it always reads the live node.
  */
+/**
+ * A wheel's overlay: its tyre as a circle across its axle (the vehicle rolls along +Z, so in the wheel's
+ * YZ plane), the suspension as a line up to where it is attached, and a tick where it bottoms out.
+ * Follows the wheel's place and its parent's turn, not its spin or steering: it shows the wheel as
+ * authored, and while Play runs, where the suspension holds it.
+ */
+function ensureWheelDebug(scene: Scene, wheel: WheelNode) {
+  const name = `${WHEEL_PREFIX}${wheel.id}`;
+  const cache = sigMapFor(scene);
+  const sig = `${wheel.radius}|${wheel.width}|${wheel.suspensionTravel}|${wheel.suspensionLength}`;
+  let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
+  if (existing && cache.get(name) !== sig) { scene.removeNode(existing); existing.dispose(); existing = undefined; }
+  if (!existing) {
+    const positions: [number, number, number][] = [];
+    const indices: number[] = [];
+    const line = (a: [number, number, number], b: [number, number, number]) => {
+      indices.push(positions.length, positions.length + 1);
+      positions.push(a, b);
+    };
+    const r = wheel.radius, half = wheel.width / 2, segments = 24;
+    for (const x of [-half, half]) {
+      for (let i = 0; i < segments; i++) {
+        const a = (i / segments) * Math.PI * 2, b = ((i + 1) / segments) * Math.PI * 2;
+        line([x, Math.cos(a) * r, Math.sin(a) * r], [x, Math.cos(b) * r, Math.sin(b) * r]);
+      }
+    }
+    for (const [y, z] of [[r, 0], [-r, 0], [0, r], [0, -r]]) line([-half, y, z], [half, y, z]);
+    const length = Math.max(wheel.suspensionLength, wheel.suspensionTravel), travel = wheel.suspensionTravel;
+    line([0, 0, 0], [0, length, 0]);
+    line([-0.08, travel, 0], [0.08, travel, 0]);
+    line([-0.05, length, 0], [0.05, length, 0]);
+    existing = wireModel(name, { positions, indices }, [1, 0, 0]);
+    scene.addNode(existing);
+    cache.set(name, sig);
+  }
+  const node = existing;
+  const place = () => {
+    node.setPosition(wheel.worldPosition);
+    node.setQuaternion((wheel.parent ?? wheel).worldQuaternion);
+  };
+  place();
+  node.onUpdate = place;
+}
+
 function ensureDecalBox(scene: Scene, decal: DecalNode, frame: DecalOverlayFrame) {
   const name = `${DECALBOX_PREFIX}${decal.id}`;
   let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
@@ -1614,6 +1661,10 @@ export function reconcileEditorHelpers(
       ensureTerrainDebug(scene, landscape);
     }
   }
+  // 4.1 Vehicle wheels (red, with the colliders): where each tyre is and how far its spring reaches.
+  if (show('colliders')) {
+    for (const node of nodes) if (node instanceof WheelNode && !node.markForRemoval) ensureWheelDebug(scene, node);
+  }
   // 4a. Foliage colliders (orange) on the scattered instances near the camera.
   if (show('foliageColliders')) {
     for (const landscape of scene.landscapes) {
@@ -1698,6 +1749,9 @@ export function reconcileEditorHelpers(
       const id = node.name.slice(BODY_PREFIX.length);
       const owner = scene.getNodeById(id);
       if (!show('colliders') || !(owner instanceof ColliderNode) || owner.markForRemoval) drop();
+    } else if (node.name.startsWith(WHEEL_PREFIX)) {
+      const owner = scene.getNodeById(node.name.slice(WHEEL_PREFIX.length));
+      if (!show('colliders') || !(owner instanceof WheelNode) || owner.markForRemoval) drop();
     } else if (node.name.startsWith(TRIGGER_PREFIX)) {
       const id = node.name.slice(TRIGGER_PREFIX.length);
       const owner = scene.getNodeById(id);

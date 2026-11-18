@@ -61,6 +61,8 @@ import {
   Body2DNode,
   ColliderNode,
   TriggerNode,
+  VehicleNode,
+  WheelNode,
   LIGHT_UNIT,
   newLightOptions,
 } from 'cleo'
@@ -79,7 +81,7 @@ import {
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, AreaLightIcon, LightProbeIcon, ExposureVolumeIcon, GiVolumeIcon, VolumetricFogIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon, WeatherIcon,
-  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
+  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon, VehicleIcon,
   SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon, CharacterBody2DIcon, Collider2DIcon, ColliderIcon,
 } from './nodeIcons'
 import { createLandscapeNode } from '../../utils/landscapeSlots'
@@ -534,6 +536,44 @@ export const ADD_ITEMS: AddItem[] = [
     // handles. The landscape and foliage materials inside it answer it.
     id: 'weather', label: 'Weather', icon: WeatherIcon, category: 'simulation',
     create: async () => new WeatherNode('weather', { size: [40, 20, 40] }),
+  },
+  {
+    // A car to start from: a 1200 kg box chassis (the Collider), the Vehicle in it and four Wheels, each with
+    // a cylinder for a tyre. The rear wheels drive and hold the hand brake, the front ones steer. Its wheels
+    // are virtual (see docs/editor/vehicles.md): placed hanging free, they settle on their springs in Play.
+    id: 'vehicle', label: 'Vehicle', icon: VehicleIcon, category: 'simulation',
+    create: async () => {
+      const chassis = new ColliderNode('vehicle')
+      chassis.mass = 1200
+      chassis.linearDamping = 0
+      chassis.angularDamping = 0
+      chassis.simulationMode = 'always'
+      chassis.shapes = [{ type: 'box', width: 1.8, height: 0.6, depth: 4, offset: [0, 0, 0], rotation: [0, 0, 0] }]
+      const body = new ModelNode('body', new Model(Geometry.Cube(), Material.Default({})))
+      body.setScale([1.8, 0.6, 4])
+      chassis.addChild(body)
+      const vehicle = new VehicleNode('vehicle')
+      vehicle.playerInput = true
+      chassis.addChild(vehicle)
+      // The engine's forward is +Z and its right is -X.
+      const corners: [string, number, number, boolean][] = [
+        ['wheel front left', 0.8, 1.3, true], ['wheel front right', -0.8, 1.3, true],
+        ['wheel rear left', 0.8, -1.3, false], ['wheel rear right', -0.8, -1.3, false],
+      ]
+      for (const [name, x, z, front] of corners) {
+        const wheel = new WheelNode(name)
+        wheel.setPosition([x, -0.5, z])
+        wheel.steerAngle = front ? 30 : 0
+        wheel.driven = !front
+        wheel.handBrakeTorque = front ? 0 : 4000
+        const tyre = new ModelNode('tyre', new Model(Geometry.Cylinder(24, wheel.radius, wheel.width), Material.Default({})))
+        // The cylinder stands on Y; a tyre rolls about X.
+        tyre.setRotation([0, 0, 90])
+        wheel.addChild(tyre)
+        vehicle.addChild(wheel)
+      }
+      return chassis
+    },
   },
   {
     // A banner held along its top edge. Under a character it becomes a cape (Ride On: Chest).

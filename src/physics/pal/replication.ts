@@ -42,6 +42,8 @@ export interface ReplicaReport {
     events: Int32Array;
     /** The world clock after the step. */
     time: number;
+    /** The vehicles' states after it (WorldReplica.reportVehicles), when there are any. */
+    vehicles?: Float64Array;
 }
 
 /**
@@ -92,6 +94,8 @@ export interface WorldReplica {
     floater(body: BodyHandle): ReplicaFloater | undefined;
     /** The moving bodies' state, for the mirror's apply, in memory from `take` (a byte count). */
     report(take: (bytes: number) => ArrayBuffer): { bodies: Float64Array; bodyCount: number };
+    /** The vehicles' states after a step, for the mirror's apply (vehicle/vehicleCopy.ts); undefined with none. */
+    reportVehicles?(): Float64Array | undefined;
     /** Forget every body and joint: the main thread starts over. */
     clear(): void;
 }

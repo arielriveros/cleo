@@ -199,6 +199,14 @@ export const WaterVolumeIcon = () => (
 export const ClothIcon = () => (
   <S><path d="M5 21V3" /><path d="M5 4c3-1.5 5 1.5 8 0s4-1 6 0v9c-2-1-3-1.5-6 0s-5-1.5-8 0" /></S>
 );
+/** Vehicle: a car's side, its body over two wheels. */
+export const VehicleIcon = () => (
+  <S><path d="M3 15.5V12l2.5-4.5h9L18 11h2.2a.8.8 0 0 1 .8.8v3.7" /><path d="M3 11.5h15" /><circle cx="7" cy="16.5" r="2" /><circle cx="17" cy="16.5" r="2" /><path d="M9 16.5h6" /></S>
+);
+/** Wheel: a tyre round its hub, and its spokes. */
+export const WheelIcon = () => (
+  <S><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="2.5" /><path d="M12 3.5v6M12 14.5v6M3.5 12h6M14.5 12h6" /></S>
+);
 /** Force field: wind lines bending around a centre. */
 export const ForceFieldIcon = () => (
   <S><path d="M3 8h10.5a2.5 2.5 0 1 0-2.5-2.5" /><path d="M3 12h15a3 3 0 1 1-3 3" /><path d="M3 16h6" /></S>

@@ -17,7 +17,7 @@ import engineConfig from './vite.config';
 // outright once a vitest.config.ts exists.
 /** Engine suites that also run on every other physics backend (see the "engine on <backend>" projects). */
 const PHYSICS_SUITES = [
-    'characterGround', 'physicsOverlap', 'physicsTriggerOverlap', 'terrainCollider', 'foliageColliderPose', 'ragdollProfile', 'waterVolumeNode',
+    'characterGround', 'physicsOverlap', 'physicsTriggerOverlap', 'terrainCollider', 'foliageColliderPose', 'ragdollProfile', 'waterVolumeNode', 'vehicleNodes',
 ];
 /** The backends besides cannon that the engine suites run on. */
 const OTHER_BACKENDS = ['rapier', 'jolt'];

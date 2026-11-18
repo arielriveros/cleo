@@ -14,6 +14,9 @@ import { cannonColliderParts } from './parts';
 import { createCannonWorld } from './worldConfig';
 import { MaterialTable } from './materialTable';
 import { broadphaseBodyCount, clearWorld } from './worldTeardown';
+import { CannonVehicle } from './cannonVehicle';
+import { copyState, landState, type VehicleEntry } from '../vehicle/vehicleCopy';
+import { normalizeVehicle, type NormalizedVehicle, type VehicleDesc, type VehicleHandle, type VehicleInput, type VehicleRecord } from '../vehicle/vehicleDesc';
 
 /** Grip and bounce of a body that brings no surface of its own: cannon's own defaults. */
 export const DEFAULT_FRICTION = 0.3;
@@ -30,6 +33,8 @@ export const CANNON_CAPABILITIES: PhysicsCapabilities = {
     profilePhases: ['broadphase', 'narrowphase', 'solve', 'integrate'],
     threadable: true,
     precision: 64,
+    vehicleCasts: ['ray'],
+    nativeDrivetrain: false,
 };
 
 /**
@@ -59,6 +64,8 @@ export class CannonWorld implements PhysicsWorld {
     private readonly _disabled = new Map<number, Body>();
     private readonly _joints = new Map<number, Constraint>();
     private _nextJoint = 1;
+    private readonly _vehicles = new Map<number, VehicleEntry<CannonVehicle>>();
+    private _nextVehicle = 1;
     private readonly _profile: StepProfile = { broadphaseMs: 0, narrowphaseMs: 0, solveMs: 0, integrateMs: 0 };
     private readonly _hit: RayHit = { body: 0 as BodyHandle, point: [0, 0, 0], normal: [0, 0, 0], distance: 0 };
 
@@ -71,7 +78,13 @@ export class CannonWorld implements PhysicsWorld {
         world.addEventListener('endContact', (e: any) => this._pair(e.bodyA, e.bodyB, PhysicsEventKind.SensorEnd));
         // After cannon has added gravity and before it integrates: forces added here are integrated exactly
         // like gravity is, in this substep.
-        world.addEventListener('preStep', () => this.onPreSubstep?.(world.dt));
+        world.addEventListener('preStep', () => {
+            this.onPreSubstep?.(world.dt);
+            for (const e of this._vehicles.values()) {
+                e.landed = null;
+                if (e.vehicle.chassis.world === world) e.vehicle.update(world.dt);
+            }
+        });
         world.addEventListener('addBody', () => { this._bodyList = null; });
         world.addEventListener('removeBody', () => { this._bodyList = null; });
     }
@@ -125,6 +138,7 @@ export class CannonWorld implements PhysicsWorld {
     }
 
     public destroyBody(h: BodyHandle): void {
+        for (const [id, v] of [...this._vehicles]) if (v.chassis === h) this._vehicles.delete(id);
         if (this._disabled.delete(h)) return;
         const body = this.raw.getBodyById(h);
         if (!body) return;
@@ -323,6 +337,72 @@ export class CannonWorld implements PhysicsWorld {
         this._joints.delete(j);
     }
 
+    // ---- vehicles ----
+
+    public createVehicle(desc: VehicleDesc): VehicleHandle {
+        return this.createVehicleFromRecord(desc.chassis, normalizeVehicle(desc));
+    }
+
+    /** Build a vehicle from its normalised description (createVehicle's, or a copy's on its own chassis). */
+    public createVehicleFromRecord(chassis: BodyHandle, vehicle: NormalizedVehicle): VehicleHandle {
+        const body = this._body(chassis);
+        if (body.type !== Body.DYNAMIC) throw new Error("physics: a vehicle's chassis must be a dynamic body");
+        const id = this._nextVehicle++;
+        this._vehicles.set(id, { input: { forward: 0, right: 0, brake: 0, handBrake: 0 }, landed: null, vehicle: new CannonVehicle(body, vehicle, (from, to, c, out) => this._wheelRay(from, to, c, out)), chassis });
+        return id as VehicleHandle;
+    }
+
+    public destroyVehicle(v: VehicleHandle): void { this._vehicles.delete(v); }
+
+    public setVehicleInput(v: VehicleHandle, input: VehicleInput): void {
+        const e = this._vehicle(v);
+        Object.assign(e.input, input);
+        e.vehicle.setInput(input);
+    }
+
+    public readVehicle(v: VehicleHandle, out: Out): void {
+        const e = this._vehicle(v);
+        if (e.landed) copyState(e.landed, out); else e.vehicle.read(out);
+    }
+
+    public vehicleInputOf(v: VehicleHandle): VehicleInput { return this._vehicle(v).input; }
+
+    public landVehicle(v: VehicleHandle, state: ArrayLike<number>, at: number): void { landState(this._vehicle(v), state, at); }
+
+    /**
+     * The vehicles, with what they were built from (for the worker's copy), wheels measured from the
+     * chassis's centre of mass: the copy's chassis is a plain cannon body whose position is that centre.
+     */
+    public *vehicleRecords(): IterableIterator<[number, VehicleRecord]> {
+        for (const [id, v] of this._vehicles) {
+            const body = v.vehicle.chassis, vehicle = v.vehicle.vehicle;
+            const c = body instanceof CannonBody ? body.centerOfMassOffset : null;
+            if (!c || (c.x === 0 && c.y === 0 && c.z === 0)) { yield [id, { chassis: v.chassis, vehicle }]; continue; }
+            const wheels = vehicle.wheels.map(w => ({ ...w, position: [w.position[0] - c.x, w.position[1] - c.y, w.position[2] - c.z] as V3 }));
+            yield [id, { chassis: v.chassis, vehicle: { ...vehicle, wheels } }];
+        }
+    }
+
+    private _vehicle(v: VehicleHandle): VehicleEntry<CannonVehicle> {
+        const entry = this._vehicles.get(v);
+        if (!entry) throw new Error(`physics: no vehicle ${v} in this world`);
+        return entry;
+    }
+
+    /** A wheel's ray: the closest body the chassis collides with, not itself, not a sensor or a body without response. */
+    private _wheelRay(from: Vec3, to: Vec3, chassis: Body, out: RaycastResult): void {
+        CannonWorld._rayFrom.copy(from);
+        CannonWorld._rayTo.copy(to);
+        this._raycastFiltered(true, { mode: 'closest', excludeSensors: true, ignore: chassis.id as BodyHandle }, result => {
+            if (!result.hasHit || !result.body) return;
+            out.hitPointWorld.copy(result.hitPointWorld);
+            out.hitNormalWorld.copy(result.hitNormalWorld);
+            out.body = result.body;
+            out.distance = result.distance;
+            out.hasHit = true;
+        }, chassis.collisionFilterGroup, chassis.collisionFilterMask);
+    }
+
     // ---- the step ----
 
     public step(dt: number): void {
@@ -400,7 +480,7 @@ export class CannonWorld implements PhysicsWorld {
      * hit, the caller keeps the nearest); only the candidate ORDER differs, which no caller depends on.
      */
     private _raycastFiltered(checkCollisionResponse: boolean, options: RayOptions,
-                             report: (result: RaycastResult) => void): void {
+                             report: (result: RaycastResult) => void, group = -1, mask = -1): void {
         const mode = options.mode;
         const ray = CannonWorld._groundRay;
         ray.from.copy(CannonWorld._rayFrom);
@@ -408,8 +488,8 @@ export class CannonWorld implements PhysicsWorld {
         ray.mode = mode === 'closest' ? Ray.CLOSEST : Ray.ALL;
         ray.result = CannonWorld._groundResult;
         ray.skipBackfaces = false;
-        ray.collisionFilterMask = -1;
-        ray.collisionFilterGroup = -1;
+        ray.collisionFilterMask = mask;
+        ray.collisionFilterGroup = group;
         ray.checkCollisionResponse = checkCollisionResponse;
         ray.callback = report;
         ray.hasHit = false;
@@ -448,6 +528,7 @@ export class CannonWorld implements PhysicsWorld {
     public clear(): void {
         for (const constraint of [...this.raw.constraints]) this.raw.removeConstraint(constraint);
         this._joints.clear();
+        this._vehicles.clear();
         // Removing bodies is subtle enough to live in its own module — see clearWorld for the two traps
         // (splice-while-iterating, and truncating world.bodies behind the broadphase's back).
         clearWorld(this.raw);
