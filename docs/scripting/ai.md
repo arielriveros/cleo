@@ -99,8 +99,9 @@ layer the controller looks for — `perceptionLayers`, a bit mask, all layers by
 middle of its box. The eyes are `eyeHeight` above the pawn's feet and the cone opens the way the body
 faces (a 2D body flips rather than turns), reaching up and down as far as its field of view does: a guard
 with a 120 degree cone does not see straight up. Line of sight is the 2D world's ray, which solid tiles and
-2D colliders block and one-way platforms do not. A guard on layer 2 with `perceptionLayers` 1 sees the
-player (layer 1) and never its fellow enemies.
+2D colliders block and one-way platforms do not. The layers are the project's [collision layers](../editor/physics.md#layers),
+the same for 2D and 3D: a guard on Enemies with `perceptionLayers = this.scene.physics2D.layer('Player')` sees the
+player and never its fellow enemies (Duskwell's).
 
 > **Gate on `noticed`, not `visible`.** `visible` is raw line of sight; `noticed` is what survives
 > the reaction delay. An agent gating on `visible` sees you instantly, the moment you clear a

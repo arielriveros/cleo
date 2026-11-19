@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { mat4, vec3 } from 'gl-matrix';
 import {
     MAX_CASCADES,
+    LEGACY_SHADOW_BIASES,
+    SHADOW_DEPTH_BIAS_DEFAULT,
     buildCascadeMatrix,
+    migrateShadowBiases,
     cascadeDepthScale,
     cascadeSphereFromCorners,
     cascadeSphereFromPerspective,
@@ -197,6 +200,18 @@ describe('buildCascadeMatrix', () => {
         }
     });
 
+    it('points its depth axis away from the light, which is how the shader finds the light (cleoCascadeToLight)', () => {
+        // shadows.wgsl shapes the normal offset by N.L, and reads L off the cascade matrix's depth row:
+        // -normalize(m[0].z, m[1].z, m[2].z). That has to be the way TOWARD the light, for any sun.
+        for (const dir of [SUN, vec3.fromValues(0, -1, 0), vec3.normalize(vec3.create(), vec3.fromValues(-0.9, -0.2, 0.4))]) {
+            const out = mat4.create();
+            buildCascadeMatrix({ center: vec3.fromValues(5, 1, -3), radius: 15 }, dir, 2048, 30, out, scratch());
+            const toLight = vec3.normalize(vec3.create(), vec3.fromValues(-out[2], -out[6], -out[10]));
+            const expected = vec3.normalize(vec3.create(), vec3.negate(vec3.create(), dir as vec3));
+            for (let i = 0; i < 3; i++) expect(toLight[i]).toBeCloseTo(expected[i], 5);
+        }
+    });
+
     it('leaves an occluder behind the slice inside the depth range (casterPad)', () => {
         // A wall between the light and the cascade's slice must still rasterize into the map, or it
         // casts nothing at all. That headroom is exactly what casterPad buys.
@@ -303,6 +318,26 @@ describe('staleCascadeCovers', () => {
 
     it('never covers from a cascade that was never drawn', () => {
         expect(staleCascadeCovers(s(0, 0), s(0, 1))).toBe(false);
+    });
+});
+
+describe('migrateShadowBiases', () => {
+    it("reads the old defaults a scene saved as today's: the sun's pair together, each light's alone", () => {
+        const old = { ...LEGACY_SHADOW_BIASES };
+        expect(migrateShadowBiases(old)).toEqual({ shadowDepthBias: SHADOW_DEPTH_BIAS_DEFAULT, shadowNormalBias: 1.5, spotShadowBias: 0, pointShadowBias: 0 });
+        // The old depth bias with a normal bias someone chose: chosen, kept; the lights still move.
+        expect(migrateShadowBiases({ ...old, shadowNormalBias: 2 })).toEqual({ shadowDepthBias: 0.03, shadowNormalBias: 2, spotShadowBias: 0, pointShadowBias: 0 });
+        // A partial save without the normal bias reads the depth bias as the old default.
+        expect(migrateShadowBiases({ shadowDepthBias: 0.03 }).shadowDepthBias).toBe(SHADOW_DEPTH_BIAS_DEFAULT);
+    });
+
+    it('keeps any other value, and hands back the same object when nothing moves', () => {
+        const chosen = { shadowDepthBias: 0.02, shadowNormalBias: 1.5, spotShadowBias: 0.002, pointShadowBias: 0.001, exposure: 1 };
+        expect(migrateShadowBiases(chosen)).toBe(chosen);
+        const other = { exposure: 2 };
+        expect(migrateShadowBiases(other)).toBe(other);
+        // The rest of the settings ride along untouched.
+        expect(migrateShadowBiases({ ...LEGACY_SHADOW_BIASES, exposure: 3 }).exposure).toBe(3);
     });
 });
 

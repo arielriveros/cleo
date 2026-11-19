@@ -361,6 +361,15 @@ export type { PhysicsRaycastHit, PhysicsRaycastOptions, JointSpec } from "./phys
 export { PhysicsBody, BodyVec3, BodyQuat } from "./physics/physicsBody";
 export type { PhysicsBodyOptions } from "./physics/physicsBody";
 export type { OverlapHit, OverlapOptions } from "./physics/overlap";
+export {
+    LAYER, LAYER_COUNT, LAYER_BITS, BUILT_IN_LAYERS, DEFAULT_LAYER_NAMES, LAYER_NAME_MAX,
+    DEFAULT_CAMERA_BLOCKED_BY, DEFAULT_CAMERA_SEE_THROUGH,
+    layerBit, singleLayerOf, isAllLayers, storedMask, layerLabel, normalizeLayerNames, layerByName, layerLabelsOf,
+    layersCollide,
+} from "./physics/collisionLayers";
+export type { CameraProbeLayers } from "./physics/cameraRayFilter";
+export { migrateCameraLayersTree, legacyFoliageCollisionLayer } from "./core/scene/nodes/cameraLayersLegacy";
+export type { CameraLayersMigration } from "./core/scene/nodes/cameraLayersLegacy";
 export type { ColliderPart, PartShape, ConvexHull, ColliderGeometry, ColliderDesc, ShapeDesc, JointHandle, PhysicsBackendKind } from "./physics/pal/types";
 export { PHYSICS_BACKENDS, DEFAULT_PHYSICS_BACKEND, FALLBACK_PHYSICS_BACKEND, resolvePhysicsBackendRequest } from "./physics/pal/backendSelect";
 export type { PhysicsBackendRequest } from "./physics/pal/backendSelect";

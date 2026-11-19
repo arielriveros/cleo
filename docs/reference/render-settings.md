@@ -230,8 +230,9 @@ screen-space reflections, which reflect the same copy of last frame's image SSIL
 | `shadowCascades` | `number` | `3` | 1–4. |
 | `shadowDistance` | `number` | `100` | How far cascades cover. |
 | `shadowSplitLambda` | `number` | `0.5` | Blend between uniform and logarithmic cascade splits. |
-| `shadowDepthBias` | `number` | `0.03` | |
-| `shadowNormalBias` | `number` | `1.5` | |
+| `shadowDepthBias` | `number` | `0.005` | World units along the light, rescaled per cascade. Spot and point lights use it too, as a step toward the light. |
+| `shadowNormalBias` | `number` | `1.5` | Shadow texels along the surface normal, scaled by how far the surface turns from the light: none facing it, all of it edge-on. |
+| `shadowBiasVersion` | `number` | `2` | The bias model the biases were saved under. Settings saved without it (before 2026-11-19) and still on the old defaults (`0.03` and `1.5`, and `0.0015` for spot and point) load as today's defaults. |
 | `shadowFilterMode` | `number` | `0` | `0` = 3×3 PCF, `1` = 16-tap rotated Poisson. |
 | `shadowFilterRadius` | `number` | `1.0` | Kernel radius in shadow texels. `0` collapses to one hard tap. |
 | `shadowStrength` | `number` | `1.0` | How dark a shadowed pixel goes. |
@@ -242,11 +243,11 @@ screen-space reflections, which reflect the same copy of last frame's image SSIL
 | `spotShadowsEnabled` | `boolean` | `true` | |
 | `spotShadowResolution` | `number` | `1024` | 256 / 512 / 1024 / 2048. |
 | `spotShadowDistance` | `number` | `100` | |
-| `spotShadowBias` | `number` | `0.0015` | |
+| `spotShadowBias` | `number` | `0` | An extra bias in depth units, on top of `shadowDepthBias`. |
 | `pointShadowsEnabled` | `boolean` | `true` | |
 | `pointShadowResolution` | `number` | `512` | **Per cube face.** 256 / 512 / 1024. |
 | `pointShadowDistance` | `number` | `50` | |
-| `pointShadowBias` | `number` | `0.0015` | |
+| `pointShadowBias` | `number` | `0` | An extra bias in depth units, as for spot shadows. |
 
 > `shadowStagger` spreads cascade updates across frames. This makes the frame-time graph
 > deliberately uneven — a periodic spike there is the feature working, not a leak. A cascade whose

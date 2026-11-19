@@ -58,7 +58,7 @@ describe('beginModel', () => {
         expect(body).toMatch(/if \(declares\.model\) this\._shaderManager\.setUniform\('u_model'/);
         expect(body).toMatch(/if \(declares\.uv\) \{/);
         expect(body).toMatch(/setDissolve\(node\.effectiveFade, declares\.dissolve\)/);
-        expect(body).toMatch(/setCameraHole\(node\.cameraDither, declares\.camHolePivot\)/);
+        expect(body).toMatch(/setCameraHole\(this\._materials\.holeOptIn\(node\), declares\.camHolePivot\)/);
         expect(body).toMatch(/if \(animated && declares\.bones\) this\.uploadBoneMatrices/);
     });
 

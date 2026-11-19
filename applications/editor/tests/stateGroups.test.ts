@@ -191,7 +191,7 @@ describe('state groups: the graph', () => {
     const find = (n: any): any => n.name === 'Mannequin' ? n : (n.children ?? []).map(find).find(Boolean)
     const sm: AnimationStateMachine = find(scene).stateMachine
     const top = graphPlan(sm, null)
-    expect(top.states.sort()).toEqual(['Idle', 'Locomotion', 'Start'])
+    expect(top.states.sort()).toEqual(['Idle', 'Locomotion', 'Stairs', 'Start'])
     expect(top.groups.map(g => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing'])
     const drawn = new Set(top.links.flatMap(l => [...l.forward, ...l.backward]))
     const memberOf = new Map(sm.groups!.flatMap(g => g.states.map(s => [s, g.name] as const)))

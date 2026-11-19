@@ -1217,12 +1217,16 @@ FOLIAGE_PROTOS.forEach((f, i) => {
   f.billboard = { textureId: texId, textures: { normal: normalId }, octahedral: imp.info, distance: imp.distance }
   f.impostorSize = imp.albedoSize
 })
+/**
+ * A rule's collision, on the See Through collision layer (3, bit 4) when the rule asks to be seen through: a camera
+ * rig sees through what is on its See through layers, and a new rig sees through See Through.
+ */
+const ruleCollision = (rule) => rule.collision && rule.seeThrough ? { ...rule.collision, layer: 4 } : rule.collision
 const RULES = FOLIAGE_PROTOS.map((f, i) => ({
   kind: 'mesh', id: id(`rule:${f.key}`), name: f.name, modelId: foliageAssets[i].id,
   density: f.rule.density, densityUnit: 'm2', minScale: f.rule.minScale, maxScale: f.rule.maxScale,
   cullDistance: f.cull, billboard: f.billboard ?? null, ...(f.billboard ? { impostorSize: f.impostorSize } : {}),
-  castShadows: f.rule.castShadows, collision: f.rule.collision,
-  ...(f.rule.cameraDither ? { cameraDither: true } : {}),
+  castShadows: f.rule.castShadows, collision: ruleCollision(f.rule),
 }))
 
 // Ground rules on the Ground, the undergrowth on the Forest Floor that carries it. Every painted road,
@@ -1452,14 +1456,13 @@ function scatter() {
       kind: 'mesh', name: proto.name, key: RULES[i].id, textureId: null,
       params: { density: proto.rule.density, minScale: proto.rule.minScale, maxScale: proto.rule.maxScale },
       densityUnit: 'm2',
-      ...(proto.rule.collision ? { collision: proto.rule.collision } : {}),
+      ...(proto.rule.collision ? { collision: ruleCollision(proto.rule) } : {}),
       model: base[0],
       ...(base.length > 1 ? { models: base } : {}),
       lods: lods.map((models, k) => ({ models, distance: proto.distances[k] })),
       ...(proto.billboard ? { billboard: proto.billboard } : {}),
       cullDistance: proto.cull,
       ...(proto.rule.castShadows ? { castShadows: true } : {}),
-      ...(proto.rule.cameraDither ? { cameraDither: true } : {}),
       cellSize: proto.cellSize,
       instances: instancesBlob(points, heights, random, proto.rule.minScale, proto.rule.maxScale, sink),
     }
@@ -1533,14 +1536,16 @@ function widenCamera(json) {
 /**
  * The player's camera rig: on the shorter `PLAYER_ARM` (and closer still locked on), seeing through trees
  * and dungeon pillars instead of pulling in behind them — in a forest the retracting camera spent most of
- * its time jammed against a trunk. Only what opted in (`cameraDither` on the tree rules and the pillar
- * nodes) is cut; walls, ceilings and rocks still pull the camera in, as 'retract' does.
+ * its time jammed against a trunk. Only what is on the See Through collision layer (3, bit 4: the tree rules'
+ * collision and the pillars' collider) is cut; walls, ceilings and rocks still pull the camera in, and what is on
+ * No Camera (4, bit 8) does nothing to it.
  */
 function playerCamera(json) {
   const walk = (n) => {
     if (n.type === 'cameraRig') {
       n.armLength = PLAYER_ARM
-      n.collisionMode = 'dither'; n.ditherRadius = 1.1; n.ditherStrength = 0.85
+      delete n.collisionMode
+      n.collisionLayers = -1 & ~(4 | 8); n.seeThroughLayers = 4; n.ditherRadius = 1.1; n.ditherStrength = 0.85
       // SoulsLockOn's framing while locked: in tight, over the shoulder.
       n.scriptVars = { ...(n.scriptVars ?? {}), lockedArmLength: PLAYER_LOCKED_ARM }
     }

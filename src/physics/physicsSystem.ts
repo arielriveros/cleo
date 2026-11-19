@@ -10,7 +10,8 @@ import { RigidBody, Trigger, triggerState } from "./body";
 import type { TriggerContact } from "./body";
 import { TriggerOverlapPass, TriggerOverlap, pairKey } from "./triggerOverlaps";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
-import { skipCameraHit, CameraProbeBody, skipRayHit, RayHitBody, RayFilter } from "./cameraRayFilter";
+import { skipCameraHit, CameraProbeBody, CameraProbeLayers, skipRayHit, RayHitBody, RayFilter } from "./cameraRayFilter";
+import { DEFAULT_LAYER_NAMES, layerByName, normalizeLayerNames } from "./collisionLayers";
 import { physicsStats, resetPhysicsStats, PhysicsStats } from "./physicsStats";
 import { MotionRecord, MotionConfig, createMotionRecord, sampleMotion, motionConfig } from "./motion";
 import { OverlapHit, OverlapOptions, OverlapBody, QueryShape, queryPoses, sweepPoses } from "./overlap";
@@ -20,6 +21,7 @@ import { InlineExecutor } from "./executor/inlineExecutor";
 import { WorkerExecutor } from "./executor/workerExecutor";
 import type { ContactSource, PhysicsExecutor, SubstepHooks } from "./executor/physicsExecutor";
 import { CharacterContactRule, type ContactBodyInfo } from "./characterContacts";
+import { SlopeHold, type SlopeHoldRequest } from "./slopeHold";
 import { acquirePhysicsBackend, createPhysicsWorld, isPhysicsBackendLoaded } from "./pal/createWorld";
 import { FALLBACK_PHYSICS_BACKEND, resolvePhysicsBackendRequest } from "./pal/backendSelect";
 import type { PhysicsCapabilities } from "./pal/capabilities";
@@ -68,7 +70,12 @@ interface PhysicsSystemConfig {
    * or 'cannon'. One that cannot run here runs on cannon, and {@link PhysicsSystem.backendFallbackReason} says why.
    */
   backend?: string;
+  /** The project's collision layer names (see collisionLayers.ts), for {@link PhysicsSystem.layer}. */
+  layers?: readonly string[];
 }
+
+/** {@link PhysicsSystem.raycastCamera}'s layers when none are given: every solid body blocks. */
+const EVERY_LAYER_BLOCKS: CameraProbeLayers = Object.freeze({ blockedBy: -1, seeThrough: 0 });
 
 /** A single hit from {@link PhysicsSystem.raycast}. Vectors are world space and freshly allocated. */
 export interface PhysicsRaycastHit {
@@ -94,6 +101,17 @@ export interface PhysicsRaycastOptions {
   includeTriggers?: boolean;
   /** Let bodies with `simulatePhysics = false` count as hits. Default false. */
   includeGhosts?: boolean;
+  /**
+   * Only bodies on one of these collision layers (`collisionFilterGroup & layerMask`), as the overlap queries'
+   * `layerMask`. Build one with {@link PhysicsSystem.layers}. Bodies the engine makes itself (terrain, the
+   * ground plane, tilemaps, foliage without a layer) are on the Default layer. Default: every layer.
+   */
+  layerMask?: number;
+  /**
+   * Only what this body would collide with: its mask holds the hit's layer AND the hit's mask holds its layer.
+   * What a body's own "what is under me" probe wants.
+   */
+  collidingWith?: PhysicsBody | null;
   /** Last word on each candidate. Return true to skip it. `owner` is null for a body with no Node. */
   reject?: (owner: Node | null, body: PhysicsBody) => boolean;
   /**
@@ -242,6 +260,37 @@ export class PhysicsSystem {
   constructor(config?: PhysicsSystemConfig) {
     this._gravity = config?.gravity ? config.gravity: [0, -9.82, 0]; // y = up
     this._backendRequest = config?.backend ?? null;
+    if (config?.layers) this.layerNames = config.layers;
+  }
+
+  private _layerNames: readonly string[] = DEFAULT_LAYER_NAMES;
+  private readonly _unknownLayers = new Set<string>();
+
+  /**
+   * The project's collision layer names (Options > Project > Layers), index 0 being layer 1. The first
+   * four are the engine's: Default, Ragdoll, See Through and No Camera. An unnamed layer is "Layer N".
+   */
+  public get layerNames(): readonly string[] { return this._layerNames; }
+  public set layerNames(names: readonly string[]) { this._layerNames = normalizeLayerNames(names); }
+
+  /**
+   * The bit of the collision layer called `name` ("Default", "No Camera", a project's own, or "Layer 7"), for a
+   * collider's `layer` or a query's mask. 0, with a warning once per name, for a layer the project does not have.
+   */
+  public layer(name: string): number {
+    const bit = layerByName(this._layerNames, name);
+    if (bit === 0 && !this._unknownLayers.has(name)) {
+      this._unknownLayers.add(name);
+      Logger.warn(`There is no collision layer called '${name}' (Options > Project > Layers).`, 'Physics');
+    }
+    return bit;
+  }
+
+  /** The mask of every collision layer named: `physics.raycast(a, b, { layerMask: physics.layers('Default', 'Stairs') })`. */
+  public layers(...names: string[]): number {
+    let mask = 0;
+    for (const name of names) mask |= this.layer(name);
+    return mask;
   }
 
   private readonly _backendRequest: string | null;
@@ -364,10 +413,51 @@ export class PhysicsSystem {
       list.length = 0;
       for (const [handle, body] of this._bodies) if (body.isCharacter && body.isDynamic && body.world === world) list.push({ handle: handle as BodyHandle, mass: body.mass });
       this._characterRule.watch(list);
+      // The holds asked for while the last frame's scene ran (physics/slopeHold.ts).
+      this._slopeHold.hold(this._slopeHoldsOf(this._holdFrame - 1, world));
     },
-    before: world => this._characterRule.before(world),
-    after: (world, h) => this._characterRule.after(world, h, this._contactInfo),
+    // The contact rule reads what a step added past the gravity it applied, which the hold changes.
+    before: world => { this._slopeHold.before(world); this._characterRule.before(world); },
+    after: (world, h) => { this._slopeHold.after(world, this._standable); this._characterRule.after(world, h, this._contactInfo, this._heldGravity); },
   };
+
+  // A character standing on a slope does not slide down it (physics/slopeHold.ts). It asks every frame it stands
+  // on walkable ground (CharacterNode, `slopeLimit`); the next step holds it, and only that one.
+  private readonly _slopeHold = new SlopeHold();
+  private readonly _holdRequests = new Map<PhysicsBody, { cosLimit: number; frame: number }>();
+  private readonly _holdList: SlopeHoldRequest[] = [];
+  /** Counts updates: what a hold request is stamped with, so a request is used by the next step alone. */
+  private _holdFrame = 0;
+  private readonly _heldGravity = (h: BodyHandle) => this._slopeHold.gravityOf(h);
+  /** What a held character can stand on: not a trigger, not a body the solver ignores. */
+  private readonly _standable = (h: BodyHandle): boolean => {
+    const b = this._bodies.get(h);
+    return !b || (!b.isTrigger && b.collisionResponse);
+  };
+
+  /**
+   * Hold `body` on its slope over the next step: the share of gravity along the ground it stands on is taken off
+   * it, on ground no steeper than `maxSlopeDegrees`, so it stands without sliding down and starts, brakes and
+   * climbs as on the flat. A request for the coming step only: ask again every frame it should hold. What a
+   * Character does with its `slopeLimit`; a dynamic body only.
+   */
+  public holdOnSlope(body: PhysicsBody, maxSlopeDegrees: number): void {
+    if (!body || !body.isDynamic || !(maxSlopeDegrees > 0)) return;
+    const degrees = Math.min(89, maxSlopeDegrees);
+    this._holdRequests.set(body, { cosLimit: Math.cos(degrees * Math.PI / 180), frame: this._holdFrame });
+  }
+
+  /** The holds stamped `frame` on bodies of `world` (older ones are dropped), as a step reads them. */
+  private _slopeHoldsOf(frame: number, world: PhysicsWorld): SlopeHoldRequest[] {
+    const list = this._holdList;
+    list.length = 0;
+    for (const [body, r] of this._holdRequests) {
+      if (r.frame < frame) { this._holdRequests.delete(body); continue; }
+      if (r.frame !== frame || body.world !== world || body.handle < 0) continue;
+      list.push({ handle: body.handle, mass: body.mass, cosLimit: r.cosLimit });
+    }
+    return list;
+  }
 
   /**
    * `deltaTime` is game time: the frame's delta with the engine's time scale applied. `timeScale` is that
@@ -375,6 +465,7 @@ export class PhysicsSystem {
    */
   public update(deltaTime: number, timeScale: number = 1): void {
     this._timeScale = timeScale;
+    this._holdFrame++;
     try {
       if (!this._scene) return;
       const frameStart = performance.now();
@@ -1077,7 +1168,8 @@ export class PhysicsSystem {
     const hit = this.raycast(
       [p[0], p[1], p[2]],
       [p[0] + downX * reach, p[1] + downY * reach, p[2] + downZ * reach],
-      { ignore: body });
+      // Only what it stands on: a step it walks through on its way up a stair ramp is no ground of its own.
+      { ignore: body, collidingWith: body });
     if (!hit) return null;
 
     // The normal points back out toward the ray origin; its agreement with world "up" is the ground-likeness,
@@ -1225,22 +1317,22 @@ export class PhysicsSystem {
   }
 
   /**
-   * Distance from `from` to the nearest solid surface along the SEGMENT `from -> to`, or null when nothing
-   * blocks it. The boom length must be baked into `to`, not passed as a max distance. `simulatePhysics =
-   * false` ghosts still block the camera: the solver and camera channels are independent.
+   * Distance from `from` to the nearest surface a camera rig's probe stops at along the SEGMENT `from -> to`,
+   * or null when nothing blocks it. The boom length must be baked into `to`, not passed as a max distance.
+   * A body blocks when its layer is in `layers.blockedBy` and not in `layers.seeThrough` (see
+   * cameraRayFilter.ts); `simulatePhysics = false` ghosts block too: the solver and the camera are independent.
    * @param reject Called with the owning Node of each candidate hit (null for bodies with no owner, e.g.
    *               the terrain heightfield — those should normally be kept). Return true to skip.
-   * @param seeThrough The probe of a 'dither' camera rig: what opted into the see-through hole
-   *               (`cameraDither`) does not block it.
+   * @param layers A rig's Blocked by and See through. Default: blocked by every layer, seeing through none.
    */
-  public raycastCamera(from: vec3, to: vec3, reject?: (owner: Node | null) => boolean, seeThrough: boolean = false): number | null {
+  public raycastCamera(from: vec3, to: vec3, reject?: (owner: Node | null) => boolean, layers: CameraProbeLayers = EVERY_LAYER_BLOCKS): number | null {
     // The standard filters are turned OFF and delegated wholesale to skipCameraHit; applying both would
     // change which bodies block a camera.
     const hit = this.raycast(from, to, {
       checkCollisionResponse: false,
       includeTriggers: true,
       includeGhosts: true,
-      reject: (_owner, body) => skipCameraHit(body as CameraProbeBody | null, reject, seeThrough),
+      reject: (_owner, body) => skipCameraHit(body as CameraProbeBody | null, layers, reject),
     });
     return hit ? hit.distance : null;
   }
@@ -1515,6 +1607,8 @@ export class PhysicsSystem {
       const worker = new WorkerExecutor({
         world: this._world,
         water: () => this._waterSpecs(),
+        // Posted at the end of the frame whose scene asked: this frame's requests.
+        slopeHolds: () => this._slopeHoldsOf(this._holdFrame, this._world!).map(r => ({ body: r.handle, cosLimit: r.cosLimit })),
         substepsFor: dt => PhysicsSystem.substepsFor(dt, this.maxSubsteps),
         profileStep: () => this.profileStep,
         onFailure: (error) => {

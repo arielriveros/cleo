@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Logger } from '../src/core/logger';
 import { makeBody, box, sphere, cylinder, heightfield, plane, engineCapsule } from './helpers/physicsBodies';
 import { PhysicsBody } from '../src/physics/physicsBody';
+import { LAYER as COLLISION_LAYER } from '../src/physics/collisionLayers';
 import { Body, Box, Cylinder, Sphere, Vec3 } from 'cannon-es';
 import { quat } from 'gl-matrix';
 import { CleoEngine } from '../src/core/engine';
@@ -595,7 +596,8 @@ describe('a dead enemy drops its weapon', () => {
             const now = Array.from(club.worldPosition) as number[];
             now.forEach((v, i) => expect(v).toBeCloseTo(at[i] as number, 4));
             expect(club.body).toBeTruthy();
-            expect(club.body.cameraCollision).toBe(false);
+            // Out of the camera's way: on No Camera, which camera rigs are not blocked by.
+            expect(club.body.collisionFilterGroup).toBe(COLLISION_LAYER.NO_CAMERA);
             expect(club.body.colliders.length).toBe(3);
             expect(e.currentWeapon()).toBeNull();
             expect(e.droppedWeapons()).toEqual([club]);

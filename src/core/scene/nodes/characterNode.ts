@@ -133,6 +133,12 @@ export class CharacterNode extends Node {
     /** What {@link moveDir} reads: the input's direction, or the body's actual travel. See `MoveDirSource`. */
     public moveDirSource: MoveDirSource = 'input';
     /**
+     * Degrees: the steepest ground the character stands on without sliding down it. On ground up to this steep,
+     * gravity only presses it into the ground (physics/slopeHold.ts), so it stands still, sets off, brakes and
+     * climbs as on the flat; steeper ground it slides down. 0 turns the hold off.
+     */
+    public slopeLimit: number = 45;
+    /**
      * Set by the animator while its state holds this character still (`AnimationState.holdMovement`): the
      * character then stops steering, and only root motion moves it. Runtime only, never saved.
      */
@@ -261,6 +267,10 @@ export class CharacterNode extends Node {
         this._locomotion = out.next;
 
         this.velocity = out.velocity as [number, number, number];
+        // On walkable ground, held there over the next step: never in the air, and not as it takes off (the jump
+        // lockout), when gravity must have it all.
+        if (this.slopeLimit > 0 && this.isGrounded && !out.jumped && out.next.jumpLockout <= 0)
+            this._scene?.physics?.holdOnSlope(body, this.slopeLimit);
         // A WORLD yaw (it came from worldForward), so it is set in world space: under a turned parent a local
         // write would face the character off its path. `setWorldQuaternion` also turns the body, which the
         // physics solver has to agree with or the capsule slides while facing elsewhere.
@@ -365,6 +375,7 @@ export class CharacterNode extends Node {
             acceleration: this.acceleration,
             turnFriction: this.turnFriction,
             moveDirSource: this.moveDirSource,
+            slopeLimit: this.slopeLimit,
             airControl: this.airControl,
             coyoteSeconds: this.coyoteSeconds,
             jumpBufferSeconds: this.jumpBufferSeconds,
@@ -391,6 +402,7 @@ export class CharacterNode extends Node {
         node.acceleration = finiteOr(json.acceleration, node.acceleration);
         node.turnFriction = finiteOr(json.turnFriction, node.turnFriction);
         if ((MOVE_DIR_SOURCES as readonly string[]).includes(json.moveDirSource)) node.moveDirSource = json.moveDirSource;
+        node.slopeLimit = Math.min(89, Math.max(0, finiteOr(json.slopeLimit, node.slopeLimit)));
         node.airControl = finiteOr(json.airControl, node.airControl);
         node.coyoteSeconds = finiteOr(json.coyoteSeconds, node.coyoteSeconds);
         node.jumpBufferSeconds = finiteOr(json.jumpBufferSeconds, node.jumpBufferSeconds);

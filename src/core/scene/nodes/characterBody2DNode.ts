@@ -37,7 +37,10 @@ import { Node } from "./node";
 export class CharacterBody2DNode extends Node {
     /** The box: width and height, world units, standing on the node's position. */
     public size: [number, number] = [0.8, 1.8];
-    /** The 2D layer the body is on, and which an area must look for to see it (bits). */
+    /**
+     * The collision layer the body is on (one bit, the project's layers, named for 2D and 3D alike): a trigger
+     * must look for it to see the body, an AI Controller's `perceptionLayers` to see it.
+     */
     public layer: number = 1;
     /** Walk (on the ground, under gravity) or fly (both axes, no gravity). */
     public movement: Body2DMovement = 'walk';

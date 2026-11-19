@@ -84,7 +84,7 @@ export class ModelDraw {
      */
     public rowForNode(node: ModelNode): number {
         const palette = this._paletteOf(node);
-        return this._objects.rowFor(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither, palette);
+        return this._objects.rowFor(node, node.worldTransform, dissolveOf(node.effectiveFade), this._materials.holeOptIn(node), palette);
     }
 
     /** A skinned node's bone palette in the table (its first texel), 0 for a static one. */
@@ -116,7 +116,7 @@ export class ModelDraw {
     /** `node`'s record, appended if needed but NOT uploaded — see {@link flushRows}. */
     public ensureRow(node: ModelNode): number {
         const palette = this._paletteOf(node);
-        return this._objects.ensure(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither, palette);
+        return this._objects.ensure(node, node.worldTransform, dissolveOf(node.effectiveFade), this._materials.holeOptIn(node), palette);
     }
 
     /** Upload the records {@link ensureRow} appended. */
@@ -236,7 +236,7 @@ export class ModelDraw {
             this._shaderManager.setUniform('u_uvScale', ModelDraw._UV_SCALE);
         }
         this._materials.setDissolve(node.effectiveFade, declares.dissolve);
-        this._materials.setCameraHole(node.cameraDither, declares.camHolePivot);
+        this._materials.setCameraHole(this._materials.holeOptIn(node), declares.camHolePivot);
         if (animated && declares.bones) this.uploadBoneMatrices(shaderType, node);
         return animated;
     }

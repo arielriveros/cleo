@@ -1,5 +1,6 @@
 import type { Node } from "../core/scene/nodes/node";
 import type { ColliderGeometry } from "./pal/types";
+import { LAYER } from "./collisionLayers";
 import {
     boxesOverlap, clampToBox, closestOnSegment, closestSegmentBox, closestSegmentSegment, distSq3, dot3, lerp3,
     quatConjugateTuple, quatMultiplyTuple, quatRotateTuple, sub3,
@@ -66,8 +67,8 @@ export interface OverlapOptions<TBody = OverlapBody> {
     filter?: (node: Node | null, body: TBody) => boolean;
 }
 
-/** The collision group ragdoll bone bodies are put in (see Ragdoll). */
-export const RAGDOLL_GROUP = 2;
+/** The collision layer ragdoll bone bodies are put in (see Ragdoll): layer 2, Ragdoll. */
+export const RAGDOLL_GROUP = LAYER.RAGDOLL;
 
 // ---------------------------------------------------------------------------------------------------
 // Query shapes, in world space. A sphere is a capsule whose two ends coincide.

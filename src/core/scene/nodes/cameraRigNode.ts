@@ -11,6 +11,9 @@ import { Node } from "./node";
 import { CAMERA_RIG_PRESETS, type CameraRigPreset } from "./cameraRigPresets";
 import { applyPreset } from "../../presets";
 import { isEditorOwnedName } from "../editorOwnership";
+import { DEFAULT_CAMERA_BLOCKED_BY, DEFAULT_CAMERA_SEE_THROUGH } from "../../../physics/collisionLayers";
+import type { CameraProbeLayers } from "../../../physics/cameraRayFilter";
+import { legacyRigLayers } from "./cameraLayersLegacy";
 
 /**
  * The follow/aim/spring-arm camera rig, driven from the scene late pass.
@@ -19,9 +22,6 @@ import { isEditorOwnedName } from "../editorOwnership";
 export type FollowSpace = 'world' | 'targetYaw' | 'targetFull';
 /** What drives the rig's aim. */
 export type AimMode = 'orbit' | 'lookAt' | 'none';
-
-/** See {@link CameraRigNode.collisionMode}. */
-export type CameraCollisionMode = 'retract' | 'dither';
 
 /**
  * Drives a child CameraNode: follow, aim, spring arm, collision, shake.
@@ -91,17 +91,23 @@ export class CameraRigNode extends Node {
     /** Nodes (by id) whose bodies the probe ignores, alongside the follow/lookAt targets. */
     public collisionIgnoreIds: string[] = [];
     /**
-     * What the rig does when something comes between the camera and the pivot. `'retract'` pulls the
-     * camera in along the arm (the probe above). `'dither'` cuts a dithered see-through hole instead in
-     * every node that opted in with `Node.cameraDither` (and every foliage rule with `cameraDither`), and
-     * the probe ignores their bodies; anything that did not opt in (a wall, a ceiling) still pulls the
-     * camera in, as `'retract'` does.
+     * Blocked by: the collision layers (a mask, collisionLayers.ts) that pull the camera in along the arm when
+     * they come between it and the pivot. Default: every layer but See Through and No Camera.
      */
-    public collisionMode: CameraCollisionMode = 'retract';
-    /** `'dither'` mode: radius of the hole around the camera -> pivot line, metres. */
+    public collisionLayers: number = DEFAULT_CAMERA_BLOCKED_BY;
+    /**
+     * See through: the collision layers the camera looks through instead. The probe passes their bodies, and
+     * the renderer cuts a dithered see-through hole in the meshes of every Collider on one of them (and every
+     * foliage rule whose collision is), around the camera -> pivot line. Wins over {@link collisionLayers} for
+     * a layer in both. 0: nothing is seen through. Default: the See Through layer.
+     */
+    public seeThroughLayers: number = DEFAULT_CAMERA_SEE_THROUGH;
+    /** See-through hole: radius around the camera -> pivot line, metres. */
     public ditherRadius: number = 1.0;
-    /** `'dither'` mode: 0..1, how much of a blocking surface is dithered away at the hole's centre. */
+    /** See-through hole: 0..1, how much of a blocking surface is dithered away at the hole's centre. */
     public ditherStrength: number = 0.85;
+    /** The two masks as the probe reads them, refreshed per probe (no allocation per frame). */
+    private readonly _probeLayers: CameraProbeLayers = { blockedBy: DEFAULT_CAMERA_BLOCKED_BY, seeThrough: DEFAULT_CAMERA_SEE_THROUGH };
 
     // --- shake -----------------------------------------------------------------------------------
     public shakePositionAmplitude: vec3 = vec3.fromValues(0.15, 0.15, 0.05);
@@ -468,11 +474,12 @@ export class CameraRigNode extends Node {
             this.setPosition(this._pivot);
     }
 
-    /** Publish (or withdraw) the dither-mode hole on the camera this rig drives. */
+    /** Publish (or withdraw) the see-through hole on the camera this rig drives. */
     private _updateSeeThrough(cam: CameraNode): void {
         const see = cam.seeThrough;
-        see.active = this.collisionEnabled && this.collisionMode === 'dither';
+        see.active = this.collisionEnabled && this.seeThroughLayers !== 0;
         if (!see.active) return;
+        see.layers = this.seeThroughLayers;
         vec3.copy(see.pivot, this._pivot);
         see.radius = Math.max(0.05, this.ditherRadius);
         see.strength = clamp(this.ditherStrength, 0, 1);
@@ -484,10 +491,9 @@ export class CameraRigNode extends Node {
             return;
         }
 
-        // 'dither' still pulls the camera in for everything else, but not for what opted into the hole: that
-        // is see-through instead (`_updateSeeThrough`).
+        // What is on a See through layer does not pull the camera in: it is cut instead (`_updateSeeThrough`).
         const direction = vec3.scale(CameraRigNode._probeDir, boomWorld, 1 / boomDistance);
-        const hit = this._probe(direction, boomDistance, worldRotation, this.collisionMode === 'dither');
+        const hit = this._probe(direction, boomDistance, worldRotation);
         const target = collisionRatio(hit, boomDistance, this.collisionRadius, this.collisionMinRatio);
 
         // Fast in, slow out: easing the pull-in leaves the camera inside the wall for several frames,
@@ -506,9 +512,12 @@ export class CameraRigNode extends Node {
      * refreshed until step 8 of `lateUpdate`. Uses its own scratch vectors — `_v0.._v3` still hold the
      * caller's boom, which is read again after this returns.
      */
-    private _probe(direction: vec3, distance: number, worldRotation: quat, seeThrough: boolean): number | null {
+    private _probe(direction: vec3, distance: number, worldRotation: quat): number | null {
         const physics = this._scene?.physics;
         if (!physics) return null;
+        const layers = this._probeLayers;
+        layers.blockedBy = this.collisionLayers;
+        layers.seeThrough = this.seeThroughLayers;
 
         // cannon has no sphere-cast, so approximate the probe sphere with four rays offset around
         // the centre one.
@@ -532,7 +541,7 @@ export class CameraRigNode extends Node {
             // A cannon ray is a segment, so the boom length goes into the endpoint.
             vec3.scaleAndAdd(to, from, direction, distance);
 
-            const hit = physics.raycastCamera(from, to, this._rejectHit, seeThrough);
+            const hit = physics.raycastCamera(from, to, this._rejectHit, layers);
             if (hit !== null && (nearest === null || hit < nearest)) nearest = hit;
         }
         return nearest;
@@ -658,7 +667,8 @@ export class CameraRigNode extends Node {
                     collisionPullTime: this.collisionPullTime,
                     collisionReturnTime: this.collisionReturnTime,
                     collisionIgnoreIds: [...this.collisionIgnoreIds],
-                    collisionMode: this.collisionMode,
+                    collisionLayers: this.collisionLayers,
+                    seeThroughLayers: this.seeThroughLayers,
                     ditherRadius: this.ditherRadius,
                     ditherStrength: this.ditherStrength,
 
@@ -718,7 +728,10 @@ export class CameraRigNode extends Node {
         node.collisionReturnTime = finiteOr(json.collisionReturnTime, node.collisionReturnTime);
         node.collisionIgnoreIds = Array.isArray(json.collisionIgnoreIds)
             ? json.collisionIgnoreIds.filter((id: any) => typeof id === 'string') : [];
-        node.collisionMode = json.collisionMode === 'dither' ? 'dither' : 'retract';
+        // Saved with a `collisionMode` ('retract' or 'dither') before rigs chose layers: the masks that did it.
+        const layers = legacyRigLayers(json);
+        node.collisionLayers = layers.blockedBy;
+        node.seeThroughLayers = layers.seeThrough;
         node.ditherRadius = finiteOr(json.ditherRadius, node.ditherRadius);
         node.ditherStrength = finiteOr(json.ditherStrength, node.ditherStrength);
 

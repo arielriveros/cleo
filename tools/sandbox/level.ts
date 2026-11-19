@@ -1,23 +1,33 @@
 // The Sandbox course: a gray-box test level for locomotion. Metres; +Z is ahead of the player's spawn, +X its left.
 //
 //   ramps        10, 20, 30, 40 degrees, each up to a 1.5 m platform you can drop off the far side of
-//   stairs       15 cm and 20 cm risers (3D physics has no step-up: each flight rides on an invisible ramp)
-//   bumps        a strip of small tilted slabs, for foot placement
+//   stairs       15 cm and 20 cm risers: the capsule glides up an invisible ramp over each flight (a capsule has
+//                no step-up of its own) while the feet stand on the real steps, kept apart by collision layer
+//   bumps        a strip of small tilted slabs, for foot placement: the feet stand on them, the capsule walks
+//                through them on the ground
 //   platforms    0.3, 0.6, 1.0, 2.0 and 3.5 m, the tall ones reached by a ramp: jump on, drop off
 //   gap          two 1 m blocks 2 m apart, for a running jump
-//   pillars, wall  close to the start, for the camera's collision
+//   pillars, wall  close to the start, for the camera: it sees through the pillars and pulls in for the wall
 //   props        loose rigid bodies over all of it: crates, barrels, balls and planks to push, knock over and roll
 //
-// Pure data: build.ts turns each piece into a collider with its mesh under it, then folds the static ones into one
-// Static Collision collider with the engine's own merge pass; the props stay bodies of their own.
+// Pure data: build.ts turns each piece into a collider with its mesh under it (a flight of stairs into two: its steps
+// and its ramp), then folds the static ones into Static Collision colliders, one per collision layer, with the
+// engine's own merge pass; the props stay bodies of their own.
 
 export type Material = 'floor' | 'block' | 'accent'
 
+/**
+ * The collision layer a piece is on, when not the Default one (build.ts names them): `footDetail` is what the feet
+ * stand on and the capsule passes through (the bumps, and the stairs' steps); `seeThrough` is what the camera sees
+ * through instead of pulling in for (the pillars).
+ */
+export type PieceLayer = 'footDetail' | 'seeThrough'
+
 export type Piece =
-    | { kind: 'box'; name: string; size: [number, number, number]; position: [number, number, number]; rotation?: [number, number, number]; material: Material }
+    | { kind: 'box'; name: string; size: [number, number, number]; position: [number, number, number]; rotation?: [number, number, number]; material: Material; layer?: PieceLayer }
     | { kind: 'ramp'; name: string; size: [number, number, number]; position: [number, number, number]; yaw?: number; material: Material }
     | { kind: 'stairs'; name: string; steps: number; size: [number, number, number]; position: [number, number, number]; yaw?: number; material: Material }
-    | { kind: 'cylinder'; name: string; radius: number; height: number; position: [number, number, number]; material: Material }
+    | { kind: 'cylinder'; name: string; radius: number; height: number; position: [number, number, number]; material: Material; layer?: PieceLayer }
 
 /**
  * A loose rigid body: a unit box, ball or cylinder scaled to `size` (a ball's must be uniform), resting where it
@@ -94,6 +104,9 @@ export function props(): Prop[] {
 
 const DEG = Math.PI / 180
 
+/** The stairs' tread, m: what one step covers (the stair clips' pace is fitted to it, machine.ts stairPaces). */
+export const TREAD = 0.3
+
 export function course(): Piece[] {
     const out: Piece[] = []
     out.push({ kind: 'box', name: 'Ground', size: [120, 1, 120], position: [0, -0.5, 0], material: 'floor' })
@@ -108,12 +121,13 @@ export function course(): Piece[] {
 
     // Stairs: 30 cm treads.
     ;[[0.15, 10, -5], [0.2, 8, -1]].forEach(([rise, steps, x]) => {
-        const h = rise * steps, d = 0.3 * steps, z0 = 6
+        const h = rise * steps, d = TREAD * steps, z0 = 6
         out.push({ kind: 'stairs', name: `Stairs ${Math.round(rise * 100)} cm`, steps, size: [2.5, h, d], position: [x, h / 2, z0 + d / 2], material: 'block' })
         out.push({ kind: 'box', name: `Stairs ${Math.round(rise * 100)} cm Top`, size: [2.5, h, 3], position: [x, h / 2, z0 + d + 1.5], material: 'block' })
     })
 
-    // Bumps: small slabs, tilted, on a 1 m grid with a fixed pattern.
+    // Bumps: small slabs, tilted, on a 1 m grid with a fixed pattern. Foot detail: the feet climb on them, the capsule
+    // walks on through them at ground level.
     let seed = 7
     const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 }
     for (let row = 0; row < 8; row++) for (let col = 0; col < 3; col++) {
@@ -121,7 +135,7 @@ export function course(): Piece[] {
         out.push({
             kind: 'box', name: `Bump ${row * 3 + col + 1}`, size: [0.9, 0.2 + rand() * 0.15, 0.9],
             position: [3 + col * 1.1, 0, 6 + row * 1.1],
-            rotation: [(rand() - 0.5) * 2 * tilt, rand() * 90, (rand() - 0.5) * 2 * tilt], material: 'accent',
+            rotation: [(rand() - 0.5) * 2 * tilt, rand() * 90, (rand() - 0.5) * 2 * tilt], material: 'accent', layer: 'footDetail',
         })
     }
 
@@ -143,9 +157,10 @@ export function course(): Piece[] {
     out.push({ kind: 'box', name: 'Gap Near', size: [3, gapH, 6], position: [0, gapH / 2, -3 - gapRun - 3], material: 'block' })
     out.push({ kind: 'box', name: 'Gap Far', size: [3, gapH, 6], position: [0, gapH / 2, -3 - gapRun - 6 - 2 - 3], material: 'block' })
 
-    // Pillars and a wall near the start, for the camera.
+    // Pillars and a wall near the start, for the camera: it sees through the pillars (See Through) and pulls in for the
+    // wall.
     ;[[8, -5], [11, -7], [14, -5]].forEach(([x, z], i) =>
-        out.push({ kind: 'cylinder', name: `Pillar ${i + 1}`, radius: 0.4, height: 4, position: [x, 2, z], material: 'accent' }))
+        out.push({ kind: 'cylinder', name: `Pillar ${i + 1}`, radius: 0.4, height: 4, position: [x, 2, z], material: 'accent', layer: 'seeThrough' }))
     out.push({ kind: 'box', name: 'Wall', size: [8, 3, 0.4], position: [-10, 1.5, -6], material: 'accent' })
     return out
 }

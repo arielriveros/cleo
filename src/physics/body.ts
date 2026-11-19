@@ -1,5 +1,6 @@
 import { quat, vec3 } from 'gl-matrix';
 import { PhysicsBody } from './physicsBody';
+import { LAYER } from './collisionLayers';
 import type { Shape } from './shape';
 import type { ColliderDesc } from './pal/types';
 import { parseSimulationMode } from './simulationRange';
@@ -27,7 +28,10 @@ interface RigidBodyConfig {
     restitution?: number;
     /** Participate in physical simulation (collide, push, be pushed). Default true. */
     simulatePhysics?: boolean;
-    /** Block a camera rig's collision probe. Default true. */
+    /**
+     * @deprecated Camera rigs choose the layers that block them (Blocked by): put the body on a layer
+     * instead. `false` puts a body that names no `group` of its own on the No Camera layer.
+     */
     cameraCollision?: boolean;
     /**
      * Meters below the collider's feet that still count as grounded. `0` = off, grounding uses solver
@@ -103,8 +107,9 @@ export class RigidBody extends PhysicsBody {
       sleepTimeLimit: 0.1,
       friction, restitution,
       collisionResponse: config?.simulatePhysics ?? true,
-      cameraCollision: config?.cameraCollision ?? true,
-      group: config?.group,
+      // The old camera channel, kept for scripts that still pass it: a body out of the camera's way is on
+      // No Camera, which no rig is blocked by unless it asks to be.
+      group: config?.group ?? (config?.cameraCollision === false ? LAYER.NO_CAMERA : undefined),
       mask: config?.mask,
       character: config?.character ?? owner?.nodeType === 'character',
     });

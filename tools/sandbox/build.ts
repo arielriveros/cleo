@@ -27,12 +27,13 @@ import { TextureSet, stableId, writeJson, vars } from '../exampleKit/bundle.mjs'
 import { packFormat2 } from '../exampleKit/packFormat2.mjs'
 import { templatizeScene, templatizeSubtree } from '../exampleKit/templatize'
 import { mergeStaticColliders } from '../exampleKit/mergeColliders'
+import { ALL_LAYERS, DEFAULT_LAYER_NAMES, LAYER } from '../../src/physics/collisionLayers'
 import { encodePng, decodePng } from '../exampleKit/png.mjs'
 import { geometryJson } from '../valley/meshes.mjs'
 import { makeClips, characterAcceleration, LEAN_BONES, LOOK_BONES, ROLES, type MadeClip } from './clips'
 import { boneOf, bodyRoll, clipSeconds } from './measure'
-import { locomotionField, lookField, machineTimings, stateMachine, RUN_SPEED_GATE, type Speeds } from './machine'
-import { course, props, PROP_KINDS, SPAWN, type Piece, type Prop } from './level'
+import { locomotionField, lookField, machineTimings, stairPaces, stairsField, stateMachine, RUN_SPEED_GATE, STAIR_RATE, type Speeds } from './machine'
+import { course, props, PROP_KINDS, SPAWN, TREAD, type Piece, type Prop } from './level'
 import { sandboxInputMap } from './inputMap'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -46,6 +47,29 @@ const id = (key: string) => stableId('sandbox:' + key)
 const SCENE_ID = id('scene')
 const REPORT = process.argv.includes('--report')
 const round = (v: number, f = 1e5) => Math.round(v * f) / f
+
+/**
+ * The collision layers (named in the project's settings, which ship with it). The engine's four, and three of the
+ * course's own. Foot Detail is what the feet stand on and the capsule passes through: the stairs' steps and the
+ * bumps (left out of the capsule's Collides with; props land on them and the camera stops at them). Stair Ramp is
+ * the ramp laid over each flight, which only the Character layer collides with: what the capsule climbs. The
+ * pillars are on the engine's See Through, which the camera sees through.
+ */
+const LAYERS = {
+    ...LAYER,
+    CHARACTER: 1 << 4,
+    FOOT_DETAIL: 1 << 5,
+    STAIR_RAMP: 1 << 6,
+}
+const LAYER_NAMES = DEFAULT_LAYER_NAMES.map((n, i) => (i === 4 ? 'Character' : i === 5 ? 'Foot Detail' : i === 6 ? 'Stair Ramp' : n))
+/** A piece's layer (level.ts), as bits. */
+const PIECE_LAYER = { footDetail: LAYERS.FOOT_DETAIL, seeThrough: LAYERS.SEE_THROUGH } as const
+/** What the player's capsule collides with: everything but the feet's detail, which it walks on through. */
+const CHARACTER_MASK = ALL_LAYERS & ~LAYERS.FOOT_DETAIL
+/** What the camera's boom stops at: what a rig is blocked by by default, but never the ramp (the steps are what show). */
+const CAMERA_BLOCKED_BY = ALL_LAYERS & ~(LAYERS.SEE_THROUGH | LAYERS.NO_CAMERA | LAYERS.STAIR_RAMP)
+/** What the feet land on: everything but the ramp. */
+const FOOT_TRACE_LAYERS = ALL_LAYERS & ~LAYERS.STAIR_RAMP
 
 /** Character tuning (section 4 of the plan): what is not measured is chosen here, in one place. */
 const TUNING = {
@@ -72,8 +96,17 @@ for (const f of fs.readdirSync(path.join(PREPARED, 'clips'))) {
     const { clip } = JSON.parse(fs.readFileSync(path.join(PREPARED, 'clips', f), 'utf8'))
     raw.set(f.replace(/\.json$/, ''), clip)
 }
+/** Ankle height over the sole at rest: what the foot solver keeps between the ground and the ankle. */
+const footHeight = (() => {
+    const parents = skin.nodeParents as Map<number, number>
+    const world = (i: number): mat4 => { const p = parents.get(i); const l = (skin.nodeTransforms as Map<number, mat4>).get(i)!; return p === undefined ? l : mat4.multiply(mat4.create(), world(p), l) }
+    let bottom = Infinity
+    for (const p of character.parts) for (let k = 1; k < p.positions.length; k += 3) bottom = Math.min(bottom, p.positions[k])
+    return round(mat4.getTranslation(vec3.create(), world(boneOf(skin, 'LeftFoot')))[1] - bottom, 1e3)
+})()
+
 const warnings: string[] = []
-const clips = makeClips(skin, raw, w => { warnings.push(w); console.warn('warning: ' + w) }, { sprint: TUNING.sprint })
+const clips = makeClips(skin, raw, w => { warnings.push(w); console.warn('warning: ' + w) }, { sprint: TUNING.sprint, footHeight }, s => console.log(s))
 
 const speeds: Speeds = {
     walk: clips.get('WalkF')!.m.speed,
@@ -138,6 +171,10 @@ console.log('foot-lock windows: ' + [...clips.values()].filter(c => c.clip.footL
     return `${c.clip.name} L ${side('foot.L')} R ${side('foot.R')}`
 }).join('; '))
 const timing = machineTimings(clips, skin)
+// The stairs: each clip's steps as read, and the pace a flight is climbed at (one tread a step, STAIR_RATE).
+const paces = stairPaces(clips, TREAD)
+console.log('stairs: ' + [...clips.values()].filter(c => c.stairs).map(c => `${c.clip.name} ${c.stairs!.stepsPerSecond.toFixed(2)} steps/s, riser ${(c.stairs!.rise * 100).toFixed(0)} cm, step ${(c.stairs!.step * 100).toFixed(0)} cm`).join('; ')
+    + ` -> paces (horizontal, at ${STAIR_RATE}x) up ${paces.upWalk} / ${paces.upRun}, down ${paces.downWalk} / ${paces.downRun} m/s`)
 console.log(`hand-overs (the field's phase 0 is a ${timing.phaseFoot === 'L' ? 'left' : 'right'} plant): start -> run at ${timing.startExit}; running turns at ${JSON.stringify(timing.runTurnExit)}; running landing at ${timing.landRunExit}; stops settle at ${JSON.stringify(timing.settle)}, ${timing.stopEarly} in the run's first half and ${timing.stopLate} in its second; landing impacts (s) ${JSON.stringify(timing.impact)}`)
 if (REPORT) process.exit(0)
 
@@ -208,18 +245,11 @@ const PROP_MAT = { prop: id('mat:prop'), propAccent: id('mat:propAccent') }
 // =====================================================================================================
 
 const leg = (side: string) => ({ thigh: boneOf(skin, `${side}UpLeg`), shin: boneOf(skin, `${side}Leg`), foot: boneOf(skin, `${side}Foot`), toe: boneOf(skin, `${side}ToeBase`) })
-/** Ankle height over the sole at rest: what the foot solver keeps between the ground and the ankle. */
-const footHeight = (() => {
-    const parents = skin.nodeParents as Map<number, number>
-    const world = (i: number): mat4 => { const p = parents.get(i); const l = (skin.nodeTransforms as Map<number, mat4>).get(i)!; return p === undefined ? l : mat4.multiply(mat4.create(), world(p), l) }
-    let bottom = Infinity
-    for (const p of character.parts) for (let k = 1; k < p.positions.length; k += 3) bottom = Math.min(bottom, p.positions[k])
-    return round(mat4.getTranslation(vec3.create(), world(boneOf(skin, 'LeftFoot')))[1] - bottom, 1e3)
-})()
 const ikRig = {
     hips: boneOf(skin, 'Hips'), feet: [leg('Left'), leg('Right')],
-    // ALS v4's traces: 50 cm above the foot, 45 below.
-    footHeight, traceUp: 0.5, traceDown: 0.45, maxHipDrop: 0.35, maxSlopeDeg: 40,
+    // ALS v4's traces: 50 cm above the foot, 45 below. On the steps of a flight of stairs, not on the ramp the
+    // capsule climbs over them: the feet stand on the treads.
+    footHeight, traceUp: 0.5, traceDown: 0.45, traceLayers: FOOT_TRACE_LAYERS, maxHipDrop: 0.35, maxSlopeDeg: 40,
     // A foot lifted more than 4 cm over the lower one is the clip's own heel-off or swing: left to the clip, or
     // the solver pulls the heel down mid-stride and the ball of the foot slides.
     swingRelease: 0.04, smoothing: 0.1,
@@ -268,8 +298,15 @@ const LOOK_MASK = {
 const LOOK_FIELD_ID = id('field:look')
 const look = lookField()
 const lookFieldAsset = { id: LOOK_FIELD_ID, name: 'Look', rigId: RIG_ID, ...look, yAxis: look.yAxis! }
+// The flights' blend space: up and down (a direction whose clips failed the check has none).
+const stairs = stairsField(clips, timing.phaseFoot, TREAD)
+const stairAssets = stairs ? (() => {
+    const { up, down, ...field } = stairs
+    return [{ up, down, asset: { id: id('field:stairs'), name: 'Stairs', rigId: RIG_ID, ...field, yAxis: field.yAxis! } }]
+})() : []
 const machine = stateMachine(clips, runtimeField, FIELD_ID, speeds, LEAN_MASK, timing,
-    { mask: LOOK_MASK, field: toRuntimeField(lookFieldAsset as any), fieldId: LOOK_FIELD_ID })
+    { mask: LOOK_MASK, field: toRuntimeField(lookFieldAsset as any), fieldId: LOOK_FIELD_ID },
+    stairAssets[0] ? { field: toRuntimeField(stairAssets[0].asset as any), fieldId: stairAssets[0].asset.id, up: stairAssets[0].up, down: stairAssets[0].down } : null)
 const controller = { id: CONTROLLER_ID, name: 'Mannequin Locomotion', rigId: RIG_ID, machine }
 
 // =====================================================================================================
@@ -345,43 +382,74 @@ const modelNode = (key: string, name: string, materialId: string, model: any, tr
 }
 
 /**
- * One level piece: a static collider holding its mesh, as an editor-placed prop is. The engine's merge pass then
- * folds every one of them into the scene's single Static Collision collider.
+ * One level piece: a static collider holding its mesh, as an editor-placed prop is (two for a flight of stairs). The
+ * engine's merge pass then folds them into the scene's Static Collision colliders, one per collision layer.
  */
-function pieceNode(p: Piece, i: number): any {
+function pieceNodes(p: Piece, i: number): any[] {
     const key = `level:${i}:${p.name}`
     const mid = LEVEL_MAT[p.material]
     const material = matById(mid)
     if (p.kind === 'box') {
         const mesh = modelNode(key, p.name, mid, { geometry: geometryOf('box', () => Geometry.Cube(1, 1, 1)), material })
-        return {
+        return [{
             type: 'collider', id: id(key + ':collider'), name: `${p.name} Collider`, position: p.position, rotation: p.rotation ?? [0, 0, 0], scale: p.size,
-            collider: { mass: 0, shapes: [{ type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }] }, children: [mesh],
-        }
+            collider: {
+                mass: 0, ...(p.layer ? { layer: PIECE_LAYER[p.layer] } : {}),
+                shapes: [{ type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }],
+            },
+            children: [mesh],
+        }]
     }
     if (p.kind === 'cylinder') {
         const mesh = modelNode(key, p.name, mid, { geometry: geometryOf('cylinder', () => Geometry.Cylinder(24, 0.5, 1)), material })
-        return {
+        return [{
             type: 'collider', id: id(key + ':collider'), name: `${p.name} Collider`, position: p.position, rotation: [0, 0, 0], scale: [p.radius * 2, p.height, p.radius * 2],
-            collider: { mass: 0, shapes: [{ type: 'cylinder', radius: 0.5, height: 1, numSegments: 24, offset: [0, 0, 0], rotation: [0, 0, 0] }] }, children: [mesh],
-        }
+            collider: {
+                mass: 0, ...(p.layer ? { layer: PIECE_LAYER[p.layer] } : {}),
+                shapes: [{ type: 'cylinder', radius: 0.5, height: 1, numSegments: 24, offset: [0, 0, 0], rotation: [0, 0, 0] }],
+            },
+            children: [mesh],
+        }]
     }
-    // A ramp or a flight of stairs: the visible mesh scaled to size, and a slab under the walking line as the
-    // collider (unscaled, so its rotation stays exact). Stairs walk on the line through their treads' middles.
+    // A ramp or a flight of stairs: the visible mesh scaled to size, and a slab under the walking line (unscaled, so
+    // its rotation stays exact). A ramp's line is its surface. A flight's runs from the ground half a tread before the
+    // first riser to the landing's front edge: only the capsule walks it (the feet stand on the steps), so it can meet
+    // the landing flush. One through the treads' middles stopped half a tread short of the landing, and the capsule
+    // hopped off its crest at a jog (Rapier).
     const [w, h, d] = p.size
     const run = p.kind === 'stairs' ? d / p.steps : 0
-    const L = Math.hypot(h, d), t = 0.4, a = Math.atan2(h, d)
-    const n = [0, d / L, -h / L]
-    const centre = [0, -n[1] * t / 2, -run / 2 - n[2] * t / 2]
+    const span = d + run / 2
+    const L = Math.hypot(h, span), t = 0.4, a = Math.atan2(h, span)
+    const n = [0, span / L, -h / L]
+    // The line's middle, from (z -d/2 - run/2, y -h/2) to (z d/2, y h/2); the box sits under it.
+    const centre = [0, -n[1] * t / 2, -run / 4 - n[2] * t / 2]
+    const slab = { type: 'box', width: w, height: t, depth: L, offset: centre, rotation: [-a * 180 / Math.PI, 0, 0] }
     const mesh = modelNode(key, p.name, mid, {
         geometry: p.kind === 'ramp' ? geometryOf('ramp', () => Geometry.Ramp(1, 1, 1)) : geometryOf(`stairs:${p.steps}`, () => Geometry.Stairs(p.steps, 1, 1, 1)),
         material,
     }, { scale: [w, h, d] })
-    return {
-        type: 'collider', id: id(key + ':collider'), name: `${p.name} Collider`, position: p.position, rotation: [0, p.yaw ?? 0, 0], scale: [1, 1, 1],
-        collider: { mass: 0, shapes: [{ type: 'box', width: w, height: t, depth: L, offset: centre, rotation: [-a * 180 / Math.PI, 0, 0] }] },
-        children: [mesh],
-    }
+    const placed = { position: p.position, rotation: [0, p.yaw ?? 0, 0], scale: [1, 1, 1] }
+    if (p.kind === 'ramp')
+        return [{ type: 'collider', id: id(key + ':collider'), name: `${p.name} Collider`, ...placed, collider: { mass: 0, shapes: [slab] }, children: [mesh] }]
+    // A flight of stairs is two colliders. Its steps, a box per step from the ground to its tread (as
+    // Geometry.Stairs lays them: climbing toward +Z), on Foot Detail: what the feet, the props and the camera
+    // meet, and what the mesh stands in. And the slab, on Stair Ramp, which only the Character layer collides
+    // with: what the capsule glides up, since a capsule has no step-up of its own.
+    const rise = h / p.steps
+    const steps = Array.from({ length: p.steps }, (_, k) => ({
+        type: 'box', width: w, height: round((k + 1) * rise), depth: round(run),
+        offset: [0, round(-h / 2 + (k + 1) * rise / 2), round(-d / 2 + (k + 0.5) * run)], rotation: [0, 0, 0],
+    }))
+    return [
+        {
+            type: 'collider', id: id(key + ':collider'), name: `${p.name} Collider`, ...placed,
+            collider: { mass: 0, layer: LAYERS.FOOT_DETAIL, shapes: steps }, children: [mesh],
+        },
+        {
+            type: 'collider', id: id(key + ':ramp'), name: `${p.name} Ramp`, ...placed,
+            collider: { mass: 0, layer: LAYERS.STAIR_RAMP, mask: LAYERS.CHARACTER, shapes: [slab] }, children: [],
+        },
+    ]
 }
 
 /**
@@ -403,7 +471,8 @@ function propNode(p: Prop, i: number): any {
         type: 'collider', id: id(key + ':collider'), name: `${p.name} Collider`, position: p.position, rotation: p.rotation ?? [0, 0, 0], scale: k.size,
         collider: {
             mass: k.mass, friction: 0.5, restitution: k.restitution ?? 0, linearDamping: 0.05, angularDamping: k.angularDamping ?? 0.1,
-            canSleep: true, cameraCollision: k.camera,
+            // Small things do not pull the camera in: on No Camera, which the rig is not blocked by.
+            canSleep: true, ...(k.camera ? {} : { layer: LAYERS.NO_CAMERA }),
             shapes: [{ ...shape, offset: [0, 0, 0], rotation: [0, 0, 0] }],
         },
         children: [mesh],
@@ -427,6 +496,7 @@ function cameraRig(rid: string, name: string, cameraName: string, o: any) {
         type: 'cameraRig', id: rid, name, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
         followId: MODEL_NODE_ID, aimMode: 'orbit', followSpace: 'world', followDampingSpace: 'rig',
         yaw: SPAWN.yaw, collisionEnabled: true, collisionRadius: 0.2, collisionPullTime: 0, collisionReturnTime: 0.35,
+        collisionLayers: CAMERA_BLOCKED_BY, seeThroughLayers: LAYERS.SEE_THROUGH,
         ...o,
         children: [{ type: 'camera', id: rid + ':camera', name: cameraName, camera: { type: 'perspective', fov: 60, near: 0.05, far: 2000, left: -1, right: 1, bottom: -1, top: 1 }, active: true }],
     }
@@ -452,6 +522,8 @@ function playerNode() {
         // space reads where the body really goes: with the acceleration alone a change of direction coasts the
         // old way at a dip in speed while the legs already play the new one, which reads as ice.
         turnFriction: 8, moveDirSource: 'velocity',
+        // It stands on the stairs' ramps (25 and 32 degrees) and the course's ramps up to 40 without sliding.
+        slopeLimit: 45,
         facingMode: 'aim', driveWhenUnpossessed: false,
         children: [
             // One rig: SandboxCamera frames it over the shoulder, and eases it out to third person while sprinting.
@@ -476,12 +548,16 @@ function playerNode() {
         walkFootSpeed: round(speeds.walk * 1.2, 1e3),
         runFootSpeed: round(speeds.jog * 0.9, 1e3),
         sprintTakeoff: round(speeds.takeoff!, 100),
+        // A flight's pace, horizontal: one tread a step at the stair clips' rate (machine.ts stairPaces).
+        stairUpWalkSpeed: paces.upWalk, stairUpRunSpeed: paces.upRun,
+        stairDownWalkSpeed: paces.downWalk, stairDownRunSpeed: paces.downRun,
     }
     return {
         type: 'collider', id: id('player:collider'), name: 'Player Collider', position: SPAWN.position, rotation: [0, SPAWN.yaw, 0], scale: [1, 1, 1],
         collider: {
             mass: TUNING.mass, friction: 0, restitution: 0, linearDamping: 0, angularDamping: 0,
             linearConstraints: [1, 1, 1], angularConstraints: [0, 0, 0], groundProbeDistance: 0.12, simulationMode: 'always',
+            layer: LAYERS.CHARACTER, mask: CHARACTER_MASK,
             shapes: [{ type: 'capsule', radius: TUNING.capsuleRadius, height: capsuleHeight, numSegments: 16, offset: [0, capsuleHeight / 2, 0], rotation: [0, 0, 0] }],
         },
         children: [characterNode],
@@ -493,7 +569,7 @@ async function buildScene() {
     const root = new Node('root', 'node', id('node:root'))
     // The props under one node of their own, so the tree reads: the environment, the player, the props, the course.
     const propsRoot = { type: 'node', id: id('node:props'), name: 'Props', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: props().map(propNode) }
-    const trees = [playerNode(), propsRoot, ...course().map(pieceNode)]
+    const trees = [playerNode(), propsRoot, ...course().flatMap(pieceNodes)]
     for (const t of trees) parseNodeJson(root, t)
     root.updateTransforms(null)
     const children: any[] = []
@@ -527,13 +603,20 @@ async function buildScene() {
     // and its script, the model, the Controller. The scene holds one instance of it, at the spawn.
     const playerRoot = scene.children.find((c: any) => c.name === 'Player Collider')
     const playerTemplate = templatizeSubtree(playerRoot, TEMPLATE_ID, 'Player')
-    const merged = mergeStaticColliders(scene, { scriptStrings: new Set(), idFor: k => id('merge:' + k) })
+    const merged = mergeStaticColliders(scene, { scriptStrings: new Set(), idFor: k => id('merge:' + k), layerNames: LAYER_NAMES })
     if (merged.kept.length) throw new Error(`level colliders left unmerged: ${merged.kept.join('; ')}`)
     console.log(`level: ${merged.merged} pieces in ${merged.colliders.map(c => `${c.name} (${c.shapes} shapes)`).join(', ')}`)
     // The merged course, as a template of its own (after the merge: the merge leaves a template instance alone).
-    // The placement keeps the examples' name for merged scenery, Static Collision.
-    const courseRoot = scene.children.find((c: any) => c.type === 'collider' && /^Static Collision/.test(c.name))
+    // The placement keeps the examples' name for merged scenery, Static Collision. What is merged apart for its layer
+    // (the feet's detail, the stairs' ramps, the see-through pillars) goes inside it: one Course, four bodies.
+    const courseRoot = scene.children.find((c: any) => c.type === 'collider' && c.name === 'Static Collision')
     if (!courseRoot) throw new Error('no merged Static Collision to make the Course of')
+    const layered = scene.children.filter((c: any) => c !== courseRoot && c.type === 'collider' && /^Static Collision \(/.test(c.name))
+    const expected = ['Static Collision (Foot Detail)', 'Static Collision (See Through)', 'Static Collision (Stair Ramp)']
+    if (layered.map((c: any) => c.name).sort().join() !== expected.join())
+        throw new Error(`expected ${expected.join(', ')} merged apart, found ${layered.map((c: any) => c.name).join(', ')}`)
+    scene.children = scene.children.filter((c: any) => !layered.includes(c))
+    courseRoot.children.push(...layered)
     const courseTemplate = templatizeSubtree(courseRoot, COURSE_TEMPLATE_ID, 'Course')
     const again = mergeStaticColliders(JSON.parse(JSON.stringify(scene)), { scriptStrings: new Set(), idFor: k => k })
     if (again.merged) throw new Error('the merged level still has colliders to merge')
@@ -558,11 +641,14 @@ async function main() {
     const { scene, config, templates } = await buildScene()
 
     const libraries: Record<string, unknown[]> = {
-        models: [modelAsset], materials, terrainMaterials: [], animationFields: [fieldAsset, lookFieldAsset], animControllers: [controller], boneMasks: [LEAN_MASK, LOOK_MASK],
+        models: [modelAsset], materials, terrainMaterials: [], animationFields: [fieldAsset, lookFieldAsset, ...stairAssets.map(a => a.asset)], animControllers: [controller], boneMasks: [LEAN_MASK, LOOK_MASK],
         animations, rigs: [rig], tilesets: [], scripts: scriptAssets, templates, particleSystems: [], aiBrains: [],
     }
     for (const [name, value] of Object.entries(libraries)) writeJson(path.join(OUT, 'libraries', `${name}.json`), value)
     writeJson(path.join(OUT, 'libraries', 'inputMap.json'), sandboxInputMap())
+    // The project's settings: the default ones (Project Settings parses what is absent as its default), and the
+    // collision layers' names, which every layer picker shows.
+    writeJson(path.join(OUT, 'libraries', 'projectSettings.json'), { version: 6, collisionLayers: LAYER_NAMES })
 
     const hashes: Record<string, string> = {}
     const written = (name: string) => JSON.parse(fs.readFileSync(path.join(OUT, 'libraries', `${name}.json`), 'utf8'))
@@ -582,7 +668,7 @@ async function main() {
             refs: {
                 version: SCENE_REFS_VERSION,
                 materialIds: materials.map(m => m.id), modelIds: [MODEL_ID], templateIds: templates.map((t: any) => t.id), terrainMaterialIds: [], tilesetIds: [],
-                aiBrainIds: [], textureIds: textures.included, scriptIds: scriptAssets.map(s => s.id), animationFieldIds: [FIELD_ID, LOOK_FIELD_ID],
+                aiBrainIds: [], textureIds: textures.included, scriptIds: scriptAssets.map(s => s.id), animationFieldIds: [FIELD_ID, LOOK_FIELD_ID, ...stairAssets.map(a => a.asset.id)],
                 foliageModelIds: [], soundSampleIds: [], audioSourceIds: [], animationIds: animations.map(a => a.id), particleSystemIds: [],
             },
         }],
@@ -597,6 +683,7 @@ async function main() {
     add('/Characters/Mannequin', 'Mannequin', 'rig', RIG_ID)
     add('/Characters/Mannequin/Animation', 'Locomotion', 'animationField', FIELD_ID)
     add('/Characters/Mannequin/Animation', 'Look', 'animationField', LOOK_FIELD_ID)
+    for (const a of stairAssets) add('/Characters/Mannequin/Animation', a.asset.name, 'animationField', a.asset.id)
     add('/Characters/Mannequin/Animation', 'Mannequin Locomotion', 'animController', CONTROLLER_ID)
     add('/Characters/Mannequin', LEAN_MASK.name, 'boneMask', LEAN_MASK.id)
     add('/Characters/Mannequin', LOOK_MASK.name, 'boneMask', LOOK_MASK.id)

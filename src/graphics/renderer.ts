@@ -16,7 +16,7 @@ import type { CompiledGraph, ResourceId } from './renderGraph/graph';
 import { FramebufferPool } from './renderGraph/pool';
 import { materialIndexOf, resolvePostChain } from './renderGraph/chain';
 import type { ResourceDesc } from './renderGraph/resources';
-import { MAX_CASCADES, MAX_POINT_SHADOWS } from './shadowMath';
+import { MAX_CASCADES, MAX_POINT_SHADOWS, SHADOW_BIAS_VERSION, migrateShadowBiases } from './shadowMath';
 
 
 import { Texture } from './texture';
@@ -3175,6 +3175,7 @@ export class Renderer {
             shadowSplitLambda: this._shadows.shadowSplitLambda,
             shadowDepthBias: this._shadows.shadowDepthBias,
             shadowNormalBias: this._shadows.shadowNormalBias,
+            shadowBiasVersion: SHADOW_BIAS_VERSION,
             shadowFilterRadius: this._shadows.shadowFilterRadius,
             shadowFilterMode: this._shadows.shadowFilterMode,
             shadowStrength: this._shadows.shadowStrength,
@@ -3312,6 +3313,9 @@ export class Renderer {
      */
     public applyRenderSettings(s: Partial<RenderSettings> | null | undefined): void {
         if (!s) return;
+        // Saved before the bias model changed and on its old defaults: today's instead (the old ones made shadows
+        // start away from their casters). Anything saved since carries the version and is applied as it is.
+        if (s.shadowBiasVersion === undefined) s = migrateShadowBiases(s);
         // Preset first: it is the coarse default that the individual keys below then refine, so
         // applying it afterwards would silently overwrite settings the caller explicitly saved.
         if (s.quality !== undefined) this.quality = s.quality;

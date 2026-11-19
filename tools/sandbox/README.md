@@ -30,6 +30,15 @@ The files:
   - The landing roll is held in place from touchdown (the body's speed carries it), with its hand-over to the run
     measured where it gets up (`rollHandOver`) and its rate fitted to a jog.
   - Jump clips are cut at take-off and touchdown, with their ballistic rise taken out.
+  - The stair clips are checked first (`stairCheck`: their feet step up or down at least 10 cm each step, and the
+    last frame matches the first); one that fails is left out with a warning, and its direction plays the walk
+    blend. A descent role marked `repair` that fails has its legs rebuilt first (**`descent.ts`**): the trunk looped,
+    the feet stepping down two risers a cycle on the clip's own timing, the legs solved by two-bone IK. The pack's
+    two descents need it. Every stair clip then has its knees turned toward straight ahead about the hip-ankle
+    line (**`legs.ts`** `alignKnees`, `STAIR_KNEE_IN`; the feet stay where they are), and `--report` prints each
+    one's knee spacing before and after. A passing one loses its rise from the hips, evenly, and is set so its planted feet stand at sole height
+    on average. Its foot-lock windows are found on the source, rise kept, against each stance's own height
+    (`ground: 'stance'`). The walk gets a creep copy at `STAIR_CREEP` of its pace.
   - Nothing takes the yaw out of the hips. The engine's `bakeInPlace` does, and it tilts clips that twist while they
     bend.
 
@@ -52,10 +61,15 @@ The files:
   - each stop's settle and each landing's impact.
 
   It also sets the start's entry gate and how far into the start clip the Start state begins, and groups the
-  states (Turning, Stopping, Running Turn, Air, Landing): the transitions a group's states share are written once,
-  from the group. `lookField` is the Look layer's blend space.
-- **`level.ts`**: the course, and its props (`props()`, `PROP_KINDS`: loose rigid bodies, each resting where it is put; `build.ts` makes every repeated one a template with `templatizeScene`). `build.ts` folds the course's colliders into one Static Collision with the engine's
-  merge pass. `build.ts` also sets the sprint speed (`TUNING.sprint`), switches on foot locking for the rig with
+  states (Turning, Stopping, Running Turn, Air, Landing): the transitions a group's states share are written
+  once, from the group. `lookField` is the Look layer's blend space. `stairsField` is the flights' (2D: Climb, up
+  +1 and down -1, by speed), each sample at `STAIR_RATE` and one tread a step (`stairPaces`, which also gives the
+  script its stair speeds). Its Stairs state is in the **Gait** sync group with Locomotion, so they hand over in
+  step.
+- **`level.ts`**: the course, and its props (`props()`, `PROP_KINDS`: loose rigid bodies, each resting where it is put; `build.ts` makes every repeated one a template with `templatizeScene`). `build.ts` folds the course's colliders into Static Collision colliders with the engine's
+  merge pass, one per collision layer: the course, and inside it the feet's detail (Foot Detail: the stairs' steps and
+  the bumps), the ramps the capsule climbs over the stairs (Stair Ramp) and the pillars (See Through, which the
+  camera sees through). The layers are named in `libraries/projectSettings.json`. `build.ts` also sets the sprint speed (`TUNING.sprint`), switches on foot locking for the rig with
   its blending, and makes three templates with one instance each (`templatizeSubtree`): **Player**, **Environment**
   (the sun, sky atmosphere and sky light under one root) and **Course** (the merged Static Collision, templatized
   after the merge, which leaves a template instance alone).

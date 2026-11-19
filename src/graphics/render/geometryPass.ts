@@ -307,7 +307,7 @@ export class GeometryPass {
                 // which keeps early-Z (chunks/pbrGBuffer.wgsl, CLEO_OPAQUE). A dissolving node falls
                 // back to the plain one for the length of its fade.
                 // Likewise a node the camera's see-through hole may cut into: it needs the discard.
-                return opaqueEligible(node.model.materials) && node.effectiveFade >= 1 && !this._materials.cameraHoleOn(node.cameraDither)
+                return opaqueEligible(node.model.materials) && node.effectiveFade >= 1 && !this._materials.cameraHoleOn(this._materials.holeOptIn(node))
                     ? names.opaque : names.plain;
             }
         }

@@ -1539,6 +1539,8 @@ export class Scene {
             const make = featureFactory<() => World2D>('world2D');
             if (!make) return null;
             this._physics2D = make();
+            // One table of collision layer names for the 2D world and the 3D one.
+            this._physics2D.layerNamesFrom(() => this.physics?.layerNames);
             this._physics2D.refresh(this);
         }
         return this._physics2D;

@@ -19,8 +19,7 @@ one Collider holding its wall boxes.
 
 | Setting | Meaning |
 |---|---|
-| **Simulate Physics** | Whether the body collides and responds. |
-| **Camera Collision** | Whether a camera rig's spring arm collides with it. **Independent of the above.** |
+| **Simulate Physics** | Whether the body collides and responds. A body that does not still blocks a camera rig, and rays can still hit it. |
 | **Mass** | `0` is static. |
 | **Damping** / **Angular Damping** | Velocity bleed per second. |
 | **Friction** | Default `0.3`. Combines between two bodies with **min**. |
@@ -29,13 +28,14 @@ one Collider holding its wall boxes.
 | **Motion smoothing** | Filters the measured speed that feeds animation blends. |
 | **Simulation** | How far from the camera the body keeps simulating before it freezes in place: **Project range** (the range in Options ▸ Engine ▸ Runtime), **Always** (never frozen) or **Custom range** (its own, in metres). See [Simulation range](#simulation-range). |
 | **Sleep when resting** | Sleeps once the body stops moving, until it is hit, pushed or a script sets its velocity. Off by default. A body sleeps together with every moving body it touches, so a stack of crates goes to sleep as one once the whole stack has settled. |
-| **Layer** | The collision layers it is on (bits 1–16). Default layer 1. |
-| **Collides with** | The layers it collides with. Default all. See [Layers](#layers). |
+| **Layer** | The collision layer it is on, one of the project's 16. Default: **Default**. A camera rig decides by it whether the body blocks its boom or is seen through, and foot IK which layers its feet land on. See [Layers](#layers). |
+| **Collides with** | The layers it collides with. Default: all. |
 | **Linear constraints** | Per-axis toggles. |
 | **Angular constraints** | Per-axis toggles. |
 
-Two independent channels is the useful part: a decorative bush can be non-colliding for gameplay yet
-still push the camera out of itself.
+What a camera does with the body is not set here. Each camera rig picks the layers that block it and the
+ones it sees through (see [Camera Rig](node-inspector.md#cameras)), so the body only has to be on the
+right layer. A decorative bush can be non-colliding for gameplay and still push the camera out of itself.
 
 > **What is under a Collider, and what it is under.** A body lives in world space, and a Collider may sit
 > anywhere in the tree:
@@ -77,10 +77,32 @@ The Performance panel's **· dynamic** row shows how many bodies are active, fro
 
 ### Layers
 
-Two Colliders collide only when each one's **Collides with** holds a layer the other is on: `(A.layer &
-B.mask) && (B.layer & A.mask)`. Put the player's projectiles on layer 2 and leave layer 2 out of the
-player's own **Collides with**, and the player never shoots itself. A Trigger's **Layer** and **Detects**
-work the same way.
+A project has 16 collision layers, the same for its 3D and its 2D physics (a [2D body](tilemap-2d.md#2d-physics)
+picks from the same names). Name them in **Options ▸ Project ▸ Layers**; an unnamed one shows as
+*Layer N*. The first four are the engine's, and their names are fixed:
+
+| Layer | Name | What uses it |
+|---|---|---|
+| 1 | **Default** | Everything that does not say otherwise, and every body the engine makes itself: a landscape, the ground plane, tilemaps, foliage without a layer. |
+| 2 | **Ragdoll** | Ragdoll bones. They collide with every layer but their own. |
+| 3 | **See Through** | What a new camera rig sees through: its boom passes, and the meshes of Colliders on it are dithered away where they block the view. |
+| 4 | **No Camera** | What a new camera rig ignores: small props and debris that should not pull the camera in. |
+
+Two Colliders collide only when each one's **Collides with** holds the other's **Layer**: `(A.layer &
+B.mask) && (B.layer & A.mask)`. Name layer 5 *Projectiles*, put the player's projectiles on it, and leave
+it out of the player's own **Collides with**: the player never shoots itself. A Trigger's **Layer** and
+**Detects** work the same way.
+
+The same layers choose what queries react to:
+
+- a [camera rig](node-inspector.md#cameras) is **Blocked by** some layers and **Sees through** others;
+- a [foot IK rig](animation.md#foot-placement)'s **Trace layers** are the layers its feet land on;
+- a script's raycast takes a `layerMask` (see [Motion and physics](../scripting/motion-and-physics.md)).
+
+That is how stairs are built: an invisible ramp for the character's capsule on a layer only characters
+collide with, and the steps on a layer the capsule's **Collides with** leaves out. The body glides up the
+ramp, while the foot IK traces land on the treads and leave the ramp out. The
+[Sandbox example](sandbox-example.md) builds its stairs this way.
 
 ### Events
 
@@ -102,6 +124,16 @@ A project saved when a body was a property of any node converts as it loads:
 A placed template's root that is wrapped hands its link to the template to the Collider. Save the scene
 to keep the converted form.
 
+Camera settings from before rigs chose layers convert as they load too:
+
+- a Collider with **Camera Collision** off moves to **No Camera**;
+- a Collider marked **See-through to camera**, or holding a mesh that was, moves to **See Through**;
+- a rig in *Dither* mode is blocked by every layer but See Through and No Camera, and sees through See
+  Through. A rig in *Retract* mode is blocked by every layer but No Camera, and sees through nothing.
+
+Only a Collider on **Default** moves; one on a layer of its own keeps it. A mesh marked see-through with no
+Collider round it can no longer be cut. Put it in a Collider on See Through.
+
 ## Trigger
 
 A Trigger node detects overlap without responding to collision. Give it shapes, and its
@@ -121,7 +153,7 @@ detects other triggers: a weapon's hitbox entering a character's hurtbox, both t
 | **Enabled** | Whether the trigger detects anything. A disabled trigger keeps its shapes but physics, overlap queries and the overlay ignore it; switching it on costs nothing. Scripts switch it with `trigger.enabled`. |
 | **Detect triggers** | Also detect other trigger volumes. Only one side of a pair has to have it on. Plain zones leave it off. |
 | **Continuous** | Test the volume along its path from last frame to this one against other triggers, so a fast mover (a blade) cannot skip past a thin target between two frames. Needs **Detect triggers** on one side. |
-| **Layer** | The collision layers this trigger is in (bits 1–16). |
+| **Layer** | The collision layer this trigger is on. In a 2D scene, the 2D world's layer bits. |
 | **Detects** | The layers it detects. A pair only overlaps when each side's **Detects** has the other's **Layer**. A hurtbox that detects only the hitbox layer never even reaches a contact test with its own character's body. |
 
 Trigger volumes are drawn in the viewport when the debug eye menu has them on. While the game runs (Play
@@ -254,8 +286,10 @@ The measured recommendation for the Collider, from the [third-person example](..
 > never has to look sloped for this to bite — the flatten brush approaches its target
 > asymptotically and saving quantizes heights, so "flat" terrain still has micro-slopes.
 >
-> A frictionless character does not slide when idle, because its locomotion zeroes horizontal
-> velocity when there is no input.
+> A frictionless character does not slide when idle on the flat, because its locomotion zeroes horizontal
+> velocity when there is no input. On a slope it is the Character's **Slope Limit** (45 degrees) that holds
+> it: up to that steep, gravity only presses it into the ground, so it stands still on a ramp and brakes and
+> climbs as on the flat. See [Characters and controllers](../scripting/characters-and-controllers.md#acceleration-on-slopes).
 
 ### What a lighter body can do to a character
 

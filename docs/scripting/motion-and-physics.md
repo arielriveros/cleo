@@ -29,7 +29,7 @@ setBody(
   friction?: number,           // default 0.3
   restitution?: number,        // default 0
   simulatePhysics?: boolean,
-  cameraCollision?: boolean,
+  cameraCollision?: boolean,   // deprecated: false puts the body on the No Camera layer
   groundProbeDistance?: number,
   motionSmoothing?: number,
 ): RigidBody
@@ -80,14 +80,17 @@ originPosition(out: vec3)
 recenterMass()
 reset()
 impulse(impulse: vec3, relativePoint?: vec3 | 0)
-get/set simulatePhysics: boolean     // independent of…
-get/set cameraCollision: boolean     // …this one
+get/set simulatePhysics: boolean
+get/set collisionFilterGroup: number // its collision layer (one bit)
+get/set collisionFilterMask: number  // the layers it collides with (-1: all)
 get owner: Node | null
 readonly friction / restitution / groundProbeDistance / motionSmoothing
 ```
 
-`simulatePhysics` and `cameraCollision` are **independent channels**: a decorative bush can be
-non-colliding for gameplay yet still push a camera out of it, and a trigger volume can be neither.
+A camera rig does not ask the body whether it blocks: the rig picks the [collision layers](../editor/physics.md#layers)
+it is **Blocked by** and the ones it **Sees through**, and goes by the body's layer. So a decorative bush
+with `simulatePhysics` off can be non-colliding for gameplay yet still push a camera out of it, and a body on
+No Camera is passed straight through.
 
 > **A collider offset from the mesh moves the centre of mass** only once you call `recenterMass()`:
 > until then the mass sits at the node origin, and an object whose collider sits off-centre tilts to the
@@ -279,9 +282,23 @@ interface PhysicsRaycastOptions {
   ignore?: Body | Body[] | null
   includeTriggers?: boolean          // default false
   includeGhosts?: boolean            // default false
+  groundOnly?: boolean               // default false: static and kinematic bodies only
+  layerMask?: number                 // default all: only bodies on these layers
+  collidingWith?: Body | null        // only what this body collides with (both masks)
   reject?: (owner: Node | null, body: Body) => boolean
 }
 ```
+
+Layers are bits. Find them by the names the project gives them rather than hard-coding the bits:
+
+```ts
+const physics = this.scene.physics
+const steps = physics.layer('Foot Detail')                  // the bit, 0 (and a warning) if unnamed
+const ground = physics.raycast(from, to, { layerMask: physics.layers('Default', 'Foot Detail') })
+```
+
+`physics.layer('Layer 7')` finds layer 7 whatever it is called, and `physics.layerNames` lists them all. A 2D
+scene's world has the same: `this.scene.physics2D.layer('Enemies')`, from the same table.
 
 A ground-placement query, which is how the shipped example places spawns:
 
@@ -337,6 +354,7 @@ interface OverlapOptions {
   includeTriggers?: boolean     // default false
   includeGhosts?: boolean       // default false
   includeRagdolls?: boolean     // default false — a corpse's limbs are not a target
+  layerMask?: number            // default all: only bodies on these layers
   filter?: (node: Node | null, body: Body) => boolean   // return true to KEEP
 }
 ```
@@ -483,8 +501,14 @@ The character stands in a Collider, which holds these:
 | `linearConstraints` | `[1, 1, 1]` | A locked linear axis silently kills movement along it. This is the usual cause of "movement is dead in some directions". |
 | `angularConstraints` | `[0, 0, 0]` | Stops the *solver* tipping the body. It does not stop a script or root motion from rotating it. |
 
-A frictionless character does not slide when idle, because the script zeroes horizontal velocity
-when there is no input.
+A frictionless character does not slide when idle on the flat, because the script zeroes horizontal velocity
+when there is no input. On a slope, a [Character](characters-and-controllers.md) is held by its `slopeLimit`
+(45 degrees): up to that steep, gravity only presses it into the ground. Any other dynamic body can ask for the
+same over the next physics step, every frame it should hold:
+
+```ts
+scene.physics.holdOnSlope(body, maxSlopeDegrees)   // the coming step only; a dynamic body only
+```
 
 ## See also
 

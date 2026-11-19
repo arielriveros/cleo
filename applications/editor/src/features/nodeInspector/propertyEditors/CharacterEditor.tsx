@@ -11,12 +11,14 @@ const FAR_SETTLE_HINT = 'Seconds the aim must stay past 135 degrees before the 1
 const ACCEL_HINT = 'Units per second squared. 0 snaps to full speed, which is what a keyboard character usually wants; above 0 makes the engine’s isAccelerating / isDecelerating animation builtins meaningful.'
 const FRICTION_HINT = 'Per second: how fast a moving character turns its velocity toward a new direction, keeping its speed (Unreal calls it ground friction; 8 there). 0 leaves turning to Acceleration, which is slower and loses speed through the turn: the character coasts on its old heading, as if on ice. A reversal is braked through, never turned. Needs an Acceleration.'
 const DIRECTION_HINT = 'What moveDir, the blend-space direction, reads. Input: the way the player pushes. Velocity: the way the body really travels, which an Acceleration makes lag the input; reading the input then plays the new direction while the body still goes the old way, and the feet slide.'
+const SLOPE_HINT = 'Degrees: the steepest ground the character stands on without sliding down it. Up to this steep, gravity only presses it into the ground, so it stands still, sets off, brakes and climbs as on the flat; steeper ground it slides down. 0 turns it off.'
 const DRIVE_HINT = 'Run locomotion with nothing possessing this character. Off by default, so an unpossessed character is inert and cannot fight physics for its own velocity.'
 
 interface CharacterState {
   walkSpeed: number; runSpeed: number; jumpSpeed: number
   turnSpeed: number; turnThreshold: number; turnReleaseAngle: number; turnSettleSeconds: number; turnSettleFarSeconds: number
   directionSmoothing: number; acceleration: number; turnFriction: number; moveDirSource: string; airControl: number
+  slopeLimit: number
   coyoteSeconds: number; jumpBufferSeconds: number; jumpLockoutSeconds: number
   facingMode: string; driveWhenUnpossessed: boolean
 }
@@ -27,7 +29,7 @@ function readNode(node: CharacterNode): CharacterState {
     turnSpeed: node.turnSpeed, turnThreshold: node.turnThreshold, turnReleaseAngle: node.turnReleaseAngle,
     turnSettleSeconds: node.turnSettleSeconds, turnSettleFarSeconds: node.turnSettleFarSeconds,
     directionSmoothing: node.directionSmoothing, acceleration: node.acceleration, turnFriction: node.turnFriction,
-    moveDirSource: node.moveDirSource, airControl: node.airControl,
+    moveDirSource: node.moveDirSource, airControl: node.airControl, slopeLimit: node.slopeLimit,
     coyoteSeconds: node.coyoteSeconds, jumpBufferSeconds: node.jumpBufferSeconds,
     jumpLockoutSeconds: node.jumpLockoutSeconds,
     facingMode: node.facingMode, driveWhenUnpossessed: node.driveWhenUnpossessed,
@@ -71,6 +73,7 @@ export default function CharacterEditor(props: { node: CharacterNode }) {
           {slider('Acceleration', 'acceleration', 0, 100, 0.5, 1, ACCEL_HINT)}
           {slider('Turn Friction', 'turnFriction', 0, 30, 0.5, 1, FRICTION_HINT)}
           {slider('Air Control', 'airControl', 0, 1, 0.01)}
+          {slider('Slope Limit', 'slopeLimit', 0, 89, 1, 0, SLOPE_HINT)}
 
           <SectionTitle title='Facing' className='mt-3 mb-1' />
           <div className='mb-2'>

@@ -36,6 +36,21 @@ import { blankImage, blit, decodePng, encodePng } from '../exampleKit/png.mjs'
 import { COLS, ROWS, ROOMS, cellCentre, cellFeet, isRock, markers, roomBounds, GRID, GUARD_ROUTE, GUARD_ROUTE_NAME } from './level'
 import { BAT_BRAIN, GUARD_BRAIN } from './brains'
 import { DUSK_INPUT_MAP } from './inputMap'
+import { DEFAULT_LAYER_NAMES } from '../../src/physics/collisionLayers'
+
+/**
+ * The collision layers (the project's, named in its settings, which ship with it; one table for 2D and 3D, the
+ * engine's four first): the player, the enemies, each side's attacks, and what the player walks into to use.
+ * The tilemaps are on Default.
+ */
+const LAYERS = {
+    PLAYER: 1 << 4,
+    ENEMIES: 1 << 5,
+    PLAYER_ATTACK: 1 << 6,
+    ENEMY_ATTACK: 1 << 7,
+    INTERACTABLES: 1 << 8,
+}
+const LAYER_NAMES = DEFAULT_LAYER_NAMES.map((n, i) => ['', '', '', '', 'Player', 'Enemies', 'Player Attack', 'Enemy Attack', 'Interactables'][i] || n)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
@@ -345,15 +360,16 @@ function buildPlayer(): CharacterBody2DNode {
     const player = named(new CharacterBody2DNode('Player'))
     player.setPosition([x, y, 0])
     player.size = [1, 2.2]
-    player.layer = 1
+    player.layer = LAYERS.PLAYER
     player.stepHeight = 0.45
     // The engine runs and jumps it (walk 8 u/s, a 3.4-unit jump); the dash, double jump and wall jump are
     // DuskPlayer's own (its 0.2 s dash, 4.4 units, clears the Long Hall's pit with a jump; a jump alone does not).
     const sprite = named(animated('Sprite', warrior.tileset, warriorSet, [], { pivot: WARRIOR_PIVOT, sortingOrder: 2 }))
     player.addChild(sprite)
     const blade = named(trigger2D('Sword', [2.8, 2]))
-    blade.layer = 4
-    blade.mask = 2
+    // The player's sword sees the enemies.
+    blade.layer = LAYERS.PLAYER_ATTACK
+    blade.mask = LAYERS.ENEMIES
     blade.enabled = false
     player.addChild(blade)
     // Last child, as in the 3D examples: the driver that reads Move and Jump into the body's intent.
@@ -385,7 +401,7 @@ function agentOf(b: CharacterBody2DNode, maxDrop = 10): NavAgent2D {
     }
 }
 
-/** An AI controller running a library brain (its link and the embedded copy that runs), seeing layer 1. */
+/** An AI controller running a library brain (its link and the embedded copy that runs), seeing the Player layer. */
 function aiController(name: string, brain: { id: string, machine: any }, o: Partial<ControllerNode>): ControllerNode {
     const c = named(new ControllerNode(name))
     c.controlSource = 'ai'
@@ -394,7 +410,7 @@ function aiController(name: string, brain: { id: string, machine: any }, o: Part
     c.brain = 'machine'
     c.targetKey = 'target'
     c.autoAcquire = true
-    c.perceptionLayers = 1
+    c.perceptionLayers = LAYERS.PLAYER
     c.brainId = brain.id
     c.behavior = parseBehaviorMachine(brain.machine)
     Object.assign(c, o)
@@ -406,7 +422,7 @@ function buildGuard(i: number, c: number, r: number): CharacterBody2DNode {
     const body = named(new CharacterBody2DNode(`Ruin Guard ${i + 1}`))
     body.setPosition([x, y, 0])
     body.size = [0.8, 1.8]
-    body.layer = 2
+    body.layer = LAYERS.ENEMIES
     body.walkSpeed = 4.2
     body.runSpeed = 4.2
     body.jumpHeight = 3.6
@@ -416,8 +432,8 @@ function buildGuard(i: number, c: number, r: number): CharacterBody2DNode {
     sprite.sprite.tint = [0.5, 0.45, 0.6]
     body.addChild(sprite)
     const edge = named(trigger2D('Blade', [1.4, 1.2]))
-    edge.layer = 16
-    edge.mask = 1
+    edge.layer = LAYERS.ENEMY_ATTACK
+    edge.mask = LAYERS.PLAYER
     edge.enabled = false
     body.addChild(edge)
     body.addChild(aiController('Guard Brain', GUARD_BRAIN, {
@@ -435,7 +451,7 @@ function buildBat(i: number, c: number, r: number): CharacterBody2DNode {
     const body = named(new CharacterBody2DNode(`Bat ${i + 1}`))
     body.setPosition([x, y - 0.5, 0])
     body.size = [1.2, 1]
-    body.layer = 2
+    body.layer = LAYERS.ENEMIES
     body.movement = 'fly'
     body.flipSprites = false
     body.oneWayPlatforms = false
@@ -445,8 +461,8 @@ function buildBat(i: number, c: number, r: number): CharacterBody2DNode {
     body.addChild(named(animated('Sprite', bat.tileset, batSet, [], { pivot: [0.5, 0.35], sortingOrder: 1 })))
     const bite = named(trigger2D('Bite', [0.9, 0.8]))
     bite.offset = [0, 0.5]
-    bite.layer = 16
-    bite.mask = 1
+    bite.layer = LAYERS.ENEMY_ATTACK
+    bite.mask = LAYERS.PLAYER
     body.addChild(bite)
     body.addChild(aiController('Bat Brain', BAT_BRAIN, {
         perception: { fieldOfView: 360, range: 12, memorySpan: 4, reactionTime: 0.2 },
@@ -475,8 +491,8 @@ function buildPickup(name: string, kind: string, c: number, r: number, tileset: 
     const [x, y] = cellCentre(c, r)
     const area = named(trigger2D(name, [0.9, 0.9]))
     area.setPosition([x, y, 0])
-    area.layer = 8
-    area.mask = 1
+    area.layer = LAYERS.INTERACTABLES
+    area.mask = LAYERS.PLAYER
     const gem = named(animated('Gem', tileset, null, [0, 1, 2, 3, 4].slice(0, tileset.tileCount), { fps: 10, randomStart: true }))
     gem.setScale([scale, scale, 1])
     if (tint) gem.sprite.tint = tint
@@ -489,8 +505,8 @@ function buildCheckpoint(i: number, c: number, r: number): TriggerNode {
     const [x, y] = cellFeet(c, r)
     const area = named(trigger2D(`Checkpoint ${i + 1}`, [1.2, 3]))
     area.setPosition([x, y + 1.5, 0])
-    area.layer = 8
-    area.mask = 1
+    area.layer = LAYERS.INTERACTABLES
+    area.mask = LAYERS.PLAYER
     const lamp = named(animated('Lamp', lampTiles, null, [0, 1, 2, 3], { fps: 8, pivot: [0.5, 0] }))
     lamp.setPosition([0, -1.5, 0])
     area.addChild(lamp)
@@ -793,6 +809,8 @@ async function main() {
     }
     for (const [name, value] of Object.entries(libraries)) writeJson(path.join(OUT, 'libraries', `${name}.json`), value)
     writeJson(path.join(OUT, 'libraries', 'inputMap.json'), DUSK_INPUT_MAP)
+    // The project's settings: the defaults (absent is default), and the collision layers' names.
+    writeJson(path.join(OUT, 'libraries', 'projectSettings.json'), { version: 6, collisionLayers: LAYER_NAMES })
 
     const hashes: Record<string, string> = {}
     for (const [kind, list] of [['tileset', tilesetAssets], ['script', scriptAssets], ['template', templates], ['aiBrain', [GUARD_BRAIN, BAT_BRAIN]]] as const)

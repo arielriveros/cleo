@@ -21,7 +21,7 @@ import type { RenderPipeline } from '../rhi/resources';
 import { ADDITIVE_BLEND } from '../rhi/types';
 import type { DepthStencilState, CullMode } from '../rhi/types';
 import { TerrainFloorGrid, ShadowLayerCache, shadowReach, sliceCornerFactor, cascadeSphereAroundEye, staggeredCascadeDue, EYE_FIT_MARGIN, receiverInnerRadius, isFreeShadowSlot } from '../shadowCasters';
-import { AREA_SHADOW_HALF_FOV, MAX_CASCADES, CascadeSphere, ShadowCasterBounds, SpotShadowSlots, MAX_POINT_SHADOWS, PointShadowCache, CasterMotion, lightViewMatrix, mixNumber, HASH_SEED, pushCasterBounds, mixTransform, spotShadowFar, pointShadowFov, POINT_SHADOW_FACES, mixString, computeCascadeSplits, staleCascadeCovers, STAGGER_MARGIN, quantizeRadius, cascadeDepthScale, cascadeSphereFromPerspective, cascadeSphereFromCorners, buildCascadeMatrix } from '../shadowMath';
+import { AREA_SHADOW_HALF_FOV, MAX_CASCADES, CascadeSphere, ShadowCasterBounds, SpotShadowSlots, MAX_POINT_SHADOWS, PointShadowCache, CasterMotion, lightViewMatrix, mixNumber, HASH_SEED, pushCasterBounds, mixTransform, spotShadowFar, pointShadowFov, POINT_SHADOW_FACES, mixString, computeCascadeSplits, staleCascadeCovers, STAGGER_MARGIN, quantizeRadius, cascadeDepthScale, cascadeSphereFromPerspective, cascadeSphereFromCorners, buildCascadeMatrix, SHADOW_DEPTH_BIAS_DEFAULT, SHADOW_NORMAL_BIAS_DEFAULT } from '../shadowMath';
 import { keyLight } from '../skyNight';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
@@ -34,7 +34,7 @@ import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
 import type { CloudSubsystem } from './featureSubsystems';
 import { ShaderManager } from '../systems/shaderManager';
-import { DEPTH_WRITE } from './pipelineCache';
+import { DEPTH_WRITE, shadowCasterDepth } from './pipelineCache';
 import type { RenderSubsystems } from './subsystems';
 import { shelterMatrix, footprintKey, type ShelterFootprint } from './weatherPack';
 import { unitDirection } from '../../core/math';
@@ -304,6 +304,11 @@ export class ShadowPasses {
      */
     public static readonly SHADOW_DEPTH: DepthStencilState = DEPTH_WRITE;
 
+    /** The depth state for a caster pipeline culling `cullMode`: see SHADOW_DEPTH_TWO_SIDED (pipelineCache.ts). */
+    public static shadowDepthFor(cullMode: CullMode): DepthStencilState {
+        return shadowCasterDepth(cullMode);
+    }
+
     // ---- Far cascade: landscape-scale shadows past the near cascades ------------------------
     // One extra layer of the cascade array (index `cascadeCount`), fit around the CAMERA rather than
     // its view so turning costs nothing, holding only terrain and large casters, and re-rasterized only
@@ -334,11 +339,20 @@ export class ShadowPasses {
     /** Split scheme blend: 0 = uniform slabs, 1 = logarithmic. */
     public shadowSplitLambda: number = 0.5;
 
-    /** Constant bias along the light, in WORLD units (converted per cascade — see cascadeDepthScales). */
-    public shadowDepthBias: number = 0.03;
+    /**
+     * Constant bias along the light, in WORLD units (converted per cascade — see cascadeDepthScales), for the
+     * sun and, as a step toward the light, for spot and point lights. Small, because the casters are drawn
+     * front-face culled (the map holds their far side) and the two-sided ones carry a slope bias of their
+     * own (SHADOW_DEPTH_TWO_SIDED): 3 cm, the old default, kept anything thinner than that from casting at
+     * all, so shadows started a few centimetres from the toes and the edges of things standing on the ground.
+     */
+    public shadowDepthBias: number = SHADOW_DEPTH_BIAS_DEFAULT;
 
-    /** Offset along the surface normal before the lookup, in shadow texels. */
-    public shadowNormalBias: number = 1.5;
+    /**
+     * Offset along the surface normal before the lookup, in shadow texels, shaped by the light's angle
+     * (shadows.wgsl `cleoNormalOffsetShare`): all of it edge-on to the light, none facing it.
+     */
+    public shadowNormalBias: number = SHADOW_NORMAL_BIAS_DEFAULT;
 
     /** PCF kernel radius in shadow texels; 0 collapses to a single (hard-edged) tap. */
     public shadowFilterRadius: number = 1.0;
@@ -392,7 +406,8 @@ export class ShadowPasses {
 
     /** Cap on a spot's derived far plane, so a barely-attenuating light cannot stretch its map flat. */
     public spotShadowDistance: number = 100;
-    public spotShadowBias: number = 0.0015;
+    /** Extra constant bias in DEPTH units, on top of the world-unit `shadowDepthBias`; 0 by default. */
+    public spotShadowBias: number = 0;
     public spotShadowsActive: boolean = false;
     public spotShadowsDirty: boolean = false;
     private _spotView: mat4 = mat4.create();
@@ -461,7 +476,8 @@ export class ShadowPasses {
 
     /** Cap on a point light's derived far plane, mirroring `spotShadowDistance`. */
     public pointShadowDistance: number = 50;
-    public pointShadowBias: number = 0.0015;
+    /** Extra constant bias in DEPTH units, as `spotShadowBias`; 0 by default. */
+    public pointShadowBias: number = 0;
     public pointShadowsActive: boolean = false;
     public pointShadowsDirty: boolean = false;
 
@@ -1144,7 +1160,7 @@ export class ShadowPasses {
             || state.cullMode !== cullMode || state.epoch !== epoch) {
             const pipeline = this._pipelines.get(shaderType, SHADOW_PROGRAMS[shaderType], {
                 cullMode,
-                depthStencil: ShadowPasses.SHADOW_DEPTH,
+                depthStencil: ShadowPasses.shadowDepthFor(cullMode),
                 targets: 0,
                 vertex: skinned ? 'model+skin' : 'model',
                 // The shadow programs declare only position, but the buffer under them was written for
@@ -2065,7 +2081,7 @@ export class ShadowPasses {
         if (rebuilt || set.recordsKey !== key || set.records.length !== set.meshes.length) {
             const pipeline = this._pipelines.get('shadowMap', SHADOW_PROGRAMS.shadowMap, {
                 cullMode: chunkState.cullMode,
-                depthStencil: ShadowPasses.SHADOW_DEPTH,
+                depthStencil: ShadowPasses.shadowDepthFor(chunkState.cullMode),
                 targets: 0,
                 vertex: 'model',
                 // Positions only: the buffer is packed for the shadow program's own single attribute.

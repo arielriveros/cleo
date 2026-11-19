@@ -85,7 +85,8 @@ The inspector's **Character** section sets these fields, in groups; the table be
 script name and default.
 
 - **Speed** — **Walk** and **Run** speeds, **Acceleration** (`0` snaps to full speed; see
-  [on slopes](#acceleration-on-slopes)) and **Air Control**.
+  [on slopes](#acceleration-on-slopes)), **Turn Friction**, **Air Control** and **Slope Limit**, the steepest
+  ground the character stands on without sliding down it.
 - **Facing** — **Aim** turns the body toward where the controller is looking (a strafe character),
   **Velocity** toward where it travels (a face-your-movement character), and **None** leaves rotation
   alone. **Turn Speed** is how fast the body swings while moving; **Direction Smooth** glides the
@@ -114,6 +115,7 @@ The **Turn in place** group is [below](#turn-in-place), and **Animator outputs**
 | `turnFriction` | `0` | **Turn Friction**. Per second: how fast a moving body's velocity turns toward a new direction, keeping its speed. See [Turning](#turning). |
 | `moveDirSource` | `'input'` | **Direction From**: `'input' \| 'velocity'`. What `moveDir` reads. See [Turning](#turning). |
 | `airControl` | `1` | Steering while airborne, as the share of the gap to the steered velocity closed per **second**: `1` steers freely, `0` keeps the launch velocity, `0.5` halves the gap in a second at any frame rate. |
+| `slopeLimit` | `45` | **Slope Limit**. Degrees: the steepest ground the character stands on without sliding down it. On ground up to this steep, gravity only presses it into the ground, so it stands still, sets off, brakes and climbs as on the flat. Steeper ground it slides down. `0` turns it off. See [on slopes](#acceleration-on-slopes). |
 | `coyoteSeconds` | `0.12` | |
 | `jumpBufferSeconds` | `0.15` | |
 | `jumpLockoutSeconds` | `0.15` | |
@@ -168,11 +170,17 @@ command. Two consequences worth knowing before you tune it:
   from what the body is actually doing. That is what lets knockback, a conveyor or a moving platform
   compose with locomotion instead of fighting it, and it is why a character in a crowd accelerates only as
   fast as the crowd allows.
-- **On a slope it is the only thing holding the character up the hill**, if the body is authored
-  `friction: 0` — which is the usual choice, since a character owns its own speed. Gravity pulls it back
-  down at `g*sin(slope)`, so an `acceleration` below roughly that cannot climb: the character stalls, and
-  below it slides back down. At `10` that limit is around 40 degrees in practice. Budget for the steepest
-  ground the character has to walk on, not for the feel on the flat.
+- **On a slope, gravity does not pull against it** on ground up to `slopeLimit` (45 degrees). A
+  character is authored `friction: 0`, the usual choice since it owns its own speed. So every physics
+  substep would integrate all of gravity into it, and the solver takes back only the part pressing into
+  the ground. The part along the ground would be left over, at `g*sin(slope)`: a character standing on a
+  ramp would creep down it, brake going down at `acceleration - g*sin(slope)`, and climb at that rate too,
+  stalling when `acceleration` is below it.
+- **The slope hold.** While the character stands on walkable ground no steeper than its limit, and is not
+  taking off, the physics step gives it a force against gravity's pull along that ground. Gravity then only
+  presses it into the ground. It stands still on a ramp, and starts, brakes and climbs at `acceleration` as
+  on the flat, on every physics backend and in the physics worker. On steeper ground, and with
+  `slopeLimit: 0`, gravity's pull along the slope comes back, and `acceleration` must outpull it.
 
 ## Animator outputs
 

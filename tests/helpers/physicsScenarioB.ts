@@ -39,7 +39,7 @@ function trunkLayer() {
     const instances: [number, number, number, number, number][] = [];
     for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) instances.push([-18 + i * 1.5, 0, -18 + j * 1.5, i * 0.4 + j * 0.1, 1 + 0.1 * ((i + j) % 3)]);
     return {
-        key: 'trunks', version: 1, count: instances.length, cameraDither: false,
+        key: 'trunks', version: 1, count: instances.length,
         collision: { shape: 'cylinder', radius: 0.3, height: 3 },
         forEachInstanceNear(cx: number, cz: number, r: number, cb: (index: number, x: number, y: number, z: number, yaw: number, scale: number) => void) {
             instances.forEach(([x, y, z, yaw, s], index) => { if ((x - cx) ** 2 + (z - cz) ** 2 <= r * r) cb(index, x, y, z, yaw, s); });

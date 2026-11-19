@@ -115,7 +115,7 @@ function toValley(bundle: any) {
       followOffset: [0, 0, 0], followDamping: [0, 0, 0], aimMode: 'orbit', aimDamping: 0.05,
       yaw, pitch: 5, yawMin: null, yawMax: null, pitchMin: -85, pitchMax: 85,
       armLength: 0, socketOffset: [0, 0, 0],
-      collisionEnabled: false, collisionMode: 'retract', collisionIgnoreIds: [],
+      collisionEnabled: false, collisionLayers: -1 & ~8, seeThroughLayers: 0, collisionIgnoreIds: [],
     }
     attach(rig, fly, {})
     // After the day (the old Time of Day node, or the Day Cycle that replaced it), else at the top.

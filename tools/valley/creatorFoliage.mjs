@@ -37,18 +37,18 @@ export const CREATOR_FOLIAGE = [
     key: `spruce-${v}`, name: `Spruce ${v.toUpperCase()}`, kind: 'tree', preset: 'spruce', seed, group: 'forest', bark: 'bark_pine',
     // A bare stretch of trunk under the crown, so the belt reads as a forest you can see into.
     params: { ...TREE_IMPOSTOR_PARAMS, ...PLANT_TEXTURES, baseSize: 0.28, windStrength: 0.03, windStiffness: 2.2, windFlutter: 0.3 },
-    rule: { density: 0.0025, minScale: 0.7, maxScale: 1.1, castShadows: true, cameraDither: true }, cellSize: 40,
+    rule: { density: 0.0025, minScale: 0.7, maxScale: 1.1, castShadows: true, seeThrough: true }, cellSize: 40,
   })),
   {
     key: 'spruce-high', name: 'Highland Spruce', kind: 'tree', preset: 'spruce', seed: 5, group: 'highland', bark: 'bark_pine',
     params: { ...TREE_IMPOSTOR_PARAMS, ...PLANT_TEXTURES, baseSize: 0.28, windStrength: 0.03, windStiffness: 2.2 },
-    rule: { density: 0.0009, minScale: 0.7, maxScale: 1.05, castShadows: true, cameraDither: true }, cellSize: 40,
+    rule: { density: 0.0009, minScale: 0.7, maxScale: 1.05, castShadows: true, seeThrough: true }, cellSize: 40,
   },
   {
     key: 'oak', name: 'Oak', kind: 'tree', preset: 'oak', seed: 7, group: 'village', bark: 'bark_oak',
     // One scanned bark repeat about a metre of trunk.
     params: { ...TREE_IMPOSTOR_PARAMS, ...PLANT_TEXTURES, windStrength: 0.04, windStiffness: 2, barkScale: 1 },
-    rule: { density: 0.0008, minScale: 0.8, maxScale: 1.15, castShadows: true, cameraDither: true }, cellSize: 40,
+    rule: { density: 0.0008, minScale: 0.8, maxScale: 1.15, castShadows: true, seeThrough: true }, cellSize: 40,
   },
 
   // --- Grass: two meadow variants and a sprinkle of tall grass through them. No billboards: the farthest

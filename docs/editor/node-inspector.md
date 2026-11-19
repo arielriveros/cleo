@@ -5,10 +5,9 @@ The **Properties** panel. What it shows depends on the selected node's type.
 Every selection is composed the same way:
 
 1. **Node Information** — name, ID, node type, child count, **Spawn on start** (when off, the node
-   stays dormant until a script calls `spawn()` on it), **Motion blur** and **See-through to camera** on
-   nodes with geometry, and Delete. **See-through to camera** lets a camera rig in Dither collision mode
-   see through this node where it stands between the camera and the player (it applies to the whole
-   subtree).
+   stays dormant until a script calls `spawn()` on it), **Motion blur** on nodes with geometry, and
+   Delete. Whether a camera rig sees through a node is decided by the collision layer of the Collider it
+   is in (see [Camera Rig](#cameras)).
 2. **Transform** — position, rotation (degrees), scale. Hidden for screen-space UI, which has no
    meaningful transform.
 3. **Model slot**, when the node has geometry.
@@ -89,17 +88,19 @@ rather than moving the camera itself. Its groups:
 - **Field of View** — when **Rig Controls FOV** is on, the rig owns the camera's FOV and eases it
   with its own damping. Turning it off gives the camera back the FOV it had before.
 - **Collision** — what happens when something is between the camera and the pivot. **Handle
-  Obstruction** switches it on; **Response** picks how:
-  - **Retract** pulls the camera in. It tests physics collider shapes, terrain included: the same
-    solids the character collides with. A body blocks it only while its **Camera Collision** channel is
-    on (on its Collider); trigger volumes, the follow and look-at targets and the rig's own character are
-    always ignored.
-  - **Dither** dithers away the part of each see-through obstruction that blocks the view, inside a
-    hole around the camera-to-player line, instead of pulling in for it. Only nodes with **See-through to
-    camera** on (and foliage rules with it) are cut, and their colliders stop pulling the camera in;
-    anything else (a wall, a ceiling) still pulls it in, as **Retract** does. **Hole Radius** is the hole's
-    size in metres, **Hole Strength** how much of the surface goes at its centre. Shadows are
-    unaffected, and under TAA the dither reads as a smooth see-through.
+  Obstruction** switches it on, and two sets of [collision layers](physics.md#layers) decide what reacts:
+  - **Blocked by** pulls the camera in for a body on one of these layers. It tests physics collider
+    shapes, terrain included: the same solids the character collides with. Trigger volumes, the follow
+    and look-at targets and the rig's own character are always ignored. Default: every layer but See
+    Through and No Camera.
+  - **See through** passes a body on one of these layers instead, and dithers away the part of its
+    Collider's meshes that blocks the view, inside a hole around the camera-to-player line. Foliage
+    whose collision is on one of these layers is cut too. A layer in both lists is seen through. Default:
+    See Through. **Hole Radius** is the hole's size in metres, **Hole Strength** how much of the surface
+    goes at its centre. Shadows are unaffected, and under TAA the dither reads as a smooth see-through.
+
+  A body on neither list does nothing to the camera: put small props on **No Camera** and the boom passes
+  through them. Geometry with no Collider round it is never seen through.
 - **Shake** — position and rotation amplitude, frequency and decay. Shake shows only while the scene
   runs (Play or Simulate), which is when **Test Shake** is worth pressing; a script calls
   `rig.shake(0.6)`.

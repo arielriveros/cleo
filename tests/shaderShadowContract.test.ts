@@ -217,3 +217,35 @@ describe('nothing reimplements shadow filtering', () => {
         }
     });
 });
+
+describe("the receivers' biases keep shadows on their casters", () => {
+    // The casters are drawn front-face culled, so a lit surface never meets its own depth: the old 3 cm
+    // constant bias and the full normal offset everywhere only kept thin casters (toes, a plank's edge) from
+    // casting, and shadows started centimetres away from them. Spot and point lights biased in depth units,
+    // which grow with the square of the distance.
+    const fnBody = (name: string) => {
+        const src = read(SHADOWS_WGSL).replace(/\r\n/g, '\n');
+        const start = src.indexOf(`fn ${name}(`);
+        expect(start, name).toBeGreaterThan(-1);
+        return src.slice(start, src.indexOf('\n}\n', start));
+    };
+
+    it("shapes the normal offset by the light's angle in every lookup that takes a normal", () => {
+        for (const name of ['cleoCascadeVisibility', 'spotShadow', 'pointShadow'])
+            expect(fnBody(name), name).toContain('cleoNormalOffsetShare(');
+        // None of it facing the light, all of it edge-on and turned away.
+        expect(fnBody('cleoNormalOffsetShare')).toContain('1.0 - clamp(dot(N, L), 0.0, 1.0)');
+    });
+
+    it('biases spot and point lights by a world-unit step toward the light', () => {
+        for (const name of ['spotShadow', 'pointShadow'])
+            expect(fnBody(name), name).toMatch(/\+ L \* u_shadow\.u_shadowDepthBias/);
+    });
+
+    it('draws a two-sided caster with a slope-scaled depth bias, a solid one without', async () => {
+        const { shadowCasterDepth, DEPTH_WRITE } = await import('../src/graphics/render/pipelineCache');
+        expect(shadowCasterDepth('front')).toBe(DEPTH_WRITE);
+        expect(shadowCasterDepth('none').depthBiasSlopeScale).toBeGreaterThan(0);
+        expect(shadowCasterDepth('none')).toBe(shadowCasterDepth('none'));
+    });
+});

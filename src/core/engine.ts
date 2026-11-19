@@ -56,6 +56,8 @@ interface CleoConfig {
      * `PhysicsSystem.backendFallbackReason`.
      */
     backend?: string;
+    /** The project's collision layer names, index 0 being layer 1. See `PhysicsSystem.layerNames`. */
+    layers?: readonly string[];
   }
   runtime?: {
     /** Longest frame delta the loop reports, seconds. See `CleoEngine.maxFrameDelta`. */
@@ -152,6 +154,7 @@ export class CleoEngine {
     this._physicsSystem = new PhysicsSystem({
       gravity: config?.physics?.gravity || [0, -9.81, 0],
       backend: config?.physics?.backend,
+      layers: config?.physics?.layers,
     });
     if (config?.physics?.maxSubsteps) this._physicsSystem.maxSubsteps = config.physics.maxSubsteps;
     if (config?.physics?.simulationRange) this._physicsSystem.simulationRange = config.physics.simulationRange;
@@ -429,7 +432,7 @@ export class CleoEngine {
    */
   public async replacePhysics(options: { backend?: string }): Promise<PhysicsSystem> {
     const old = this._physicsSystem;
-    const next = new PhysicsSystem({ gravity: old.gravity, backend: options.backend });
+    const next = new PhysicsSystem({ gravity: old.gravity, backend: options.backend, layers: old.layerNames });
     next.maxSubsteps = old.maxSubsteps;
     next.simulationRange = old.simulationRange;
     next.profileStep = old.profileStep;

@@ -452,3 +452,25 @@ describe('2D bodies saved with the built-in platformer controller', () => {
         expect(body.controller).toBeNull();
     });
 });
+
+describe('2D collision layers', () => {
+    it("are the project's layers, named once for 2D and 3D: the scene's 2D world reads its 3D physics' names", async () => {
+        const { PhysicsSystem } = await import('../src/physics/physicsSystem');
+        const { World2D, TILEMAP_LAYER } = await import('../src/physics2d/world2d');
+        const { LAYER } = await import('../src/physics/collisionLayers');
+        // Tilemaps are on Default.
+        expect(TILEMAP_LAYER).toBe(LAYER.DEFAULT);
+        const world = new World2D();
+        // With no table: the engine's own names.
+        expect(world.layer('Default')).toBe(1);
+        expect(world.layer('Enemies')).toBe(0);
+        const physics = new PhysicsSystem({ layers: ['', '', '', '', 'Player', 'Enemies'] });
+        world.layerNamesFrom(() => physics.layerNames);
+        expect(world.layer('Enemies')).toBe(32);
+        expect(world.layers('Player', 'Enemies')).toBe(48);
+        // Renamed in the project, read live.
+        physics.layerNames = ['', '', '', '', 'Hero'];
+        expect(world.layer('Hero')).toBe(16);
+        expect(world.layerNames).toBe(physics.layerNames);
+    });
+});

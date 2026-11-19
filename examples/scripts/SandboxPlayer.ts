@@ -30,7 +30,11 @@ import { attribute } from 'cleo/decorators'
  *   - `footPlacement`, the foot IK weight while moving: full at a walk, light at a run (the solver plants the
  *     lower foot whenever it nears the ground, which a run's flight phase between strides must not do);
  *   - the LOOK-AT: where the camera faces off the body (`lookYaw`, `lookPitch`) and the Look layer's weight
- *     (`lookWeight`, up standing still), and the turn in place held back `turnDelay` seconds so the head turns first.
+ *     (`lookWeight`, up standing still), and the turn in place held back `turnDelay` seconds so the head turns first;
+ *   - the STAIRS: whether the body is on a flight (`onStairs`, the ramp under it on `stairsLayer`) and which way it
+ *     goes along it (`stairs`, +1 up, -1 down, from the climb under its travel), the flight's pace (one tread a
+ *     step, slowing down BEFORE the first riser, seen ahead), facing where it goes on the flight, and `stairRate`,
+ *     how much faster the stair clips play while the body still slows onto it.
  *
  * It names no clip, no state and no key, and plays no animation.
  *
@@ -137,6 +141,41 @@ export default class SandboxPlayerNode extends CharacterNode {
     @attribute('Foot Placement', { min: 0, max: 1, step: 0.05 })
     public runFootWeight: number = 0.3
 
+    /** The collision layer of the ramps laid over flights of stairs: what the capsule climbs, and how a flight is known. */
+    @attribute('Stairs')
+    public stairsLayer: string = 'Stair Ramp'
+
+    /**
+     * A flight's pace, horizontal m/s, walking and running, up and down: one tread a step at the stair clips'
+     * rate (the build fits them to the clips and the course's treads). Faster, and the feet slide on the treads.
+     */
+    @attribute('Stairs', { min: 0.1, max: 5, step: 0.01 })
+    public stairUpWalkSpeed: number = 0.55
+
+    @attribute('Stairs', { min: 0.1, max: 5, step: 0.01 })
+    public stairUpRunSpeed: number = 1.25
+
+    @attribute('Stairs', { min: 0.1, max: 5, step: 0.01 })
+    public stairDownWalkSpeed: number = 0.8
+
+    @attribute('Stairs', { min: 0.1, max: 5, step: 0.01 })
+    public stairDownRunSpeed: number = 1.88
+
+    /** The climb along the travel (rise over run) that counts as going up or down a flight; it lets go at 60% of it. */
+    @attribute('Stairs', { min: 0.05, max: 1, step: 0.01 })
+    private stairGrade: number = 0.25
+
+    /** Seconds a flight still counts after the ramp last showed under the body (it meets the ground at its foot). */
+    @attribute('Stairs', { min: 0, max: 1, step: 0.01 })
+    private stairGrace: number = 0.15
+
+    /**
+     * How much harder than its Acceleration the body brakes for a flight ahead: it starts slowing that much later,
+     * and still reaches the flight's pace by its first step.
+     */
+    @attribute('Stairs', { min: 1, max: 4, step: 0.05 })
+    private stairBrake: number = 1.5
+
     // ----- read by the animator (Linked parameters) -----------------------------------------------------------
 
     /** MoveInput: the player is asking to move. */
@@ -168,6 +207,12 @@ export default class SandboxPlayerNode extends CharacterNode {
     public lookYaw: number = 0
     public lookPitch: number = 0
     public lookWeight: number = 0
+    /** OnStairs: standing or moving on a flight of stairs (its ramp is under the body). */
+    public onStairs: boolean = false
+    /** Stairs: on a flight, the way along it: +1 up, -1 down, 0 across it or off it. */
+    public stairs: number = 0
+    /** StairRate: how much faster the stair clips play while the body is still faster than their pace. */
+    public stairRate: number = 1
 
     private _directionScale: number = 1
     private _lean: number = 0
@@ -178,6 +223,13 @@ export default class SandboxPlayerNode extends CharacterNode {
     private _stopYaw: number = 0
     /** The Character's own Acceleration, as authored: what everything but a sprint take-off uses. */
     private _acceleration: number = -1
+    /** The stairs' collision layer bit (`stairsLayer`), looked up once. */
+    private _stairBit: number = -1
+    /** The horizontal pace the stairs ask for this frame (`_stairsToward`), m/s. */
+    private _stairPace: number = 0
+    /** Seconds since the ramp of a flight was last under the body, and its normal then. */
+    private _offStairs: number = Infinity
+    private _stairNormal: number[] = [0, 1, 0]
 
     onUpdate(delta: number) {
         if (this._acceleration < 0) this._acceleration = this.acceleration
@@ -195,6 +247,12 @@ export default class SandboxPlayerNode extends CharacterNode {
         // The input as a world heading (angles are counter-clockwise: right is negative), then off the body.
         const inputYaw = intent.basisYaw + Math.atan2(-right, forward) * 180 / Math.PI
         this.moveAngle = this.hasMoveInput ? this._wrap(inputYaw - bodyYaw) : 0
+        // The way it goes over the ground: the stick's, or while it brakes with none, its travel's.
+        const travel = this.hasMoveInput ? [Math.sin(inputYaw * Math.PI / 180), Math.cos(inputYaw * Math.PI / 180)]
+            : this.groundSpeed > 0.3 ? [v[0] / this.groundSpeed, v[2] / this.groundSpeed] : null
+        // The gait the stick asks for, as below: a run (a jog or a sprint) or a walk; the stairs brake to its pace.
+        const runGait = (intent.sprint && amount > 0.9) || !(Input.pressed('Walk') || amount < this.walkDeflection)
+        const pace = this._stairsToward(delta, travel, runGait)
         this._lean = this._leanToward(delta, facing, run)
         this._lookToward(delta, intent.aimYaw - bodyYaw, intent.aimPitch)
         // The turn in place waits for the head: it engages only once the camera has stayed round this long.
@@ -209,7 +267,8 @@ export default class SandboxPlayerNode extends CharacterNode {
             // Stopping out of a sprint: stay as stopped until the camera is swung, rather than turning to it at once.
             if (this._wasSprinting) { this._afterSprint = true; this._stopYaw = intent.aimYaw; this._wasSprinting = false }
             if (this._afterSprint && Math.abs(this._wrap(intent.aimYaw - this._stopYaw)) > this.lookAroundAngle) this._afterSprint = false
-            this.facingMode = this._afterSprint ? 'none' : 'aim'
+            // Standing on a flight: no turning in place on the steps.
+            this.facingMode = this._afterSprint || this.onStairs ? 'none' : 'aim'
             return
         }
 
@@ -220,7 +279,10 @@ export default class SandboxPlayerNode extends CharacterNode {
         // The take-off: speeding up into a sprint from a standstill, or along the way the body already goes (not
         // braking to reverse, which the running turn and the stop expect at the Character's own rate).
         const along = this.groundSpeed < 0.5 || Math.abs(this._wrap(inputYaw - Math.atan2(v[0], v[2]) * 180 / Math.PI)) < 60
-        this.acceleration = sprinting && along && this.groundSpeed < this.runSpeed - 0.05 ? this.sprintTakeoff : this._acceleration
+        // Onto or on a flight, the Character's own: a sprint's gentle take-off would carry it up the steps too fast.
+        // Slowing for one, `stairBrake` times harder, which is what lets the slowing start that late.
+        this.acceleration = pace !== 0 && this.groundSpeed > this._stairPace + 0.05 ? this._acceleration * this.stairBrake
+            : sprinting && along && pace === 0 && this.groundSpeed < this.runSpeed - 0.05 ? this.sprintTakeoff : this._acceleration
 
         // The running turn: a fast sprint asked to go back the way it came.
         if (sprinting && this.runTurn === 0 && this.planarSpeed > this.runTurnSpeed && Math.abs(this.moveAngle) > this.runTurnAngle) {
@@ -231,8 +293,9 @@ export default class SandboxPlayerNode extends CharacterNode {
             this._turnTime += delta
             if (!sprinting || Math.abs(this.moveAngle) < this.runTurnRelease || this._turnTime > this.runTurnSeconds) this.runTurn = 0
         }
-        // While the turn clip turns the body, nothing else may.
-        this.facingMode = this.runTurn !== 0 ? 'none' : sprinting ? 'velocity' : 'aim'
+        // While the turn clip turns the body, nothing else may. On a flight it faces the way it goes: the stair
+        // clips go forward only.
+        this.facingMode = this.runTurn !== 0 ? 'none' : sprinting || this.stairs !== 0 ? 'velocity' : 'aim'
         this._wasSprinting = sprinting
         this._afterSprint = false
 
@@ -252,7 +315,75 @@ export default class SandboxPlayerNode extends CharacterNode {
         const k = this.directionEase > 0 ? 1 - Math.exp(-delta / this.directionEase) : 1
         this._directionScale += (target - this._directionScale) * k
 
+        if (pace !== 0) {
+            // A flight, or one ahead: its pace, walking or running as on the flat. The Character's speed runs along
+            // the ground, the pace over it: sqrt(1 + grade^2) of it along a flight's slope (on the flat before one, 1).
+            const up = pace > 0
+            const flat = walking ? (up ? this.stairUpWalkSpeed : this.stairDownWalkSpeed) * (Input.pressed('Walk') ? 1 : Math.min(1, amount / this.walkDeflection))
+                : up ? this.stairUpRunSpeed : this.stairDownRunSpeed
+            const nominal = sprinting ? this.runSpeed : this.walkSpeed
+            const slope = this.onStairs ? Math.hypot(1, this._grade(travel)) : 1
+            intent.speedScale *= Math.min(1, flat * slope / Math.max(0.01, nominal))
+            return
+        }
         intent.speedScale *= scale * this._directionScale
+    }
+
+    /**
+     * The stairs, every frame: whether a flight is under the body (`onStairs`), which way the travel goes along it
+     * (`stairs`), how much faster the stair clips play while the body is still faster than their pace
+     * (`stairRate`), and the pace to keep: +1 a flight going up (under the body or ahead of it, as close as braking
+     * to the gait's pace at `stairBrake` takes), -1 down, 0 none.
+     */
+    private _stairsToward(delta: number, travel: number[] | null, run: boolean): number {
+        const physics = this.scene?.physics as any
+        if (this._stairBit < 0) this._stairBit = physics?.layer?.(this.stairsLayer) ?? 0
+        const p = this.worldPosition
+        // Straight down onto the stairs' ramps alone (their layer), `reach` above and below the feet, and only onto
+        // the top of one: a ramp's end, where it meets a landing, leans the other way.
+        const ramp = (x: number, z: number, y: number, reach: number) => {
+            const hit = this._stairBit && physics ? physics.raycast([x, y + reach, z], [x, y - reach, z], { layerMask: this._stairBit }) : null
+            return hit && hit.normal[1] >= 0.7 ? hit : null
+        }
+        const here = ramp(p[0], p[2], p[1], 0.6)
+        if (here) { this._offStairs = 0; this._stairNormal = [here.normal[0], here.normal[1], here.normal[2]] }
+        else this._offStairs += delta
+        this.onStairs = this.isGrounded && this._offStairs <= this.stairGrace
+        // Up or down it, by the climb under the travel: let go below 60% of the grade, not at once.
+        if (!this.onStairs) this.stairs = 0
+        else if (travel) {
+            const grade = this._grade(travel)
+            if (Math.abs(grade) >= this.stairGrade) this.stairs = Math.sign(grade)
+            else if (Math.abs(grade) < this.stairGrade * 0.6) this.stairs = 0
+        }
+        // No travel on a flight: it keeps the way it went, so a stop there settles into Idle, not the walk.
+        const fastest = this.stairs > 0 ? this.stairUpRunSpeed : this.stairDownRunSpeed
+        this.stairRate = this.stairs !== 0 ? Math.max(1, this.groundSpeed / Math.max(0.01, fastest)) : 1
+        // The gait's pace: up or down once known, else the slower of the two (up).
+        const paceOf = (dir: number) => run ? (dir < 0 ? this.stairDownRunSpeed : dir > 0 ? this.stairUpRunSpeed : Math.min(this.stairUpRunSpeed, this.stairDownRunSpeed))
+            : (dir < 0 ? this.stairDownWalkSpeed : dir > 0 ? this.stairUpWalkSpeed : Math.min(this.stairUpWalkSpeed, this.stairDownWalkSpeed))
+        this._stairPace = paceOf(this.stairs)
+        if (this.stairs !== 0) return this.stairs
+        if (this.onStairs || !travel || !this.hasMoveInput) return 0
+        // Ahead: as far as braking from this speed to the gait's pace takes at `stairBrake`, no further (at least
+        // past the capsule's front).
+        const brake = 2 * Math.max(0.5, this._acceleration * this.stairBrake)
+        const reach = Math.max(0.3, (this.groundSpeed ** 2 - this._stairPace ** 2) / brake)
+        // Tall enough to meet a ramp that far up (or down) a flight at its steepest.
+        const ahead = ramp(p[0] + travel[0] * reach, p[2] + travel[1] * reach, p[1], 0.5 + reach)
+        if (!ahead) return 0
+        const n = ahead.normal
+        const grade = -(travel[0] * n[0] + travel[1] * n[2]) / Math.max(1e-3, n[1])
+        if (Math.abs(grade) < this.stairGrade) return 0
+        this._stairPace = paceOf(Math.sign(grade))
+        return Math.sign(grade)
+    }
+
+    /** The climb along `travel` (rise over run, + up) of the flight last under the body. */
+    private _grade(travel: number[] | null): number {
+        if (!travel) return 0
+        const n = this._stairNormal
+        return -(travel[0] * n[0] + travel[1] * n[2]) / Math.max(1e-3, n[1])
     }
 
     /**

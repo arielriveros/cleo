@@ -19,6 +19,7 @@ import { parseChild } from "./childParser";
 import type { BVH } from "../../bvh";
 import type { ChangeKind } from "../../eventBus";
 import { eulerFromQuatDeg } from "../../math";
+import { asksLooseSeeThrough } from "./cameraLayersLegacy";
 // Type-only: actionMap is a pure leaf with no imports of its own, so this closes no cycle.
 import type { ActionState } from "../../../input/actionMap";
 
@@ -171,9 +172,6 @@ export class Node {
   // serialized) and read by the renderer's object-velocity pass, never by anything else.
   protected _motionBlur: MotionBlurMode = 'full';
 
-  // Whether a CameraRig in 'dither' collision mode may cut its see-through hole into this node. Authored
-  // (inspector + serialized) and read by the renderer's model draws, never by anything else.
-  protected _cameraDither = false;
   protected _viewmodel = false;
 
   // See SocketAttachment. Read by the scene's late socket pass.
@@ -1006,7 +1004,6 @@ export class Node {
       spawnOnStart: this._spawnOnStart,
       ...(this._cleoSave?.saved ? { saved: true } : {}),
       ...(this._motionBlur !== 'full' ? { motionBlur: this._motionBlur } : {}),
-      ...(this._cameraDither ? { cameraDither: true } : {}),
       ...(this._viewmodel ? { viewmodel: true } : {}),
       ...(this._drawDistance > 0 ? { drawDistance: this._drawDistance } : {}),
       ...(this._socketAttachment ? { socketAttachment: { ...this._socketAttachment } } : {}),
@@ -1118,7 +1115,12 @@ export class Node {
     // Absent in older saves, which is exactly the 'full' default. Assigned to the field rather than
     // through the setter: the setter fans out to children, and this node has none yet.
     if (json.motionBlur === 'objectOnly' || json.motionBlur === 'none') node._motionBlur = json.motionBlur;
-    if (json.cameraDither === true) node._cameraDither = true;
+    // Saved when a node could ask for the camera's see-through hole itself. Now what a rig sees through is what
+    // a Collider on one of its See through layers holds (cameraLayersLegacy.ts): a Collider that asked moved to
+    // the See Through layer as it was read; a mesh with none round it has no layer to go by.
+    // (A parent is attached to ITS parent only after its children are parsed, so `parent.collider` alone cannot
+    // see a Collider further up a subtree being parsed: ColliderNode.parse counts itself in.)
+    if (asksLooseSeeThrough(json) && Node._colliderParseDepth === 0 && !parent.collider) Node._warnLooseSeeThrough(json.name);
     if (json.viewmodel === true) node._viewmodel = true;
     if (typeof json.drawDistance === 'number' && json.drawDistance > 0) node._drawDistance = json.drawDistance;
 
@@ -1163,7 +1165,7 @@ export class Node {
         // Absent in older saves; RigidBody supplies its own defaults for them.
         json.body.friction,
         json.body.restitution,
-        // Likewise for the two channels — absent means true.
+        // Likewise for the solver channel — absent means true. The old camera channel: `false` is No Camera.
         json.body.simulatePhysics,
         json.body.cameraCollision,
         // Absent in scenes saved before the ground probe existed; RigidBody defaults it to 0 (off).
@@ -1460,18 +1462,15 @@ export class Node {
     this._notifyChange('component', 'motionBlur', prev, value);
   }
 
-  /**
-   * Whether this node is dithered away where it blocks the view of a CameraRig in `'dither'` collision
-   * mode, instead of the rig pulling its camera in (default false). Only the part inside the hole around
-   * the camera -> player line goes; shadows are untouched. Fans out to descendants like
-   * {@link motionBlur}, so it can be set on an imported model's holder node.
-   */
-  public get cameraDither(): boolean { return this._cameraDither; }
-  public set cameraDither(value: boolean) {
-    const prev = this._cameraDither;
-    this._cameraDither = !!value;
-    for (const child of this._children) child.cameraDither = value;
-    this._notifyChange('component', 'cameraDither', prev, this._cameraDither);
+  /** @internal How many Colliders' subtrees are being parsed right now (ColliderNode.parse). */
+  public static _colliderParseDepth = 0;
+  private static _warnedLooseSeeThrough = false;
+  /** Once per session: a saved mesh asked for the camera's see-through hole with no Collider round it. */
+  private static _warnLooseSeeThrough(name: unknown): void {
+    if (Node._warnedLooseSeeThrough) return;
+    Node._warnedLooseSeeThrough = true;
+    Logger.warn(`'${String(name)}' (and maybe others) was see-through to the camera without a Collider round it. ` +
+      `A camera rig now sees through what a Collider on one of its See through layers holds: put it in a Collider on the See Through layer.`, 'Scene');
   }
 
   /**
@@ -2409,9 +2408,8 @@ export class Node {
    * @param simulatePhysics   Take part in physical simulation (collide, push, be pushed). Default
    *                          `true`; `false` leaves the body in the world as a ghost the solver
    *                          ignores, which a camera probe can still see.
-   * @param cameraCollision   Block a camera rig's collision probe. Default `true`. Independent of
-   *                          `simulatePhysics`, so an object can be solid to the camera but not the
-   *                          character, or the reverse.
+   * @param cameraCollision   Deprecated: camera rigs choose the layers that block them. `false` puts the body
+   *                          on the No Camera layer, which rigs are not blocked by unless they ask.
    * @param groundProbeDistance Meters below the collider's feet that still count as grounded, default
    *                          `0` (off — grounding uses solver contacts only). A small value (~0.1–0.2)
    *                          removes `isGrounded` flicker for a character resting on terrain by probing

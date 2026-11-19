@@ -853,7 +853,7 @@ function staticBody(shape) {
     : [{ type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }]
   return {
     mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1],
-    friction: 0.3, restitution: 0, simulatePhysics: true, cameraCollision: true, groundProbeDistance: 0,
+    friction: 0.3, restitution: 0, simulatePhysics: true, groundProbeDistance: 0,
     motionSmoothing: 0, shapes,
   }
 }

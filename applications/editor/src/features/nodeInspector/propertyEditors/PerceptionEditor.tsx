@@ -1,6 +1,8 @@
 import { ControllerNode, PERCEPTION_PRESETS, perceptionTuning } from 'cleo'
 import type { PerceptionPreset, PerceptionTuning } from 'cleo'
 import { PresetMenu, SectionTitle, Slider, Toggle } from '@cleo/app-kit/ui'
+import { useCleoEngine } from '../../EngineContext'
+import { LayerMaskSelect } from '../physicsEditors/layerPickers'
 
 /**
  * What an agent can see, and what it remembers.
@@ -14,6 +16,7 @@ const RANGE_HINT = 'How far the agent can see. Range and the cone are both teste
 const MEMORY_HINT = 'How long a target stays remembered after it was last seen. This is what makes an agent walk to where you WERE instead of forgetting you the instant you break line of sight — the investigate goal has nothing to act on without it.'
 const REACTION_HINT = 'Seconds of continuous visibility before a target counts as noticed. Without it an agent reacts on the exact frame a pixel of you clears a doorway, which reads as clairvoyance.'
 const EYE_HINT = 'How far above the pawn’s origin the agent looks from. A pawn’s origin is at its feet, and a ray cast from there runs along the floor — which is an obstacle — so an agent with no eye height is blind exactly when it most needs to see.'
+const LAYERS_HINT = 'The collision layers of the 2D bodies it can see: put the player on a layer of its own and look for that, or every enemy sees its own kind. A 3D agent finds its targets by faction instead.'
 const ACQUIRE_HINT = 'Write the nearest noticed character into the target key automatically. On by default: without it perception fills in the senses but nobody ever becomes the target, and every chase has to be wired by a script. Turn it off for a brain that picks its own.'
 
 interface Props {
@@ -22,6 +25,7 @@ interface Props {
 }
 
 export default function PerceptionEditor({ node, onChange }: Props) {
+  const { sceneDimension } = useCleoEngine()
   const apply = (patch: Partial<PerceptionTuning>) => {
     node.perception = perceptionTuning({ ...node.perception, ...patch })
     onChange()
@@ -48,6 +52,9 @@ export default function PerceptionEditor({ node, onChange }: Props) {
       </div>
       {slider('Field of view', 'fieldOfView', 0, 360, 5, 0, FOV_HINT, '°')}
       {slider('Range', 'range', 0, 100, 0.5, 1, RANGE_HINT)}
+      {sceneDimension === '2D' &&
+        <LayerMaskSelect label='Sees layers' labelClassName='w-[104px]' value={node.perceptionLayers} hint={LAYERS_HINT}
+          onChange={(m) => { node.perceptionLayers = m === -1 ? ControllerNode.ALL_LAYERS : m; onChange() }} />}
       <Slider label='Eye height' min={0} max={4} step={0.05} value={node.eyeHeight} title={EYE_HINT}
         labelClassName='w-[104px]' readout={(v) => v.toFixed(2)}
         onChange={(v) => { node.eyeHeight = v; onChange() }} />

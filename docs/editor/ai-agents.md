@@ -118,6 +118,7 @@ What the agent can see and remember. Every field here is a reason an NPC stops b
 |---|---|---|
 | **Field of view** | `120` | The **full** cone, in degrees, not the half-angle: 120 sees 60° either side of the pawn's facing. 360 sees everything within range. |
 | **Range** | `20` | How far the agent can see. |
+| **Sees layers** | all | 2D only: the [collision layers](physics.md#layers) of the 2D bodies it can see. Put the player on a layer of its own and look for that, or every enemy sees its own kind. A 3D agent finds its targets by faction. |
 | **Eye height** | `1.6` | How far above the pawn's origin it looks from. The origin is at the feet, and a ray cast from there runs along the floor, so an agent with no eye height is blind. |
 | **Memory span** | `5` | Seconds a lost target is remembered — what makes an agent walk to where you *were*. The `investigate` goal has nothing to act on without it. |
 | **Reaction time** | `0.25` | Seconds of continuous visibility before a target counts as *noticed*, so an agent does not react the frame a pixel of you clears a doorway. |

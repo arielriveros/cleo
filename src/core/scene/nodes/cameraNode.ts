@@ -11,6 +11,8 @@ import type { NodeType } from "./nodeType";
 /** See {@link CameraNode.seeThrough}. */
 export interface CameraSeeThrough {
     active: boolean;
+    /** The collision layers seen through: the meshes of Colliders on them are cut (a rig's See through). */
+    layers: number;
     /** World-space end of the hole: the rig's pivot, i.e. the player. */
     pivot: vec3;
     /** Hole radius, metres. */
@@ -54,11 +56,11 @@ export class CameraNode extends Node {
 
     /**
      * The see-through hole the renderer cuts while this camera is active (chunks/cameraHole.wgsl): the
-     * surfaces of opted-in nodes (`Node.cameraDither`) inside `radius` of the line from this camera to
-     * `pivot` are dithered away by up to `strength`. Written every frame by a CameraRig in `'dither'`
-     * collision mode; runtime state, never serialized.
+     * surfaces of the meshes a Collider on one of `layers` holds (and of foliage whose collision is on one),
+     * inside `radius` of the line from this camera to `pivot`, are dithered away by up to `strength`. Written
+     * every frame by a CameraRig that sees through something; runtime state, never serialized.
      */
-    public readonly seeThrough: CameraSeeThrough = { active: false, pivot: vec3.create(), radius: 1, strength: 0.85 };
+    public readonly seeThrough: CameraSeeThrough = { active: false, layers: 0, pivot: vec3.create(), radius: 1, strength: 0.85 };
 
     constructor(name: string, camera: Camera, id: string = uuidv4(), nodeType: NodeType = 'camera') {
         super(name, nodeType, id);

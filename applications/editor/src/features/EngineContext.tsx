@@ -115,7 +115,7 @@ import { impostorBillboardOf } from "../utils/foliageRules";
 import { idbGet, idbSet } from "@cleo/app-kit/utils/idb";
 import { EDITOR_CAMERA_MAP } from "@cleo/app-kit/engine/viewCameraMap";
 import { KEYS, libKey, inputMapKey, projectSettingsKey } from "../utils/storageKeys";
-import { ProjectSettings, DEFAULT_PROJECT_SETTINGS, parseProjectSettings, applyEngineRuntime, physicsBackendOverride } from "./options/projectSettings";
+import { ProjectSettings, DEFAULT_PROJECT_SETTINGS, parseProjectSettings, applyEngineRuntime, applyCollisionLayers, physicsBackendOverride } from "./options/projectSettings";
 import { getEditorPrefs, editorPrefsStore } from "./options/editorPrefs";
 import { setGizmoSnapSteps } from "@cleo/app-kit/gizmo/gizmoDrag";
 import { openScriptExternally } from "./options/scriptOpener";
@@ -1214,6 +1214,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const engine = instanceRef.current;
     if (engine) applyEngineRuntime(engine as any, projectSettings.engine, AudioManager.Instance.mixer);
   }, [projectSettings.engine]);
+  // Likewise the collision layers' names (Options ▸ Project ▸ Layers), which scripts look layers up by.
+  useEffect(() => {
+    const engine = instanceRef.current;
+    if (engine) applyCollisionLayers(engine as any, projectSettings.collisionLayers);
+  }, [projectSettings.collisionLayers]);
 
   // Push edits straight into the running system, so Play picks up a rebind with no rebuild — and
   // install the editor's own camera map as an OVERLAY, which is never serialized into a build.
@@ -6314,6 +6319,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
           instanceRef.current = engine;
           applyEngineRuntime(engine as any, projectSettingsRef.current.engine, AudioManager.Instance.mixer);
+          applyCollisionLayers(engine as any, projectSettingsRef.current.collisionLayers);
           instanceRef.current.isPaused = false;
 
           CleoEngine.eventEmitter.on('SCENE_CHANGED', bridge);

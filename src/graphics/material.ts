@@ -1262,6 +1262,11 @@ export interface FoliageCollision {
     depth?: number;
     /** Shape centre above the instance base. Defaults to half the height (or the radius for a sphere). */
     offsetY?: number;
+    /**
+     * The collision layer its bodies are on (one bit, collisionLayers.ts). Absent: Default. A camera rig that
+     * sees through it sees through these instances: its boom passes them and the renderer cuts them.
+     */
+    layer?: number;
 }
 
 /** Marker stamped on a rule whose `density` is expressed in instances per square metre. */
@@ -1360,11 +1365,6 @@ export interface TerrainFoliageRule {
     cullDistance?: number;
     /** Rasterize these instances into the shadow cascades. Off by default: one instanced draw per cell per cascade. */
     castShadows?: boolean;
-    /**
-     * Mesh rules: dither these instances away where they block the view of a CameraRig in `'dither'`
-     * collision mode — the foliage form of `Node.cameraDither`. Off by default.
-     */
-    cameraDither?: boolean;
     /**
      * Wind response of a BILLBOARD rule, which has no material of its own (see `WindConfig`). A mesh
      * rule's plants answer the wind through their materials instead.

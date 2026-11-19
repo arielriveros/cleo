@@ -368,7 +368,7 @@ function linkedCopy(asset: any, key: string, name: string, position: number[], y
 
 const staticBody = (shapes: any[]) => ({
   mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1],
-  friction: 0.3, restitution: 0, simulatePhysics: true, cameraCollision: true, groundProbeDistance: 0, motionSmoothing: 0,
+  friction: 0.3, restitution: 0, simulatePhysics: true, groundProbeDistance: 0, motionSmoothing: 0,
   shapes,
 })
 const cylinder = (radius: number, height: number, offset: number[]) =>

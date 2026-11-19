@@ -17,8 +17,9 @@ export interface ContactSource {
 }
 
 /**
- * Work around each substep, the same on the main thread and in the physics worker (the character contact rule,
- * physics/characterContacts.ts): `begin` once before a frame's substeps, `before`/`after` around each one.
+ * Work around each substep, the same on the main thread and in the physics worker (the slope hold,
+ * physics/slopeHold.ts, and the character contact rule, physics/characterContacts.ts): `begin` once before a
+ * frame's substeps, `before`/`after` around each one.
  */
 export interface SubstepHooks {
     begin(world: PhysicsWorld): void;

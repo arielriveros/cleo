@@ -5,13 +5,14 @@ import type { PhysicsWorld } from '../pal/world';
 import { applyBuoyancy, floats, type BuoyancyVolume } from '../buoyancy';
 import { buoyancyVolumeFromSpec, type WaterSpec } from '../waterSurface';
 import { CharacterContactRule, type ContactBodyInfo } from '../characterContacts';
+import { SlopeHold, type SlopeHoldRequest } from '../slopeHold';
 import type { FromWorker, Snapshot, StepMessage, ToWorker } from './protocol';
 import { CONTACT_ROW } from './protocol';
 
 // The physics worker's half: a copy of the main thread's world on the same backend (its WorldReplica, see
 // pal/replication.ts), kept in step with it by the messages in protocol.ts, stepped exactly as
-// PhysicsSystem's inline executor steps (equal substeps, buoyancy per substep, the character contact rule around
-// each), and reported back as a
+// PhysicsSystem's inline executor steps (equal substeps, buoyancy per substep, the slope hold and the character
+// contact rule around each), and reported back as a
 // snapshot. Pure — no `self`, no postMessage — so tests run it in-process (ports.ts LoopbackPort) and compare
 // it with the inline step. Imports only physics leaf modules and the backends' own libraries: a worker must
 // not pull in the engine barrel (howler needs `window`).
@@ -32,6 +33,10 @@ export class PhysicsWorkerCore {
     private _waiting: Promise<unknown> | null = null;
     private readonly _characters = new CharacterContactRule();
     private readonly _characterList: { handle: BodyHandle; mass: number }[] = [];
+    private readonly _slopeHold = new SlopeHold();
+    private readonly _holdList: SlopeHoldRequest[] = [];
+    /** Every character's handle by its slot, as `_watchCharacters` last found them: what a step's holds name. */
+    private readonly _characterSlots = new Map<number, BodyHandle>();
 
     constructor(backend: PhysicsBackendKind = 'cannon') {
         this._replica = this._replicaOf(backend);
@@ -85,12 +90,35 @@ export class PhysicsWorkerCore {
     private _watchCharacters(world: PhysicsWorld): void {
         const list = this._characterList;
         list.length = 0;
+        this._characterSlots.clear();
         for (const h of world.bodies()) {
             const f = this._replica.floater(h);
-            if (f?.character) list.push({ handle: h, mass: f.mass });
+            if (!f?.character) continue;
+            list.push({ handle: h, mass: f.mass });
+            const slot = this._replica.slotOf(h);
+            if (slot !== undefined) this._characterSlots.set(slot, h);
         }
         this._characters.watch(list);
     }
+
+    /** The slope holds a step asks for ([slot, cos of the limit] per body), on the characters it names. */
+    private _watchHolds(holds: readonly number[] | undefined): void {
+        const list = this._holdList;
+        list.length = 0;
+        if (holds) for (let i = 0; i + 1 < holds.length; i += 2) {
+            const handle = this._characterSlots.get(holds[i]);
+            const f = handle !== undefined ? this._replica.floater(handle) : undefined;
+            if (handle !== undefined && f) list.push({ handle, mass: f.mass, cosLimit: holds[i + 1] });
+        }
+        this._slopeHold.hold(list);
+    }
+
+    private readonly _heldGravity = (h: BodyHandle) => this._slopeHold.gravityOf(h);
+    /** What a held body can stand on: not a trigger, not a body the solver ignores (as PhysicsSystem tells). */
+    private readonly _solid = (h: BodyHandle): boolean => {
+        const f = this._replica.floater(h);
+        return !f || (!f.isTrigger && f.collisionResponse);
+    };
 
     private readonly _contactInfo = (h: BodyHandle): ContactBodyInfo | undefined => this._replica.floater(h);
 
@@ -147,10 +175,16 @@ export class PhysicsWorkerCore {
         world.profile = msg.profile;
         const start = performance.now();
         if (msg.substeps > 0 && msg.dt > 0) {
-            const h = msg.dt / msg.substeps, rule = this._characters;
-            // The character contact rule, as InlineExecutor runs it (physics/characterContacts.ts).
+            const h = msg.dt / msg.substeps, rule = this._characters, hold = this._slopeHold;
+            // The slope hold and the character contact rule, as InlineExecutor runs them (physics/slopeHold.ts,
+            // physics/characterContacts.ts): the rule reads what a step added past the gravity it applied.
             this._watchCharacters(world);
-            for (let i = 0; i < msg.substeps; i++) { rule.before(world); world.step(h); rule.after(world, h, this._contactInfo); }
+            this._watchHolds(msg.holds);
+            for (let i = 0; i < msg.substeps; i++) {
+                hold.before(world); rule.before(world);
+                world.step(h);
+                hold.after(world, this._solid); rule.after(world, h, this._contactInfo, this._heldGravity);
+            }
             if (msg.profile) world.readProfile(stats);
         }
         stats.stepMs = performance.now() - start;

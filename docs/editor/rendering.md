@@ -376,7 +376,7 @@ Distance** is on. Spot and point lights have their own groups below.
 | **Far Distance** | Landscape-scale shadows past **Distance**: the terrain and large casters only, from one extra layer redrawn only as the camera travels or something in it changes. 0 = off. |
 | **Filter** | 3×3 PCF or 16-tap rotated Poisson (softer at wide radii). |
 | **Softness / Strength / Blend** | Softness is the filter radius in shadow texels (0 = one hard tap). Strength is how dark a shadowed pixel goes. Blend cross-fades the seam between cascades; 0 leaves a visible line. |
-| **Depth Bias / Normal Bias** | Acne versus peter-panning. Depth Bias is in *world* units and rescaled per cascade, so one value means the same in all of them. For acne on steeply lit surfaces raise Normal Bias first: it moves the lookup across the map rather than pulling the surface toward the light. |
+| **Depth Bias / Normal Bias** | Acne versus peter-panning (a shadow starting away from what casts it). Depth Bias is in *world* units and rescaled per cascade, so one value means the same in all of them; spot and point lights use it too. The default is small (5 mm), because solid casters are drawn with their front faces culled and a lit surface never meets its own depth in the map. Normal Bias is in shadow texels, and a surface takes more of it the more it turns from the light: none facing the light, all of it edge-on. For acne on steeply lit surfaces raise Normal Bias first: it moves the lookup across the map rather than pulling the surface toward the light. Two-sided casters (cut-out cards, double-sided materials, foliage) carry a slope bias of their own. Scenes saved before 2026-11-19 on the old defaults (3 cm and 1.5) load with the new ones. |
 | **Stabilize** | Snaps the frustum to texels so shadows stop crawling as the camera moves. |
 | **Stagger Updates** | Updates distant cascades on their own frames: cascade *i* every 2^*i* frames, never two on one frame. |
 | **Caster Pad** | How far toward the light, past a cascade's own bounds, its depth pass still gathers casters — so something outside the view still throws its shadow into it. |
@@ -417,7 +417,7 @@ Shadows **Enabled** switch turns these off too.
 |---|---|
 | **Resolution** | One map per casting spot light, 256 to 2K. |
 | **Max Dist** | The farthest a spot shadow reaches; a light with a shorter range stops at its range. |
-| **Bias** | In *depth* units, not world units — perspective depth does not convert linearly — so it is a small number. |
+| **Bias** | An extra bias in *depth* units, on top of the Shadows section's Depth Bias (which spot lights use as a world-unit step toward the light). 0 by default. Perspective depth is not linear, so a depth-unit bias grows with the square of the distance: the old default of 0.0015 put shadows about 13 cm away from their casters at 3 m. |
 
 A one-sided [area light](node-inspector.md#light) takes a spot map too, facing its emitting side, 75°
 each way, and counts against the same cap.
@@ -439,7 +439,7 @@ these off too.
 |---|---|
 | **Resolution** | **Per cube face**, 256 to 1K — six times the memory it looks like. |
 | **Max Dist** | The farthest a point shadow reaches; a light with a shorter range stops at its range. |
-| **Bias** | In depth units, as for spot shadows. |
+| **Bias** | An extra bias in depth units, as for spot shadows. 0 by default. |
 
 A two-sided area light takes a cube from its centre, against the same cap.
 

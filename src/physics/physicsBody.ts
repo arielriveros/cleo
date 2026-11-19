@@ -41,8 +41,6 @@ export interface PhysicsBodyOptions {
     collisionResponse?: boolean;
     /** Where the mass sits. Default 'origin' (the node origin); 'colliders' puts it at their centre. */
     centerOfMass?: 'colliders' | 'origin';
-    /** Whether a camera rig's collision probe treats it as solid. Default true. */
-    cameraCollision?: boolean;
     /** May be woken by contact when the engine has put it to sleep. Default true. */
     allowSleep?: boolean;
     /** Advisory sleep thresholds (m/s, s). Backend defaults when unset. */
@@ -125,10 +123,6 @@ export class BodyQuat {
 export class PhysicsBody {
     private readonly _name: string;
     private readonly _owner: Node | null;
-    /** Whether a camera rig's collision probe treats it as solid (see cameraRayFilter.ts). */
-    public cameraCollision: boolean;
-    /** A 'dither' camera rig sees through it (foliage rules that ask for it). */
-    public cameraDither = false;
 
     /** @internal What the body is made of: handed to the world when it is added. */
     protected readonly _desc: BodyDesc & { colliders: ColliderDesc[] };
@@ -149,7 +143,6 @@ export class PhysicsBody {
     constructor(options: PhysicsBodyOptions = {}) {
         this._name = options.name ?? 'body';
         this._owner = options.owner ?? null;
-        this.cameraCollision = options.cameraCollision ?? true;
         const p = options.position ?? [0, 0, 0], q = options.quaternion ?? [0, 0, 0, 1];
         const v3 = (a: ArrayLike<number> | undefined) => (a ? [a[0], a[1], a[2]] as const : undefined);
         this._desc = {

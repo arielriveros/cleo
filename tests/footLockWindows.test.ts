@@ -41,7 +41,47 @@ function stepClip(): Animation {
     };
 }
 
+/**
+ * Two seconds of a stair climb with its rise kept: the left foot stands on a tread at 0 until 0.6 s, swings up
+ * over 0.3 s (to 0.4) and stands on the next tread, 0.25 higher, from 0.9 to 1.6 s, then lifts again.
+ */
+function stairClip(): Animation {
+    const times: number[] = [], foot: number[] = [];
+    for (let k = 0; k <= 80; k++) {
+        const t = k / 40;
+        times.push(t);
+        const h = t <= 0.6 ? 0
+            : t <= 0.9 ? 0.25 * (t - 0.6) / 0.3 + 0.6 * Math.sin(Math.PI * (t - 0.6) / 0.3) * 0.25
+            : t <= 1.6 ? 0.25
+            : 0.25 + (t - 1.6) * 0.8;
+        foot.push(0.1, -0.9 + h, 0);
+    }
+    return {
+        name: 'stairs',
+        samplers: [{ input: times, output: foot, interpolation: 'LINEAR' }],
+        channels: [{ samplerIndex: 0, targetNodeIndex: FOOT_L, targetPath: 'translation' }],
+    };
+}
+
 describe('foot-lock windows', () => {
+    it('finds every stance of a stair climb against its own height (ground: stance)', () => {
+        // Against the clip's lowest, only the first tread is "down".
+        const flat = detectFootLockWindows(stairClip(), skin(), { heelLift: 0.03 })['foot.L'];
+        expect(flat).toHaveLength(1);
+        const w = detectFootLockWindows(stairClip(), skin(), { heelLift: 0.03, ground: 'stance' })['foot.L'];
+        expect(w).toHaveLength(2);
+        expect(w[0][0]).toBeCloseTo(0, 5);
+        expect(w[0][1]).toBeGreaterThan(0.55);
+        expect(w[0][1]).toBeLessThan(0.66);
+        // The upper tread: from the landing (within contact of it) to the lift.
+        expect(w[1][0]).toBeGreaterThan(0.8);
+        expect(w[1][0]).toBeLessThan(0.92);
+        expect(w[1][1]).toBeGreaterThan(1.58);
+        expect(w[1][1]).toBeLessThan(1.66);
+        // A foot standing still on the flat is down throughout either way.
+        expect(detectFootLockWindows(stepClip(), skin(), { heelLift: 0.03, ground: 'stance' })['foot.R']).toEqual([[0, 1]]);
+    });
+
     it('keys a humanoid foot by its slot, anything else by its name', () => {
         expect(footLockKey('mixamorig1:LeftFoot')).toBe('foot.L');
         expect(footLockKey('RightFoot')).toBe('foot.R');

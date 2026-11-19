@@ -1,5 +1,6 @@
 import { mat4, vec3, quat } from 'gl-matrix';
 import { PhysicsBody } from './physicsBody';
+import { ALL_LAYERS, LAYER } from './collisionLayers';
 import type { JointHandle } from './pal/types';
 import type { JointSpec } from './physicsSystem';
 import { AnimatedModel } from '../animation/animatedModel';
@@ -75,8 +76,14 @@ export const RAGDOLL_DEFAULTS: Required<Omit<RagdollOptions, 'inheritVelocity' |
     impulse: [0, 0.3, -1.2],
 };
 
-/** Ragdoll bodies' collision group (the static world is group 1). Matches `overlap.ts`. */
-const RAGDOLL_GROUP = 2;
+/** Ragdoll bodies' collision layer (collisionLayers.ts): layer 2, Ragdoll. */
+const RAGDOLL_GROUP = LAYER.RAGDOLL;
+/**
+ * What a ragdoll bone collides with: every layer but the other bones' own, unless the ragdoll collides with
+ * itself. Every layer, not just Default: a corpse must land on stairs, pillars and props whatever layer the
+ * level put them on.
+ */
+const boneMask = (selfCollision: boolean | undefined): number => selfCollision ? ALL_LAYERS : ALL_LAYERS & ~RAGDOLL_GROUP;
 /** Fastest a part may start, so a teleport or a hitch in the last frame cannot launch a corpse. */
 const MAX_HANDOFF_SPEED = 5;
 /** Fastest a part may start moving UP (m/s). */
@@ -274,10 +281,10 @@ export class Ragdoll {
                 quaternion: q,
                 linearDamping: cfg.linearDamping,
                 angularDamping: cfg.angularDamping,
-                // Bones live in group 2. The mask includes the static world (group 1); adding group 2
+                // Bones live on the Ragdoll layer and collide with every other; the Ragdoll layer too
                 // enables bone-vs-bone collision.
                 group: RAGDOLL_GROUP,
-                mask: cfg.selfCollision ? (1 | RAGDOLL_GROUP) : 1,
+                mask: boneMask(cfg.selfCollision),
             });
             body.addCollider({ shape: { kind: 'sphere', radius } });
             if (inheritVel) body.velocity.set(inheritVel[0], inheritVel[1], inheritVel[2]);
@@ -411,7 +418,7 @@ export class Ragdoll {
                 // seconds after everything else is still. Damping their spin costs nothing visible.
                 angularDamping: lp.mass < 0.02 ? Math.max(profile.angularDamping, 0.6) : profile.angularDamping,
                 group: RAGDOLL_GROUP,
-                mask: profile.selfCollision ? (1 | RAGDOLL_GROUP) : 1,
+                mask: boneMask(profile.selfCollision),
             });
             const r = lp.radius * scale, len = lp.length * scale, depth = lp.depth * scale;
             switch (lp.part.shape) {
@@ -523,7 +530,8 @@ export class Ragdoll {
             const x = body.position.x, z = body.position.z;
             let hit = null;
             try {
-                hit = this._physics.raycast([x, hiY + 1, z], [x, loY - 1, z], { groundOnly: true });
+                // Only what the part would land on: a stair ramp meant for characters' capsules is not.
+                hit = this._physics.raycast([x, hiY + 1, z], [x, loY - 1, z], { groundOnly: true, collidingWith: body });
             } catch { hit = null; }
             if (hit) lift = Math.max(lift, hit.point[1] - loY);
         }

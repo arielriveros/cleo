@@ -130,7 +130,7 @@ The game's hold on the mouse and keyboard in Play, in the viewport and in a Play
 ## Project
 
 What belongs to this game and travels with it in a project bundle: its name, the scene it starts in,
-how a published build presents itself, and the input map.
+how a published build presents itself, the input map and the names of its collision layers.
 
 ### General
 
@@ -173,3 +173,17 @@ game must agree on these, or a player's saves would vanish with an update.
 
 The action map editor; see [Input](input.md). While this page is open the viewport previews the
 on-screen touch controls.
+
+### Layers
+
+The names of the project's [collision layers](physics.md#layers).
+
+**Collision layers** — the names of its 16 layers, one table for its 3D and its 2D physics alike. They are what every layer picker shows: a Collider's, a Trigger's or a 2D body's **Layer** and **Collides
+with**, a camera rig's **Blocked by** and **See through**, foot placement's **Trace layers**, and what a 2D AI
+**Sees**. They are also what scripts find layers by: `physics.layer('Enemies')`, or `physics2D.layer('Enemies')`
+in a 2D scene.
+
+- The first four are the engine's and cannot be renamed: **Default** (tilemaps and everything that does not
+  say otherwise), **Ragdoll**, **See Through** and **No Camera**.
+- An unnamed layer shows as *Layer N*.
+- Renaming a layer changes no body: bodies store the layer, not its name.

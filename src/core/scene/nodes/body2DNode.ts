@@ -15,9 +15,10 @@ export type Body2DKind = 'solid' | 'oneWay';
  * Mass above 0: it falls (`gravityScale` times the 2D world's gravity) and lands on the tilemaps' solid
  * and one-way tiles and on other colliders, pushed by nothing but what a script gives its `velocity2D`.
  *
- * Its `layer` is the collision layers it is in, its `mask` the layers it collides with: two colliders
- * collide when each one's mask holds a layer of the other. Tilemaps are on layer 1. A Trigger looking for
- * its layer sees it.
+ * Its `layer` is the collision layer it is on, its `mask` the layers it collides with: two colliders collide
+ * when each one's mask holds the other's layer. The layers are the project's, named once for its 2D and 3D
+ * physics alike (src/physics/collisionLayers.ts); tilemaps are on Default (layer 1). A Trigger looking for its
+ * layer sees it.
  */
 export class Body2DNode extends Node {
     public size: [number, number] = [2, 0.5];
@@ -28,7 +29,7 @@ export class Body2DNode extends Node {
     public mass: number = 0;
     /** How strongly the 2D world's gravity pulls it, when it has mass. */
     public gravityScale: number = 1;
-    /** The collision layers it is in (bits). */
+    /** The collision layer it is on: one bit (layer 1, Default, is 1). */
     public layer: number = 1;
     /** The layers it collides with (bits); -1 = all. */
     public mask: number = -1;

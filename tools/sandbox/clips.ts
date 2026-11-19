@@ -14,7 +14,12 @@
 //               its mirror, so a stop can start on either foot (the machine picks by the run's phase);
 //   start       held in place by the travel the BODY makes as it accelerates into a sprint, and played at the rate
 //               that matches the clip's push-off to the Character's acceleration;
-//   run turn    a turn (yaw onto the Pivot, scaled to 180) whose travel is held in place.
+//   run turn    a turn (yaw onto the Pivot, scaled to 180) whose travel is held in place;
+//   stairs      a stair climb or descent, in place on the ground already, its RISE taken out of the hips (the
+//               capsule climbs the ramp over the flight) and the hips set so the planted feet stand at sole height
+//               on average; its foot-lock windows found against each stance's own height. Checked first: a clip
+//               whose feet do not step a riser each step, or whose last frame does not match its first, is left
+//               out with a warning (`stairCheck`), and the flight plays the walk blend instead.
 //
 // "Held in place" is `holdInPlace` here, not the engine's bakeInPlace. That one also takes the YAW out of the hips,
 // with a swing-twist split, and these clips turn the pelvis while they bend (the hard landing twists 44 degrees
@@ -28,10 +33,12 @@
 import { mat4, quat, vec3 } from 'gl-matrix'
 import type { Animation, Skin } from '../../src/animation/animatedModel'
 import { mirrorClip, timeScaleClip, trimClip } from '../../src/animation/clipEdit'
-import { detectFootLockWindows, shrinkFootLockSpans } from '../../src/animation/footLockWindows'
-import { boneOf, clipSeconds, hipsYaw, measure, travelAcceleration, type Measured } from './measure'
+import { detectFootLockWindows, shrinkFootLockSpans, type FootLockWindows } from '../../src/animation/footLockWindows'
+import { boneOf, clipSeconds, hipsYaw, measure, poser, travelAcceleration, type Measured } from './measure'
+import { repairDescent, type DescentRepair } from './descent'
+import { alignKnees, kneeSpacing } from './legs'
 
-export type ClipKind = 'loop' | 'locomotion' | 'turn' | 'air' | 'oneShot' | 'stop' | 'start' | 'runTurn'
+export type ClipKind = 'loop' | 'locomotion' | 'turn' | 'air' | 'oneShot' | 'stop' | 'start' | 'runTurn' | 'stairs'
 
 export interface ClipRole {
     /** The clip's name in the project (what states and blend-space samples name). */
@@ -41,6 +48,10 @@ export interface ClipRole {
     kind: ClipKind
     /** A turn: the angle it must turn by (positive = left), within 15 degrees. */
     turn?: number
+    /** Stairs: +1 a climb, -1 a descent. */
+    climb?: 1 | -1
+    /** Stairs: a descent whose feet do not step down may have its legs rebuilt (descent.ts) rather than be left out. */
+    repair?: boolean
     optional?: boolean
 }
 
@@ -69,7 +80,35 @@ export const ROLES: ClipRole[] = [
     { name: 'LandSoft', file: 'Falling To Landing', kind: 'air' },
     { name: 'LandHard', file: 'Hard Landing', kind: 'air' },
     { name: 'LandRoll', file: 'Falling To Roll', kind: 'air' },
+    // Stairs, walking and running, up and down: each played on the flight its direction climbs (machine.ts).
+    { name: 'StairsUpWalk', file: 'Ascending Stairs', kind: 'stairs', climb: 1, optional: true },
+    { name: 'StairsUpRun', file: 'Running Ascending Stairs', kind: 'stairs', climb: 1, optional: true },
+    // The pack's descents keep their feet on the floor while the hips sink: their legs are rebuilt (descent.ts).
+    { name: 'StairsDownWalk', file: 'Descending Stairs', kind: 'stairs', climb: -1, optional: true, repair: true },
+    { name: 'StairsDownRun', file: 'Running Descending Stairs', kind: 'stairs', climb: -1, optional: true, repair: true },
 ]
+
+/** What a stair clip was measured to be (`stairCheck`), on the clip as it plays. */
+export interface StairStats {
+    /** Steps a second: one foot onto the next tread each step. */
+    stepsPerSecond: number
+    /** Its riser: how far each step rises (or falls), m. */
+    rise: number
+    /** Ground a planted foot covers under the body per step, m: its stride as authored. */
+    step: number
+}
+
+/** A creep up or down the stairs: the walk at this share of its pace (it clears the machine's "moving" gate). */
+export const STAIR_CREEP = 0.6
+/**
+ * How far each stair clip's knees are turned toward straight ahead (about the hip-ankle line, the feet left where
+ * they are): the pack's walking climb splays them (23 cm apart over hips 16 cm apart, the flat walk 18).
+ */
+export const STAIR_KNEE_IN = 0.75
+/** How much higher than sole height the stair clips' planted feet stand on average: IK can only lower the pelvis. */
+const STAIR_HIPS_MARGIN = 0.02
+/** The least a stair clip must step up (or down) each step, m, and how closely its ends must match. */
+const STAIR_MIN_RISE = 0.1, STAIR_LOOP_TOLERANCE = 0.06
 
 /** A clip ready to store, and what was measured on it. */
 export interface MadeClip {
@@ -87,12 +126,18 @@ export interface MadeClip {
     rate?: number
     /** The landing roll: the share of it at which it is up enough to hand back to the run. */
     handOver?: number
+    /** Stairs: the clip's steps (see `stairCheck`). */
+    stairs?: StairStats
+    /** Stairs: its legs were rebuilt (descent.ts). */
+    repaired?: boolean
 }
 
 /** What the build decides that the clips cannot measure. */
 export interface ClipOptions {
     /** The sprint's speed, m/s: what the start accelerates to (the sprint clip plays faster to match it). */
     sprint: number
+    /** The ankle's height over the sole at rest, m: where a planted foot's ankle stands over its ground. */
+    footHeight: number
 }
 
 /** The lean at full weight, degrees: the whole body tilted about the ground under it (see `leanClip`). */
@@ -306,6 +351,109 @@ function rollHandOver(skin: Skin, clip: Animation): { handOver: number; travel: 
     return { handOver: Math.min(0.95, t[at] / T), travel: Math.hypot(o[at * 3] - o[0], o[at * 3 + 2] - o[2]) }
 }
 
+/** A stair clip as `stairCheck` reads it: usable or not (and why), its windows, its steps. */
+export interface StairReading {
+    ok: boolean
+    reason?: string
+    /** Foot-lock windows, against each stance's own height (`ground: 'stance'`), seconds. */
+    windows: FootLockWindows
+    /** Every stance in time order: its foot, when it starts (s) and the ankle's height in it (m). */
+    stances: { foot: string; t: number; y: number }[]
+    /** The hips' rise over the clip (negative going down), m. */
+    hipsRise: number
+    stats: StairStats
+}
+
+/**
+ * Read a stair clip with its rise kept (the source as prepare.mjs leaves it): its stances against their own
+ * heights, and whether it really climbs (or descends) a riser each step and loops. A clip that keeps its feet on
+ * one level while its hips sink, or whose last frame is not its first, is not one: it would fold the legs over
+ * every cycle and snap them straight at the loop.
+ */
+export function stairCheck(skin: Skin, clip: Animation, climb: 1 | -1): StairReading {
+    const T = clipSeconds(clip)
+    const windows = detectFootLockWindows(clip, skin, { heelLift: FOOT_LOCK_HEEL_LIFT, ground: 'stance' })
+    const pose = poser(skin, clip)
+    const hips = boneOf(skin, 'Hips')
+    const ankle: Record<string, number> = { 'foot.L': boneOf(skin, 'LeftFoot'), 'foot.R': boneOf(skin, 'RightFoot') }
+    const toe: Record<string, number> = { 'foot.L': boneOf(skin, 'LeftToeBase'), 'foot.R': boneOf(skin, 'RightToeBase') }
+    const stances: { foot: string; t: number; y: number }[] = []
+    for (const [foot, spans] of Object.entries(windows)) {
+        if (ankle[foot] === undefined) continue
+        for (const [a, b] of spans) stances.push({ foot, t: a, y: pose((a + b) / 2).at(ankle[foot])[1] })
+    }
+    stances.sort((x, y) => x.t - y.t)
+    const hipsRise = pose(T).at(hips)[1] - pose(0).at(hips)[1]
+    // One step: the next foot down, onto the next tread.
+    const steps: number[] = []
+    for (let k = 1; k < stances.length; k++) if (stances[k].foot !== stances[k - 1].foot) steps.push(stances[k].y - stances[k - 1].y)
+    const rise = steps.length ? steps.reduce((sum, d) => sum + Math.abs(d), 0) / steps.length : 0
+    const perCycle = rise > 0 ? Math.max(1, Math.round(Math.abs(hipsRise) / rise)) : 2
+    // The ground a planted foot covers under the body: its ball's travel over its windows, per step.
+    let travel = 0, time = 0
+    for (const [foot, spans] of Object.entries(windows)) for (const [a, b] of spans) {
+        if (toe[foot] === undefined || b - a < 0.05) continue
+        const p = pose(a).at(toe[foot]), q = pose(b).at(toe[foot])
+        travel += Math.hypot(q[0] - p[0], q[2] - p[2]); time += b - a
+    }
+    const stats: StairStats = { stepsPerSecond: perCycle / T, rise, step: time > 0 ? travel / time * T / perCycle : 0 }
+    const reading = { windows, stances, hipsRise, stats }
+    const fail = (reason: string): StairReading => ({ ok: false, reason, ...reading })
+    const dir = climb > 0 ? 'up' : 'down'
+    if (stances.length < 2 || !steps.length) return fail(`its feet plant ${stances.length} time(s): no step ${dir} to read`)
+    const wrong = steps.find(d => d * climb < STAIR_MIN_RISE)
+    if (wrong !== undefined) {
+        const heights = stances.map(x => (x.y * 100).toFixed(0)).join(', ')
+        return fail(`its feet do not step ${dir} a riser each step (a step of ${(wrong * 100).toFixed(0)} cm; the feet plant at ${heights} cm)`)
+    }
+    if (hipsRise * climb < STAIR_MIN_RISE) return fail(`its hips ${hipsRise > 0 ? 'rise' : 'fall'} ${(Math.abs(hipsRise) * 100).toFixed(0)} cm over the clip`)
+    // The loop: each leg as long at the end as at the start (the rise does not change that).
+    const reach = (t: number, foot: string) => {
+        const p = pose(t), h = p.at(hips), f = p.at(ankle[foot])
+        return Math.hypot(h[0] - f[0], h[1] - f[1], h[2] - f[2])
+    }
+    for (const foot of Object.keys(ankle)) {
+        const d = Math.abs(reach(T, foot) - reach(0, foot))
+        if (d > STAIR_LOOP_TOLERANCE) return fail(`its last frame does not match its first (the ${foot === 'foot.L' ? 'left' : 'right'} leg ${(d * 100).toFixed(0)} cm off)`)
+    }
+    return { ok: true, ...reading }
+}
+
+/**
+ * A stair clip in place: the hips' rise over the clip taken out of them linearly (the step-to-step bob stays: the
+ * capsule climbs the ramp at an even pace), any ground travel too, and the whole pose raised or lowered so the
+ * planted ankles stand at `footHeight` over the capsule's ground on average, a touch high (foot IK lowers the
+ * pelvis for a foot that must reach down, but cannot raise it).
+ */
+function stairInPlace(skin: Skin, clip: Animation, reading: StairReading, footHeight: number): Animation {
+    const out = plain(clip)
+    const hips = boneOf(skin, 'Hips')
+    const ch = out.channels.find(c => c.targetNodeIndex === hips && c.targetPath === 'translation')
+    if (!ch) return out
+    const s = out.samplers[ch.samplerIndex]
+    const o = s.output as number[]
+    const T = clipSeconds(clip)
+    const n = s.input.length - 1
+    const dx = o[n * 3] - o[0], dz = o[n * 3 + 2] - o[2]
+    for (let k = 0; k <= n; k++) {
+        const f = s.input[k] / T
+        o[k * 3] -= dx * f
+        o[k * 3 + 1] -= reading.hipsRise * f
+        o[k * 3 + 2] -= dz * f
+    }
+    // Where the planted ankles stand now, on average over every window.
+    const pose = poser(skin, out)
+    const ankle: Record<string, number> = { 'foot.L': boneOf(skin, 'LeftFoot'), 'foot.R': boneOf(skin, 'RightFoot') }
+    let sum = 0, count = 0
+    for (const [foot, spans] of Object.entries(reading.windows)) for (const [a, b] of spans) {
+        if (ankle[foot] === undefined) continue
+        for (let t = a; t <= b; t += 1 / 60) { sum += pose(t).at(ankle[foot])[1]; count++ }
+    }
+    const shift = count ? footHeight + STAIR_HIPS_MARGIN - sum / count : 0
+    for (let k = 0; k <= n; k++) o[k * 3 + 1] += shift
+    return out
+}
+
 /** The bones a look turns, hips up: the Look bone mask. */
 export const LOOK_BONES = ['Spine', 'Spine1', 'Spine2', 'Neck', 'Head']
 /** The share of a look each of `LOOK_BONES` turns (they add up to 1: the head looks the whole way). */
@@ -416,7 +564,8 @@ function removeArc(skin: Skin, clip: Animation, from: number, to: number): void 
  * Condition every role's clip. `raw` maps a file stem to its prepared clip (travel kept). Returns the clips to
  * store, by project clip name.
  */
-export function makeClips(skin: Skin, raw: Map<string, Animation>, warn: (s: string) => void, options: ClipOptions): Map<string, MadeClip> {
+export function makeClips(skin: Skin, raw: Map<string, Animation>, warn: (s: string) => void, options: ClipOptions,
+    note: (s: string) => void = () => {}): Map<string, MadeClip> {
     const out = new Map<string, MadeClip>()
     const add = (clip: Animation, role: ClipRole | null, extra: Partial<MadeClip> = {}) => {
         if (out.has(clip.name)) throw new Error(`two clips are both called ${clip.name}`)
@@ -451,6 +600,38 @@ export function makeClips(skin: Skin, raw: Map<string, Animation>, warn: (s: str
         }
         const m = measure(skin, source)
         if (role.kind === 'start') continue   // after the loop: it needs the Character's acceleration
+        if (role.kind === 'stairs') {
+            // Read with its rise kept: its stances stand at their own heights only there.
+            let stairSource = source
+            let reading = stairCheck(skin, source, role.climb!)
+            let repaired: DescentRepair | null = null
+            if (!reading.ok && role.repair) {
+                // A descent whose feet never step down: its legs rebuilt, the rest of it kept.
+                repaired = repairDescent(skin, source)
+                if (repaired) {
+                    const again = stairCheck(skin, repaired.clip, role.climb!)
+                    note(`${role.file}.fbx: ${reading.reason}; its legs are rebuilt (descent.ts: plants at ${(repaired.plant * 100).toFixed(0)}% and ${((repaired.plant + 0.5) * 100).toFixed(0)}%, `
+                        + `a ${(repaired.riser * 100).toFixed(0)} cm riser, a ${(repaired.stride * 100).toFixed(0)} cm stride)${again.ok ? '' : `, and still fails: ${again.reason}`}`)
+                    if (again.ok) { stairSource = repaired.clip; reading = again }
+                }
+            }
+            if (!reading.ok) { warn(`${role.file}.fbx is left out: ${reading.reason}. Its flights play the walk blend instead.`); continue }
+            // Its knees turned in toward straight ahead: the feet, and so its windows, stay where they were.
+            const before = kneeSpacing(skin, stairSource)
+            stairSource = alignKnees(skin, stairSource, STAIR_KNEE_IN)
+            note(`${role.name}: knees ${(before * 100).toFixed(1)} cm apart on average, ${(kneeSpacing(skin, stairSource) * 100).toFixed(1)} once turned in`)
+            const clip = { ...named(stairInPlace(skin, stairSource, reading, options.footHeight), role.name), footLocks: reading.windows }
+            add(clip, role, { m, stairs: reading.stats, ...(repaired ? { repaired: true } : {}) })
+            // The creep: the walk at STAIR_CREEP of its pace, its windows stretched with it.
+            if (role.name.endsWith('Walk')) {
+                const slow = 1 / STAIR_CREEP
+                const footLocks: FootLockWindows = {}
+                for (const [k, spans] of Object.entries(reading.windows)) footLocks[k] = spans.map(([a, b]) => [a * slow, b * slow])
+                const creep = { ...named(timeScaleClip(clip, slow), role.name.replace(/Walk$/, 'Creep')), footLocks }
+                add(creep, null, { m: { ...m, seconds: m.seconds * slow }, stairs: { ...reading.stats, stepsPerSecond: reading.stats.stepsPerSecond * STAIR_CREEP } })
+            }
+            continue
+        }
         if (role.kind === 'turn') {
             const { clip, done } = splitTurn(skin, named(source, role.name), role.turn!)
             add(clip, role, { m, turnDone: done })
