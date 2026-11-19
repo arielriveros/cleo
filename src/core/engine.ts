@@ -51,8 +51,9 @@ interface CleoConfig {
      */
     worker?: 'off' | 'on' | 'auto';
     /**
-     * The physics engine to simulate with: 'cannon' (the default, and the only one implemented). Any other
-     * request runs on cannon with the reason logged; see `PhysicsSystem.backendFallbackReason`.
+     * The physics engine to simulate with: 'jolt' (the default), 'rapier' or 'cannon'. A request this build
+     * cannot run, or whose library fails to load, runs on cannon with the reason logged; see
+     * `PhysicsSystem.backendFallbackReason`.
      */
     backend?: string;
   }
@@ -406,6 +407,42 @@ export class CleoEngine {
     // the editor calls setScene on every tab switch, and per-scene AI state must not ride along.
     this._aiSystem.setScene(this._scene);
     this._scene.ai = this._aiSystem;
+  }
+
+  /**
+   * Let go of the scene, keeping the engine: the loop runs on with nothing to step or draw until
+   * {@link setScene}. The editor does this when it closes a project and opens another in the same window.
+   */
+  public releaseScene(): void {
+    this._dilation.clear();
+    this._dilation.base = 1;
+    this._physicsSystem.releaseScene();
+    this._aiSystem.clear();
+    this._scene = undefined as any;
+  }
+
+  /**
+   * Simulate with another physics backend from here on (a world cannot change engines, so this is a new
+   * PhysicsSystem): built and loaded on `backend`, given the old one's settings, bound to the scene if there is
+   * one, and the old one disposed. For a host that opens another project in the same engine. Resolves once the
+   * new world is running; a backend that cannot load falls back to cannon, as at startup.
+   */
+  public async replacePhysics(options: { backend?: string }): Promise<PhysicsSystem> {
+    const old = this._physicsSystem;
+    const next = new PhysicsSystem({ gravity: old.gravity, backend: options.backend });
+    next.maxSubsteps = old.maxSubsteps;
+    next.simulationRange = old.simulationRange;
+    next.profileStep = old.profileStep;
+    await next.load();
+    next.initialize();
+    next.setWorkerMode(old.workerMode);
+    this._physicsSystem = next;
+    old.dispose();
+    if (this._scene) next.scene = this._scene;
+    if (next.backendFallbackReason)
+      Logger.warn(`Physics runs on ${next.backend} instead of ${next.requestedBackend}: ${next.backendFallbackReason}`, 'Runtime');
+    if (next.capabilities) Logger.info(`Physics ready — ${describePhysicsCapabilities(next.capabilities)}`, 'Runtime');
+    return next;
   }
 
   public onResize(): void {

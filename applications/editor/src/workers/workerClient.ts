@@ -5,6 +5,7 @@
 import { runJob, ProjectJob, ProjectJobResult, PublishFiles, PlayerTemplates } from './projectJobs';
 import type { BundleData } from '../utils/bundle';
 import type { SimplifyBuffers } from '../utils/simplify';
+import { trackProjectWrite } from '../utils/projectLifecycle';
 
 interface Response {
   id: number;
@@ -107,7 +108,8 @@ export async function decimateGeometry(buffers: SimplifyBuffers, ratio: number):
 
 /** Persist a value to IndexedDB off the main thread. */
 export async function saveToStorage(key: string, payload: any): Promise<void> {
-  await dispatch({ kind: 'save', key, payload });
+  // Tracked: a project switch waits for every save under way before another project opens (projectLifecycle).
+  await trackProjectWrite(dispatch({ kind: 'save', key, payload }));
 }
 
 /** JSON.stringify off the main thread, returned as UTF-8 bytes ready to wrap in a Blob. */

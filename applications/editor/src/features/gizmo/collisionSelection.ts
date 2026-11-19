@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type EventEmitter from '@cleo/app-kit/utils/eventEmitter';
+import { onProjectClose } from '../../utils/projectLifecycle';
 
 /**
  * Which collision shape is being edited: one shape of one channel (body or trigger) of one node.
@@ -34,6 +35,8 @@ export const COLLISION_SHAPES_EDITED = 'COLLISION_SHAPES_EDITED';
 export const COLLISION_SHAPE_FRAME = 'COLLISION_SHAPE_FRAME';
 
 let current: CollisionShapeRef | null = null;
+// It names a node of the closed project's scene.
+onProjectClose(() => { current = null; });
 
 export function selectedCollisionShape(): CollisionShapeRef | null {
   return current;

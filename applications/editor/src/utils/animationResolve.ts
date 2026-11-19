@@ -16,6 +16,7 @@ import { loadSkin, type AnimationAsset, type StoredClip } from './animationAsset
 import { nodeByName, overridesFor, type RetargetOverride, type RigAsset } from './rigAssets'
 import { posesForRig, type PoseAsset } from './poseAssets'
 import { skinnedModelJsonOf } from './modelClips'
+import { onProjectClose } from '../utils/projectLifecycle';
 
 const toMat4 = (a: number[]) => {
   const m = mat4.create()
@@ -143,6 +144,9 @@ const warnedNoSkin = new Set<string>()
 
 /** Override sets already reported as naming a missing bone. Cleared with the cache. */
 const warnedMissingOverride = new Set<string>()
+
+// Keyed by the closed project's asset ids, which another project (another install of the same example) can reuse.
+onProjectClose(() => invalidateAnimationCache());
 
 /** Drop everything cached for one animation asset — call when its clips change or it is deleted. */
 export function invalidateAnimationCache(animationId?: string): void {

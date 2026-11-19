@@ -8,6 +8,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { lsKey, LS_KEYS } from '../../utils/lsScope';
+import { onProjectClose } from '../../utils/projectLifecycle';
 
 export interface ScriptBreakpoint {
   id: string;
@@ -92,6 +93,8 @@ export function parseBreakpoints(raw: string | null): ScriptBreakpoint[] {
 
 let list: ScriptBreakpoint[] | null = null;
 const listeners = new Set<() => void>();
+// Read from the open project's storage: another project opening in this window reads its own.
+onProjectClose(() => { list = null; for (const listener of listeners) listener(); });
 
 function storageKey(): string | null {
   try { return lsKey(LS_KEYS.scriptBreakpoints); } catch { return null; }

@@ -117,6 +117,12 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
     private readonly _pairCounts = new Map<string, number>();
     /** Bodies a force or torque was applied to since the last step (Rapier keeps them: reset after it). */
     private readonly _forced = new Set<Entry>();
+    /**
+     * Bodies put to sleep by hand (sleep). Rapier's own sleep goes by islands; one body put to sleep while an awake
+     * one rests on it stays asleep and stops answering it, so the awake one sinks through. Each step wakes one of
+     * these first if an awake body touches it, as cannon and Jolt do.
+     */
+    private readonly _slept = new Set<Entry>();
     /** Something moved since the query tree was refitted (see _syncQueries). */
     private _dirty = true;
     /** The last step's contacts, [a, b, nx, ny, nz] per contact, gathered on first read. */
@@ -188,6 +194,7 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
         this._raw.removeRigidBody(e.body);
         this._entries.delete(h);
         this._forced.delete(e);
+        this._slept.delete(e);
         this._removeFromOrder(h);
         this._forget(h);
         this._dirty = true;
@@ -308,8 +315,16 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
         this._forced.delete(e);
     }
 
-    public sleep(h: BodyHandle): void { this._entry(h).body.sleep(); }
-    public wakeUp(h: BodyHandle): void { this._entry(h).body.wakeUp(); }
+    public sleep(h: BodyHandle): void {
+        const e = this._entry(h);
+        e.body.sleep();
+        if (e.type === 'dynamic') this._slept.add(e);
+    }
+    public wakeUp(h: BodyHandle): void {
+        const e = this._entry(h);
+        e.body.wakeUp();
+        this._slept.delete(e);
+    }
     public isSleeping(h: BodyHandle): boolean { return this._entry(h).body.isSleeping(); }
 
     public getAabb(h: BodyHandle, out: Out): void {
@@ -422,6 +437,7 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
 
     public step(dt: number): void {
         this.onPreSubstep?.(dt);
+        this._wakeTouched();
         const w = this._raw;
         w.timestep = dt;
         w.profilerEnabled = this.profile;
@@ -450,6 +466,24 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
     public forEachContact(visit: (a: BodyHandle, b: BodyHandle, nx: number, ny: number, nz: number) => void): void {
         const rows = this._contactRows();
         for (let i = 0; i < rows.length; i += 5) visit(rows[i] as BodyHandle, rows[i + 1] as BodyHandle, rows[i + 2], rows[i + 3], rows[i + 4]);
+    }
+
+    // One body's pairs, asked of Rapier directly rather than built for every body (_contactRows). The same
+    // manifolds and the same normal rule, so it agrees with forEachContact.
+    public forEachContactOf(h: BodyHandle, visit: (other: BodyHandle, nx: number, ny: number, nz: number) => void): void {
+        const e = this._entries.get(h);
+        if (!e) return;
+        for (const c of e.colliders) {
+            this._raw.contactPairsWith(c, other => {
+                const ob = this._owner.get(other.handle);
+                if (ob === undefined || ob === h) return;
+                this._raw.contactPair(c, other, (m, flipped) => {
+                    if (m.numContacts() === 0) return;
+                    const n = m.normal(), s = flipped ? -1 : 1;
+                    visit(ob, s * n.x, s * n.y, s * n.z);
+                });
+            });
+        }
     }
 
     public get contactCount(): number { return this._contactRows().length / 5; }
@@ -511,9 +545,37 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
         this._events = [];
         this._pairCounts.clear();
         this._forced.clear();
+        this._slept.clear();
         this._contacts = null;
         this._dirty = true;
         this._version++;
+    }
+
+    /** Wake each body put to sleep by hand that an awake dynamic body now touches (see _slept). */
+    private _wakeTouched(): void {
+        if (this._slept.size === 0) return;
+        for (const e of this._slept) {
+            if (!this._entries.has(e.handle) || !e.body.isSleeping()) { this._slept.delete(e); continue; }
+            if (!this._touchesAwake(e)) continue;
+            e.body.wakeUp();
+            this._slept.delete(e);
+        }
+    }
+
+    /** Whether an awake dynamic body is in contact with `e` (contact points, not only overlapping bounds). */
+    private _touchesAwake(e: Entry): boolean {
+        let touched = false;
+        for (const c of e.colliders) {
+            if (touched) break;
+            this._raw.contactPairsWith(c, other => {
+                if (touched) return;
+                const ob = this._owner.get(other.handle);
+                const oe = ob === undefined ? undefined : this._entries.get(ob);
+                if (!oe || oe === e || oe.type !== 'dynamic' || !oe.enabled || oe.body.isSleeping()) return;
+                this._raw.contactPair(c, other, m => { if (m.numContacts() > 0) touched = true; });
+            });
+        }
+        return touched;
     }
 
     public dispose(): void {
@@ -721,6 +783,8 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
         // A sleeping body that was moved by hand (a step landing from the physics worker writes every body)
         // is woken by the next step, even a zero-length one. These refits must change nothing: what slept
         // goes back to sleep, its velocity as it was.
+        // (One put to sleep by hand that an awake body touches is woken by the next real step: see _wakeTouched. It
+        // must not be here, or a world the physics worker copies, which does not refit for rays, steps otherwise.)
         const sleeping: { body: RigidBody; v: { x: number; y: number; z: number }; w: { x: number; y: number; z: number } }[] = [];
         for (const e of this._entries.values()) if (e.enabled && e.body.isSleeping()) sleeping.push({ body: e.body, v: e.body.linvel(), w: e.body.angvel() });
         w.timestep = 0;

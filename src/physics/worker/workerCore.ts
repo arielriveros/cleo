@@ -1,15 +1,17 @@
 import { acquirePhysicsBackend, createWorldReplica, isPhysicsBackendLoaded } from '../pal/createWorld';
 import type { WorldReplica } from '../pal/replication';
-import type { PhysicsBackendKind } from '../pal/types';
+import type { BodyHandle, PhysicsBackendKind } from '../pal/types';
 import type { PhysicsWorld } from '../pal/world';
 import { applyBuoyancy, floats, type BuoyancyVolume } from '../buoyancy';
 import { buoyancyVolumeFromSpec, type WaterSpec } from '../waterSurface';
+import { CharacterContactRule, type ContactBodyInfo } from '../characterContacts';
 import type { FromWorker, Snapshot, StepMessage, ToWorker } from './protocol';
 import { CONTACT_ROW } from './protocol';
 
 // The physics worker's half: a copy of the main thread's world on the same backend (its WorldReplica, see
 // pal/replication.ts), kept in step with it by the messages in protocol.ts, stepped exactly as
-// PhysicsSystem's inline executor steps (equal substeps, buoyancy per substep), and reported back as a
+// PhysicsSystem's inline executor steps (equal substeps, buoyancy per substep, the character contact rule around
+// each), and reported back as a
 // snapshot. Pure — no `self`, no postMessage — so tests run it in-process (ports.ts LoopbackPort) and compare
 // it with the inline step. Imports only physics leaf modules and the backends' own libraries: a worker must
 // not pull in the engine barrel (howler needs `window`).
@@ -28,6 +30,8 @@ export class PhysicsWorkerCore {
     private _free: ArrayBuffer[] = [];
     /** A backend loading (its WASM): every message waits behind it, in order. Null when none is. */
     private _waiting: Promise<unknown> | null = null;
+    private readonly _characters = new CharacterContactRule();
+    private readonly _characterList: { handle: BodyHandle; mass: number }[] = [];
 
     constructor(backend: PhysicsBackendKind = 'cannon') {
         this._replica = this._replicaOf(backend);
@@ -76,6 +80,19 @@ export class PhysicsWorkerCore {
             return { kind: 'error', epoch: msg.epoch, message: e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e) };
         }
     }
+
+    /** The characters in the world, for the contact rule: what PhysicsSystem watches inline. */
+    private _watchCharacters(world: PhysicsWorld): void {
+        const list = this._characterList;
+        list.length = 0;
+        for (const h of world.bodies()) {
+            const f = this._replica.floater(h);
+            if (f?.character) list.push({ handle: h, mass: f.mass });
+        }
+        this._characters.watch(list);
+    }
+
+    private readonly _contactInfo = (h: BodyHandle): ContactBodyInfo | undefined => this._replica.floater(h);
 
     private _replicaOf(backend: PhysicsBackendKind): WorldReplica {
         const replica = createWorldReplica(backend);
@@ -130,8 +147,10 @@ export class PhysicsWorkerCore {
         world.profile = msg.profile;
         const start = performance.now();
         if (msg.substeps > 0 && msg.dt > 0) {
-            const h = msg.dt / msg.substeps;
-            for (let i = 0; i < msg.substeps; i++) world.step(h);
+            const h = msg.dt / msg.substeps, rule = this._characters;
+            // The character contact rule, as InlineExecutor runs it (physics/characterContacts.ts).
+            this._watchCharacters(world);
+            for (let i = 0; i < msg.substeps; i++) { rule.before(world); world.step(h); rule.after(world, h, this._contactInfo); }
             if (msg.profile) world.readProfile(stats);
         }
         stats.stepMs = performance.now() - start;

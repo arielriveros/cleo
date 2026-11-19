@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type EventEmitter from '@cleo/app-kit/utils/eventEmitter';
+import { onProjectClose } from '../../utils/projectLifecycle';
 
 /**
  * Which point of which Water node's river or lake is being edited: the water's twin of collisionSelection.ts.
@@ -19,6 +20,8 @@ export const WATER_SHAPE_SELECT = 'WATER_SHAPE_SELECT';
 export const WATER_SHAPES_EDITED = 'WATER_SHAPES_EDITED';
 
 let current: WaterShapeRef | null = null;
+// It names a node of the closed project's scene.
+onProjectClose(() => { current = null; });
 
 const same = (a: WaterShapeRef | null, b: WaterShapeRef | null) =>
   a === b || (!!a && !!b && a.nodeId === b.nodeId && a.point === b.point);

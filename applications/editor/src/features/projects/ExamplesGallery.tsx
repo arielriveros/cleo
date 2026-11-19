@@ -80,7 +80,8 @@ export default function ExamplesGallery({ examples, className = '' }: {
         setBusySlug(null)
         return
       }
-      // importExample ends in switchToProject's reload: keep the screen up until the page goes.
+      // importExample ends by opening the new project in place, which carries this load on into its own: the
+      // screen is the next project's now.
       leaving = true
     } catch (e: any) {
       Logger.error(`Could not open the example "${entry.name}": ${e?.message ?? e}`, 'Editor')

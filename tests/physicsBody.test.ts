@@ -7,7 +7,7 @@ import { PhysicsBody } from '../src/physics/physicsBody';
 // live views of the world's state, and what a removal or a world clear keeps.
 
 function physics(): PhysicsSystem {
-    const p = new PhysicsSystem({ gravity: [0, -10, 0] });
+    const p = new PhysicsSystem({ gravity: [0, -10, 0], backend: 'cannon' });
     p.initialize();
     (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null };
     return p;

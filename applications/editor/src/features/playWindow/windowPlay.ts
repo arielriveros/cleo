@@ -170,6 +170,11 @@ export function windowPlay(): WindowPlayController {
   return controller;
 }
 
+/** End a game running in a window, if one is: its project is closing (another opening in this editor). */
+export function stopWindowPlay(): void {
+  controller?.stopForUnload();
+}
+
 /** Whether a game is running (or being built) in a window — in-editor Play waits for it to end. */
 export function isWindowPlayActive(): boolean {
   return controller?.getSnapshot().active ?? false;

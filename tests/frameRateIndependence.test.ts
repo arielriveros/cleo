@@ -13,7 +13,7 @@ import { Ragdoll } from '../src/physics/ragdoll';
 
 /** A physics system over an empty stand-in scene: enough for update() to step the world. */
 function physics(): PhysicsSystem {
-    const p = new PhysicsSystem({ gravity: [0, 0, 0] });
+    const p = new PhysicsSystem({ gravity: [0, 0, 0], backend: 'cannon' });
     p.initialize();
     (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null };
     return p;

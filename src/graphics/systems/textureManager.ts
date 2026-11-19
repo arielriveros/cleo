@@ -479,6 +479,20 @@ export class TextureManager {
         this._textures.delete(id);
     }
 
+    /**
+     * Forget every texture but those in `keep`, and free each one's GPU texture: a project closing in a window
+     * that goes on to open another (the editor). Nothing may draw the dropped ones afterwards, so the scene that
+     * used them must be gone first.
+     */
+    public clearExcept(keep: ReadonlySet<string>): void {
+        for (const [id, texture] of [...this._textures]) {
+            if (keep.has(id)) continue;
+            this._textures.delete(id);
+            texture.delete();
+        }
+        this._imageRevision++;
+    }
+
     public get textures(): Map<string, Texture> {
         return this._textures;
     }

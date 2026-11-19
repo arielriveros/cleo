@@ -29,7 +29,7 @@ export interface ScenarioBTrace {
 
 /** A physics system as the engine sets one up for a scene with water, gravity at the engine default. */
 export function scenarioBPhysics(): PhysicsSystem {
-    const p = new PhysicsSystem({ gravity: [0, -9.82, 0] });
+    const p = new PhysicsSystem({ gravity: [0, -9.82, 0], backend: 'cannon' });
     p.initialize();
     return p;
 }

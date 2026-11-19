@@ -22,6 +22,7 @@ import { buildManifest, buildScaffold, readManifest, staticScaffold } from './sc
 import { clearExternalSource } from './externalSourceStore'
 import { getEditorPrefs } from '../options/editorPrefs'
 import { setExternalScriptOpener } from '../options/scriptOpener'
+import { trackProjectWrite } from '../../utils/projectLifecycle'
 
 // Keeps the project's script library and a folder on disk in step, so scripts can be edited in VSCode.
 //
@@ -113,6 +114,11 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     const bridge = getScriptsBridge()
     const root = rootRef.current
     if (!bridge || !root || statusRef.current !== 'live' || pushingRef.current) return
+    // Tracked, so a project switch waits for a push under way (it names the project in its manifest).
+    return trackProjectWrite(pushNow(bridge, root))
+  }, [setStatusBoth])
+
+  const pushNow = async (bridge: NonNullable<ReturnType<typeof getScriptsBridge>>, root: string) => {
 
     const desired = buildDesiredMirror(vfsRef.current, scriptsRef.current)
     const plan = planPush(agreedRef.current, desired)
@@ -138,7 +144,7 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     } finally {
       pushingRef.current = false
     }
-  }, [setStatusBoth])
+  }
 
   const schedulePush = useCallback(() => {
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current)
@@ -354,6 +360,17 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     setConflicts([])
     setStatusBoth('off')
   }, [setStatusBoth])
+
+  // The project closing in this window (another one opening: features/projects/projectSwitch.ts): its folder
+  // stops being mirrored. The pending push goes, and the watcher closes; the project keeps its folder setting.
+  useEffect(() => () => {
+    if (pushTimerRef.current) clearTimeout(pushTimerRef.current)
+    pushTimerRef.current = null
+    const bridge = getScriptsBridge()
+    const root = rootRef.current
+    rootRef.current = null
+    if (bridge && root) void trackProjectWrite(bridge.close(root)).catch(() => {})
+  }, [])
 
   /** Reconnect at boot when this project already has a workspace and the folder is still there. */
   useEffect(() => {

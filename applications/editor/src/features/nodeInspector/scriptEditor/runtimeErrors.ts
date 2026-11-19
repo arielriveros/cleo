@@ -5,6 +5,7 @@
 // logScriptError), whether the game runs in the editor or in its own window (whose rows the play-window
 // controller re-emits here). Kept until the next Play starts: the marks are about the last run.
 import { CleoEngine, Logger, moduleIdOfScriptUrl, type LogEntry } from 'cleo';
+import { onProjectClose } from '../../../utils/projectLifecycle';
 
 export interface RuntimeError {
   /** 1-based. */
@@ -67,6 +68,9 @@ export function runtimeErrorsFor(moduleId: string | undefined): RuntimeError[] {
   const lines = moduleId ? byModule.get(moduleId) : undefined;
   return lines ? [...lines.values()].sort((a, b) => a.line - b.line) : [];
 }
+
+// The closed project's scripts' marks.
+onProjectClose(() => clearRuntimeErrors());
 
 /** A new run starts: the last one's marks go. */
 export function clearRuntimeErrors(): void {

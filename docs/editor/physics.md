@@ -28,7 +28,7 @@ one Collider holding its wall boxes.
 | **Ground probe** | Distance a downward probe reaches, which is what makes `groundDistance` and `slopeAngle` readable. |
 | **Motion smoothing** | Filters the measured speed that feeds animation blends. |
 | **Simulation** | How far from the camera the body keeps simulating before it freezes in place: **Project range** (the range in Options ▸ Engine ▸ Runtime), **Always** (never frozen) or **Custom range** (its own, in metres). See [Simulation range](#simulation-range). |
-| **Sleep when resting** | Sleeps once the body stops moving, until it is hit, pushed or a script sets its velocity. Off by default. |
+| **Sleep when resting** | Sleeps once the body stops moving, until it is hit, pushed or a script sets its velocity. Off by default. A body sleeps together with every moving body it touches, so a stack of crates goes to sleep as one once the whole stack has settled. |
 | **Layer** | The collision layers it is on (bits 1–16). Default layer 1. |
 | **Collides with** | The layers it collides with. Default all. See [Layers](#layers). |
 | **Linear constraints** | Per-axis toggles. |
@@ -256,6 +256,28 @@ The measured recommendation for the Collider, from the [third-person example](..
 >
 > A frictionless character does not slide when idle, because its locomotion zeroes horizontal
 > velocity when there is no input.
+
+### What a lighter body can do to a character
+
+A character is not pushed about by bodies lighter than it. A body lighter than the character can stop it
+and hold it up: you can stand on a crate, land on it and jump off it. But it can move the character only by
+its share of the two masses. A crate of 8 kg against a 75 kg character gives about a tenth of the push the
+solver gave.
+
+- Jumping into the edge of a light box does not throw the character up it.
+- A light box that tips under the character does not lift it on its corner.
+- A light ball thrown at the character barely moves it.
+
+The crate still gets the whole push, so the character shoves it along as before. Bodies at least as heavy
+as the character, static and kinematic bodies, the ground and walls are unaffected. A fixed edge still
+deflects a capsule up, as its round bottom meets it.
+
+The rule compares masses, so give the character's Collider its real mass. A character of 1 kg (the
+recommendation above, and what **Add ▸ Gameplay ▸ Character** makes) is lighter than any prop, and every
+prop can still push it. The Sandbox's character is 75 kg.
+
+One limit: a light body that is itself carried up by something heavier (a crate on a lift) does not lift a
+character standing on it either.
 
 ## Cloth on a character
 

@@ -3,6 +3,7 @@ import { CleoEngine, Logger, TextureManager, AudioManager, isDerivedTextureId } 
 import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { idbGet, idbSet } from '@cleo/app-kit/utils/idb'
+import { scheduleProjectWrite } from '../../utils/projectLifecycle'
 import {
   EMPTY_VFS, LibSnapshot, VfsEntry, VfsIndex, vfsKey,
   AssetKind, indexByPath, reconcileVfs, repairVfs, baseOf, stemOf,
@@ -333,10 +334,9 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   // Persist, debounced: texture registration is chatty while a project or a mesh import loads.
   useEffect(() => {
     if (!vfsLoaded) return
-    const timer = window.setTimeout(() => {
-      idbSet(vfsKey(), vfs).catch(e => console.warn('Failed to persist the asset index:', e))
-    }, 300)
-    return () => window.clearTimeout(timer)
+    // Through the project's writes: a project switch lands it rather than losing it (utils/projectLifecycle.ts).
+    return scheduleProjectWrite(300, () =>
+      idbSet(vfsKey(), vfs).catch(e => console.warn('Failed to persist the asset index:', e)))
   }, [vfs, vfsLoaded])
 
   const pathIndex = useMemo(() => indexByPath(vfs), [vfs])

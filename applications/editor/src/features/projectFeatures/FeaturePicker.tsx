@@ -60,7 +60,7 @@ export function presetChoice(preset: Pick<FeaturePreset, 'disabled'> & { webgl2?
   return { disabled: preset.disabled.filter(id => id !== 'webgl2'), webgl2: preset.webgl2 ?? !preset.disabled.includes('webgl2') }
 }
 
-export default function FeaturePicker({ value, onChange, usage, sizes, physicsBackend = 'cannon', compact }: FeaturePickerProps) {
+export default function FeaturePicker({ value, onChange, usage, sizes, physicsBackend = 'jolt', compact }: FeaturePickerProps) {
   const [saved, setSaved] = useState<SavedPreset[]>(loadSaved)
   const enabled = useMemo(() => enabledFeatures(value.disabled), [value.disabled])
   const matched = presetMatching(value.disabled)

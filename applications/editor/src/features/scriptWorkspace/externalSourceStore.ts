@@ -1,3 +1,4 @@
+import { onProjectClose } from '../../utils/projectLifecycle'
 // A module store that lets an edit made in an external IDE reach an already-open Monaco script tab.
 // It cannot go through props: MonacoScriptEditor is uncontrolled and builds its model once from
 // `initialSource`, so it subscribes to the revision counter here and replaces its model when bumped.
@@ -7,6 +8,8 @@ type Listener = () => void
 const listeners = new Set<Listener>()
 const sources = new Map<string, string>()
 let revision = 0
+// A closed project's pending sources are not the next one's.
+onProjectClose(() => { sources.clear(); revision++; for (const listener of listeners) listener() })
 
 export function subscribe(listener: Listener): () => void {
   listeners.add(listener)

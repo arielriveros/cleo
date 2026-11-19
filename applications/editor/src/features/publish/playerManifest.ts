@@ -1,6 +1,7 @@
 // What a published game copies from the prebuilt player (public/player/): the files build.json says every
 // game carries, and those of each optional part the game needs. vite.player.config.ts writes build.json from
 // the bundle's chunk graph; this reads it. Pure, so tests can check a selection without a built player.
+import { resolvePhysicsBackendRequest } from 'cleo';
 
 /** One optional part of the player (a physics backend), as build.json lists it. */
 export interface PlayerBuildFeature {
@@ -37,7 +38,9 @@ export interface PlayerBuild {
  */
 export function playerFeaturesFor(config: any, build?: Pick<PlayerBuild, 'features'>): string[] {
   const out: string[] = [];
-  const backend = config?.physics?.backend;
+  // The backend the player will run: a config naming none (or one this build lacks) runs on the default, Jolt,
+  // so it needs Jolt's part as much as one that names it.
+  const backend = resolvePhysicsBackendRequest(config?.physics?.backend).kind;
   if (backend === 'rapier') out.push('physics-rapier');
   if (backend === 'jolt') out.push('physics-jolt');
   if (build && Array.isArray(config?.features)) {

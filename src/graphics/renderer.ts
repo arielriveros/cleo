@@ -1960,7 +1960,9 @@ export class Renderer {
     }
 
     public set viewport(viewport: HTMLElement) {
-        if (this._viewport) this._viewport.removeChild(this._canvas);
+        // Off whatever holds it now: the old host, or nothing (its host was taken out of the page, as when the
+        // editor closes a project and mounts the next one's viewport).
+        if (this._canvas.parentElement) this._canvas.remove();
         this._viewport = viewport
         this._viewport.appendChild(this._canvas);
         // Size to the new host immediately: `preInitialize`'s `resize()` no-ops when there is no

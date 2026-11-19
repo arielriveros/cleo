@@ -7,6 +7,7 @@
 
 import { useSyncExternalStore } from 'react'
 import type { AssetKind } from '../../utils/vfs'
+import { onProjectClose } from '../../utils/projectLifecycle'
 
 /** The explorer's root for Creator assets. */
 export const CREATOR_ROOT = '/Creator'
@@ -20,6 +21,8 @@ export interface CreatorPins {
 
 let pins: CreatorPins = { folders: new Map(), names: new Map() }
 const listeners = new Set<() => void>()
+// The next project's Creator sync publishes its own.
+onProjectClose(() => setCreatorPins({ folders: new Map(), names: new Map() }))
 
 export const pinKey = (kind: AssetKind, assetId: string) => `${kind}:${assetId}`
 

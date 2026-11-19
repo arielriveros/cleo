@@ -56,6 +56,16 @@ export function AddonHost({ children }: { children: ReactNode }) {
     }
   }, [enabled, projectSettingsReady, setProjectSettings])
 
+  // The project closing (another one opening in this window, features/projects/projectSwitch.ts): every addon
+  // it started stops, and one still loading stays off when it lands.
+  useEffect(() => () => {
+    wanted.current = new Set()
+    for (const [id, mod] of [...modules.current]) {
+      modules.current.delete(id)
+      Promise.resolve(mod.deactivate?.()).catch(e => Logger.warn(`The ${id} addon did not stop cleanly: ${e?.message ?? e}`, 'Addons'))
+    }
+  }, [])
+
   const slots = useMemo(() => {
     const out: Partial<Record<AddonSlotName, Mounted[]>> = {}
     for (const [id, c] of Object.entries(active))

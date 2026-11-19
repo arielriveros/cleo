@@ -22,6 +22,7 @@ import { runWaterBake } from '../../../workers/waterBakeClient'
 import {
   WATER_SHAPES_EDITED, setWaterShapeSelection, useWaterShapeSelection,
 } from '../../gizmo/waterSelection'
+import { onProjectClose } from '../../../utils/projectLifecycle'
 
 // The Water inspector. A Water node is ONE body of water — a river, a lake, an ocean or a pool — that buoys
 // what floats in it, carries it downstream and draws its surface. A river joins other Water nodes by naming
@@ -309,6 +310,8 @@ const BAKE_RESOLUTIONS = [{ value: 256, label: 'Draft (256)' }, { value: 512, la
 
 /** How each bake made this session went, by bake id: what the card says under the button. */
 const BAKE_REPORTS = new Map<string, WaterBakeReport>()
+// Keyed by the closed project's bakes.
+onProjectClose(() => BAKE_REPORTS.clear())
 
 /** Whether a node's bake is drawn: none, current, stale (the water or the ground round it changed), or missing. */
 function bakeStatus(node: WaterVolumeNode): 'none' | 'current' | 'stale' | 'missing' {

@@ -13,7 +13,7 @@ interface Rig { p: PhysicsSystem; hero: Node }
 
 /** One moving body on a node in a stand-in scene, stepped through an in-process worker port. */
 function rig(port: LoopbackPort | null): Rig {
-    const p = new PhysicsSystem({ gravity: [0, 0, 0] });
+    const p = new PhysicsSystem({ gravity: [0, 0, 0], backend: 'cannon' });
     p.initialize();
     const hero = new Node('Hero');
     hero.setBody(70, 0, 0);
@@ -98,7 +98,7 @@ describe('physics worker stats', () => {
     it('Auto rides out a hitch, moves back only when the worker stays behind, and tries it again later', () => {
         // 40 moving bodies: what makes Auto want the worker. `slow` holds every step two frames (half late).
         let slow = false;
-        const p = new PhysicsSystem({ gravity: [0, 0, 0] });
+        const p = new PhysicsSystem({ gravity: [0, 0, 0], backend: 'cannon' });
         p.initialize();
         const nodes: Node[] = [];
         for (let i = 0; i < 40; i++) {

@@ -41,7 +41,7 @@ describe('simulation range rules', () => {
 
 /** A physics system over a stand-in scene whose camera sits at `cam`. */
 function physics(cam: [number, number, number]) {
-    const p = new PhysicsSystem({ gravity: [0, -9.81, 0] });
+    const p = new PhysicsSystem({ gravity: [0, -9.81, 0], backend: 'cannon' });
     p.initialize();
     const camera = { worldPosition: cam };
     (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: camera };

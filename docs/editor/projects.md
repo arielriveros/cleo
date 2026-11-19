@@ -21,8 +21,16 @@ examples:
   key).
 - The **Examples** tab is described [below](#examples).
 
-> **Switching projects reloads the editor**, because every storage key is namespaced and the whole
-> library set changes. **Deleting a project takes its dock layouts with it.**
+> **Opening another project does not reload the editor.** The window and the graphics device stay, and so do
+> the compiled shaders, so the next project opens without the startup's device and shader steps. What the open
+> project holds in memory is closed first: Play stops, edits waiting to be stored are stored, and its textures,
+> sounds and scenes are let go. Opening a new project, installing an example and importing a bundle go the same
+> way.
+>
+> **Deleting the open project** closes it, deletes it, and opens the project you used most recently, or a new
+> empty one if it was the last. The one dialog that asks about deleting also lists unsaved edits that would be
+> lost. **Deleting a project takes its dock layouts, sounds, GI bakes and Play saves with it.** The folder a
+> script workspace mirrors its scripts into is yours, and stays.
 
 ## Examples
 
@@ -63,7 +71,8 @@ else.
 | **Replace** | Overwrites the current project. |
 | **Merge** | Folds it into the current project, re-minting colliding ids and remapping the references that point at them. |
 
-New-project and Merge confirm unsaved work first, and a successful import reloads the editor.
+New-project and Merge confirm unsaved work first. A successful import opens the project it went into, in
+place: Replace and Merge close the current project, write the bundle into it, and open it again.
 
 Merge is what you want for combining an asset pack into an existing game. It is also the usual way
 to acquire the orphan entries the [asset audit](assets.md#missing-assets) reports, so it is worth

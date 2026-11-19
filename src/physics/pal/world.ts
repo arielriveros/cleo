@@ -115,6 +115,12 @@ export interface PhysicsWorld {
     readProfile(out: StepProfile): void;
     /** The last substep's contacts: (a, b, normal pointing out of a toward b). */
     forEachContact(visit: (a: BodyHandle, b: BodyHandle, nx: number, ny: number, nz: number) => void): void;
+    /**
+     * The last substep's contacts of ONE body: (the other body, normal pointing out of `body` toward it), in the
+     * order {@link forEachContact} gives them. Cheaper than filtering every contact where a backend can ask for
+     * one body's (Rapier); what the character contact rule reads after each substep (physics/characterContacts.ts).
+     */
+    forEachContactOf(body: BodyHandle, visit: (other: BodyHandle, nx: number, ny: number, nz: number) => void): void;
     readonly contactCount: number;
     /** Everything the steps reported since the last drain, in order. */
     drainEvents(visit: (kind: PhysicsEventKind, a: BodyHandle, b: BodyHandle) => void): void;

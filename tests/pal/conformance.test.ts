@@ -218,6 +218,36 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             expect(pose(w, b)[1]).toBeLessThan(10);
         });
 
+        it('still hold up an awake body resting on one put to sleep, and wake when an awake body runs into them', () => {
+            // Rapier stopped solving a pair already in contact once one side was put to sleep by hand: the box on
+            // top sank through the one under it (the Sandbox's crate pyramid). cannon holds it as if static; Jolt and
+            // now Rapier wake the sleeper.
+            const w = make();
+            ground(w);
+            const box = { kind: 'box', halfExtents: [0.25, 0.25, 0.25] } as const;
+            const lower = body(w, box, [0, 0.25, 0], { mass: 8, allowSleep: true });
+            const upper = body(w, box, [0, 0.75, 0], { mass: 8, allowSleep: true });
+            run(w, 30);
+            w.sleep(lower);
+            run(w, 60);
+            expect(pose(w, upper)[1]).toBeCloseTo(0.75, 1);
+
+            const crate = body(w, box, [3, 0.25, 0], { mass: 8, allowSleep: true });
+            run(w, 30);
+            w.sleep(crate);
+            const ball = body(w, { kind: 'sphere', radius: 0.25 }, [1.5, 0.25, 0], { mass: 20 });
+            w.setLinearVelocity(ball, 4, 0, 0);
+            // A write and a raycast between steps (a script, a character's ground probe: Rapier refits its query tree
+            // for the ray) must not put it back to sleep either.
+            for (let i = 0; i < 60; i++) {
+                w.step(H);
+                w.setTransform(ball, pose(w, ball).slice(0, 3), null);
+                w.raycast([0, 5, 0], [0, -5, 0], { mode: 'closest' }, () => {});
+            }
+            expect(pose(w, ball)[0], 'the ball did not pass through').toBeLessThan(pose(w, crate)[0]);
+            if (kind !== 'cannon') expect(pose(w, crate)[0] - 3, 'the crate was pushed').toBeGreaterThan(0.5);
+        });
+
         it('step out of the world while disabled, keeping handle and state, and come back', () => {
             const w = make();
             const b = body(w, { kind: 'sphere', radius: 0.5 }, [0, 10, 0]);

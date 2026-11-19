@@ -52,6 +52,7 @@ import {
   creatorFolder, creatorIds, isWorldImportData, keepClipEvents, planCreatorSync, REMOVED_FOLDER, type CreatorLink, type CreatorLinks,
 } from './creatorLinks'
 import { pinKey, setCreatorPins } from './creatorPins'
+import { trackProjectWrite } from '../../utils/projectLifecycle'
 
 const LINKS_KEY = 'cleo_creator_links'
 
@@ -147,7 +148,8 @@ export class CreatorSync {
   private enqueue(id: string, revision: number): void {
     if (this.disposed) return
     this.queue.set(id, Math.max(revision, this.queue.get(id) ?? 0))
-    void this.drain()
+    // Tracked: a project switch waits for an apply under way, which writes the open project's keys.
+    void trackProjectWrite(this.drain())
   }
 
   private async drain(): Promise<void> {

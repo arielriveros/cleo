@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { AnimatedModel, ModelNode, clothFromWeights, clothNeighboursOf, clothSettingsOf, clothTwinsOf, weightsFromCloth } from 'cleo'
 import type { ClothBrushMode, SkinnedClothSettings as ClothSettings, Node, SkinnedClothData } from 'cleo'
+import { onProjectClose } from '../../utils/projectLifecycle'
 
 // The model tab's Cloth brush: its settings, and the working copy of the weights it paints. Lives outside
 // React, like landscapeBrushStore, so the viewport brush (a non-rendering component with its own pointer
@@ -105,6 +106,8 @@ export interface ClothWorkingCopy {
 
 interface Cached extends ClothWorkingCopy { geometry: unknown; source: SkinnedClothData | null }
 const working = new Map<string, Cached>()
+// Keyed by the closed project's nodes.
+onProjectClose(() => working.clear())
 
 const clothOf = (node: ModelNode): SkinnedClothData | null =>
   node.model instanceof AnimatedModel ? node.model.skinnedCloth : null

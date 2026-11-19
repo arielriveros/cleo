@@ -1,4 +1,5 @@
 import type { BodyHandle } from '../pal/types';
+import type { PhysicsWorld } from '../pal/world';
 
 // Where the physics step runs. PhysicsSystem owns the scene-facing half — the bodies' nodes, triggers,
 // grounding, queries — and hands the step itself to an executor:
@@ -13,6 +14,16 @@ import type { BodyHandle } from '../pal/types';
 export interface ContactSource {
     readonly contactCount: number;
     forEachContact(visit: (a: BodyHandle, b: BodyHandle, nx: number, ny: number, nz: number) => void): void;
+}
+
+/**
+ * Work around each substep, the same on the main thread and in the physics worker (the character contact rule,
+ * physics/characterContacts.ts): `begin` once before a frame's substeps, `before`/`after` around each one.
+ */
+export interface SubstepHooks {
+    begin(world: PhysicsWorld): void;
+    before(world: PhysicsWorld): void;
+    after(world: PhysicsWorld, h: number): void;
 }
 
 /** No contacts (a frame whose worker step has not come back). */

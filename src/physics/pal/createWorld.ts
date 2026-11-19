@@ -8,6 +8,7 @@ import { JoltWorld } from './jolt/joltWorld';
 import { DescribedMirror } from './copy/describedMirror';
 import { DescribedReplica } from './copy/describedReplica';
 import type { WorldMirror, WorldReplica } from './replication';
+import { FALLBACK_PHYSICS_BACKEND } from './backendSelect';
 import type { PhysicsBackendKind } from './types';
 import type { PhysicsWorld } from './world';
 
@@ -42,7 +43,7 @@ export async function acquirePhysicsWorld(kind: PhysicsBackendKind, gravity?: Ar
 }
 
 /** A world on a loaded backend (see {@link acquirePhysicsBackend}). */
-export function createPhysicsWorld(kind: PhysicsBackendKind = 'cannon', gravity?: ArrayLike<number>): PhysicsWorld {
+export function createPhysicsWorld(kind: PhysicsBackendKind = FALLBACK_PHYSICS_BACKEND, gravity?: ArrayLike<number>): PhysicsWorld {
     if (!loaded.has(kind)) throw new Error(`physics: the ${kind} backend is not loaded (acquirePhysicsBackend first)`);
     switch (kind) {
         case 'cannon': return new CannonWorld(gravity);

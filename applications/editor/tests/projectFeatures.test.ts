@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync } from 'fs';
 import path from 'path';
 import { FEATURES, FEATURE_PRESETS } from 'cleo';
-import { parseProjectSettings, DEFAULT_PROJECT_SETTINGS, LEGACY_ADDONS } from '../src/features/options/projectSettings';
+import { parseProjectSettings, DEFAULT_PROJECT_SETTINGS, LEGACY_ADDONS, PROJECT_SETTINGS_VERSION } from '../src/features/options/projectSettings';
 import { FEATURE_ADD_ITEMS, FEATURE_NEW_ASSETS, FEATURE_MODES, featureOfAddItem, projectFeatures } from '../src/features/projectFeatures/featureUi';
 import { ADD_ITEMS } from '../src/features/sceneInspector/addCatalog';
 import { toggleFeature, presetChoice } from '../src/features/projectFeatures/FeaturePicker';
@@ -22,7 +22,8 @@ describe('project settings v3 and v4: features and addons', () => {
     expect(old.features.disabled).toEqual([]);
     expect(old.addons.enabled).toEqual([...LEGACY_ADDONS]);
     expect(LEGACY_ADDONS).toEqual(['mcp-server', 'claude-code']);
-    expect(old.version).toBe(4);
+    // Read at the current version (5: Jolt the default physics backend, optionsSettings.test.ts).
+    expect(old.version).toBe(PROJECT_SETTINGS_VERSION);
   });
 
   it('gives a v3 project with Claude Code on the MCP server addon its link was part of', () => {

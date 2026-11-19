@@ -1,4 +1,4 @@
-import { beginLoadWithHandoff, continueLoad, type LoadHandle, type LoadStepHandle, type LoadStepSpec } from '@cleo/app-kit/feedback/loadingStore'
+import { beginLoadWithHandoff, continueLoad, handoffFromCurrent, saveHandoff, type LoadHandle, type LoadStepHandle, type LoadStepSpec } from '@cleo/app-kit/feedback/loadingStore'
 
 // The editor startup as one load: app.tsx begins it before a project is open, EngineContext reports
 // every step after that, and the splash stays up until the last one is done.
@@ -26,6 +26,23 @@ export const BOOT_TITLE = 'Opening project'
 /** Start the startup load, continuing a hand-off from a reload when there is one. */
 export function beginBootLoad(): LoadHandle {
   return beginLoadWithHandoff(BOOT_TITLE, BOOT_STEPS)
+}
+
+/**
+ * Another project opening in the running editor (features/projects/projectSwitch.ts): the startup's steps but
+ * the device and the shaders, which stay, and the storage step the switch has already done.
+ */
+export const SWITCH_STEPS: LoadStepSpec[] = BOOT_STEPS.filter(s => s.id !== 'project' && s.id !== 'device' && s.id !== 'shaders')
+
+/**
+ * Start the load the next project's EngineContext reports into, just before it mounts. What the load on screen
+ * already did (closing the last project, an example's download, an import's writes) comes first, as done, so
+ * the screen reads as one load. Its title stays that load's unless `title` is given.
+ */
+export function beginSwitchLoad(title: string, keepTitle = false): LoadHandle {
+  const carried = handoffFromCurrent()
+  if (carried) saveHandoff({ ...carried, title: keepTitle ? carried.title : title })
+  return beginLoadWithHandoff(title, SWITCH_STEPS)
 }
 
 const NOOP_STEP: LoadStepHandle = {

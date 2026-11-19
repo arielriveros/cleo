@@ -1,6 +1,6 @@
 import type { PhysicsWorld } from '../pal/world';
 import { physicsStats } from '../physicsStats';
-import { NO_CONTACTS, type PhysicsExecutor, type StepResult } from './physicsExecutor';
+import { NO_CONTACTS, type PhysicsExecutor, type StepResult, type SubstepHooks } from './physicsExecutor';
 
 /**
  * The step on this thread. The world advances by EXACTLY the frame's delta, in equal substeps no longer
@@ -19,6 +19,7 @@ export class InlineExecutor implements PhysicsExecutor {
         private readonly _world: () => PhysicsWorld | undefined,
         private readonly _substepsFor: (dt: number) => number,
         private readonly _profile: () => boolean,
+        private readonly _hooks: SubstepHooks | null = null,
     ) {}
 
     public step(dt: number): StepResult {
@@ -28,8 +29,11 @@ export class InlineExecutor implements PhysicsExecutor {
         const profile = this._profile();
         if (world) world.profile = profile;
         if (substeps > 0 && world) {
-            const h = dt / substeps;
-            for (let i = 0; i < substeps; i++) world.step(h);
+            const h = dt / substeps, hooks = this._hooks;
+            if (hooks) {
+                hooks.begin(world);
+                for (let i = 0; i < substeps; i++) { hooks.before(world); world.step(h); hooks.after(world, h); }
+            } else for (let i = 0; i < substeps; i++) world.step(h);
             if (profile) world.readProfile(physicsStats);
         }
         physicsStats.stepMs = performance.now() - start;
