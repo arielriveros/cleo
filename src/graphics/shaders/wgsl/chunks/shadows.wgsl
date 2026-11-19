@@ -226,6 +226,26 @@ fn cleoCascadeCovering(viewDepth: f32, worldPos: vec3<f32>) -> i32 {
     return layer;
 }
 
+/**
+ * How much of the normal offset a surface takes, from how far it turns from the light `L` (unit, toward the
+ * light): none facing it straight on, all of it edge-on and turned away.
+ *
+ * The casters are drawn front-face culled, so the map holds each object's far side and a lit surface never
+ * meets its own depth there: a surface facing the light needs no offset. One turning edge-on does, since the
+ * far side it meets is right behind it, and so does a smooth-shaded one past its facets' terminator. The full
+ * offset everywhere lifted the lookup over thin casters (toes, a plank's edge), so their shadows started a few
+ * centimetres away from them.
+ */
+fn cleoNormalOffsetShare(N: vec3<f32>, L: vec3<f32>) -> f32 {
+    return 1.0 - clamp(dot(N, L), 0.0, 1.0);
+}
+
+/** The direction toward the light of a directional layer: against its matrix's depth axis. */
+fn cleoCascadeToLight(layer: i32) -> vec3<f32> {
+    let m = cleoCascadeMatrix(layer);
+    return -normalize(vec3<f32>(m[0].z, m[1].z, m[2].z));
+}
+
 /** One comparison tap against the cascade array. Returns visibility, 1 = lit. */
 fn cleoCascadeTap(uv: vec2<f32>, layer: i32, refDepth: f32) -> f32 {
     return textureSampleCompareLevel(u_shadowCascades_texture, u_shadowCascades_sampler, uv, layer, refDepth);
@@ -242,7 +262,9 @@ fn cleoCascadeVisibility(layer: i32, worldPos: vec3<f32>, N: vec3<f32>) -> f32 {
     // Normal offset: push the sample off the surface before projecting. This is what kills acne on
     // steeply lit geometry without the peter-panning a large depth bias would cause, since it moves the
     // lookup sideways across the shadow map rather than pulling the whole surface toward the light.
-    let p = worldPos + N * (u_shadow.u_shadowNormalBias * cleoTexelSize(layer));
+    // Shaped by the light's angle (cleoNormalOffsetShare): a surface facing the light takes little of it.
+    let share = cleoNormalOffsetShare(N, cleoCascadeToLight(layer));
+    let p = worldPos + N * (u_shadow.u_shadowNormalBias * cleoTexelSize(layer) * share);
 
     let posLS = cleoCascadeMatrix(layer) * vec4<f32>(p, 1.0);
     var proj = posLS.xyz / posLS.w;
@@ -449,13 +471,20 @@ fn cleoSpotTap(uv: vec2<f32>, layer: i32, refDepth: f32) -> f32 {
  *
  * The normal offset scales with distance from the light because a perspective shadow map's texel covers
  * more world the further out it lands; a fixed world offset would be far too large next to the light and
- * far too small at the end of the cone.
+ * far too small at the end of the cone. It is shaped by the light's angle as the sun's is.
+ *
+ * The constant bias is the sun's world-unit `u_shadowDepthBias`, as a step toward the light before the
+ * lookup: a perspective map's depth is not linear, so a bias in depth units (`u_spotShadowBias`, now 0
+ * unless a project sets it) grows with the square of the distance, about 13 cm at 3 m.
  */
 fn spotShadow(layer: i32, worldPos: vec3<f32>, N: vec3<f32>, lightPos: vec3<f32>) -> f32 {
     if (u_shadow.u_spotShadowsEnabled == 0 || layer < 0) { return 0.0; }
 
-    let texelWorld = cleoSpotTexelScale(layer) * distance(lightPos, worldPos);
-    let p = worldPos + N * (u_shadow.u_shadowNormalBias * texelWorld);
+    let toLight = lightPos - worldPos;
+    let L = toLight / max(length(toLight), 1e-4);
+    let texelWorld = cleoSpotTexelScale(layer) * length(toLight);
+    let p = worldPos + N * (u_shadow.u_shadowNormalBias * texelWorld * cleoNormalOffsetShare(N, L))
+          + L * u_shadow.u_shadowDepthBias;
 
     let posLS = u_shadow.u_spotShadowMatrices[layer] * vec4<f32>(p, 1.0);
     if (posLS.w <= 0.0) { return 0.0; }                 // behind the light
@@ -518,12 +547,16 @@ fn cleoPointTap(uv: vec2<f32>, layer: i32, refDepth: f32) -> f32 {
  *
  * The normal offset scales with distance from the light for the same reason it does in
  * `spotShadow`: these are perspective maps, and a texel covers more world the further out it lands.
+ * The constant bias is a world-unit step toward the light, as in `spotShadow`.
  */
 fn pointShadow(slot: i32, worldPos: vec3<f32>, N: vec3<f32>, lightPos: vec3<f32>) -> f32 {
     if (u_shadow.u_pointShadowsEnabled == 0 || slot < 0 || slot >= MAX_POINT_SHADOWS) { return 0.0; }
 
-    let texelWorld = u_shadow.u_pointShadowTexelScale * distance(lightPos, worldPos);
-    let p = worldPos + N * (u_shadow.u_shadowNormalBias * texelWorld);
+    let toLight = lightPos - worldPos;
+    let L = toLight / max(length(toLight), 1e-4);
+    let texelWorld = u_shadow.u_pointShadowTexelScale * length(toLight);
+    let p = worldPos + N * (u_shadow.u_shadowNormalBias * texelWorld * cleoNormalOffsetShare(N, L))
+          + L * u_shadow.u_shadowDepthBias;
 
     // The face is picked from the OFFSET position, not the original: near a cube edge the normal
     // offset can push a sample across into the next face, and it has to be looked up in the face it

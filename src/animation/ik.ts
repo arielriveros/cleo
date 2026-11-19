@@ -46,6 +46,13 @@ export interface IkRigTuning {
     /** How far below the animated foot the ray reaches. Beyond this the foot is treated as airborne. */
     traceDown: number;
     /**
+     * The collision layers the foot rays land on (a mask, collisionLayers.ts; -1, the default, is every layer).
+     * Leave out the layer of a walking ramp laid over stairs for the character's capsule, and keep the layer
+     * of the steps themselves (which the capsule's Collides with leaves out): the body climbs the ramp, the
+     * feet stand on the treads.
+     */
+    traceLayers: number;
+    /**
      * How far the ANIMATION must lift a foot above the lowest foot before IK releases it, in model units —
      * the swing/stance split. Measured in the clip, not against the ground, so a slope is never mistaken for a
      * stride. A foot inside its ground is pushed out even mid-swing; 0 disables the release.
@@ -100,6 +107,7 @@ export const IK_DEFAULTS: IkRigTuning = {
     footHeight: 0.1,
     traceUp: 0.5,
     traceDown: 0.6,
+    traceLayers: -1,
     // A full human stride lifts the ankle about this far, so a standing or idling character (where the clip
     // keeps both feet at the same height, whatever the ground under them does) is untouched and only a real
     // swing releases.
@@ -151,6 +159,7 @@ export function ikTuning(rig: IkRig | null | undefined): IkRigTuning {
         footHeight: nonNegativeOr(rig?.footHeight, IK_DEFAULTS.footHeight),
         traceUp: nonNegativeOr(rig?.traceUp, IK_DEFAULTS.traceUp),
         traceDown: nonNegativeOr(rig?.traceDown, IK_DEFAULTS.traceDown),
+        traceLayers: typeof rig?.traceLayers === 'number' && Number.isFinite(rig.traceLayers) ? Math.trunc(rig.traceLayers) : IK_DEFAULTS.traceLayers,
         swingRelease: nonNegativeOr(rig?.swingRelease, IK_DEFAULTS.swingRelease),
         maxHipDrop: nonNegativeOr(rig?.maxHipDrop, IK_DEFAULTS.maxHipDrop),
         maxSlopeDeg: nonNegativeOr(rig?.maxSlopeDeg, IK_DEFAULTS.maxSlopeDeg),

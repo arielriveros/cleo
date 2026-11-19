@@ -8,7 +8,8 @@ import {
 import { useEventBus } from '../../EventBusContext'
 import { usePlayback } from '../../PlaybackContext'
 import { CharacterIcon, PhysicsIcon } from '../sectionIcons'
-import { LayerBits, PairInput } from './ui2D'
+import { PairInput } from './ui2D'
+import { LayerDropdown, LayerMaskDropdown } from '../physicsEditors/layerPickers'
 
 // The inspectors of the 2D physics nodes (src/physics2d): a character body (its generic walking, flying and
 // jumping, and who drives it) and a box collider. A 2D trigger is a Trigger node in a 2D scene (TriggerEditor).
@@ -53,8 +54,8 @@ export function CharacterBody2DEditor(props: { node: CharacterBody2DNode }) {
             <PropertyRow label='Size' hint='The box, width and height, standing on the node’s position (its feet).'>
               <PairInput min={0.01} value={n.size} onChange={(v) => { n.size = v; changed() }} />
             </PropertyRow>
-            <PropertyRow label='Layer' hint='The 2D layers it is on: an area sees it when the area looks for one of them.'>
-              <LayerBits value={n.layer} onChange={(v) => { n.layer = v; changed() }} />
+            <PropertyRow label='Layer' hint='The collision layer it is on: a trigger sees it when it looks for that layer, an AI when it looks for it. The project names its layers, for 2D and 3D alike.'>
+              <LayerDropdown value={n.layer} onChange={(v) => { n.layer = v; changed() }} />
             </PropertyRow>
             <Tune n={n} k='stepHeight' label='Step height' step={0.05} hint='The most it climbs walking: a step, the rise of a slope. World units.' changed={changed} />
             <PropertyRow label='Flip sprites' hint='Mirror its sprite children to face the way it faces.'>
@@ -194,11 +195,11 @@ export function Body2DEditor(props: { node: Body2DNode }) {
               <PropertyRow label='Gravity scale' hint='How strongly gravity pulls it, times the 2D world’s.'>
                 <NumberInput step={0.1} value={n.gravityScale} onChange={(v) => { n.gravityScale = v; changed() }} />
               </PropertyRow>}
-            <PropertyRow label='Layer' hint='The layers it is on. A trigger sees it when it looks for one of them.'>
-              <LayerBits value={n.layer} onChange={(v) => { n.layer = v; changed() }} />
+            <PropertyRow label='Layer' hint='The collision layer it is on. A trigger sees it when it looks for that layer.'>
+              <LayerDropdown value={n.layer} onChange={(v) => { n.layer = v; changed() }} />
             </PropertyRow>
-            <PropertyRow label='Collides with' hint='The layers it lands on and stops at. Tilemaps are on layer 1.'>
-              <LayerBits value={n.mask} onChange={(v) => { n.mask = v; changed() }} />
+            <PropertyRow label='Collides with' hint='The layers it lands on and stops at. Tilemaps are on Default.'>
+              <LayerMaskDropdown value={n.mask} onChange={(v) => { n.mask = v; changed() }} />
             </PropertyRow>
             <PropertyRow label='Enabled'>
               <Toggle checked={n.enabled} onChange={(c) => { n.enabled = c; changed() }} />

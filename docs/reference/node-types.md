@@ -43,15 +43,17 @@ mass: number                     // 0 = static
 linearDamping: number ; angularDamping: number
 linearConstraints: [x, y, z] ; angularConstraints: [x, y, z]   // 1 free, 0 locked
 friction: number ; restitution: number
-simulatePhysics: boolean ; cameraCollision: boolean
+simulatePhysics: boolean
 groundProbeDistance: number ; motionSmoothing: number
 simulationMode: 'project' | 'always' | 'custom' ; simulationRange: number ; canSleep: boolean
-layer: number ; mask: number     // bits; mask -1 = every layer
+layer: number ; mask: number     // layer: one bit; mask -1 = every layer
 shapes: ColliderShape[]          // in the node's own units, scaled by its world scale
 get body: RigidBody | null       // built when the scene runs, never while authoring
 ```
 
-Two Colliders collide when each one's `mask` holds a layer of the other. `onCollision(other)` fires on
+Two Colliders collide when each one's `mask` holds the other's `layer`. Camera rigs, foot IK and raycasts
+choose what they react to by layer as well (see [collision layers](../editor/physics.md#layers)), and a
+camera rig that sees through the layer cuts the meshes the Collider holds. `onCollision(other)` fires on
 the Collider.
 
 ### TriggerNode — `'trigger'`
@@ -197,7 +199,8 @@ Fields: `followOffset`, `followSpace` (`'world' | 'targetYaw' | 'targetFull'`), 
 `yawSensitivity`, `pitchSensitivity`, `invertPitch`, `yawMin` / `yawMax`, `pitchMin = -80` /
 `pitchMax = 80`, `armLength = 4`, `socketOffset`, `fovEnabled` / `fov` / `fovDamping`,
 `collisionEnabled` / `collisionRadius` / `collisionMinRatio` / `collisionPullTime` /
-`collisionReturnTime` / `collisionIgnoreIds`, `collisionMode` (`'retract' | 'dither'`) /
+`collisionReturnTime` / `collisionIgnoreIds`, `collisionLayers` (Blocked by: a layer mask, default every
+layer but See Through and No Camera) / `seeThroughLayers` (See through, default See Through) /
 `ditherRadius = 1` / `ditherStrength = 0.85`, `shakePositionAmplitude`, `shakeRotationAmplitude`,
 `shakeFrequency`, `shakeDecay`, `shakeSustained`, `cameraNodeId`.
 
@@ -228,7 +231,7 @@ A pawn: it turns a control intent into velocity and facing. It does not read inp
 
 **Tuning:** `walkSpeed = 1.5`, `runSpeed = 4`, `jumpSpeed = 4`, `turnSpeed = 540`,
 `turnThreshold = 90`, `turnReleaseAngle = 10`, `directionSmoothing = 0.12`, `acceleration = 0`,
-`turnFriction = 0`, `moveDirSource` (`'input' | 'velocity'`, default `'input'`), `airControl = 1`, `coyoteSeconds = 0.12`, `jumpBufferSeconds = 0.15`, `jumpLockoutSeconds = 0.15`,
+`turnFriction = 0`, `moveDirSource` (`'input' | 'velocity'`, default `'input'`), `airControl = 1`, `slopeLimit = 45` (degrees: the steepest ground it stands on without sliding; `0` off), `coyoteSeconds = 0.12`, `jumpBufferSeconds = 0.15`, `jumpLockoutSeconds = 0.15`,
 `facingMode` (`'aim' | 'velocity' | 'none'`), `driveWhenUnpossessed = false`.
 
 ```ts

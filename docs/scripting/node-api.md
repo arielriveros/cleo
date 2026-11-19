@@ -206,13 +206,9 @@ weapon model, a UI-adjacent prop.
 
 ## See-through to camera
 
-```ts
-get cameraDither: boolean ; set cameraDither(v)
-```
-
-Lets a camera rig whose `collisionMode` is `'dither'` see through this node: where it stands between
-the camera and the player, the blocking part is dithered away instead of the camera pulling in. The
-setter fans out to children. Foliage rules have the same switch (`cameraDither` on the rule).
+A camera rig sees through what a Collider on one of its `seeThroughLayers` holds: put the node in a Collider
+on the See Through layer (`collider.layer = this.scene.physics.layer('See Through')`). Geometry with no
+Collider round it is never seen through. See [collision layers](../editor/physics.md#layers).
 
 ## Viewmodel
 

@@ -13,6 +13,7 @@ import type { RayHit2D } from './collide2d';
 import { stepBody2D } from './body2d';
 import type { Locomotion2DTuning } from './locomotion2d';
 import type { Box2D, CollisionWorld2D, Grid2D } from './types';
+import { DEFAULT_LAYER_NAMES, LAYER, layerByName, layersCollide } from '../physics/collisionLayers';
 
 /** What the 2D world reads from the scene each step (the scene's typed lists). */
 export interface World2DSceneView {
@@ -23,12 +24,14 @@ export interface World2DSceneView {
     readonly areas2D: ReadonlySet<TriggerNode>;
 }
 
-/** The layer tilemaps are on, for a collider's mask (see Body2DNode). */
-export const TILEMAP_LAYER = 1;
+/**
+ * The layer tilemaps are on, for a collider's mask (see Body2DNode): Default. The 2D world's layers are the
+ * project's collision layers, the same table its 3D physics names (src/physics/collisionLayers.ts).
+ */
+export const TILEMAP_LAYER = LAYER.DEFAULT;
 
-/** Whether two colliders' layers and masks let them collide: each one's mask holds a layer of the other. */
-export const layersCollide = (aLayer: number, aMask: number, bLayer: number, bMask: number): boolean =>
-    (aLayer & bMask) !== 0 && (bLayer & aMask) !== 0;
+/** Whether two colliders' layers and masks let them collide: each one's mask holds the other's layer. */
+export { layersCollide };
 
 /** A 2D collider's fall speed is held under this (world units per second). */
 const MAX_FALL_SPEED = 50;
@@ -61,6 +64,28 @@ export class World2D {
 
     /** The world as of the last step (or {@link refresh}): what queries read. */
     public get world(): CollisionWorld2D { return this._world; }
+
+    /** Where the project's collision layer names come from (the scene hands it its 3D physics' table). */
+    private _layerNames: () => readonly string[] | null | undefined = () => null;
+
+    /** @internal Read the layer names from `source` (Scene does, from its PhysicsSystem): one table for 2D and 3D. */
+    public layerNamesFrom(source: () => readonly string[] | null | undefined): void { this._layerNames = source; }
+
+    /**
+     * The project's collision layer names (Options ▸ Project ▸ Layers), index 0 being layer 1: the same
+     * table as the 3D physics'.
+     */
+    public get layerNames(): readonly string[] { return this._layerNames() ?? DEFAULT_LAYER_NAMES; }
+
+    /** The bit of the collision layer called `name` ("Default", a project's own, or "Layer 7"), or 0. */
+    public layer(name: string): number { return layerByName(this.layerNames, name); }
+
+    /** The mask of every collision layer named: `body.mask = physics2D.layers('Default', 'Enemies')`. */
+    public layers(...names: string[]): number {
+        let mask = 0;
+        for (const name of names) mask |= this.layer(name);
+        return mask;
+    }
 
     /** Rebuild the collision world from the scene: its tilemaps and enabled 2D colliders, as they stand. */
     public refresh(view: World2DSceneView, carry: boolean = false): void {

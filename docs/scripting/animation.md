@@ -102,6 +102,26 @@ root motion still moves it. A hard landing that crouches where it came down, wha
 case. The animator reaches the Character as root motion reaches its body: the first ancestor with an
 `animationHold` field (`CharacterNode.animationHold`, set each frame, read-only to scripts).
 
+**Sync groups.** States that share a `syncGroup` hand over in step:
+
+```ts
+{ name: 'Locomotion', field: walk, syncGroup: 'Gait', ... }
+{ name: 'Stairs', field: climb, syncGroup: 'Gait', ... }
+```
+
+- **The phase.** A transition between two of them starts the state entered at the normalized phase the one it left
+  was at: a blend space's phase, or a looping clip's time over its length. Anything else starts at 0, and so does a
+  re-entry of the same state.
+- **The blend.** Through the cross-fade the two blend spaces share that phase, advanced at the rate of their mixed
+  cycle (the outgoing one's length mixed into the incoming one's by the blend's progress). `fieldDebug.synced` is
+  true meanwhile, and `fieldDebug.previousPhase` reads the outgoing side's phase (equal to `phase` when synced).
+- **The feet.** It lines the feet up only if phase 0 is the same foot's plant in every state of the group (set
+  each sample's `phaseOffset`).
+- **Exit times** and `loopCount` count from the carried phase.
+- **Interrupted.** A synced cross-fade interrupted by another freezes as any does; the next state still starts at the
+  live phase.
+- **Not a state group.** `syncGroup` shares a stride; `groups` share transitions.
+
 A character running a [shared animator](../editor/animation.md#shared-animators) holds a resolved
 copy of it, so all of the above works the same either way.
 
@@ -411,10 +431,17 @@ interface Animation { footLocks?: Record<string, [number, number][]> }   // per 
 - **Missing vs empty.** An empty list never locks that foot; a foot with no entry is detected as above.
 - **Blends.** Weighted as the pose is: a blend space's samples each at their own time, a cross-fade's two sides by
   the blend. A foot whose posed clips have no windows for it, over half their weight, is detected.
+- **Planted at any height** (`AnimationState.plantInWindows`). Foot placement lets go of a foot the clip lifts more
+  than `swingRelease` over the lowest one, reading it as a swing. In a state with `plantInWindows: true`, a foot
+  inside its window keeps its ground correction however high the clip holds it. The share of the pose inside a
+  window decides, damped over the rig's `smoothing`. For a stair climb, whose upper foot stands a riser above the
+  lower one and would otherwise float over its tread. Off by default; base layer only.
 
 Helpers in `footLockWindows.ts`:
-- `detectFootLockWindows(clip, skin, { heelLift })`: spans from the ball coming down to the heel lifting
-  `heelLift` (3 cm);
+- `detectFootLockWindows(clip, skin, { heelLift, ground })`: spans from the ball coming down to the heel lifting
+  `heelLift` (3 cm). `ground: 'stance'` judges "down" against each stance's own height (a stretch of at least
+  0.1 s over which the ball holds its height) instead of the clip's lowest, for a clip whose feet plant at different
+  heights: a stair climb with its rise kept;
 - `shrinkFootLockSpans(windows, keep)`: each span cut to its middle `keep` share (0 to 1), spans left shorter
   than 0.06 s dropped, for clips whose feet should lock for less of each stance;
 - `footLockAt(clip, key, time)`;

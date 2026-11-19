@@ -514,6 +514,12 @@ function SelectedState() {
           <Toggle label='lock' checked={s.footLock !== false}
             onChange={c => setState(i, { footLock: c ? undefined : false })} className='text-ui-xs' />
         </span>
+        <span title={'Plant the feet by the clips’ foot-lock windows, at any height: a foot inside one keeps its ground '
+          + 'correction however far above the other foot the clip holds it. For a stair climb, whose upper foot stands a '
+          + 'riser above the lower one and would otherwise float over its tread. Off, a raised foot reads as swinging.'}>
+          <Toggle label='windows' checked={!!s.plantInWindows}
+            onChange={c => setState(i, { plantInWindows: c || undefined })} className='text-ui-xs' />
+        </span>
         {/* Base layer only: a layer's state does not move the character. */}
         {activeLayer === 0 && (
           <span title={'Hold the character still while this state plays: the Character it animates stops steering (no '
@@ -524,6 +530,20 @@ function SelectedState() {
               onChange={c => setState(i, { holdMovement: c || undefined })} />
           </span>
         )}
+      </div>
+
+      {/* Sync group: a hand-over between two states of one carries the stride (AnimationState.syncGroup). */}
+      <div className='flex items-center gap-1 text-ui-xs'
+        title={'States in one sync group hand over in step: the state entered starts at the phase of the cycle the one '
+          + 'left was at, and through the cross-fade the two move as one. For blend spaces whose phase 0 is the same '
+          + 'foot’s plant (a walk and a stair climb, say). Not the same as the state groups above, which share '
+          + 'transitions.'}>
+        <span className='text-muted w-[42px] shrink-0'>Sync</span>
+        <div className='flex-1 min-w-0'>
+          <ComboSelect value={s.syncGroup ?? ''} noun='sync group' allowEmpty allowCustom
+            choices={[...new Set(sm.states.map(x => x.syncGroup).filter((g): g is string => !!g))].map(value => ({ value }))}
+            onChange={v => setState(i, { syncGroup: v.trim() || undefined })} />
+        </div>
       </div>
 
       <SectionTitle title='Links' className='mt-1' />

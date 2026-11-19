@@ -16,6 +16,46 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Stairs in the Sandbox, and characters that stand on slopes.**
+  - *Stair clips.* The Sandbox goes up and down its flights with the pack's stair clips, from one 2D blend space
+    (Climb by speed): walking and running, at a stair pace (one step a tread), facing the way it goes, slowing
+    down before the first riser even from a sprint, and blending the climb into the descent when it turns round
+    on a flight. The generator checks each stair clip first (its feet step a riser each step, and it loops). The
+    pack's two descending clips fail it (their feet never step down), so their legs are rebuilt: their own trunk
+    and timing, the feet stepping down on a schedule, the legs by IK. Walking up, the knees stay together: the
+    pack's walking climb splays them 23 cm apart (the flat walk holds them 18), and the build turns them in about
+    the hip-ankle line, the feet where they were. In game they come out 19 cm apart walking up, 18 on the flat.
+    The slowdown for a flight starts late: it brakes 1.5 times harder (**stairBrake**) to its own gait's stair
+    pace, from about 0.5 m short of the first riser at a jog and 1.2 m at a sprint (it was 1.25 m and 2.35 m).
+  - *Sync groups.* Animator states in one **Sync** group hand over in step: the state entered starts where the one
+    it leaves was in its stride, and the two blend spaces cycle as one through the cross-fade (`state.syncGroup`).
+    The walk and the stair climb share one, so the planted foot stays planted.
+  - *Feet planted by their windows.* A state can plant its feet by its clips' foot-lock windows at any height
+    (**windows**, `state.plantInWindows`), so a stair climb's upper foot stands on its tread instead of floating
+    over it. Foot-lock detection can judge each stance against its own height (`ground: 'stance'`).
+  - *Slope Limit.* A Character stands on ground up to its **Slope Limit** (45 degrees, `slopeLimit`) without sliding
+    down it. Gravity then only presses it into the ground, so on a slope it also starts, brakes and climbs as on the
+    flat. A character used to creep down a stair ramp or a hill at about 0.1 m/s, brake short going down and stall
+    climbing. Any dynamic body can ask for the same (`physics.holdOnSlope`). Player contract 46.
+
+- **Named collision layers, and the camera and foot IK choose by them.** A project names its 16 collision layers
+  once for its 3D and its 2D physics (Options ▸ Project ▸ Layers; the engine's four are Default, Ragdoll,
+  See Through and No Camera). A Collider, a Trigger or a 2D body is on one of them, picked by name, and a 2D AI's
+  **Sees layers** picks from them too. Duskwell names its own: Player, Enemies, each side's attacks and
+  Interactables.
+  - *Camera rigs* are **Blocked by** some layers and **See through** others. A new rig is blocked by everything
+    but See Through and No Camera, and sees through See Through: its boom passes those bodies and the dither hole
+    cuts the meshes their Collider holds. This replaces the Collider's **Camera Collision** switch, the node's and
+    the foliage rule's **See-through to camera**, and the rig's Retract/Dither **Response**. Old scenes convert as
+    they load. A mesh with no Collider round it can no longer be seen through.
+  - *Foot placement* has **Trace layers**: the layers its feet land on.
+  - *Scripts* get a `layerMask` and a `collidingWith` on `physics.raycast`, and `physics.layer('Name')` /
+    `physics.layers(...)` to find layers by name. A body's ground probe now reads only what the body collides with.
+  - *The Sandbox* is built this way. The capsule glides up a ramp over each flight of stairs that only characters
+    collide with, and walks on through the bumps. The feet stand on the real steps and climb the bumps, both of
+    which the capsule passes through. The camera sees through the three pillars by the start, and pulls in for
+    the wall. Ragdolls now collide with every layer, not just Default.
+
 - **Saving and loading.** `SaveGame` saves a game to slots and loads it back, from scripts: `SaveGame.save('auto')`,
   `SaveGame.load('auto')`, `list`, `mostRecent` for a Continue, and `set`/`get` globals for progress. What a save
   keeps is opt-in: a node marked **Saved** (its transform, spawned state, body motion and variables, and that it
@@ -909,6 +949,22 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   cell and nested, so sweeping it never swaps one plant for another; thinned plants stop colliding too.
 
 ### Fixes & refactors
+
+- **Shadows start at their casters.** Sun shadows began a few centimetres from what cast them, and spot and point
+  shadows far more: a crate floated over its own shadow under a lamp. Thin casters (toes, a plank's edge) cast
+  nothing at all.
+  - *Sun.* The constant **Depth Bias** is now 5 mm, not 3 cm. Solid casters are drawn with their front faces
+    culled, so a lit surface never meets its own depth and needs almost no bias. The **Normal Bias** now scales
+    with how far a surface turns from the light: none facing it, all of it edge-on, which is where acne starts.
+  - *Spot and point lights* biased in depth units, which grow with the square of the distance (13 cm at 3 m). They
+    now use the sun's Depth Bias as a world-unit step toward the light, and their own **Bias** is an extra in
+    depth units, 0 by default.
+  - *Two-sided casters* (cut-out cards, double-sided materials, foliage) meet their own depth, so their shadow
+    pipelines carry a slope-scaled depth bias. WebGL2 now applies a pipeline's depth bias (`polygonOffset`).
+  - *Old scenes.* Render settings saved before this and still on the old defaults (0.03 and 1.5, and 0.0015 for
+    spot and point lights) load with the new ones (`shadowBiasVersion`). Values someone chose are kept.
+  - *Custom materials.* The shadow library is part of the forward custom-material prelude, so a forward custom
+    material saved with WebGPU code needs its inspector opened once to re-translate it.
 
 - **Leaving a scene frees it.** A game that moved on with `Game.loadScene` kept the scene it left in memory, every mesh
   of it: the first scene for the rest of the session, and the one before the current one too. The game UI layer

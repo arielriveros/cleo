@@ -89,13 +89,13 @@ function liftedClip(h: number, side: 'left' | 'right' = 'right'): Animation {
 
 /** Physics stubbed to a horizontal plane at `groundY`. `null` means the ray finds nothing at all. */
 function stubPhysics(groundY: number | null, normal: vec3 = vec3.fromValues(0, 1, 0)) {
-    const calls: { from: vec3; to: vec3 }[] = [];
+    const calls: { from: vec3; to: vec3; options?: any }[] = [];
     return {
         calls,
         physics: {
             up: vec3.fromValues(0, 1, 0),
-            raycast(from: vec3, to: vec3) {
-                calls.push({ from: vec3.clone(from), to: vec3.clone(to) });
+            raycast(from: vec3, to: vec3, options?: any) {
+                calls.push({ from: vec3.clone(from), to: vec3.clone(to), options });
                 if (groundY === null) return null;
                 // Only report a hit when the segment actually spans the plane, so traceUp/traceDown matter.
                 if (from[1] < groundY || to[1] > groundY) return null;
@@ -331,6 +331,19 @@ describe('Animator — foot IK', () => {
         expect(to[1]).toBeCloseTo(0 - 0.6, 5);      // ankle - traceDown
     });
 
+    it("traces only the rig's trace layers, every layer by default", () => {
+        const all = makeAnimator(RIG, 0.2);
+        all.animator.playAnimationByName('idle', true, false);
+        step(all.animator);
+        expect(all.stub.calls[0].options).toMatchObject({ groundOnly: true, layerMask: -1 });
+
+        // A stair ramp for the capsule on layer 7 (64), left out: the feet land on the steps under it.
+        const some = makeAnimator({ ...RIG, traceLayers: -1 & ~64 }, 0.2);
+        some.animator.playAnimationByName('idle', true, false);
+        step(some.animator);
+        expect(some.stub.calls.every(c => c.options?.layerMask === (-1 & ~64))).toBe(true);
+    });
+
     it('rolls the foot onto a slope, and leaves it alone past the limit', () => {
         const tilted = vec3.normalize(vec3.create(), vec3.fromValues(0, 1, 0.5));  // ~26 degrees
         const rolled = makeAnimator({ ...RIG, maxSlopeDeg: 45 }, 0.2, { normal: tilted }).animator;
@@ -555,6 +568,51 @@ describe('Animator — foot IK, stance vs swing', () => {
         // The escape hatch, and what this did before the release existed: the swing foot is planted anyway.
         // 2 dp — planting it from 0.35 extends the leg into the DEFAULT_MAX_REACH shortfall.
         expect(jointPos(animator, FOOT_R)[1]).toBeCloseTo(0.1, 2);
+    });
+
+    // A stair climb's upper foot stands a riser above the lower one, in the clip, while it is planted: measured
+    // against the lowest foot it reads as a swing, and released it floated over its tread. A clip's foot-lock
+    // windows say when a foot is planted; inside one the release lets it be.
+    const windowed = (spans: [number, number][]) => ({ ...liftedClip(0.35), footLocks: { 'foot.R': spans, 'foot.L': [[0, 1]] as [number, number][] } });
+    /** The clip in a state that plants by its windows (AnimationState.plantInWindows), or one that does not. */
+    const inState = (animator: Animator, plantInWindows: boolean) => animator.setStateMachine({
+        parameters: [], transitions: [], events: [],
+        states: [{ name: 'Climb', clipName: 'idle', loop: true, speed: 1, isEntry: true, plantInWindows }],
+    } as any);
+
+    it('plants a lifted foot that its clip has inside a foot-lock window, in a state that asks', () => {
+        const { animator } = makeAnimator(RIG2, 0, { clip: windowed([[0, 1]]) });
+        inState(animator, true);
+        stepSm(animator);
+        // As with the release off: pulled down to its ground (2 dp, the reach shortfall).
+        expect(jointPos(animator, FOOT_R)[1]).toBeCloseTo(0.1, 2);
+    });
+
+    it('releases it as before in any other state, and outside its windows', () => {
+        const other = makeAnimator(RIG2, 0, { clip: windowed([[0, 1]]) }).animator;
+        inState(other, false);
+        stepSm(other);
+        expect(jointPos(other, FOOT_R)[1]).toBeCloseTo(0.35, 6);
+        // The window has passed by the first frame: the foot is swinging, by the clip's own account.
+        const { animator } = makeAnimator(RIG2, 0, { clip: windowed([[0, 0.001]]) });
+        inState(animator, true);
+        stepSm(animator);
+        expect(jointPos(animator, FOOT_R)[1]).toBeCloseTo(0.35, 6);
+    });
+
+    it('plants and lets go over the rig smoothing, not in one frame', () => {
+        // Planted for the first 0.5 s, then the window ends: the correction fades in, then out, over the smoothing.
+        const { animator } = makeAnimator({ ...RIG2, smoothing: 0.1 }, 0, { clip: windowed([[0, 0.5]]) });
+        inState(animator, true);
+        stepSm(animator);
+        expect(jointPos(animator, FOOT_R)[1], 'the first frame').toBeGreaterThan(0.2);
+        for (let k = 0; k < 28; k++) stepSm(animator);
+        expect(jointPos(animator, FOOT_R)[1], "planted").toBeLessThan(0.13);
+        stepSm(animator); stepSm(animator);   // past 0.5 s
+        expect(jointPos(animator, FOOT_R)[1], 'one frame after the window').toBeLessThan(0.2);
+        // Still short of the loop, where the window opens again.
+        for (let k = 0; k < 25; k++) stepSm(animator);
+        expect(jointPos(animator, FOOT_R)[1], 'released').toBeGreaterThan(0.33);
     });
 });
 

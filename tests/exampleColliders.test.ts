@@ -79,6 +79,19 @@ describe('merging static colliders', () => {
         expect(fire.collider).toBeUndefined();
     });
 
+    it('splits by collision layer, named by the layer, and reads the old see-through flag as its layer', () => {
+        const names = ['', '', '', '', '', 'Stair Steps']
+        const root = node('root', {}, [
+            collider('Floor', [box(4, 1, 4)]),
+            node('Steps Collider', { type: 'collider', collider: { mass: 0, layer: 32, shapes: [box(1, 0.2, 0.3)] } }),
+            collider('Pillar', [box(1, 3, 1)], { cameraDither: true }),
+        ]);
+        mergeStaticColliders(root, { scriptStrings: new Set(), idFor: k => k, layerNames: names });
+        const merged = Object.fromEntries(root.children.map((c: any) => [c.name, c.collider.layer]));
+        expect(merged).toEqual({ 'Static Collision': 1, 'Static Collision (Stair Steps)': 32, 'Static Collision (See Through)': 4 });
+        expect(root.children.every((c: any) => c.cameraDither === undefined)).toBe(true);
+    });
+
     it('leaves a collider a script names by its name', () => {
         const root = scene();
         mergeStaticColliders(root, { scriptStrings: new Set(['Floor']), idFor: k => k });

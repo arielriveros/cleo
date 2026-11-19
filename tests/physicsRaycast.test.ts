@@ -1,14 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { World, Body, Box, Vec3, Heightfield, RaycastResult } from 'cannon-es';
-import { skipCameraHit, skipRayHit } from '../src/physics/cameraRayFilter';
+import { skipCameraHit, skipRayHit, type CameraProbeLayers } from '../src/physics/cameraRayFilter';
+import { ALL_LAYERS, DEFAULT_CAMERA_BLOCKED_BY, DEFAULT_CAMERA_SEE_THROUGH, LAYER } from '../src/physics/collisionLayers';
+
+/** A rig's layers as it starts: blocked by everything but See Through and No Camera, seeing through See Through. */
+const RIG: CameraProbeLayers = { blockedBy: DEFAULT_CAMERA_BLOCKED_BY, seeThrough: DEFAULT_CAMERA_SEE_THROUGH };
 
 // Mirrors PhysicsSystem.raycastCamera: every hit along the segment, filtered, nearest survivor wins.
 // PhysicsSystem itself imports the cleo barrel and cannot be loaded here, so the filter rule lives in
 // its own leaf module (cameraRayFilter) and this drives it against a real cannon World.
-function raycastCamera(world: World, from: Vec3, to: Vec3, reject?: (owner: any) => boolean): number | null {
+function raycastCamera(world: World, from: Vec3, to: Vec3, reject?: (owner: any) => boolean, layers: CameraProbeLayers = RIG): number | null {
     let nearest: number | null = null;
     world.raycastAll(from, to, { checkCollisionResponse: false }, (result) => {
-        if (skipCameraHit(result.body as any, reject)) return;
+        if (skipCameraHit(result.body as any, layers, reject)) return;
         if (result.hasHit && (nearest === null || result.distance < nearest)) nearest = result.distance;
     });
     return nearest;
@@ -46,14 +50,25 @@ describe('camera probe filtering', () => {
         expect(raycastCamera(world, ORIGIN, BACK)).toBeCloseTo(3.9, 5);
     });
 
-    it('skips bodies with the camera channel off, and keeps them when it is on', () => {
+    it('stops only at the layers the rig is blocked by', () => {
         const world = new World();
-        world.addBody(wallAt(-4, { cameraCollision: false }));
+        world.addBody(wallAt(-4, { collisionFilterGroup: LAYER.NO_CAMERA }));
         expect(raycastCamera(world, ORIGIN, BACK)).toBeNull();
+        // A rig blocked by every layer stops at it after all.
+        expect(raycastCamera(world, ORIGIN, BACK, undefined, { blockedBy: ALL_LAYERS, seeThrough: 0 })).toBeCloseTo(3.9, 5);
 
         const world2 = new World();
-        world2.addBody(wallAt(-4, { cameraCollision: true }));
+        world2.addBody(wallAt(-4, { collisionFilterGroup: LAYER.DEFAULT }));
         expect(raycastCamera(world2, ORIGIN, BACK)).toBeCloseTo(3.9, 5);
+    });
+
+    it('passes what it sees through to the wall behind it', () => {
+        const world = new World();
+        world.addBody(wallAt(-2, { collisionFilterGroup: LAYER.SEE_THROUGH }));
+        world.addBody(wallAt(-6));
+        expect(raycastCamera(world, ORIGIN, BACK)).toBeCloseTo(5.9, 5);
+        // A rig that sees through nothing and is blocked by everything stops at the first.
+        expect(raycastCamera(world, ORIGIN, BACK, undefined, { blockedBy: ALL_LAYERS, seeThrough: 0 })).toBeCloseTo(1.9, 5);
     });
 
     // The two channels are independent: a body can be a ghost to the solver and still stop the camera.
@@ -103,28 +118,36 @@ describe('skipCameraHit', () => {
         expect(skipCameraHit(undefined)).toBe(true);
     });
 
-    // Bodies the engine did not create (the terrain heightfield) have no cameraCollision field at all.
-    it('treats an absent camera channel as solid', () => {
-        expect(skipCameraHit({})).toBe(false);
+    // Bodies the engine did not create (the terrain heightfield) have no layer of their own: Default.
+    it('treats a body with no layer as on the Default layer', () => {
+        expect(skipCameraHit({}, RIG)).toBe(false);
+        expect(skipCameraHit({}, { blockedBy: ALL_LAYERS & ~LAYER.DEFAULT, seeThrough: 0 })).toBe(true);
+        expect(skipCameraHit({}, { blockedBy: ALL_LAYERS, seeThrough: LAYER.DEFAULT })).toBe(true);
+    });
+
+    it('rejects triggers whatever their layer', () => {
+        expect(skipCameraHit({ isTrigger: true, collisionFilterGroup: LAYER.DEFAULT }, { blockedBy: ALL_LAYERS, seeThrough: 0 })).toBe(true);
     });
 
     it('keeps ownerless bodies when a reject rule is supplied', () => {
         const reject = (owner: any) => owner !== null && owner.name === 'player';
-        expect(skipCameraHit({}, reject)).toBe(false);
+        expect(skipCameraHit({}, RIG, reject)).toBe(false);
     });
 
-    // A 'dither' rig sees through what opted into its hole (a pillar, a tree) and pulls in for the rest.
-    it('lets a see-through probe pass bodies that opted into the hole, and only those', () => {
-        const pillar = { owner: { cameraDither: true } as any };
-        const tree = { cameraDither: true };
-        const wall = { owner: { cameraDither: false } as any };
-        expect(skipCameraHit(pillar, undefined, true)).toBe(true);
-        expect(skipCameraHit(tree, undefined, true)).toBe(true);
-        expect(skipCameraHit(wall, undefined, true)).toBe(false);
-        expect(skipCameraHit({}, undefined, true)).toBe(false);
-        // A 'retract' rig pulls in for all of them.
-        expect(skipCameraHit(pillar)).toBe(false);
-        expect(skipCameraHit(tree)).toBe(false);
+    it('passes a See through layer even when the rig is blocked by it too', () => {
+        const pillar = { collisionFilterGroup: LAYER.SEE_THROUGH };
+        const wall = { collisionFilterGroup: LAYER.DEFAULT };
+        const crate = { collisionFilterGroup: LAYER.NO_CAMERA };
+        const both: CameraProbeLayers = { blockedBy: ALL_LAYERS, seeThrough: LAYER.SEE_THROUGH };
+        expect(skipCameraHit(pillar, both)).toBe(true);
+        expect(skipCameraHit(wall, both)).toBe(false);
+        expect(skipCameraHit(crate, both)).toBe(false);
+        // The default rig: the pillar is seen through, the crate ignored, the wall pulls in.
+        expect(skipCameraHit(pillar, RIG)).toBe(true);
+        expect(skipCameraHit(crate, RIG)).toBe(true);
+        expect(skipCameraHit(wall, RIG)).toBe(false);
+        // A rig that sees through nothing pulls in for the pillar.
+        expect(skipCameraHit(pillar, { blockedBy: ALL_LAYERS, seeThrough: 0 })).toBe(false);
     });
 });
 
@@ -157,6 +180,30 @@ describe('skipRayHit', () => {
         expect(skipRayHit(other, { ignore: self })).toBe(false);
         expect(skipRayHit(other, { ignore: [self, other] })).toBe(true);
         expect(skipRayHit(other, { ignore: null })).toBe(false);
+    });
+
+    it('keeps only the layers a layer mask names', () => {
+        const stairSteps = { collisionFilterGroup: 32 };
+        expect(skipRayHit(stairSteps, { layerMask: ALL_LAYERS })).toBe(false);
+        expect(skipRayHit(stairSteps, { layerMask: 32 | LAYER.DEFAULT })).toBe(false);
+        expect(skipRayHit(stairSteps, { layerMask: LAYER.DEFAULT })).toBe(true);
+        // No layer of its own: Default.
+        expect(skipRayHit({}, { layerMask: LAYER.DEFAULT })).toBe(false);
+        expect(skipRayHit({}, { layerMask: 32 })).toBe(true);
+    });
+
+    it('keeps only what a body collides with, both ways round', () => {
+        // A capsule on layer 16 that leaves the steps (32) out of its mask, and a ramp (64) only it collides with.
+        const capsule = { collisionFilterGroup: 16, collisionFilterMask: ALL_LAYERS & ~32 };
+        const steps = { collisionFilterGroup: 32, collisionFilterMask: ALL_LAYERS };
+        const ramp = { collisionFilterGroup: 64, collisionFilterMask: 16 };
+        const prop = { collisionFilterGroup: LAYER.DEFAULT, collisionFilterMask: ALL_LAYERS };
+        expect(skipRayHit(steps, { collidingWith: capsule })).toBe(true);
+        expect(skipRayHit(ramp, { collidingWith: capsule })).toBe(false);
+        expect(skipRayHit({}, { collidingWith: capsule })).toBe(false);
+        // The prop collides with the steps, and not with the ramp, whose mask leaves it out.
+        expect(skipRayHit(steps, { collidingWith: prop })).toBe(false);
+        expect(skipRayHit(ramp, { collidingWith: prop })).toBe(true);
     });
 
     it('gives the caller rule the last word, with the owning node', () => {

@@ -11,6 +11,9 @@ import { detectFootLockWindows } from '../src/animation/footLockWindows';
 import { fakeInput } from './helpers/fakeInput';
 import type { FakeInput } from './helpers/fakeInput';
 import { TEST_PHYSICS } from './helpers/testPhysics';
+import { PhysicsBody } from '../src/physics/physicsBody';
+import { ALL_LAYERS, LAYER, layerByName } from '../src/physics/collisionLayers';
+import { MaterialBinder } from '../src/graphics/render/materialBinder';
 
 // The Sandbox example: a mannequin with ALS-style locomotion built from the engine's own tools (tools/sandbox).
 // Almost everything that can go wrong with it is silent: a parameter bound to a field that does not exist reads
@@ -77,7 +80,448 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(controller.aimSource).toBe('node');
         expect(controller.aimSourceId).toBe(camera.id);
         expect(camera.followId).toBe(player.children[1].id);
-        expect(nodes().filter(n => n.type === 'collider' && /^Static Collision/.test(n.name))).toHaveLength(1);
+        // One course at the top, what is merged apart for its layer (the feet's detail, the stairs' ramps, the
+        // see-through pillars) inside it.
+        const course = sceneFile().scene.children.filter((n: any) => n.type === 'collider' && /^Static Collision/.test(n.name));
+        expect(course.map((n: any) => n.name)).toEqual(['Static Collision']);
+        expect(course[0].children.filter((n: any) => n.type === 'collider').map((n: any) => n.name).sort())
+            .toEqual(['Static Collision (Foot Detail)', 'Static Collision (See Through)', 'Static Collision (Stair Ramp)']);
+    });
+
+    // ----- collision layers -------------------------------------------------------------------------
+
+    /** The project's collision layers by name, as its settings name them. */
+    const layer = (name: string) => layerByName(read('libraries', 'projectSettings.json').collisionLayers, name);
+
+    it('names its layers: the feet on the steps and the bumps, the capsule on a ramp over each flight, the camera through the pillars', () => {
+        const [character, detail, ramp] = ['Character', 'Foot Detail', 'Stair Ramp'].map(layer);
+        expect([character, detail, ramp]).toEqual([16, 32, 64]);
+        const collider = named('Player Collider').collider;
+        expect(collider.layer).toBe(character);
+        // The capsule never meets the steps or the bumps: the ramp stands in for the steps, the ground for the bumps.
+        expect(collider.mask & detail).toBe(0);
+        expect(collider.mask & ramp).not.toBe(0);
+        const rampBody = named('Static Collision (Stair Ramp)').collider, detailBody = named('Static Collision (Foot Detail)').collider;
+        expect([rampBody.layer, rampBody.mask]).toEqual([ramp, character]);
+        expect([detailBody.layer, detailBody.mask]).toEqual([detail, ALL_LAYERS]);
+        expect(detailBody.shapes).toHaveLength(18 + 24);   // a box per step (10 + 8), and the 24 bumps
+        const pillars = named('Static Collision (See Through)');
+        expect(pillars.collider.layer).toBe(LAYER.SEE_THROUGH);
+        expect(allNodes(pillars).filter((n: any) => n.type === 'model').map((n: any) => n.name).sort()).toEqual(['Pillar 1', 'Pillar 2', 'Pillar 3']);
+        // The feet land on the steps and the bumps, never on the ramp; the camera stops at the steps and the wall,
+        // never at the ramp, and sees through the pillars.
+        const traceLayers = rig().skin.ikRig.traceLayers;
+        expect([traceLayers & detail, traceLayers & ramp]).toEqual([detail, 0]);
+        const camera = named('Camera Rig');
+        expect([camera.collisionLayers & detail, camera.collisionLayers & ramp, camera.collisionLayers & LAYER.NO_CAMERA]).toEqual([detail, 0, 0]);
+        expect(camera.seeThroughLayers).toBe(LAYER.SEE_THROUGH);
+        // Small props are out of the camera's way, big ones block it.
+        const props = library('templates').filter((t: any) => t.nodeJson?.type === 'collider' && t.nodeJson.collider.mass > 0);
+        const layerOf = (name: string) => props.find((t: any) => t.name === name)?.nodeJson.collider.layer ?? LAYER.DEFAULT;
+        expect(layerOf('Ball')).toBe(LAYER.NO_CAMERA);
+        expect(layerOf('Large Crate')).toBe(LAYER.DEFAULT);
+    });
+
+    /** The flights of stairs (tools/sandbox/level.ts): where to set off from, the riser, the step count. */
+    const FLIGHTS = [
+        // Left of the barrel lying at the foot of the 15 cm flight.
+        { name: '15 cm', x: -5.95, rise: 0.15, steps: 10 },
+        { name: '20 cm', x: -1, rise: 0.2, steps: 8 },
+    ];
+    const STAIRS_Z = 6, TREAD = 0.3;
+    /**
+     * The most a stance foot creeps over its tread on the stairs, m/s. The clips' stride is 0.24 m to a 0.30 m tread,
+     * which foot locking takes up: measured 0.02-0.13.
+     */
+    const STAIR_SLIDE = 0.25;
+    /** The top of what is under `z` on flight `f`: the ground before it, a step's tread, the landing past it. */
+    const treadTop = (f: typeof FLIGHTS[number], z: number) => z < STAIRS_Z ? 0 : Math.min(f.steps, Math.floor((z - STAIRS_Z) / TREAD) + 1) * f.rise;
+
+    /**
+     * Up a flight from 3 m short of it, or down it from its landing, at a gait, and stop past it, with the rig's foot
+     * IK tuned by `ikRig`: every foot ray over the flight and what it landed on, and how the capsule, the animator
+     * and the feet went while on it.
+     */
+    function flight(f: typeof FLIGHTS[number], o: { down?: boolean; gait?: 'walk' | 'jog' | 'sprint'; back?: number; ikRig?: Record<string, unknown>; character?: Record<string, unknown> } = {}) {
+        const steps = layer('Foot Detail');
+        const end = STAIRS_Z + f.steps * TREAD;
+        const p = play(o.down ? [f.x, f.rise * f.steps + 0.02, end + 2.2] : [f.x, 0.02, STAIRS_Z - (o.back ?? 3)], o.ikRig ?? {}, o.character ?? {}, o.down ? 180 : 0);
+        const hits: { layer: number; y: number; z: number }[] = [];
+        const raycast = p.physics.raycast.bind(p.physics);
+        // The foot rays are the ground-only ones the rig's trace layers filter.
+        (p.physics as any).raycast = (from: any, to: any, options?: any) => {
+            const hit = raycast(from, to, options);
+            if (options?.groundOnly && options.layerMask !== undefined && hit) hits.push({ layer: hit.body.collisionFilterGroup, y: hit.point[1], z: hit.point[2] });
+            return hit;
+        };
+        p.run(0.5);
+        if (o.gait === 'walk') input.press('Walk');
+        if (o.gait === 'sprint') input.press('Sprint');
+        input.setMove(0, 1);
+        const speeds: number[] = [], states = new Set<string>(), clips = new Set<string>();
+        let onFlight = 0, facing = 0, atFirstRiser = -1;
+        // Going up: the fastest it got before the flight, and how far short of the first riser it began to slow.
+        let topSpeed = 0, brakeAt = -1;
+        // The feet in stance on the flight: a toe at most 3.5 cm over its foot's tread (the one under the ankle: going
+        // down, the toe hangs over the nose) and nearly still. Its drift over each stance (foot slide), and how far over
+        // its tread each stance stood (a floating upper foot).
+        const toes = ['LeftToeBase', 'RightToeBase'];
+        const last: Record<string, vec3> = {};
+        const stance: Record<string, { from: vec3; at: vec3; frames: number; over: number } | null> = { LeftToeBase: null, RightToeBase: null };
+        let drift = 0, stanceTime = 0, stillFrames = 0, stillOver = 0;
+        // How far apart the knees are side to side on the flight (model space, +X the left), m.
+        let kneeSum = 0, kneeFrames = 0;
+        const overs: number[] = [];
+        const close = (toe: string) => {
+            const s = stance[toe];
+            if (s && s.frames >= 4) { drift += Math.hypot(s.at[0] - s.from[0], s.at[2] - s.from[2]); stanceTime += s.frames * FRAME; overs.push(s.over); }
+            stance[toe] = null;
+        };
+        // A walk up a flight takes its time: 3 m at a walk, 3 more at half a metre a second.
+        p.run(o.gait === 'walk' ? 10 : o.down ? 6 : 5, () => {
+            const at = p.collider.worldPosition;
+            // Past the flight: let go there.
+            if (o.down ? at[2] < STAIRS_Z - 1 : at[2] > end + 0.6) input.setMove(0, 0);
+            if (!o.down && atFirstRiser < 0 && at[2] >= STAIRS_Z) atFirstRiser = p.player.groundSpeed;
+            if (!o.down && at[2] < STAIRS_Z) {
+                topSpeed = Math.max(topSpeed, p.player.groundSpeed);
+                if (brakeAt < 0 && topSpeed > 1 && p.player.groundSpeed < topSpeed - 0.15) brakeAt = STAIRS_Z - at[2];
+            }
+            const onIt = at[2] > STAIRS_Z + 0.5 && at[2] < end - 0.5;
+            for (const toe of toes) {
+                const w = p.jointWorld(toe), ankle = p.jointWorld(toe === 'LeftToeBase' ? 'LeftFoot' : 'RightFoot');
+                const prev = last[toe];
+                last[toe] = vec3.clone(w);
+                if (!onIt || !prev) { close(toe); continue; }
+                const over = w[1] - treadTop(f, ankle[2]);
+                const still = Math.hypot(w[0] - prev[0], w[1] - prev[1], w[2] - prev[2]) / FRAME < 0.3;
+                if (still) { stillFrames++; if (over < 0.035) stillOver++; }
+                if (over > 0.035 || !still) { close(toe); continue; }
+                const s = stance[toe];
+                if (!s) stance[toe] = { from: vec3.clone(w), at: vec3.clone(w), frames: 0, over };
+                else { vec3.copy(s.at, w); s.frames++; s.over = Math.min(s.over, over); }
+            }
+            if (!onIt) return;
+            onFlight++;
+            kneeSum += p.jointModel('LeftLeg')[0] - p.jointModel('RightLeg')[0];
+            kneeFrames++;
+            speeds.push(p.player.groundSpeed);
+            states.add(p.animator.currentStateName ?? '');
+            clips.add(heaviest(p));
+            const v = p.player.velocity, fw = p.player.worldForward;
+            if (Math.hypot(v[0], v[2]) > 0.3) facing = Math.max(facing, Math.abs(wrap(Math.atan2(v[0], v[2]) * DEG - Math.atan2(fw[0], fw[2]) * DEG)));
+        });
+        for (const toe of toes) close(toe);
+        input.setMove(0, 0);
+        input.release('Walk'); input.release('Sprint');
+        const over = hits.filter(h => h.z > STAIRS_Z && h.z < end);
+        // On a tread: on the steps, at one of their heights.
+        const offTread = over.filter(h => h.layer !== steps || Math.abs(h.y - Math.round(h.y / f.rise) * f.rise) > 0.01).length;
+        const mean = speeds.length ? speeds.reduce((a, b) => a + b, 0) / speeds.length : 0;
+        return {
+            p, hits, over, offTread, onFlight, states: [...states], clips: [...clips], mean, slowest: Math.min(...speeds), fastest: Math.max(...speeds), facing, atFirstRiser, topSpeed, brakeAt, knees: kneeFrames ? kneeSum / kneeFrames : 0,
+            slide: stanceTime > 0 ? drift / stanceTime : 0, landed: stillFrames ? stillOver / stillFrames : 0, overs, stillFrames, top: f.rise * f.steps,
+        };
+    }
+
+    /** The stair paces the build fitted (SandboxPlayer's public attributes): horizontal m/s. */
+    const pace = (name: 'stairUpWalkSpeed' | 'stairUpRunSpeed' | 'stairDownWalkSpeed' | 'stairDownRunSpeed') => named('Player').scriptVars[name] as number;
+    /** Whether the Stairs blend space has clips for going down (clips.ts stairCheck passed them). */
+    const downInBlend = () => (machine().states.find((s: any) => s.name === 'Stairs')?.field?.samples ?? []).some((s: any) => s.x < 0);
+    /** The blend space's heaviest clip this frame. */
+    const heaviest = (p: ReturnType<typeof play>) => [...(p.animator.activeFieldWeights ?? [])].sort((a: any, b: any) => b.weight - a.weight)[0]?.clipName ?? '';
+
+    it("plays up and down a flight from one blend space, in the walk's sync group, the descent rebuilt from the pack's clips", () => {
+        const sm = machine();
+        const stairs = sm.states.find((s: any) => s.name === 'Stairs');
+        const loco = sm.states.find((s: any) => s.name === 'Locomotion');
+        expect(stairs.field.mode).toBe('2d');
+        expect([stairs.fieldInputs.x, stairs.fieldInputs.y]).toEqual(['Stairs', 'GroundSpeed']);
+        expect([stairs.syncGroup, stairs.plantInWindows, stairs.speedScaleParam]).toEqual([loco.syncGroup, true, 'StairRate']);
+        // Up at +1, down at -1, each a creep, a walk and a run, at the paces the script keeps.
+        const at = (x: number) => stairs.field.samples.filter((s: any) => s.x === x).map((s: any) => s.clipName).sort();
+        expect(at(1)).toEqual(['StairsUpCreep', 'StairsUpRun', 'StairsUpWalk']);
+        expect(at(-1)).toEqual(['StairsDownCreep', 'StairsDownRun', 'StairsDownWalk']);
+        const speedOf = (name: string) => stairs.field.samples.find((s: any) => s.clipName === name).y;
+        expect([speedOf('StairsUpWalk'), speedOf('StairsUpRun'), speedOf('StairsDownWalk'), speedOf('StairsDownRun')])
+            .toEqual([pace('stairUpWalkSpeed'), pace('stairUpRunSpeed'), pace('stairDownWalkSpeed'), pace('stairDownRunSpeed')]);
+        // The rebuilt descents step down and loop (the build's check), with a window per foot to plant by.
+        const clips = new Map(library('animations').map(a => [a.clips[0].name, a.clips[0]]));
+        for (const name of ['StairsDownWalk', 'StairsDownRun', 'StairsUpWalk', 'StairsUpRun']) {
+            const c = clips.get(name);
+            expect(c.footLocks['foot.L'].length, name).toBeGreaterThan(0);
+            expect(c.footLocks['foot.R'].length, name).toBeGreaterThan(0);
+        }
+    });
+
+    for (const gait of ['walk', 'jog'] as const) {
+        it(`${gait}s up each flight in the stair climb, at its pace, facing its travel, the feet on the treads and never on the ramp`, () => {
+            const ramp = layer('Stair Ramp');
+            const expected = pace(gait === 'walk' ? 'stairUpWalkSpeed' : 'stairUpRunSpeed');
+            for (const f of FLIGHTS) {
+                const c = flight(f, { gait });
+                console.log(`stairs ${f.name} ${gait} up: ${c.onFlight} frames, ${c.mean.toFixed(2)} m/s (${c.slowest.toFixed(2)}-${c.fastest.toFixed(2)}; the pace ${expected}), states ${c.states.join(' ')}, facing off ${c.facing.toFixed(0)} deg, `
+                    + `${c.over.length} foot rays, ${c.offTread} off a tread, ${(c.landed * 100).toFixed(0)}% of still toes on their tread, stance slide ${c.slide.toFixed(2)} m/s`);
+                expect(c.onFlight, f.name).toBeGreaterThan(40);
+                expect(c.states, `${f.name}: the states on the flight`).toEqual(['Stairs']);
+                // The climb's clips, never the descent's.
+                expect(c.clips.every(n => n.startsWith('StairsUp')), `${f.name}: clips ${c.clips.join(' ')}`).toBe(true);
+                // At the pace: one tread a step.
+                expect(Math.abs(c.mean - expected) / expected, `${f.name}: ${c.mean.toFixed(2)} m/s on the flight, not ${expected}`).toBeLessThan(0.1);
+                expect(c.facing, `${f.name}: facing off its travel`).toBeLessThan(15);
+                expect(c.hits.some(h => h.layer === ramp), `${f.name}: a foot ray on the ramp`).toBe(false);
+                expect(c.over.length, f.name).toBeGreaterThan(20);
+                expect(c.offTread, `${f.name}: foot rays that missed a tread`).toBe(0);
+                expect(c.slide, `${f.name}: stance slide`).toBeLessThan(STAIR_SLIDE);
+                expect(c.p.collider.worldPosition[1], `${f.name}: up on the landing`).toBeCloseTo(c.top, 1);
+                // A still foot stands on its tread, the upper one too (planted by its clip's windows at any height).
+                // Not from every run-up: the climb steps one tread a step from wherever its stride met the flight,
+                // so now and then each foot comes down on a riser's edge, the toe on the tread above (a known
+                // limit: the stride is not matched to the treads). From three run-ups, most stand on their tread.
+                const landings = [c.landed, ...[2.7, 3.3].map(back => flight(f, { gait, back }).landed)];
+                console.log(`stairs ${f.name} ${gait} up: still toes on their tread from run-ups of 3, 2.7 and 3.3 m: ${landings.map(l => (l * 100).toFixed(0)).join(', ')}%`);
+                expect(landings.filter(l => l > 0.85).length, `${f.name}: run-ups with the still toes on their tread`).toBeGreaterThanOrEqual(2);
+                expect(c.p.trace).not.toContain('Fall');
+            }
+        });
+
+        it(`${gait}s down each flight at its pace, facing its travel, the feet on the treads`, () => {
+            const ramp = layer('Stair Ramp');
+            const expected = pace(gait === 'walk' ? 'stairDownWalkSpeed' : 'stairDownRunSpeed');
+            // The descent's clips (rebuilt from the pack's, descent.ts) when they passed the build's check; else a
+            // flight down plays the walk blend at the stairs' pace.
+            const down = downInBlend();
+            const state = down ? 'Stairs' : 'Locomotion';
+            for (const f of FLIGHTS) {
+                const c = flight(f, { gait, down: true });
+                console.log(`stairs ${f.name} ${gait} down: ${c.onFlight} frames, ${c.mean.toFixed(2)} m/s (${c.slowest.toFixed(2)}-${c.fastest.toFixed(2)}; the pace ${expected}), states ${c.states.join(' ')}, facing off ${c.facing.toFixed(0)} deg, `
+                    + `${c.offTread} foot rays off a tread, ${(c.landed * 100).toFixed(0)}% of still toes on their tread, stance slide ${c.slide.toFixed(2)} m/s`);
+                expect(c.onFlight, f.name).toBeGreaterThan(20);
+                expect(c.states, `${f.name}: the states on the flight`).toEqual([state]);
+                if (down) {
+                    expect(c.clips.every(n => n.startsWith('StairsDown')), `${f.name}: clips ${c.clips.join(' ')}`).toBe(true);
+                    expect(c.landed, `${f.name}: still toes on their tread`).toBeGreaterThan(0.85);
+                    expect(c.slide, `${f.name}: stance slide`).toBeLessThan(STAIR_SLIDE);
+                }
+                expect(Math.abs(c.mean - expected) / expected, `${f.name}: ${c.mean.toFixed(2)} m/s on the flight, not ${expected}`).toBeLessThan(0.12);
+                expect(c.facing, `${f.name}: facing off its travel`).toBeLessThan(15);
+                expect(c.hits.some(h => h.layer === ramp), `${f.name}: a foot ray on the ramp`).toBe(false);
+                expect(c.offTread, `${f.name}: foot rays that missed a tread`).toBe(0);
+                expect(c.p.collider.worldPosition[1], `${f.name}: down on the ground`).toBeLessThan(0.1);
+                expect(c.p.trace).not.toContain('Fall');
+            }
+        });
+    }
+
+    it('keeps its knees in walking up a flight, as close together as on the flat', () => {
+        // The pack's walking climb splays its knees (23 cm apart over hips 16 cm apart); the build turns them in
+        // (legs.ts alignKnees), and the foot IK bends them along the clip's own bend.
+        const flat = play(OPEN);
+        flat.run(0.5);
+        input.press('Walk');
+        input.setMove(0, 1);
+        flat.run(1);
+        let sum = 0, frames = 0;
+        flat.run(1.5, () => { sum += flat.jointModel('LeftLeg')[0] - flat.jointModel('RightLeg')[0]; frames++; });
+        input.setMove(0, 0);
+        input.release('Walk');
+        const onFlat = sum / frames;
+        for (const f of FLIGHTS) {
+            const c = flight(f, { gait: 'walk' });
+            console.log(`stairs ${f.name} walk up: knees ${(c.knees * 100).toFixed(1)} cm apart, ${(onFlat * 100).toFixed(1)} walking on the flat`);
+            expect(Math.abs(c.knees - onFlat), f.name).toBeLessThan(0.02);
+        }
+    });
+
+    it('slows to the stairs\' pace by the first riser, starting late: from a jog and from a full sprint', () => {
+        // Braking 1.5 times harder than its Acceleration, to the jog's own stair pace: from a jog it starts about
+        // 0.6 m short of the first riser, from a sprint about 1.4 (it used to be 1.25 and 2.35).
+        for (const [gait, back, latest] of [['jog', 3, 0.8], ['sprint', 7, 1.6]] as const) for (const f of FLIGHTS) {
+            const c = flight(f, { gait, back });
+            console.log(`stairs ${f.name} ${gait} up: ${c.topSpeed.toFixed(2)} m/s at most, slowing from ${c.brakeAt.toFixed(2)} m short of the first riser, ${c.atFirstRiser.toFixed(2)} m/s at it, ${c.mean.toFixed(2)} on the flight`);
+            expect(c.topSpeed, `${f.name} ${gait}: up to speed`).toBeGreaterThan((gait === 'sprint' ? named('Player').runSpeed : named('Player').walkSpeed) * 0.95);
+            expect(c.brakeAt, `${f.name} ${gait}: slows from`).toBeGreaterThan(0);
+            expect(c.brakeAt, `${f.name} ${gait}: slows from`).toBeLessThan(latest);
+            expect(c.atFirstRiser, f.name).toBeLessThan(pace('stairUpRunSpeed') * 1.15);
+            expect(c.states, f.name).toEqual(['Stairs']);
+        }
+    });
+
+    it('hands the walk blend over to the stair climb in step, the stride carried across', () => {
+        // The same approach with and without the sync group. Through the cross-fade both sides pose the feet, and
+        // their foot-lock windows say which foot each has planted: in step they agree, out of step one side swings
+        // the foot the other stands on and the blend drags it. Measured as the share of the blend in which they
+        // disagree, per foot (0 agree, 1 one side planted and the other not). Even in step they disagree for some of
+        // it: the stair climb holds each foot down for 56-61% of its cycle, the walk for 44-47%, so about an eighth
+        // of the cycle one side has a foot down that the other has just lifted.
+        const handOver = (synced: boolean, back: number) => {
+            const f = FLIGHTS[0];
+            const p = play([f.x, 0.02, STAIRS_Z - back], {}, {}, undefined, synced ? undefined : (sm: any) => { for (const s of sm.states) delete s.syncGroup; });
+            const feet = ['LeftFoot', 'RightFoot'].map(b => [...(rig().skin.nodeNames as [number, string][])].find(([, n]) => n.endsWith(':' + b))![0]);
+            p.run(0.5);
+            input.setMove(0, 1);
+            let entered: { phase: number; previous: number | null; synced: boolean } | null = null;
+            let disagree = 0, frames = 0;
+            p.run(3, () => {
+                const d = p.animator.fieldDebug;
+                if (!entered && p.animator.currentStateName === 'Stairs') entered = { phase: d.phase, previous: d.previousPhase, synced: d.synced };
+                if (!entered || !p.animator.isBlending) return;
+                frames++;
+                for (const foot of feet) {
+                    const s = (p.animator as any)._footLockShares(foot) as { inside: number; total: number };
+                    const share = s.total > 0 ? s.inside / s.total : 0;
+                    disagree += 2 * Math.min(share, 1 - share) / feet.length;
+                }
+            });
+            input.setMove(0, 0);
+            return { entered, disagree: frames ? disagree / frames : 0, frames };
+        };
+        // From eight run-ups 15-20 cm apart, so the walk reaches the flight all round its stride (about 1.4 m).
+        const backs = [3, 3.15, 3.35, 3.5, 3.7, 3.85, 4.05, 4.2];
+        const runs = backs.map(back => ({ synced: handOver(true, back), unsynced: handOver(false, back) }));
+        const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+        const syncedShare = mean(runs.map(r => r.synced.disagree)), unsyncedShare = mean(runs.map(r => r.unsynced.disagree));
+        console.log(`stairs hand-over: the two sides disagree on a planted foot ${(syncedShare * 100).toFixed(0)}% of the blend in step `
+            + `(${runs.map(r => (r.synced.disagree * 100).toFixed(0)).join(', ')}%), ${(unsyncedShare * 100).toFixed(0)}% without the sync group `
+            + `(${runs.map(r => (r.unsynced.disagree * 100).toFixed(0)).join(', ')}%)`);
+        for (const { synced, unsynced } of runs) {
+            expect(synced.entered).not.toBeNull();
+            expect(synced.entered!.synced).toBe(true);
+            expect(synced.entered!.previous).toBeCloseTo(synced.entered!.phase, 6);
+            expect(unsynced.entered!.synced).toBe(false);
+            expect(synced.disagree).toBeLessThan(0.3);
+        }
+        // In step it is never as far out as the worst run-ups without it (35-40%: a foot one side swings, the
+        // other stands on). On average the two come out alike, about 15-18%, since most run-ups happen to meet
+        // the stair clip near in step anyway and the windows' lengths differ either way.
+        expect(Math.max(...runs.map(r => r.synced.disagree))).toBeLessThan(Math.max(...runs.map(r => r.unsynced.disagree)) - 0.08);
+        expect(syncedShare).toBeLessThan(unsyncedShare + 0.03);
+    });
+
+    it('turns round on a flight: the climb blends into the way down', () => {
+        const f = FLIGHTS[0];
+        const p = play([f.x, 0.02, STAIRS_Z - 3]);
+        p.run(0.5);
+        input.setMove(0, 1);
+        p.run(2.6);
+        expect(p.animator.currentStateName).toBe('Stairs');
+        expect(heaviest(p)).toMatch(/^StairsUp/);
+        input.setMove(0, -1);
+        p.run(1.2);
+        // Down, facing the way it goes: the descent's clips in the same blend space when it has them, else the walk.
+        expect(p.animator.currentStateName).toBe(downInBlend() ? 'Stairs' : 'Locomotion');
+        if (downInBlend()) expect(heaviest(p)).toMatch(/^StairsDown/);
+        expect(p.player.stairs).toBe(-1);
+        const v = p.player.velocity, fw = p.player.worldForward;
+        expect(Math.abs(wrap(Math.atan2(v[0], v[2]) * DEG - Math.atan2(fw[0], fw[2]) * DEG))).toBeLessThan(20);
+        input.setMove(0, 0);
+    });
+
+    it('stands on a flight without sliding down its ramp, and stops on it as on the flat', () => {
+        const f = FLIGHTS[1];
+        // Half way up, let go: it brakes at its acceleration and stands, into Idle.
+        const p = play([f.x, 0.02, STAIRS_Z - 3]);
+        p.run(0.5);
+        input.setMove(0, 1);
+        p.run(1.6);
+        expect(p.player.onStairs).toBe(true);
+        const v0 = p.player.velocity, speed = Math.hypot(v0[0], v0[1], v0[2]);
+        const from = vec3.clone(p.collider.worldPosition as vec3);
+        input.setMove(0, 0);
+        p.run(0.8);
+        const braked = vec3.distance(p.collider.worldPosition as vec3, from);
+        expect(p.animator.currentStateName).toBe('Idle');
+        // Braking at the Character's acceleration, along the ramp: v^2 / 2a (a frame or two of travel on top).
+        expect(braked, `braked in ${braked.toFixed(3)} m from ${speed.toFixed(2)} m/s`).toBeLessThan(speed * speed / (2 * p.player.acceleration) + speed * 3 * FRAME);
+        const still = vec3.clone(p.collider.worldPosition as vec3);
+        p.run(3);
+        const drift = vec3.distance(p.collider.worldPosition as vec3, still);
+        // The hold off (slopeLimit 0): frictionless, it creeps down the ramp.
+        const q = play([f.x, 0.02, STAIRS_Z - 3], {}, { slopeLimit: 0 });
+        q.run(0.5);
+        input.setMove(0, 1);
+        q.run(1.6);
+        input.setMove(0, 0);
+        q.run(0.8);
+        const qFrom = vec3.clone(q.collider.worldPosition as vec3);
+        q.run(3);
+        const creep = vec3.distance(q.collider.worldPosition as vec3, qFrom);
+        console.log(`stairs stand: braked in ${braked.toFixed(3)} m from ${speed.toFixed(2)} m/s, then drifted ${(drift * 100).toFixed(2)} cm in 3 s (${(creep * 100).toFixed(1)} cm with slopeLimit 0)`);
+        expect(drift).toBeLessThan(0.01);
+        expect(creep).toBeGreaterThan(0.05);
+    });
+
+    it('lands the feet on the ramp instead when the rig traces every layer: the trace layers are what keep them off it', () => {
+        const ramp = layer('Stair Ramp');
+        const c = flight(FLIGHTS[1], { ikRig: { traceLayers: ALL_LAYERS } });
+        console.log(`stairs ${FLIGHTS[1].name}, every layer traced: ${c.over.length} foot rays over it, ${c.offTread} off a tread`);
+        expect(c.over.filter(h => h.layer === ramp).length).toBeGreaterThan(5);
+        expect(c.offTread).toBeGreaterThan(5);
+    });
+
+    it('walks through the bumps on the ground, its feet climbing onto them', () => {
+        const detail = layer('Foot Detail');
+        // Up the middle column of the strip (level.ts: x 3, 4.1, 5.2; z 6 to 13.7, 0.9 m slabs).
+        const p = play([4.1, 0.02, 4]);
+        const hits: { layer: number; y: number; z: number }[] = [];
+        const raycast = p.physics.raycast.bind(p.physics);
+        (p.physics as any).raycast = (from: any, to: any, options?: any) => {
+            const hit = raycast(from, to, options);
+            if (options?.groundOnly && options.layerMask !== undefined && hit) hits.push({ layer: hit.body.collisionFilterGroup, y: hit.point[1], z: hit.point[2] });
+            return hit;
+        };
+        p.run(0.5);
+        input.setMove(0, 1);
+        let highest = 0, slowest = Infinity;
+        p.run(2.5, () => {
+            const at = p.collider.worldPosition;
+            if (at[2] > 15) input.setMove(0, 0);
+            if (at[2] < 6 || at[2] > 13.5) return;
+            highest = Math.max(highest, at[1]);
+            slowest = Math.min(slowest, p.player.planarSpeed);
+        });
+        const over = hits.filter(h => h.z > 5.6 && h.z < 14.1);
+        const onBumps = over.filter(h => h.layer === detail);
+        console.log(`bumps: capsule at most ${highest.toFixed(3)} m up, slowest ${slowest.toFixed(2)} m/s, ${onBumps.length} of ${over.length} foot rays on a bump, highest ${Math.max(...onBumps.map(h => h.y)).toFixed(2)} m`);
+        // The capsule stays on the ground at full pace: the bumps are not in its way.
+        expect(highest).toBeLessThan(0.03);
+        expect(slowest).toBeGreaterThan(named('Player').walkSpeed * 0.9);
+        // The feet are: a good share of their rays over the strip land on a bump, above the ground.
+        expect(onBumps.length).toBeGreaterThan(over.length * 0.3);
+        expect(onBumps.every(h => h.y > 0)).toBe(true);
+        expect(p.trace).not.toContain('Fall');
+    });
+
+    it('sees through the pillars and pulls the camera in for the wall', () => {
+        const p = play(OPEN);
+        p.run(0.1);
+        const rig = p.rigs[0];
+        const layers = { blockedBy: rig.collisionLayers, seeThrough: rig.seeThroughLayers };
+        // Through Pillar 1 (level.ts: at x 8, z -5, 0.4 m round), and through the Wall (x -10, z -6, 0.4 m thick).
+        const pillar = p.physics.raycastCamera([8, 1.5, -3] as any, [8, 1.5, -7] as any, undefined, layers);
+        const wall = p.physics.raycastCamera([-10, 1.5, -4] as any, [-10, 1.5, -8] as any, undefined, layers);
+        expect(pillar).toBeNull();
+        expect(wall).toBeCloseTo(1.8, 1);
+        // A rig that saw through nothing would stop at the pillar.
+        expect(p.physics.raycastCamera([8, 1.5, -3] as any, [8, 1.5, -7] as any, undefined, { blockedBy: ALL_LAYERS, seeThrough: 0 })).toBeCloseTo(1.6, 1);
+        // And the hole cuts the pillars' meshes, not the wall's.
+        const optIn = (name: string) => MaterialBinder.prototype.holeOptIn.call({ _camHoleLayers: rig.seeThroughLayers } as any, p.scene.findNode(name) as any);
+        expect([optIn('Pillar 1'), optIn('Pillar 2'), optIn('Pillar 3'), optIn('Wall')]).toEqual([true, true, true, false]);
+    });
+
+    it('lands a dropped ball on a tread, not on the ramp over it', () => {
+        const p = play(OPEN);
+        const f = FLIGHTS[1];
+        // Over the back of the fourth tread, where the ramp runs above it.
+        const k = 3, z = STAIRS_Z + (k + 0.75) * TREAD, r = 0.05;
+        const ball = new PhysicsBody({ name: 'ball', type: 'dynamic', mass: 1, position: [f.x, 2.5, z] });
+        ball.addCollider({ shape: { kind: 'sphere', radius: r } });
+        p.physics.addBody(ball);
+        p.run(1.5);
+        // On the tread (give or take a backend's contact slop: Jolt lets a small ball settle 2 cm in), where the
+        // ramp would have it 5 cm higher and rolling down.
+        expect(Math.abs(ball.position.y - ((k + 1) * f.rise + r)), `rests at ${ball.position.y.toFixed(3)}`).toBeLessThan(0.03);
+        expect(Math.abs(ball.position.z - z)).toBeLessThan(0.02);
     });
 
     it('names only clips its skeleton owns, and links every parameter to something that exists', () => {
@@ -136,15 +580,22 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
      * The scene as the player starts it, on a real physics world, with an Animator in the model's place: the
      * Animator the editor would build from the model's skin, the skeleton's clips and the embedded machine.
      */
-    function play(at?: [number, number, number], ikRig: Record<string, unknown> = {}, character: Record<string, unknown> = {}) {
+    function play(at?: [number, number, number], ikRig: Record<string, unknown> = {}, character: Record<string, unknown> = {}, yaw?: number, editMachine?: (sm: any) => void) {
         const file = sceneFile();
         const scene = new Scene();
         const tree = withoutModels(file.scene);
         if (at) tree.children.find((c: any) => c.name === 'Player Collider').position = at;
+        // Facing `yaw` (degrees), the body and the camera behind it.
+        if (yaw !== undefined) {
+            tree.children.find((c: any) => c.name === 'Player Collider').rotation = [0, yaw, 0];
+            for (const n of allNodes(tree)) if (n.type === 'cameraRig') n.yaw = yaw;
+        }
         Object.assign(allNodes(tree).find((n: any) => n.name === 'Player'), character);
         scene.parse({ ...file, scene: tree }, true);
         const physics = new PhysicsSystem({ gravity: [0, -9.82, 0], backend: TEST_PHYSICS } as any);
         physics.initialize();
+        // The project's layer names, as the game config hands them to the world (scripts look layers up by name).
+        physics.layerNames = read('libraries', 'projectSettings.json').collisionLayers;
         physics.scene = scene;
         // A test that plays many times (each direction of a gait) keeps the last two worlds; the rest are freed.
         played.push(physics);
@@ -156,7 +607,9 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const animator = new Animator({ skin, animations, hasSkin: true } as any);
         const model = scene.findNode('Mannequin') as Node;
         animator.setNode(model);
-        animator.setStateMachine(JSON.parse(JSON.stringify(machine())));
+        const sm = JSON.parse(JSON.stringify(machine()));
+        editMachine?.(sm);
+        animator.setStateMachine(sm);
         // A ModelNode's frame: its script, then the machine, then the pose.
         const base = model.update.bind(model);
         (model as any).update = (dt: number, t: number) => { base(dt, t); animator.checkTriggers(); animator.update(dt); };
@@ -855,7 +1308,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(ids.has(controller.possessedId) && ids.has(controller.aimSourceId)).toBe(true);
         const publics = (name: string) => library('scripts').find(s => s.name === name).variables
             .filter((v: any) => v.attribute && !v.hidden && v.access === 'public').map((v: any) => v.name).sort();
-        expect(publics('SandboxPlayer')).toEqual(['backDiagonalScale', 'backScale', 'runFootSpeed', 'runFootWeight', 'runTurnSpeed', 'sprintTakeoff', 'turnDelay', 'walkBackDiagonalScale', 'walkFootSpeed', 'walkScale']);
+        expect(publics('SandboxPlayer')).toEqual(['backDiagonalScale', 'backScale', 'runFootSpeed', 'runFootWeight', 'runTurnSpeed', 'sprintTakeoff',
+            'stairDownRunSpeed', 'stairDownWalkSpeed', 'stairUpRunSpeed', 'stairUpWalkSpeed', 'stairsLayer', 'turnDelay', 'walkBackDiagonalScale', 'walkFootSpeed', 'walkScale']);
         expect(publics('SandboxCamera')).toEqual(['pivotHeight', 'shoulderArm', 'shoulderOffset', 'thirdPersonArm']);
         expect(inside.find((n: any) => n.type === 'character').script).toBe(named('Player').script);
         expect(inside.find((n: any) => n.type === 'cameraRig').script).toBe(named('Camera Rig').script);
@@ -868,7 +1322,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(course.variables.__templateId.value).toBe(templates.get('Course').id);
         expect(env.children.map((c: any) => [c.type, c.name])).toEqual([['light', 'Sun'], ['skyAtmosphere', 'Sky Atmosphere'], ['skyLight', 'Sky Light']]);
         expect(course.type).toBe('collider');
-        expect(course.collider.shapes.length).toBeGreaterThan(40);
+        expect(allNodes(course).filter((n: any) => n.type === 'collider').reduce((k: number, n: any) => k + n.collider.shapes.length, 0)).toBeGreaterThan(40);
         // The scene's top level is the three placements.
         expect(sceneFile().scene.children.map((c: any) => c.name)).toEqual(['Environment', 'Player Collider', 'Props', 'Static Collision']);
         // And the running scene still finds its sun, sky and sky light inside the Environment.
@@ -1028,7 +1482,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             for (const m of g.states) { expect(states.has(m), m).toBe(true); expect(seen.has(m), m).toBe(false); seen.add(m); }
         }
         // Left outside: the ones everything comes back to.
-        for (const s of ['Idle', 'Locomotion', 'Start']) expect(seen.has(s), s).toBe(false);
+        for (const s of ['Idle', 'Locomotion', 'Start', 'Stairs']) expect(seen.has(s), s).toBe(false);
         const fromGroups = sm.transitions.filter((t: any) => sm.groups.some((g: any) => g.name === t.from));
         expect(fromGroups.length).toBeGreaterThan(6);
         expect(sm.states.find((s: any) => s.name === 'LandHard').holdMovement).toBe(true);

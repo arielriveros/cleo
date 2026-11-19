@@ -3,7 +3,9 @@ import {
   TerrainMaterial, TerrainFoliageRule, Model, TextureManager, Logger,
   DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT, MAX_INSTANCES, foliageEffectiveCull, allTerrainFoliageRules,
 } from 'cleo'
-import type { FoliageOrientation } from 'cleo'
+import type { FoliageOrientation, FoliageCollision } from 'cleo'
+import { LAYER_COUNT, layerBit, layerLabel, singleLayerOf } from 'cleo'
+import { useCollisionLayerNames } from '../nodeInspector/physicsEditors/layerPickers'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { buildFoliageRuleFromModelAsset, foliageRuleModels } from '../../utils/foliageRules'
@@ -22,6 +24,10 @@ import { toast } from '@cleo/app-kit/feedback/toastStore'
 const DENSITY_BLOCK = 100
 /** Terrain side length the density estimate is quoted against (matches the Landscape panel's default). */
 const ESTIMATE_SIZE = 200
+
+/** A refitted or re-edited collider keeps the collision layer the rule's old one was on. */
+const keepLayer = (r: TerrainFoliageRule, c: FoliageCollision | null): FoliageCollision | null =>
+  c && r.collision?.layer !== undefined && c.layer === undefined ? { ...c, layer: r.collision.layer } : c
 
 /** Instances a rule would place over a default-sized terrain — the sanity check on a per-m² number. */
 const estimateFor = (r: TerrainFoliageRule): number =>
@@ -42,6 +48,7 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
   defaultOpen?: boolean
 }) {
   const { terrainMaterials, models, materials, dropFoliageLayer, bakeFoliageImpostor, instance } = useCleoEngine()
+  const layerNames = useCollisionLayerNames()
 
   /**
    * Where a mesh rule's levels take over and how far it draws, as the renderer will actually do it
@@ -258,14 +265,6 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
                   <span className={label} title='Rasterize these instances into the shadow cascades. Costs one extra instanced draw per cell per cascade — cheap for trees, expensive for dense grass.'>Cast shadows</span>
                   <Toggle checked={!!r.castShadows} onChange={c => patchRule(i, { castShadows: c })} />
                 </div>
-                {/* Trees and tall props between the camera and the player: dithered see-through when a camera
-                    rig in Dither collision mode looks through them, instead of blocking the view. */}
-                {r.kind === 'mesh' && (
-                  <div className='flex items-center justify-between'>
-                    <span className={label} title='When a camera rig in Dither collision mode has these instances between the camera and the player, the part that blocks the view is dithered see-through.'>See-through to camera</span>
-                    <Toggle checked={!!r.cameraDither} onChange={c => patchRule(i, { cameraDither: c })} />
-                  </div>
-                )}
                 {/* How each instance stands. Rocks want the slope under them (or none at all); trees and
                     grass want to stand up whatever the slope. Re-orients in place: nothing is re-scattered. */}
                 {r.kind === 'mesh' && (
@@ -380,8 +379,8 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
                         // A newly picked shape starts fitted to the trunk when there is geometry to fit.
                         patchRule(i, {
                           collision: !shape ? null
-                            : fitColliderToTrunk(foliageRuleModels(r), shape)
-                              ?? { shape, radius: r.collision?.radius ?? 0.4, height: r.collision?.height ?? 2 },
+                            : keepLayer(r, fitColliderToTrunk(foliageRuleModels(r), shape)
+                              ?? { shape, radius: r.collision?.radius ?? 0.4, height: r.collision?.height ?? 2 }),
                         })
                       }}>
                       <option value=''>(none)</option>
@@ -391,17 +390,26 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
                     </Select>
                   </div>
                   {r.collision && <>
+                    {/* Its bodies' collision layer: what a camera rig sees through (trees between the camera and
+                        the player dithered away) or a foot rig traces is chosen by layer. */}
+                    <div className='flex items-center justify-between'>
+                      <span className={label} title='The collision layer its bodies are on. A camera rig that sees through this layer sees through these instances: its boom passes them and their meshes are dithered away where they block the view.'>Collision layer</span>
+                      <Select className='w-32 px-1 py-0.5' value={singleLayerOf(r.collision.layer ?? 1) ?? 0}
+                        onChange={e => patchRule(i, { collision: { ...r.collision!, layer: layerBit(Number(e.target.value)) } })}>
+                        {Array.from({ length: LAYER_COUNT }, (_, k) => <option key={k} value={k}>{`${k + 1}. ${layerLabel(layerNames, k)}`}</option>)}
+                      </Select>
+                    </div>
                     <p className={cn(hintClass, 'text-right')} title='Prototype units — each instance multiplies these by its own random scale.'>
                       {describeCollider(r.collision)}
                     </p>
                     <div className='flex gap-1 justify-end'>
                       {r.kind === 'mesh' && <>
                         <Button size='sm' variant='ghost' title='Fit to the trunk: what a character should bump into'
-                          onClick={() => { const f = fitColliderToTrunk(foliageRuleModels(r), r.collision!.shape); if (f) patchRule(i, { collision: f }) }}>
+                          onClick={() => { const f = fitColliderToTrunk(foliageRuleModels(r), r.collision!.shape); if (f) patchRule(i, { collision: keepLayer(r, f) }) }}>
                           Fit trunk
                         </Button>
                         <Button size='sm' variant='ghost' title='Fit around the whole plant, canopy included'
-                          onClick={() => { const f = fitColliderToBounds(foliageRuleModels(r), r.collision!.shape); if (f) patchRule(i, { collision: f }) }}>
+                          onClick={() => { const f = fitColliderToBounds(foliageRuleModels(r), r.collision!.shape); if (f) patchRule(i, { collision: keepLayer(r, f) }) }}>
                           Fit bounds
                         </Button>
                       </>}
@@ -429,7 +437,7 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
         {colliderRule >= 0 && rules[colliderRule] && (
           <FoliageColliderModal
             rule={rules[colliderRule]}
-            onApply={c => patchRule(colliderRule, { collision: c })}
+            onApply={c => patchRule(colliderRule, { collision: keepLayer(rules[colliderRule], c) })}
             onClose={() => setColliderRule(-1)} />
         )}
     </>

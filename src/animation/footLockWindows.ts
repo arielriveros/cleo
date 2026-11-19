@@ -67,6 +67,49 @@ export interface FootLockDetectOptions {
     fps?: number;
     /** The feet, as foot (ankle) and toe node indices. Default: the skeleton's humanoid feet and toes. */
     feet?: { foot: number; toe?: number }[];
+    /**
+     * What "down" is measured against. `'clip'` (the default): the foot's lowest in the whole clip, which is the
+     * floor of a clip played on the flat. `'stance'`: each stance's own height, for a clip whose feet plant at
+     * different heights (a stair climb with its rise kept: the upper foot stands a riser above the lower one).
+     * A stance is a stretch of at least 0.1 s over which the ball of the foot holds its height (moves up or down
+     * slower than 0.15 m/s); the frames round it within `contact` of that height are down too.
+     */
+    ground?: 'clip' | 'stance';
+}
+
+/** `ground: 'stance'`: how slowly the ball must move up or down to be standing (m/s), and for how long (s). */
+const STANCE_STILL_SPEED = 0.15, STANCE_MIN = 0.1;
+
+/**
+ * Per frame, whether the ball of the foot is down on a stance of its own (`ground: 'stance'`): inside or next to
+ * a stretch over which it holds its height, and within `contact` of that height.
+ */
+function stanceDown(ball: number[], times: number[], contact: number): boolean[] {
+    const n = ball.length - 1;
+    const down = new Array<boolean>(ball.length).fill(false);
+    const still = ball.map((_, k) => {
+        const a = Math.max(0, k - 1), b = Math.min(n, k + 1);
+        const dt = times[b] - times[a];
+        return dt > 0 && Math.abs(ball[b] - ball[a]) / dt < STANCE_STILL_SPEED;
+    });
+    for (let k = 0; k <= n;) {
+        if (!still[k]) { k++; continue; }
+        let end = k;
+        while (end < n && still[end + 1]) end++;
+        if (times[end] - times[k] >= STANCE_MIN) {
+            let ground = Infinity;
+            for (let j = k; j <= end; j++) ground = Math.min(ground, ball[j]);
+            // The landing onto it and the push off it, as far as the ball stays that close to its height (above it
+            // or below: a foot stepping on down past its tread has left it).
+            const near = (j: number) => Math.abs(ball[j] - ground) <= contact;
+            let from = k, to = end;
+            while (from > 0 && near(from - 1)) from--;
+            while (to < n && near(to + 1)) to++;
+            for (let j = from; j <= to; j++) if (near(j)) down[j] = true;
+        }
+        k = end + 1;
+    }
+    return down;
 }
 
 /** Seconds: the shortest stance detection keeps. */
@@ -124,8 +167,10 @@ export function detectFootLockWindows(clip: Animation, skin: Skin, options: Foot
     feet.forEach((f, i) => {
         const { heel, ball } = heights[i];
         // The ground: low in the clip, but not its single lowest frame, which one dip through the floor would set.
+        // Or each stance's own (`ground: 'stance'`).
         const sorted = [...ball].sort((x, y) => x - y);
         const ballLow = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.05))];
+        const onStance = options.ground === 'stance' ? stanceDown(ball, times, contact) : null;
         const spans: [number, number][] = [];
         let from = -1, heelRef = Infinity, spent = false, spentHeel = Infinity;
         const close = (k: number) => {
@@ -134,7 +179,7 @@ export function detectFootLockWindows(clip: Animation, skin: Skin, options: Foot
             from = -1;
         };
         for (let k = 0; k <= n; k++) {
-            const ballDown = ball[k] <= ballLow + contact;
+            const ballDown = onStance ? onStance[k] : ball[k] <= ballLow + contact;
             if (from < 0) {
                 // After a heel-off the next span waits for the foot to come down again: the ball leaving the ground
                 // and landing, or the heel settling back (a stop's shuffle onto a flat foot).

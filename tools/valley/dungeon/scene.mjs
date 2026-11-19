@@ -346,33 +346,38 @@ export function buildDungeon(kit) {
   }
 
   function scene() {
+    const part = (partName) => souls.group(`dungeon:part:${partName}`, partName,
+      chunks.filter(c => c.partName === partName).map((c, i) =>
+        modelNode(`dungeon:chunk:${partName}:${i}`, c.name, c, MATERIALS[c.materialName], {})))
+    // Pillars stand between the player and the camera in every room: see-through rather than blocking the view.
+    // A camera rig sees through what a Collider on its See through layers holds, so their meshes go in the
+    // pillars' collider below, not here.
     const structureNode = souls.group('dungeon:structure', 'Dungeon Structure',
-      [...new Set(chunks.map(c => c.partName))].map(partName => souls.group(`dungeon:part:${partName}`, partName,
-        chunks.filter(c => c.partName === partName).map((c, i) =>
-          // Pillars stand between the player and the camera in every room: see-through rather than
-          // blocking the view (the player rig's 'dither' collision mode).
-          modelNode(`dungeon:chunk:${partName}:${i}`, c.name, c, MATERIALS[c.materialName],
-                    partName === 'Pillars' ? { cameraDither: true } : {})))))
+      [...new Set(chunks.map(c => c.partName))].filter(p => p !== 'Pillars').map(part))
 
     // The colliders, one static body per 10 m cell and per role: walls (which swings bounce off and the
     // navmesh carves round) apart from floors, ramps and wedges (which it walks on), and the pillars' walls
-    // apart from the rest — flagged `cameraDither` like the pillars themselves, so the player camera sees
-    // through them where every other wall and ceiling pulls it in.
+    // apart from the rest: one body at the origin on the See Through collision layer (3, bit 4) holding the
+    // pillars' meshes, so the player camera sees through them where every other wall and ceiling pulls it in.
     const collision = []
+    const SEE_THROUGH_LAYER = 4
     const ROLES = {
       walls: { name: 'Walls', of: b => (b.kind === 'wall' && !b.seeThrough) || b.kind === 'ceiling', variables: { blocksSwings: true } },
-      pillars: { name: 'Pillars', of: b => b.kind === 'wall' && b.seeThrough, variables: { blocksSwings: true }, extra: { cameraDither: true } },
+      pillars: { name: 'Pillars', of: b => b.kind === 'wall' && b.seeThrough, variables: { blocksSwings: true }, layer: SEE_THROUGH_LAYER, cell: Infinity, children: () => [part('Pillars')] },
       floors: { name: 'Floors', of: b => b.kind !== 'wall' && b.kind !== 'ceiling', variables: { navObstacle: false } },
     }
     for (const [role, R] of Object.entries(ROLES)) {
-      for (const { key, boxes: list } of chunkBoxes(boxes.filter(R.of), 10)) {
-        const [cx, cz] = key.split(',').map(v => (parseInt(v) + 0.5) * 10)
-        const n = node(`${R.name} ${key}`, 'node', {
+      const cells = R.cell === Infinity ? [{ key: '0,0', boxes: boxes.filter(R.of), origin: true }] : chunkBoxes(boxes.filter(R.of), 10)
+      for (const { key, boxes: list, origin } of cells) {
+        if (!list.length) continue
+        const [cx, cz] = origin ? [0, 0] : key.split(',').map(v => (parseInt(v) + 0.5) * 10)
+        const n = node(origin ? R.name : `${R.name} ${key}`, 'node', {
           id: id(`dungeon:collision:${role}:${key}`), position: [cx, 0, cz],
-          variables: vars(R.variables), ...(R.extra ?? {}),
+          variables: vars(R.variables), ...(R.children ? { children: R.children() } : {}),
         })
         n.body = {
           ...souls.staticBody('box'),
+          ...(R.layer ? { layer: R.layer } : {}),
           shapes: list.map(b => ({
             type: 'box', width: b.size[0], height: b.size[1], depth: b.size[2],
             offset: [round(b.center[0] - cx), b.center[1], round(b.center[2] - cz)], rotation: b.rotation,

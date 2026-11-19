@@ -417,6 +417,12 @@ export interface RenderSettings {
     shadowSplitLambda: number;
     shadowDepthBias: number;
     shadowNormalBias: number;
+    /**
+     * Which bias model the four biases were saved under: 2 since 2026-11-19 (a small constant, a normal
+     * offset shaped by the light's angle, world units for spot and point too). Absent on older saves,
+     * whose exact old defaults load as today's (`migrateShadowBiases`).
+     */
+    shadowBiasVersion?: number;
     shadowFilterRadius: number;
     shadowFilterMode: number;
     shadowStrength: number;

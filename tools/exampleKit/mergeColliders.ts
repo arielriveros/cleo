@@ -8,13 +8,15 @@
 //
 // Left as they are: template instances (placing one keeps its collision), anything scripted, anything holding a
 // Trigger, a saved node or a dormant one, and any collider another node or a script names. Colliders that differ
-// in how they collide (the `collider` block bar its shapes, gameplay variables such as `blocksSwings`, see-through
-// dither) get a merged Collider each.
+// in how they collide (the `collider` block bar its shapes, its collision layer and mask included, and gameplay
+// variables such as `blocksSwings`) get a merged Collider each, named by what sets it apart.
 
 import { mat4, quat, vec3 } from 'gl-matrix'
 import { Node } from '../../src/core/scene/nodes/node'
 import { parseNodeJson } from '../../src/core/scene/nodes/parseNodeJson'
 import { ColliderNode } from '../../src/core/scene/nodes/colliderNode'
+import { legacyColliderLayer } from '../../src/core/scene/nodes/cameraLayersLegacy'
+import { layerLabel, singleLayerOf } from '../../src/physics/collisionLayers'
 
 export interface MergeOptions {
   /** A stable id for a node this pass creates. */
@@ -23,6 +25,8 @@ export interface MergeOptions {
   scriptStrings: Set<string>
   /** Ids referenced from outside the scene (sequences): a collider among them stays. */
   externalRefs?: Set<string>
+  /** The project's collision layer names, for the name of a group on a layer of its own ("Static Collision (Stairs)"). */
+  layerNames?: readonly string[]
 }
 
 export interface MergeResult {
@@ -147,16 +151,20 @@ function settings(block: any): Record<string, unknown> {
   return out
 }
 
+/** Its collider block with its layer as the engine reads it, the old camera flags included (cameraLayersLegacy). */
+const blockOf = (n: any): any => ({ ...(n.collider ?? {}), layer: legacyColliderLayer(n) })
+
 function behaviour(n: any): string {
-  const block = settings(n.collider ?? {})
+  const block = settings(blockOf(n))
   const vars = Object.fromEntries(Object.entries(n.variables ?? {}).filter(([k]) => !k.startsWith('__')))
-  return JSON.stringify({ block, vars, cameraDither: n.cameraDither ?? null })
+  return JSON.stringify({ block, vars })
 }
 
-/** A short label for what sets a group apart, for its name ("blocksSwings"). */
-function label(n: any): string {
+/** A short label for what sets a group apart, for its name ("blocksSwings", "Stair Steps"). */
+function label(n: any, names?: readonly string[]): string {
   const vars = Object.entries<any>(n.variables ?? {}).filter(([k]) => !k.startsWith('__')).map(([k, v]) => v?.value === true ? k : `${k} ${v?.value}`)
-  if (n.cameraDither) vars.push('see-through')
+  const layer = singleLayerOf(legacyColliderLayer(n))
+  if (layer !== null && layer !== 0) vars.push(layerLabel(names, layer))
   return vars.join(', ')
 }
 
@@ -234,7 +242,7 @@ export function mergeStaticColliders(sceneRoot: any, opts: MergeOptions): MergeR
   }
 
   // The plain group first, then the tagged ones in scene order.
-  const ordered = [...groups].sort((a, b) => Number(!!label(a[1][0])) - Number(!!label(b[1][0])))
+  const ordered = [...groups].sort((a, b) => Number(!!label(a[1][0], opts.layerNames)) - Number(!!label(b[1][0], opts.layerNames)))
   groups.clear()
   for (const [k, v] of ordered) groups.set(k, v)
 
@@ -243,16 +251,15 @@ export function mergeStaticColliders(sceneRoot: any, opts: MergeOptions): MergeR
   for (const [key, members] of groups) {
     const first = members[0]
     // Named by what sets it apart; the plain one (no gameplay tags) is just "Static Collision".
-    const tag = groups.size > 1 ? label(first) : ''
+    const tag = groups.size > 1 ? label(first, opts.layerNames) : ''
     let name = tag ? `Static Collision (${tag})` : 'Static Collision'
     for (let k = 2; result.colliders.some(c => c.name === name); k++) name = `${tag ? `Static Collision (${tag})` : 'Static Collision'} ${k}`
-    const block = settings(first.collider)
+    const block = settings(blockOf(first))
     const merged: any = {
       id: opts.idFor(`collider:${key}`), name, type: 'collider',
       position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
       variables: Object.fromEntries(Object.entries(first.variables ?? {}).filter(([k]) => !k.startsWith('__'))),
       spawnOnStart: true,
-      ...(first.cameraDither ? { cameraDither: first.cameraDither } : {}),
       collider: { ...block, mass: 0, shapes: [] as any[] },
       children: [] as any[],
     }

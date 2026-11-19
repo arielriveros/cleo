@@ -19,6 +19,7 @@ class GLStateCache {
     private readonly _blendFunc = [-1, -1, -1, -1];
     private readonly _blendEquation = [-1, -1];
     private _colorMask = -1;
+    private readonly _polygonOffset = [NaN, NaN];
 
     public useProgram(program: WebGLProgram | null): void {
         if (!gl) return;
@@ -175,6 +176,23 @@ class GLStateCache {
         } else frameStats.stateChangesSaved++;
     }
 
+    /**
+     * Constant and slope-scaled depth bias (a pipeline's `depthBias` / `depthBiasSlopeScale`), on while
+     * either is set: `gl.polygonOffset(factor = slope scale, units = constant)`.
+     */
+    public polygonOffset(slopeScale: number, constant: number): void {
+        if (!gl) return;
+        const on = slopeScale !== 0 || constant !== 0;
+        this.setEnabled(0x8037 /* POLYGON_OFFSET_FILL */, on);
+        if (!on) return;
+        const o = this._polygonOffset;
+        if (o[0] !== slopeScale || o[1] !== constant) {
+            gl.polygonOffset(slopeScale, constant);
+            o[0] = slopeScale; o[1] = constant;
+            frameStats.stateChanges++;
+        } else frameStats.stateChangesSaved++;
+    }
+
     /** Depth testing on or off. Named rather than enum-taking — see {@link cullFace}. */
     public depthTest(on: boolean): void { this.setEnabled(0x0B71 /* DEPTH_TEST */, on); }
 
@@ -197,6 +215,7 @@ class GLStateCache {
         this._blendFunc.fill(-1);
         this._blendEquation.fill(-1);
         this._colorMask = -1;
+        this._polygonOffset.fill(NaN);
     }
 }
 

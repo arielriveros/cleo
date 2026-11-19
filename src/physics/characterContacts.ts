@@ -107,9 +107,12 @@ export class CharacterContactRule {
      * After one substep of `h` seconds: take back what lighter bodies gave each character beyond their share.
      * `info` describes a body the character touched (undefined: not dynamic, so solid).
      */
-    public after(world: PhysicsWorld, h: number, info: (body: BodyHandle) => ContactBodyInfo | undefined): void {
+    public after(
+        world: PhysicsWorld, h: number, info: (body: BodyHandle) => ContactBodyInfo | undefined,
+        gravityOf?: (body: BodyHandle) => ArrayLike<number> | undefined,
+    ): void {
         if (!(h > 0)) return;
-        let g: readonly number[] | null = null;
+        let g: ArrayLike<number> | null = null;
         for (const w of this._watched) {
             if (w.asleep || !world.hasBody(w.handle)) continue;
             w.lightOf.clear(); w.light.length = 0; w.solid.length = 0;
@@ -125,11 +128,13 @@ export class CharacterContactRule {
             });
             if (w.light.length === 0) continue;
             g ??= world.gravity;
-            this._limit(world, w, h, g);
+            // The gravity the step gave it: the world's, or less where something else changed it (the slope hold).
+            this._limit(world, w, h, g, gravityOf?.(w.handle) ?? g);
         }
     }
 
-    private _limit(world: PhysicsWorld, w: Watched, h: number, g: readonly number[]): void {
+    /** `g` is the world's gravity (what "up" is); `a` what the step applied of it to this body. */
+    private _limit(world: PhysicsWorld, w: Watched, h: number, g: ArrayLike<number>, a: ArrayLike<number>): void {
         world.getVelocity(w.handle, this._v);
         world.getTransform(w.handle, this._x);
         const v = this._v, pre = w.pre, pos = this._pos;
@@ -149,7 +154,7 @@ export class CharacterContactRule {
             // Velocity: what the step added along n (gravity aside), at most the speed it now leaves at.
             const leaving = v[0] * nx + v[1] * ny + v[2] * nz;
             if (leaving > 0) {
-                const added = (v[0] - pre[0] - g[0] * h) * nx + (v[1] - pre[1] - g[1] * h) * ny + (v[2] - pre[2] - g[2] * h) * nz;
+                const added = (v[0] - pre[0] - a[0] * h) * nx + (v[1] - pre[1] - a[1] * h) * ny + (v[2] - pre[2] - a[2] * h) * nz;
                 const gain = Math.min(leaving, added);
                 if (gain > 0) {
                     v[0] -= cut * gain * nx; v[1] -= cut * gain * ny; v[2] -= cut * gain * nz;
@@ -175,7 +180,7 @@ export class CharacterContactRule {
             const ux = -g[0] / gl, uy = -g[1] / gl, uz = -g[2] / gl;
             if (!this._solidAlong(solid, ux, uy, uz, HOLDS_UP)) {
                 const cut = 1 - keepMost;
-                const free = (pre[0] + g[0] * h) * ux + (pre[1] + g[1] * h) * uy + (pre[2] + g[2] * h) * uz;
+                const free = (pre[0] + a[0] * h) * ux + (pre[1] + a[1] * h) * uy + (pre[2] + a[2] * h) * uz;
                 const up = v[0] * ux + v[1] * uy + v[2] * uz, base = Math.max(free, 0);
                 if (up > base) {
                     const gain = cut * (up - base);

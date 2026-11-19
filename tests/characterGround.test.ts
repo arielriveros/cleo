@@ -140,6 +140,26 @@ describe('ground stamping — which contact becomes the ground', () => {
         stamp(p);
         expect(p.groundNormal(body)[1]).toBeCloseTo(1, 3);
     });
+
+    it('probes only what the body collides with: a stair step its layers leave out is no ground of its own', () => {
+        // A capsule climbing a ramp laid over a flight of stairs passes through the steps (its mask leaves their
+        // layer out). The probe must read the ramp under it, not the flat tread its ray would meet first, or the
+        // controller projects the climb onto a level plane.
+        const p = physics();
+        const ramp = makeBody(box(2, 0.1, 2), { position: [0, -0.1, 0], quaternion: [Math.sin(-15 * Math.PI / 360), 0, 0, Math.cos(-15 * Math.PI / 360)], group: 64, mask: 16 });
+        const tread = makeBody(box(2, 0.05, 2), { position: [0, 0.03, 0], group: 32 });
+        p.addBody(ramp);
+        p.addBody(tread);
+        const body = new RigidBody({ mass: 1, groundProbeDistance: 0.4, group: 16, mask: -1 & ~32 });
+        body.addCollider({ shape: { kind: 'sphere', radius: 0.25 } });
+        body.position.set(0, 0.3, 0);
+        p.addBody(body);
+        setTime(p, 1);
+        stamp(p);
+        // The ramp's tilt, 15 degrees about X: not the tread's level normal.
+        expect(p.groundNormal(body)[1]).toBeCloseTo(Math.cos(15 * Math.PI / 180), 2);
+        expect(p.isGrounded(body)).toBe(true);
+    });
 });
 
 describe('a character walking up a heightfield', () => {

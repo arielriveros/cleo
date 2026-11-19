@@ -267,7 +267,7 @@ export default function RendererSettingsPanel({ leftOut = {} }: { leftOut?: Left
   const [shadowCascades, setShadowCascades] = useState<number>(() => renderer?.shadowCascades ?? 3);
   const [shadowDistance, setShadowDistance] = useState<number>(() => renderer?.shadowDistance ?? 100);
   const [shadowLambda, setShadowLambda] = useState<number>(() => renderer?.shadowSplitLambda ?? 0.5);
-  const [shadowDepthBias, setShadowDepthBias] = useState<number>(() => renderer?.shadowDepthBias ?? 0.03);
+  const [shadowDepthBias, setShadowDepthBias] = useState<number>(() => renderer?.shadowDepthBias ?? 0.005);
   const [shadowNormalBias, setShadowNormalBias] = useState<number>(() => renderer?.shadowNormalBias ?? 1.5);
   const [shadowSoftness, setShadowSoftness] = useState<number>(() => renderer?.shadowFilterRadius ?? 1);
   const [shadowFilterMode, setShadowFilterMode] = useState<number>(() => renderer?.shadowFilterMode ?? 0);
@@ -281,11 +281,11 @@ export default function RendererSettingsPanel({ leftOut = {} }: { leftOut?: Left
   const [spotShadows, setSpotShadows] = useState<boolean>(() => renderer?.spotShadowsEnabled ?? true);
   const [spotShadowRes, setSpotShadowRes] = useState<number>(() => renderer?.spotShadowResolution ?? 1024);
   const [spotShadowDist, setSpotShadowDist] = useState<number>(() => renderer?.spotShadowDistance ?? 100);
-  const [spotShadowBias, setSpotShadowBias] = useState<number>(() => renderer?.spotShadowBias ?? 0.0015);
+  const [spotShadowBias, setSpotShadowBias] = useState<number>(() => renderer?.spotShadowBias ?? 0);
   const [pointShadows, setPointShadows] = useState<boolean>(() => renderer?.pointShadowsEnabled ?? true);
   const [pointShadowRes, setPointShadowRes] = useState<number>(() => renderer?.pointShadowResolution ?? 512);
   const [pointShadowDist, setPointShadowDist] = useState<number>(() => renderer?.pointShadowDistance ?? 50);
-  const [pointShadowBias, setPointShadowBias] = useState<number>(() => renderer?.pointShadowBias ?? 0.0015);
+  const [pointShadowBias, setPointShadowBias] = useState<number>(() => renderer?.pointShadowBias ?? 0);
 
   // Leaving Options › Engine › Renderer (unmount) must restore the normal composited image for the other modes.
   useEffect(() => () => {
@@ -927,7 +927,8 @@ export default function RendererSettingsPanel({ leftOut = {} }: { leftOut?: Left
         <Slider label='Blend' value={shadowBlend} min={0} max={0.5} step={0.01}
           onChange={(v) => { renderer.shadowCascadeBlend = v; setShadowBlend(v); touch(); }} />
 
-        <Slider label='Depth Bias' value={shadowDepthBias} min={0} max={0.5} step={0.005}
+        <Slider label='Depth Bias' value={shadowDepthBias} min={0} max={0.2} step={0.001}
+          readout={(v) => v.toFixed(3)}
           onChange={(v) => { renderer.shadowDepthBias = v; setShadowDepthBias(v); touch(); }} />
         <Slider label='Normal Bias' value={shadowNormalBias} min={0} max={8} step={0.1}
           onChange={(v) => { renderer.shadowNormalBias = v; setShadowNormalBias(v); touch(); }} />

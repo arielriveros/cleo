@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
+import { layerByName } from '../src/physics/collisionLayers';
 import { COLS, ROWS, GRID, ROOMS, roomBounds } from '../tools/duskwell/level';
 // The whole engine: it registers itself as the scripts' 'cleo' module, so the demo's scripts run headless.
 import { Scene, CleoEngine, ControllerNode, AISystem, NavGraph2D, parseNavGraph2D, EDGE_JUMP, setGameHost, SaveGame, setSaveStore, createMemorySaveStore, parseRuntimeScene, resetSaveSession } from '../src/cleo';
@@ -22,6 +23,8 @@ const present = existsSync(join(PROJECT, 'manifest.json'));
 // Read through the editor's own bundle reader: the example is checked in as format 2.
 const duskwell = present ? await readExample(PROJECT) : null;
 const read = (...parts: string[]) => duskwell!.read(...parts);
+/** A collision layer of the project's, by the name its settings give it. */
+const layer = (name: string) => layerByName(read('libraries', 'projectSettings.json').collisionLayers, name);
 const allNodes = (root: any): any[] => {
     const out: any[] = [];
     const walk = (n: any) => { out.push(n); for (const c of n.children ?? []) walk(c); };
@@ -238,7 +241,9 @@ describe.skipIf(!present)('the Duskwell example project', { timeout: 60_000 }, (
             expect(controller.type, name).toBe('controller');
             expect(controller.controlSource, name).toBe('ai');
             expect(controller.possessedId, name).toBe(enemy.id);
-            expect(controller.perceptionLayers, name).toBe(1);
+            // It sees the Player layer: the project's own, named in its settings (one table for 2D and 3D).
+            expect(controller.perceptionLayers, name).toBe(layer('Player'));
+            expect(enemy.characterBody2D.layer, name).toBe(layer('Enemies'));
             const brain: any = brains.get(controller.brainId);
             expect(brain, name).toBeTruthy();
             expect(controller.behavior.states.map((s: any) => s.name)).toEqual(brain.machine.states.map((s: any) => s.name));

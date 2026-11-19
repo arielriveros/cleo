@@ -10,7 +10,7 @@ const mem = new Map<string, string>();
 };
 
 import {
-  DEFAULT_PROJECT_SETTINGS, applyEngineRuntime, isDefaultProjectSettings, parseProjectSettings, projectSettingsConfig,
+  DEFAULT_PROJECT_SETTINGS, applyEngineRuntime, applyCollisionLayers, isDefaultProjectSettings, parseProjectSettings, projectSettingsConfig,
   physicsWorkerOverride, physicsWorkerOverrideSource, storePhysicsWorkerOverride, physicsBackendOverride,
   cleanSaveFolder, resolveSaveFolder,
 } from '../src/features/options/projectSettings';
@@ -48,12 +48,29 @@ describe('project settings', () => {
     });
     expect(isDefaultProjectSettings(s)).toBe(false);
     expect(projectSettingsConfig(s)).toEqual({
-      physics: { gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0, worker: 'on', backend: 'jolt' },
+      physics: {
+        gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0, worker: 'on', backend: 'jolt',
+        layers: ['Default', 'Ragdoll', 'See Through', 'No Camera', ...Array(12).fill('')],
+      },
       runtime: { maxFrameDelta: 0.05 },
       audio: { masterVolume: 0.5 },
       saves: { version: 0, namespace: '' },
       window: { title: 'Hollow Keep', width: 1920, height: 1080, fullscreen: true, resizable: false },
     });
+  });
+
+  it('names the collision layers: 16, the engine four fixed, a project from before them on the defaults', () => {
+    const before = parseProjectSettings({ version: 5, engine: {} });
+    expect(before.collisionLayers).toEqual(['Default', 'Ragdoll', 'See Through', 'No Camera', ...Array(12).fill('')]);
+    const s = parseProjectSettings({ collisionLayers: ['Mine', 'x', 'y', 'z', '  Foot   Detail ', 3, 'a'.repeat(40)] });
+    expect(s.collisionLayers).toHaveLength(16);
+    expect(s.collisionLayers.slice(0, 7)).toEqual(['Default', 'Ragdoll', 'See Through', 'No Camera', 'Foot Detail', '', 'a'.repeat(32)]);
+    expect(projectSettingsConfig(s).physics.layers[4]).toBe('Foot Detail');
+    // Kept under `engine` for a while: still read from there.
+    expect(parseProjectSettings({ engine: { collisionLayers: ['', '', '', '', 'Enemies'] } }).collisionLayers[4]).toBe('Enemies');
+    const engine = { maxFrameDelta: 0, physics: { gravity: [0, 0, 0] as [number, number, number], maxSubsteps: 1, simulationRange: 0, layerNames: [] as readonly string[] } };
+    applyCollisionLayers(engine, s.collisionLayers);
+    expect(engine.physics.layerNames[4]).toBe('Foot Detail');
   });
 
   it('reads the saves settings tolerantly, a project from before them as version 0 and no folder', () => {
@@ -101,9 +118,9 @@ describe('project settings', () => {
     expect(parseProjectSettings({ version: 2, engine: { physicsBackend: 'cannon' } }).engine.physicsBackend).toBe('jolt');
     expect(parseProjectSettings({ version: 4, engine: { physicsBackend: 'rapier' } }).engine.physicsBackend).toBe('rapier');
     expect(parseProjectSettings({ version: 5, engine: { physicsBackend: 'cannon' } }).engine.physicsBackend).toBe('cannon');
-    // Once read it is stored at version 5, so a project switched back to cannon stays there.
+    // Once read it is stored at the current version (5 or later), so a project switched back to cannon stays there.
     const reread = parseProjectSettings(parseProjectSettings({ version: 4, engine: { physicsBackend: 'cannon' } }));
-    expect([reread.version, reread.engine.physicsBackend]).toEqual([5, 'jolt']);
+    expect([reread.version, reread.engine.physicsBackend]).toEqual([6, 'jolt']);
     expect(parseProjectSettings({ ...reread, engine: { ...reread.engine, physicsBackend: 'cannon' } }).engine.physicsBackend).toBe('cannon');
   });
 

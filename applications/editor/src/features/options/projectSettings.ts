@@ -101,7 +101,8 @@ export interface ProjectSaveSettings {
 
 export interface ProjectSettings {
   /**
-   * The settings' format. 2: the physics worker became the default. A stored 'off' from before that is the
+   * The settings' format (6: collision layer names, absent before and read as the engine's defaults). 2: the
+   * physics worker became the default. A stored 'off' from before that is the
    * old default rather than a choice, so it reads as 'on'. 3: features and addons. A project from before
    * reads as every feature on and the Claude Code addon on, which is what it had. 4: the MCP server is an addon of
    * its own, which Claude Code needs; a version-3 project with Claude Code on gets it, as the link was part of it.
@@ -113,9 +114,33 @@ export interface ProjectSettings {
   addons: ProjectAddonSettings;
   /** Read tolerantly: a project from before saves existed reads as version 0 and the derived folder. */
   saves: ProjectSaveSettings;
+  /**
+   * The names of the project's 16 collision layers (the engine's collisionLayers.ts), index 0 being layer 1: one
+   * table for its 3D and its 2D physics alike (Options ▸ Project ▸ Layers). The first four are the
+   * engine's and fixed: Default, Ragdoll, See Through, No Camera. An empty name shows as "Layer N". Every layer
+   * picker shows them; a game's scripts find layers by them (`physics.layer('Enemies')`).
+   */
+  collisionLayers: string[];
 }
 
-export const PROJECT_SETTINGS_VERSION = 5;
+export const PROJECT_SETTINGS_VERSION = 6;
+
+/** How many collision layers a project names (the engine's LAYER_COUNT). */
+export const COLLISION_LAYER_COUNT = 16;
+/** The engine's own layers, first in the table, their names fixed (the engine's DEFAULT_LAYER_NAMES). */
+export const BUILT_IN_COLLISION_LAYERS: readonly string[] = ['Default', 'Ragdoll', 'See Through', 'No Camera'];
+/** Longest name a collision layer may have (the engine's LAYER_NAME_MAX). */
+export const COLLISION_LAYER_NAME_MAX = 32;
+
+/** A stored collision layer table, read tolerantly: always 16 names, the engine's four fixed (see collisionLayers). */
+export function parseCollisionLayers(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : [];
+  return Array.from({ length: COLLISION_LAYER_COUNT }, (_, i) => {
+    if (i < BUILT_IN_COLLISION_LAYERS.length) return BUILT_IN_COLLISION_LAYERS[i];
+    const v = list[i];
+    return typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, COLLISION_LAYER_NAME_MAX) : '';
+  });
+}
 
 /** The addons a project from before addons had: the Claude Code panel and its agent link were always there. */
 export const LEGACY_ADDONS: readonly string[] = ['mcp-server', 'claude-code'];
@@ -127,6 +152,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   features: { disabled: [] },
   addons: { enabled: [...LEGACY_ADDONS], settings: {} },
   saves: { version: 0, folder: '' },
+  collisionLayers: parseCollisionLayers(null),
 };
 
 /** What a save folder may be called: no path separators, nothing Windows refuses in a folder name. */
@@ -195,6 +221,8 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       version: Math.round(num(sv.version, d.saves.version, 0, 1_000_000)),
       folder: typeof sv.folder === 'string' ? cleanSaveFolder(sv.folder) : d.saves.folder,
     },
+    // Kept under `engine` for a while before it had a page of its own.
+    collisionLayers: parseCollisionLayers(o.collisionLayers ?? e.collisionLayers),
   };
 }
 
@@ -218,6 +246,7 @@ export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
     physics: {
       gravity: [...s.engine.gravity], maxSubsteps: s.engine.maxSubsteps, simulationRange: s.engine.simulationRange,
       worker: s.engine.physicsWorker, backend: s.engine.physicsBackend,
+      layers: [...s.collisionLayers],
     },
     runtime: { maxFrameDelta: s.engine.maxFrameDelta },
     audio: { masterVolume: s.engine.masterVolume },
@@ -235,6 +264,7 @@ export interface EngineRuntimeTarget {
   maxFrameDelta: number;
   physics: {
     gravity: [number, number, number]; maxSubsteps: number; simulationRange: number;
+    layerNames?: readonly string[];
     readonly workerMode?: PhysicsWorkerSetting;
     setWorkerMode?(mode: PhysicsWorkerSetting): void;
   } | null | undefined;
@@ -302,4 +332,9 @@ export function applyEngineRuntime(
     if (engine.physics.setWorkerMode && engine.physics.workerMode !== mode) engine.physics.setWorkerMode(mode);
   }
   if (mixer) mixer.masterVolume = s.masterVolume;
+}
+
+/** Push the project's collision layer names into a live engine: its 3D physics and its scenes' 2D worlds read them. */
+export function applyCollisionLayers(engine: EngineRuntimeTarget, names: readonly string[]): void {
+  if (engine.physics) engine.physics.layerNames = [...names];
 }

@@ -25,6 +25,8 @@ export interface StepMessage {
     time: number;
     /** The water buoying bodies this step (see WaterStep). */
     water: WaterStep[];
+    /** The characters held on their slopes this step (physics/slopeHold.ts): [slot, cos of its limit] per body. */
+    holds?: number[];
     /** Buffers the main thread is done with, handed back for the worker's next snapshot. */
     recycle: ArrayBuffer[];
 }

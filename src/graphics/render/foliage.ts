@@ -22,7 +22,7 @@ import { TexturePacker } from '../systems/texturePacker';
 import { ShadowMapImpostorProgram, ShadowMapInstancedCutoutProgram, ShadowMapInstancedProgram, GEOMETRY_PROGRAMS, GeometryFoliageBillboardProgram, GeometryFoliageImpostorProgram } from './programs';
 import type { FrameView } from './frameView';
 import type { PassEncoder } from './passEncoder';
-import { DEPTH_WRITE } from './pipelineCache';
+import { DEPTH_WRITE, shadowCasterDepth } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
@@ -817,7 +817,8 @@ export class FoliagePasses {
                     const cutout = !!cut;
                     // A cut-out caster culls nothing — its shape is in the texture and its card is
                     // two-sided; a solid prop keeps the FRONT-face culling the rest of the shadow pass
-                    // uses to push acne out of view.
+                    // uses to push acne out of view (and a two-sided one gets the slope bias, shadowCasterDepth).
+                    const casterCull = cutout || model.material.config.side === 'double' ? 'none' : 'front';
                     // A foliage material moves its shadow (wind, interaction, droop); a billboard's card sways
                     // with its rule's wind; anything else on the layer casts still.
                     const moves = !!wind && (billboard ? !wind.foliage : wind.foliage && isFoliageMaterial(model.material));
@@ -826,8 +827,8 @@ export class FoliagePasses {
                     const pipeline = this._pipelines.get(
                         program,
                         cutout ? ShadowMapInstancedCutoutProgram : ShadowMapInstancedProgram, {
-                        cullMode: cutout || model.material.config.side === 'double' ? 'none' : 'front',
-                        depthStencil: DEPTH_WRITE,
+                        cullMode: casterCull,
+                        depthStencil: shadowCasterDepth(casterCull),
                         targets: 0,
                         vertex: 'model+instance',
                         builtFor: 'blinn_phongGeometry',
@@ -1022,7 +1023,7 @@ export class FoliagePasses {
         this._shaderManager.setUniform('u_lodFrame', f);
         // Every foliage program reads the hole block too, so it is written on every bind, never only on
         // the layers that opt in: a uniform keeps its last value.
-        this._materials.setCameraHole(layer.cameraDither);
+        this._materials.setCameraHole(this._materials.holeOptInLayer(layer.collisionLayer));
     }
 
     /** The (slot, model) pairs whose prepass depth went down this layer: see `foliagePass`. */
@@ -1188,7 +1189,7 @@ export class FoliagePasses {
                 // leaves overlap on screen. Billboards gain nothing — their colour pass is already one fetch.
                 // Nor a layer the camera hole is cutting into: the colour pass after a prepass has no
                 // discard, so the depth the prepass wrote would show through as a solid silhouette.
-                const prepassSlots = this.foliagePrepass && layer.kind !== 'billboard' && !this._materials.cameraHoleOn(layer.cameraDither)
+                const prepassSlots = this.foliagePrepass && layer.kind !== 'billboard' && !this._materials.cameraHoleOn(this._materials.holeOptInLayer(layer.collisionLayer))
                     ? Math.min(2, billboardBucket) : 0;
                 const prepassed = (model: Model, slot: number) => slot < prepassSlots && model.material.type === 'pbr'
                     && !usesParallax(model.materials) && FoliagePasses._meshUvOnly(model.materials);

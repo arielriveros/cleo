@@ -62,8 +62,8 @@ export const FLOOR_PARTS = new Set(['Floors', 'Stairs', 'Gallery', 'Arena', 'Thr
 /** Parts that are not solid at all (bars you see through but the generator would wall in are kept). */
 const IGNORED_PARTS = new Set(['Windows', 'Oculus', 'Beams', 'Portcullis'])
 /**
- * Parts the player camera sees through (the scene gives their nodes `cameraDither`): their walls are kept
- * apart and flagged `seeThrough`, so they can go on bodies of their own that the camera rig ignores.
+ * Parts the player camera sees through (the scene puts them in a Collider on the See Through layer): their walls
+ * are kept apart and flagged `seeThrough`, so they can go on a body of their own that the camera rig sees through.
  */
 export const SEE_THROUGH_PARTS = new Set(['Pillars'])
 

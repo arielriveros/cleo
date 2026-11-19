@@ -4,9 +4,10 @@ import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import AxisInput from '@cleo/app-kit/ui/AxisInput'
 import NodeRefInput from '../NodeRefInput'
 import { useCleoEngine } from '../../EngineContext'
-import { Button, PresetMenu, SectionTitle, SegmentedControl, Select, Slider, Toggle, cn, labelClass } from '@cleo/app-kit/ui'
+import { Button, PresetMenu, SectionTitle, Select, Slider, Toggle, cn, labelClass } from '@cleo/app-kit/ui'
 import { hintAffordance } from '@cleo/app-kit/ui/Field'
 import { RigIcon } from '../sectionIcons'
+import { LayerMaskSelect } from '../physicsEditors/layerPickers'
 
 const FOLLOW_TARGET_HINT = 'The node the rig follows. With no target, the rig’s own position is the pivot.'
 const FOLLOW_DAMPING_HINT = 'Seconds of lag per axis. 0 seconds is rigid; higher values lag further behind.'
@@ -26,7 +27,7 @@ interface RigState {
   fovEnabled: boolean; fov: number; fovDamping: number
   collisionEnabled: boolean; collisionRadius: number; collisionMinRatio: number
   collisionPullTime: number; collisionReturnTime: number
-  collisionMode: 'retract' | 'dither'; ditherRadius: number; ditherStrength: number
+  collisionLayers: number; seeThroughLayers: number; ditherRadius: number; ditherStrength: number
   shakePositionAmplitude: Vec3; shakeRotationAmplitude: Vec3; shakeFrequency: number; shakeDecay: number
 }
 
@@ -52,7 +53,8 @@ function readNode(node: CameraRigNode): RigState {
     collisionEnabled: node.collisionEnabled, collisionRadius: node.collisionRadius,
     collisionMinRatio: node.collisionMinRatio, collisionPullTime: node.collisionPullTime,
     collisionReturnTime: node.collisionReturnTime,
-    collisionMode: node.collisionMode, ditherRadius: node.ditherRadius, ditherStrength: node.ditherStrength,
+    collisionLayers: node.collisionLayers, seeThroughLayers: node.seeThroughLayers,
+    ditherRadius: node.ditherRadius, ditherStrength: node.ditherStrength,
     shakePositionAmplitude: toVec3(node.shakePositionAmplitude),
     shakeRotationAmplitude: toVec3(node.shakeRotationAmplitude),
     shakeFrequency: node.shakeFrequency, shakeDecay: node.shakeDecay,
@@ -191,22 +193,19 @@ export default function CameraRigEditor(props: { node: CameraRigNode }) {
         <SectionTitle title='Collision' className='mt-3 mb-1' />
         {check('Handle Obstruction', 'collisionEnabled')}
         {state.collisionEnabled && <>
-          {/* Retract pulls the camera in along the arm; Dither makes whatever opted in (a node's "See-through
-              to camera", a foliage rule's) see-through where it blocks the view, and pulls in for the rest. */}
-          <div className='flex items-center justify-between mb-2'>
-            <span className={labelClass}>Response</span>
-            <SegmentedControl size='sm' value={state.collisionMode}
-              onChange={(m) => apply({ collisionMode: m })}
-              options={[
-                { value: 'retract' as const, label: 'Retract', title: 'Pull the camera in along the arm, in front of the obstruction' },
-                { value: 'dither' as const, label: 'Dither', title: 'Dither see-through every opted-in object between the camera and the player; pull in for anything else' },
-              ]} />
-          </div>
+          {/* By collision layer: what pulls the camera in along the arm, and what it sees through instead (the
+              meshes of Colliders on those layers dithered away where they block the view). See through wins. */}
+          <LayerMaskSelect label='Blocked by' labelClassName='w-[104px]' value={state.collisionLayers}
+            hint='The collision layers that pull the camera in along the arm when they come between it and the pivot.'
+            onChange={(m) => apply({ collisionLayers: m })} />
+          <LayerMaskSelect label='See through' labelClassName='w-[104px]' value={state.seeThroughLayers}
+            hint='The collision layers the camera looks through: the boom passes them, and their meshes are dithered away where they block the view.'
+            onChange={(m) => apply({ seeThroughLayers: m })} />
           {slider('Probe Radius', 'collisionRadius', 0, 2, 0.01)}
           {slider('Min Arm Ratio', 'collisionMinRatio', 0, 0.9, 0.01)}
           {slider('Pull In Time', 'collisionPullTime', 0, 1, 0.01)}
           {slider('Return Time', 'collisionReturnTime', 0, 2, 0.01)}
-          {state.collisionMode === 'dither' && <>
+          {state.seeThroughLayers !== 0 && <>
             {slider('Hole Radius', 'ditherRadius', 0.1, 4, 0.05)}
             {slider('Hole Strength', 'ditherStrength', 0, 1, 0.01)}
           </>}

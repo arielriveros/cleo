@@ -15,7 +15,9 @@ import { resolve } from 'node:path';
 const FROZEN: Record<string, string> = {
     'chunks/pbrLighting.wgsl': 'ce051619af387f2b',
     'chunks/clusteredLights.wgsl': 'd7ab3d8bd1ae1012',
-    'chunks/shadows.wgsl': '164d51c6903a0578',
+    // 2026-11-19: the shadow biases (a normal offset shaped by the light's angle, a world-unit step toward a spot
+    // or point light) fixed shadows starting away from their casters. No bundled example stores custom WGSL.
+    'chunks/shadows.wgsl': '2cfea08c9e5a1cdf',
     'clusteredLightsChunk.wgsl': '990df0e519e8aec4',
     'shadowsChunk.wgsl': '4ce12d8aa88ab346',
 };

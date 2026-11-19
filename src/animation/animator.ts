@@ -180,11 +180,29 @@ export interface AnimationState {
      */
     footLock?: boolean;
     /**
+     * Feet planted by the clips' foot-lock windows (`Animation.footLocks`), at any height: a foot inside one keeps
+     * its ground correction however far above the lowest foot the clip holds it, where foot placement would
+     * otherwise read it as swinging and let it go. For a stair climb, whose upper foot stands a riser above the
+     * lower one: released, it floats over its tread. Base layer only; off by default, so a clip on the flat keeps
+     * the release it was tuned with.
+     */
+    plantInWindows?: boolean;
+    /**
      * Hold the character still while this state plays: the Character it animates stops steering (no planar
      * velocity, no turning; gravity kept), so only the clip's root motion moves it. For a clip that must not
      * travel with whatever speed the body had or the stick asks for, a hard landing say. Base layer only.
      */
     holdMovement?: boolean;
+    /**
+     * A SYNC GROUP: a transition between two states that share one carries the stride across. The state entered
+     * starts at the normalized phase the state left was at (a looping blend space's phase, or a looping clip's
+     * time over its length) instead of at its start, and through the cross-fade the two blend spaces advance as
+     * one, at the rate of their mixed cycle. So a walk handing over to a stair climb keeps the foot that was
+     * planted planted, as long as phase 0 is the same foot's plant in both (a field sample's `phaseOffset`).
+     * Not the state GROUPS of the graph (`AnimationStateMachine.groups`), which share transitions. Exit times and
+     * `loopCount` count from the carried phase.
+     */
+    syncGroup?: string;
     /** Link to the Pose asset (and pose within it) this state holds. Authoring-side only, like `fieldId`. */
     poseRef?: { assetId: string; poseId: string };
     /**
@@ -1000,6 +1018,11 @@ export class Animator {
     private _ikFootHits: Map<number, { point: vec3; normal: vec3 }> = new Map();
     /** Per foot (keyed like `_ikFootWeights`): its foot lock, while one is held or fading out. */
     private _ikFootLocks: Map<number, FootLockState> = new Map();
+    /**
+     * Per foot (keyed like `_ikFootWeights`): the share of the pose that has it inside a clip foot-lock window,
+     * damped, which swing release leaves planted however high it stands (a stair climb's upper foot).
+     */
+    private _ikPlantedShare: Map<number, number> = new Map();
     /** Per foot node: the key its clip foot-lock windows are stored under (footLockWindows.ts). */
     private _footLockKeys: Map<number, string> = new Map();
     /**
@@ -1023,6 +1046,8 @@ export class Animator {
     /** The field being cross-faded OUT of, mirroring _previousBones for the single-clip path. */
     private _previousFieldEntries: FieldEntry[] | null = null;
     private _previousFieldPhase: number = 0;
+    /** The cross-fade in flight is a sync group's (AnimationState.syncGroup): both fields on one phase. */
+    private _syncedBlend: boolean = false;
     /**
      * The outgoing side of a cross-fade that INTERRUPTED another one: the pose that was on screen, per bone,
      * frozen. Taking the interrupted blend's target as the outgoing side instead would drop everything it was
@@ -1151,6 +1176,7 @@ export class Animator {
         }
 
         this._clearField();
+        this._syncedBlend = false;
 
         this._currentAnimation = animation;
         this._currentTime = 0;
@@ -1275,15 +1301,17 @@ export class Animator {
         this._previousFieldPhase = this._fieldPhase;
     }
 
-    // Start playing a field, cross-fading out of whatever is posed. A different field starts at phase 0;
-    // re-entering the SAME field object carries its phase, so a ping-ponging state does not stutter.
-    // Identity is by reference: each state embeds its own copy, so two states never share one.
+    // Start playing a field, cross-fading out of whatever is posed. A different field starts at phase 0, or at
+    // `startPhase` (a sync group's carried phase); re-entering the SAME field object carries its phase, so a
+    // ping-ponging state does not stutter. Identity is by reference: each state embeds its own copy, so two
+    // states never share one.
     private _startField(
         field: AnimationField,
         inputs: { x?: string; y?: string } | undefined,
         loop: boolean,
         blend: boolean,
         blendOverride?: number,
+        startPhase?: number,
     ): void {
         if (!this._animatedModel) return;
         // A layer coming out of an empty state shows again, as `_playClip` does for a clip.
@@ -1291,7 +1319,7 @@ export class Animator {
 
         const hadSource = this._fieldEntries !== null || this._currentAnimation !== null;
         if (blend && hadSource && this._isBlending) {
-            // Interrupting a cross-fade: see _playClip.
+            // Interrupting a cross-fade: see _playClip. The frozen pose has no phase to keep in step with.
             this._freezeOutgoingPose();
             this._previousLoop = this._loop;
             this._currentBlendTime = 0;
@@ -1301,6 +1329,8 @@ export class Animator {
             this._previousAnimation = this._currentAnimation;
             this._previousBones = new Map(this._bones);
             this._capturePreviousField();
+            // A synced hand-over from a blend space: the two run on one phase through the cross-fade.
+            this._syncedBlend = startPhase !== undefined && this._previousFieldEntries !== null;
             this._capturePreviousRootPin();
             this._previousTime = this._currentTime;
             this._previousAdvancing = this._playing;
@@ -1313,6 +1343,7 @@ export class Animator {
             this._previousAnimation = null;
             this._previousFieldEntries = null;
             this._frozenPrevious = null;
+            this._syncedBlend = false;
         }
 
         const sameField = field === this._fieldDef;
@@ -1336,6 +1367,8 @@ export class Animator {
             this._fieldDominant = null;
             this._fieldProbeSeeded = false;
         }
+        // A sync group's carried phase, set before the previous phase is: the markers it skips do not fire.
+        if (startPhase !== undefined && Number.isFinite(startPhase)) this._fieldPhase = ((startPhase % 1) + 1) % 1;
         this._prevFieldPhase = this._fieldPhase;
         this._bones.clear();          // the field owns the pose now; stale clip bones must not leak through
         this._currentAnimation = null;
@@ -1708,6 +1741,10 @@ export class Animator {
         weights: { clipName: string; weight: number; phaseOffset: number }[];
         dominant: string | null;
         phase: number;
+        /** The outgoing blend space's phase while one cross-fades out, else null. */
+        previousPhase: number | null;
+        /** The cross-fade in flight is a sync group's: both sides on one phase. */
+        synced: boolean;
         /** Weighted cycle length in seconds; moves as the blend shifts. */
         duration: number;
         stateName: string | null;
@@ -1739,6 +1776,8 @@ export class Animator {
             })),
             dominant: this._fieldDominant,
             phase: this._fieldPhase,
+            previousPhase: this._isBlending && this._previousFieldEntries ? this._previousFieldPhase : null,
+            synced: this._syncedBlend && this._isBlending,
             duration: this._fieldDuration(this._fieldEntries),
             stateName: this._currentStateName,
             stateTime: this._stateTime,
@@ -1762,6 +1801,22 @@ export class Animator {
      * for several times per frame per character; a linear `find` each time added up. A machine edited in
      * place (a renamed state) is caught by the name check and rebuilt.
      */
+    /**
+     * The normalized phase a transition into `next` carries (AnimationState.syncGroup): where the state being
+     * left is in its cycle, when both are in one sync group and it loops (a field, or a looping clip). Null for any
+     * other entry, a re-entry of the same state among them, which starts over.
+     */
+    private _syncedPhase(name: string, next: AnimationState | undefined): number | null {
+        const group = next?.syncGroup;
+        const sm = this._stateMachine;
+        if (!group || !sm || !this._currentStateName || this._currentStateName === name) return null;
+        if (this._stateByName(sm, this._currentStateName)?.syncGroup !== group || !this._loop) return null;
+        if (this._fieldEntries) return this._fieldPhase;
+        if (!this._currentAnimation) return null;
+        const duration = this._getAnimationDuration();
+        return duration > 0 ? (this._currentTime % duration) / duration : null;
+    }
+
     private _stateByName(sm: AnimationStateMachine, name: string): AnimationState | null {
         let lookup = this._stateLookup;
         if (!lookup || lookup.sm !== sm || lookup.states !== sm.states || lookup.length !== sm.states.length) {
@@ -1912,6 +1967,7 @@ export class Animator {
                 this._previousBones.clear();
                 this._previousFieldEntries = null;
                 this._frozenPrevious = null;
+                this._syncedBlend = false;
             }
         }
 
@@ -1929,7 +1985,15 @@ export class Animator {
             // Advance the normalized PHASE, then project onto the weighted duration — never the reverse.
             // The duration moves as the blend shifts, so a wall-clock phase would jog the pose.
             this._prevFieldPhase = this._fieldPhase;
-            if (duration > 0) this._fieldPhase += this._deltaTime / duration;
+            // A synced cross-fade (sync groups) moves both sides on one phase, at the rate of the cycle the blend
+            // shows: the outgoing one's length mixed into this one's by the blend's progress.
+            let cycle = duration;
+            if (this._syncedBlend && this._isBlending && this._previousFieldEntries && this._previousAdvancing) {
+                const previous = this._fieldDuration(this._previousFieldEntries);
+                const alpha = this._activeBlendTime > 0 ? Math.min(1, this._currentBlendTime / this._activeBlendTime) : 1;
+                if (previous > 0) cycle = previous + (duration - previous) * alpha;
+            }
+            if (cycle > 0) this._fieldPhase += this._deltaTime / cycle;
             if (this._fieldPhase >= 1) {
                 this._loopsPlayed++;
                 if (this._loop && (this._loopLimit === 0 || this._loopsPlayed < this._loopLimit)) {
@@ -1985,7 +2049,9 @@ export class Animator {
 
         // The outgoing motion keeps playing under the cross-fade; freezing it stops the legs mid-stride.
         if (this._isBlending && this._previousFieldEntries) {
-            if (this._previousAdvancing) {
+            if (this._previousAdvancing && this._syncedBlend) {
+                this._previousFieldPhase = this._fieldPhase;
+            } else if (this._previousAdvancing) {
                 const previousDuration = this._fieldDuration(this._previousFieldEntries);
                 if (previousDuration > 0) this._previousFieldPhase += this._deltaTime / previousDuration;
                 if (this._previousFieldPhase >= 1) {
@@ -2265,6 +2331,7 @@ export class Animator {
         this._prevRootBoneName = null;
         this._previousAdvancing = false;
         this._isBlending = true;
+        this._syncedBlend = false;
     }
 
     // Remember the current clip's root pin as the outgoing one. Called as a cross-fade starts, BEFORE the
@@ -2291,6 +2358,7 @@ export class Animator {
     private _finishBlend(): void {
         if (!this._isBlending) return;
         this._isBlending = false;
+        this._syncedBlend = false;
         this._frozenPrevious = null;
         this._previousAnimation = null;
         this._previousBones.clear();
@@ -2307,6 +2375,7 @@ export class Animator {
             this._ikFootWeights.clear();
             this._ikFootHits.clear();
             this._ikFootLocks.clear();
+            this._ikPlantedShare.clear();
             this._footLockKeys.clear();
             this._ikHipOffset = 0;
         }
@@ -2466,6 +2535,13 @@ export class Animator {
         return state?.footLock !== false;
     }
 
+    /** Whether the base state plants its feet by the clips' windows, at any height (AnimationState.plantInWindows). */
+    private _statePlantsInWindows(): boolean {
+        const sm = this._stateMachine;
+        const state = sm && this._currentStateName ? this._stateByName(sm, this._currentStateName) : null;
+        return !!state?.plantInWindows;
+    }
+
     private _stateIkWeightOfState(): number {
         const sm = this._stateMachine;
         const state = sm && this._currentStateName ? this._stateByName(sm, this._currentStateName) : null;
@@ -2566,8 +2642,9 @@ export class Animator {
                 const to = vec3.scaleAndAdd(IK_TO, ankleWorld, upWorld, -tuning.traceDown);
                 // Ground only: another character's capsule, a ragdoll limb or a loose prop under a foot is
                 // not something to plant on, and skipping dynamic bodies before any shape test is most of
-                // what a foot ray used to cost.
-                hit = physics.raycast(from, to, { ignore: ownBody, groundOnly: true });
+                // what a foot ray used to cost. And only the rig's trace layers: the steps of a stair, not
+                // the ramp laid over them for the capsule.
+                hit = physics.raycast(from, to, { ignore: ownBody, groundOnly: true, layerMask: tuning.traceLayers });
             }
 
             const prev = this._ikFootWeights.get(key) ?? 0;
@@ -2589,6 +2666,7 @@ export class Animator {
                 // Spent: drop the memory rather than leave a stale point to be resurrected after a teleport.
                 this._ikFootHits.delete(key);
                 this._ikFootLocks.delete(key);
+                this._ikPlantedShare.delete(key);
                 continue;
             }
 
@@ -2618,13 +2696,26 @@ export class Animator {
         // became the "planted" reference and was pulled down onto the slope. One foot is its own reference.
         let ref = Infinity;
         for (let i = 0; i < planCount; i++) ref = Math.min(ref, plans[i].height);
+        const plantInWindows = this._statePlantsInWindows();
 
         for (let i = 0; i < planCount; i++) {
             const plan = plans[i];
+            // In a state that plants by the clips' windows (AnimationState.plantInWindows), a foot inside one of
+            // its clip's foot-lock windows is PLANTED, by the clip's own account, however far above the lowest foot
+            // it is: the upper foot of a stair climb stands a riser higher than the lower one, and released it
+            // would float over its tread. The share of the pose that says so, damped over the rig's smoothing so a
+            // window's edge (or the state's) does not pop the foot; outside every window, or in any other state,
+            // the release decides alone, as it always did (a flat clip keeps the release it was tuned with).
+            const shares = plantInWindows ? this._footLockShares(plan.chain.foot) : null;
+            const planted = shares && shares.total > 0 ? shares.inside / shares.total : 0;
+            const before = this._ikPlantedShare.get(plan.chain.foot) ?? 0;
+            const share = tuning.smoothing > 0 && dt > 0 ? dampTime(before, planted, tuning.smoothing, dt) : planted;
+            if (share > 1e-4) this._ikPlantedShare.set(plan.chain.foot, share);
+            else this._ikPlantedShare.delete(plan.chain.foot);
             // The release only stops a lifted foot being pulled DOWN. A foot inside the ground is pushed out
             // of it mid-swing too, or a stride over rising ground clips through it. No jump where `along`
             // changes sign: the correction there is zero either way.
-            if (plan.along <= 0) plan.weight *= swingReleaseWeight(plan.height - ref, tuning.swingRelease);
+            if (plan.along <= 0) plan.weight *= share + (1 - share) * swingReleaseWeight(plan.height - ref, tuning.swingRelease);
         }
 
         // ---- Pass 1c: foot locking -------------------------------------------------------------------
@@ -2874,6 +2965,18 @@ export class Animator {
      * two sides by the blend. A frozen interrupted pose and a pose state carry no windows.
      */
     private _footLockWindow(footNode: number): number | null {
+        const { total, withData, inside } = this._footLockShares(footNode);
+        this._footLockUnwindowed = total > 0 ? Math.max(0, 1 - withData / total) : 0;
+        if (!(total > 0) || withData < total * 0.5) return null;
+        return inside / withData;
+    }
+
+    /**
+     * The posed clips' foot-lock windows for one foot (by its node), weighted as the base pose is (see
+     * `_footLockWindow`): the pose's whole weight, the share of it from clips with windows for that foot, and the
+     * share of it inside one of them. No side effects.
+     */
+    private _footLockShares(footNode: number): { total: number; withData: number; inside: number } {
         let key = this._footLockKeys.get(footNode);
         if (key === undefined) {
             key = footLockKey(this._skin?.nodeNames?.get(footNode) ?? String(footNode));
@@ -2905,9 +3008,7 @@ export class Animator {
             else if (this._previousFieldEntries) addField(this._previousFieldEntries, this._previousFieldPhase, 1 - f);
             else add(this._previousAnimation, this._previousTime, 1 - f);
         }
-        this._footLockUnwindowed = total > 0 ? Math.max(0, 1 - withData / total) : 0;
-        if (!(total > 0) || withData < total * 0.5) return null;
-        return inside / withData;
+        return { total, withData, inside };
     }
 
     /** The point of a foot that holds the ground (model space, as animated): its toe, or its ankle without one. */
@@ -3389,6 +3490,8 @@ export class Animator {
         // presence; one still visible (interrupted mid-fade) cross-fades from the pose it is holding, as a
         // slot does, or the old pose would be swapped for the new clip's first frame at full presence.
         const wasEmpty = (this._overlayEmpty && !this._overlayVisible) || !this._currentAnimation;
+        // A sync group's hand-over: read where the stride is before anything below resets it.
+        const carried = this._syncedPhase(name, state);
         if (this._isOverlay) {
             // Leaving a clip for an empty state keeps that clip's foot-IK weight for the fade-out. Read
             // before the name changes: it is the state being left that answers.
@@ -3406,7 +3509,7 @@ export class Animator {
 
         // A field state blends several clips instead of playing one; _startField arms the cross-fade itself.
         if (state?.field) {
-            this._startField(state.field, state.fieldInputs, state.loop, true, blendOverride);
+            this._startField(state.field, state.fieldInputs, state.loop, true, blendOverride, carried ?? undefined);
             this._loopLimit = Math.max(0, Math.floor(state.loopCount ?? 0));
             this._loopsPlayed = 0;
             this._speed = state.speed ?? 1.0;
@@ -3465,6 +3568,12 @@ export class Animator {
             // Join the clip part-way (one segment of a combo clip): the clock starts there, and neither the
             // events nor the root travel before it count -- both are read from the previous frame's time.
             this._currentTime = Math.min(state.startTime, this._getAnimationDuration());
+            this._prevEventTime = this._currentTime;
+            this._eventFromStart = false;
+        }
+        // A sync group's carried phase wins over `startTime`: the clip joins the stride where it was.
+        if (carried !== null && state.loop && this._currentAnimation) {
+            this._currentTime = carried * this._getAnimationDuration();
             this._prevEventTime = this._currentTime;
             this._eventFromStart = false;
         }
@@ -4475,6 +4584,7 @@ export class Animator {
         this._ikFootWeights.clear();
         this._ikFootHits.clear();
         this._ikFootLocks.clear();
+        this._ikPlantedShare.clear();
         this._ikHipOffset = 0;
 
         // Stop any playing animation

@@ -202,7 +202,8 @@ Character's does, reading the player's input actions or deciding as an AI. Undri
 whatever velocity a script gives it.
 
 - **Size** — the box's width and height.
-- **Layer** — the 2D layers it is on; a [Trigger](#trigger-2d) sees it if the trigger looks for one of them.
+- **Layer** — the [collision layer](physics.md#layers) it is on, one of the project's, named for 2D and 3D
+  alike; a [Trigger](#trigger-2d) sees it if the trigger looks for that layer, an AI if its **Sees layers** do.
 - **One-way platforms** — on, one-way platforms hold it up; off, it passes through them both ways, as a bat
   or a ghost does.
 - **Driven by** — the controller possessing it, or **Add Player Controller** (reads **Move** and **Jump**)
@@ -241,9 +242,9 @@ opened). Everything under it moves with it.
   solid and one-way tiles and on other Collider 2Ds — a crate knocked off a ledge, a boulder. It slides to
   a stop on the ground. A script can give it a velocity (`velocity2D`) to throw it; `grounded` says
   whether it rests on something.
-- **Layer** and **Collides with** — the layers it is on and the layers it lands on. Two Collider 2Ds
-  collide when each one's **Collides with** holds a layer of the other. Tilemaps are on layer 1: leave it
-  out and the collider falls through the tiles.
+- **Layer** and **Collides with** — the [collision layer](physics.md#layers) it is on and the layers it lands
+  on. Two Collider 2Ds collide when each one's **Collides with** holds the other's **Layer**. Tilemaps are on
+  **Default**: leave it out and the collider falls through the tiles.
 
 ### Trigger 2D
 

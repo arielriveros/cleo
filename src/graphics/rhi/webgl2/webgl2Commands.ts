@@ -121,10 +121,12 @@ export class WebGL2RenderPipeline implements RenderPipeline {
             GLState.depthTest(true);
             GLState.depthMask(this.depthStencil!.depthWriteEnabled);
             GLState.depthFunc(glCompare(this.depthStencil!.depthCompare));
+            GLState.polygonOffset(this.depthStencil!.depthBiasSlopeScale ?? 0, this.depthStencil!.depthBias ?? 0);
         } else {
             // Mask as well as disable: DEPTH_TEST off still lets writes through on some drivers.
             GLState.depthTest(false);
             GLState.depthMask(false);
+            GLState.polygonOffset(0, 0);
         }
 
         const cull = glCullMode(this.primitive.cullMode);

@@ -49,6 +49,8 @@ export interface WorkerExecutorHost {
     water(): { spec: WaterSpec; record: (body: BodyHandle, fraction: number) => void }[];
     substepsFor(dt: number): number;
     profileStep(): boolean;
+    /** The characters to hold on their slopes over this step (physics/slopeHold.ts): body and cos of its limit. */
+    slopeHolds?(): readonly { body: BodyHandle; cosLimit: number }[];
     /** The worker failed: PhysicsSystem falls back to stepping inline, on the same world. */
     onFailure(error: unknown): void;
 }
@@ -464,11 +466,18 @@ export class WorkerExecutor implements PhysicsExecutor {
             if (fresh) this._waterKeys.add(key);
             return { key, waveScale: w.spec.waveScale ?? 1, spec: fresh ? w.spec : undefined };
         });
+        // The slope holds go by slot, which the diff just sent: [slot, cos of the limit] per held body.
+        const requests = this._host.slopeHolds?.() ?? [];
+        const holds: number[] = [];
+        for (const r of requests) {
+            const slot = this._mirror.slotOf(r.body);
+            if (slot !== undefined) holds.push(slot, r.cosLimit);
+        }
         const msg: StepMessage = {
             kind: 'step', epoch: this._epoch, seq: ++this._seq, dt: stepDt, substeps: this._host.substepsFor(stepDt),
             profile: this._host.profileStep(), changes: diff.changes,
             gravity: world.gravity, iterations: world.solverIterations, time: world.time,
-            water: steps, recycle: this._recycle,
+            water: steps, holds, recycle: this._recycle,
         };
         const transfer = uniqueBuffers([...diff.transfer, ...this._recycle]);
         // Measured before posting: a transferred buffer reads as empty afterwards.

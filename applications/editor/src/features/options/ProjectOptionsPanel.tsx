@@ -5,12 +5,15 @@ import { Button, Field, NumberInput, Section, Select, TextInput, Toggle, cn } fr
 import { loadProjects, renameProject } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
 import { OptionsPageBody, OptionsShell, OPTION_LABEL, useMarkOptionPageShown, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
-import { DEFAULT_PROJECT_SETTINGS, cleanSaveFolder, resolveSaveFolder, type ProjectSaveSettings, type PublishWindowSettings } from './projectSettings'
+import {
+  BUILT_IN_COLLISION_LAYERS, COLLISION_LAYER_NAME_MAX, DEFAULT_PROJECT_SETTINGS, cleanSaveFolder, resolveSaveFolder,
+  type ProjectSaveSettings, type PublishWindowSettings,
+} from './projectSettings'
 
 // Options ▸ Project: what belongs to THIS game and travels with it — its name, the scene it starts in,
-// how a published build presents itself, and the input map. Carried in project bundles.
+// how a published build presents itself, the input map and the collision layers' names. Carried in project bundles.
 
-type Page = 'general' | 'input'
+type Page = 'general' | 'input' | 'layers'
 
 /** The id the viewport watches to preview on-screen touch controls while the input map is open. */
 export const INPUT_PAGE_ID = 'project.input'
@@ -24,10 +27,12 @@ export default function ProjectOptionsPanel() {
       pages={[
         { value: 'general', label: 'General', doc: 'editor/options#general' },
         { value: 'input', label: 'Input', doc: 'editor/options#input' },
+        { value: 'layers', label: 'Layers', doc: 'editor/options#layers' },
       ]}
     >
       {page === 'general' && <GeneralOptions />}
       {page === 'input' && <InputPage />}
+      {page === 'layers' && <CollisionLayersPage />}
     </OptionsShell>
   )
 }
@@ -35,6 +40,34 @@ export default function ProjectOptionsPanel() {
 function InputPage() {
   useMarkOptionPageShown(INPUT_PAGE_ID)
   return <div className='flex h-full flex-col overflow-hidden'><InputMapPanel /></div>
+}
+
+/**
+ * The names of the project's 16 collision layers: one table for its 3D physics and its 2D physics alike, shown by
+ * every layer picker (a Collider's or a 2D body's Layer, a camera rig's Blocked by, foot placement's Trace layers)
+ * and what scripts find layers by. The engine's four are fixed.
+ */
+function CollisionLayersPage() {
+  const { projectSettings, setProjectSettings } = useCleoEngine()
+  const names = projectSettings.collisionLayers
+  const rename = (i: number, name: string) =>
+    setProjectSettings(prev => ({ ...prev, collisionLayers: prev.collisionLayers.map((n, k) => (k === i ? name : n)) }))
+  return (
+    <OptionsPageBody>
+      <Section title='Collision layers'>
+        {names.map((name, i) => {
+          const builtIn = i < BUILT_IN_COLLISION_LAYERS.length
+          return (
+            <Field key={i} label={`${i + 1}`} labelClassName='w-[28px] text-right text-muted' doc={false}>
+              <TextInput value={name} disabled={builtIn} maxLength={COLLISION_LAYER_NAME_MAX}
+                className={builtIn ? 'opacity-60' : undefined} placeholder={`Layer ${i + 1}`}
+                onChange={v => rename(i, v)} />
+            </Field>
+          )
+        })}
+      </Section>
+    </OptionsPageBody>
+  )
 }
 
 function GeneralOptions() {

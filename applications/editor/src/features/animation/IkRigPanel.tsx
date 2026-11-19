@@ -5,6 +5,7 @@ import { useCleoEngine } from '../EngineContext'
 import { jointLabel } from './skeleton'
 import { Button, Select, cn, controlClass } from '@cleo/app-kit/ui'
 import { guessFootPlacement } from '../../utils/footPlacementAuto'
+import { LayerMaskSelect } from '../nodeInspector/physicsEditors/layerPickers'
 
 // Foot-IK rig authoring: the Skeleton part's Foot Placement tab (rig/FootPlacementPanel), beside Skeleton while
 // the bone tree stays up on the left. Bones are assigned by hand: select a joint (SELECT_JOINT, from the tree or
@@ -199,6 +200,10 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
             {num('Foot height', 'footHeight', 'How far the ankle sits above the sole. Too small and the foot sinks into the ground; too large and it hovers.')}
             {num('Trace up', 'traceUp', 'How far above the animated foot the ground ray starts. Raise it if feet ignore ground they are standing inside.')}
             {num('Trace down', 'traceDown', 'How far below the foot the ray reaches. Past this the foot counts as airborne and IK fades out.')}
+            <LayerMaskSelect label='Trace layers' labelClassName='w-[74px] text-ui-xs text-muted' className='my-0'
+              value={current.traceLayers ?? IK_DEFAULTS.traceLayers}
+              hint='The collision layers the foot rays land on. Leave out a ramp laid over stairs for the capsule, and keep the steps (which the capsule does not collide with): the body climbs the ramp, the feet stand on the treads.'
+              onChange={m => write({ ...current, traceLayers: m === IK_DEFAULTS.traceLayers ? undefined : m })} />
             {num('Swing release', 'swingRelease', 'How far the animation must lift a foot above the other one before IK lets go of it, so a stride is not dragged back down to the ground. Measured in the clip, so a slope or a step under the feet never counts as a stride. Lower it if lifted feet are still pulled down mid-step; raise it if a foot the clip holds a little off the ground does not plant. 0 turns the release off.')}
             {num('Max hip drop', 'maxHipDrop', 'Furthest the pelvis may be lowered when a foot cannot reach. Stops a hole in the ground folding the character up.')}
             {num('Max slope', 'maxSlopeDeg', 'Steepest surface the foot will roll to match. Past it the foot keeps its animated angle, because matching starts to look like a broken ankle.', 1)}

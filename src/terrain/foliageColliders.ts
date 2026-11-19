@@ -2,6 +2,7 @@ import { vec3 } from 'gl-matrix';
 import { FoliageCollision } from '../graphics/material';
 import { Shape } from '../physics/shape';
 import { PhysicsBody } from '../physics/physicsBody';
+import { LAYER } from '../physics/collisionLayers';
 import { quatFromEuler } from '../physics/pal/math';
 import type { PhysicsSystem } from '../physics/physicsSystem';
 import { FoliageLayer, foliageDensityScale } from './foliage';
@@ -30,8 +31,7 @@ const REFRESH_TRAVEL = 0.25;
 /** Upper bound on how long a stale active set may persist even if nothing appears to have changed. */
 const REFRESH_INTERVAL_MS = 250;
 
-/** `see`: the layer's `cameraDither`, stamped on the body (a pooled body may serve any layer of its shape). */
-interface Wanted { sig: string; x: number; y: number; z: number; yaw: number; scale: number; d2: number; see: boolean }
+interface Wanted { sig: string; x: number; y: number; z: number; yaw: number; scale: number; d2: number }
 
 /** The pool bucket each body was built for. */
 const signatures = new WeakMap<PhysicsBody, string>();
@@ -40,9 +40,9 @@ const yawRotation = [0, 0, 0, 1];
 
 /**
  * Static physics proxies for the collidable foliage instances near the camera, materialised only inside
- * an activation disc and recycled as it slides. Bodies are pooled by SHAPE SIGNATURE (post-scale
- * dimensions, rounded), not by instance, so a recycled body only ever changes position — nothing rebuilds
- * its shapes or recomputes mass properties: an evicted body stays built in the world, disabled.
+ * an activation disc and recycled as it slides. Bodies are pooled by SHAPE SIGNATURE (collision layer and
+ * post-scale dimensions, rounded), not by instance, so a recycled body only ever changes position — nothing
+ * rebuilds its shapes or recomputes mass properties: an evicted body stays built in the world, disabled.
  */
 /** A layer's instance set as colliders see it: its rebuild version and the share its density keeps. */
 const layerState = (layer: FoliageLayer) => `${layer.version}:${foliageDensityScale(layer)}`;
@@ -94,7 +94,7 @@ export class FoliageColliderField {
                 const dx = ix - camPos[0], dy = iy - camPos[1], dz = iz - camPos[2];
                 wanted.set(`${layer.key}#${index}`, {
                     sig: signatureOf(col, scale), x: ix, y: iy, z: iz, yaw, scale,
-                    d2: dx * dx + dy * dy + dz * dz, see: layer.cameraDither,
+                    d2: dx * dx + dy * dy + dz * dz,
                 });
             }, foliageDensityScale(layer));
         }
@@ -108,7 +108,8 @@ export class FoliageColliderField {
 
         // 3. Evict what left the set, back into the pool keyed by the shape it already carries.
         for (const [key, body] of this._active) {
-            if (keep.has(key)) continue;
+            // Kept only as the kind it is now: a rule whose collider or layer changed gets a body of the new one.
+            if (keep.get(key)?.sig === signatures.get(body)) continue;
             physics.removeBody(body, true);
             const sig = signatures.get(body)!;
             let bucket = this._free.get(sig);
@@ -119,15 +120,12 @@ export class FoliageColliderField {
 
         // 4. Materialise what entered it, reusing a pooled body of the same signature when one exists.
         for (const [key, w] of keep) {
-            const active = this._active.get(key);
-            // Read by the camera probe (cameraRayFilter): a 'dither' rig sees through this rule's trees.
-            if (active) { active.cameraDither = w.see; continue; }
+            if (this._active.has(key)) continue;
             const body = this._free.get(w.sig)?.pop() ?? buildBody(w.sig, layerCollisionFor(layers, key), w.scale);
             if (!body) continue;
             body.position.set(w.x, w.y, w.z);
             quatFromEuler(0, w.yaw, 0, yawRotation);
             body.quaternion.set(yawRotation[0], yawRotation[1], yawRotation[2], yawRotation[3]);
-            body.cameraDither = w.see;
             physics.addBody(body);
             this._active.set(key, body);
         }
@@ -177,8 +175,9 @@ function signatureOf(col: FoliageCollision, scale: number): string {
     const w = (col.width ?? col.radius ?? 0.5) * 2 * scale;
     const d = (col.depth ?? col.radius ?? 0.5) * 2 * scale;
     const o = (col.offsetY ?? (col.shape === 'sphere' ? (col.radius ?? 0.5) : (col.height ?? 2) / 2)) * scale;
-    // Rounded so the continuous minScale..maxScale range collapses into a handful of reusable buckets.
-    return `${col.shape}|${r.toFixed(2)}|${h.toFixed(2)}|${w.toFixed(2)}|${d.toFixed(2)}|${o.toFixed(2)}`;
+    // Rounded so the continuous minScale..maxScale range collapses into a handful of reusable buckets. The layer
+    // too: a body is on its rule's collision layer, which a pooled body carries from when it was built.
+    return `${col.layer ?? LAYER.DEFAULT}|${col.shape}|${r.toFixed(2)}|${h.toFixed(2)}|${w.toFixed(2)}|${d.toFixed(2)}|${o.toFixed(2)}`;
 }
 
 /** The collision descriptor of the layer an instance key belongs to. */
@@ -190,9 +189,12 @@ function layerCollisionFor(layers: FoliageLayer[], key: string): FoliageCollisio
     return null;
 }
 
-/** The static body for one instance's collider (exported for tests). It collides as the default surface. */
+/**
+ * The static body for one instance's collider (exported for tests), on its rule's collision layer (Default when
+ * it names none). A camera rig that sees through that layer sees through these trunks and cuts their meshes.
+ */
 export function buildFoliageColliderBody(col: FoliageCollision, scale: number): PhysicsBody {
-    const body = new PhysicsBody({ name: 'foliage', type: 'static' });
+    const body = new PhysicsBody({ name: 'foliage', type: 'static', group: col.layer ?? LAYER.DEFAULT });
     const pose = foliageColliderPose(col, scale);
     const offset: [number, number, number] = [0, pose.offsetY, 0];
     if (pose.shape === 'sphere') body.addCollider({ shape: Shape.Sphere(pose.size[0] / 2).desc, offset });

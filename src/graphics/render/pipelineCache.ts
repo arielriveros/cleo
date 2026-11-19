@@ -32,6 +32,20 @@ export interface PipelineCacheHost {
  */
 export const DEPTH_WRITE: DepthStencilState = { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' };
 
+/**
+ * DEPTH_WRITE with a slope-scaled depth bias, for a shadow caster drawn WITHOUT culling (a cut-out card, a
+ * double-sided material, foliage cards). Its lit face is in the map too, so it is its own receiver and meets
+ * its own depth: the bias moves its recorded depth back by what it spans over two texels (the filter reaches
+ * one either side), so the receivers' small constant bias need not cover it. A solid caster keeps DEPTH_WRITE:
+ * drawn front-face culled, the map already holds its far side. Shared, like DEPTH_WRITE.
+ */
+export const SHADOW_DEPTH_TWO_SIDED: DepthStencilState = { ...DEPTH_WRITE, depthBiasSlopeScale: 2 };
+
+/** The depth state of a shadow caster pipeline that culls `cullMode`. */
+export function shadowCasterDepth(cullMode: CullMode): DepthStencilState {
+    return cullMode === 'none' ? SHADOW_DEPTH_TWO_SIDED : DEPTH_WRITE;
+}
+
 /** Depth test `less-equal` without writes: transparents, the sky, boxes tested against the scene depth. */
 export const DEPTH_TEST: DepthStencilState = { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' };
 

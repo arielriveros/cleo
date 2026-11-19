@@ -223,7 +223,7 @@ export class MaterialBinder {
 
     /**
      * This frame's camera see-through hole (chunks/cameraHole.wgsl), from the active camera's
-     * `seeThrough` — set by a CameraRig in 'dither' collision mode. `_camHolePivot[3]` is the strength,
+     * `seeThrough` — set by a CameraRig that sees through some layers. `_camHolePivot[3]` is the strength,
      * 0 when no rig asked for one, which switches the test off in every program at once.
      */
     private readonly _camHole: number[] = [0, 0, 0, 1];
@@ -236,8 +236,13 @@ export class MaterialBinder {
 
     private _camHoleStrength = 0;
 
+    /** The collision layers the active camera sees through: what {@link holeOptIn} cuts. */
+    private _camHoleLayers = 0;
+
     public updateCameraHole(scene: Scene): void {
         const see = scene.activeCamera?.seeThrough;
+        // Kept whether or not this view cuts the hole, so a mesh's per-object record does not churn with it.
+        this._camHoleLayers = see?.active ? see.layers : 0;
         // Not in the editor's own views, not in captures and thumbnails: only the game camera has a player.
         if (!see || !see.active || see.strength <= 0 || see.radius <= 0 || this._view.capturing || this._view.preview
             || this._host.thumbnailMode()) {
@@ -251,7 +256,23 @@ export class MaterialBinder {
         this._camHoleStrength = Math.min(1, see.strength);
     }
 
-    /** Whether a draw that opted in (`cameraDither`) gets the hole this frame. */
+    /**
+     * Whether the see-through hole may cut `node`: a mesh a Collider on one of the seen-through layers holds
+     * (`Node.collider`: the node itself or its nearest Collider ancestor). Geometry outside any Collider has no
+     * layer to go by, so it never is.
+     */
+    public holeOptIn(node: { readonly collider: unknown }): boolean {
+        if (this._camHoleLayers === 0) return false;
+        const collider = node.collider as { layer?: number } | null;
+        return !!collider && ((collider.layer ?? 0) & this._camHoleLayers) !== 0;
+    }
+
+    /** {@link holeOptIn} for foliage: whether its collision layer (undefined: Default, or no collision) is seen through. */
+    public holeOptInLayer(layer: number | undefined): boolean {
+        return layer !== undefined && (layer & this._camHoleLayers) !== 0;
+    }
+
+    /** Whether a draw that opted in ({@link holeOptIn}) gets the hole this frame. */
     public cameraHoleOn(optedIn: boolean): boolean {
         return optedIn && this._camHoleStrength > 0 && !this._view.capturing && !this._view.cubeFace;
     }

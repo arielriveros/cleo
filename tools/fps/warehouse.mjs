@@ -254,7 +254,7 @@ function addAssets(bundle, scene, imports) {
 const findNode = (n, f) => { if (f(n)) return n; for (const c of n.children ?? []) { const r = findNode(c, f); if (r) return r } return null }
 const walkNodes = (n, fn) => { fn(n); for (const c of n.children ?? []) walkNodes(c, fn) }
 
-const BODY = { mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1], friction: 0.3, restitution: 0, simulatePhysics: true, cameraCollision: true, groundProbeDistance: 0, simulationMode: 'project', simulationRange: 0, canSleep: false, motionSmoothing: 0 }
+const BODY = { mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1], friction: 0.3, restitution: 0, simulatePhysics: true, groundProbeDistance: 0, simulationMode: 'project', simulationRange: 0, canSleep: false, motionSmoothing: 0 }
 const boxShape = () => ({ type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] })
 
 function makeBuilders(scene, key) {

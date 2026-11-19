@@ -24,6 +24,7 @@ const any = (...children: Node[]): AnimationConditionGroup => ({ op: 'or', child
 const gt = (param: string, value: number, hysteresis = 0): AnimationCondition => ({ param, op: 'gt', value, ...(hysteresis ? { hysteresis } : {}) })
 const lt = (param: string, value: number, hysteresis = 0): AnimationCondition => ({ param, op: 'lt', value, ...(hysteresis ? { hysteresis } : {}) })
 const eq = (param: string, value: number): AnimationCondition => ({ param, op: 'eq', value })
+const neq = (param: string, value: number): AnimationCondition => ({ param, op: 'neq', value })
 const yes = (param: string): AnimationCondition => ({ param, op: 'true' })
 const no = (param: string): AnimationCondition => ({ param, op: 'false' })
 
@@ -129,6 +130,66 @@ export function locomotionField(clips: Map<string, MadeClip>, speeds: Speeds, ph
         // The weights follow the probe quickly: every lag between the body's travel and the legs is foot slide.
         weightSmoothing: 0.04,
         samples,
+    }
+}
+
+/**
+ * The stair clips' rate: they are slow, steep climbs (23 cm risers), played a quarter faster, at one step a tread.
+ * The Character slows to the pace that gives (SandboxPlayer's stair speeds), so the feet keep to the treads.
+ */
+export const STAIR_RATE = 1.25
+
+/** The stair paces, horizontal m/s: walking and running, up and down (descending's fallback when its clips fail). */
+export interface StairPaces { upWalk: number; upRun: number; downWalk: number; downRun: number }
+
+/**
+ * What a flight is walked and run at, horizontally: each stair clip's steps a second at `STAIR_RATE`, one tread a
+ * step. A direction whose clips were left out (`stairCheck`) keeps the pace the clips it would have had suggest.
+ */
+export function stairPaces(clips: Map<string, MadeClip>, tread: number): StairPaces {
+    const pace = (name: string) => { const c = clips.get(name); return c?.stairs ? r3(STAIR_RATE * c.stairs.stepsPerSecond * tread) : null }
+    return {
+        upWalk: pace('StairsUpWalk') ?? 0.55, upRun: pace('StairsUpRun') ?? 1.25,
+        downWalk: pace('StairsDownWalk') ?? 0.8, downRun: pace('StairsDownRun') ?? 1.88,
+    }
+}
+
+const r3 = (v: number) => Math.round(v * 1000) / 1000
+
+/**
+ * The flights' blend space: 2D, Climb (the script's `stairs`: +1 up, -1 down) x Speed (the body's ground speed). Up
+ * and down a creep, a walk and a run, each at the speed its steps cover at one tread a step and `STAIR_RATE`, and
+ * phase-shifted so `phaseFoot` plants at phase 0, as in the Locomotion blend space: the two hand over in step (their
+ * states share a sync group), and turning round on a flight blends the climb into the descent inside it. Null when
+ * no stair clip passed (clips.ts stairCheck); `up` / `down` say which directions it has.
+ */
+export function stairsField(clips: Map<string, MadeClip>, phaseFoot: 'L' | 'R', tread: number): (AnimationField & { up: boolean; down: boolean }) | null {
+    const samples: any[] = []
+    const has = { Up: false, Down: false }
+    for (const [dir, x] of [['Up', 1], ['Down', -1]] as const) for (const gait of ['Creep', 'Walk', 'Run']) {
+        const made = clips.get(`Stairs${dir}${gait}`)
+        if (!made?.stairs) continue
+        const T = clipSeconds(made.clip)
+        // The foot's plant: where a window of it starts, not the one the clip opens inside (a stance carried over its loop).
+        const starts = (made.clip.footLocks?.[phaseFoot === 'L' ? 'foot.L' : 'foot.R'] ?? []).map(([a]) => a)
+        const plant = starts.find(a => a > 0.01 * T) ?? starts[0] ?? 0
+        const phase = ((plant / T) % 1 + 1) % 1
+        if (gait !== 'Creep') has[dir] = true
+        samples.push({
+            clipName: made.clip.name, x, y: r3(STAIR_RATE * made.stairs.stepsPerSecond * tread), rateScale: STAIR_RATE,
+            ...(phase > 0.01 && phase < 0.99 ? { phaseOffset: r3(phase) } : {}),
+        })
+    }
+    if (!has.Up && !has.Down) return null
+    const top = Math.max(...samples.map(s => s.y))
+    return {
+        mode: '2d',
+        // The climb is -1, 0 or +1: smoothed, so a turn round on the flight blends the one into the other.
+        xAxis: { name: 'Climb', min: -1, max: 1, smoothing: 0.15 },
+        yAxis: { name: 'Speed', min: 0, max: Math.ceil(top * 10) / 10, smoothing: 0.03 },
+        weightSmoothing: 0.04,
+        samples,
+        up: has.Up, down: has.Down,
     }
 }
 
@@ -240,8 +301,19 @@ export function lookField(): AnimationField {
     }
 }
 
+/** The stairs' blend space the machine plays (`stairsField`), its asset id, and which directions it has. */
+export interface StairField {
+    field: AnimationField
+    fieldId: string
+    up: boolean
+    down: boolean
+}
+
+/** The sync group the gait cycles hand over in (AnimationState.syncGroup): the walk blend space and the stairs'. */
+export const GAIT_SYNC = 'Gait'
+
 export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField, fieldId: string, speeds: Speeds, lean: LeanMask, timing: MachineTimings,
-    look: { mask: LeanMask; field: AnimationField; fieldId: string }): AnimationStateMachine {
+    look: { mask: LeanMask; field: AnimationField; fieldId: string }, stairs: StairField | null = null): AnimationStateMachine {
     const clip = (name: string) => { const c = clips.get(name); if (!c) throw new Error(`no clip ${name}`); return c }
     const jumpAir = clip('JumpAir'), runAir = clip('JumpRunAir')
     // Air clips play so their touchdown comes a little after the physics one on level ground: the landing
@@ -261,7 +333,7 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
         state('Idle', 'Idle', 300, 260, { loop: true, isEntry: true, footLock: false }),
         // Foot placement at the weight SandboxPlayer writes: full at a walk, light at a run, where the solver would
         // pull the lower foot down to the ground in the flight phase between strides.
-        { name: 'Locomotion', clipName: '', fieldId, field, fieldInputs: { x: 'Direction', y: 'GroundSpeed' }, loop: true, speed: 1, ikWeightParam: 'FootPlacement', x: 640, y: 260 },
+        { name: 'Locomotion', clipName: '', fieldId, field, fieldInputs: { x: 'Direction', y: 'GroundSpeed' }, loop: true, speed: 1, ikWeightParam: 'FootPlacement', syncGroup: GAIT_SYNC, x: 640, y: 260 },
         state('Turn90L', 'Turn90L', 60, 60, { footLock: false }), state('Turn90R', 'Turn90R', 300, 40, { footLock: false }),
         state('Turn180L', 'Turn180L', 60, 140, { footLock: false }), state('Turn180R', 'Turn180R', 540, 60, { footLock: false }),
         // The run-to-stop and its mirror: whichever plants the foot that is swinging when the player lets go.
@@ -282,13 +354,24 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
         // A far fall while running rolls instead, carried on by the run's own speed.
         state('LandRoll', 'LandRoll', 940, 900, { speed: rollRate }),
     ]
+    // Up and down a flight: the stairs' blend space (Climb x Speed), in step with the walk's (one sync group), the
+    // feet on the treads at full weight whatever the pace and planted by the clips' windows at any height (the upper
+    // foot stands a riser above the lower one), and played a little faster while the body still slows onto the
+    // flight (StairRate, SandboxPlayer), so the steps keep up with it.
+    if (stairs) states.push({
+        name: 'Stairs', clipName: '', fieldId: stairs.fieldId, field: stairs.field, fieldInputs: { x: 'Stairs', y: 'GroundSpeed' }, loop: true, speed: 1,
+        speedScaleParam: 'StairRate', ikWeight: 1, plantInWindows: true, syncGroup: GAIT_SYNC, x: 1080, y: 260,
+    })
+    // On a flight the way its blend space has clips for: up and down, or the one direction that passed.
+    const onFlight = !stairs ? null : stairs.up && stairs.down ? neq('Stairs', 0) : eq('Stairs', stairs.up ? 1 : -1)
+    const offFlight = !stairs ? null : stairs.up && stairs.down ? eq('Stairs', 0) : neq('Stairs', stairs.up ? 1 : -1)
 
     const moving = gt('Speed', 0.15, 0.2)
     const stopped = lt('Speed', 0.15, 0.2)
     const fast = gt('Speed', RUN_SPEED_GATE)
     const leftGround = all(no('Grounded'), gt('AirTime', 0.1))
     const T: AnimationTransition[] = []
-    const grounded = ['Idle', 'Locomotion', 'Stop', 'StopMirror', 'Start', 'RunTurnL', 'RunTurnR', 'Turn90L', 'Turn90R', 'Turn180L', 'Turn180R', 'JumpLand', 'LandRun', 'LandSoft', 'LandHard', 'LandRoll']
+    const grounded = ['Idle', 'Locomotion', 'Stop', 'StopMirror', 'Start', 'RunTurnL', 'RunTurnR', 'Turn90L', 'Turn90R', 'Turn180L', 'Turn180R', 'JumpLand', 'LandRun', 'LandSoft', 'LandHard', 'LandRoll', ...(stairs ? ['Stairs'] : [])]
     const forward = all(gt('MoveAngle', -45), lt('MoveAngle', 45))
     const turns: [string, number][] = [['Turn90R', 1], ['Turn180R', 2], ['Turn90L', -1], ['Turn180L', -2]]
     /** Every grounded state's way into the air: a jump (running or standing) or a fall, blended in gently. */
@@ -301,9 +384,12 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
     // Idle
     T.push(edge('Idle', 'JumpStand', all(yes('Jumping')), { blend: 0.08 }))
     T.push(edge('Idle', 'Fall', leftGround, { blend: 0.35 }))
+    // Setting off on a flight: straight up or down it (Stairs is the script's climb direction while on one).
+    if (onFlight) T.push(edge('Idle', 'Stairs', all(yes('MoveInput'), moving, onFlight), { blend: 0.25 }))
     // A sprint set off roughly the way the body faces, and really moving (not pushing against a wall), starts with
-    // the start clip; a walk or a jog, or a sprint off to the side or back, goes straight into the blend.
-    T.push(edge('Idle', 'Start', all(yes('Sprinting'), forward, gt('Speed', START_GATE)), { blend: 0.25 }))
+    // the start clip; a walk or a jog, or a sprint off to the side or back, goes straight into the blend. Never on
+    // a flight, which is climbed at the stairs' pace.
+    T.push(edge('Idle', 'Start', all(yes('Sprinting'), forward, gt('Speed', START_GATE), no('OnStairs')), { blend: 0.25 }))
     // ALS's "should move": asking to move, and moving. (Not "or moving fast": a teleport reads as a burst of speed.)
     T.push(edge('Idle', 'Locomotion', all(yes('MoveInput'), moving), { blend: 0.25 }))
     // Not before a blend into Idle (out of a stop or a landing) is over: a turn cutting it would pop.
@@ -311,12 +397,14 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
 
     // Locomotion
     airborne('Locomotion')
+    // Onto a flight, up or down it: in step, the stride carried across (the sync group).
+    if (onFlight) T.push(edge('Locomotion', 'Stairs', all(onFlight), { blend: 0.3 }))
     // The running turn: the script holds RunTurn (-1 left, +1 right) while a sprint reverses.
     T.push(edge('Locomotion', 'RunTurnL', all(eq('RunTurn', -1)), { blend: 0.12 }))
     T.push(edge('Locomotion', 'RunTurnR', all(eq('RunTurn', 1)), { blend: 0.12 }))
     // The stop, from a jog (a sprint brakes through the blend space to a jog first, so the clip's travel fits), on
     // the foot that is swinging: phase 0 is one foot's plant, so in the field's first half the other foot swings.
-    const stop = all(no('MoveInput'), yes('Decelerating'), fast, lt('Speed', speeds.jog * 1.1), gt('Direction', -45), lt('Direction', 45))
+    const stop = all(no('MoveInput'), yes('Decelerating'), fast, lt('Speed', speeds.jog * 1.1), gt('Direction', -45), lt('Direction', 45), no('OnStairs'))
     T.push(edge('Locomotion', timing.stopLate, stop, { blend: 0.25, stay: 0.25, exit: 0.5 }))
     T.push(edge('Locomotion', timing.stopEarly, stop, { blend: 0.25, stay: 0.25 }))
     T.push(edge('Locomotion', 'Idle', all(stopped), { blend: 0.35, stay: 0.1 }))
@@ -326,11 +414,13 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
     for (const [t] of turns) T.push(edge(t, 'Idle', null, { blend: 0.25, exit: turnExit(t) }))
     T.push(edge('Turning', 'JumpStand', all(yes('Jumping')), { blend: 0.08 }))
     T.push(edge('Turning', 'Fall', leftGround, { blend: 0.35 }))
+    if (onFlight) T.push(edge('Turning', 'Stairs', all(yes('MoveInput'), moving, onFlight), { blend: 0.2 }))
     T.push(edge('Turning', 'Locomotion', all(yes('MoveInput'), moving), { blend: 0.2 }))
 
     // Start: into the run on its last plant (of the field's phase-0 foot), or out of it as soon as the player lets go,
-    // stops sprinting or is stopped by a wall.
+    // stops sprinting or is stopped by a wall, or reaches a flight.
     airborne('Start')
+    if (onFlight) T.push(edge('Start', 'Stairs', all(onFlight), { blend: 0.25 }))
     T.push(edge('Start', timing.stopEarly, all(no('MoveInput'), fast), { blend: 0.25 }))
     T.push(edge('Start', 'Idle', all(no('MoveInput')), { blend: 0.3 }))
     T.push(edge('Start', 'Idle', all(lt('Speed', 0.3)), { blend: 0.3, stay: 0.25 }))
@@ -391,6 +481,15 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
     T.push(edge('LandRoll', 'Locomotion', all(yes('MoveInput')), { blend: 0.3, exit: rollExit }))
     T.push(edge('LandRoll', 'Idle', null, { blend: 0.3, exit: 1 }))
     airborne('Landing', 0.1)
+
+    // Stairs: off the flight at the top or the bottom, or crossing it (or going a way its blend space has no clips
+    // for), back into the walk blend in step; stopped on it (its way along it kept), Idle. Turning round on it stays
+    // in the state: its blend space turns the climb into the descent. Into the air like any.
+    if (stairs) {
+        T.push(edge('Stairs', 'Idle', all(stopped), { blend: 0.35, stay: 0.1 }))
+        T.push(edge('Stairs', 'Locomotion', all(offFlight!), { blend: 0.3, stay: 0.2 }))
+        airborne('Stairs')
+    }
     for (const s of grounded) if (!states.some(x => x.name === s)) throw new Error(`no state ${s}`)
 
     return {
@@ -416,6 +515,9 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
             variable('AirTime', 'airTime', 'number', 'builtin'),
             variable('VerticalSpeed', 'verticalSpeed', 'number', 'builtin'),
             variable('Decelerating', 'isDecelerating', 'boolean', 'builtin'),
+            variable('OnStairs', 'onStairs', 'boolean', 'variable'),
+            variable('Stairs', 'stairs', 'number', 'variable'),
+            { ...variable('StairRate', 'stairRate', 'number', 'variable'), default: 1 },
         ] as any,
         states,
         transitions: T,

@@ -128,6 +128,44 @@ export function snapToTexelGrid(value: number, texelSize: number): number {
     return Math.floor(value / texelSize) * texelSize;
 }
 
+/** The constant shadow bias, world units along the light: the renderer's default (ShadowPasses). */
+export const SHADOW_DEPTH_BIAS_DEFAULT = 0.005;
+/** The normal offset, shadow texels, shaped by the light's angle: the renderer's default. */
+export const SHADOW_NORMAL_BIAS_DEFAULT = 1.5;
+
+/** The biases' defaults before 2026-11-19, which every scene saved with its render settings carries. */
+export const LEGACY_SHADOW_BIASES = { shadowDepthBias: 0.03, shadowNormalBias: 1.5, spotShadowBias: 0.0015, pointShadowBias: 0.0015 } as const;
+
+/** The bias model render settings save today (`RenderSettings.shadowBiasVersion`); older saves have none. */
+export const SHADOW_BIAS_VERSION = 2;
+
+/** The bias fields of saved render settings, as {@link migrateShadowBiases} reads them. */
+export interface ShadowBiasSettings {
+    shadowDepthBias?: number; shadowNormalBias?: number; spotShadowBias?: number; pointShadowBias?: number; shadowBiasVersion?: number;
+}
+
+/**
+ * Render settings saved before the bias model changed (the caller checks: they have no `shadowBiasVersion`)
+ * and still on its exact defaults, read as today's. The old constant bias (3 cm along the light, with an unshaped normal offset)
+ * kept anything thinner than that from casting, so shadows started a few centimetres from what cast them;
+ * the spot and point biases were in depth units, which grow with the square of the distance (about 13 cm at
+ * 3 m). A scene saved them all whether or not anyone set them, so only the exact old defaults move: the
+ * sun's pair together, each light's alone. Anything else was chosen and is kept, and so is everything saved
+ * since (it carries the version). Returns `s` itself when nothing moves.
+ */
+export function migrateShadowBiases<T extends ShadowBiasSettings>(s: T): T {
+    const old = LEGACY_SHADOW_BIASES;
+    const sun = s.shadowDepthBias === old.shadowDepthBias && (s.shadowNormalBias === undefined || s.shadowNormalBias === old.shadowNormalBias);
+    const spot = s.spotShadowBias === old.spotShadowBias, point = s.pointShadowBias === old.pointShadowBias;
+    if (!sun && !spot && !point) return s;
+    return {
+        ...s,
+        ...(sun ? { shadowDepthBias: SHADOW_DEPTH_BIAS_DEFAULT } : {}),
+        ...(spot ? { spotShadowBias: 0 } : {}),
+        ...(point ? { pointShadowBias: 0 } : {}),
+    };
+}
+
 /**
  * Convert a world-space depth bias into the [0,1] depth units the shadow map stores, for a cascade
  * spanning `depthRange` world units. Keeps one bias value correct across every cascade.

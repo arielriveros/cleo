@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
+import { DEFAULT_CAMERA_BLOCKED_BY, LAYER } from '../src/physics/collisionLayers';
 
 // The Dungeon example: the three-level dungeon under the valley's skull cave, built by tools/valley/build.mjs
 // (tools/valley/dungeon/) and split out of the Valley into a project of its own by tools/valley/split.ts. The
@@ -195,7 +196,7 @@ describe.skipIf(!present)('the Dungeon example project', { timeout: 60_000 }, ()
         // The level's collision is folded into the scene's Static Collision colliders, one per way of colliding
         // (mergeStaticColliders.ts): walls, see-through pillars, and floors.
         const bodies = nodes().filter(n => n.type === 'collider' && n.name.startsWith('Static Collision ('));
-        expect(bodies.map(n => n.name).sort()).toEqual(['Static Collision (blocksSwings)', 'Static Collision (blocksSwings, see-through)', 'Static Collision (navObstacle false)']);
+        expect(bodies.map(n => n.name).sort()).toEqual(['Static Collision (blocksSwings)', 'Static Collision (blocksSwings, See Through)', 'Static Collision (navObstacle false)']);
         const shapes = bodies.flatMap(n => n.collider.shapes);
         // Merged hard (dungeon/collision.mjs: tolerances, pillars one box, diagonals one turned box): it
         // was over 3000 boxes before.
@@ -207,12 +208,18 @@ describe.skipIf(!present)('the Dungeon example project', { timeout: 60_000 }, ()
         expect(ramps.length).toBeGreaterThanOrEqual(2);
         for (const r of ramps) expect(Math.abs(r.rotation[0])).toBeLessThan(45);
         // Walls and pillars are what swings bounce off; floors are walked on, never carved out of the navmesh.
-        // The pillars' colliders are see-through to the player camera, like the pillars; the walls' are not.
+        // The pillars' collider is on See Through, which the player camera sees through, and holds the pillars'
+        // meshes, which is what the camera's hole cuts; the walls' are on Default, which pulls the camera in.
         for (const n of bodies) {
             if (/blocksSwings/.test(n.name)) expect(n.variables.blocksSwings?.value, n.name).toBe(true);
             else expect(n.variables.navObstacle?.value, n.name).toBe(false);
-            expect(!!n.cameraDither, n.name).toBe(/see-through/.test(n.name));
+            expect(n.collider.layer, n.name).toBe(/See Through/.test(n.name) ? LAYER.SEE_THROUGH : LAYER.DEFAULT);
         }
+        const pillars = bodies.find(n => /See Through/.test(n.name))!.children.find((c: any) => c.name === 'Pillars');
+        expect(allNodes(pillars).filter((n: any) => n.type === 'model').length).toBeGreaterThan(10);
+        expect(nodes().some((n: any) => 'cameraDither' in n || 'cameraCollision' in (n.collider ?? {}))).toBe(false);
+        const rig = nodes().find((n: any) => n.type === 'cameraRig');
+        expect([rig.collisionLayers, rig.seeThroughLayers]).toEqual([DEFAULT_CAMERA_BLOCKED_BY, LAYER.SEE_THROUGH]);
     });
 
     it('hangs wall torches at the light rig sconces, spaced apart, and lights the dungeon with fire', () => {

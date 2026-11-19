@@ -203,6 +203,25 @@ its states.
 Groups are per layer. Names are unique across states and groups: a transition that names one means only
 that.
 
+### Sync groups
+
+A cross-fade between two looping cycles, a walk and a stair climb say, normally starts the new one at its first frame
+wherever the old one was in its stride. Halfway through a step, the blend then mixes one cycle's planted left foot with
+the other's swinging one, and the legs drag across each other.
+
+States in one **sync group** (the **Sync** field) hand over in step instead:
+
+- the state entered starts where the one it leaves was in its cycle, by share of the cycle (a blend space's phase, or
+  a looping clip's time over its length);
+- through the cross-fade the two blend spaces move as one, at the pace of their mixed cycle;
+- a transition into a state outside the group, or into the same state again, starts it at its beginning as before.
+
+For this to line the feet up, phase 0 must be the same foot's plant in every state of the group: shift each blend
+space sample with its **phase offset** until it is. An exit time on a synced state counts from the phase it was
+entered at, and so does its play count.
+
+A sync group is not a [state group](#state-groups). State groups share transitions; sync groups share a stride.
+
 ### The inspector
 
 The Animator part's **Animator** panel edits what the graph has selected. On a layer's tab it starts
@@ -231,8 +250,10 @@ between two states, with its conditions.
 | **Extract root travel** | On a layer: the clip's ground travel is collected for a script's `consumeRootMotion()` instead of moving anything, and the root is held over the start spot. A roll that covers exactly the ground the dive does. |
 | **Foot-placement weight**, optionally from a parameter | How strongly foot placement applies in this state. On a layer it applies as far as the layer shows: a roll at 0 eases foot placement out and back in with the layer. |
 | **lock** | Foot locking in this state, when the skeleton has it on (default on). Off, the state plants no foot, and a foot locked when it was entered fades back to the animation: a standing Idle whose small weight shifts should not be pinned. |
+| **windows** | Plant the feet by the clips' [foot-lock windows](#foot-lock-windows), at any height: a foot inside one keeps its ground correction however far above the other foot the clip holds it. Off by default, when foot placement reads a raised foot as swinging and lets it go. For a stair climb, whose upper foot stands a riser above the lower one: released, it floats over its tread. |
 | **Hold** (the planted-feet icon beside **lock**) | Base layer only. While this state plays, the Character it animates stops steering: no speed, no turning; gravity is kept. Only the clip's [root motion](#root-motion) moves it. For a clip that must not travel with the speed it came in with or with the stick, a hard landing say. Its way out should wait on the input (**MoveInput**), not on speed, which is 0 meanwhile. |
 | **Group** | The [group](#state-groups) it is in, when the layer has any. The group's own transitions leave from this state too, after its own. |
+| **Sync** | Its [sync group](#sync-groups): a name it shares with the states it should hand over to in step. Pick one the animator already has, or type a new one. Not the same as **Group**. |
 | **Links** | The states this one connects to, and which way (→ out, ← in, ⇄ both). Drag from the state's right handle in the graph to add one. |
 
 **A selected group:**
@@ -553,6 +574,12 @@ Toe**, per leg. There is a `⤓` name-matched auto-guess and a validation report
 
 It is stored on the **skeleton**, so every character built on it gets it. Per-state strength comes
 from the state's foot-placement weight.
+
+Each foot casts a ray from **Trace up** above the animated ankle to **Trace down** below it, and lands on
+static and kinematic ground: never on a trigger, another character's capsule or a loose prop. **Trace
+layers** are the [collision layers](physics.md#layers) it lands on, all of them by default. Leave out a
+ramp laid over stairs for the character's capsule, and keep the steps' layer, which the capsule's
+**Collides with** leaves out: the body glides up the ramp and the feet stand on the treads.
 
 **Foot locking** (the **Foot locking** group under the tuning values) keeps a foot the animation has
 planted where it is on the ground, and pointing the way it was, while the body moves or turns over it.
