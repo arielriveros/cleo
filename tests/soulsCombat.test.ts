@@ -45,7 +45,7 @@ afterEach(() => { CleoEngine.authoringMode = authoring; });
 type V3 = [number, number, number];
 
 function physics(): PhysicsSystem {
-    const p = new PhysicsSystem({ gravity: [0, 0, 0] });
+    const p = new PhysicsSystem({ gravity: [0, 0, 0], backend: 'cannon' });
     p.initialize();
     (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null };
     return p;

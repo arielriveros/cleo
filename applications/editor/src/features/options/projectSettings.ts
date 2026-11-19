@@ -22,8 +22,8 @@ export interface EngineRuntimeSettings {
   physicsWorker: PhysicsWorkerSetting;
   /**
    * The physics engine the game simulates with (the engine's `physics.backend` config). Project-wide, not
-   * per machine: backends do not simulate alike, so the game must play the same everywhere. Read when the
-   * engine starts; one this build cannot run falls back to cannon, with the reason logged.
+   * per machine: backends do not simulate alike, so the game must play the same everywhere. Jolt by default.
+   * Read when the project opens; one this build cannot run falls back to cannon, with the reason logged.
    */
   physicsBackend: PhysicsBackendSetting;
   /** Longest frame delta the loop reports, seconds (CleoEngine.maxFrameDelta). */
@@ -115,14 +115,14 @@ export interface ProjectSettings {
   saves: ProjectSaveSettings;
 }
 
-export const PROJECT_SETTINGS_VERSION = 4;
+export const PROJECT_SETTINGS_VERSION = 5;
 
 /** The addons a project from before addons had: the Claude Code panel and its agent link were always there. */
 export const LEGACY_ADDONS: readonly string[] = ['mcp-server', 'claude-code'];
 
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   version: PROJECT_SETTINGS_VERSION,
-  engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'on', physicsBackend: 'cannon', maxFrameDelta: 0.1, masterVolume: 1 },
+  engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'on', physicsBackend: 'jolt', maxFrameDelta: 0.1, masterVolume: 1 },
   publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true, webgl2Fallback: true },
   features: { disabled: [] },
   addons: { enabled: [...LEGACY_ADDONS], settings: {} },
@@ -156,6 +156,11 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
   const worker: PhysicsWorkerSetting = PHYSICS_WORKER_SETTINGS.includes(e.physicsWorker)
     ? (version < 2 && e.physicsWorker === 'off' ? 'on' : e.physicsWorker)
     : d.engine.physicsWorker;
+  // Before version 5 cannon was the default, and every stored project had it written back whether or not anyone
+  // chose it: those move to Jolt, the default since. A project set to Rapier stays on Rapier.
+  const backend: PhysicsBackendSetting = PHYSICS_BACKEND_SETTINGS.includes(e.physicsBackend)
+    ? (version < 5 && e.physicsBackend === 'cannon' ? 'jolt' : e.physicsBackend)
+    : d.engine.physicsBackend;
   const g = Array.isArray(e.gravity) && e.gravity.length === 3 && e.gravity.every((x: unknown) => typeof x === 'number' && Number.isFinite(x))
     ? [e.gravity[0], e.gravity[1], e.gravity[2]] as [number, number, number]
     : [...d.engine.gravity] as [number, number, number];
@@ -166,7 +171,7 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       maxSubsteps: Math.round(num(e.maxSubsteps, d.engine.maxSubsteps, 1, 32)),
       simulationRange: num(e.simulationRange, d.engine.simulationRange, 0, 100000),
       physicsWorker: worker,
-      physicsBackend: PHYSICS_BACKEND_SETTINGS.includes(e.physicsBackend) ? e.physicsBackend : d.engine.physicsBackend,
+      physicsBackend: backend,
       maxFrameDelta: num(e.maxFrameDelta, d.engine.maxFrameDelta, 1 / 240, 0.5),
       masterVolume: num(e.masterVolume, d.engine.masterVolume, 0, 1),
     },

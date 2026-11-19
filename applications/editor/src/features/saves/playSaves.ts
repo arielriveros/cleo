@@ -14,6 +14,13 @@ export function playSaveStore(projectId: string): SaveStore {
   return createIndexedDbSaveStore({ dbName: PLAY_SAVES_DB, namespace: projectId || 'project', notify: true });
 }
 
+/** Delete every Play save a project made (the project is being deleted). */
+export async function deleteProjectPlaySaves(projectId: string): Promise<void> {
+  if (!projectId) return;
+  const store = playSaveStore(projectId);
+  for (const save of await store.list()) await store.delete(save.slot);
+}
+
 /** What the editor tells a Play-in-window game about saving, in its pack's `config.playSaves`. */
 export interface PlaySavesConfig {
   /** The project, whose Play saves the game reads and writes. */

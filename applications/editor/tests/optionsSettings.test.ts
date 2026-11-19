@@ -48,7 +48,7 @@ describe('project settings', () => {
     });
     expect(isDefaultProjectSettings(s)).toBe(false);
     expect(projectSettingsConfig(s)).toEqual({
-      physics: { gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0, worker: 'on', backend: 'cannon' },
+      physics: { gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0, worker: 'on', backend: 'jolt' },
       runtime: { maxFrameDelta: 0.05 },
       audio: { masterVolume: 0.5 },
       saves: { version: 0, namespace: '' },
@@ -86,12 +86,25 @@ describe('project settings', () => {
     expect(projectSettingsConfig(parseProjectSettings({ engine: { physicsWorker: 'auto' } })).physics.worker).toBe('auto');
   });
 
-  it('reads the physics backend, defaulting to cannon, and ships it in the game config', () => {
-    expect(parseProjectSettings(null).engine.physicsBackend).toBe('cannon');
+  it('reads the physics backend, defaulting to Jolt, and ships it in the game config', () => {
+    expect(parseProjectSettings(null).engine.physicsBackend).toBe('jolt');
     expect(parseProjectSettings({ engine: { physicsBackend: 'rapier' } }).engine.physicsBackend).toBe('rapier');
     expect(parseProjectSettings({ engine: { physicsBackend: 'jolt' } }).engine.physicsBackend).toBe('jolt');
-    expect(parseProjectSettings({ engine: { physicsBackend: 'havok' } }).engine.physicsBackend).toBe('cannon');
+    expect(parseProjectSettings({ engine: { physicsBackend: 'havok' } }).engine.physicsBackend).toBe('jolt');
+    expect(projectSettingsConfig(parseProjectSettings(null)).physics.backend).toBe('jolt');
     expect(projectSettingsConfig(parseProjectSettings({ engine: { physicsBackend: 'rapier' } })).physics.backend).toBe('rapier');
+  });
+
+  it('moves a project stored before Jolt was the default off cannon, keeping Rapier and a later choice of cannon', () => {
+    // Before version 5 every stored project had cannon written back into it, chosen or not.
+    expect(parseProjectSettings({ version: 4, engine: { physicsBackend: 'cannon' } }).engine.physicsBackend).toBe('jolt');
+    expect(parseProjectSettings({ version: 2, engine: { physicsBackend: 'cannon' } }).engine.physicsBackend).toBe('jolt');
+    expect(parseProjectSettings({ version: 4, engine: { physicsBackend: 'rapier' } }).engine.physicsBackend).toBe('rapier');
+    expect(parseProjectSettings({ version: 5, engine: { physicsBackend: 'cannon' } }).engine.physicsBackend).toBe('cannon');
+    // Once read it is stored at version 5, so a project switched back to cannon stays there.
+    const reread = parseProjectSettings(parseProjectSettings({ version: 4, engine: { physicsBackend: 'cannon' } }));
+    expect([reread.version, reread.engine.physicsBackend]).toEqual([5, 'jolt']);
+    expect(parseProjectSettings({ ...reread, engine: { ...reread.engine, physicsBackend: 'cannon' } }).engine.physicsBackend).toBe('cannon');
   });
 
   it('lets the URL ask for a physics backend', () => {

@@ -354,6 +354,15 @@ export class CannonWorld implements PhysicsWorld {
         }
     }
 
+    public forEachContactOf(h: BodyHandle, visit: (other: BodyHandle, nx: number, ny: number, nz: number) => void): void {
+        const contacts = this.raw.contacts;
+        for (let i = 0; i < contacts.length; i++) {
+            const c = contacts[i], n = c.ni;
+            if (c.bi.id === h) visit(c.bj.id as BodyHandle, n.x, n.y, n.z);
+            else if (c.bj.id === h) visit(c.bi.id as BodyHandle, -n.x, -n.y, -n.z);
+        }
+    }
+
     public get contactCount(): number { return this.raw.contacts.length; }
 
     public drainEvents(visit: (kind: PhysicsEventKind, a: BodyHandle, b: BodyHandle) => void): void {

@@ -9,19 +9,21 @@ import { getAllTextures, putTextures, deleteTextures, StoredTexture } from './te
 import { getAllAudio, putAudio, deleteAudio, StoredAudio } from './audioStore'
 import { deleteGiBakes, getAllGiBakes, putGiBake } from './giBakeStore'
 import { planMerge, LocalState } from './bundleMerge'
-import { createProject, switchToProject } from './projects'
-import { confirmDiscard, reloadDiscarding } from '../features/unloadGuard'
+import { createProject } from './projects'
+import { activeProjectId } from './projectScope'
+import { confirmDiscard } from '../features/unloadGuard'
 import type { BundleData } from './bundle'
 import { currentOrNoop } from '../features/loading/bootLoad'
-import { handoffFromCurrent, saveHandoff } from '@cleo/app-kit/feedback/loadingStore'
+import { reopenProject, switchProject } from '../features/projects/projectSwitch'
 
-// Applies an imported bundle to local storage, then reloads. Both modes must write straight to IndexedDB
-// and let the boot path rebuild React/engine state: reconciling live state instead lets the debounced
-// library-persistence resurrect pre-import data.
+// Applies an imported bundle to local storage, then opens the project it went into. Both modes write
+// straight to IndexedDB and let the project's load rebuild React/engine state: reconciling live state instead
+// lets the debounced library-persistence resurrect pre-import data. A bundle written over (or merged into)
+// the open project is written once that project is closed (projectSwitch's reopenProject), so nothing of it
+// is still running to write over the import.
 //
 // Progress goes to the load on screen (features/loading), into the steps listed in IMPORT_WRITE_STEPS
-// when the caller declared them; with no load, it goes nowhere. Before the reload, what was done is
-// handed over so the startup splash carries on from it.
+// when the caller declared them; with no load, it goes nowhere. The project's load carries on from it.
 
 /** The write steps a caller adds to its load before applying a bundle. */
 export const IMPORT_WRITE_STEPS = [
@@ -31,12 +33,6 @@ export const IMPORT_WRITE_STEPS = [
   { id: 'textures', label: 'Writing textures', weight: 3 },
   { id: 'audio', label: 'Writing audio', weight: 1 },
 ]
-
-/** Save the load's finished steps for the startup splash, which shows them first after the reload. */
-function handOff(): void {
-  const handoff = handoffFromCurrent()
-  if (handoff) saveHandoff(handoff)
-}
 
 function audioToRecords(audio: BundleData['audio']): StoredAudio[] {
   return (audio ?? []).map(a => ({
@@ -61,10 +57,20 @@ function texturesToRecords(textures: BundleData['textures']): StoredTexture[] {
  * asset portion of the VFS while preserving local scene entries/folders.
  */
 export async function applyBundleReplace(bundle: BundleData, targetProjectId?: string): Promise<boolean> {
+  // Into a project that is NOT open: written now, then opened.
+  if (targetProjectId) {
+    await writeBundleReplace(bundle, targetProjectId)
+    return switchProject({ to: targetProjectId, confirm: null })
+  }
+  // Over the open project: written once it is closed, then opened again. No unsaved-work question here:
+  // ImportBundleModal already asked the one that matters (Replace discards the project).
+  return reopenProject({ prepare: () => writeBundleReplace(bundle, activeProjectId()) })
+}
+
+/** Write a bundle into project `pid`'s storage, replacing what it held. */
+async function writeBundleReplace(bundle: BundleData, pid: string): Promise<void> {
   const isProject = bundle.manifest.kind === 'project'
-  // `targetProjectId` writes into a project that is NOT open. The id must be threaded through the key
-  // helpers; repointing the active project would send in-flight debounced writes into the new project.
-  const pid = targetProjectId
+  // The id is threaded through the key helpers explicitly: this may run while no project is open.
   const load = currentOrNoop()
 
   // Libraries + VFS. Both audio halves travel as RECORDS, unlike images/textures — a sample's settings
@@ -154,14 +160,7 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   await deleteGiBakes(existingBakes, pid)
   for (const g of bundle.giBakes ?? []) await putGiBake(g.id, new Uint8Array(g.bytes), pid)
 
-  Logger.info(`Imported ${isProject ? 'project' : 'asset pack'} (replace) — reloading`, 'Editor')
-  handOff()
-  // No unsaved-work question here: ImportBundleModal already asked the one that matters (Replace
-  // discards the project), and the stored data has been rewritten by the time this runs -- so the
-  // browser's "Leave site?" box would be a second dialog with no answer that changes anything.
-  if (pid) { await switchToProject(pid); return true }
-  reloadDiscarding()
-  return true
+  Logger.info(`Imported ${isProject ? 'project' : 'asset pack'} (replace)`, 'Editor')
 }
 
 /**
@@ -249,6 +248,12 @@ export async function applyBundleMerge(bundle: BundleData, alreadyConfirmed = fa
   // will not contain them. Asked before the first write: a declined merge must leave nothing behind.
   // `alreadyConfirmed`: the caller asked first, before putting its loading screen over the dialog.
   if (!alreadyConfirmed && !(await confirmDiscard('Merging into this project'))) return false
+  // Written once the open project is closed, then it opens again with the merged result.
+  return reopenProject({ prepare: () => writeBundleMerge(bundle) })
+}
+
+/** Merge a bundle into the open project's storage (it is closed while this runs, and opens after). */
+async function writeBundleMerge(bundle: BundleData): Promise<void> {
   const load = currentOrNoop()
   const local = await readLocalState()
   const plan = planMerge(bundle, local)
@@ -309,8 +314,5 @@ export async function applyBundleMerge(bundle: BundleData, alreadyConfirmed = fa
   }
   await idbSet(vfsKey(), repairVfs(merged).next)
 
-  Logger.info(`Imported ${bundle.manifest.kind} (merge) — reloading`, 'Editor')
-  handOff()
-  reloadDiscarding()
-  return true
+  Logger.info(`Imported ${bundle.manifest.kind} (merge)`, 'Editor')
 }

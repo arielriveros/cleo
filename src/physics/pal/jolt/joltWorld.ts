@@ -566,6 +566,14 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         for (let i = 0; i < rows.length; i += 5) visit(rows[i] as BodyHandle, rows[i + 1] as BodyHandle, rows[i + 2], rows[i + 3], rows[i + 4]);
     }
 
+    public forEachContactOf(h: BodyHandle, visit: (other: BodyHandle, nx: number, ny: number, nz: number) => void): void {
+        const rows = this._rows;
+        for (let i = 0; i < rows.length; i += 5) {
+            if (rows[i] === h) visit(rows[i + 1] as BodyHandle, rows[i + 2], rows[i + 3], rows[i + 4]);
+            else if (rows[i + 1] === h) visit(rows[i] as BodyHandle, -rows[i + 2], -rows[i + 3], -rows[i + 4]);
+        }
+    }
+
     public get contactCount(): number { return this._rows.length / 5; }
 
     public drainEvents(visit: (kind: PhysicsEventKind, a: BodyHandle, b: BodyHandle) => void): void {

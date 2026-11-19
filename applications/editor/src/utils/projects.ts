@@ -1,8 +1,9 @@
-// The project registry: what projects exist, which one is open, and how to create, switch to and delete one.
+// The project registry: what projects exist, which one is open, and how to create and delete one. Opening
+// another one, in the running editor, is features/projects/projectSwitch.ts.
 //
 // A project owns EVERYTHING — scenes, all six asset libraries, folder layout, texture payloads — under the
-// key prefix `p:<id>:`, and nothing is shared between projects. Deleting is a prefix sweep; switching is a
-// page reload. The registry itself is the only kv record that is NOT scoped.
+// key prefix `p:<id>:`, and nothing is shared between projects. Deleting is a prefix sweep. The registry
+// itself is the only kv record that is NOT scoped.
 
 import { Logger } from 'cleo';
 import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from '@cleo/app-kit/utils/idb';
@@ -11,11 +12,12 @@ import type { ProjectSettings } from '../features/options/projectSettings';
 import { projectPrefix, setActiveProjectId } from './projectScope';
 import { MIGRATABLE_LS_KEYS, lsKey, projectLsKeys } from './lsScope';
 import { deleteProjectTextures, migrateUnscopedTextures } from './textureStore';
+import { deleteProjectAudio } from './audioStore';
+import { deleteProjectGiBakes } from './giBakeStore';
+import { deleteProjectPlaySaves } from '../features/saves/playSaves';
 import { createFreshProjectMeta } from './sceneStorage';
 import { EMPTY_VFS } from './vfs';
 import { cryptoRandomId } from './ids';
-import { confirmDiscard, reloadDiscarding } from '../features/unloadGuard';
-import { hasHandoff, saveHandoff } from '@cleo/app-kit/feedback/loadingStore';
 
 export type ProjectRecord = {
   id: string;
@@ -146,14 +148,49 @@ async function migrateWorkspace(existing?: ProjectRecord): Promise<ProjectRecord
   return done;
 }
 
-/** Erase every trace of a project: kv keys, texture payloads, localStorage, registry entry. */
-async function wipeProject(id: string): Promise<void> {
+/**
+ * Erase every trace of a project: kv keys, texture, audio and GI bake payloads, its Play saves, localStorage,
+ * and its registry entry. The folder its scripts are mirrored into (a script workspace) is the user's, and stays.
+ */
+export async function wipeProject(id: string): Promise<void> {
   for (const key of await idbKeysByPrefix(projectPrefix(id))) await idbDelete(key);
   await deleteProjectTextures(id);
+  await deleteProjectAudio(id);
+  await deleteProjectGiBakes(id);
+  try { await deleteProjectPlaySaves(id); } catch (e) { Logger.warn(`Could not delete the project's Play saves: ${e}`, 'Editor'); }
   for (const key of projectLsKeys(id)) {
     try { localStorage.removeItem(key); } catch { /* ignore */ }
   }
   await saveProjects((await loadProjects()).filter(p => p.id !== id));
+}
+
+/**
+ * Park a project to be wiped: the next boot wipes it before anything can read it (initProjects), should the
+ * window close before the delete under way finishes. Cleared once it has.
+ */
+export function parkPendingDelete(id: string): void {
+  try { localStorage.setItem(PENDING_DELETE_KEY, id); } catch { /* ignore */ }
+}
+
+export function clearPendingDelete(id: string): void {
+  try { if (localStorage.getItem(PENDING_DELETE_KEY) === id) localStorage.removeItem(PENDING_DELETE_KEY); } catch { /* ignore */ }
+}
+
+/**
+ * Make `id` the open project: every scoped key names it from here on, and the next launch opens it. The ONLY
+ * place the open project changes, at boot and when another project opens in the running editor — and then
+ * only once the last one's writes have drained (projectSwitch.ts).
+ */
+export async function activateProject(id: string): Promise<void> {
+  setActiveProjectId(id);
+  await writeActiveId(id);
+  legacyImportAllowed = !(await loadProjects()).find(p => p.id === id)?.legacyMigrated;
+}
+
+/** The project to open once `id` is deleted: the most recently used of the rest, or null when it is the last. */
+export async function nextProjectAfterDelete(id: string): Promise<ProjectRecord | null> {
+  const remaining = (await loadProjects()).filter(p => p.id !== id);
+  return remaining.length ? [...remaining].sort((a, b) => b.updatedAt - a.updatedAt)[0] : null;
 }
 
 /**
@@ -191,9 +228,7 @@ export async function initProjects(): Promise<{ projects: ProjectRecord[]; activ
     activeId = [...projects].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
   }
 
-  setActiveProjectId(activeId);
-  await writeActiveId(activeId);
-  legacyImportAllowed = !projects.find(p => p.id === activeId)?.legacyMigrated;
+  await activateProject(activeId);
   return { projects, activeId };
 }
 
@@ -205,7 +240,7 @@ export interface NewProjectOptions {
   dimension?: '2D' | '3D';
 }
 
-/** Create an empty project. Does not switch to it — the caller decides (openProject reloads). */
+/** Create an empty project. Does not open it — the caller decides (projectSwitch's openProject). */
 export async function createProject(name: string, options: NewProjectOptions = {}): Promise<ProjectRecord> {
   const now = Date.now();
   const record: ProjectRecord = {
@@ -262,59 +297,4 @@ export async function touchProject(id: string, thumbnail?: string): Promise<void
   const list = await loadProjects();
   if (!list.some(p => p.id === id)) return;
   await saveProjects(list.map(p => (p.id === id ? { ...p, updatedAt: Date.now(), thumbnail: thumbnail ?? p.thumbnail } : p)));
-}
-
-/**
- * Open a project: point the pointer at it and reload.
- *
- * Returns false when unsaved work made the user back out — and NOTHING has happened in that case. The
- * confirm comes before `writeActiveId` on purpose: a pointer written first would leave the editor
- * opening the other project on its next launch, after the user said not to.
- *
- * The confirm lives here rather than at the call sites because the reload does: `location.reload()` on
- * a page with unsaved edits is what raises the browser's own "Leave site?" box, and asking first (which
- * also stands the `beforeunload` guard down) is what keeps that box off the screen.
- */
-export async function openProject(id: string): Promise<boolean> {
-  if (!(await confirmDiscard('Opening another project'))) return false;
-  await switchToProject(id);
-  return true;
-}
-
-/**
- * Point at a project and reload, asking nothing — for a caller that has already confirmed something more
- * specific (the import modal's Replace, the delete confirm). Everything the editor holds in memory goes
- * either way, so a second question, in the browser's voice, would only be noise.
- */
-export async function switchToProject(id: string): Promise<void> {
-  // The startup splash after the reload is titled for the project being opened — unless a flow that
-  // ends here (installing an example, importing) already handed over a title and its finished steps.
-  if (!hasHandoff()) {
-    const name = (await loadProjects()).find(p => p.id === id)?.name;
-    if (name) saveHandoff({ title: `Opening ${name}`, steps: [] });
-  }
-  await writeActiveId(id);
-  Logger.info('Opening project — reloading', 'Editor');
-  reloadDiscarding();
-}
-
-/**
- * Delete a project. A project that is not open is wiped immediately; the OPEN one cannot be, because the
- * editor's debounced writers (400 ms per library, 500 ms for textures) would re-create the keys just
- * removed. Its id is parked in localStorage and the page reloads, so initProjects wipes it before any write.
- */
-export async function deleteProject(id: string, isActive: boolean): Promise<void> {
-  if (!isActive) {
-    await wipeProject(id);
-    return;
-  }
-  const remaining = (await loadProjects()).filter(p => p.id !== id);
-  const next = remaining.length
-    ? [...remaining].sort((a, b) => b.updatedAt - a.updatedAt)[0]
-    : await createProject('Untitled Project');
-  // Asked BEFORE the pending-delete key is parked: a key left behind by a cancelled delete would wipe
-  // the project on the next reload, whenever that came.
-  if (!(await confirmDiscard('Deleting the open project'))) return;
-  try { localStorage.setItem(PENDING_DELETE_KEY, id); } catch { /* ignore */ }
-  await switchToProject(next.id);
 }

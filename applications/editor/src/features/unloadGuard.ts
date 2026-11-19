@@ -2,15 +2,14 @@ import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
 
 // "Is there unsaved work, and what is it" — kept OUTSIDE React, and the reason is the code that reads it.
 //
-// The editor throws its own page away in three places (opening a project, importing a bundle over the
-// open one, deleting the open project), and all three are plain async functions in utils/, not
-// components. Each ends in `location.reload()`, which trips the `beforeunload` guard — and what the user
-// then gets is CHROME's "Leave site?" box: unthemeable, unlabellable, and worded by the browser rather
-// than by the app, on an action the editor itself started. Every other confirm in the editor goes
-// through features/dialogs/dialogStore.ts, and these should too.
+// The editor discards the open project's unsaved work in a few places (opening another project, importing a
+// bundle over the open one, deleting the open project: features/projects/projectSwitch.ts, which swaps the
+// project in place), all plain async functions, not components. Each asks first, in the editor's own dialog
+// (features/dialogs/dialogStore.ts), never in the browser's "Leave site?" box. The one reload left (a failed
+// switch's "Reload editor") goes through `reloadDiscarding`, with the native guard stood down.
 //
-// So: EngineContext publishes what is dirty here, and anything about to discard the page asks first
-// through `confirmDiscard`, then reloads with the native guard suppressed for that one navigation.
+// So: EngineContext publishes what is dirty here, and anything about to discard it asks first through
+// `confirmDiscard`.
 //
 // The same registry answers the desktop shell's close/reload confirm (features/desktopShell.ts), which
 // is why it holds LABELS and not just a boolean.

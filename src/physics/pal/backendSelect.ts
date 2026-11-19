@@ -10,13 +10,19 @@ export type PhysicsBackendRequest = PhysicsBackendKind;
 
 /** Every backend a project may ask for, in the order a picker lists them. */
 export const PHYSICS_BACKENDS: readonly { readonly request: PhysicsBackendRequest; readonly label: string; readonly implemented: boolean }[] = [
-    { request: 'cannon', label: 'cannon-es', implemented: true },
-    { request: 'rapier', label: 'Rapier', implemented: true },
     { request: 'jolt', label: 'Jolt', implemented: true },
+    { request: 'rapier', label: 'Rapier', implemented: true },
+    { request: 'cannon', label: 'cannon-es', implemented: true },
 ];
 
 /** The backend a request gets when it names none, or one this build cannot run. */
-export const DEFAULT_PHYSICS_BACKEND: PhysicsBackendKind = 'cannon';
+export const DEFAULT_PHYSICS_BACKEND: PhysicsBackendKind = 'jolt';
+
+/**
+ * The backend a world falls back to when the one asked for could not be loaded (a WASM engine missing from a
+ * player, or failing to start): cannon, the one backend that needs no loading, so a world is always built.
+ */
+export const FALLBACK_PHYSICS_BACKEND: PhysicsBackendKind = 'cannon';
 
 /**
  * Resolve a backend request: the backend to run, and why it is not the one asked for (null when it is,

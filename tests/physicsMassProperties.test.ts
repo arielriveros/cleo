@@ -49,7 +49,7 @@ const ON_ITS_SIDE = (() => { const q = new Quaternion(); q.setFromEuler(0, 0, Ma
 
 /** A physics system with no scene around it. */
 const physics = (): PhysicsSystem => {
-    const p = new PhysicsSystem({ gravity: [0, -9.82, 0] });
+    const p = new PhysicsSystem({ gravity: [0, -9.82, 0], backend: 'cannon' });
     p.initialize();
     (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null };
     return p;

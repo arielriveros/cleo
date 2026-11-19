@@ -18,9 +18,10 @@ import { applyBuoyancy, floats, type BuoyancyVolume } from "./buoyancy";
 import { setWaterClock } from "./water/waterClock";
 import { InlineExecutor } from "./executor/inlineExecutor";
 import { WorkerExecutor } from "./executor/workerExecutor";
-import type { ContactSource, PhysicsExecutor } from "./executor/physicsExecutor";
+import type { ContactSource, PhysicsExecutor, SubstepHooks } from "./executor/physicsExecutor";
+import { CharacterContactRule, type ContactBodyInfo } from "./characterContacts";
 import { acquirePhysicsBackend, createPhysicsWorld, isPhysicsBackendLoaded } from "./pal/createWorld";
-import { DEFAULT_PHYSICS_BACKEND, resolvePhysicsBackendRequest } from "./pal/backendSelect";
+import { FALLBACK_PHYSICS_BACKEND, resolvePhysicsBackendRequest } from "./pal/backendSelect";
 import type { PhysicsCapabilities } from "./pal/capabilities";
 import type { PhysicsWorld } from "./pal/world";
 import { PhysicsEventKind, type BodyHandle, type ColliderGeometry, type ColliderPart } from "./pal/types";
@@ -63,8 +64,8 @@ export type PhysicsWorkerMode = 'off' | 'on' | 'auto';
 interface PhysicsSystemConfig {
   gravity?: number[];
   /**
-   * The physics engine to simulate with, as a request (see pal/backendSelect.ts): 'cannon', the default and
-   * only one implemented; anything else runs on cannon, and {@link PhysicsSystem.backendFallbackReason} says why.
+   * The physics engine to simulate with, as a request (see pal/backendSelect.ts): 'jolt' (the default), 'rapier'
+   * or 'cannon'. One that cannot run here runs on cannon, and {@link PhysicsSystem.backendFallbackReason} says why.
    */
   backend?: string;
 }
@@ -230,6 +231,13 @@ export class PhysicsSystem {
   private _wokenAt = new WeakMap<PhysicsBody, number>();
   /** Per `canSleep` body: seconds it has been continuously at rest. */
   private _restTime = new WeakMap<PhysicsBody, number>();
+  /**
+   * Per dynamic body: the other dynamic bodies it touched in the last step. A resting body sleeps only with
+   * everything it touches (see _updateActivation), as the backends' own sleep does by islands.
+   */
+  private _touching = new Map<PhysicsBody, PhysicsBody[]>();
+  /** This frame's resting bodies, while _updateActivation decides which of them sleep. */
+  private readonly _resting = new Set<RigidBody>();
 
   constructor(config?: PhysicsSystemConfig) {
     this._gravity = config?.gravity ? config.gravity: [0, -9.82, 0]; // y = up
@@ -242,7 +250,7 @@ export class PhysicsSystem {
   private _loading: Promise<void> | null = null;
   private _loadFailure: string | null = null;
 
-  /** The physics engine simulating (see pal/): 'cannon'. Before {@link initialize}, the one that will. */
+  /** The physics engine simulating (see pal/). Before {@link initialize}, the one that will. */
   public get backend(): PhysicsBackendKind { return this._world?.backend ?? resolvePhysicsBackendRequest(this._backendRequest).kind; }
 
   /** The physics engine asked for. Differs from {@link backend} when the request could not be met. */
@@ -296,10 +304,12 @@ export class PhysicsSystem {
     try {
       if (!world) {
         let { kind, reason } = resolvePhysicsBackendRequest(this._backendRequest);
-        // A backend whose library loads first (see load) and has not: the default, saying why.
+        // A backend whose library loads first (see load) and has not: cannon, which needs no loading, saying why.
+        // Not the default: that is a backend that loads first too.
         if (!isPhysicsBackendLoaded(kind)) {
-          reason = this._loadFailure ?? `the ${kind} backend was not loaded before the world was built`;
-          kind = DEFAULT_PHYSICS_BACKEND;
+          const notLoaded = this._loadFailure ?? `the ${kind} backend was not loaded before the world was built`;
+          reason = reason ? `${reason}, and ${notLoaded}` : notLoaded;
+          kind = FALLBACK_PHYSICS_BACKEND;
         }
         this._backendFallbackReason = reason;
         // Built the same way the physics worker builds its own, so both step alike.
@@ -336,8 +346,28 @@ export class PhysicsSystem {
   }
 
   private _inlineExecutor(): InlineExecutor {
-    return new InlineExecutor(() => this._world, dt => PhysicsSystem.substepsFor(dt, this.maxSubsteps), () => this.profileStep);
+    return new InlineExecutor(() => this._world, dt => PhysicsSystem.substepsFor(dt, this.maxSubsteps), () => this.profileStep, this._substepHooks);
   }
+
+  // A character is not pushed about by lighter bodies (physics/characterContacts.ts): the rule runs around each
+  // substep, here and, with the worker, in WorkerCore on the same terms.
+  private readonly _characterRule = new CharacterContactRule();
+  private readonly _characterList: { handle: BodyHandle; mass: number }[] = [];
+  /** A body as the rule reads it: an engine body is one when it is dynamic; anything else is solid. */
+  private readonly _contactInfo = (h: BodyHandle): ContactBodyInfo | undefined => {
+    const b = this._bodies.get(h);
+    return b && b.isDynamic ? b : undefined;
+  };
+  private readonly _substepHooks: SubstepHooks = {
+    begin: world => {
+      const list = this._characterList;
+      list.length = 0;
+      for (const [handle, body] of this._bodies) if (body.isCharacter && body.isDynamic && body.world === world) list.push({ handle: handle as BodyHandle, mass: body.mass });
+      this._characterRule.watch(list);
+    },
+    before: world => this._characterRule.before(world),
+    after: (world, h) => this._characterRule.after(world, h, this._contactInfo),
+  };
 
   /**
    * `deltaTime` is game time: the frame's delta with the engine's time scale applied. `timeScale` is that
@@ -369,6 +399,7 @@ export class PhysicsSystem {
         // update() runs only while unpaused, so the grace window cannot expire behind a paused game.
         this._time += stepDt;
         this._stampGroundContacts(result.contacts);
+        this._recordTouching(result.contacts);
         // Must follow the stamps, so the clocks agree with what isGrounded answers this frame.
         this._updateAirborneTimes(stepDt);
       }
@@ -573,16 +604,33 @@ export class PhysicsSystem {
         continue;
       }
 
-      if (body.canSleep && this._atRest(body, dt)) {
-        this._freeze(body, 'rest');
-        resting++;
-        continue;
-      }
+      // At rest: a candidate to sleep, once everything it touches can sleep with it (below).
+      if (body.canSleep && this._atRest(body, dt)) { this._resting.add(body); continue; }
       active++;
     }
+
+    // A resting body sleeps only together with every dynamic body it touches: each of them asleep already, or
+    // resting this frame too. Put to sleep under a crate still settling on it, a body stops answering it on
+    // Rapier (a pair already in contact when one side is put to sleep is no longer solved), and the crate sinks
+    // into it, then is thrown out when they wake; the backends' own sleep goes by islands for the same reason.
+    for (const body of this._resting) {
+      if (this._touchesAwake(body)) { active++; continue; }
+      this._freeze(body, 'rest');
+      resting++;
+    }
+    this._resting.clear();
     physicsStats.activeBodies = active;
     physicsStats.frozenBodies = frozen;
     physicsStats.restingBodies = resting;
+  }
+
+  /** Whether `body` touched, in the last step, a dynamic body that neither sleeps nor rests this frame. */
+  private _touchesAwake(body: RigidBody): boolean {
+    for (const other of this._touching.get(body) ?? []) {
+      if (this._frozen.has(other) || other.isSleeping) continue;
+      if (!(other instanceof RigidBody) || !this._resting.has(other)) return true;
+    }
+    return false;
   }
 
   /** Whether a `canSleep` body has been below the rest speeds for {@link REST_SECONDS}. */
@@ -949,6 +997,21 @@ export class PhysicsSystem {
 
   public removeJoint(joint: JointHandle): void {
     this._world?.destroyJoint(joint);
+  }
+
+  /** Who touched whom in the last step, for the rest sleep (see _updateActivation): dynamic bodies only. */
+  private _recordTouching(contacts: ContactSource): void {
+    const touching = this._touching;
+    touching.clear();
+    if (contacts.contactCount === 0) return;
+    const touch = (x: PhysicsBody, y: PhysicsBody) => {
+      const list = touching.get(x);
+      if (!list) touching.set(x, [y]); else if (!list.includes(y)) list.push(y);
+    };
+    contacts.forEachContact((a, b) => {
+      const bi = this._bodyOf(a), bj = this._bodyOf(b);
+      if (bi && bj && bi.isDynamic && bj.isDynamic && !bi.isTrigger && !bj.isTrigger) { touch(bi, bj); touch(bj, bi); }
+    });
   }
 
   /**
@@ -1328,6 +1391,7 @@ export class PhysicsSystem {
     // to strand half of every play session's bodies in its broadphase for the lifetime of the page).
     for (const body of this._bodies.values()) body._release(false);
     this._bodies.clear();
+    this._touching.clear();
     this._world.clear();
     this._inWorld.clear();
     this._frozen.clear();
@@ -1341,6 +1405,23 @@ export class PhysicsSystem {
     this._localVersion++;
     this._executor?.reset();
     this._pendingWorker?.reset();
+  }
+
+  /**
+   * Done with this system: everything in it goes, its worker stops and its world is freed. A WASM backend's
+   * world holds memory of its own (Jolt's whole heap is a fixed 128 MB), so a system replaced by another
+   * (CleoEngine.replacePhysics, a test) is disposed rather than dropped. Nothing may use it afterwards.
+   */
+  public dispose(): void {
+    try { this.clear(); } catch (e) { Logger.warn(`Physics: clearing a disposed world failed: ${e}`); }
+    this._pendingWorker?.dispose();
+    this._pendingWorker = null;
+    this._executor?.dispose();
+    this._executor = undefined as any;
+    const world = this._world;
+    this._world = undefined as any;
+    if (world) { world.onPreSubstep = null; world.dispose(); }
+    this._scene = undefined as any;
   }
 
   // ---- Where the step runs ----
@@ -1541,6 +1622,12 @@ export class PhysicsSystem {
     this.clear();
     this._scene = scene;
     scene.physics = this;
+  }
+
+  /** Let go of the scene: every body goes, and nothing steps until a scene is bound again (a project closing). */
+  public releaseScene(): void {
+    this.clear();
+    this._scene = undefined as any;
   }
 
   /** Current gravity vector (m/s^2). Settable at runtime. */

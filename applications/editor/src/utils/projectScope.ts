@@ -1,9 +1,10 @@
 // Which project the editor is currently working in, and the key prefix that isolates its data.
 //
 // A module singleton, not React state: the consumers are `utils/*` key producers called from render-time
-// code, none of which can await. Set exactly once, by initProjects(), before <EngineProvider> mounts (the
-// boot gate in app.tsx). Switching projects is a page RELOAD, never a reassignment — TextureManager, the
-// IndexedDB handle, the log/progress stores, the engine and the dockview tree are all module-level state.
+// code, none of which can await. Set only by utils/projects.ts activateProject: at boot, before
+// <EngineProvider> mounts (the boot gate in app.tsx), and when another project opens in the running editor
+// (features/projects/projectSwitch.ts) — then only once the last project's providers are unmounted and its
+// writes drained (utils/projectLifecycle.ts), so a write computing its key late still names its own project.
 
 let activeId = '';
 

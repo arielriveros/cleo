@@ -1,6 +1,7 @@
 import { Vec, carveSoup, clipSoupToVolume, walkableSoup } from 'cleo'
 import type { NavObstacle } from 'cleo'
 import type { NavMeshNode, TriangleSoup } from 'cleo'
+import { onProjectClose } from '../utils/projectLifecycle'
 
 /**
  * What the nav-mesh overlays should look like right now — decided WITHOUT touching the GPU.
@@ -75,6 +76,8 @@ export function soupBounds(soup: TriangleSoup): { min: Vec.vec3; max: Vec.vec3 }
 
 /** The last preview, keyed by everything it read, so a reconcile that changed none of it is free. */
 let lastPreview: { soup: TriangleSoup; obstacles: readonly NavObstacle[]; key: string; walkable: TriangleSoup } | null = null
+// The closed project's navmesh, held for a free reconcile.
+onProjectClose(() => { lastPreview = null })
 
 function previewSoup(navMesh: NavMeshNode, soup: TriangleSoup, obstacles: readonly NavObstacle[]): TriangleSoup {
   const bake = navMesh.bake

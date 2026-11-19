@@ -3,6 +3,7 @@ import { Logger } from "cleo";
 import { ModelAsset } from "../utils/models";
 import { writeModelLibrary } from "../utils/modelStore";
 import { saveToStorage } from "../workers/workerClient";
+import { scheduleProjectWrite } from "../utils/projectLifecycle";
 
 /**
  * Persist an asset library to IndexedDB whenever it changes. A write rewrites the WHOLE array, so it is
@@ -11,12 +12,12 @@ import { saveToStorage } from "../workers/workerClient";
 export function usePersistedLibrary<T>(key: string, value: T, loaded: React.MutableRefObject<boolean>): void {
   useEffect(() => {
     if (!loaded.current) return; // don't write back before the initial read lands (would clobber it)
-    const timer = setTimeout(() => {
+    // Scheduled through the project's writes: switching to another project runs it at once, under this `key`
+    // (computed for the project it was edited in), instead of losing it (utils/projectLifecycle.ts).
+    return scheduleProjectWrite(400, () =>
       // Logger, not console.warn: a library that silently stops persisting is the worst outcome here —
       // the user keeps working and loses everything on reload with nothing on screen having said so.
-      saveToStorage(key, value).catch(e => Logger.error(`Failed to save ${key}: ${e}`, 'Editor'));
-    }, 400);
-    return () => clearTimeout(timer);
+      saveToStorage(key, value).catch(e => Logger.error(`Failed to save ${key}: ${e}`, 'Editor')));
   }, [key, value, loaded]);
 }
 
@@ -38,16 +39,15 @@ export function usePersistedModelLibrary(
 ): void {
   useEffect(() => {
     if (!loaded.current) return;
-    const timer = setTimeout(() => {
+    return scheduleProjectWrite(400, () => {
       const prev = persisted.current;
       // Claim the write BEFORE awaiting: a second edit landing mid-write must diff against what this pass
       // is persisting, not against the state before it, or its changes are never written at all.
       persisted.current = models;
-      writeModelLibrary(models, prev).catch(e => {
+      return writeModelLibrary(models, prev).catch(e => {
         persisted.current = prev; // failed — the next pass must retry these assets
         Logger.error(`Failed to save the model library: ${e}`, 'Editor');
       });
-    }, 400);
-    return () => clearTimeout(timer);
+    });
   }, [models, loaded, persisted]);
 }

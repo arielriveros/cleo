@@ -165,7 +165,9 @@ describe('choosing the player files a game ships', () => {
     expect(playerFeaturesFor({ physics: { backend: 'rapier' } })).toEqual(['physics-rapier']);
     expect(playerFeaturesFor({ physics: { backend: 'jolt' } })).toEqual(['physics-jolt']);
     expect(playerFeaturesFor({ physics: { backend: 'cannon' } })).toEqual([]);
-    expect(playerFeaturesFor(undefined)).toEqual([]);
+    // Naming none, or one there is no such backend as, runs on the default: Jolt.
+    expect(playerFeaturesFor(undefined)).toEqual(['physics-jolt']);
+    expect(playerFeaturesFor({ physics: { backend: 'havok' } })).toEqual(['physics-jolt']);
   });
 
   it('adds the parts of the features the game was built with that have code in this player', () => {
@@ -174,10 +176,10 @@ describe('choosing the player files a game ships', () => {
     expect(playerFeaturesFor({ physics: { backend: 'jolt' }, features: ['sequencer', 'ssr', 'decals'] }, withFeatures))
       .toEqual(['physics-jolt', 'sequencer']);
     // Without the build to check against, only the backend.
-    expect(playerFeaturesFor({ features: ['sequencer'] })).toEqual([]);
+    expect(playerFeaturesFor({ physics: { backend: 'cannon' }, features: ['sequencer'] })).toEqual([]);
     // Game UI brings the UI layer that draws it.
     const withHost = { ...build, features: { ...build.features, gameUi: { files: ['chunks/gameUi-7.js'], bytes: 0, deps: [] }, 'ui-host': { files: ['chunks/ui-host-8.js'], bytes: 0, deps: [] } } };
-    expect(playerFeaturesFor({ features: ['gameUi'] }, withHost)).toEqual(['gameUi', 'ui-host']);
+    expect(playerFeaturesFor({ physics: { backend: 'cannon' }, features: ['gameUi'] }, withHost)).toEqual(['gameUi', 'ui-host']);
   });
 
   it('names a part for every feature the engine can load as a chunk', () => {

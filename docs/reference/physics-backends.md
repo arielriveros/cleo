@@ -1,7 +1,7 @@
 # Physics backends
 
 Physics runs behind a backend-neutral layer, the physics counterpart of the renderer's RHI, so it can run
-on more than one physics engine. Three are implemented: cannon-es, the default, Rapier and Jolt. The
+on more than one physics engine. Three are implemented: Jolt, the default, Rapier and cannon-es. The
 engine's tests pin the cannon step bit for bit, so cannon games behave exactly as before.
 
 ## The layer
@@ -73,14 +73,18 @@ project, not the machine: two engines do not simulate alike, so a game must play
 published game's config always carries it (`physics.backend`), so a game keeps its backend even if the
 engine's default changes.
 
-The choice is a request, read when the engine starts. A backend this build cannot run (a name it does not
-know, or Rapier or Jolt in a player built without it) falls back to cannon-es. The log says why, and so
+Jolt is the default: a project that names no backend runs on it, and so does a request for one this build
+does not know. A project stored before Jolt was the default has cannon written into its settings whether or
+not anyone chose it, so it is read as Jolt (project settings version 5); one set to Rapier stays on Rapier.
+
+The choice is a request, read when the engine starts. A backend that cannot load (Rapier or Jolt in a player
+built without it, or a WASM engine that fails to start) falls back to cannon-es, which needs no loading. The log says why, and so
 does `physics.backendFallbackReason`. `physics.backend` is the backend running, and `physics.requestedBackend`
 the one asked for. `?physicsBackend=` in the URL asks for another backend for a comparison, in the editor
 and in a web build. Each engine logs its backend at startup:
 
 ```
-Physics ready — physics cannon · capsule compound · groups 32-bit · cone limit native · f64 · worker capable
+Physics ready — physics jolt · capsule native · groups 16-bit · cone limit native · f32 · worker capable
 ```
 
 ## Two different "where"s
@@ -186,7 +190,11 @@ JavaScript (base64), which a published game loads as one chunk with no file of i
 bundle is about 4.3 MB.
 
 - **Sleep.** With automatic sleep off (`setCanSleep(false)`), a body put to sleep by hand stays asleep,
-  `setLinvel(v, false)` does not wake it, and a body that hits it does. That is the engine's freeze.
+  `setLinvel(v, false)` does not wake it, and a body that hits it does. That is the engine's freeze. But a
+  pair ALREADY in contact when one side is put to sleep is no longer solved, and nothing wakes it: a crate
+  resting on one put to sleep sinks through it. So each step first wakes a body put to sleep by hand that an
+  awake dynamic body touches (`RapierWorld._wakeTouched`), as cannon and Jolt behave, and the engine puts a
+  resting body to sleep only together with everything it touches (`PhysicsSystem._updateActivation`).
 - **Queries see the last step.** Ray and shape queries run against a tree Rapier refits inside `step`. A
   body added, moved or turned since is invisible to them. Two zero-length steps refit it and change no
   position or velocity bit. The backend runs them before a query when something changed.

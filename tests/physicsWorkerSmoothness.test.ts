@@ -26,7 +26,7 @@ interface Rig { p: PhysicsSystem; hero: Node; port: LoopbackPort | null }
 
 /** One body on a node in a stand-in scene, stepped inline or through an in-process worker port. */
 function rig(mode: 'inline' | 'worker', options: { gravity?: number; fixedRotation?: boolean; delayFor?: (seq: number) => number } = {}): Rig {
-    const p = new PhysicsSystem({ gravity: [0, -(options.gravity ?? 0), 0] });
+    const p = new PhysicsSystem({ gravity: [0, -(options.gravity ?? 0), 0], backend: 'cannon' });
     p.initialize();
     const hero = new Node('Hero');
     hero.setBody(70, 0, 0, undefined, options.fixedRotation ? [0, 0, 0] : undefined);

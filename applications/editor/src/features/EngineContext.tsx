@@ -22,7 +22,6 @@ import { playSaveStore, type PlaySavesConfig } from "./saves/playSaves";
 import { dimensionLookPatch, overlayDimensionOf } from "../utils/sceneDimension";
 import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, FOLIAGE_STARTER, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener, RenderSettings } from "cleo";
-import NullImage from '../images/null.png';
 import EventEmitter from "@cleo/app-kit/utils/eventEmitter";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
 import { createMaterialPreviewScene } from './demoScene/createMaterialPreviewScene';
@@ -90,7 +89,6 @@ import { findEquivalentRig, buildRigAsset, runtimeSockets, overridesFromMapping,
 import { extractRigs, moveClipsToRigs } from "../utils/rigMigration";
 import { decimateGeometry } from "../workers/workerClient";
 import { cancelAllImports, ImportCancelled, parseAnimationFiles } from "../workers/importClient";
-import { installPhysicsWorker } from "../workers/physicsWorkerHost";
 import { detectMissingTextures } from "../utils/textureRefs";
 import { buildGameData } from "./publish/buildGameData";
 import { applyGameData, extractNodeState, ProjectPrefs } from "../utils/projectStorage";
@@ -128,14 +126,14 @@ import { isDesktop } from "./publish/publishClient";
 import { assetIdOfTab, loadTabState, saveTabState, MAIN_MODES, MainMode } from "../utils/tabState";
 import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects";
 import { activeProjectId } from "../utils/projectScope";
+import { scheduleProjectWrite, trackProjectWrite, onProjectUnload } from "../utils/projectLifecycle";
+import { acquireEditorEngine, editorEngine, releaseEngineProject } from "./editorEngine";
 import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf, deleteTextures } from "../utils/textureStore";
 import { preloadAudio, persistAudio } from "../utils/audioStore";
 import { preloadGiBakes } from "../utils/giBakeStore";
 import { startTask, StepStatus } from "@cleo/app-kit/feedback/progressStore";
 import { invalidateNavSoup, reconcileEditorHelpers } from "../utils/editorHelpers";
-import { readBackendPreference } from '@cleo/app-kit/renderer/backendPreference';
 import { deepClone } from '@cleo/app-kit/utils/deepClone';
-import { buildProbeIconDataURL, buildLightIconDataURL, buildSoundIconDataURL, buildDecalIconDataURL, buildParticleIconDataURL, buildForceFieldIconDataURL } from './editorIcons';
 import { ImportStage, IMPORT_STAGES, AnimImportStage, ANIM_IMPORT_STAGES } from './importStages';
 import { usePersistedLibrary, usePersistedModelLibrary } from './persistLibrary';
 import { useAssetThumbnails } from './hooks/useAssetThumbnails';
@@ -951,7 +949,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    * settled. Captured once: a later load (opening a scene) must not receive the boot's reports.
    */
   const bootLoadRef = useRef<LoadHandle>(currentOrNoop());
-  const editorSceneRef = useRef<Scene>(createEditorScene());
+  // Made once, lazily: `useRef(createEditorScene())` built (and leaked, every Scene listening on the global bus
+  // until disposed) a new scene on every render of this provider.
+  const [firstEditorScene] = useState(createEditorScene);
+  const editorSceneRef = useRef<Scene>(firstEditorScene);
   const eventEmitter = useRef(new EventEmitter());
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   // Read by the helper reconciler, which runs off an rAF rather than a render and so cannot close
@@ -2566,8 +2567,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // pruned one.
   useEffect(() => {
     if (!tabsRestoreDoneRef.current) return;
-    const timer = setTimeout(() => saveTabState(tabs, activeTabId, mainMode), 200);
-    return () => clearTimeout(timer);
+    return scheduleProjectWrite(200, () => saveTabState(tabs, activeTabId, mainMode));
   }, [tabs, activeTabId, mainMode]);
 
   // Keep the texture store in step with the libraries. Assets record only texture IDS; the payloads live
@@ -2583,8 +2583,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!assetsLoaded) return;
-    const timer = window.setTimeout(() => {
-      void (async () => {
+    return scheduleProjectWrite(500, () => (async () => {
         try {
           const legacy = legacyTexturesOf(materials, terrainMaterials, templates, models);
           if (legacy.length) await adoptLegacyTextures(legacy);
@@ -2596,9 +2595,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         } catch (e) {
           Logger.error(`Failed to store textures: ${e}`, 'Editor');
         }
-      })();
-    }, 500); // debounced: an import registers textures and adds assets in a burst
-    return () => window.clearTimeout(timer);
+      })()); // debounced: an import registers textures and adds assets in a burst
   }, [assetsLoaded, textureEpoch, materials, terrainMaterials, templates, models]);
 
   // The audio twin of the block above: an epoch bumped by SOUNDS_CHANGED, and a debounced pass that
@@ -2614,8 +2611,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!assetsLoaded) return;
-    const timer = window.setTimeout(() => {
-      void (async () => {
+    return scheduleProjectWrite(500, () => (async () => {
         try {
           // No id list, same reasoning as textures: a sample can be referenced by the scene without
           // belonging to any library, and the project blob does not embed audio.
@@ -2624,9 +2620,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         } catch (e) {
           Logger.error(`Failed to store audio: ${e}`, 'Editor');
         }
-      })();
-    }, 500);
-    return () => window.clearTimeout(timer);
+      })());
   }, [assetsLoaded, soundEpoch, soundSamples]);
 
   // The five park-then-resolve modals (mesh import review, rig pick, animation import review, unsaved-
@@ -5856,8 +5850,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     try { await saveProjectMeta(next); } catch (e) { console.warn('Failed to persist imported project meta:', e); }
   };
 
-  /** Serialize the current (open) scene and write its blob + updated meta. The core of "Save". */
-  const saveCurrentScene = async (): Promise<boolean> => {
+  /**
+   * Serialize the current (open) scene and write its blob + updated meta. The core of "Save". Tracked: its
+   * keys are the open project's, read between awaits, so a project switch waits for it (projectLifecycle).
+   */
+  const saveCurrentScene = (): Promise<boolean> => trackProjectWrite(saveCurrentSceneNow());
+  const saveCurrentSceneNow = async (): Promise<boolean> => {
     const sceneId = openSceneIdRef.current;
     if (!sceneId) return false;
     try {
@@ -6284,30 +6282,26 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+      // The engine outlives this provider (features/editorEngine.ts): another project opening in the same
+      // window unmounts this one and mounts the next, which acquires the same engine. `alive` stops a load
+      // still under way when that happens, and the cleanup gives the engine back.
+      let alive = true;
+      // Logs bypass this bridge: the console panel's store subscribes to CleoEngine.eventEmitter
+      // directly (features/logger/logStore.ts), so it also catches everything logged before mount.
+      const bridge = (e: unknown) => { eventEmitter.current.emit('SCENE_CHANGED', e) };
       const initializeEngine = async () => {
         try {
           const stored = await storedProjectSettings();
-          const engine = new CleoEngine({
-              graphics: {
-                  clearColor: EDITOR_CLEAR_COLOR,
-                  // A request, resolved against what this build and browser can provide — the renderer
-                  // reports the outcome through `backendFallbackReason`, which Renderer Settings shows.
-                  // Read here because a context's API cannot change once resources exist on it.
-                  backend: readBackendPreference(),
-              },
-              // Read here for the same reason: a world cannot change physics engines. The project's choice,
-              // or the URL's; Options ▸ Engine ▸ Runtime says when the running one differs.
-              physics: { backend: physicsBackendOverride() ?? (stored ?? projectSettingsRef.current).engine.physicsBackend },
-          });
-
-          // Before setupInitialScene() and the texture registrations below: both build GPU resources,
-          // and device acquisition is asynchronous. Reported step by step: shader compilation is the
-          // longest part of a cold start, and with a listener it yields so the splash can show it.
+          if (!alive) return;
+          // Built the first time (device, shaders, the editor's icons), the same engine after that. Its physics
+          // is read here: a world cannot change physics engines, so another project's backend means a new world.
           const boot = bootLoadRef.current;
+          let acquired: Awaited<ReturnType<typeof acquireEditorEngine>>;
           try {
-            await engine.initialize({
+            acquired = await acquireEditorEngine({
+              physicsBackend: physicsBackendOverride() ?? (stored ?? projectSettingsRef.current).engine.physicsBackend,
               onProgress: (phase, done, total) => {
-                if (phase === 'device') { if (done < total) boot.step('device').start(); else boot.step('device').done(engine.renderer.backend ?? ''); }
+                if (phase === 'device') { if (done < total) boot.step('device').start(); else boot.step('device').done(editorEngine()?.renderer.backend ?? ''); }
                 else if (phase === 'shaders') { if (done < total) boot.step('shaders').progress(done, total); else boot.step('shaders').done(); }
               },
             });
@@ -6315,18 +6309,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             boot.step('device').fail(String((e as Error)?.message ?? e));
             throw e;
           }
+          if (!alive) return;
+          const { engine, fresh } = acquired;
 
           instanceRef.current = engine;
-          // Before the runtime options: the project's Physics thread setting needs a way to make the worker.
-          installPhysicsWorker();
           applyEngineRuntime(engine as any, projectSettingsRef.current.engine, AudioManager.Instance.mixer);
           instanceRef.current.isPaused = false;
 
-          // Logs bypass this bridge: the console panel's store subscribes to CleoEngine.eventEmitter
-          // directly (features/logger/logStore.ts), so it also catches everything logged before mount.
-          CleoEngine.eventEmitter.on('SCENE_CHANGED', (e) => { eventEmitter.current.emit('SCENE_CHANGED', e) });
-          
+          CleoEngine.eventEmitter.on('SCENE_CHANGED', bridge);
+
           await setupInitialScene();
+          if (!alive) return;
 
           // Migrate the old grey default to the pastel-blue editor background, leaving an intentionally
           // customised clear color alone.
@@ -6334,31 +6327,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           if (cc && Math.abs(cc[0] - LEGACY_CLEAR_COLOR[0]) < 0.01 && Math.abs(cc[1] - LEGACY_CLEAR_COLOR[1]) < 0.01 && Math.abs(cc[2] - LEGACY_CLEAR_COLOR[2]) < 0.01)
             engine.renderer.clearColor = [...EDITOR_CLEAR_COLOR];
 
-          TextureManager.Instance.addTextureFromBase64(NullImage, {}, 'Null');
-          // The viewport icons: mipmapped, since they are drawn small far away and at most 64 CSS px up close
-          // (editorIcons' ICON_RASTER_SCALE, editorHelpers' ICON_MAX_PX).
-          TextureManager.Instance.addTextureFromBase64(buildLightIconDataURL(), {
-            mipMap: true
-          }, '__editor__light_icon');
-          // Light-probe viewport billboard icon, rasterised to a PNG so it can be a sprite texture.
-          TextureManager.Instance.addTextureFromBase64(buildProbeIconDataURL(), {
-            mipMap: true
-          }, '__editor__probe_icon');
-          // Sound-emitter viewport billboard icon, same arrangement as the two above.
-          TextureManager.Instance.addTextureFromBase64(buildSoundIconDataURL(), {
-            mipMap: true
-          }, '__editor__sound_icon');
-          // Decal viewport billboard icon (editorHelpers' ensureDecalIcon).
-          TextureManager.Instance.addTextureFromBase64(buildDecalIconDataURL(), {
-            mipMap: true
-          }, '__editor__decal_icon');
-          // Particle system and force field billboards (editorHelpers' ensureEffectIcon).
-          TextureManager.Instance.addTextureFromBase64(buildParticleIconDataURL(), {
-            mipMap: true
-          }, '__editor__particle_icon');
-          TextureManager.Instance.addTextureFromBase64(buildForceFieldIconDataURL(), {
-            mipMap: true
-          }, '__editor__forcefield_icon');
+          // The placeholder and the viewport icons are the engine's from its first build (editorEngine.ts).
           eventEmitter.current.emit('TEXTURES_CHANGED');
 
           engine.setScene(editorSceneRef.current);
@@ -6377,7 +6346,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           const prefs = pendingPrefsRef.current;
           setSelectedNode(prefs?.selectedNode ?? editorSceneRef.current.root.id);
 
-          engine.run();
+          // Only a fresh engine's loop needs starting: a second run() would start a second frame loop.
+          if (fresh) engine.run();
 
           // Enable the editor infinite-grid overlay (ground/XZ plane by default), unless it is toggled off.
           engine.renderer.setGridVisible(debugVisibilityRef.current.grid.editor);
@@ -6401,11 +6371,25 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         } finally {
           // Always dismiss the splash, even if an asset failed to load,
           // so the editor never gets stuck behind the loading screen.
-          setIsSceneReady(true);
+          if (alive) setIsSceneReady(true);
         }
       };
 
-      initializeEngine();
+      // Tracked: a project switch requested while this load still runs waits for it before another opens.
+      trackProjectWrite(initializeEngine()).catch(() => { /* reported above */ });
+      return () => {
+        alive = false;
+        CleoEngine.eventEmitter.off('SCENE_CHANGED', bridge);
+        releaseEngineProject();
+        instanceRef.current = null;
+        // Every Scene listens on the process-wide bus until disposed: the closed project's would stay resident.
+        const scenes = new Set<Scene>([editorSceneRef.current]);
+        for (const runtime of tabRuntimeRef.current.values()) {
+          if (runtime?.scene) scenes.add(runtime.scene);
+          try { runtime?.helperTerrain?.dispose(); } catch { /* already gone */ }
+        }
+        for (const scene of scenes) { try { scene.dispose(); } catch (e) { console.warn('[projects] disposing a scene failed', e); } }
+      };
   }, []);
 
   // Keep editor helper nodes (light/camera/probe icons + physics debug wireframes) derived from the scene's
@@ -7076,6 +7060,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.emit('SET_PLAY_STATE', 'stop');
   };
   const pausePlay = () => eventEmitter.current.emit('SET_PLAY_STATE', 'pause');
+  // A project closing in this window (features/projects/projectSwitch.ts) stops Play or Simulate first: the
+  // play scene goes with the project, and the engine must be back on the editor scene to give it back.
+  const stopPlayRef = useRef(stopPlay);
+  stopPlayRef.current = stopPlay;
+  useEffect(() => onProjectUnload(() => { if (startedRef.current) stopPlayRef.current(); }), []);
   const resetPlay = async () => {
     const instance = instanceRef.current;
     if (!instance) return;

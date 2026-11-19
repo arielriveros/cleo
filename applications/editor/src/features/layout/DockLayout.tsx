@@ -14,6 +14,7 @@ import { setOptionsPage } from '@cleo/app-kit/ui/OptionsShell';
 import { useEditorPrefs } from '../options/editorPrefs';
 import { scriptDebugger } from '../scriptDebugger/debugSession';
 import { useWindowPlay } from '../playWindow/windowPlay';
+import { scheduleProjectWrite } from '../../utils/projectLifecycle';
 
 // Per-project. Both live keys resolve through lsScope, so deleting a project takes them with it.
 const dockLayoutKey = () => lsKey(LS_KEYS.dockLayout);
@@ -523,19 +524,21 @@ export default function DockLayout() {
   // restriction, not an arrangement worth remembering.
   useEffect(() => {
     if (!api) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const flush = () => {
       const mode = keyRef.current;
       if (playingRef.current || !mode) return;
       saveLayoutFor(api, mode);
     };
+    // Through the project's writes, so switching to another project lands a drag still inside the debounce
+    // window, in this project's layout (utils/projectLifecycle.ts).
+    let cancel: (() => void) | null = null;
     const disposable = api.onDidLayoutChange(() => {
-      clearTimeout(timer);
-      timer = setTimeout(flush, 300);
+      cancel?.();
+      cancel = scheduleProjectWrite(300, flush);
     });
     // localStorage is synchronous, so this flush lands a drag that finished inside the debounce window.
     window.addEventListener('beforeunload', flush);
-    return () => { clearTimeout(timer); disposable.dispose(); window.removeEventListener('beforeunload', flush); };
+    return () => { cancel?.(); disposable.dispose(); window.removeEventListener('beforeunload', flush); };
   }, [api]);
 
   /**

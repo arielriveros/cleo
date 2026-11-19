@@ -6,9 +6,9 @@ import '@cleo/app-kit/assets/filemanager.css'
 import './projects.css'
 import { iconFor } from '../assets/assetKinds'
 
-import {
-  ProjectRecord, deleteProject, loadProjects, openProject, renameProject,
-} from '../../utils/projects'
+import { ProjectRecord, loadProjects, nextProjectAfterDelete, renameProject } from '../../utils/projects'
+import { deleteProject, openProject } from './projectSwitch'
+import { unsavedWork } from '../unloadGuard'
 import { activeProjectId } from '../../utils/projectScope'
 import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
 import { Button } from '@cleo/app-kit/ui'
@@ -83,7 +83,7 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
     if (id === activeId) return
     setBusy(true)
     // Can be declined: openProject asks about unsaved work first. Nothing has happened then, so
-    // the explorer has to come back out of its busy state rather than sit spinning on a reload
+    // the explorer has to come back out of its busy state rather than sit spinning on a switch
     // that is not coming.
     if (!await openProject(id)) setBusy(false)
   }, [activeId])
@@ -92,13 +92,19 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
     const record = projectsRef.current.find(p => p.id === id)
     if (!record) return
     const isActive = id === activeId
+    // The open project: what opens instead, and the unsaved edits that go with it, asked in this one dialog.
+    const next = isActive ? await nextProjectAfterDelete(id) : null
+    const unsaved = isActive ? unsavedWork() : []
     const ok = await confirmDialog({
       title: `Delete "${record.name}"?`,
       message: 'This cannot be undone.',
       details: [
         'Every scene, model, material, script, texture and folder in it is deleted with it',
         'Nothing is shared with your other projects, so nothing else is affected',
-        ...(isActive ? ['This is the project you have open; the editor will reload into another one'] : []),
+        ...(isActive ? [next
+          ? `This is the project you have open: Cleo closes it and opens "${next.name}"`
+          : 'This is the project you have open: Cleo closes it and starts a new empty project'] : []),
+        ...(unsaved.length ? [`Unsaved edits in it are lost: ${unsaved.join(', ')}`] : []),
       ],
       confirmLabel: 'Delete project',
       tone: 'danger',
@@ -106,7 +112,8 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
     if (!ok) return
     setBusy(true)
     try {
-      await deleteProject(id, isActive) // the active case reloads and wipes on the next boot
+      // The open one closes first, then is wiped, and the next project opens in its place (projectSwitch).
+      await deleteProject(id, isActive)
       if (!isActive) {
         // The tree is uncontrolled, so the card must also be dropped from SVAR's own store, with
         // skipProvider so the bridge does not treat this as a fresh user delete.
