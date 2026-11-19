@@ -1,0 +1,28 @@
+{
+  "name": "cleo-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The NetSync dedicated host (docs/design/netsync.md): accepts WebTransport and WebSocket links and runs a session. Phase 1: links and sessions only.",
+  "type": "module",
+  "scripts": {
+    "start": "vite-node src/main.ts --",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "author": "Ariel Riveros",
+  "license": "ISC",
+  "dependencies": {
+    "@fails-components/webtransport": "1.6.12",
+    "@fails-components/webtransport-transport-http3-quiche": "1.6.12",
+    "@peculiar/x509": "^3.1.0",
+    "reflect-metadata": "^0.2.2",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.0"
+  }
+}

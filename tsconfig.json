@@ -43,6 +43,8 @@
   "files": [
     "src/cleo.ts", "src/decorators.ts", "src/glsl.d.ts", "src/webgpu.d.ts", "src/webglHandles.d.ts", "src/wgsl.d.ts",
     "src/graphics/rhi/webgpu/webgpuDevice.ts", "src/graphics/rhi/webgpu/webgpuShaderProgram.ts",
-    "src/modules/loaders.ts"
+    "src/modules/loaders.ts",
+    // NetSync (docs/design/netsync.md) is not in the cleo barrel yet; named so it is typechecked.
+    "src/netsync/index.ts"
   ],
 }

@@ -1,9 +1,13 @@
-// Imports must stay type-only: this module has to be dependency-free at runtime (see engineEventBus).
+// Imports must stay type-only (bar ./typedEmitter, which imports nothing): this module has to be dependency-free at runtime (see engineEventBus).
 import type { LogEntry } from './logger';
 import type { Node } from './scene/nodes/node';
 import type { Scene } from './scene/scene';
 import type { ActionState } from '../input/actionMap';
 import type { AssetRef } from './assets/assetGraph';
+// TypedEmitter lives in its own dependency-free module so code outside the engine graph (NetSync's Node
+// host) can use it without type-checking the scene graph this file's event map names.
+import { TypedEmitter } from './typedEmitter';
+export { TypedEmitter };
 
 /**
  * What kind of mutation a `SCENE_CHANGED` event describes. The first three are *structural* — they
@@ -120,50 +124,6 @@ export interface EngineEventMap {
    * editor. A published game never populates the graph, so it pays nothing either way.
    */
   ASSET_CHANGED: { origin: AssetRef; affected: AssetRef[] };
-}
-
-type Listener<T> = (payload: T) => void;
-/** For `void` events `emit(name)` takes no payload; otherwise it takes the typed payload. */
-type EmitArgs<T> = [T] extends [void] ? [] : [payload: T];
-
-/**
- * Minimal typed event emitter — `on`/`off`/`once`/`emit`, with a compiler-checked payload type per
- * event. Deliberately tiny and dependency-free, so importing it stays cheap.
- */
-export class TypedEmitter<Events extends Record<string, any>> {
-  private _listeners: { [K in keyof Events]?: Set<Listener<Events[K]>> } = {};
-
-  on<K extends keyof Events>(event: K, listener: Listener<Events[K]>): this {
-    let set = this._listeners[event];
-    if (!set) { set = new Set(); this._listeners[event] = set; }
-    set.add(listener);
-    return this;
-  }
-
-  off<K extends keyof Events>(event: K, listener: Listener<Events[K]>): this {
-    this._listeners[event]?.delete(listener);
-    return this;
-  }
-
-  once<K extends keyof Events>(event: K, listener: Listener<Events[K]>): this {
-    const wrapper: Listener<Events[K]> = (payload) => { this.off(event, wrapper); listener(payload); };
-    return this.on(event, wrapper);
-  }
-
-  emit<K extends keyof Events>(event: K, ...args: EmitArgs<Events[K]>): boolean {
-    const set = this._listeners[event];
-    if (!set || set.size === 0) return false;
-    const payload = args[0] as Events[K];
-    // Iterate a copy so a listener that unsubscribes (or subscribes) during dispatch can't disturb it.
-    for (const listener of [...set]) listener(payload);
-    return true;
-  }
-
-  removeAllListeners<K extends keyof Events>(event?: K): this {
-    if (event === undefined) this._listeners = {};
-    else delete this._listeners[event];
-    return this;
-  }
 }
 
 /**
