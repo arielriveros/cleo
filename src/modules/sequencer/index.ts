@@ -15,7 +15,7 @@ const sequencer: FeatureModule = {
     install(reg) {
         reg.nodeType('sequence', SequenceNode.parse.bind(SequenceNode));
         // Property tracks aimed at 'renderer' or 'game' resolve here: the node module sits below both in the import graph.
-        sequenceGlobals.renderer = () => CleoEngine.instance?.renderer ?? null;
+        sequenceGlobals.renderer = () => { const e = CleoEngine.instance; return e && !e.headless ? e.renderer : null; };
         sequenceGlobals.game = () => Game;
     },
 };

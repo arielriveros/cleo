@@ -74,10 +74,13 @@ describe('publishing an animation', () => {
 describe('the publish/player contract', () => {
   const read = (...p: string[]) => readFileSync(join(__dirname, '..', ...p), 'utf-8').replace(/\r\n/g, '\n')
 
+  // The shared-clip rules live in sharedAnimations.ts (the NetSync host packs games with them too); publish
+  // must still go through them.
   it('publish still flattens the rig into sourceSkin', () => {
-    const publish = read('src', 'features', 'publish', 'buildMultiSceneGameData.ts')
-    expect(publish).toContain('sourceSkinFor')
-    expect(publish).toMatch(/sourceSkin:\s*sourceSkinFor/)
+    const shared = read('src', 'features', 'publish', 'sharedAnimations.ts')
+    expect(shared).toContain('sourceSkinFor')
+    expect(shared).toMatch(/sourceSkin:\s*sourceSkinFor/)
+    expect(read('src', 'features', 'publish', 'buildMultiSceneGameData.ts')).toContain('sharedAnimationData(src.libs)')
   })
 
   it('the player still retargets off sourceSkin', () => {
@@ -146,11 +149,11 @@ describe('publishing a rig-owned clip list', () => {
   })
 
   it('the publish path actually expands from the rig', () => {
-    const publish = readFileSync(
-      join(__dirname, '..', 'src', 'features', 'publish', 'buildMultiSceneGameData.ts'), 'utf-8',
+    const shared = readFileSync(
+      join(__dirname, '..', 'src', 'features', 'publish', 'sharedAnimations.ts'), 'utf-8',
     ).replace(/\r\n/g, '\n')
-    expect(publish).toContain('rigClips')
-    expect(publish).toContain('src.libs.rigs')
+    expect(shared).toContain('rigClips')
+    expect(shared).toContain('libs.rigs')
   })
 })
 
@@ -158,14 +161,13 @@ describe('publishing a rig-owned clip list', () => {
 // build retargets with the automatic match the user explicitly fixed — visibly different from the editor,
 // with nothing logged. There is no unit test downstream of this that could notice.
 describe('publishing retarget corrections', () => {
-  const src = () => readFileSync(
-    join(__dirname, '..', 'src', 'features', 'publish', 'buildMultiSceneGameData.ts'), 'utf-8',
+  const src = (file = 'buildMultiSceneGameData.ts') => readFileSync(
+    join(__dirname, '..', 'src', 'features', 'publish', file), 'utf-8',
   ).replace(/\r\n/g, '\n')
 
   it('publish flattens rig.retargets into a (model, animation) table', () => {
-    const publish = src()
-    expect(publish).toContain('rig.retargets')
-    expect(publish).toContain('out.retargets')
+    expect(src('sharedAnimations.ts')).toContain('rig.retargets')
+    expect(src()).toContain('out.retargets')
   })
 
   it('the player applies them between the automatic match and the retarget', () => {
@@ -180,7 +182,8 @@ describe('publishing retarget corrections', () => {
 
   // Additive and optional: a build with no corrections must not grow the field at all.
   it('omits the table entirely when nothing was corrected', () => {
-    expect(src()).toContain('if (Object.keys(retargets).length) out.retargets = retargets')
+    expect(src('sharedAnimations.ts')).toContain('return Object.keys(retargets).length ? { animations, modelAnimations, retargets } : { animations, modelAnimations }')
+    expect(src()).toContain('if (retargets) out.retargets = retargets')
   })
 })
 
@@ -230,7 +233,7 @@ describe('publishing shared poses', () => {
   })
 
   it('publish really does it, and the player really reads it', () => {
-    expect(read('src', 'features', 'publish', 'buildMultiSceneGameData.ts')).toContain('posesForRig(rig, src.libs.poseAssets')
+    expect(read('src', 'features', 'publish', 'sharedAnimations.ts')).toContain('posesForRig(rig, libs.poseAssets')
     expect(read('src', 'player', 'animations.ts')).toContain('asset.poses')
   })
 })

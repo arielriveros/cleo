@@ -45,6 +45,7 @@
     "src/graphics/rhi/webgpu/webgpuDevice.ts", "src/graphics/rhi/webgpu/webgpuShaderProgram.ts",
     "src/modules/loaders.ts",
     // NetSync (docs/design/netsync.md) is not in the cleo barrel yet; named so it is typechecked.
-    "src/netsync/index.ts"
+    "src/netsync/index.ts",
+    "src/graphics/rhi/null/nullDevice.ts"
   ],
 }

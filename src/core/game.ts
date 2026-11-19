@@ -249,12 +249,15 @@ export const Game = {
 
   /** A snapshot of the current render/post-processing settings (exposure, bloom, motion blur, ...). */
   getRenderSettings(): RenderSettings | undefined {
-    return CleoEngine.instance?.renderer.getRenderSettings();
+    const engine = CleoEngine.instance;
+    // A headless engine (the NetSync host) has no renderer and so no render settings.
+    return engine && !engine.headless ? engine.renderer.getRenderSettings() : undefined;
   },
   /** Patch one or more render settings live — e.g. Game.updateRenderSettings({ exposure: 1.5 }). */
   updateRenderSettings(settings: Partial<RenderSettings>): void {
-    const renderer = CleoEngine.instance?.renderer;
-    if (!renderer) return;
+    const engine = CleoEngine.instance;
+    if (!engine || engine.headless) return;
+    const renderer = engine.renderer;
     // `applyRenderSettings` resolves an absent tone mapper, bloom mode and Purkinje strength to their
     // defaults (a whole scene blob without one predates the setting), and likewise an absent exposure
     // compensation curve to none. A patch is not a scene: whatever is on now stays on.

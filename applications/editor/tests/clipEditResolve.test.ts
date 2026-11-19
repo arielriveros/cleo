@@ -181,6 +181,6 @@ describe('the editor and the player apply the stack identically', () => {
     // The rig itself is not shipped, so publish flattens its poses onto each animation. Without them a
     // posed clip plays with the offset silently missing.
     expect(playerSrc()).toContain('asset.poses')
-    expect(read('src', 'features', 'publish', 'buildMultiSceneGameData.ts')).toContain('posesForRig(rig, src.libs.poseAssets')
+    expect(read('src', 'features', 'publish', 'sharedAnimations.ts')).toContain('posesForRig(rig, libs.poseAssets')
   })
 })

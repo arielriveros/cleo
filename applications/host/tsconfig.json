@@ -1,15 +1,32 @@
 {
+  // The host type-checks with the engine's own strictness (root tsconfig.json: noImplicitAny + the null-safety
+  // pair, not full `strict`), because it compiles engine and player source directly. `cleo` and `@cleo/app-kit`
+  // resolve to source, as in vite.config.ts.
   "compilerOptions": {
     "target": "es2022",
+    // As the engine compiles (target es6): class fields are assignments, not definitions.
+    "useDefineForClassFields": false,
     "module": "es2022",
     "moduleResolution": "bundler",
     "customConditions": ["node"],
-    "lib": ["es2022", "dom"],
+    "lib": ["es2022", "es2021.weakref", "dom", "dom.iterable", "esnext.disposable"],
     "types": ["node"],
-    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictPropertyInitialization": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "allowSyntheticDefaultImports": true
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "cleo": ["../../src/cleo.ts"],
+      "cleo/*": ["../../src/*"],
+      "@cleo/app-kit/*": ["../app-kit/src/*"],
+      "meshoptimizer/decoder": ["../../node_modules/meshoptimizer/meshopt_decoder.d.ts"]
+    }
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "../../src/glsl.d.ts", "../../src/wgsl.d.ts", "../../src/webgpu.d.ts", "../../src/webglHandles.d.ts"]
 }

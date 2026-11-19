@@ -1,6 +1,6 @@
 # NetSync — online multiplayer for Cleo (plan)
 
-Status: **phase 1 done** (phase 0 open: Safari) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
+Status: **phase 2 done** (phase 0 open: Safari) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
 Target: **physics sandbox shooter — co-op PvE (≤ 50 AI) and 8v8 deathmatch with bots, ≤ 16 peers** ·
 Started 2026-11-19
 
@@ -210,9 +210,10 @@ The rest of NetSync does not know which link it is on: the same messages, encode
 Today the engine advances by the variable frame delta (`engine.ts` `_tick`; physics cut into ≤ 1/60 s
 substeps, `physicsSystem.ts` `substepsFor`). NetSync needs ticks.
 
-- **Host:** `HostRuntime` drives `Scene` + `PhysicsSystem` + `AISystem` at a fixed `tickDt` (default 1/30 s,
-  physics substepped inside the tick). No renderer, no rAF.
-- **Peers:** a new engine simulation mode, `simulation: 'frame' | 'fixed'` (default `'frame'`, so nothing
+- **Host:** `HostRuntime` drives a headless `CleoEngine` (`headless: true`: no renderer, a `NullDevice`, the
+  loop detached) with `engine.stepFrame(1/30)` from a deadline-driven `FixedTicker` — physics substepped inside
+  the tick, scripts, AI and animators as in a game. Built in phase 2.
+- **Peers (moved to phase 5):** a new engine simulation mode, `simulation: 'frame' | 'fixed'` (default `'frame'`, so nothing
   changes for single-player). In `'fixed'` an accumulator runs the control pass, character locomotion and
   physics in whole ticks; rendering interpolates between the last two ticks. Animation, particles, camera
   rigs and UI keep using the frame delta.
@@ -573,10 +574,10 @@ supported OS / Node versions. This is the main reason the container image is the
 |---|---|---|---|
 | 0 | **Spike** | Node host (fails-components + `ws`) + browser page exchanging datagrams, a stream, and the WebSocket fallback, with hashed certs | §4.5 checklist answered for every target browser; fallback connects when UDP is blocked |
 | 1 | **Link + Session** | `NetLink`, `WebTransportLink`, `WebSocketLink`, `connect()` fallback choice, `HostListener`, `LoopbackLink`, `ConditionedLink`; handshake, version + content hash, PeerIds, clock sync, ping | peers connect over either link, agree on host tick within one tick, reconnect works |
-| 2 | **Headless host + fixed tick** | `HostRuntime`, `cleo-host` CLI; engine `simulation: 'fixed'` with render interpolation; `Scene` input source injection | sandbox example runs on the host at 30 Hz; single-player unchanged (existing tests green) |
+| 2 | **Headless host** | headless `CleoEngine` + `NullDevice`; `HostRuntime` loading game.bin through the player's own loader; `cleo-host --game / --example` | sandbox example runs on the host at 30 Hz; single-player unchanged (existing tests green) |
 | 3 | **Identity, spawn, pulses, scope** | NetId table, spawn / despawn, built-in field sets, quantized delta pulses with acks, sleep skipping, priority packing + scope, follow buffer, join in progress (live apply), pulse skipping on WebSocket | 16 peers + 50 AI see the same 200-prop sandbox (explosion included) within budget, at 150 ms / 5 % loss, on both links; host tick under 25 ms |
-| 4 | **Commands + remote control** | `CommandWriter` / `CommandReader`, `controlSource: 'remote'` | each peer drives its own character (no prediction yet) |
-| 5 | **Predict / correct** | predicted mover (soft props, solid statics), command ring, correction + smoothing | own character feels local at 150 ms; corrections rare on flat ground and among props |
+| 4 | **Commands + remote control** | `CommandWriter` / `CommandReader`, `controlSource: 'remote'`, per-controller input source (instead of the `InputSystem` singleton) | each peer drives its own character (no prediction yet) |
+| 5 | **Predict / correct** | engine `simulation: 'fixed'` on peers (tick accumulator, render interpolation); predicted mover (soft props, solid statics), command ring, correction + smoothing | own character feels local at 150 ms; corrections rare on flat ground and among props |
 | 6 | **Carry + weapons** | grab / carry / throw / drop, hitbox history and rewind, `Shot` / `Hit`, projectiles with local stand-ins | carrying and throwing feel local; hitscan registers at 150 ms against moving AI and players; grenades land where the host says without visible pops; `versus` trust rejects forged shot claims |
 | 7 | **Script surface** | `@synced`, `@netcall`, `this.net`, `Net.emit`, `Game.random`, decorator completion in the script editor | a door / pickup / scoreboard / weapon example works from scripts alone |
 | 8 | **Animation + effects** | `PlayAction`, `Animator.forceState`, root motion rules, `PlaySequence` | fire / reload / hit reactions line up on all peers; no foot slide on followed characters |
@@ -589,7 +590,26 @@ Phases 0–3 are the foundation; 4–6 make the target game playable; 7–9 make
 | Phase | State | Where |
 |---|---|---|
 | 0 | Done except Safari on a real Apple device, a real network, Linux arm64 | [tools/netsyncSpike](../../tools/netsyncSpike/README.md) |
-| 1 | **Done (2026-11-19).** Peers connect over either link (and fall back), are seated, agree with the host on the tick within one tick (tested at 100 ms RTT with jitter and 10 % loss), and take their seat back after a drop. Verified in Node over real sockets and in Chrome, Edge and Firefox against `cleo-host`. | `src/netsync/` (links, sessions, clock, ticker), [applications/host](../../applications/host/README.md) (listeners, CLI), tests `tests/netsync*.test.ts`, `applications/host/tests` |
+| 1 | **Done (2026-11-19).** Peers connect over either link (and fall back), are seated, agree with the host on the tick within one tick (tested at 100 ms RTT with jitter and 10 % loss), and take their seat back after a drop. Verified in Node over real sockets and in Chrome, Edge and Firefox against `cleo-host`. | `src/netsync/` (links, sessions, clock, ticker), `applications/host` (see its README) (listeners, CLI), tests `tests/netsync*.test.ts`, `applications/host/tests` |
+
+| 2 | **Done (2026-11-19).** The Sandbox and Firing Line examples run headless on the host from a game.bin — models, shared clips, scripts and script modules (inline or extracted to game.scripts.js), physics on Jolt — at 30 Hz. `cleo-host --example …/firing-line` plays the bot match in real time. | `src/core/engine.ts` (`headless`), `src/graphics/rhi/null/nullDevice.ts`, `applications/editor/src/player/gameContent.ts` (the player's loader, now shared), `applications/host/src/hostRuntime.ts`, `exampleGame.ts`, `applications/host/tests/hostRuntime.test.ts` |
+
+Phase-2 findings:
+- **CPU budget is not met at 50 AI yet.** Firing Line on the development machine: 12 fighters ~4–5 ms per
+  tick; 50 fighters ~26 ms mean, p95 36–67 ms — over the 25 ms budget. At 50, AI perception (~7 ms) and
+  think (~7 ms) and the animators (~7 ms) dominate; physics is ~1.4 ms. Planned fixes, before phase 8's
+  50-AI exit criterion: stagger perception and think across ticks (each agent every 2nd–3rd tick), a host
+  animation LOD (bots far from every player pose at a lower rate; only root motion and hitboxes need the pose
+  on the host), and profiling the bot scripts.
+- **Physics simulation range is camera-relative.** The host turns the global range off, but a body's own
+  `simulationRange` still measures from the scene's active camera. Phase 3 measures it from the nearest
+  peer's character instead.
+- **Content hash** is SHA-256 of the game.bin bytes (`cleo-host` prints it); peers must compute the same
+  (phase 3 decides whether to hash the manifest only, which is cheaper in a browser).
+- **The client fixed-tick mode moved to phase 5**, where prediction is its first user; building it now would
+  mean guessing its requirements. The scene input-source change moved to phase 4 for the same reason.
+- Script modules are reset per game (`resetScriptModules`): a host process that ran one game must not leak
+  module state into the next.
 
 Phase-1 details worth knowing for later phases:
 - The link API is `sendControl` / `sendPulse` (returns false when not sent) / `sendBulk`. Bulk messages are

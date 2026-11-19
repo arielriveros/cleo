@@ -1,5 +1,4 @@
 import { Scene, TextureManager, AudioManager, GiBakeRegistry, FEATURES, featureApiNames } from 'cleo'
-import { sourceSkinFor } from '../../utils/rigAssets'
 import type { RenderSettings, InputMap } from 'cleo'
 import { isDefaultInputMap } from 'cleo'
 import { projectSettingsConfig } from '../options/projectSettings'
@@ -21,7 +20,7 @@ import type { AssetLibs } from '../../utils/assetHash'
 import { migrateLegacyUI } from '../../utils/uiMigration'
 import type { ScriptAsset } from '../../utils/scripts'
 import { deepClone } from '@cleo/app-kit/utils/deepClone'
-import { posesForRig } from '../../utils/poseAssets'
+import { sharedAnimationData } from './sharedAnimations'
 
 // game.json v2: a multi-scene published game. The entry (main) scene runs first; scripts call
 // Game.loadScene(name|id) to switch at runtime. Textures are serialized ONCE at the top level (they are
@@ -206,44 +205,6 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     soundBytes = wantedSounds.size > 0 ? AudioManager.Instance.serializeSoundBytes(wantedSounds) : []
   } catch { soundBytes = [] }
 
-  // Shared animation clips ONCE for the whole game, in their source rig's space, plus a map of which model
-  // asset uses which. `AnimatedModel.serialize` drops an asset-backed clip, so the scenes above carry
-  // none; the player resolves and retargets at load. Narrowed to what a shipped model references.
-  const modelAnimations: Record<string, string[]> = {}
-  const wantedAnims = new Set<string>()
-  // EXPANDED from rig -> models at pack time. Clips are owned by the rig now, but the player looks them up
-  // per MODEL (`byModel[modelIdOf(node)]`), so flattening here keeps the pack format and the player
-  // untouched — the same trick used just below for `sourceSkin`.
-  const rigClips = new Map((src.libs.rigs ?? []).map(r => [r.id, r.animationIds ?? []]))
-  for (const m of src.libs.models ?? []) {
-    const ids = m.rigId ? rigClips.get(m.rigId) ?? [] : []
-    const unique = [...new Set(ids)]
-    if (!unique.length) continue
-    modelAnimations[m.id] = unique
-    for (const id of unique) wantedAnims.add(id)
-  }
-  // FLATTEN the rig back into each shipped animation.
-  //
-  // `player/animations.ts` retargets using `asset.sourceSkin`; with no skeleton on the asset it falls
-  // through to playing the clips UNRETARGETED — silently wrong animation in the published game, with
-  // nothing logged. New assets carry `rigId` instead of an embedded skin, so publish resolves it here.
-  // Deliberately not a `rigs` table in the pack: that would be a runtime format change (and a player
-  // rebuild) for a bundle that is a flattened artifact anyway.
-  //
-  // The rig's shared POSES ride along for the same reason. A clip's `poseOffset` edit names one by id and
-  // `applyClipEdits` resolves it against the SOURCE rig — which is not shipped — so without this the
-  // published game plays every posed clip with its offset silently missing. Same failure mode as the
-  // skeleton above, and just as invisible: the clip still plays, it is simply not the clip the artist saw.
-  const animations = (src.libs.animations ?? [])
-    .filter(a => wantedAnims.has(a.id))
-    .map(a => {
-      const rig = a.rigId ? (src.libs.rigs ?? []).find(r => r.id === a.rigId) : undefined
-      const withSkin = { ...a, sourceSkin: sourceSkinFor(a, src.libs.rigs ?? []) }
-      // Pose ASSETS on the rig resolve the same pose ids as its legacy list, so both ship.
-      const poses = posesForRig(rig, src.libs.poseAssets ?? [])
-      return poses.length ? { ...withSkin, poses } : withSkin
-    })
-
   const out: any = {
     version: 2,
     entry: src.mainSceneId in scenes ? src.mainSceneId : Object.keys(scenes)[0],
@@ -252,23 +213,8 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     textureBytes,
   }
   if (modules) out.modules = modules
-  // Flatten the rig-level retarget corrections into the (model, animation) pair the player can index.
-  // Stored on the target rig keyed by SOURCE rig; the player has a model and an animation, so publish
-  // resolves the two hops here rather than shipping a rig table.
-  const retargets: Record<string, Record<string, unknown[]>> = {}
-  for (const m of src.libs.models ?? []) {
-    // The model's OWN skeleton's rig: the corrections map onto it, also while it plays another skeleton.
-    const rigId = (m as { nativeRigId?: string }).nativeRigId ?? m.rigId
-    const rig = rigId ? (src.libs.rigs ?? []).find(r => r.id === rigId) : undefined
-    if (!rig?.retargets) continue
-    for (const id of modelAnimations[m.id] ?? []) {
-      const sourceRigId = animations.find(a => a.id === id)?.rigId
-      const overrides = sourceRigId ? rig.retargets[sourceRigId] : undefined
-      if (!overrides?.length) continue
-      ;(retargets[m.id] ??= {})[id] = overrides
-    }
-  }
-  if (Object.keys(retargets).length) out.retargets = retargets
+  const { animations, modelAnimations, retargets } = sharedAnimationData(src.libs)
+  if (retargets) out.retargets = retargets
 
   if (soundBytes.length) out.soundBytes = soundBytes
   // GI Volume bakes, narrowed like the sounds: the ones the serialized scenes' volumes name. A volume
@@ -309,3 +255,4 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   if (Object.keys(config).length > 0) out.config = config
   return out
 }
+

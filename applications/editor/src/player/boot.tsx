@@ -1,13 +1,13 @@
-import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, addScriptModuleSources, registerTemplates, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles, restrictFeatures, setAbsentFeatureNames, parseRuntimeScene, setSaveStore, beginSaveSessionFrom, createBridgeSaveStore, createIndexedDbSaveStore } from 'cleo';
+import { CleoEngine, PhysicsSystem, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles, restrictFeatures, setAbsentFeatureNames, setSaveStore, beginSaveSessionFrom, createBridgeSaveStore, createIndexedDbSaveStore } from 'cleo';
 import type { BackendKind, LoadProgressListener, SaveStore, SaveDocument } from 'cleo';
 import { mountVirtualControls } from './virtualControls';
-import { inflateSceneGeometry, inflateTerrainData, inflateTilemapData, readChunkSet, collectSceneRefs, collectUiTextureIds, type GameHeader, type SceneRefs } from './unpack';
+import { collectUiTextureIds, type GameHeader } from './unpack';
+import { buildGameScene, installGameContent } from './gameContent';
 import type { GameSource } from './gameSource';
 import { pool } from './byteSpans';
 import { showError, setLoadingText } from './pageStatus';
 // The page status helpers, for the pages that import them from here (session.tsx).
 export { showError, setLoadingText, hideLoadingWhenSmooth } from './pageStatus';
-import { attachSharedAnimations, attachTemplateAnimations } from './animations';
 import { PLAYER_CONTRACT } from '../features/publish/pack';
 import { physicsBackendOverride, physicsWorkerOverride } from '../features/options/projectSettings';
 
@@ -256,24 +256,11 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     } catch { /* skip a sound the browser cannot take */ }
   });
 
-  // Templates once, globally: the registry backs scene.instantiate and must survive a Game.loadScene
-  // switch. Geometry is inflated eagerly — a script may instantiate one at any moment. A template's GI
-  // bakes stay registered for the session; a scene's come and go with it (startScene).
-  const templateRefs: SceneRefs = { chunks: [], giBakeIds: [] };
-  for (const t of (data.templates ?? [])) {
-    const refs = collectSceneRefs(t.node, data, { data: false });
-    templateRefs.chunks.push(...refs.chunks);
-    templateRefs.giBakeIds.push(...refs.giBakeIds);
-  }
-  const templateChunks = await readChunkSet(source, header, templateRefs, claimed);
-  for (const t of (data.templates ?? [])) inflateSceneGeometry(t.node, templateChunks);
-  const permanentBakes = new Set<string>();
-  for (const b of templateChunks.giBakes) { GiBakeRegistry.set(b.id, b.bytes); permanentBakes.add(b.id); }
+  // Templates and script module sources, once for the session (gameContent.ts, shared with the NetSync host).
+  // A template's GI bakes stay registered for the session; a scene's come and go with it (startScene).
+  const content = { source, header, claimed };
+  const permanentBakes = await installGameContent(content);
   let sceneBakes: string[] = [];
-  // Shared clips are baked into the template subtrees BEFORE they are registered: the registry entry is
-  // the master `Scene.instantiate` deep-copies, and nothing revisits it after a spawn.
-  attachTemplateAnimations(data.templates, data);
-  registerTemplates(data.templates);
 
   // How the engine finds a node's precompiled script: consulted whenever a node has no `script`
   // source, including nodes created later by scene.instantiate (matched through their __sourceId).
@@ -281,9 +268,6 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   // Script modules (shared code scripts import), keyed by module id. Evaluated lazily on first import
   // and kept for the whole session, so a module's state survives Game.loadScene.
   setScriptModuleProvider(id => ((window as any).CLEO_GAME_MODULES ?? {})[id]);
-  // A pack whose scripts were NOT extracted (Play in window) keeps each node's `script` source, which the
-  // engine compiles at parse, and carries the module SOURCES here, which it compiles on first import.
-  addScriptModuleSources(data.modules);
 
   const table = data.scenes ?? {};
   let currentId = data.entry in table ? data.entry : Object.keys(table)[0];
@@ -308,24 +292,9 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     // Read when the scene loads, so an unvisited scene's meshes are never touched. Into a fresh copy of its
     // JSON, every visit: the manifest's stays refs only, and what this one is inflated with goes with it once
     // the engine has parsed it (and with the engine's objects, once the scene is disposed).
-    await stage(0.1, 'Loading scene data');
-    const json = structuredClone(entry.scene);
-    const chunks = await readChunkSet(source, header, collectSceneRefs(json, data), claimed);
-    await stage(0.3, 'Unpacking models');
-    inflateSceneGeometry(json, chunks);
-    await stage(0.45, 'Unpacking terrain');
-    await inflateTerrainData(json, chunks);
-    await inflateTilemapData(json, chunks);
-    // This scene's GI captures, before its volumes parse: a volume loads its capture instead of capturing again.
-    for (const b of chunks.giBakes) GiBakeRegistry.set(b.id, b.bytes);
-    await stage(0.6, 'Building the scene');
-    const scene = new Scene();
-    // Through the save session: a scene the player comes back to (or a loaded save's) has its Saved nodes
-    // and @save fields put back as it is built. Textures are already registered.
-    parseRuntimeScene(scene, { scene: json, textures: [] }, id, true);
-    // Shared clips are not in the serialized scene by design; retarget after parse, before start.
-    attachSharedAnimations(scene, data);
-    Logger.info(`scene "${entry.name}" nodes=${[...scene.nodes].length}`, 'Player');
+    const built = await buildGameScene(content, id, stage);
+    if (!built) return;
+    const { scene } = built;
     // The scene's own look (exposure, shadows, post), as the editor shows it. A game published before
     // scenes carried one keeps the boot settings throughout.
     engine.renderer.applyRenderSettings(entry.render);
@@ -336,7 +305,7 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     // every time.
     if (outgoing && outgoing !== scene) outgoing.dispose();
     // The captures of the scene just left go with it, unless this one or a template uses them too.
-    const bakesNow = chunks.giBakes.map(b => b.id);
+    const bakesNow = built.giBakeIds;
     for (const bakeId of sceneBakes) if (!permanentBakes.has(bakeId) && !bakesNow.includes(bakeId)) GiBakeRegistry.delete(bakeId);
     sceneBakes = bakesNow;
     // The new scene needs the viewport before its first layout, or the HUD resolves against the
