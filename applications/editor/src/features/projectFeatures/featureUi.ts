@@ -19,6 +19,7 @@ export const FEATURE_ADD_ITEMS: Readonly<Record<string, readonly string[]>> = {
   world2d: ['tilemap', 'camera2D', 'room2D', 'parallaxLayer'],
   physics2d: ['characterBody2D', 'body2D'],
   cloth: ['cloth'],
+  vehicles: ['vehicle'],
   ai: ['navMesh'],
   gameUi: ['uiCanvas', 'uiWorldRoot', 'uiStackColumn', 'uiStackRow', 'uiSpacer', 'uiPanel', 'uiText', 'uiImage', 'uiButton',
            'uiProgressBar', 'uiSlider', 'uiToggle', 'uiTextInput'],

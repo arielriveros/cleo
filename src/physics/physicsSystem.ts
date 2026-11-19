@@ -10,6 +10,7 @@ import { RigidBody, Trigger, triggerState } from "./body";
 import type { TriggerContact } from "./body";
 import { TriggerOverlapPass, TriggerOverlap, pairKey } from "./triggerOverlaps";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
+import type { Vehicle } from "./vehicle";
 import { skipCameraHit, CameraProbeBody, skipRayHit, RayHitBody, RayFilter } from "./cameraRayFilter";
 import { physicsStats, resetPhysicsStats, PhysicsStats } from "./physicsStats";
 import { MotionRecord, MotionConfig, createMotionRecord, sampleMotion, motionConfig } from "./motion";
@@ -227,6 +228,8 @@ export class PhysicsSystem {
   private _overlapCount = new Map<PhysicsBody, number>();
   /** Bodies this system has put to sleep — out of range, or at rest — and what they were doing. */
   private _frozen = new Map<PhysicsBody, FrozenState>();
+  /** Vehicles carried by bodies of this world (see addVehicle). */
+  private readonly _vehicles = new Set<Vehicle>();
   /** When a frozen body was last woken by something else (a hit, an impulse): it gets a grace period. */
   private _wokenAt = new WeakMap<PhysicsBody, number>();
   /** Per `canSleep` body: seconds it has been continuously at rest. */
@@ -386,7 +389,11 @@ export class PhysicsSystem {
       // BEFORE the step: a body frozen this frame must not be integrated by it. (The worker's activation
       // runs in endFrame, just before the step is posted.)
       if (inline) this._updateActivation(deltaTime);
+      // This frame's driver input, into vehicles built where their chassis is now.
+      if (inline) this._syncVehicles();
       const result = this._executor.step(deltaTime, timeScale);
+      // What the step (inline, or the worker's just applied) left them at.
+      this._readVehicles();
       physicsStats.executor = this._executor.kind;
       // What the step reported: inline, as it ran; with the worker, as its result was applied just now.
       this._drainEvents();
@@ -1015,6 +1022,37 @@ export class PhysicsSystem {
   }
 
   /**
+   * Put a vehicle on a dynamic body: its wheels carry, drive and steer it from the next step on, on every
+   * backend (see physics/vehicle.ts). It follows the body through the world: rebuilt if the body leaves and
+   * comes back, idle while it is out. A world clear removes every vehicle.
+   */
+  public addVehicle(chassis: PhysicsBody, vehicle: Vehicle): Vehicle {
+    vehicle._attach(chassis);
+    this._vehicles.add(vehicle);
+    return vehicle;
+  }
+
+  public removeVehicle(vehicle: Vehicle): void {
+    if (!this._vehicles.delete(vehicle)) return;
+    vehicle._detach();
+  }
+
+  /** The vehicles in this world. */
+  public get vehicles(): ReadonlySet<Vehicle> { return this._vehicles; }
+
+  private _syncVehicles(): void {
+    for (const v of this._vehicles) {
+      // Its chassis left the world: the node that put it here adds it again if the body comes back.
+      if (!v.chassis || !this._inWorld.has(v.chassis)) { this.removeVehicle(v); continue; }
+      try { v._sync(); } catch (e) { logScriptError('Physics', e, 'Runtime'); }
+    }
+  }
+
+  private _readVehicles(): void {
+    for (const v of this._vehicles) v._read();
+  }
+
+  /**
    * Record how ground-like each body's best contact is this frame. Must run immediately after the step, while
    * `world.contacts` still describes it — the equations are pooled and rewritten in place, so retain nothing.
    */
@@ -1385,6 +1423,8 @@ export class PhysicsSystem {
     for (const ragdoll of this._ragdolls) ragdoll.destroy();
     this._ragdolls = [];
     this._applyRagdollIterations();
+    for (const vehicle of this._vehicles) vehicle._detach();
+    this._vehicles.clear();
 
     // The engine bodies keep their last state and forget their handles: a body added again later is made
     // afresh. Then every joint and every body goes (see the cannon backend's clear for the traps that used
@@ -1438,6 +1478,8 @@ export class PhysicsSystem {
       // the step moved over, whose inline update already ran it.
       if (!this._activatedThisFrame) this._updateActivation(deltaTime);
       this._activatedThisFrame = false;
+      // The input this frame's scripts set, diffed out with the step.
+      this._syncVehicles();
       this._executor.endFrame(deltaTime, nextTimeScale);
     } catch (e) {
       logScriptError(`Physics`, e, 'Runtime');

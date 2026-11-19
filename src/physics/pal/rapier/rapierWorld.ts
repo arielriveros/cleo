@@ -9,6 +9,9 @@ import type { DescribedWorld } from '../copy/describedWorld';
 import { boundingRadiusOf, collidersAabb, multiply, partShapeFor, rotate } from '../shapeBounds';
 import { fromX, matchedFrame } from '../jointFrames';
 import { rapier } from './load';
+import { RapierVehicle } from './rapierVehicle';
+import { copyState, landState, type VehicleEntry } from '../vehicle/vehicleCopy';
+import { normalizeVehicle, type NormalizedVehicle, type VehicleDesc, type VehicleHandle, type VehicleInput, type VehicleRecord } from '../vehicle/vehicleDesc';
 
 // The Rapier backend (@dimforge/rapier3d-compat, see docs/reference/physics-backends.md for what its spike
 // found). Every layer convention holds as on cannon:
@@ -37,6 +40,8 @@ export const RAPIER_CAPABILITIES: PhysicsCapabilities = {
     profilePhases: ['broadphase', 'narrowphase', 'solve'],
     threadable: true,
     precision: 32,
+    vehicleCasts: ['ray'],
+    nativeDrivetrain: false,
 };
 
 /** Rapier's interaction groups: 16 bits of membership over 16 of filter. */
@@ -111,6 +116,8 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
     /** Rapier collider handle → the body handle it belongs to. */
     private readonly _owner = new Map<number, BodyHandle>();
     private readonly _joints = new Map<number, { joint: ImpulseJoint; record: RapierJointRecord }>();
+    private readonly _vehicles = new Map<number, VehicleEntry<RapierVehicle>>();
+    private _nextVehicle = 1;
     /** Queued events: [kind, a, b] per event. */
     private _events: number[] = [];
     /** Overlapping collider pairs per body pair ("lo,hi"): a pair begins on the first and ends on the last. */
@@ -191,6 +198,7 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
         for (const c of e.colliders) this._owner.delete(c.handle);
         // Rapier removes a body's joints with it.
         for (const [id, j] of this._joints) if (j.record.a === h || j.record.b === h) this._joints.delete(id);
+        for (const [id, v] of [...this._vehicles]) if (v.chassis === h) this.destroyVehicle(id as VehicleHandle);
         this._raw.removeRigidBody(e.body);
         this._entries.delete(h);
         this._forced.delete(e);
@@ -433,11 +441,74 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
         this._joints.delete(j);
     }
 
+    // ---- vehicles ----
+
+    public createVehicle(desc: VehicleDesc): VehicleHandle {
+        return this.createVehicleFromRecord(desc.chassis, normalizeVehicle(desc));
+    }
+
+    /** Build a vehicle from its normalised description (createVehicle's, or a copy's on its own chassis). */
+    public createVehicleFromRecord(chassis: BodyHandle, vehicle: NormalizedVehicle): VehicleHandle {
+        const e = this._entry(chassis);
+        if (e.type !== 'dynamic') throw new Error("physics: a vehicle's chassis must be a dynamic body");
+        const groups = groupsOf(e.group, e.mask);
+        const skip = (collider: Collider): boolean => {
+            const owner = this._owner.get(collider.handle);
+            if (owner === undefined || owner === chassis) return true;
+            const o = this._entries.get(owner);
+            return !o || !o.response || o.sensor;
+        };
+        const id = this._nextVehicle++;
+        this._vehicles.set(id, { input: { forward: 0, right: 0, brake: 0, handBrake: 0 }, landed: null, vehicle: new RapierVehicle(this._raw, e.body, vehicle, groups, skip), chassis });
+        return id as VehicleHandle;
+    }
+
+    public destroyVehicle(v: VehicleHandle): void {
+        const entry = this._vehicles.get(v);
+        if (!entry) return;
+        entry.vehicle.dispose();
+        this._vehicles.delete(v);
+    }
+
+    public setVehicleInput(v: VehicleHandle, input: VehicleInput): void {
+        const e = this._vehicle(v);
+        Object.assign(e.input, input);
+        e.vehicle.setInput(input);
+    }
+
+    public readVehicle(v: VehicleHandle, out: Out): void {
+        const e = this._vehicle(v);
+        if (e.landed) copyState(e.landed, out); else e.vehicle.read(out);
+    }
+
+    public vehicleInputOf(v: VehicleHandle): VehicleInput { return this._vehicle(v).input; }
+
+    public landVehicle(v: VehicleHandle, state: ArrayLike<number>, at: number): void { landState(this._vehicle(v), state, at); }
+
+    /** The vehicles, with what they were built from (for the worker's copy). */
+    public *vehicleRecords(): IterableIterator<[number, VehicleRecord]> {
+        for (const [id, v] of this._vehicles) yield [id, { chassis: v.chassis, vehicle: v.vehicle.vehicle }];
+    }
+
+    private _vehicle(v: VehicleHandle): VehicleEntry<RapierVehicle> {
+        const entry = this._vehicles.get(v);
+        if (!entry) throw new Error(`physics: no vehicle ${v} in this world`);
+        return entry;
+    }
+
     // ---- the step ----
 
     public step(dt: number): void {
         this.onPreSubstep?.(dt);
         this._wakeTouched();
+        if (this._vehicles.size > 0) {
+            // The wheels' rays read the query tree: it must see bodies moved by hand since the last step.
+            this._syncQueries();
+            for (const e of this._vehicles.values()) {
+                e.landed = null;
+                if (this._entries.get(e.chassis)?.enabled) e.vehicle.update(dt);
+            }
+        }
         const w = this._raw;
         w.timestep = dt;
         w.profilerEnabled = this.profile;
@@ -542,6 +613,8 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
         this._bodyList = null;
         this._owner.clear();
         this._joints.clear();
+        // The controllers went with the Rapier world they were made in.
+        this._vehicles.clear();
         this._events = [];
         this._pairCounts.clear();
         this._forced.clear();

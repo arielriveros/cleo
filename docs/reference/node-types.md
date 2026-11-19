@@ -72,6 +72,44 @@ touching: Set<Node>                            // 2D: what is inside
 `onTriggerEnter(other)` / `onTriggerExit(other)` fire on the Trigger and on what came in. `Area2DNode` is a
 deprecated alias of it: an Area 2D loads as a Trigger.
 
+### VehicleNode — `'vehicle'` *(unreleased)*
+
+A vehicle. It stands in its chassis Collider, and the WheelNodes under it are its wheels. It faces its +Z.
+Feature `vehicles`. See [Vehicles](../editor/vehicles.md).
+
+```ts
+drive: 'none' | 'engine' | 'motors'
+maxTorque: number ; minRpm: number ; maxRpm: number ; clutchStrength: number
+gearRatios: number[] ; reverseRatio: number ; finalDrive: number
+shiftUpRpm: number ; shiftDownRpm: number ; shiftTime: number
+limitedSlip: boolean ; antiRoll: number ; maxPitchRoll: number   // degrees
+cast: 'ray' | 'sphere' | 'cylinder'
+autoReverse: boolean ; playerInput: boolean
+throttle: number ; steer: number ; brake: number ; handBrake: number   // the driver, each frame (not saved)
+get speed: number ; get rpm: number ; get gear: number
+get vehicle: Vehicle | null      // built when the scene runs
+get wheels: WheelNode[]
+rebuild(): void                  // after changing wheels or settings in Play
+addWheel(): WheelNode            // at the chassis's next free corner, no mesh
+lean: boolean ; maxLean: number ; leanSpring: number ; leanDamping: number   // maxLean in degrees
+hitchTarget: string | null ; hitchPoint: [x, y, z]   // what tows it (a vehicle's id), where
+get towedBy: Node | null
+applyPreset(id): boolean         // 'car' 'sportsCar' 'kart' 'truck' 'bus' 'offRoad' 'bike' 'trailer'
+```
+
+### WheelNode — `'wheel'` *(unreleased)*
+
+One wheel of a Vehicle, placed at its centre with the suspension fully extended. Its mesh goes under it.
+
+```ts
+radius: number ; width: number ; grip: number
+suspensionTravel: number ; suspensionLength: number
+suspensionFrequency: number ; suspensionDamping: number
+steerAngle: number               // degrees; 0 does not steer
+driven: boolean ; brakeTorque: number ; handBrakeTorque: number   // driven: the Engine drive
+motorTorque: number ; motorTopSpeed: number                         // the Motors drive; top speed in m/s at the rim
+```
+
 Full API: [Node API](../scripting/node-api.md), [Lifecycle](../scripting/lifecycle.md),
 [Motion and physics](../scripting/motion-and-physics.md).
 

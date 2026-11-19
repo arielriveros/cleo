@@ -63,6 +63,7 @@ After that the two halves are independent, and you can read either first:
 | [Node inspector](editor/node-inspector.md) | Every property editor, by node type |
 | [Models and materials](editor/models-and-materials.md) | Importing meshes, retargeting animation, LODs, the material editor, textures |
 | [Physics](editor/physics.md) | Rigid bodies, triggers, colliders, convex hulls, ragdolls |
+| [Vehicles](editor/vehicles.md) | Cars on virtual wheels: engine, gearbox, suspension, tyres, on every backend |
 | [Animation](editor/animation.md) | Clips, state machines and controllers, layers and bone masks, poses, action slots, blend spaces, foot IK, sockets, events, root motion |
 | [AI brains](editor/ai-brains.md) | The `.brain` asset and the Behaviour / Goals / Fuzzy canvases |
 | [AI agents](editor/ai-agents.md) | The Controller node, perception, steering, navmesh baking |

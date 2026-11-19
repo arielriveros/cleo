@@ -136,6 +136,43 @@ bit for bit.
 | Jolt: the engine and the Valley on it; published games carry only their backend | Done |
 | Jolt in the physics worker | Done |
 
+## Vehicles
+
+*(unreleased)* `PhysicsWorld.createVehicle(desc)` puts virtual wheels on a dynamic chassis
+(`pal/vehicle/vehicleDesc.ts`). The description is in SI units and modelled on Jolt's
+`VehicleConstraintSettings`, and every backend builds it with its own native vehicle:
+
+| | Jolt | Rapier | cannon |
+|---|---|---|---|
+| Native vehicle | `VehicleConstraint` with `WheeledVehicleController` | `DynamicRayCastVehicleController` (Bullet's) | `RaycastVehicle` (Bullet's) |
+| Ground found by | ray, sphere or cylinder cast | ray | ray, through the backend's filtered query |
+| Suspension | soft constraint, by frequency and damping | Bullet spring, its stiffness and damping set from the same frequency and damping on the mass the wheel carries | as Rapier |
+| Tyres | slip curves; grip clamped per axis | Bullet friction, capped at the curves' grip | as Rapier |
+| Engine, gearbox, differentials | native | the shared model (`pal/vehicle/raycastDrive.ts`) | the shared model |
+| Anti-roll bars | native | shared | shared |
+| `maxPitchRollAngle` | native | shared (`pal/vehicle/leanController.ts`) | shared |
+| `lean` (motorcycles) | shared, on Jolt's `MotorcycleController` (its steering limit) with its own lean controller off | shared | shared |
+
+The shared model follows Jolt's controller closely. It has the torque curve, idle and redline, and an
+automatic gearbox with switch time, clutch release and latency, which holds its upshift while a driven
+wheel spins. Wheels spin up past the grip they have, brakes and the hand brake are torques up to the
+tyre's sliding grip, and coasting brings engine drag. Rapier shares each wheel's rolling friction among
+every wheel on the ground, so the brakes there would let a car creep down a slope; the shared model holds
+the rest of each brake itself.
+
+The lean controller is one model on all three: it aims at the lean that balances the turn the steering asks
+for (tan φ = v² · tan δ / (L · g)) and pulls the chassis toward it with a spring and damper integrated
+implicitly on its roll inertia. Jolt's own lean controller launched our chassis off the ground on its first
+contact, with Jolt's default settings as much as with ours, so it is switched off and Jolt keeps only its
+steering limit. Aiming at where the tyres' forces point (Jolt's model) rings a Bullet-port bike over: its
+contact slides out as it tips, and the aim follows the tilt it should correct.
+
+`tests/pal/vehicle.test.ts` holds the backends to one description. It checks that each settles, drives,
+reverses, brakes, steers, holds on a slope with the hand brake, goes with its chassis, and copies into
+the physics worker (vehicles copy like joints; each frame's input goes with the step, and each step's
+wheel states come back with the bodies). It also checks that the backends ride within 1 cm of each other,
+reach speeds within 25% of each other, and stop within 15% of each other's distance.
+
 ## Rapier compared with cannon
 
 A project picks Rapier in Options ▸ Engine ▸ Runtime. What differs from cannon:

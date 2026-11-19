@@ -1,4 +1,5 @@
 import type { PhysicsBackendKind } from './types';
+import type { VehicleCast } from './vehicle/vehicleDesc';
 
 /**
  * What a physics backend can and cannot do, as the backend itself reports it. The engine reads these
@@ -24,6 +25,13 @@ export interface PhysicsCapabilities {
     readonly threadable: boolean;
     /** Bits of float it simulates in: 64 (JavaScript numbers) or 32 (a WASM engine's single precision). */
     readonly precision: 64 | 32;
+    /** What a vehicle's wheels can find the ground with (a ray always). */
+    readonly vehicleCasts: readonly VehicleCast[];
+    /**
+     * Its vehicles' engine, gearbox, differentials and tyre slip are the backend's own (Jolt). False: the
+     * shared model's (vehicle/raycastDrive.ts) over a native raycast vehicle.
+     */
+    readonly nativeDrivetrain: boolean;
 }
 
 /** The boot log line: `physics cannon · capsule compound · groups 32-bit · ...`. */

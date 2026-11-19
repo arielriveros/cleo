@@ -35,6 +35,7 @@ const FEATURE_ROOTS: Record<string, string[]> = {
   landscape: ['src/core/scene/nodes/landscapeNode.ts', 'src/terrain/terrain.ts', 'src/terrain/foliage.ts', 'src/graphics/render/foliage.ts'],
   gameUi: ['src/core/scene/nodes/ui/uiNode.ts', 'src/core/scene/nodes/ui/uiWidgets.ts', 'src/core/uiLayout.ts'],
   ai: ['src/core/scene/nodes/navMeshNode.ts', 'src/ai/navMesh.ts', 'src/ai/perception.ts', 'src/ai/goals.ts'],
+  vehicles: ['src/core/scene/nodes/vehicleNode.ts', 'src/core/scene/nodes/wheelNode.ts', 'src/physics/vehicle.ts'],
 };
 
 describe.skipIf(!built)('the published player build', () => {

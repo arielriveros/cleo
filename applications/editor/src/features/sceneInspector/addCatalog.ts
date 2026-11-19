@@ -61,6 +61,7 @@ import {
   Body2DNode,
   ColliderNode,
   TriggerNode,
+  VehicleNode,
   LIGHT_UNIT,
   newLightOptions,
 } from 'cleo'
@@ -79,7 +80,7 @@ import {
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, AreaLightIcon, LightProbeIcon, ExposureVolumeIcon, GiVolumeIcon, VolumetricFogIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon, WeatherIcon,
-  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
+  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon, VehicleIcon,
   SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon, CharacterBody2DIcon, Collider2DIcon, ColliderIcon,
 } from './nodeIcons'
 import { createLandscapeNode } from '../../utils/landscapeSlots'
@@ -536,6 +537,21 @@ export const ADD_ITEMS: AddItem[] = [
     create: async () => new WeatherNode('weather', { size: [40, 20, 40] }),
   },
   {
+    // A chassis to build on: a 1200 kg box Collider holding an empty Vehicle. No meshes, no wheels, no power:
+    // wheels and the drive are added from the Vehicle's Properties, the meshes are yours (docs/editor/vehicles.md).
+    id: 'vehicle', label: 'Vehicle', icon: VehicleIcon, category: 'simulation',
+    create: async () => {
+      const chassis = new ColliderNode('vehicle')
+      chassis.mass = 1200
+      chassis.linearDamping = 0
+      chassis.angularDamping = 0
+      chassis.simulationMode = 'always'
+      chassis.shapes = [{ type: 'box', width: 1.8, height: 0.6, depth: 4, offset: [0, 0, 0], rotation: [0, 0, 0] }]
+      chassis.addChild(new VehicleNode('vehicle'))
+      return chassis
+    },
+  },
+  {
     // A banner held along its top edge. Under a character it becomes a cape (Ride On: Chest).
     id: 'cloth', label: 'Cloth', icon: ClothIcon, category: 'simulation',
     create: async () => new ClothNode('cloth'),
@@ -650,7 +666,8 @@ function resolveUIParent(item: AddItem, parent: Node, ctx: AddContext, created: 
 export async function addItemTo(item: AddItem, parent: Node, ctx: AddContext): Promise<Node> {
   const node = await item.create(ctx);
   resolveUIParent(item, parent, ctx, node).addChild(node); // Node.addChild emits SCENE_CHANGED itself
-  // A Character comes in its Collider: the Character is what you go on to set up.
-  ctx.eventEmitter.emit('SELECT_NODE', (node.character ?? node).id);
+  // A Character (a Vehicle) comes in its Collider: the Character (the Vehicle) is what you go on to set up.
+  const setUp = node.character ?? node.children.find(c => c.nodeType === 'vehicle') ?? node;
+  ctx.eventEmitter.emit('SELECT_NODE', setUp.id);
   return node;
 }

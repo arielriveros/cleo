@@ -3,6 +3,7 @@ import type {
     BodyDesc, BodyHandle, ColliderDesc, ColliderPart, JointDesc, JointHandle, MassProperties, Out, PhysicsBackendKind,
     PhysicsEventKind, RayHit, RayOptions, StepProfile, V3,
 } from './types';
+import type { VehicleDesc, VehicleHandle, VehicleInput } from './vehicle/vehicleDesc';
 
 /**
  * A physics world on some backend: the one interface the engine simulates through (see types.ts for the
@@ -104,6 +105,19 @@ export interface PhysicsWorld {
 
     createJoint(desc: JointDesc): JointHandle;
     destroyJoint(joint: JointHandle): void;
+
+    // ---- vehicles ----
+
+    /**
+     * A vehicle on a dynamic chassis (see vehicle/vehicleDesc.ts): virtual wheels that spring, grip and drive
+     * it every substep, inside {@link step}. It goes with its chassis (destroyBody) and with {@link clear}.
+     */
+    createVehicle(desc: VehicleDesc): VehicleHandle;
+    destroyVehicle(vehicle: VehicleHandle): void;
+    /** What its driver asks from now on, every substep until changed. */
+    setVehicleInput(vehicle: VehicleHandle, input: VehicleInput): void;
+    /** Its state after the last substep, as vehicle/vehicleState.ts lays it out (vehicleStateSize numbers). */
+    readVehicle(vehicle: VehicleHandle, out: Out): void;
 
     // ---- the step ----
 

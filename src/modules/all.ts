@@ -17,8 +17,9 @@ import fluids from "./fluids/index";
 import decals from "./decals/index";
 import cloth from "./cloth/index";
 import water from "./water/index";
+import vehicles from "./vehicles/index";
 
 /** The feature modules, in a stable order (installFeatures puts dependencies first). */
-export const ALL_FEATURE_MODULES = [sequencer, water, cloth, decals, fluids, volumetricClouds, gi, volumetricFog, world2d, physics2d, particles, weather, landscape, gameUi, ai];
+export const ALL_FEATURE_MODULES = [sequencer, water, cloth, decals, fluids, volumetricClouds, gi, volumetricFog, world2d, physics2d, particles, weather, landscape, gameUi, ai, vehicles];
 
 installFeatures(ALL_FEATURE_MODULES);

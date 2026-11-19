@@ -184,10 +184,12 @@ export class PhysicsWorkerCore {
         const submerged = new Float64Array(this._submerged.size * 3);
         let s = 0;
         for (const [key, fraction] of this._submerged) { submerged[s++] = Math.floor(key / 1048576); submerged[s++] = key % 1048576; submerged[s++] = fraction; }
+        const vehicles = this._replica.reportVehicles?.();
         return {
             kind: 'snapshot', epoch: msg.epoch, seq: msg.seq, dt: msg.dt, time: world.time,
             bodies, bodyCount, contacts, contactCount: count,
             events: Int32Array.from(this._events), submerged, stats,
+            ...(vehicles ? { vehicles } : {}),
         };
     }
 
@@ -198,7 +200,9 @@ export class PhysicsWorkerCore {
 
     /** Typed arrays a snapshot can hand over without copying. */
     public static transfers(s: Snapshot): ArrayBuffer[] {
-        return [s.bodies.buffer, s.contacts.buffer, s.events.buffer, s.submerged.buffer] as ArrayBuffer[];
+        const buffers = [s.bodies.buffer, s.contacts.buffer, s.events.buffer, s.submerged.buffer] as ArrayBuffer[];
+        if (s.vehicles) buffers.push(s.vehicles.buffer as ArrayBuffer);
+        return buffers;
     }
 
     /** Buoyancy, once per substep: PhysicsSystem._applyWater, from the specs the main thread sent. */

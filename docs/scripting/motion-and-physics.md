@@ -467,6 +467,69 @@ of by clips. This is the usual stand-in for a death animation when you do not ha
 
 > **Keep the twist limit loose.** cannon's twist constraint jitters when it is tight.
 
+## Vehicles
+
+*(unreleased)* A [Vehicle node](../editor/vehicles.md) drives its chassis Collider on its Wheels. A script
+attached to it (or to anything that can find it) sets the driver's input each frame:
+
+```ts
+import { Input, VehicleNode } from 'cleo'
+
+export default class Drive extends VehicleNode {
+  onUpdate() {
+    const [steer, forward] = Input.vector('Move')
+    this.throttle = forward          // -1 .. 1; held against the way it rolls, it brakes (autoReverse)
+    this.steer = steer               // -1 left .. 1 right
+    this.handBrake = Input.pressed('Jump') ? 1 : 0
+  }
+}
+```
+
+What it reads back after each step: `speed` (forward, m/s), `rpm`, `gear` (`-1` reverse, `0` neutral),
+and per wheel `vehicle.wheel(i)`, which gives `grounded`, `suspensionLength`, `compression` (0–1),
+`steerAngle`, `rotation`, `angularVelocity`, `contactPoint`, `contactNormal`, `longitudinalSlip` and
+`lateralSlip`.
+
+A vehicle can also be put on any dynamic body from code, without nodes:
+
+```ts
+import { Vehicle } from 'cleo'
+
+const car = new Vehicle({
+  wheels: [
+    { position: [0.8, 0, 1.3], maxSteerAngle: 0.5 },     // attachment points, chassis frame, metres
+    { position: [-0.8, 0, 1.3], maxSteerAngle: 0.5 },
+    { position: [0.8, 0, -1.3], maxSteerAngle: 0 },
+    { position: [-0.8, 0, -1.3], maxSteerAngle: 0 },
+  ],
+  differentials: [{ leftWheel: 2, rightWheel: 3 }],
+})
+this.scene.physics.addVehicle(chassisBody, car)
+car.throttle = 1
+```
+
+A preset lays a Vehicle node out in one call: its settings, wheels and chassis (`VEHICLE_PRESETS` lists them):
+
+```ts
+vehicle.applyPreset('bike')        // two wheels in line, leaning into turns
+trailer.applyPreset('trailer')
+trailer.hitchTarget = car.id       // towed from the next Play
+```
+
+With electric motors instead of an engine, give the wheels that drive a `motorTorque` (N·m) and a
+`motorMaxSpeed` (rad/s at the wheel), and set `drive: 'motors'`:
+
+```ts
+const rover = new Vehicle({
+  drive: 'motors',
+  wheels: [[0.6, 0, 0.8], [-0.6, 0, 0.8], [0.6, 0, -0.8], [-0.6, 0, -0.8]]
+    .map(position => ({ position: position as [number, number, number], motorTorque: 200, motorMaxSpeed: 20 })),
+})
+```
+
+Angles in a description are radians, and its frames are the chassis body's (measured from its node origin).
+The defaults are Jolt's. `scene.physics.removeVehicle(car)` takes it off.
+
 ## Character body setup, measured
 
 The shipped third-person character documents this in detail

@@ -4,7 +4,7 @@ import { useCleoEngine } from '../EngineContext'
 import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
   CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, ExposureVolumeIcon, GiVolumeIcon, VolumetricFogIcon, SkyboxIcon, SkyLightIcon, CloudsIcon, WindIcon, WeatherIcon,
-  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
+  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon, VehicleIcon, WheelIcon,
   SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon, CharacterBody2DIcon, Collider2DIcon, ColliderIcon, TriggerIcon,
   TemplateIcon,
 } from './nodeIcons'
@@ -27,7 +27,7 @@ const TYPE_ICONS: Record<string, () => JSX.Element> = {
   landscape: LandscapeIcon,
   // One glyph for both modes: the tree shows what a node IS, and ambient vs spatial is a property of it.
   sound: SoundIcon,
-  particleSystem: ParticlesIcon, forceField: ForceFieldIcon, cloth: ClothIcon, waterVolume: WaterVolumeIcon, occlusionVolume: OcclusionVolumeIcon,
+  particleSystem: ParticlesIcon, forceField: ForceFieldIcon, cloth: ClothIcon, vehicle: VehicleIcon, wheel: WheelIcon, waterVolume: WaterVolumeIcon, occlusionVolume: OcclusionVolumeIcon,
   sequence: SequenceIcon,
   camera2D: Camera2DIcon, room2D: Room2DIcon, parallaxLayer: ParallaxLayerIcon,
   characterBody2D: CharacterBody2DIcon, body2D: Collider2DIcon,

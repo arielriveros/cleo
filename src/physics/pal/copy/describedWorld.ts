@@ -1,6 +1,7 @@
 import type { ReplicaFloater } from '../replication';
 import type { BodyDesc, BodyHandle, JointHandle, Out, PhysicsEventKind } from '../types';
 import type { PhysicsWorld } from '../world';
+import type { CopiedVehicles } from '../vehicle/vehicleCopy';
 
 // A world copied into the physics worker BY DESCRIPTION (describedMirror.ts, describedReplica.ts): each body
 // as the description it was made from, each joint as the record it was built from, so the worker's copy is
@@ -14,7 +15,7 @@ export interface DescribedJointRecord {
     b: BodyHandle;
 }
 
-export interface DescribedWorld<J extends DescribedJointRecord = DescribedJointRecord> extends PhysicsWorld {
+export interface DescribedWorld<J extends DescribedJointRecord = DescribedJointRecord> extends PhysicsWorld, CopiedVehicles {
     /** What a body is made of now, as a description a copy can build it from (at its current pose). */
     descOf(h: BodyHandle): BodyDesc;
     /** Bumped by every change to what the body is made of (colliders, layers, response, reporting). */

@@ -2,6 +2,7 @@ import { Body, Constraint, Shape } from 'cannon-es';
 import type { BodyHandle } from '../types';
 import type { ReplicaFloater, WorldReplica } from '../replication';
 import { CannonWorld } from './cannonWorld';
+import { VehicleReplica } from '../vehicle/vehicleCopy';
 import {
     BODY_ROW, STATE_STRIDE, applyConfig, decodeConstraint, decodeShape, writeState, type CannonChanges, type ShapeRef,
 } from './replicaCodec';
@@ -18,9 +19,10 @@ export class CannonReplica implements WorldReplica {
     private readonly _constraints = new Map<number, Constraint>();
     private readonly _shapes = new Map<number, Shape>();
     private readonly _floater: ReplicaFloater = { mass: 0, isTrigger: false, collisionResponse: true, character: false };
+    private readonly _vehicles = new VehicleReplica(this.world, slot => this._bodies[slot]?.id as BodyHandle | undefined);
 
     public receive(changes: unknown): void {
-        const { ops, writes, writeCount } = changes as CannonChanges;
+        const { ops, writes, writeCount, vehicles } = changes as CannonChanges;
         const world = this.world;
         for (const op of ops) {
             switch (op.op) {
@@ -63,7 +65,10 @@ export class CannonReplica implements WorldReplica {
             const b = this._bodies[writes[at]];
             if (b) writeState(b, writes, at + 2, writes[at + 1]);
         }
+        this._vehicles.receive(vehicles);
     }
+
+    public reportVehicles(): Float64Array | undefined { return this._vehicles.report(); }
 
     public slotOf(h: BodyHandle): number | undefined {
         return (this.world.bodyOf(h) as ReplicaBody | undefined)?.__slot;
@@ -105,6 +110,7 @@ export class CannonReplica implements WorldReplica {
         this._bodies.length = 0;
         this._constraints.clear();
         this._shapes.clear();
+        this._vehicles.clear();
     }
 
     private _shapeOf = (ref: ShapeRef): Shape => {

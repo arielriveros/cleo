@@ -197,6 +197,12 @@ export const FEATURES: readonly FeatureDef[] = [
         nodeTypes: ['cloth'],
         apiNames: ['ClothNode'],
     },
+    {
+        id: 'vehicles', label: 'Vehicles', group: 'simulation',
+        description: 'Cars, trucks and karts: a body carried, driven and steered by its wheels.',
+        nodeTypes: ['vehicle', 'wheel'],
+        apiNames: ['VehicleNode', 'WheelNode', 'Vehicle'],
+    },
 
     // --- Gameplay --------------------------------------------------------------------------------------------
     {
