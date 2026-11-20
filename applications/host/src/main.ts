@@ -1,196 +1,60 @@
 // cleo-host (docs/design/netsync.md §7): a NetSync dedicated host. Runs a game headless at a fixed tick rate and
-// accepts peers over WebTransport and WebSocket. Peers that join are sent the game's state every tick (phase 3:
-// spawns, removals and every synced node's transform; src/netsync/sync).
+// accepts players over WebTransport and WebSocket. Every setting is a flag or an environment variable (the host
+// contract, settings.ts); the game's own NetSync settings fill in the rest.
 //
 //   npm start -- --game path/to/game.bin [--scripts path/to/game.scripts.js]
-//   npm start -- --example ../editor/public/examples/firing-line
-//   npm start                                     (no game: a session only, as in phase 1)
-//
-//   [--wt-port 4433] [--ws-port 4480] [--tick-rate 30] [--max-peers 16] [--physics jolt|rapier|cannon]
-//   [--player-template Player] [--spawn x,y,z]   each joining peer gets a copy of that template to drive
-//   [--trust coop|versus]                         how far peers' carried props and shot claims are trusted
-//   [--serve]                                     with --example: publish it as a web game too, serve it on the
-//                                                 WebSocket port and print a link that opens it joined to this host
+//   npm start -- --example ../editor/public/examples/sandbox --serve      (development: publish, host and serve it)
+//   npm start                                                              (no game: a session only)
 
-import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AnimHost, CarryHost, HostSession, LagCompensator, RemoteControl, ScriptHost, SyncHost, WeaponHost, hashContent } from '../../../src/netsync';
-import type { ControllerNode, Node } from 'cleo';
-import { cachedCertificate } from './devCertificate';
-import { HostListener } from './hostListener';
-import { HostRuntime } from './hostRuntime';
-import { packExampleGame } from './exampleGame';
-import { buildExampleWeb, type WebBuild } from './webBuild';
+import { cachedCertificate, generateCertificate } from './devCertificate';
+import { HostApp, createLog } from './hostApp';
+import { readSettings } from './settings';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const args = process.argv.slice(2);
-const arg = (name: string, fallback?: string): string | undefined => {
-    const i = args.indexOf(name);
-    return i >= 0 && i + 1 < args.length ? args[i + 1] : fallback;
-};
-const log = (line: string) => console.log(`[${new Date().toISOString().slice(11, 23)}] ${line}`);
-const tickRate = Number(arg('--tick-rate', '30'));
+const settings = readSettings(process.argv.slice(2), process.env);
+const log = createLog(settings.log);
 
-// ----- the game ------------------------------------------------------------------------------------------------
+// Development keeps one certificate for its 14 days (a browser tab can be reloaded against the same hash); a
+// deployed host makes its own each start (it lives for a session, and its hash goes out with the allocation).
+const certificate = settings.example ? await cachedCertificate(path.join(here, '..', '.cache')) : await generateCertificate();
 
-let runtime: HostRuntime | null = null;
-let contentHash = arg('--content', 'dev')!;
-const gamePath = arg('--game');
-const examplePath = arg('--example');
-let web: WebBuild | null = null;
-if (gamePath || examplePath) {
-    let bin: Uint8Array;
-    let scripts: string | undefined;
-    if (gamePath) {
-        bin = new Uint8Array(readFileSync(gamePath));
-        const scriptsPath = arg('--scripts') ?? path.join(path.dirname(gamePath), 'game.scripts.js');
-        if (existsSync(scriptsPath)) scripts = readFileSync(scriptsPath, 'utf8');
-    } else if (args.includes('--serve')) {
-        log(`publishing ${examplePath} as a web game`);
-        web = await buildExampleWeb(examplePath!);
-        bin = web.bin;
-        scripts = web.scripts;
-    } else {
-        log(`packing ${examplePath}`);
-        bin = await packExampleGame(examplePath!);
-    }
-    const t0 = performance.now();
-    runtime = await HostRuntime.open({ bin, scripts }, { tickRate, physicsBackend: arg('--physics'), logging: args.includes('--verbose') });
-    // Peers must run exactly this game: the session refuses a peer whose content hash differs. The pack carries
-    // its own fingerprint; an older one is hashed whole.
-    contentHash = runtime.contentHash ?? await hashContent([bin]);
-    log(`game loaded in ${Math.round(performance.now() - t0)} ms: scene "${runtime.sceneName}", ${[...runtime.scene.nodes].length} nodes, physics ${runtime.engine.physics.backend}`);
-    runtime.onSceneStarted = (name) => log(`scene "${name}" started`);
-}
+const app = await HostApp.start(settings, { certificate, log });
+const { listener } = app;
 
-// ----- the session -----------------------------------------------------------------------------------------------
-
-const session = new HostSession({ contentHash, tickRate, maxPeers: Number(arg('--max-peers', '16')) });
-session.on('join', (p) => log(`peer ${p.id} joined (${p.name || 'unnamed'}) over ${p.linkKind}`));
-session.on('drop', (e) => log(`peer ${e.peer.id} dropped: ${e.reason} — seat held ${session.reconnectGraceMs} ms`));
-session.on('resume', (p) => log(`peer ${p.id} is back over ${p.linkKind}`));
-session.on('leave', (e) => log(`peer ${e.peer.id} left: ${e.reason}`));
-
-const certificate = await cachedCertificate(path.join(here, '..', '.cache'));
-const listener = await HostListener.start({
-    certificate,
-    webTransportPort: Number(arg('--wt-port', '4433')),
-    webSocketPort: Number(arg('--ws-port', '4480')),
-    onLink: (link) => session.accept(link),
-    log,
-    // --serve: the published game, from memory, on this port.
-    onHttp: (_req, res, url) => {
-        if (!web) return false;
-        const file = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
-        const body = web.files.get(file);
-        if (!body) return false;
-        res.writeHead(200, { 'content-type': contentType(file), 'cache-control': 'no-store' });
-        res.end(body);
-        return true;
-    },
-});
-
-// Tick 0 of the game is tick 0 of the session clock, so a tick number means the same moment to both.
-if (runtime) {
-    // Possession: with --player-template, each joining peer gets a copy of that template (a Collider, Character
-    // and Controller, usually) to drive, spread out from --spawn; it goes when the peer leaves.
-    const playerTemplate = arg('--player-template');
-    const spawnAt = (arg('--spawn', '0,1,0') ?? '0,1,0').split(',').map(Number);
-    const characters = new Map<number, Node>();
-    const spawnedControllers = new Set<ControllerNode>();
-    const subtree = (root: Node): Node[] => [root, ...root.children.flatMap(subtree)];
-    const remote = playerTemplate ? new RemoteControl(session, {
-        possess: (peer): ControllerNode | null => {
-            // A character the level placed for a player, while one is free; then a new copy of the template.
-            // (One a player already drives is 'remote', so 'player' means free.)
-            const placed = [...runtime!.scene.controllers].find((c: ControllerNode) => c.controlSource === 'player' && !!c.possessed && !spawnedControllers.has(c));
-            if (placed) { log(`peer ${peer.id} drives the level's "${placed.possessed!.name}"`); return placed; }
-            const root = runtime!.scene.instantiate(playerTemplate, { position: [spawnAt[0] + peer.id * 2, spawnAt[1], spawnAt[2]] });
-            const controller = root ? subtree(root).find((n) => n.nodeType === 'controller') as ControllerNode | undefined : undefined;
-            if (!root || !controller) { log(`--player-template "${playerTemplate}" has no Controller in it; peer ${peer.id} spectates`); return null; }
-            characters.set(peer.id, root);
-            spawnedControllers.add(controller);
-            log(`peer ${peer.id} drives a new "${playerTemplate}"`);
-            return controller;
-        },
-        release: (peer, controller) => {
-            // The level's own character goes back to waiting for a player; a spawned copy goes.
-            if (!spawnedControllers.has(controller)) { controller.controlSource = 'player'; return; }
-            spawnedControllers.delete(controller);
-            const root = characters.get(peer.id);
-            characters.delete(peer.id);
-            if (root?.scene) runtime!.scene.removeNode(root);
-        },
-    }) : null;
-    const sync = new SyncHost(session, () => runtime!.scene, {
-        sceneKey: () => runtime!.sceneName,
-        focusOf: (peerId) => remote?.controllerOf(peerId)?.possessed?.worldPosition ?? null,
-    });
-    // this.net, @synced and @netcall for the game's scripts.
-    const scripts = new ScriptHost(session, sync, () => runtime!.scene, { ownerOf: (node) => remote?.ownerOf(node) ?? 0 });
-    // Carrying and weapons work through each peer's character, so they come with possession.
-    const trust = arg('--trust', 'coop') === 'versus' ? 'versus' : 'coop';
-    const pawnOf = (peerId: number) => remote?.controllerOf(peerId)?.possessed ?? null;
-    const carry = remote ? new CarryHost(session, sync, { pawnOf, trust, gravity: () => runtime!.engine.physics.gravity }) : null;
-    const lag = remote ? new LagCompensator(sync) : null;
-    let lastTick = 0;
-    if (remote && lag) new WeaponHost(session, sync, lag, () => runtime!.scene, {
-        pawnOf, trust, physics: () => runtime!.engine.physics, currentTick: () => lastTick,
-        gravity: () => runtime!.engine.physics.gravity,
-        onHit: (h) => log(`peer ${h.peer.id} hit "${h.node.name}" with ${h.weapon}${h.claimed ? ' (claimed)' : ''}`),
-    });
-    if (remote) runtime.onBeforeTick = (tick) => { remote.beforeTick(tick); carry?.beforeTick(tick, 1 / tickRate); };
-    // Animation level of detail by distance to the players' characters.
-    runtime.focusPoints = () => [...session.peers.keys()].map((id) => remote?.controllerOf(id)?.possessed?.worldPosition).filter((p): p is any => !!p);
-    // Followed characters' animators: parameters and events.
-    const anim = new AnimHost(session, sync);
-    runtime.start(performance.now() - session.timeMs());
-    let last = 0;
-    runtime.onTick = (tick) => {
-        lastTick = tick;
-        lag?.record(tick);
-        sync.tick(tick);
-        scripts.tick();
-        anim.tick(tick);
-        if (tick - last < tickRate * 10) return;
-        last = tick;
-        const s = runtime!.stats();
-        const peers = [...session.peers.values()].map((p) => `${p.id}:${p.connected ? p.linkKind : 'held'}`).join(' ') || 'none';
-        const bytes = [...session.peers.values()].map((p) => sync.peerStats(p.id)?.maxBytesPerTick ?? 0);
-        log(`tick ${tick}: ${s.meanMs} ms mean, ${s.p95Ms} p95, ${s.maxMs} max (budget ${Math.round(1000 / tickRate)}), skipped ${s.skipped}; ` +
-            `${sync.syncedCount} synced; peers ${peers}${bytes.length ? `, peak ${Math.max(...bytes)} B/tick` : ''}`);
-    };
-}
-
-console.log(`cleo-host (NetSync phase 8)
+if (settings.log === 'text') {
+    console.log(`cleo-host
   WebTransport  udp/${listener.webTransportPort}  /netsync   cert sha-256 ${certificate.hash} (expires ${certificate.notAfter})
   WebSocket     tcp/${listener.webSocketPort}  /ws
-  Endpoint      http://localhost:${listener.webSocketPort}/endpoint  (a HostEndpoint for PeerSession.join)
-  Session       ${session.tickRate} Hz, ${session.maxPeers} seats, content ${contentHash.slice(0, 16)}…
-  Game          ${runtime ? `"${runtime.sceneName}" running headless` : 'none (session only)'}`);
-
-if (web) {
-    const q = new URLSearchParams({
-        wt: `https://localhost:${listener.webTransportPort}/netsync`, hash: certificate.hash, ws: `ws://localhost:${listener.webSocketPort}/ws`,
-    });
-    console.log(`  Play          http://localhost:${listener.webSocketPort}/?${q}
+  Control       ${app.controlPort ? `http://localhost:${app.controlPort}  /healthz /readyz /status /cert-hash, POST /allocate` : 'off'}
+  Session       ${app.session.tickRate} Hz, ${app.session.maxPeers} seats, ${app.state}${app.sessionSpec ? ` (${app.sessionSpec.id})` : ''}, lifecycle ${app.lifecycle.name}${settings.tokenKey ? ', join tokens required' : ''}
+  Game          ${app.runtime ? `"${app.runtime.sceneName}" running headless` : 'none (session only)'}`);
+    if (app.web) {
+        const q = new URLSearchParams({
+            wt: `https://localhost:${listener.webTransportPort}/netsync`, hash: certificate.hash, ws: `ws://localhost:${listener.webSocketPort}/ws`,
+        });
+        console.log(`  Play          http://localhost:${listener.webSocketPort}/?${q}
                 (add &transport=websocket to play over the fallback)`);
+    }
+} else {
+    log('info', 'started', {
+        udpPort: listener.webTransportPort, tcpPort: listener.webSocketPort, controlPort: app.controlPort,
+        certHash: certificate.hash, state: app.state, session: app.sessionSpec?.id, lifecycle: app.lifecycle.name,
+    });
 }
 
-function contentType(file: string): string {
-    const ext = file.slice(file.lastIndexOf('.') + 1);
-    return ({ html: 'text/html', js: 'text/javascript', json: 'application/json', wasm: 'application/wasm', css: 'text/css' } as Record<string, string>)[ext]
-        ?? 'application/octet-stream';
-}
-
-const shutdown = async (signal: string) => {
-    log(`${signal}: closing`);
-    runtime?.dispose();
-    session.close('host shutting down');
-    await new Promise((r) => setTimeout(r, 300));
-    await listener.close();
+// SIGTERM is the platform's "drain": no new players, end the session, exit within the grace. A second signal (or
+// Ctrl+C) stops at once.
+let stopping = false;
+const stopNow = async (signal: string) => {
+    log('info', `${signal}: stopping`);
+    await app.close();
     process.exit(0);
 };
-process.on('SIGINT', () => void shutdown('SIGINT'));
-process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGTERM', () => {
+    if (stopping) return void stopNow('SIGTERM');
+    stopping = true;
+    app.drain('SIGTERM');
+});
+process.on('SIGINT', () => void stopNow('SIGINT'));

@@ -1,6 +1,6 @@
 # NetSync — online multiplayer for Cleo (plan)
 
-Status: **phase 9 in progress (9a: browser peer runtime done)** (phase 0 open: Safari; browser peer runtime open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
+Status: **phase 9 in progress (9a browser runtime, 9b host contract done)** (phase 0 open: Safari; browser peer runtime open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
 Target: **physics sandbox shooter — co-op PvE (≤ 50 AI) and 8v8 deathmatch with bots, ≤ 16 peers** ·
 Started 2026-11-19
 
@@ -605,7 +605,7 @@ Phases 0–3 are the foundation; 4–6 make the target game playable; 7–9 make
 | 7 | **Done (2026-11-19).** Four game scripts, written with nothing but the new surface, run on a host and two peers at 150 ms RTT and 5 % loss: a door any player opens (`@netcall({ to: 'host', anyone: true })`, `@synced({ onChange })`), a gun only its owner fires (`'host'`) whose shot flashes everywhere (`'all'`, unreliable) and whose hint reaches its owner alone (`'owner'`), a pickup the host scores and removes, and a scoreboard with a synced object and a synced node reference. `this.net` answers host / peer / offline and ownership correctly; a player's event reaches the host and the other players; a late joiner gets every synced field. | `src/core/net/sceneNet.ts` (`SceneNet`, `NodeNet`), `scene.net`, `node.net`, `@synced` / `@netcall` in `cleo/decorators`, `Game.random` / `seedRandom`, `Net`; `src/netsync/sync/scriptSync.ts` (`ScriptHost`, `ScriptPeer`); `RemoteControl.ownerOf`; editor `@` completion; tests `tests/netsyncScripting.test.ts`, `applications/host/tests/scripts.test.ts` |
 
 | 8 | **Done (2026-11-19).** A followed player's character, watched by another player at 150 ms RTT and 5 % loss while it runs, sprints, strafes and stops: its animator is in the host's state on 100 % of frames, its speed parameter is the host's to 0.015 m/s on average, and the animation's speed matches the character's motion to 0.14 m/s (no foot slide); an action the host plays shows on the watcher while it draws that very tick (225 → 225.4); a state forced away comes back. 27 B/tick of parameters. The 50-AI host budget: Firing Line with 50 fighters ~22 ms a tick mean (was ~26), p95 ~37 (was 45–67). | `src/netsync/sync/animSync.ts` (`AnimHost`, `AnimPeer`); `Animator.forceState`; `SyncPeer.renderTick` measured from the newest state that can have arrived; `Scene.aiDetail` + `Scene.takePathSearch`; `HostRuntime` AI detail and animation LOD (`focusPoints`); tests `applications/host/tests/anim.test.ts`, `hostRuntime.test.ts` |
-| 9 | **In progress.** 9a done (2026-11-20): the browser peer runtime. Two Chrome windows joined the Sandbox on `cleo-host --example … --serve`, one over WebTransport, one forced onto the WebSocket fallback: each drove its character with the keyboard (7 m and 6 m) and saw the other's within 1 cm of where the host has it; the WebTransport player's prediction corrected 22 of 141 host states (p95 2.5 cm, max 6 cm) at 6 ms RTT. Still to come: 9b host contract, 9c allocator + gateway, 9d editor (Play › Multiplayer, inspector, settings, debugger), 9e Publish host, 9f guides and examples. | `src/netsync/client/` (`NetSyncClient`, `PeerFrames`); player `boot.tsx` `netsync` option and `netsyncJoin.ts` (`?join=` / `?wt=&hash=&ws=`, `&transport=`); `cleo-host --serve` (`applications/host/src/webBuild.ts`); `applications/host/tests/predictFrames.test.ts` |
+| 9 | **In progress.** 9a done (2026-11-20): the browser peer runtime. Two Chrome windows joined the Sandbox on `cleo-host --example … --serve`, one over WebTransport, one forced onto the WebSocket fallback: each drove its character with the keyboard (7 m and 6 m) and saw the other's within 1 cm of where the host has it; the WebTransport player's prediction corrected 22 of 141 host states (p95 2.5 cm, max 6 cm) at 6 ms RTT. 9b done (2026-11-20): the host contract — settings from flags, `NETSYNC_*` environment and the game's `config.netsync`; the control port (`/healthz` `/readyz` `/status` with Prometheus, `/cert-hash`, `POST /allocate`); a session's life (ready → allocated → running → ended; `--reuse`); SIGTERM draining; Ed25519 join tokens; JSON logs; lifecycle adapters `none` and `agones` (tested against a stand-in SDK sidecar). Still to come: 9c allocator + gateway, 9d editor (Play › Multiplayer, inspector, settings, debugger), 9e Publish host, 9f guides and examples. | `src/netsync/client/` (`NetSyncClient`, `PeerFrames`); player `boot.tsx` `netsync` option and `netsyncJoin.ts` (`?join=` / `?wt=&hash=&ws=`, `&transport=`); `cleo-host --serve` (`applications/host/src/webBuild.ts`); `applications/host/tests/predictFrames.test.ts` |
 
 Phase-9 details and findings:
 - **A browser peer simulates frame by frame, not in host ticks** (`PeerFrames`). Stepping the peer's engine in
@@ -631,6 +631,17 @@ Phase-9 details and findings:
   WebSocket port and prints a link that opens it joined. Joining players get the level's own player-controlled
   characters first, then copies of `--player-template`; a level character goes back to waiting when its player
   leaves.
+- **9b, the host contract** (`applications/host/src/hostApp.ts`, `settings.ts`, `joinToken.ts`, `lifecycle.ts`;
+  README). A host with no session and no `--await-allocation` opens one and keeps it open (a plain server, and
+  development); an allocated one ends when everyone has left or nobody came, then exits or (`--reuse`) reloads
+  its entry scene and is ready again. Joins are refused while there is no session, while draining, past the
+  session's own `maxPeers`, and without a valid token when `NETSYNC_TOKEN_KEY` is set. Possession moved into the
+  host app: the level's free player characters first, then the game's player template (`config.netsync`
+  `playerTemplate`, `spawn`). Agones: Ready at start, Health every 2 s, the allocation read from
+  `GET /watch/gameserver` (session from the `netsync.session` annotation, else labels, else the GameServer's
+  name), Shutdown when the session ends (one session per GameServer). Session `mode` is recorded and reported,
+  not yet handed to scripts. SIGTERM could not be sent on Windows; the drain itself is tested through
+  `HostApp.drain`, and the signal will be checked in the Linux container (9e).
 - **Open from 9a:** a host scene change (`Game.loadScene` on the host) is not followed yet (the peer stays in
   its scene); mouse look is applied at frame rate locally but reaches the host once per tick, as everything
   else does; the NetSync chunk ships in every player build's core (a feature chunk of its own would keep it

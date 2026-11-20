@@ -143,6 +143,23 @@ export class HostRuntime {
     public get contentHash(): string | null { return (this._content.header.manifest as any).contentHash ?? null; }
     public get sceneName(): string { return (this._content.header.manifest as any).scenes?.[this._currentId]?.name ?? ''; }
     public get running(): boolean { return this._ticker.running; }
+    /** The game's config block from its manifest (`config.netsync` holds its NetSync settings). */
+    public get config(): Record<string, any> { return (this._content.header.manifest as any).config ?? {}; }
+    /** The game's first scene's name. */
+    public get entrySceneName(): string {
+        const data = this._content.header.manifest as any;
+        const table = data.scenes ?? {};
+        const id = data.entry in table ? data.entry : Object.keys(table)[0];
+        return table[id]?.name ?? '';
+    }
+
+    /** Switch to the scene named (or with the id) `nameOrId`, as Game.loadScene does: from its authored state. */
+    public async loadScene(nameOrId: string): Promise<void> {
+        const id = this._resolve(nameOrId);
+        if (!id) throw new Error(`The game has no scene "${nameOrId}".`);
+        this.engine.physics.clear();
+        await this._startScene(id);
+    }
 
     /**
      * Start ticking in real time. `originMs` is the scheduler time tick 0 was due — pass the NetSync session's
