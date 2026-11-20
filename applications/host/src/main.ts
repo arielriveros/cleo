@@ -7,11 +7,13 @@
 //   npm start                                     (no game: a session only, as in phase 1)
 //
 //   [--wt-port 4433] [--ws-port 4480] [--tick-rate 30] [--max-peers 16] [--physics jolt|rapier|cannon]
+//   [--player-template Player] [--spawn x,y,z]   each joining peer gets a copy of that template to drive
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HostSession, SyncHost, hashContent } from '../../../src/netsync';
+import { HostSession, RemoteControl, SyncHost, hashContent } from '../../../src/netsync';
+import type { ControllerNode, Node } from 'cleo';
 import { cachedCertificate } from './devCertificate';
 import { HostListener } from './hostListener';
 import { HostRuntime } from './hostRuntime';
@@ -70,7 +72,32 @@ const listener = await HostListener.start({
 
 // Tick 0 of the game is tick 0 of the session clock, so a tick number means the same moment to both.
 if (runtime) {
-    const sync = new SyncHost(session, () => runtime!.scene, { sceneKey: () => runtime!.sceneName });
+    // Possession: with --player-template, each joining peer gets a copy of that template (a Collider, Character
+    // and Controller, usually) to drive, spread out from --spawn; it goes when the peer leaves.
+    const playerTemplate = arg('--player-template');
+    const spawnAt = (arg('--spawn', '0,1,0') ?? '0,1,0').split(',').map(Number);
+    const characters = new Map<number, Node>();
+    const subtree = (root: Node): Node[] => [root, ...root.children.flatMap(subtree)];
+    const remote = playerTemplate ? new RemoteControl(session, {
+        possess: (peer) => {
+            const root = runtime!.scene.instantiate(playerTemplate, { position: [spawnAt[0] + peer.id * 2, spawnAt[1], spawnAt[2]] });
+            const controller = root ? subtree(root).find((n) => n.nodeType === 'controller') as ControllerNode | undefined : undefined;
+            if (!root || !controller) { log(`--player-template "${playerTemplate}" has no Controller in it; peer ${peer.id} spectates`); return null; }
+            characters.set(peer.id, root);
+            log(`peer ${peer.id} drives a new "${playerTemplate}"`);
+            return controller;
+        },
+        release: (peer) => {
+            const root = characters.get(peer.id);
+            characters.delete(peer.id);
+            if (root?.scene) runtime!.scene.removeNode(root);
+        },
+    }) : null;
+    if (remote) runtime.onBeforeTick = (tick) => remote.beforeTick(tick);
+    const sync = new SyncHost(session, () => runtime!.scene, {
+        sceneKey: () => runtime!.sceneName,
+        focusOf: (peerId) => remote?.controllerOf(peerId)?.possessed?.worldPosition ?? null,
+    });
     runtime.start(performance.now() - session.timeMs());
     let last = 0;
     runtime.onTick = (tick) => {
@@ -85,7 +112,7 @@ if (runtime) {
     };
 }
 
-console.log(`cleo-host (NetSync phase 3)
+console.log(`cleo-host (NetSync phase 4)
   WebTransport  udp/${listener.webTransportPort}  /netsync   cert sha-256 ${certificate.hash} (expires ${certificate.notAfter})
   WebSocket     tcp/${listener.webSocketPort}  /ws
   Endpoint      http://localhost:${listener.webSocketPort}/endpoint  (a HostEndpoint for PeerSession.join)

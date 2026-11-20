@@ -29,6 +29,13 @@ export interface SyncHostOptions {
     resendTicks?: number;
     /** Which nodes are synced. Default: dynamic colliders, characters, and nodes with a truthy `netSync` variable. */
     isSynced?: (node: Node) => boolean;
+    /**
+     * Where a peer's attention is — its own character, usually (RemoteControl knows it) — or null. Rows near it
+     * win the priority race for that peer: a crate at your feet is updated before one across the map.
+     */
+    focusOf?: (peerId: number) => ArrayLike<number> | null;
+    /** Metres at which a node's priority halves with distance from the focus. Default 20. */
+    focusFalloff?: number;
     /** A name for the scene peers should be in (the game's scene id). Default: empty. */
     sceneKey?: (scene: Scene) => string;
 }
@@ -69,6 +76,8 @@ export class SyncHost {
     public readonly resendTicks: number;
     private readonly _isSynced: (node: Node) => boolean;
     private readonly _sceneKey: (scene: Scene) => string;
+    private readonly _focusOf: ((peerId: number) => ArrayLike<number> | null) | null;
+    private readonly _falloff: number;
 
     private _scene: Scene | null = null;
     private _epoch = 0;
@@ -92,11 +101,13 @@ export class SyncHost {
         this.resendTicks = options.resendTicks ?? 6;
         this._isSynced = options.isSynced ?? defaultIsSynced;
         this._sceneKey = options.sceneKey ?? (() => '');
+        this._focusOf = options.focusOf ?? null;
+        this._falloff = options.focusFalloff ?? 20;
         engineEventBus.on('SCENE_CHANGED', this._onSceneChanged);
         _session.on('join', this._onJoin);
         _session.on('resume', this._onJoin);
         _session.on('leave', this._onLeave);
-        _session.onPulse = (peer, m) => this._onPulse(peer, m);
+        _session.route('pulse', SyncPulse.ack, (peer, m) => this._onPulse(peer, m));
     }
 
     /** The NetId of a synced node, or undefined. */
@@ -133,7 +144,7 @@ export class SyncHost {
         this._session.off('join', this._onJoin);
         this._session.off('resume', this._onJoin);
         this._session.off('leave', this._onLeave);
-        this._session.onPulse = null;
+        this._session.route('pulse', SyncPulse.ack, null);
     }
 
     // ----- scene and structure ---------------------------------------------------------------------------
@@ -325,12 +336,19 @@ export class SyncHost {
     }
 
     private _pulse(hostPeer: HostPeer, p: PeerSync, tick: number, states: Map<number, QState>): void {
+        const focus = this._focusOf?.(hostPeer.id) ?? null;
         const candidates: number[] = [];
         for (const [netId, state] of states) {
             if (sameState(p.acked.get(netId), state)) { p.priority.delete(netId); continue; }
             const last = p.lastSent.get(netId);
             if (last && sameState(last.state, state) && tick - last.tick < this.resendTicks) continue;
-            p.priority.set(netId, (p.priority.get(netId) ?? 0) + weightOf(this._nodeByNet.get(netId)!));
+            const node = this._nodeByNet.get(netId)!;
+            let weight = weightOf(node);
+            if (focus) {
+                const at = node.worldPosition;
+                weight *= this._falloff / (this._falloff + Math.hypot(at[0] - focus[0], at[1] - focus[1], at[2] - focus[2]));
+            }
+            p.priority.set(netId, (p.priority.get(netId) ?? 0) + weight);
             candidates.push(netId);
         }
         candidates.sort((a, b) => p.priority.get(b)! - p.priority.get(a)!);

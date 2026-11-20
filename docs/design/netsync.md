@@ -1,6 +1,6 @@
 # NetSync — online multiplayer for Cleo (plan)
 
-Status: **phase 3 done** (phase 0 open: Safari; 50-AI host budget open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
+Status: **phase 4 done** (phase 0 open: Safari; 50-AI host budget open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
 Target: **physics sandbox shooter — co-op PvE (≤ 50 AI) and 8v8 deathmatch with bots, ≤ 16 peers** ·
 Started 2026-11-19
 
@@ -595,6 +595,29 @@ Phases 0–3 are the foundation; 4–6 make the target game playable; 7–9 make
 | 2 | **Done (2026-11-19).** The Sandbox and Firing Line examples run headless on the host from a game.bin — models, shared clips, scripts and script modules (inline or extracted to game.scripts.js), physics on Jolt — at 30 Hz. `cleo-host --example …/firing-line` plays the bot match in real time. | `src/core/engine.ts` (`headless`), `src/graphics/rhi/null/nullDevice.ts`, `applications/editor/src/player/gameContent.ts` (the player's loader, now shared), `applications/host/src/hostRuntime.ts`, `exampleGame.ts`, `applications/host/tests/hostRuntime.test.ts` |
 
 | 3 | **Done (2026-11-19), except the 50-AI part of the exit criterion** (see phase-2 findings). Peers get the table of synced nodes, every template copy spawned on the host (with the host's node ids, so later messages and saves name the same nodes), every removal, and per-tick state; a peer that joins late or resumes gets the same baseline. Measured on the Sandbox over loopback at 150 ms RTT, jitter and 5 % loss: 200 props and an explosion, 16 peers (and a TCP-like link for the WebSocket fallback) — every peer within 1200 B/tick, props at rest cost 0 B/tick, everyone converges within 2 mm, a prop in flight is drawn within 2.6 cm (p50) of where the host had it; the host's sync work for 16 peers is 0.7 ms a tick (p95 1.3 ms). | `src/netsync/sync/` (`quantize.ts`, `syncMessages.ts`, `syncHost.ts`, `syncPeer.ts`), `tests/netsyncQuantize.test.ts`, `applications/host/tests/sync.test.ts`; `cleo-host` runs `SyncHost` on its game |
+
+| 4 | **Done (2026-11-19).** Each joining peer is given a character (the game decides how: `possess(peer)`; `cleo-host --player-template Player`) and drives it with commands; the host simulates it, every peer sees it. At 150 ms RTT and 5 % loss two peers moved their characters ~9 m each in 2 s in the directions they asked, a single jump press jumped once, and a silent player's character stops. Over real sockets in real time (WebTransport and WebSocket peers against `HostListener`): 8.5 m in 2 s each, ~30 commands/s. | `ControllerNode` `controlSource: 'remote'` + `remoteIntent` + `publishedIntent`; `src/netsync/sync/commands.ts` (`RemoteControl`, `CommandQueue`, `PeerCommands`); `HostSession.route` / `PeerSession.route`; `SyncHost` `focusOf`; tests `tests/netsyncCommands.test.ts`, `applications/host/tests/control.test.ts`, `realSockets.test.ts` |
+
+Phase-4 details and findings:
+- **A command** is the intent a peer's controller published that frame (`ControllerNode.publishedIntent`):
+  move, move basis, aim yaw and pitch, sprint, crouch, speed scale and each raised request's buffer — 21 bytes,
+  four per datagram (the newest and the three before). Look deltas are not sent: a peer turns its own camera,
+  and its aim is what reaches the host. Stamped with the host tick due when it arrives (half the RTT ahead,
+  plus one tick).
+- **The host's queue** applies each tick's command; a missing one repeats the last movement for up to 6
+  ticks, then the character stops. A request is applied exactly once, even when its command arrives after
+  its tick was played (its datagram lost, a later one carrying it): found by a unit test, and the queue had
+  to zero requests itself because `clearIntent` keeps them on purpose.
+- **The host's camera rig follows the remote aim**, so host-side logic that reads the rig sees where that
+  player looks.
+- **Distance priority:** `SyncHost` weighs each row by the distance from the peer's own character
+  (`focusOf`, halving at 20 m) — what is near you is updated first.
+- **Message routing:** sessions route app messages by type (`route(lane, types, handler)`), so sync,
+  commands and the layers to come share a session; held control messages replay in arrival order.
+- **Not yet:** prediction — a player's own character answers after the round trip plus the follow delay
+  (phase 5); scripts on the host that read `Input` (the Firing Line player's fire button) see nothing for a
+  remote player — per-peer input for scripts is phase 7; the editor's Control Source dropdown now lists
+  "Remote", which only the host should set.
 
 Phase-3 details and findings:
 - **Rows are absolute, not bit-deltas.** Each row is a node's full quantized state (≈24 bytes with a velocity),

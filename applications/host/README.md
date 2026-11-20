@@ -14,6 +14,7 @@ them the game's state.
 npm run host:install          # from the repo root, once (native WebTransport addon, ws, cert tooling)
 npm run host -- --game path/to/game.bin           # a published game (game.scripts.js beside it is picked up)
 npm run host -- --example ../editor/public/examples/firing-line   # an example folder, packed on the fly
+npm run host -- --example ../editor/public/examples/sandbox --player-template Player   # each peer drives a Player
 npm run host                                       # no game: a session only
 #   options: --wt-port 4433 --ws-port 4480 --tick-rate 30 --max-peers 16 --physics jolt|rapier|cannon --verbose
 npm run host:test             # integration tests over real sockets

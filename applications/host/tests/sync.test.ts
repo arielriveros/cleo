@@ -3,106 +3,18 @@
 // 150 ms round trip, jitter and 5 % loss — or a TCP-like link standing in for the WebSocket fallback.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import path from 'node:path';
-import { quat, vec3 } from 'gl-matrix';
-import type { Node, Scene } from 'cleo';
-import {
-    ConditionedLink, HostSession, ManualScheduler, PeerSession, SyncHost, SyncPeer, createLoopbackPair,
-    type LinkConditions,
-} from '../../../src/netsync';
-import { HostRuntime } from '../src/hostRuntime';
+import { vec3 } from 'gl-matrix';
+import type { Node } from 'cleo';
 import { packExampleGame } from '../src/exampleGame';
-import { bufferSource } from '../../editor/src/player/gameSource';
-import { readGameHeader } from '../../editor/src/player/unpack';
-import { buildGameScene } from '../../editor/src/player/gameContent';
-
-const TICK_MS = 1000 / 30;
-const LOSSY: LinkConditions = { latencyMs: 75, jitterMs: 15, loss: 0.05, seed: 3 };
-const TCP: LinkConditions = { latencyMs: 75, jitterMs: 15, loss: 0.05, tcp: true, seed: 4 };
+import { LOSSY, TCP, TICK_MS, divergence, manifestOf, world as makeWorld } from './helpers/world';
 
 let bin: Uint8Array;
 let crateTemplate: string;
-
-/** The same game's entry scene, parsed but not started: what a peer draws. */
-async function peerScene(): Promise<Scene> {
-    const buffer = bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength) as ArrayBuffer;
-    const source = bufferSource(buffer);
-    const header = await readGameHeader(source);
-    const built = await buildGameScene({ source, header, claimed: new Set() }, (header.manifest as any).entry);
-    return built!.scene;
-}
-
-/** A host game, its session and sync, and a clock everything runs on. */
-async function world() {
-    const s = new ManualScheduler();
-    const runtime = await HostRuntime.open({ bin });
-    const session = new HostSession({ contentHash: 'sandbox', scheduler: s, tickRate: 30 });
-    const sync = new SyncHost(session, () => runtime.scene, { sceneKey: () => runtime.sceneName });
-    const peers: { session: PeerSession; sync: SyncPeer; scene: Scene }[] = [];
-    let tick = 0;
-    /** ms spent in SyncHost.tick, per tick (the sync layer's own cost on the host). */
-    const syncMs: number[] = [];
-    /** Host history of chosen nodes, by tick: where they were, to measure how closely a peer follows. */
-    const history = new Map<string, Map<number, vec3>>();
-
-    const run = async (ticks: number, each?: (tick: number) => void) => {
-        for (let i = 0; i < ticks; i++) {
-            each?.(tick);
-            runtime.step(1);
-            for (const [id, h] of history) {
-                const n = runtime.scene.getNodeById(id);
-                if (n) h.set(tick, vec3.clone(n.position as vec3));
-            }
-            const t0 = performance.now();
-            sync.tick(tick++);
-            syncMs.push(performance.now() - t0);
-            await s.advance(TICK_MS);
-            for (const p of peers) p.sync.apply();
-        }
-    };
-
-    const join = async (conditions: LinkConditions) => {
-        const scene = await peerScene();
-        const joining = PeerSession.join({
-            endpoint: {}, contentHash: 'sandbox', scheduler: s, reconnect: false,
-            connector: async () => {
-                const [peerEnd, hostEnd] = createLoopbackPair(s);
-                session.accept(hostEnd);
-                return { link: new ConditionedLink(peerEnd, conditions, s), fallbackReason: null };
-            },
-        });
-        await run(15);
-        const peerSession = await joining;
-        const peer = { session: peerSession, sync: new SyncPeer(peerSession, scene), scene };
-        peers.push(peer);
-        return peer;
-    };
-
-    return { runtime, session, sync, peers, run, join, history, s, syncMs, dispose: () => { sync.dispose(); session.close(); runtime.dispose(); } };
-}
-
-/**
- * Largest position (m) and rotation (deg) difference between the host's synced nodes and a peer's copies, over
- * the nodes at rest on the host: a peer draws `delayTicks` in the past, so a moving one is behind by design.
- */
-function divergence(host: HostRuntime, sync: SyncHost, peer: { sync: SyncPeer; scene: Scene }) {
-    let pos = 0, rot = 0, missing = 0, compared = 0, moving = 0;
-    for (const node of host.scene.nodes as Set<Node>) {
-        if (sync.netIdOf(node) === undefined) continue;
-        const body = (node as any).nodeType === 'collider' ? (node as any).body : null;
-        if (body && body.velocity.length() > 0.01) { moving++; continue; }
-        const copy = peer.scene.getNodeById(node.id);
-        if (!copy) { missing++; continue; }
-        compared++;
-        pos = Math.max(pos, vec3.distance(node.position as vec3, copy.position as vec3));
-        const dot = Math.min(1, Math.abs(quat.dot(node.quaternion as quat, copy.quaternion as quat)));
-        rot = Math.max(rot, 2 * Math.acos(dot) * 180 / Math.PI);
-    }
-    return { pos, rot, missing, compared, moving };
-}
+const world = () => makeWorld(bin);
 
 beforeAll(async () => {
     bin = await packExampleGame(path.resolve(__dirname, '../../editor/public/examples/sandbox'));
-    const manifest = (await readGameHeader(bufferSource(bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength) as ArrayBuffer))).manifest as any;
+    const manifest = await manifestOf(bin);
     // A prop: a template whose root is a dynamic collider with no character in it (the Sandbox's crates).
     const types = (n: any): string[] => [n.type, ...(n.children ?? []).flatMap(types)];
     crateTemplate = manifest.templates.find((t: any) => t.node.type === 'collider' && t.node.collider?.mass > 0 && !types(t.node).includes('character')).name;

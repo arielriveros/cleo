@@ -103,6 +103,22 @@ export function clearIntent(out: ControlIntent): ControlIntent {
 }
 
 /** Raise a one-shot, pending for `bufferSeconds`. Re-raising restarts the window rather than stacking. */
+/** Copy every channel of `from` into `out`, requests included. */
+export function copyIntent(out: ControlIntent, from: Readonly<ControlIntent>): ControlIntent {
+    out.move[0] = from.move[0];
+    out.move[1] = from.move[1];
+    out.look[0] = from.look[0];
+    out.look[1] = from.look[1];
+    out.basisYaw = from.basisYaw;
+    out.aimYaw = from.aimYaw;
+    out.aimPitch = from.aimPitch;
+    out.sprint = from.sprint;
+    out.crouch = from.crouch;
+    out.speedScale = from.speedScale;
+    for (const kind of INTENT_REQUESTS) out.requests[kind] = from.requests[kind];
+    return out;
+}
+
 export function raiseRequest(out: ControlIntent, kind: IntentRequest, bufferSeconds: number): void {
     // A non-positive or non-finite buffer still raises the request for exactly this frame — a driver that
     // wants no buffering at all should still be able to ask for something.

@@ -87,12 +87,16 @@ export class HostSession extends TypedEmitter<HostSessionEvents> {
     public readonly timeoutMs: number;
     public readonly helloTimeoutMs: number;
 
-    /** App messages (type ≥ FIRST_APP_TYPE) from seated peers. */
+    /**
+     * App messages (type ≥ FIRST_APP_TYPE) from seated peers that no {@link route} claims. The layers above the
+     * session (sync, commands) route their own types, so they never compete for these.
+     */
     public onControl: ((peer: HostPeer, message: Uint8Array) => void) | null = null;
     public onPulse: ((peer: HostPeer, message: Uint8Array) => void) | null = null;
     public onBulk: ((peer: HostPeer, message: Uint8Array) => void) | null = null;
 
     private readonly _peers = new Map<number, HostPeer>();
+    private readonly _routes = { control: new Map<number, (peer: HostPeer, m: Uint8Array) => void>(), pulse: new Map<number, (peer: HostPeer, m: Uint8Array) => void>() };
     private readonly _scheduler: Scheduler;
     private readonly _origin: number;
     private readonly _protocol: number;
@@ -146,6 +150,15 @@ export class HostSession extends TypedEmitter<HostSessionEvents> {
             }
             this._onHello(link, hello);
         };
+    }
+
+    /**
+     * Deliver app messages of one type on one lane to `handler` (null removes it). Each layer above the session
+     * claims its own types, so several can share the session.
+     */
+    public route(lane: 'control' | 'pulse', type: number, handler: ((peer: HostPeer, message: Uint8Array) => void) | null): void {
+        if (handler) this._routes[lane].set(type, handler);
+        else this._routes[lane].delete(type);
     }
 
     /** Send Bye and free the seat at once (no grace). */
@@ -218,7 +231,7 @@ export class HostSession extends TypedEmitter<HostSessionEvents> {
     private _onControl(peer: HostPeer, link: NetLink, m: Uint8Array): void {
         peer.lastHeard = this._scheduler.now();
         if (m.length === 0) return;
-        if (m[0] >= FIRST_APP_TYPE) { this.onControl?.(peer, m); return; }
+        if (m[0] >= FIRST_APP_TYPE) { (this._routes.control.get(m[0]) ?? this.onControl)?.(peer, m); return; }
         if (m[0] === SessionControl.bye) {
             let reason = 'left';
             try { reason = decodeBye(new ByteReader(m, 1)).reason || reason; } catch { /* keep default */ }
@@ -229,7 +242,7 @@ export class HostSession extends TypedEmitter<HostSessionEvents> {
     private _onPulse(peer: HostPeer, link: NetLink, m: Uint8Array): void {
         peer.lastHeard = this._scheduler.now();
         if (m.length === 0) return;
-        if (m[0] >= FIRST_APP_TYPE) { this.onPulse?.(peer, m); return; }
+        if (m[0] >= FIRST_APP_TYPE) { (this._routes.pulse.get(m[0]) ?? this.onPulse)?.(peer, m); return; }
         if (m[0] === SessionPulse.ping) {
             try {
                 const ping = decodePing(new ByteReader(m, 1));

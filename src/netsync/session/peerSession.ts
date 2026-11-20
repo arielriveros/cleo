@@ -77,6 +77,26 @@ export class PeerSession extends TypedEmitter<PeerSessionEvents> {
         if (handler) for (const m of this._heldControl.splice(0)) handler(m);
     }
     public onPulse: ((message: Uint8Array) => void) | null = null;
+    private readonly _routes = { control: new Map<number, (m: Uint8Array) => void>(), pulse: new Map<number, (m: Uint8Array) => void>() };
+
+    /**
+     * Deliver app messages of the given types on one lane to `handler` (null removes it), ahead of `onControl` /
+     * `onPulse`. Control messages of those types held before they were routed are delivered at once, in the
+     * order they arrived — route a layer's types together so their relative order survives.
+     */
+    public route(lane: 'control' | 'pulse', types: number | readonly number[], handler: ((message: Uint8Array) => void) | null): void {
+        const list = typeof types === 'number' ? [types] : types;
+        for (const type of list) {
+            if (handler) this._routes[lane].set(type, handler);
+            else this._routes[lane].delete(type);
+        }
+        if (!handler || lane !== 'control') return;
+        const held = this._heldControl.splice(0);
+        for (const m of held) {
+            if (list.includes(m[0])) handler(m);
+            else this._heldControl.push(m);
+        }
+    }
     public get onBulk(): ((message: Uint8Array) => void) | null { return this._appBulk; }
     public set onBulk(handler: ((message: Uint8Array) => void) | null) {
         this._appBulk = handler;
@@ -198,7 +218,7 @@ export class PeerSession extends TypedEmitter<PeerSessionEvents> {
     private _onControl(m: Uint8Array): void {
         this._lastHeard = this._scheduler.now();
         if (m.length === 0) return;
-        if (m[0] >= FIRST_APP_TYPE) { this._deliver(this._appControl, this._heldControl, m); return; }
+        if (m[0] >= FIRST_APP_TYPE) { this._deliver(this._routes.control.get(m[0]) ?? this._appControl, this._heldControl, m); return; }
         if (m[0] === SessionControl.bye) {
             let reason = 'host said bye';
             try { reason = decodeBye(new ByteReader(m, 1)).reason || reason; } catch { /* keep default */ }
@@ -212,7 +232,7 @@ export class PeerSession extends TypedEmitter<PeerSessionEvents> {
     private _onPulse(m: Uint8Array): void {
         this._lastHeard = this._scheduler.now();
         if (m.length === 0) return;
-        if (m[0] >= FIRST_APP_TYPE) { this.onPulse?.(m); return; }
+        if (m[0] >= FIRST_APP_TYPE) { (this._routes.pulse.get(m[0]) ?? this.onPulse)?.(m); return; }
         if (m[0] === SessionPulse.pong) {
             try {
                 const pong = decodePong(new ByteReader(m, 1));

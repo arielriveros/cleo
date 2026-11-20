@@ -45,6 +45,8 @@ export interface TickStats {
 const STATS_WINDOW = 300;
 
 export class HostRuntime {
+    /** Called before every tick, with the tick number (remote players' commands are applied here). */
+    public onBeforeTick: ((tick: number) => void) | null = null;
     /** Called after every tick, with the tick number (the NetSync sync layer hooks in here). */
     public onTick: ((tick: number) => void) | null = null;
     /** Called after each scene has started (the entry scene and every Game.loadScene). */
@@ -159,6 +161,7 @@ export class HostRuntime {
     }
 
     private _tick(tick: number): void {
+        this.onBeforeTick?.(tick);
         const t0 = performance.now();
         this.engine.stepFrame(1 / this.tickRate, { render: false });
         const ms = performance.now() - t0;

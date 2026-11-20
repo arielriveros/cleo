@@ -53,8 +53,8 @@ export class SyncPeer {
     constructor(private readonly _session: PeerSession, private _scene: Scene, options: SyncPeerOptions = {}) {
         this.delayTicks = options.delayTicks ?? 2;
         this.extrapolateMs = options.extrapolateMs ?? 100;
-        _session.onControl = (m) => this._onControl(m);
-        _session.onPulse = (m) => this._onPulse(m);
+        _session.route('control', [SyncControl.table, SyncControl.spawn, SyncControl.despawn], (m) => this._onControl(m));
+        _session.route('pulse', SyncPulse.pulse, (m) => this._onPulse(m));
     }
 
     public get scene(): Scene { return this._scene; }
@@ -78,8 +78,8 @@ export class SyncPeer {
     }
 
     public dispose(): void {
-        this._session.onControl = null;
-        this._session.onPulse = null;
+        this._session.route('control', [SyncControl.table, SyncControl.spawn, SyncControl.despawn], null);
+        this._session.route('pulse', SyncPulse.pulse, null);
     }
 
     // ----- control --------------------------------------------------------------------------------------------
