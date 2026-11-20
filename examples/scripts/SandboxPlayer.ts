@@ -1,6 +1,6 @@
 import { CharacterNode, Input, MathUtils } from 'cleo'
 import type { Animator, CameraRigNode, ColliderNode, ControllerNode, Node, TriggerName } from 'cleo'
-import { attribute } from 'cleo/decorators'
+import { attribute, eventListener, observable } from 'cleo/decorators'
 
 /**
  * The Sandbox player: input only. Attach to the **Character** node ("Player").
@@ -292,7 +292,11 @@ export default class SandboxPlayerNode extends CharacterNode {
     public stairs: number = 0
     /** StairRate: how much faster the stair clips play while the body is still faster than their pace. */
     public stairRate: number = 1
-    /** The weapon in the hands: 0 none, 1 the pistol, 2 the rifle (the one shown; Equip picks the next). */
+    /**
+     * The weapon in the hands: 0 none, 1 the pistol, 2 the rifle (the one shown; Equip picks the next). Setting it
+     * tells `weapon:Equipped` (the weapon and the one before), which shows the model in the hand.
+     */
+    @observable('weapon:Equipped')
     public weapon: number = 0
     /** PistolWeight, RifleWeight: the weapon layers' weights, the one in the hands up, faded in and out. */
     public pistolWeight: number = 0
@@ -603,8 +607,7 @@ export default class SandboxPlayerNode extends CharacterNode {
             if (k >= 0) weights[k] = Math.max(0, weights[k] - step)
             if (k < 0 || weights[k] < 0.35) {
                 if (k >= 0) weights[k] = 0
-                this.weapon = this._weaponWanted
-                this._showWeapon(this.weapon)
+                this.weapon = this._weaponWanted   // weapon:Equipped shows it
             }
         } else if (this.weapon > 0) weights[this.weapon - 1] = Math.min(1, weights[this.weapon - 1] + step)
         this.pistolWeight = weights[0]
@@ -626,8 +629,9 @@ export default class SandboxPlayerNode extends CharacterNode {
     }
 
     /**
-     * The trigger: the weapon in the hands (its SandboxGun) fires along the camera's aim once it is up, and its
-     * recoil kicks the camera and the weapon. The camera's kick mostly comes back. The crosshair follows.
+     * The trigger: the weapon in the hands (its SandboxGun) fires along the camera's aim once it is up. Each shot
+     * comes back as `weapon:Shot`, whose recoil kicks the camera and the weapon (`_shot`); the camera's kick mostly
+     * comes back. The crosshair follows.
      */
     private _fire(delta: number, holster: boolean, sprinting: boolean) {
         const gun = this.weapon > 0 ? this._weaponNodes?.[this.weapon - 1] as any : null
@@ -641,13 +645,7 @@ export default class SandboxPlayerNode extends CharacterNode {
             const look = [Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)]
             const weight = this.weapon === 1 ? this.pistolWeight : this.rifleWeight
             const ready = !holster && !sprinting && this.weapon === this._weaponWanted && weight >= 0.95 && this._aim >= this.fireAimReady
-            const recoil = gun.pull(!holster && Input.pressed('Fire'), ready, eye, look, this._aim, moving, (this.collider as ColliderNode | null)?.body ?? null)
-            if (recoil) {
-                rig.pitch = rig.pitch - recoil.pitch
-                rig.yaw = rig.yaw + recoil.yaw
-                this._recoilBack += recoil.pitch * this.recoilRecovery
-                this._kick += recoil.kick
-            }
+            gun.pull(!holster && Input.pressed('Fire'), ready, eye, look, this._aim, moving, (this.collider as ColliderNode | null)?.body ?? null)
         }
         // The camera's kick coming back.
         if (rig && this._recoilBack > 1e-4 && delta > 0) {
@@ -676,6 +674,27 @@ export default class SandboxPlayerNode extends CharacterNode {
         if (bottom) { bottom.offsetMin = [-1, gap]; bottom.offsetMax = [1, gap + 7] }
         if (left) { left.offsetMin = [-gap - 7, -1]; left.offsetMax = [-gap, 1] }
         if (right) { right.offsetMin = [gap, -1]; right.offsetMax = [gap + 7, 1] }
+    }
+
+    /**
+     * A shot from the weapon in the hands (SandboxGun's `weapon:Shot`, bubbling up from the grip): its recoil kicks
+     * the camera up and aside, and the weapon in the hands. A shot fired some other way carries no recoil.
+     */
+    @eventListener('weapon:Shot')
+    private _shot(shot: { recoil?: { pitch: number, yaw: number, kick: number } | null }) {
+        const recoil = shot?.recoil
+        const rig = this.cameraRig()
+        if (!recoil || !rig) return
+        rig.pitch = rig.pitch - recoil.pitch
+        rig.yaw = rig.yaw + recoil.yaw
+        this._recoilBack += recoil.pitch * this.recoilRecovery
+        this._kick += recoil.kick
+    }
+
+    /** The weapon in the hands changed (`weapon:Equipped`, from setting `weapon`): its model shown, the other hidden. */
+    @eventListener('weapon:Equipped')
+    private _equipped(weapon: number) {
+        this._showWeapon(weapon)
     }
 
     /** Show the weapon `weapon` (1 the pistol, 2 the rifle) on the hand, and hide the other; 0 hides both. */

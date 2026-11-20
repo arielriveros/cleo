@@ -1,6 +1,15 @@
 import { Logger, Node } from 'cleo'
 import type { TemplateName } from 'cleo'
-import { attribute } from 'cleo/decorators'
+import { attribute, eventDispatch } from 'cleo/decorators'
+
+/** What one shot was, as the gun tells it (`weapon:Shot`). */
+export interface SandboxShot {
+    gun: Node
+    /** What it hit, or null: nothing within `range`. */
+    hit: { point: number[], node: Node | null } | null
+    /** The kick a pull of the trigger gives (camera pitch up and yaw, degrees, and the weapon's); null for a shot fired directly. */
+    recoil: { pitch: number, yaw: number, kick: number } | null
+}
 
 /**
  * A Sandbox gun: hitscan shots by raycast, pushing what they hit. Attach to a weapon's holder (the `Pistol Grip` and
@@ -22,6 +31,10 @@ import { attribute } from 'cleo/decorators'
  * SPREAD is a cone round the crosshair: tight aimed (`aimSpread`), wider from the hip (`hipSpread`), wider moving
  * (`moveSpread` at a run), and wider still the longer it fires (`bloomPerShot`, up to `bloomMax`, settling at
  * `bloomRecovery` degrees a second). The holder reads {@link spread} for its crosshair.
+ *
+ * EVERY SHOT is told as the event `weapon:Shot` (a {@link SandboxShot}), dispatched at the gun: it bubbles up to the
+ * character holding it, whose `@eventListener('weapon:Shot')` applies the recoil, and then reaches anything listening
+ * with `@onEvent('weapon:Shot')` anywhere (a hit marker, a sound, a score).
  */
 export default class SandboxGunNode extends Node {
     /** Holding the trigger keeps firing (a rifle); a pistol fires once per pull. */
@@ -147,16 +160,32 @@ export default class SandboxGunNode extends Node {
         const interval = 60 / Math.max(1, this.roundsPerMinute)
         this._cooldown = Math.max(this._cooldown, -interval) + interval
         this._queued = 0
-        this.fire(eye, look, this.spread(aim, moving), shooter)
+        const recoil = { pitch: this.recoilPitch, yaw: (Math.random() * 2 - 1) * this.recoilYaw, kick: this.kick }
+        this.fire(eye, look, this.spread(aim, moving), shooter, recoil)
         this._bloom = Math.min(this.bloomMax, this._bloom + this.bloomPerShot)
-        return { pitch: this.recoilPitch, yaw: (Math.random() * 2 - 1) * this.recoilYaw, kick: this.kick }
+        return recoil
     }
 
     /**
      * One shot from the camera at `eye` along `look`, `spread` degrees round it at most, passing `shooter`'s body:
-     * the two raycasts, the push, the effects. Returns what it hit, or null.
+     * the two raycasts, the push, the effects, and the `weapon:Shot` event (with `recoil`, when a pull fired it).
+     * Returns what it hit, or null.
      */
-    public fire(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter?: unknown): { point: number[], node: Node | null } | null {
+    public fire(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter?: unknown,
+        recoil: SandboxShot['recoil'] = null): { point: number[], node: Node | null } | null {
+        const hit = this._shoot(eye, look, spread, shooter)
+        this._told({ gun: this, hit, recoil })
+        return hit
+    }
+
+    /** Tell the shot: what this returns is the `weapon:Shot` event, dispatched here and bubbling to the holder. */
+    @eventDispatch('weapon:Shot')
+    private _told(shot: SandboxShot): SandboxShot {
+        return shot
+    }
+
+    /** The shot itself: the raycasts, the push and the effects. */
+    private _shoot(eye: ArrayLike<number>, look: ArrayLike<number>, spread: number, shooter?: unknown): { point: number[], node: Node | null } | null {
         const physics = this.scene?.physics as any
         this.shots++
         const muzzleNode = this.getChildByName('Muzzle')[0] ?? this

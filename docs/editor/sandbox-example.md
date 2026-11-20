@@ -29,7 +29,10 @@ and the light over the platforms' tops where the GI Volume ends.
 dusk, **3** night (the d-pad's left, up and right on a pad). A setup is where the sun is; the sky, the clouds, the
 moon, the Sky Light, the GI Volume and the Light Probe follow it, and the eye adapts. How dark the dusk and the
 night look is the project's exposure compensation curve, set once in the render settings rather than by the
-script. The **HUD** in the top left corner says which setup is on and lists the keys.
+script. The **HUD** in the top left corner says which setup is on and lists the keys. The setup is the script's
+`setup` field, an `@observable` one: setting it sends the event `sandbox:LightSetup`, which the HUD line answers.
+Another script can follow the light the same way, with `@onEvent('sandbox:LightSetup')` (see
+[Events](../scripting/events.md)).
 
 Its feet stay planted and locked on ramps, stairs and bumps. To try it, open **Sandbox** from the example gallery
 and press Play.
@@ -624,6 +627,13 @@ spreads, shown with a weapon out and brighter aimed.
 (`recoilYaw`); 70% of the pitch comes back (SandboxPlayer's `recoilRecovery`, at `recoilRecoverySpeed`), so a held
 rifle climbs slowly. The weapon kicks up in the hands too (the gun's `kick`, through the aim blend space's pitch),
 settling at `kickRecovery`.
+
+**Every shot is an event.** The gun tells each shot as `weapon:Shot`, dispatched at its grip:
+`{ gun, hit, recoil }`. It bubbles up to the character holding it, where SandboxPlayer's
+`@eventListener('weapon:Shot')` applies the recoil. A script anywhere can hear every shot with
+`@onEvent('weapon:Shot')`, for a hit marker, a sound or a score, without the gun knowing about it. The weapon in
+the hands is the player's `weapon` field. Setting it sends `weapon:Equipped` (the weapon, and the one before),
+which shows that weapon's model in the hand. See [Events](../scripting/events.md).
 
 Each gun's numbers are its script's attributes, set on its holder (`Pistol Grip`, `Rifle Grip`) in the Player
 template.

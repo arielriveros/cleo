@@ -37,6 +37,9 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     per node per frame on the engine channel, before the frame is drawn, and only while someone listens.
   - *Online.* `to: 'host' | 'peers' | 'all'` sends an event to other machines in a NetSync game, dispatched at each
     machine's copy of its node.
+  - *The Sandbox's scripts use it.* The guns tell each shot as `weapon:Shot` at their grip, and the player takes the
+    recoil from it; the weapon in the hands is an `@observable` (`weapon:Equipped` shows its model), and so is the
+    Game Manager's light setup (`sandbox:LightSetup` updates the HUD).
   - *Fixes on the way.* A scene re-reads its node lists only for its own structural changes, not every open tab's.
     A disposed scene is collected now: before, a scene whose scripts used `@onEvent` stayed in memory with every
     node in it, and its handlers kept being called (30 Play sessions of a 300-node scene held 92 MB). Events still

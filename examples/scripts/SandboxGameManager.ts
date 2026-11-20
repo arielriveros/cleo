@@ -1,6 +1,6 @@
 import { Input, Node } from 'cleo'
 import type { ActionName, LightProbeNode, UITextNode } from 'cleo'
-import { attribute } from 'cleo/decorators'
+import { attribute, eventListener, observable } from 'cleo/decorators'
 
 /** One of the light setups: what it is called on the HUD, and where it puts the sun. */
 interface LightSetup {
@@ -60,7 +60,12 @@ export default class SandboxGameManagerNode extends Node {
     @attribute('Input')
     public nightAction: ActionName = 'Night'
 
-    /** The setup on now: 1 day, 2 sunset, 3 night (0 before the first frame). */
+    /**
+     * The setup on now: 1 day, 2 sunset, 3 night (0 before the first frame). Setting it tells `sandbox:LightSetup`
+     * (the setup and the one before): the HUD line answers here, and anything else may with
+     * `@onEvent('sandbox:LightSetup')`.
+     */
+    @observable('sandbox:LightSetup')
     public setup: number = 0
 
     private _sun: Node | null = null
@@ -95,14 +100,20 @@ export default class SandboxGameManagerNode extends Node {
         ]
     }
 
-    /** Switch to setup `index` (1 day, 2 sunset, 3 night): the sun there, and the HUD saying so. */
+    /** Switch to setup `index` (1 day, 2 sunset, 3 night): the sun there, and (through `sandbox:LightSetup`) the HUD. */
     public applySetup(index: number) {
         const i = Math.min(3, Math.max(1, Math.round(index)))
         const s = this.setups[i - 1]
-        this.setup = i
         // A directional light shines along its +Z: pitched down by the elevation, turned to the heading.
         this._sun?.setRotation([s.elevation, this.sunHeading, 0])
-        if (this._hudLine) this._hudLine.text = `Light: ${s.name}`
         this._relightIn = this.probeRelightDelay
+        this.setup = i
+    }
+
+    /** The setup changed: the HUD says which. */
+    @eventListener('sandbox:LightSetup')
+    private _setupShown(setup: number) {
+        const s = this.setups[setup - 1]
+        if (this._hudLine && s) this._hudLine.text = `Light: ${s.name}`
     }
 }
