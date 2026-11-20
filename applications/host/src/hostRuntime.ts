@@ -28,6 +28,17 @@ export interface HostRuntimeOptions {
     physicsBackend?: string;
     /** Keep the engine's Logger on. Default off, as a shipped game runs. */
     logging?: boolean;
+    /**
+     * How often AI agents perceive and probe for obstacles, in ticks, and how many path searches a tick may run
+     * (Scene.aiDetail). Default 3, 2 and 1: a host with 50 agents could not afford every tick
+     * (docs/design/netsync.md §7). { perceiveEvery: 1, probeEvery: 1 } keeps single-player behaviour exactly.
+     */
+    aiDetail?: { perceiveEvery: number; probeEvery: number; pathsPerFrame?: number };
+    /**
+     * Animators posed at a reduced rate by distance to the nearest player, foot IK off (the host draws nothing;
+     * sockets and root motion still work). Default true.
+     */
+    animationLod?: boolean;
     scheduler?: Scheduler;
 }
 
@@ -51,6 +62,10 @@ export class HostRuntime {
     public onTick: ((tick: number) => void) | null = null;
     /** Called after each scene has started (the entry scene and every Game.loadScene). */
     public onSceneStarted: ((name: string) => void) | null = null;
+    /** Where the players are (their characters), for animation level of detail. None: everything is far. */
+    public focusPoints: (() => ArrayLike<number>[]) | null = null;
+    private _aiDetail: { perceiveEvery: number; probeEvery: number; pathsPerFrame?: number } = { perceiveEvery: 3, probeEvery: 2, pathsPerFrame: 1 };
+    private _animationLod = true;
 
     private readonly _ticker: FixedTicker;
     private readonly _durations: number[] = [];
@@ -101,6 +116,8 @@ export class HostRuntime {
         resetScriptModules();
         const content: GameContentSource = { source, header, claimed: new Set() };
         const runtime = new HostRuntime(engine, content, tickRate, options.scheduler ?? realScheduler);
+        if (options.aiDetail) runtime._aiDetail = { ...options.aiDetail };
+        runtime._animationLod = options.animationLod !== false;
         runtime._permanentBakes = await installGameContent(content);
         runtime._installScripts(files.scripts);
 
@@ -163,12 +180,31 @@ export class HostRuntime {
     private _tick(tick: number): void {
         this.onBeforeTick?.(tick);
         const t0 = performance.now();
+        this._applyDetail();
         this.engine.stepFrame(1 / this.tickRate, { render: false });
         const ms = performance.now() - t0;
         this._durations.push(ms);
         if (this._durations.length > STATS_WINDOW) this._durations.shift();
         this._ticks = tick + 1;
         this.onTick?.(tick);
+    }
+
+    /** The AI detail on the scene, and each animator's level of detail from its distance to the nearest player. */
+    private _applyDetail(): void {
+        const scene = this.engine.scene;
+        if (!scene) return;
+        scene.aiDetail = this._aiDetail;
+        if (!this._animationLod) return;
+        const focus = this.focusPoints?.() ?? [];
+        for (const node of scene.nodes as Set<any>) {
+            if (node.nodeType !== 'model' || !node.animator) continue;
+            const at = node.worldPosition;
+            let d = Infinity;
+            for (const f of focus) d = Math.min(d, Math.hypot(at[0] - f[0], at[1] - f[1], at[2] - f[2]));
+            // As the renderer would for a model no camera sees: every 2nd frame near a player, every 4th beyond.
+            node.cameraVisible = false;
+            node.cameraDistance = d;
+        }
     }
 
     private _resolve(nameOrId: string): string | undefined {

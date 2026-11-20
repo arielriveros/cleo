@@ -1,6 +1,6 @@
 # NetSync — online multiplayer for Cleo (plan)
 
-Status: **phase 7 done** (phase 0 open: Safari; 50-AI host budget open; browser peer runtime open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
+Status: **phase 8 done** (phase 0 open: Safari; browser peer runtime open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
 Target: **physics sandbox shooter — co-op PvE (≤ 50 AI) and 8v8 deathmatch with bots, ≤ 16 peers** ·
 Started 2026-11-19
 
@@ -603,6 +603,31 @@ Phases 0–3 are the foundation; 4–6 make the target game playable; 7–9 make
 | 6 | **Done (2026-11-19).** Sandbox, 150 ms RTT, 5 % loss. Carrying: the prop sits where it is held on the carrier's screen at once, within 15 cm of that on the host, stays within reach while walking, cannot be taken by another player; a throw flies 9.8 m on the host and the thrower's screen never moves it more than 31 cm in a frame (its flight speed) across the hand-over. Hitscan at a player running across the line of fire: 5 of 5 hit, all 5 only thanks to the rewind. Trust: co-op accepts a claimed near miss and clamps an old view; versus refuses both; a forged claim is refused under both. Projectile: the stand-in leaves at once, swaps for the host's with no jump (26 cm largest step at ~21 cm/frame) and lands within 1 mm of the host's. | `src/netsync/sync/carry.ts` (`CarryHost`, `CarryPeer`), `weapons.ts` (`LagCompensator`, `WeaponHost`, `WeaponPeer`); `SyncPeer` `hold` / `release` (blended) / `renderTick`; `SyncHost` `nodeOf` / `synced`; `cleo-host --trust`; `applications/host/tests/play.test.ts` |
 
 | 7 | **Done (2026-11-19).** Four game scripts, written with nothing but the new surface, run on a host and two peers at 150 ms RTT and 5 % loss: a door any player opens (`@netcall({ to: 'host', anyone: true })`, `@synced({ onChange })`), a gun only its owner fires (`'host'`) whose shot flashes everywhere (`'all'`, unreliable) and whose hint reaches its owner alone (`'owner'`), a pickup the host scores and removes, and a scoreboard with a synced object and a synced node reference. `this.net` answers host / peer / offline and ownership correctly; a player's event reaches the host and the other players; a late joiner gets every synced field. | `src/core/net/sceneNet.ts` (`SceneNet`, `NodeNet`), `scene.net`, `node.net`, `@synced` / `@netcall` in `cleo/decorators`, `Game.random` / `seedRandom`, `Net`; `src/netsync/sync/scriptSync.ts` (`ScriptHost`, `ScriptPeer`); `RemoteControl.ownerOf`; editor `@` completion; tests `tests/netsyncScripting.test.ts`, `applications/host/tests/scripts.test.ts` |
+
+| 8 | **Done (2026-11-19).** A followed player's character, watched by another player at 150 ms RTT and 5 % loss while it runs, sprints, strafes and stops: its animator is in the host's state on 100 % of frames, its speed parameter is the host's to 0.015 m/s on average, and the animation's speed matches the character's motion to 0.14 m/s (no foot slide); an action the host plays shows on the watcher while it draws that very tick (225 → 225.4); a state forced away comes back. 27 B/tick of parameters. The 50-AI host budget: Firing Line with 50 fighters ~22 ms a tick mean (was ~26), p95 ~37 (was 45–67). | `src/netsync/sync/animSync.ts` (`AnimHost`, `AnimPeer`); `Animator.forceState`; `SyncPeer.renderTick` measured from the newest state that can have arrived; `Scene.aiDetail` + `Scene.takePathSearch`; `HostRuntime` AI detail and animation LOD (`focusPoints`); tests `applications/host/tests/anim.test.ts`, `hostRuntime.test.ts` |
+
+Phase-8 details and findings:
+- **Animation is driven, not sent.** `AnimHost` sends each followed character's animator parameters when they
+  change (a full set every 30 ticks for loss), plus triggers, actions and base-layer state changes reliably,
+  stamped with the tick. `AnimPeer` pins the parameters (`setParamOverride`, which wins over a parameter's
+  link to the local character — on a peer, a follower whose senses read nothing true) and fires events when
+  it draws their tick. Numeric parameters are blended across the tick a change happened in, as positions are;
+  a gap between samples means "unchanged" (blending across the whole gap made it worse). A state that differs
+  from the host's for 15 ticks is forced. Animators are addressed by character NetId and order among its
+  animated models.
+- **Follow point fixed (all of sync):** `renderTick` was "the host clock now, minus 2 ticks", but a pulse
+  takes half a round trip to arrive, so at 75 ms one way the tick drawn had often not arrived and followed
+  nodes were extrapolated. It is now measured back from the newest state that can have arrived (host clock −
+  RTT/2 − jitter − 2 ticks). Found because animation parameters cannot be extrapolated; it also took the
+  200-prop follow error in flight from 2.6 cm / 23 cm (p50 / p95) to 0.7 cm / 2.1 cm. Shots are judged at
+  this same view.
+- **Host AI detail** (`Scene.aiDetail`, default every frame; `HostRuntime` sets perceive every 3 ticks,
+  obstacle whiskers every 2, at most 1 path search a tick): each agent takes its turn on its own frame of the
+  cycle with the time since its last. At 50 fighters perception 9.1 → ~3.5 ms, path searches 2.9 → 1 per
+  tick. **Host animation LOD**: animators posed as an off-screen model would be, by distance to the nearest
+  player (every 2nd tick within 15 m, every 4th beyond), foot IK off: 9.5 → ~3.5 ms.
+- **Still open:** a navmesh path search costs ~4 ms on Firing Line's mesh, the largest single item left in a
+  50-fighter tick (p95 ~37 ms); speeding up the search itself is engine work outside NetSync.
 
 Phase-7 details and findings:
 - **`this.net`** reads the scene's network (`scene.net`, set by `ScriptHost` / `ScriptPeer`). Offline a game is

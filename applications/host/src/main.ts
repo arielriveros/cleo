@@ -13,7 +13,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CarryHost, HostSession, LagCompensator, RemoteControl, ScriptHost, SyncHost, WeaponHost, hashContent } from '../../../src/netsync';
+import { AnimHost, CarryHost, HostSession, LagCompensator, RemoteControl, ScriptHost, SyncHost, WeaponHost, hashContent } from '../../../src/netsync';
 import type { ControllerNode, Node } from 'cleo';
 import { cachedCertificate } from './devCertificate';
 import { HostListener } from './hostListener';
@@ -112,6 +112,10 @@ if (runtime) {
         onHit: (h) => log(`peer ${h.peer.id} hit "${h.node.name}" with ${h.weapon}${h.claimed ? ' (claimed)' : ''}`),
     });
     if (remote) runtime.onBeforeTick = (tick) => { remote.beforeTick(tick); carry?.beforeTick(tick, 1 / tickRate); };
+    // Animation level of detail by distance to the players' characters.
+    runtime.focusPoints = () => [...session.peers.keys()].map((id) => remote?.controllerOf(id)?.possessed?.worldPosition).filter((p): p is any => !!p);
+    // Followed characters' animators: parameters and events.
+    const anim = new AnimHost(session, sync);
     runtime.start(performance.now() - session.timeMs());
     let last = 0;
     runtime.onTick = (tick) => {
@@ -119,6 +123,7 @@ if (runtime) {
         lag?.record(tick);
         sync.tick(tick);
         scripts.tick();
+        anim.tick(tick);
         if (tick - last < tickRate * 10) return;
         last = tick;
         const s = runtime!.stats();
@@ -129,7 +134,7 @@ if (runtime) {
     };
 }
 
-console.log(`cleo-host (NetSync phase 7)
+console.log(`cleo-host (NetSync phase 8)
   WebTransport  udp/${listener.webTransportPort}  /netsync   cert sha-256 ${certificate.hash} (expires ${certificate.notAfter})
   WebSocket     tcp/${listener.webSocketPort}  /ws
   Endpoint      http://localhost:${listener.webSocketPort}/endpoint  (a HostEndpoint for PeerSession.join)

@@ -53,3 +53,7 @@ export type { HitEvent, HitReport, WeaponHostOptions, WeaponHostStats } from './
 // Phase 7: scripts.
 export { ScriptHost, ScriptPeer, decodeValue, encodeValue } from './sync/scriptSync';
 export type { ScriptHostOptions, ScriptHostStats, ScriptPeerOptions } from './sync/scriptSync';
+
+// Phase 8: animation.
+export { AnimHost, AnimPeer, animatorsOf } from './sync/animSync';
+export type { AnimHostOptions, AnimHostStats, AnimPeerOptions, AnimPeerStats } from './sync/animSync';

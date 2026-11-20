@@ -675,6 +675,12 @@ export class ControllerNode extends Node {
     public perceive(delta: number): void {
         const pawn = this._resolvePossessed();
         if (!pawn || this.controlSource !== 'ai') return;
+        // Every `perceiveEvery` frames (Scene.aiDetail), on this controller's own frame of the cycle, with all the
+        // time since it last looked: agents take turns rather than all looking on the same frame.
+        this._perceiveWait += delta;
+        if (!this._onItsFrame(this._scene?.aiDetail.perceiveEvery ?? 1, this._perceiveFrame++)) return;
+        delta = this._perceiveWait;
+        this._perceiveWait = 0;
         if (isCharacterBody2D(pawn)) { this._perceive2D(pawn, delta); return; }
 
         // Every other pawn in the scene. A player and every NPC is a Character, so this is both the
@@ -980,7 +986,8 @@ export class ControllerNode extends Node {
         // Deflect around whatever is ahead. Gated on `avoidDistance > 0`, so the rays are not fired at all
         // unless avoidance was asked for — see `_probeObstacles`.
         if (tuning.avoidDistance > 0 && vec3.length(this._desired) > 1e-6 && pawn instanceof CharacterNode) {
-            this._probeObstacles(pawn);
+            // The whiskers every `probeEvery` frames (Scene.aiDetail); in between, the last ones still steer.
+            if (this._onItsFrame(this._scene?.aiDetail.probeEvery ?? 1, this._probeFrame++)) this._probeObstacles(pawn);
             avoidObstacles(this._desired, this._desired, this._probes, tuning, up);
         }
 
@@ -1039,7 +1046,9 @@ export class ControllerNode extends Node {
             return;
         }
 
-        if (shouldRepath(this._repathState, delta, this._targetPos, this.repath)) {
+        // A search when the policy wants one AND the scene's ration allows it (Scene.takePathSearch): otherwise the
+        // current path is followed one frame more. An agent with no path at all still waits its turn.
+        if (shouldRepath(this._repathState, delta, this._targetPos, this.repath) && (this._scene?.takePathSearch() ?? true)) {
             const found = this._scene?.ai?.findPath(source, this._selfPos, this._targetPos, this._pathScratch)
                 ?? source.mesh.findPath(this._selfPos, this._targetPos, this._pathScratch);
             // Marked BEFORE the emptiness check, so an unreachable destination is retried on the
@@ -1668,6 +1677,23 @@ export class ControllerNode extends Node {
      * `CameraRigNode._probe` does for the camera boom. The cost is `whiskerCount` raycasts per AI
      * controller per frame, which `physicsStats.rayCount` already surfaces in the performance HUD.
      */
+    private _perceiveWait = 0;
+    private _perceiveFrame = 0;
+    private _probeFrame = 0;
+    /** This controller's offset in a cycle, from its id: spreads agents over the frames of the cycle. */
+    private _cyclePhase = -1;
+
+    /** Whether frame `frame` of this controller is one of its turns in a cycle of `every` frames. */
+    private _onItsFrame(every: number, frame: number): boolean {
+        if (!(every > 1)) return true;
+        if (this._cyclePhase < 0) {
+            let h = 0;
+            for (let i = 0; i < this.id.length; i++) h = (h * 31 + this.id.charCodeAt(i)) >>> 0;
+            this._cyclePhase = h;
+        }
+        return (frame + this._cyclePhase) % Math.round(every) === 0;
+    }
+
     private _probeObstacles(pawn: CharacterNode): void {
         this._probes.length = 0;
         const physics = this._scene?.physics;

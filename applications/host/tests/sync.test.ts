@@ -116,7 +116,7 @@ describe('NetSync phase 3: a 200-prop sandbox under load', () => {
         const errors: number[] = [];
         await w.run(90, () => {
             // Where the host had it at the moment the peer draws: the same fractional tick, interpolated.
-            const renderTick = lossy.session.hostTimeNow() / TICK_MS - lossy.sync.delayTicks;
+            const renderTick = lossy.sync.renderTick();
             const h = w.history.get(flier.id)!;
             const a = h.get(Math.floor(renderTick)), b = h.get(Math.floor(renderTick) + 1);
             const copy = lossy.scene.getNodeById(flier.id);

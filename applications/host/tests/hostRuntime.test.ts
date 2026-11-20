@@ -72,10 +72,10 @@ describe('HostRuntime', () => {
         expect(nodesOfType(r, 'character').length).toBe(12);
     });
 
-    // The budget is 25 ms of one core per tick at 30 Hz (docs/design/netsync.md §7). 12 fighters take ~4 ms; 50
-    // took ~26 ms mean on the development machine (2026-11-19), AI perception and think ~14 ms of it and the
-    // animators ~7 ms: over budget, which the plan addresses (staggered perception, host animation LOD). This
-    // measures and logs it, and fails only on a gross regression.
+    // The budget is 25 ms of one core per tick at 30 Hz (docs/design/netsync.md §7). 12 fighters take ~4 ms. 50
+    // took ~26 ms mean before the host's AI detail and animation level of detail (phase 8), ~22 ms after (p95
+    // ~37 ms), on the development machine. What is left is mostly one navmesh path search a tick (~4 ms each).
+    // This measures and logs it, and fails on a regression past the old cost.
     it('measures a 50-fighter match against the tick budget', async () => {
         const bin = await packExampleGame(path.join(EXAMPLES, 'firing-line'), {
             edit: (data) => {
@@ -89,6 +89,6 @@ describe('HostRuntime', () => {
         r.step(900);
         const stats = r.stats();
         console.log(`Firing Line, 50 fighters, last 10 s of 30: ${JSON.stringify(stats)}`);
-        expect(stats.meanMs).toBeLessThan(60);
+        expect(stats.meanMs).toBeLessThan(35);
     });
 });

@@ -370,6 +370,29 @@ export class Scene {
     public net: SceneNet | null = null;
 
     /**
+     * How often AI controllers do their expensive parts, in frames: `perceiveEvery` (senses: a raycast per
+     * candidate) and `probeEvery` (obstacle whiskers: a raycast each). 1 — every frame — by default. A NetSync
+     * host with many agents spreads them out (each agent on its own frame of the cycle, with the time since it
+     * last ran), docs/design/netsync.md §7.
+     */
+    public aiDetail: { perceiveEvery: number; probeEvery: number; pathsPerFrame?: number } = { perceiveEvery: 1, probeEvery: 1 };
+
+    /** Path searches left this frame (see `aiDetail.pathsPerFrame`). */
+    private _pathsLeft = Infinity;
+
+    /**
+     * @internal Whether a controller may search for a new path this frame. With `aiDetail.pathsPerFrame` set (a
+     * NetSync host), searches are rationed: one that is refused keeps following its current path and asks again
+     * next frame. A search over a large navmesh costs milliseconds; fifty agents re-planning on the same frame
+     * cost a frame.
+     */
+    public takePathSearch(): boolean {
+        if (this._pathsLeft <= 0) return false;
+        this._pathsLeft--;
+        return true;
+    }
+
+    /**
      * The rain and snow falling from this scene's weather volumes (WeatherNode `precipitation`): one
      * particle system per kind round the camera, outside the tree. See PrecipitationRig (feature `weather`); in a
      * game built without weather, a stand-in where nothing falls (scenePrecipitation.ts).
@@ -754,6 +777,7 @@ export class Scene {
             // THIS frame's camera rather than the previous frame's.
             if (this._hasStarted && !paused) {
                 const controlStart = performance.now();
+                this._pathsLeft = this.aiDetail.pathsPerFrame ?? Infinity;
                 for (const controller of this.controllers) {
                     // Guarded per controller, like dispatchActions: one bad brain must not take the frame.
                     try { controller.think(delta); }

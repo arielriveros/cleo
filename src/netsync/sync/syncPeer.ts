@@ -33,7 +33,7 @@ export interface SyncPeerOptions {
      * already be recognised. (A Predictor sets it too.)
      */
     isOwn?: (nodeId: string) => boolean;
-    /** How far behind the host clock nodes are drawn, in ticks. Default 2 (plus the link's jitter is absorbed by it). */
+    /** How far behind the newest state that can have arrived nodes are drawn, in ticks. Default 2. */
     delayTicks?: number;
     /** Longest extrapolation past the newest state, ms. Default 100. */
     extrapolateMs?: number;
@@ -113,8 +113,19 @@ export class SyncPeer {
     /** Whether this peer moves `nodeId` itself (its own character, or a node it holds). */
     public owns(nodeId: string): boolean { return this._held.has(nodeId) || !!this.isOwn?.(nodeId); }
 
-    /** The host tick (fractional) this peer is drawing followed nodes at: what a shot fired now was aimed at. */
-    public renderTick(): number { return this._session.hostTimeNow() / (1000 / this._session.tickRate) - this.delayTicks; }
+    /**
+     * The host tick (fractional) this peer is drawing followed nodes at: what a shot fired now was aimed at.
+     *
+     * Measured back from the newest state that can have ARRIVED — the host's clock now, less the half round trip
+     * a pulse takes and the link's jitter — and then `delayTicks` further, so there is a state on each side of it
+     * to interpolate between. (Measured from the host's clock alone, the tick drawn had often not arrived yet at
+     * 75 ms one way, and followed nodes were extrapolated instead.)
+     */
+    public renderTick(): number {
+        const tickMs = 1000 / this._session.tickRate;
+        const transit = this._session.clock.rttMs / 2 + this._session.clock.jitterMs;
+        return (this._session.hostTimeNow() - transit) / tickMs - this.delayTicks;
+    }
 
     /** The NetId a node is followed under here. */
     public netIdOf(node: Node): number | undefined {
@@ -128,7 +139,7 @@ export class SyncPeer {
     /** Move every followed node to where the host had it `delayTicks` ago. Call once per frame, before drawing. */
     public apply(): void {
         const tickMs = 1000 / this._session.tickRate;
-        const renderTick = this._session.hostTimeNow() / tickMs - this.delayTicks;
+        const renderTick = this.renderTick();
         for (const [netId, samples] of this._samples) {
             const node = this._nodeByNet.get(netId);
             if (!node || samples.length === 0 || this.owns(node.id)) continue;

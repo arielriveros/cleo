@@ -3212,6 +3212,19 @@ export class Animator {
     public get currentStateName(): string | null { return this._currentStateName; }
 
     /**
+     * Make `name` the current state of the base layer at once, cross-fading over `blend` seconds (the state's own
+     * default when omitted), whatever the transitions say. For a machine driven from outside — a NetSync peer
+     * putting a followed character into the state the host has it in (docs/design/netsync.md §6.7). Returns false
+     * when the machine has no such state.
+     */
+    public forceState(name: string, blend?: number): boolean {
+        if (!this._stateMachine?.states.some(s => s.name === name)) return false;
+        if (this._currentStateName === name) return true;
+        this._enterState(name, blend);
+        return true;
+    }
+
+    /**
      * Assign or clear the state machine, resetting parameters to their defaults and entering the entry
      * state. Null falls back to the mapping list, else the bind pose.
      */

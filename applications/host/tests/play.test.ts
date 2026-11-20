@@ -64,7 +64,7 @@ describe('NetSync phase 6: carrying', () => {
         a.drive = () => intent([0, 1]);
         await w.run(30);
         a.drive = null;
-        await w.run(15);
+        await w.run(30);
         expect(vec3.distance(crate!.worldPosition, me.worldPosition)).toBeLessThan(2.5);
         // The other player sees it there too.
         expect(vec3.distance(b.scene.getNodeById(crate!.id)!.position as vec3, crate!.position as vec3)).toBeLessThan(0.1);
