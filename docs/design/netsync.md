@@ -626,8 +626,12 @@ Phase-8 details and findings:
   cycle with the time since its last. At 50 fighters perception 9.1 → ~3.5 ms, path searches 2.9 → 1 per
   tick. **Host animation LOD**: animators posed as an off-screen model would be, by distance to the nearest
   player (every 2nd tick within 15 m, every 4th beyond), foot IK off: 9.5 → ~3.5 ms.
-- **Still open:** a navmesh path search costs ~4 ms on Firing Line's mesh, the largest single item left in a
-  50-fighter tick (p95 ~37 ms); speeding up the search itself is engine work outside NetSync.
+- **Path search, after phase 8.** Nearly all of a search was Yuka's A* (Maps for costs and frontier, an object
+  per queue entry, an edge array per expanded region). `src/ai/navSearch.ts` (`RegionSearch`) runs A* over the
+  same region graph copied once into flat arrays, with reused scratch and connected-component labels (a goal the
+  start cannot reach is answered without searching). Same shortest costs as Yuka on 120 of 120 random pairs. A
+  whole `findPath`: Firing Line 3.7 → 0.9 ms, Dungeon 7.7 → 0.25 ms. 50 fighters on Firing Line: ~22 → 16 ms a
+  tick mean, p95 ~37 → 24 ms.
 
 Phase-7 details and findings:
 - **`this.net`** reads the scene's network (`scene.net`, set by `ScriptHost` / `ScriptPeer`). Offline a game is
