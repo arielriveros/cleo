@@ -695,14 +695,18 @@ Phase-5 details and findings:
   from where the host has it).
 - **Ordering:** the peer must learn which character is its own before that character's spawn is applied
   (`SyncPeer` takes `isOwn` at construction; `PeerCommands` is created first). `RemoteControl` sends the
-  Possess before the spawn reaches the peer. An authored (not spawned) character is made a follower at parse
-  and cannot be predicted yet.
+  Possess before the spawn reaches the peer. An authored (not spawned) character is made a follower at parse;
+  `followerSceneJson(json, kept)` keeps what it took from characters' Colliders and from controllers, and once
+  the peer knows its character the predictor has `SyncPeer.adopt` give it back (body rebuilt dynamic where it
+  stands, controller restored). Tested on the Sandbox's own Player: moved 5.8 m, 0 corrections in 89 checks.
 - **Open:** the browser-side peer loop — a non-headless engine stepping its simulation in host-numbered
   ticks (`Predictor.dueTick()`) with render interpolation between ticks, and the local controller reading
   real input (`controlSource: 'player'`). The tests drive the same steps by hand; the loop lands with the
   editor's Play › Multiplayer (phase 9). Until then followed characters and props are drawn at 30 Hz.
-- Not done: other players' characters still do not animate (phase 8); the peer's own rotation is predicted
-  and never corrected (only position and velocity are).
+- **Facing is corrected too.** The Character node's row (its facing) is compared with the facing predicted for
+  that tick; past 3° the difference is turned into the present at once and into every later prediction. Only
+  something the host alone ran turns it differently (a script, a knock-back): a quarter turn applied on the
+  host alone was corrected once, to 0.11°; the open-course run had none.
 
 Phase-4 details and findings:
 - **A command** is the intent a peer's controller published that frame (`ControllerNode.publishedIntent`):

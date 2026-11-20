@@ -33,6 +33,11 @@ export interface SyncPeerOptions {
      * already be recognised. (A Predictor sets it too.)
      */
     isOwn?: (nodeId: string) => boolean;
+    /**
+     * What {@link followerSceneJson} took from the authored scene's nodes, when this peer's own character may be
+     * one of them (placed in the level rather than spawned for the player): {@link SyncPeer.adopt} gives it back.
+     */
+    authored?: FollowerOriginals;
     /** How far behind the newest state that can have arrived nodes are drawn, in ticks. Default 2. */
     delayTicks?: number;
     /** Longest extrapolation past the newest state, ms. Default 100. */
@@ -80,17 +85,43 @@ export class SyncPeer {
     /** The host's state for one of this peer's own nodes, as of host tick `tick` (for prediction to compare). */
     public onOwnState: ((nodeId: string, tick: number, state: QState) => void) | null = null;
     private readonly _simulated: boolean;
+    private readonly _authored: FollowerOriginals | null;
 
     constructor(private readonly _session: PeerSession, private _scene: Scene, options: SyncPeerOptions = {}) {
         this.delayTicks = options.delayTicks ?? 2;
         this.extrapolateMs = options.extrapolateMs ?? 100;
         this._simulated = !!options.simulated;
         this.isOwn = options.isOwn ?? null;
+        this._authored = options.authored ?? null;
         _session.route('control', [SyncControl.table, SyncControl.spawn, SyncControl.despawn], (m) => this._onControl(m));
         _session.route('pulse', SyncPulse.pulse, (m) => this._onPulse(m));
     }
 
     public get scene(): Scene { return this._scene; }
+
+    /**
+     * Make an authored node that was parsed as a follower this peer's own again: a Collider gets back its mass and
+     * collision response (its body rebuilt, dynamic, where it stands), a controller its control source. For the
+     * peer's own character when the level placed it rather than the host spawning it. False when `node` was not
+     * made a follower (a spawned own character never is).
+     */
+    public adopt(node: Node): boolean {
+        const was = this._authored?.get(node.id);
+        if (!was) return false;
+        this._authored!.delete(node.id);
+        const n = node as any;
+        if (was.controlSource !== undefined) n.controlSource = was.controlSource;
+        if (was.mass !== undefined && node.nodeType === 'collider') {
+            const old = n.body;
+            if (old) this._scene.physics?.removeBody(old);
+            n._body = null;
+            n.mass = was.mass;
+            n.simulatePhysics = was.simulatePhysics ?? true;
+            n.buildPhysics();
+            n.body?.wakeUp?.();
+        }
+        return true;
+    }
     /** The host's name for the scene it is running (its table's). */
     public get sceneId(): string { return this._sceneId; }
     /** Stop following a node: this peer moves it itself (carries it, flies it after a throw). */
@@ -336,19 +367,29 @@ export class SyncPeer {
     }
 }
 
+/** What {@link followerSceneJson} changed, by node id: a character's Collider's body, a controller's source. */
+export type FollowerOriginals = Map<string, { mass?: number; simulatePhysics?: boolean; controlSource?: string }>;
+
 /**
  * Make a serialized subtree a follower of the host, in place: every dynamic collider static and without collision
  * response (it is moved by sync, and must neither fall under this peer's gravity nor push this peer's character),
  * every controller off (nobody here drives it). For a peer that runs physics: its authored scene before it is
  * parsed, and every spawned copy but its own character's. Returns the same JSON.
  */
-export function followerSceneJson(json: any): any {
+export function followerSceneJson(json: any, kept?: FollowerOriginals): any {
     const walk = (n: any) => {
         if (n?.type === 'collider' && n.collider && n.collider.mass > 0) {
+            // Kept for a character only: the one body a peer may take back (its own, see SyncPeer.adopt).
+            if (kept && n.id && (n.children ?? []).some((c: any) => c?.type === 'character')) {
+                kept.set(n.id, { mass: n.collider.mass, simulatePhysics: n.collider.simulatePhysics !== false });
+            }
             n.collider.mass = 0;
             n.collider.simulatePhysics = false;
         }
-        if (n?.type === 'controller') n.controlSource = 'none';
+        if (n?.type === 'controller') {
+            if (kept && n.id) kept.set(n.id, { controlSource: n.controlSource ?? 'player' });
+            n.controlSource = 'none';
+        }
         for (const c of n?.children ?? []) walk(c);
     };
     walk(json);

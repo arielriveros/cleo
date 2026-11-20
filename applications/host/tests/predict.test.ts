@@ -3,7 +3,7 @@
 // 150 ms RTT with jitter and 5 % loss throughout.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import path from 'node:path';
-import { vec3 } from 'gl-matrix';
+import { quat, vec3 } from 'gl-matrix';
 import type { ControllerNode, Node } from 'cleo';
 import { packExampleGame } from '../src/exampleGame';
 import { LOSSY, intent, world, type TestPeer, type World } from './helpers/world';
@@ -113,5 +113,25 @@ describe('NetSync phase 5: a peer predicts its own character', () => {
             `here vs host at rest ${(vec3.distance(local(), onHost()) * 100).toFixed(1)} cm`);
         // Whatever happened on the way, it ends where the host says.
         expect(vec3.distance(local(), onHost())).toBeLessThan(0.03);
+    });
+
+    it('turns its character to the host’s facing when only the host turned it', async () => {
+        const hostPawn = subtree(spawned.get(me.session.peerId)!).find((n) => n.nodeType === 'character')!;
+        const pawn = me.predictor!.pawn!;
+        const stats = me.predictor!.stats;
+        const angle = () => quat.getAngle(hostPawn.quaternion as quat, pawn.quaternion as quat) * 180 / Math.PI;
+        expect(angle()).toBeLessThan(3);
+        const before = stats.rotationCorrections;
+        console.log(`facing so far: ${stats.rotationChecked} checked, ${before} corrected`);
+        // A script on the host (a knock-back, a cutscene) turns the character a quarter turn; this peer did not.
+        await w.run(1, () => {
+            const q = quat.rotateY(quat.create(), hostPawn.quaternion as quat, Math.PI / 2);
+            hostPawn.setQuaternion(q);
+        });
+        expect(angle()).toBeGreaterThan(80);
+        await w.run(20);
+        console.log(`after the host's turn: ${stats.rotationCorrections - before} corrections, ${angle().toFixed(2)}° from the host`);
+        expect(stats.rotationCorrections - before).toBeGreaterThanOrEqual(1);
+        expect(angle()).toBeLessThan(3);
     });
 });

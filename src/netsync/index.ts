@@ -40,7 +40,7 @@ export { COMMAND_TYPE, CommandQueue, PeerCommands, POSSESS_TYPE, RemoteControl, 
 export type { Command, RemoteControlOptions } from './sync/commands';
 
 // Phase 5: prediction.
-export { followerSceneJson } from './sync/syncPeer';
+export { followerSceneJson, type FollowerOriginals } from './sync/syncPeer';
 export { Predictor } from './sync/predictor';
 export type { PredictionStats, PredictorOptions } from './sync/predictor';
 

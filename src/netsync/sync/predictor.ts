@@ -17,14 +17,19 @@
 // since H, it would have done from the corrected position too, give or take what it touched. The bodies it could
 // touch differently are the props, which on a peer are followers that do not collide with it (followerSceneJson);
 // walls and floors are the same on both sides.
+//
+// The character's facing (its Character node's rotation; the Collider's is upright) is predicted and corrected the
+// same way: compared with the host's for the same tick, and past `rotationThreshold` the difference is turned into
+// the present at once and into every later prediction. It drifts only when something the host alone ran turned the
+// character (a script, a knock-back), so the correction is rare, and a turn reads as one where a jump would not.
 
-import { vec3 } from 'gl-matrix';
+import { quat, vec3 } from 'gl-matrix';
 import type { Node } from '../../core/scene/nodes/node';
 import type { ControllerNode } from '../../core/scene/nodes/controllerNode';
 import type { PeerSession } from '../session/peerSession';
 import type { PeerCommands } from './commands';
 import type { SyncPeer } from './syncPeer';
-import { POSITION_SCALE, VELOCITY_SCALE, type QState } from './quantize';
+import { POSITION_SCALE, VELOCITY_SCALE, unpackQuaternion, type QState } from './quantize';
 
 export interface PredictorOptions {
     /** Error (m) under which a prediction counts as right. Default 0.02. */
@@ -35,6 +40,8 @@ export interface PredictorOptions {
     blend?: number;
     /** Predicted ticks kept for comparison. Default 90 (3 s at 30 Hz). */
     historyTicks?: number;
+    /** Facing error (degrees) under which a prediction counts as right. Default 3 (a quantized row is within 0.23). */
+    rotationThreshold?: number;
 }
 
 interface Predicted { pos: vec3; vel: vec3; }
@@ -45,6 +52,9 @@ export interface PredictionStats {
     /** Of those, ones past the threshold (corrected). */
     corrections: number;
     snaps: number;
+    /** Host facings compared with a prediction, and of those, ones corrected. */
+    rotationChecked: number;
+    rotationCorrections: number;
     /** Largest error seen, m. */
     maxError: number;
     /** Every error seen, m (recent ones), for percentiles. */
@@ -55,14 +65,20 @@ export class Predictor {
     public readonly threshold: number;
     public readonly snapDistance: number;
     public readonly blend: number;
-    public readonly stats: PredictionStats = { checked: 0, corrections: 0, snaps: 0, maxError: 0, errors: [] };
+    public readonly stats: PredictionStats = { checked: 0, corrections: 0, snaps: 0, rotationChecked: 0, rotationCorrections: 0, maxError: 0, errors: [] };
 
+    public readonly rotationThreshold: number;
     private readonly _history = new Map<number, Predicted>();
+    /** The character's predicted facing per tick (its own map: the Character's row arrives apart from the Collider's). */
+    private readonly _facing = new Map<number, quat>();
+    private readonly _hostRot = quat.create();
+    private readonly _unpack = [0, 0, 0, 1];
     private readonly _historyTicks: number;
     private readonly _pending = vec3.create();
     private _lastTick = -1;
     /** Whether the character has been put where the host has it at least once (it spawns at its template's origin). */
     private _placed = false;
+    private _adopted = false;
 
     constructor(
         private readonly _session: PeerSession,
@@ -74,6 +90,7 @@ export class Predictor {
         this.snapDistance = options.snapDistance ?? 1.5;
         this.blend = options.blend ?? 0.3;
         this._historyTicks = options.historyTicks ?? 90;
+        this.rotationThreshold = options.rotationThreshold ?? 3;
         // The character and its Collider are this peer's to simulate: sync leaves them alone and hands their
         // host states here.
         _sync.isOwn = (id) => id === _commands.pawnId || (!!_commands.pawnId && id === this.pawn?.parent?.id);
@@ -106,6 +123,7 @@ export class Predictor {
      */
     public afterTick(tick: number): void {
         this._lastTick = tick;
+        this._adopt();
         const node = this._bodyNode;
         const body = (node as any)?.body;
         const controller = this.controller;
@@ -127,11 +145,52 @@ export class Predictor {
             vel: vec3.fromValues(v[0], v[1], v[2]),
         });
         this._history.delete(tick - this._historyTicks);
+        const pawn = this.pawn;
+        if (pawn && this._placed) this._facing.set(tick, quat.clone(pawn.quaternion as quat));
+        this._facing.delete(tick - this._historyTicks);
+    }
+
+    /** The host's facing for the character at `tick`: compared with the one predicted for it, and corrected past the threshold. */
+    private _onHostFacing(pawn: Node, tick: number, state: QState): void {
+        unpackQuaternion(state.rot, this._unpack);
+        const host = quat.set(this._hostRot, this._unpack[0], this._unpack[1], this._unpack[2], this._unpack[3]);
+        const predicted = this._facing.get(tick);
+        if (!predicted) return;
+        for (const t of this._facing.keys()) if (t <= tick) this._facing.delete(t);
+        this.stats.rotationChecked++;
+        const degrees = quat.getAngle(host, predicted) * 180 / Math.PI;
+        if (!(degrees > this.rotationThreshold)) return;
+        this.stats.rotationCorrections++;
+        // The turn that takes the prediction to the host's, applied to the present and to every later prediction.
+        const delta = quat.multiply(quat.create(), host, quat.invert(quat.create(), predicted));
+        const now = quat.multiply(quat.create(), delta, pawn.quaternion as quat);
+        pawn.setQuaternion(quat.normalize(now, now));
+        for (const q of this._facing.values()) quat.normalize(q, quat.multiply(q, delta, q));
+    }
+
+    /**
+     * Once the character is known: if the level placed it (it was parsed as a follower, like everything the host
+     * simulates), take it back — its body dynamic again, its controller this peer's.
+     */
+    private _adopt(): void {
+        if (this._adopted) return;
+        const node = this._bodyNode, controller = this.controller;
+        if (!node || !controller) return;
+        this._adopted = true;
+        this._sync.adopt(node);
+        this._sync.adopt(controller);
     }
 
     private _onHostState(nodeId: string, tick: number, state: QState): void {
+        this._adopt();
         const node = this._bodyNode;
-        if (!node || nodeId !== node.id) return; // the character's own row: rotation only, predicted here
+        if (!node) return;
+        if (nodeId !== node.id) {
+            // The Character node's own row: its facing.
+            const pawn = this.pawn;
+            if (pawn && nodeId === pawn.id && this._placed) this._onHostFacing(pawn, tick, state);
+            return;
+        }
         const body = (node as any).body;
         if (!body) return;
         if (!this._placed) {
@@ -143,6 +202,7 @@ export class Predictor {
             // spawned would leave the character drawn at the template's origin).
             body.wakeUp?.();
             this._history.clear();
+            this._facing.clear();
             vec3.zero(this._pending);
             return;
         }

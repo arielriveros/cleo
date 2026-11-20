@@ -8,7 +8,7 @@ import { createIntent, type ControlIntent } from '../../../../src/core/control/i
 import {
     AnimHost, AnimPeer, CarryHost, CarryPeer, ConditionedLink, HostSession, LagCompensator, ManualScheduler, PeerCommands, PeerSession, Predictor,
     RemoteControl, ScriptHost, ScriptPeer, SyncHost, SyncPeer, WeaponHost, WeaponPeer, createLoopbackPair, followerSceneJson,
-    type LinkConditions, type RemoteControlOptions, type Trust, type WeaponHostOptions,
+    type FollowerOriginals, type LinkConditions, type RemoteControlOptions, type Trust, type WeaponHostOptions,
 } from '../../../../src/netsync';
 import { HostRuntime } from '../../src/hostRuntime';
 import { bufferSource } from '../../../editor/src/player/gameSource';
@@ -36,14 +36,16 @@ export async function peerScene(bin: Uint8Array, prepare?: (json: any) => void):
  * A peer's scene that RUNS: the host's bodies made followers, its own physics world (Jolt, as the host), started.
  * What a predicting peer simulates its own character in.
  */
-export async function simulatedPeerScene(bin: Uint8Array): Promise<{ scene: Scene; physics: PhysicsSystem }> {
-    const scene = await peerScene(bin, followerSceneJson);
+export async function simulatedPeerScene(bin: Uint8Array): Promise<{ scene: Scene; physics: PhysicsSystem; authored: FollowerOriginals }> {
+    // What was made a follower, kept: this peer's own character may be one the level placed.
+    const authored: FollowerOriginals = new Map();
+    const scene = await peerScene(bin, (json) => followerSceneJson(json, authored));
     const physics = new PhysicsSystem({ gravity: [0, -9.81, 0], backend: 'jolt' } as any);
     await physics.load();
     physics.initialize();
     physics.scene = scene;
     scene.start();
-    return { scene, physics };
+    return { scene, physics, authored };
 }
 
 export interface TestPeer {
@@ -173,7 +175,7 @@ export async function world(bin: Uint8Array, options: WorldOptions = {}) {
         const commands = remote ? new PeerCommands(peerSession) : null;
         const peer: TestPeer = {
             session: peerSession, scene, commands, drive: null,
-            sync: new SyncPeer(peerSession, scene, { simulated: !!simulated, isOwn: commands ? (id) => id === commands.pawnId : undefined }),
+            sync: new SyncPeer(peerSession, scene, { simulated: !!simulated, authored: simulated?.authored, isOwn: commands ? (id) => id === commands.pawnId : undefined }),
         };
         if (simulated && peer.commands) {
             peer.physics = simulated.physics;
