@@ -297,6 +297,16 @@ export class PeerCommands {
         for (const kind of INTENT_REQUESTS) this._requests[kind] = Math.max(this._requests[kind], intent.requests[kind]);
         const tick = this.targetTick();
         if (tick <= this._lastTick) return;
+        this.send(tick, intent);
+    }
+
+    /**
+     * Send the command for host tick `tick` (a predicting peer, which steps its own ticks, says which). Ticks
+     * must increase; requests raised through {@link update} since the last send ride along.
+     */
+    public send(tick: number, intent: Readonly<ControlIntent>): void {
+        if (tick <= this._lastTick) return;
+        for (const kind of INTENT_REQUESTS) this._requests[kind] = Math.max(this._requests[kind], intent.requests[kind]);
         this._lastTick = tick;
         const copy = createIntent();
         copy.move[0] = intent.move[0];

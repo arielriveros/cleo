@@ -1,6 +1,6 @@
 # NetSync — online multiplayer for Cleo (plan)
 
-Status: **phase 4 done** (phase 0 open: Safari; 50-AI host budget open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
+Status: **phase 5 done** (phase 0 open: Safari; 50-AI host budget open; browser peer runtime open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
 Target: **physics sandbox shooter — co-op PvE (≤ 50 AI) and 8v8 deathmatch with bots, ≤ 16 peers** ·
 Started 2026-11-19
 
@@ -597,6 +597,36 @@ Phases 0–3 are the foundation; 4–6 make the target game playable; 7–9 make
 | 3 | **Done (2026-11-19), except the 50-AI part of the exit criterion** (see phase-2 findings). Peers get the table of synced nodes, every template copy spawned on the host (with the host's node ids, so later messages and saves name the same nodes), every removal, and per-tick state; a peer that joins late or resumes gets the same baseline. Measured on the Sandbox over loopback at 150 ms RTT, jitter and 5 % loss: 200 props and an explosion, 16 peers (and a TCP-like link for the WebSocket fallback) — every peer within 1200 B/tick, props at rest cost 0 B/tick, everyone converges within 2 mm, a prop in flight is drawn within 2.6 cm (p50) of where the host had it; the host's sync work for 16 peers is 0.7 ms a tick (p95 1.3 ms). | `src/netsync/sync/` (`quantize.ts`, `syncMessages.ts`, `syncHost.ts`, `syncPeer.ts`), `tests/netsyncQuantize.test.ts`, `applications/host/tests/sync.test.ts`; `cleo-host` runs `SyncHost` on its game |
 
 | 4 | **Done (2026-11-19).** Each joining peer is given a character (the game decides how: `possess(peer)`; `cleo-host --player-template Player`) and drives it with commands; the host simulates it, every peer sees it. At 150 ms RTT and 5 % loss two peers moved their characters ~9 m each in 2 s in the directions they asked, a single jump press jumped once, and a silent player's character stops. Over real sockets in real time (WebTransport and WebSocket peers against `HostListener`): 8.5 m in 2 s each, ~30 commands/s. | `ControllerNode` `controlSource: 'remote'` + `remoteIntent` + `publishedIntent`; `src/netsync/sync/commands.ts` (`RemoteControl`, `CommandQueue`, `PeerCommands`); `HostSession.route` / `PeerSession.route`; `SyncHost` `focusOf`; tests `tests/netsyncCommands.test.ts`, `applications/host/tests/control.test.ts`, `realSockets.test.ts` |
+
+| 5 | **Done (2026-11-19) for the prediction itself; the browser-side peer loop is open** (see below). A peer simulates its own character ahead of the host and corrects to it. At 150 ms RTT and 5 % loss on the Sandbox: the character moves on its player's screen 2 frames after the input (its own acceleration) and on the host 6 frames after — the round trip no longer shows. Walking, strafing, sprinting, jumping and stopping on open ground: 155 host states compared, **0 corrections**, worst error 0.1 cm. Running into a wall of crates (followers on the peer, solid on the host): 16 of 79 states corrected, worst 6.8 cm, no snaps, ending 1.8 cm from the host. | `src/netsync/sync/predictor.ts`; `SyncPeer` `simulated` / `isOwn` / `onOwnState` / `followerSceneJson`; `PeerCommands.send`; `buildGameScene` `prepare`; `applications/host/tests/predict.test.ts` |
+
+Phase-5 details and findings:
+- **Correction by offset, not re-simulation.** The engine cannot step one body alone, and stepping the peer's
+  whole world again for every correction is the expensive path the plan feared. The predictor keeps each
+  predicted tick's position and velocity; when the host's state for tick H differs, the velocity is corrected
+  at once and the position blended in (30 % of what is left per tick, snapped past 1.5 m), and every
+  prediction after H is shifted by the same error so it is corrected once. On the same engine, physics backend
+  and tick, prediction on open ground matched the host to the millimetre, so corrections only come from what
+  the two sides see differently.
+- **Followers on a simulating peer.** `followerSceneJson` (authored scene, before parse) and `SyncPeer`
+  `simulated` (spawned copies) make every body the host simulates a static collider without collision response,
+  moved by sync, and switch off controllers the peer does not drive. Only the peer's own character stays
+  dynamic. Hence the corrections among props: the host's crates stop the character, the peer's do not.
+- **Bug fixed in spawned copies (phase 3):** a peer renamed a copy's nodes to the host's ids but left the copy's
+  internal references (a controller's character, a camera's target) on the throwaway ids instantiate made, so
+  a spawned controller drove nothing on a peer. References are now remapped with the ids.
+- **The first host state places the character** (a copy spawns at its template's origin; prediction starts
+  from where the host has it).
+- **Ordering:** the peer must learn which character is its own before that character's spawn is applied
+  (`SyncPeer` takes `isOwn` at construction; `PeerCommands` is created first). `RemoteControl` sends the
+  Possess before the spawn reaches the peer. An authored (not spawned) character is made a follower at parse
+  and cannot be predicted yet.
+- **Open:** the browser-side peer loop — a non-headless engine stepping its simulation in host-numbered
+  ticks (`Predictor.dueTick()`) with render interpolation between ticks, and the local controller reading
+  real input (`controlSource: 'player'`). The tests drive the same steps by hand; the loop lands with the
+  editor's Play › Multiplayer (phase 9). Until then followed characters and props are drawn at 30 Hz.
+- Not done: other players' characters still do not animate (phase 8); the peer's own rotation is predicted
+  and never corrected (only position and velocity are).
 
 Phase-4 details and findings:
 - **A command** is the intent a peer's controller published that frame (`ControllerNode.publishedIntent`):

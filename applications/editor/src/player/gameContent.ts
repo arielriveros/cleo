@@ -57,7 +57,11 @@ export type SceneBuildStage = (fraction: number, name: string) => Promise<void>;
  * session (a scene the player comes back to has its Saved nodes put back), and the shared clips retargeted onto
  * its characters. Returns null when the game has no such scene.
  */
-export async function buildGameScene(at: GameContentSource, id: string, stage?: SceneBuildStage): Promise<{ scene: Scene; giBakeIds: string[] } | null> {
+export async function buildGameScene(
+  at: GameContentSource, id: string, stage?: SceneBuildStage,
+  /** A last edit to the inflated scene JSON before it is parsed (a NetSync peer making the host's bodies followers). */
+  prepare?: (sceneJson: any) => void,
+): Promise<{ scene: Scene; giBakeIds: string[] } | null> {
   const data = at.header.manifest as PackManifest & Record<string, any>;
   const entry = data.scenes?.[id];
   if (!entry) return null;
@@ -72,6 +76,7 @@ export async function buildGameScene(at: GameContentSource, id: string, stage?: 
   // This scene's GI captures, before its volumes parse: a volume loads its capture instead of capturing again.
   for (const b of chunks.giBakes) GiBakeRegistry.set(b.id, b.bytes);
   await stage?.(0.6, 'Building the scene');
+  prepare?.(json);
   const scene = new Scene();
   // Through the save session: a scene the player comes back to (or a loaded save's) has its Saved nodes
   // and @save fields put back as it is built. Textures are already registered.

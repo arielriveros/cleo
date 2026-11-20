@@ -12,12 +12,27 @@
 import { quat, vec3 } from 'gl-matrix';
 import { ByteReader } from '../bytes';
 import type { Node } from '../../core/scene/nodes/node';
+import { remapNodeRefs } from '../../core/scene/nodeJson';
 import type { Scene } from '../../core/scene/scene';
 import type { PeerSession } from '../session/peerSession';
 import { POSITION_SCALE, VELOCITY_SCALE, readRow, unpackQuaternion, type QState } from './quantize';
 import { SyncControl, SyncPulse, decodeDespawn, decodeSpawn, decodeTable, encodeAck, type SyncSpawn } from './syncMessages';
 
 export interface SyncPeerOptions {
+    /**
+     * This peer runs physics in its scene (it predicts its own character, docs/design/netsync.md §6.5). Then
+     * every body the host simulates must not be simulated here too: spawned copies arrive as FOLLOWERS — their
+     * dynamic colliders static and without collision response (moved by sync, never pushed, pushing nothing), their
+     * controllers off — except the copy holding this peer's own character ({@link SyncPeer.isOwn}). The authored
+     * scene must be parsed from {@link followerSceneJson} for the same reason.
+     */
+    simulated?: boolean;
+    /**
+     * Which nodes are this peer's own (see {@link SyncPeer.isOwn}), from the start: messages held since the
+     * Welcome are delivered as soon as the SyncPeer exists, and the spawn of this peer's character among them must
+     * already be recognised. (A Predictor sets it too.)
+     */
+    isOwn?: (nodeId: string) => boolean;
     /** How far behind the host clock nodes are drawn, in ticks. Default 2 (plus the link's jitter is absorbed by it). */
     delayTicks?: number;
     /** Longest extrapolation past the newest state, ms. Default 100. */
@@ -50,9 +65,17 @@ export class SyncPeer {
     private readonly _rotB = quat.create();
     private readonly _unpack: number[] = [0, 0, 0, 1];
 
+    /** Nodes this peer simulates itself (its own character): never moved by `apply`, their rows go to {@link onOwnState}. */
+    public isOwn: ((nodeId: string) => boolean) | null = null;
+    /** The host's state for one of this peer's own nodes, as of host tick `tick` (for prediction to compare). */
+    public onOwnState: ((nodeId: string, tick: number, state: QState) => void) | null = null;
+    private readonly _simulated: boolean;
+
     constructor(private readonly _session: PeerSession, private _scene: Scene, options: SyncPeerOptions = {}) {
         this.delayTicks = options.delayTicks ?? 2;
         this.extrapolateMs = options.extrapolateMs ?? 100;
+        this._simulated = !!options.simulated;
+        this.isOwn = options.isOwn ?? null;
         _session.route('control', [SyncControl.table, SyncControl.spawn, SyncControl.despawn], (m) => this._onControl(m));
         _session.route('pulse', SyncPulse.pulse, (m) => this._onPulse(m));
     }
@@ -60,6 +83,11 @@ export class SyncPeer {
     public get scene(): Scene { return this._scene; }
     /** The host's name for the scene it is running (its table's). */
     public get sceneId(): string { return this._sceneId; }
+    /** The NetId a node is followed under here. */
+    public netIdOf(node: Node): number | undefined {
+        for (const [netId, n] of this._nodeByNet) if (n === node) return netId;
+        return undefined;
+    }
     /** The node a NetId stands for here. */
     public nodeOf(netId: number): Node | undefined { return this._nodeByNet.get(netId); }
     public get followedCount(): number { return this._nodeByNet.size; }
@@ -70,7 +98,7 @@ export class SyncPeer {
         const renderTick = this._session.hostTimeNow() / tickMs - this.delayTicks;
         for (const [netId, samples] of this._samples) {
             const node = this._nodeByNet.get(netId);
-            if (!node || samples.length === 0) continue;
+            if (!node || samples.length === 0 || this.isOwn?.(node.id)) continue;
             this._sample(samples, renderTick, tickMs);
             node.setPosition(this._pos);
             node.setQuaternion(this._rot);
@@ -124,13 +152,22 @@ export class SyncPeer {
     private _spawn(s: SyncSpawn): void {
         if (this._scene.getNodeById(s.ids[0])) return; // already here (a baseline after a resume)
         const parent = s.parentId ? this._scene.getNodeById(s.parentId) ?? undefined : undefined;
+        const own = !!this.isOwn && s.ids.some((id) => this.isOwn!(id));
         const made = this._scene.instantiate(s.template, parent ? { parent } : {}, (json) => {
+            // instantiate gave the copy fresh ids and pointed its references (a controller's character, a camera's
+            // target) at them: both are renamed to the host's, or the copy's parts would not find each other.
             let i = 0;
+            const renamed = new Map<string, string>();
             const walk = (n: any) => {
-                if (i < s.ids.length) n.id = s.ids[i++];
+                if (i < s.ids.length) {
+                    if (n.id) renamed.set(n.id, s.ids[i]);
+                    n.id = s.ids[i++];
+                }
                 for (const c of n.children ?? []) walk(c);
             };
             walk(json);
+            remapNodeRefs(json, renamed);
+            if (this._simulated && !own) followerSceneJson(json);
         });
         if (!made) return;
         for (const { index, netId } of s.synced) {
@@ -153,7 +190,9 @@ export class SyncPeer {
             for (let i = 0; i < count; i++) {
                 const { netId, state } = readRow(r);
                 this.rows++;
-                if (!this._nodeByNet.has(netId)) { this.unknownRows++; continue; }
+                const node = this._nodeByNet.get(netId);
+                if (!node) { this.unknownRows++; continue; }
+                if (this.isOwn?.(node.id)) { this.onOwnState?.(node.id, tick, state); continue; }
                 this._store(netId, tick, state);
             }
         } catch { /* a truncated pulse: keep what was read */ }
@@ -215,4 +254,23 @@ export class SyncPeer {
         unpackQuaternion(s.rot, this._unpack);
         quat.set(rot, this._unpack[0], this._unpack[1], this._unpack[2], this._unpack[3]);
     }
+}
+
+/**
+ * Make a serialized subtree a follower of the host, in place: every dynamic collider static and without collision
+ * response (it is moved by sync, and must neither fall under this peer's gravity nor push this peer's character),
+ * every controller off (nobody here drives it). For a peer that runs physics: its authored scene before it is
+ * parsed, and every spawned copy but its own character's. Returns the same JSON.
+ */
+export function followerSceneJson(json: any): any {
+    const walk = (n: any) => {
+        if (n?.type === 'collider' && n.collider && n.collider.mass > 0) {
+            n.collider.mass = 0;
+            n.collider.simulatePhysics = false;
+        }
+        if (n?.type === 'controller') n.controlSource = 'none';
+        for (const c of n?.children ?? []) walk(c);
+    };
+    walk(json);
+    return json;
 }

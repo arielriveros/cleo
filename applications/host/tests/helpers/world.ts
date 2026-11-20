@@ -3,11 +3,11 @@
 // simulated) on loopback links with chosen conditions. Everything runs on one ManualScheduler: `run(n)` plays n
 // host ticks, 1/30 s of simulated time each, and lets every peer follow and send its commands.
 import { quat, vec3 } from 'gl-matrix';
-import type { Node, Scene } from 'cleo';
+import { PhysicsSystem, type ControllerNode, type Node, type Scene } from 'cleo';
 import { createIntent, type ControlIntent } from '../../../../src/core/control/intent';
 import {
-    ConditionedLink, HostSession, ManualScheduler, PeerCommands, PeerSession, RemoteControl, SyncHost, SyncPeer,
-    createLoopbackPair, type LinkConditions, type RemoteControlOptions,
+    ConditionedLink, HostSession, ManualScheduler, PeerCommands, PeerSession, Predictor, RemoteControl, SyncHost, SyncPeer,
+    createLoopbackPair, followerSceneJson, type LinkConditions, type RemoteControlOptions,
 } from '../../../../src/netsync';
 import { HostRuntime } from '../../src/hostRuntime';
 import { bufferSource } from '../../../editor/src/player/gameSource';
@@ -24,11 +24,25 @@ export async function manifestOf(bin: Uint8Array): Promise<any> {
 }
 
 /** The same game's entry scene, parsed but not started: what a peer draws. */
-export async function peerScene(bin: Uint8Array): Promise<Scene> {
+export async function peerScene(bin: Uint8Array, prepare?: (json: any) => void): Promise<Scene> {
     const source = bufferSource(bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength) as ArrayBuffer);
     const header = await readGameHeader(source);
-    const built = await buildGameScene({ source, header, claimed: new Set() }, (header.manifest as any).entry);
+    const built = await buildGameScene({ source, header, claimed: new Set() }, (header.manifest as any).entry, undefined, prepare);
     return built!.scene;
+}
+
+/**
+ * A peer's scene that RUNS: the host's bodies made followers, its own physics world (Jolt, as the host), started.
+ * What a predicting peer simulates its own character in.
+ */
+export async function simulatedPeerScene(bin: Uint8Array): Promise<{ scene: Scene; physics: PhysicsSystem }> {
+    const scene = await peerScene(bin, followerSceneJson);
+    const physics = new PhysicsSystem({ gravity: [0, -9.81, 0], backend: 'jolt' } as any);
+    await physics.load();
+    physics.initialize();
+    physics.scene = scene;
+    scene.start();
+    return { scene, physics };
 }
 
 export interface TestPeer {
@@ -38,6 +52,11 @@ export interface TestPeer {
     commands: PeerCommands | null;
     /** What this peer's player is doing: called each tick for the intent to send (null sends nothing). */
     drive: ((tick: number) => ControlIntent | null) | null;
+    /** A predicting peer: its own physics, and the predictor over it. */
+    predictor?: Predictor;
+    physics?: PhysicsSystem;
+    /** Local ticks a predicting peer has simulated. */
+    simulatedTicks?: number;
 }
 
 export async function world(bin: Uint8Array, options: { remote?: RemoteControlOptions | ((runtime: HostRuntime) => RemoteControlOptions) } = {}) {
@@ -72,6 +91,7 @@ export async function world(bin: Uint8Array, options: { remote?: RemoteControlOp
             tick++;
             await s.advance(TICK_MS);
             for (const p of peers) {
+                if (p.predictor) { simulate(p); p.sync.apply(); continue; }
                 p.sync.apply();
                 const intent = p.drive?.(tick);
                 if (intent && p.commands) p.commands.update(intent);
@@ -79,8 +99,33 @@ export async function world(bin: Uint8Array, options: { remote?: RemoteControlOp
         }
     };
 
-    const join = async (conditions: LinkConditions): Promise<TestPeer> => {
-        const scene = await peerScene(bin);
+    /**
+     * A predicting peer's frame: step its own simulation, a tick at a time, up to the tick it should have
+     * simulated by now — its player's intent fed to its own controller (as a real client's controller would read
+     * its input), its physics and scene stepped, the predictor told.
+     */
+    const simulate = (p: TestPeer) => {
+        const pred = p.predictor!;
+        const due = pred.dueTick();
+        let t = pred.lastTick < 0 ? due : pred.lastTick + 1;
+        for (; t <= due; t++) {
+            const controller = pred.controller as ControllerNode | null;
+            if (controller) {
+                controller.controlSource = 'remote';
+                controller.remoteIntent = p.drive?.(t) ?? null;
+            }
+            const dt = 1 / 30;
+            p.physics!.update(dt);
+            p.scene.update(dt, t * TICK_MS, false, dt);
+            p.physics!.endFrame(dt);
+            pred.afterTick(t);
+            p.simulatedTicks = (p.simulatedTicks ?? 0) + 1;
+        }
+    };
+
+    const join = async (conditions: LinkConditions, mode: 'follow' | 'predict' = 'follow'): Promise<TestPeer> => {
+        const simulated = mode === 'predict' ? await simulatedPeerScene(bin) : null;
+        const scene = simulated?.scene ?? await peerScene(bin);
         const joining = PeerSession.join({
             endpoint: {}, contentHash: 'test', scheduler: s, reconnect: false,
             connector: async () => {
@@ -91,10 +136,16 @@ export async function world(bin: Uint8Array, options: { remote?: RemoteControlOp
         });
         await run(15);
         const peerSession = await joining;
+        // Commands first: the host's Possess (which character is ours) must be read before the spawn of it.
+        const commands = remote ? new PeerCommands(peerSession) : null;
         const peer: TestPeer = {
-            session: peerSession, sync: new SyncPeer(peerSession, scene), scene,
-            commands: remote ? new PeerCommands(peerSession) : null, drive: null,
+            session: peerSession, scene, commands, drive: null,
+            sync: new SyncPeer(peerSession, scene, { simulated: !!simulated, isOwn: commands ? (id) => id === commands.pawnId : undefined }),
         };
+        if (simulated && peer.commands) {
+            peer.physics = simulated.physics;
+            peer.predictor = new Predictor(peerSession, peer.sync, peer.commands);
+        }
         peers.push(peer);
         return peer;
     };
