@@ -518,7 +518,7 @@ describe('@attribute', () => {
 });
 
 describe("the 'cleo/decorators' module", () => {
-    const NAMES = ['attribute', 'child', 'every', 'find', 'onAction', 'onEnter', 'onEvent', 'onExit', 'onHold', 'onTap', 'options', 'pick', 'save'];
+    const NAMES = ['attribute', 'child', 'every', 'find', 'netcall', 'onAction', 'onEnter', 'onEvent', 'onExit', 'onHold', 'onTap', 'options', 'pick', 'save', 'synced'];
 
     it('is what scripts import the decorators from', () => {
         expect(Object.keys(resolveScriptModule('cleo/decorators')).sort()).toEqual(NAMES);

@@ -1,6 +1,6 @@
 # NetSync — online multiplayer for Cleo (plan)
 
-Status: **phase 6 done** (phase 0 open: Safari; 50-AI host budget open; browser peer runtime open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
+Status: **phase 7 done** (phase 0 open: Safari; 50-AI host budget open; browser peer runtime open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
 Target: **physics sandbox shooter — co-op PvE (≤ 50 AI) and 8v8 deathmatch with bots, ≤ 16 peers** ·
 Started 2026-11-19
 
@@ -601,6 +601,31 @@ Phases 0–3 are the foundation; 4–6 make the target game playable; 7–9 make
 | 5 | **Done (2026-11-19) for the prediction itself; the browser-side peer loop is open** (see below). A peer simulates its own character ahead of the host and corrects to it. At 150 ms RTT and 5 % loss on the Sandbox: the character moves on its player's screen 2 frames after the input (its own acceleration) and on the host 6 frames after — the round trip no longer shows. Walking, strafing, sprinting, jumping and stopping on open ground: 155 host states compared, **0 corrections**, worst error 0.1 cm. Running into a wall of crates (followers on the peer, solid on the host): 16 of 79 states corrected, worst 6.8 cm, no snaps, ending 1.8 cm from the host. | `src/netsync/sync/predictor.ts`; `SyncPeer` `simulated` / `isOwn` / `onOwnState` / `followerSceneJson`; `PeerCommands.send`; `buildGameScene` `prepare`; `applications/host/tests/predict.test.ts` |
 
 | 6 | **Done (2026-11-19).** Sandbox, 150 ms RTT, 5 % loss. Carrying: the prop sits where it is held on the carrier's screen at once, within 15 cm of that on the host, stays within reach while walking, cannot be taken by another player; a throw flies 9.8 m on the host and the thrower's screen never moves it more than 31 cm in a frame (its flight speed) across the hand-over. Hitscan at a player running across the line of fire: 5 of 5 hit, all 5 only thanks to the rewind. Trust: co-op accepts a claimed near miss and clamps an old view; versus refuses both; a forged claim is refused under both. Projectile: the stand-in leaves at once, swaps for the host's with no jump (26 cm largest step at ~21 cm/frame) and lands within 1 mm of the host's. | `src/netsync/sync/carry.ts` (`CarryHost`, `CarryPeer`), `weapons.ts` (`LagCompensator`, `WeaponHost`, `WeaponPeer`); `SyncPeer` `hold` / `release` (blended) / `renderTick`; `SyncHost` `nodeOf` / `synced`; `cleo-host --trust`; `applications/host/tests/play.test.ts` |
+
+| 7 | **Done (2026-11-19).** Four game scripts, written with nothing but the new surface, run on a host and two peers at 150 ms RTT and 5 % loss: a door any player opens (`@netcall({ to: 'host', anyone: true })`, `@synced({ onChange })`), a gun only its owner fires (`'host'`) whose shot flashes everywhere (`'all'`, unreliable) and whose hint reaches its owner alone (`'owner'`), a pickup the host scores and removes, and a scoreboard with a synced object and a synced node reference. `this.net` answers host / peer / offline and ownership correctly; a player's event reaches the host and the other players; a late joiner gets every synced field. | `src/core/net/sceneNet.ts` (`SceneNet`, `NodeNet`), `scene.net`, `node.net`, `@synced` / `@netcall` in `cleo/decorators`, `Game.random` / `seedRandom`, `Net`; `src/netsync/sync/scriptSync.ts` (`ScriptHost`, `ScriptPeer`); `RemoteControl.ownerOf`; editor `@` completion; tests `tests/netsyncScripting.test.ts`, `applications/host/tests/scripts.test.ts` |
+
+Phase-7 details and findings:
+- **`this.net`** reads the scene's network (`scene.net`, set by `ScriptHost` / `ScriptPeer`). Offline a game is
+  its own host: `isHost` is true and `online` false, so code guarded with `if (!this.net.isHost) return` keeps
+  working single-player. `owner` is the peer whose character's tree (the top-level node its controller sits
+  in) holds the node, 0 for the host's; a peer only knows its own tree, so it reads other players' nodes as
+  the host's — enough for `isOwner`.
+- **`@synced`** fields are compared each tick on the host (as JSON) and sent reliably when they change; a
+  joining peer gets them all after the sync baseline. `onChange` runs only when the value actually changes
+  (the baseline repeated the scene's own values and ran it once too often — found by the door test). Node
+  references travel by id; typed arrays as arrays.
+- **`@netcall`** wraps the method; the wrapper asks `scene.net` and the network runs the ORIGINAL when the call
+  arrives, so a call is never routed twice. The host checks a peer's `'host'` call: the node's script must
+  declare it, and the peer must own the node unless `anyone`. `this.net.caller` names the peer during the call.
+  Peers cannot call `'all'` or `'owner'` (only the host tells others).
+- **Synced nodes** now include any node whose script declares `@synced` or `@netcall`: they need a NetId.
+- **Per-player input for scripts** is answered by `@netcall`, not by a per-player `Input`: the owner's script
+  reads its own input and calls a `'host'` netcall (the gun above). Scripts on the host reading `Input` still
+  see nothing for remote players, by design.
+- **Bug fixed:** "top-level node" (for ownership) meant the child of the scene's root, not a node with no
+  grandparent — the scene's content root has a parent, so every player's tree looked like one. The host's
+  `RemoteControl.ownerOf` had the same mistake and only passed the first test by peer order.
+- **Not yet:** user documentation (phase 9); the editor shows no network badges on synced fields.
 
 Phase-6 details and findings:
 - **Carrying** moves the host's copy by velocity toward the carrier's pose (minus the gravity the step will

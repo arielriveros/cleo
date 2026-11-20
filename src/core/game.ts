@@ -8,6 +8,11 @@ import { Logger } from "./logger";
 import type { RenderSettings } from "../graphics/renderer";
 import type { SequenceNode, SequencePlayOptions } from "./scene/nodes/sequenceNode";
 import { captureOutgoing } from "./save/session";
+import { seededRandom } from "./math";
+import type { NetEventTarget } from "./net/sceneNet";
+
+/** Game.random's stream (see Game.seedRandom). Seeded from the clock until a game seeds it. */
+let randomStream: () => number = seededRandom((Date.now() ^ 0x5bd1e995) >>> 0);
 
 /** Progress of a scene load: 0..1, and a short name for the stage it is in. */
 export type LoadProgressListener = (fraction: number, stage: string) => void;
@@ -98,6 +103,19 @@ async function runLoad(h: GameHost, nameOrId: string, options: LoadSceneOptions)
 }
 
 export const Game = {
+  /**
+   * A random number in [0, 1) from the game's own seeded stream. Gameplay rolls (loot, spread, AI choices) belong
+   * on the host in a NetSync game (docs/design/netsync.md §6.9): roll there with this, and send peers the result.
+   * Seed it with {@link seedRandom} to replay a run.
+   */
+  random(): number {
+    return randomStream();
+  },
+  /** Restart {@link random}'s stream from `seed`: the same seed, the same numbers. */
+  seedRandom(seed: number): void {
+    randomStream = seededRandom(seed >>> 0);
+  },
+
   /**
    * Load another scene by name or id. Resets scripts, physics, input and UI for the new scene, and
    * resolves once it has started (and, with a loading screen, once its first frames run smoothly).
@@ -268,5 +286,33 @@ export const Game = {
       exposureCompensationCurve: renderer.exposureCompensationCurve,
       ...settings,
     });
+  },
+};
+
+/**
+ * The network, for code that is not a node's script (a node's script has `this.net`). In a single-player game
+ * there is none: `Net.online` is false and `Net.isHost` true.
+ */
+export const Net = {
+  /** In a NetSync session. */
+  get online(): boolean {
+    return !!CleoEngine.instance?.scene?.net;
+  },
+  /** This machine decides the game: the NetSync host, or any offline game. */
+  get isHost(): boolean {
+    const net = CleoEngine.instance?.scene?.net;
+    return net ? net.role === 'host' : true;
+  },
+  /** This machine's PeerId: 0 on the host and offline. */
+  get peerId(): number {
+    return CleoEngine.instance?.scene?.net?.peerId ?? 0;
+  },
+  /**
+   * Raise game event `name` with `payload` on other machines, where `@onEvent(name)` methods and GameEvents
+   * listeners receive it. `to`: `'all'` (default: the host and every peer), `'peers'`, or `'host'`.
+   * Offline it does nothing (there is no one else) — raise it locally with GameEvents.emit as usual.
+   */
+  emit(name: string, payload?: unknown, to: NetEventTarget = 'all'): void {
+    CleoEngine.instance?.scene?.net?.emit(name, payload, to);
   },
 };

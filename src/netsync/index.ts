@@ -49,3 +49,7 @@ export { CarryHost, CarryPeer } from './sync/carry';
 export type { CarryHostOptions, CarryHostStats, CarryPeerOptions, Trust } from './sync/carry';
 export { LagCompensator, WeaponHost, WeaponPeer } from './sync/weapons';
 export type { HitEvent, HitReport, WeaponHostOptions, WeaponHostStats } from './sync/weapons';
+
+// Phase 7: scripts.
+export { ScriptHost, ScriptPeer, decodeValue, encodeValue } from './sync/scriptSync';
+export type { ScriptHostOptions, ScriptHostStats, ScriptPeerOptions } from './sync/scriptSync';

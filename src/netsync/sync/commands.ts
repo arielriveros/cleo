@@ -14,6 +14,7 @@ import { ByteReader, ByteWriter } from '../bytes';
 import { FIRST_APP_TYPE } from '../session/messages';
 import { INTENT_REQUESTS, clearIntent, createIntent, type ControlIntent } from '../../core/control/intent';
 import type { ControllerNode } from '../../core/scene/nodes/controllerNode';
+import type { Node } from '../../core/scene/nodes/node';
 import type { HostPeer, HostSession } from '../session/hostSession';
 import type { PeerSession } from '../session/peerSession';
 
@@ -191,6 +192,18 @@ export class RemoteControl {
         _session.on('resume', this._onResume);
         _session.on('drop', this._onDrop);
         _session.on('leave', this._onLeave);
+    }
+
+    /**
+     * The peer that owns `node`: the one whose controller sits in the same top-level tree (a spawned player
+     * template: its Collider, Character, Controller, camera and weapons), or 0 for the host. For `this.net.owner`.
+     */
+    public ownerOf(node: Node): number {
+        // The ancestor directly under the scene's root (the scene's root itself sits under nothing).
+        const top = (n: Node): Node => { const root = n.scene?.root; while (n.parent && n.parent !== root) n = n.parent; return n; };
+        const mine = top(node);
+        for (const [peerId, seat] of this._seats) if (seat.controller.scene && top(seat.controller) === mine) return peerId;
+        return 0;
     }
 
     /** The controller peer `peerId` drives, if any. */

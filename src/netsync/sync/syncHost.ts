@@ -13,6 +13,7 @@
 
 import { ByteReader, ByteWriter } from '../bytes';
 import { engineEventBus } from '../../core/eventBus';
+import { membersOfNode } from '../../core/scripting/decorators';
 import type { SceneChange } from '../../core/eventBus';
 import type { Node } from '../../core/scene/nodes/node';
 import type { Scene } from '../../core/scene/scene';
@@ -48,6 +49,8 @@ function weightOf(node: Node): number {
 export function defaultIsSynced(node: Node): boolean {
     if (node.nodeType === 'character') return true;
     if (node.nodeType === 'collider' && ((node as any).mass ?? 0) > 0) return true;
+    // A script with @synced fields or @netcalls: its node needs a NetId for them to travel.
+    for (const m of membersOfNode(node)) if (m.kind === 'synced' || m.kind === 'netcall') return true;
     const flag = (node as any).getVariable?.('netSync');
     return flag === true || flag === 1 || flag === 'true';
 }

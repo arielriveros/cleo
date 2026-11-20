@@ -13,7 +13,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CarryHost, HostSession, LagCompensator, RemoteControl, SyncHost, WeaponHost, hashContent } from '../../../src/netsync';
+import { CarryHost, HostSession, LagCompensator, RemoteControl, ScriptHost, SyncHost, WeaponHost, hashContent } from '../../../src/netsync';
 import type { ControllerNode, Node } from 'cleo';
 import { cachedCertificate } from './devCertificate';
 import { HostListener } from './hostListener';
@@ -98,6 +98,8 @@ if (runtime) {
         sceneKey: () => runtime!.sceneName,
         focusOf: (peerId) => remote?.controllerOf(peerId)?.possessed?.worldPosition ?? null,
     });
+    // this.net, @synced and @netcall for the game's scripts.
+    const scripts = new ScriptHost(session, sync, () => runtime!.scene, { ownerOf: (node) => remote?.ownerOf(node) ?? 0 });
     // Carrying and weapons work through each peer's character, so they come with possession.
     const trust = arg('--trust', 'coop') === 'versus' ? 'versus' : 'coop';
     const pawnOf = (peerId: number) => remote?.controllerOf(peerId)?.possessed ?? null;
@@ -116,6 +118,7 @@ if (runtime) {
         lastTick = tick;
         lag?.record(tick);
         sync.tick(tick);
+        scripts.tick();
         if (tick - last < tickRate * 10) return;
         last = tick;
         const s = runtime!.stats();
@@ -126,7 +129,7 @@ if (runtime) {
     };
 }
 
-console.log(`cleo-host (NetSync phase 6)
+console.log(`cleo-host (NetSync phase 7)
   WebTransport  udp/${listener.webTransportPort}  /netsync   cert sha-256 ${certificate.hash} (expires ${certificate.notAfter})
   WebSocket     tcp/${listener.webSocketPort}  /ws
   Endpoint      http://localhost:${listener.webSocketPort}/endpoint  (a HostEndpoint for PeerSession.join)

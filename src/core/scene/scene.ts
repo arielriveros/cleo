@@ -45,6 +45,7 @@ import { DEFAULT_SCENE_AMBIENT_LUX, legacyAmbientFromSceneJson, MAX_LIGHTS } fro
 import { Logger } from '../logger'
 import { logScriptError } from '../scripting/scriptErrors'
 import { membersOfNode, type ScriptMember } from '../scripting/decorators'
+import type { SceneNet } from '../net/sceneNet'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
 import { sceneStats, resetSceneStats, SceneStats } from "./sceneStats";
 import { resetAIStats } from "../../ai/aiStats";
@@ -361,6 +362,12 @@ export class Scene {
      * Niagara's realtime viewport.
      */
     public particlePreview: boolean = true;
+
+    /**
+     * The network this scene runs on: set by NetSync on a host or a peer (docs/design/netsync.md §6.9); null in a
+     * single-player game. What `this.net` and `@netcall` read.
+     */
+    public net: SceneNet | null = null;
 
     /**
      * The rain and snow falling from this scene's weather volumes (WeatherNode `precipitation`): one
