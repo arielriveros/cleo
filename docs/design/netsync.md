@@ -751,9 +751,10 @@ Phase-2 findings:
   50-AI exit criterion: stagger perception and think across ticks (each agent every 2nd–3rd tick), a host
   animation LOD (bots far from every player pose at a lower rate; only root motion and hitboxes need the pose
   on the host), and profiling the bot scripts.
-- **Physics simulation range is camera-relative.** The host turns the global range off, but a body's own
-  `simulationRange` still measures from the scene's active camera. Phase 3 measures it from the nearest
-  peer's character instead.
+- **Physics simulation range is measured from the players.** `PhysicsSystem.simulationOrigins` replaces the
+  camera as the point range is measured from; the host sets it to its players' characters (`focusPoints`), so
+  the game's own range and each body's `simulationMode` mean on the host what they mean in single player,
+  around whichever player is nearest. No player connected: nothing freezes for range.
 - **Content hash** is carried in the pack: `packGameBin` writes `manifest.contentHash`, a 64-bit fingerprint
   of the manifest and every chunk's bytes, so a browser peer reads it from the header instead of hashing the
   file. The manifest alone is not enough (its chunk refs are offsets and lengths, blind to a same-size edit).

@@ -62,7 +62,8 @@ export class HostRuntime {
     public onTick: ((tick: number) => void) | null = null;
     /** Called after each scene has started (the entry scene and every Game.loadScene). */
     public onSceneStarted: ((name: string) => void) | null = null;
-    /** Where the players are (their characters), for animation level of detail. None: everything is far. */
+    /** Where the players are (their characters): animation level of detail and the physics simulation range
+     *  measure from them. None: every animation is far, and no body freezes for range. */
     public focusPoints: (() => ArrayLike<number>[]) | null = null;
     private _aiDetail: { perceiveEvery: number; probeEvery: number; pathsPerFrame?: number } = { perceiveEvery: 3, probeEvery: 2, pathsPerFrame: 1 };
     private _animationLod = true;
@@ -104,8 +105,6 @@ export class HostRuntime {
         // Main thread: the host has no other work for that thread, and a worker would add a tick of latency.
         delete physics.worker;
         const engine = new CleoEngine({ headless: true, physics, runtime: data.config?.runtime ?? {} });
-        // Freezing far bodies is measured from the camera, and a host has no one camera: everything simulates.
-        engine.physics.simulationRange = 0;
         // Saves made on the host stay in memory (a host's game state is the session, not a save slot).
         setSaveStore(createMemorySaveStore(), { gameVersion: typeof data.config?.saves?.version === 'number' ? data.config.saves.version : 0 });
         await engine.initialize();
@@ -116,6 +115,9 @@ export class HostRuntime {
         resetScriptModules();
         const content: GameContentSource = { source, header, claimed: new Set() };
         const runtime = new HostRuntime(engine, content, tickRate, options.scheduler ?? realScheduler);
+        // A host has no camera: the game's simulation range is measured from the players' characters instead,
+        // so a crate far from every player rests frozen (none connected: nothing freezes).
+        engine.physics.simulationOrigins = () => runtime.focusPoints?.() ?? [];
         if (options.aiDetail) runtime._aiDetail = { ...options.aiDetail };
         runtime._animationLod = options.animationLod !== false;
         runtime._permanentBakes = await installGameContent(content);

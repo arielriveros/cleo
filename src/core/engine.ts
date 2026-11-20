@@ -453,6 +453,7 @@ export class CleoEngine {
     const next = new PhysicsSystem({ gravity: old.gravity, backend: options.backend });
     next.maxSubsteps = old.maxSubsteps;
     next.simulationRange = old.simulationRange;
+    next.simulationOrigins = old.simulationOrigins;
     next.profileStep = old.profileStep;
     await next.load();
     next.initialize();

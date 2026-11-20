@@ -44,6 +44,33 @@ describe('HostRuntime', () => {
         expect(Number.isFinite(startY)).toBe(true);
     });
 
+    it('measures the simulation range from the players, not a camera', async () => {
+        const bin = await packExampleGame(path.join(EXAMPLES, 'sandbox'), {
+            edit: (data) => { data.config.physics = { ...(data.config.physics ?? {}), simulationRange: 10 }; },
+        });
+        const r = await run(bin);
+        // No player yet: nothing freezes for range.
+        r.step(30);
+        const bodies = [...r.scene.nodes].filter((n: any) => n.nodeType === 'collider' && n.body?.isDynamic) as any[];
+        expect(bodies.length).toBeGreaterThan(3);
+        expect(bodies.filter((n) => n.body.rangeFrozen)).toEqual([]);
+        // One player, by the first body: the far ones freeze, the near ones do not.
+        let player = [...bodies[0].worldPosition];
+        r.focusPoints = () => [player];
+        r.step(30);
+        const near = bodies.filter((n) => distance(n.worldPosition, player) < 9);
+        const far = bodies.filter((n) => distance(n.worldPosition, player) > 12);
+        expect(far.length).toBeGreaterThan(0);
+        for (const n of near) expect(n.body.rangeFrozen).toBe(false);
+        for (const n of far) expect(n.body.rangeFrozen).toBe(true);
+        // A second player by a far body wakes it.
+        const other = [...far[0].worldPosition];
+        r.focusPoints = () => [player, other];
+        r.step(5);
+        expect(far[0].body.rangeFrozen).toBe(false);
+        for (const n of near) expect(n.body.rangeFrozen).toBe(false);
+    });
+
     it('plays a Firing Line match: the manager fills it with bots, who move and fight', async () => {
         const r = await run(await packExampleGame(path.join(EXAMPLES, 'firing-line')));
         r.step(30);
