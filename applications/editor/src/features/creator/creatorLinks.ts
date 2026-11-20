@@ -61,6 +61,8 @@ export function planCreatorSync(assets: readonly CreatorAssetMeta[], links: Read
 
 const KIND_FOLDER: Record<CreatorAssetKind, string> = {
   foliage: 'Foliage', fx: 'FX', world: 'World', motion: 'Motion', character: 'Characters', pose: 'Poses',
+  // A Motion Creator reference clip: kept in the Creator only (no public files), never imported.
+  video: 'Video',
 }
 
 /** A name safe as one path segment. */

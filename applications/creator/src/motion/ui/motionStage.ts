@@ -35,9 +35,30 @@ export interface MotionStageSettings {
   chain: number;
   sunYaw: number;
   sunElevation: number;
+  /** How the reference video is drawn: not at all, over the 3D view, or behind the character. */
+  refMode: ReferenceMode;
+  /** The video's opacity over the 3D view (Over). */
+  refOpacity: number;
+  /** Over, as the difference of the two pictures: where the pose matches the video, it goes dark. */
+  refDifference: boolean;
+  /** Mirrored left to right (filmed the other way round). */
+  refFlip: boolean;
+  /** Darken the viewport outside the video's frame. */
+  refGate: boolean;
+  /** Play the video's sound while the timeline plays near real speed. */
+  refSound: boolean;
+  /** Keys snap to the video's own frames (else to the bake rate). */
+  refSnap: boolean;
+  /** The width the video is decoded at for the viewport, pixels (0: its own). */
+  refProxy: number;
 }
 
-export const DEFAULT_MOTION_STAGE: MotionStageSettings = { grid: true, ground: true, skeleton: true, keepLengths: true, chain: 0, sunYaw: 35, sunElevation: 40 };
+export type ReferenceMode = 'off' | 'over' | 'behind';
+
+export const DEFAULT_MOTION_STAGE: MotionStageSettings = {
+  grid: true, ground: true, skeleton: true, keepLengths: true, chain: 0, sunYaw: 35, sunElevation: 40,
+  refMode: 'over', refOpacity: 0.5, refDifference: false, refFlip: false, refGate: true, refSound: true, refSnap: true, refProxy: 720,
+};
 
 export class MotionStage {
   private ground: ModelNode | null = null;
@@ -58,6 +79,12 @@ export class MotionStage {
   /** The character's extent at rest, in the scene (after the display scale): for framing. */
   public bounds: { size: [number, number, number]; floor: [number, number, number] } | null = null;
   private readonly saved: { sunIntensity: number | null; sunRotation: vec3 | null; ambient: vec3; animations: boolean };
+  /**
+   * Called first every frame with the seconds since the last: the workspace's clock (the transport) moves,
+   * seeks the character and hands the reference video its frame here, so the pose, the skeleton drawn over
+   * it and the video frame all land on the same render.
+   */
+  public onTick: ((dt: number) => void) | null = null;
 
   constructor(private engine: CleoEngine, private world: Scene, private sun: LightNode | null) {
     const light = sun?.light as DirectionalLight | undefined;
@@ -65,7 +92,14 @@ export class MotionStage {
                    animations: world.animationsEnabled !== false };
     // The Creator's scene is an authoring scene, which holds skinned meshes still; this stage plays them.
     world.animationsEnabled = true;
-    const frame = () => { this.tick(); this.raf = requestAnimationFrame(frame); };
+    let last = 0;
+    const frame = (now: number) => {
+      const dt = last ? Math.min(0.25, (now - last) / 1000) : 0;
+      last = now;
+      try { this.onTick?.(dt); } catch (e) { console.error(e); }
+      this.tick();
+      this.raf = requestAnimationFrame(frame);
+    };
     this.raf = requestAnimationFrame(frame);
   }
 

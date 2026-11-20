@@ -11,6 +11,7 @@
 
 import { quat } from 'gl-matrix';
 import { builtinPreset, cloneCurve, DEFAULT_BLEND_PRESET, normaliseCurve, type BlendCurve } from './blendCurve';
+import { normaliseReference, type MotionReference } from './reference/referenceDoc';
 
 export type Limb = 'footL' | 'footR' | 'handL' | 'handR';
 export const LIMBS: Limb[] = ['footL', 'footR', 'handL', 'handR'];
@@ -120,7 +121,7 @@ export interface MotionDoc {
   keys: MotionKey[];
   /** Body-part groups, each blending its own way (parts.ts). Empty: every bone follows the keys' blends. */
   parts: MotionPart[];
-  /** Bake rate, frames per second. */
+  /** Bake rate, frames per second (fractional for the NTSC rates: 23.976, 29.97, 59.94). */
   fps: number;
   /**
    * Overlapping action: each joint further from the hips trails by this many seconds per joint, so the
@@ -135,7 +136,12 @@ export interface MotionDoc {
   loop: boolean;
   /** The Character (Creator library id) this motion animates; absent: the mannequin. */
   characterId?: string;
+  /** A video the motion is made against (reference/referenceDoc.ts); absent: none. */
+  reference?: MotionReference;
 }
+
+/** The bake rates offered, the NTSC ones as cameras write them. */
+export const FPS_PRESETS: readonly number[] = [12, 15, 23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 120];
 
 export const newId = () => Math.random().toString(36).slice(2, 10);
 
@@ -256,16 +262,18 @@ export function normaliseMotion(raw: Partial<MotionDoc> | null | undefined): Mot
     })
     .sort((a, b) => a.time - b.time);
   if (!keys.length) keys.push({ id: newId(), poseId: poses[0].id, time: 0, ...presetBlend() });
+  const reference = normaliseReference(d.reference);
   return {
     name: typeof d.name === 'string' && d.name.trim() ? d.name : 'motion',
     seed: Math.floor(num(d.seed, 0, 0x7fffffff, 1)),
     poses, keys, parts,
-    fps: Math.round(num(d.fps, 10, 120, 30)),
+    fps: Math.round(num(d.fps, 10, 240, 30) * 1000) / 1000,
     overlap: num(d.overlap, 0, 0.2, 0.02),
     variation: num(d.variation, 0, 20, 0),
     variationRate: num(d.variationRate, 0.05, 5, 0.6),
     loop: !!d.loop,
     ...(typeof d.characterId === 'string' && d.characterId ? { characterId: d.characterId } : {}),
+    ...(reference ? { reference } : {}),
   };
 }
 

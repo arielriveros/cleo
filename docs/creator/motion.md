@@ -16,6 +16,9 @@ model instead, add it as a [character](#characters).
 Clip events (a `hit`, a `footstep`) are not made here: they belong to the clip, and the Editor's clip
 player sets them. They survive every change you make to the motion afterwards.
 
+To animate over filmed action, link a video as the motion's [reference](#reference): it plays with the
+motion, frame for frame.
+
 ## Poses
 
 The left dock lists the poses, in two groups. Click one to select it and hold it in the viewport; drag one
@@ -146,16 +149,42 @@ segment to edit it in the key's **Parts** section; click a lane's name to select
 
 | Do | How |
 |---|---|
-| **Play** | **Play** in the Timeline, or **Space**. The preview loops. |
-| **Loop** | Bakes the clip to loop: set the last key to the first pose. |
+| **Play** | The [transport](#transport)'s play button, or **Space**. |
 | **Scrub** | Drag on the ruler. |
-| **Select a key** | Click its chip. The stage holds its pose, and the Pose tab edits it. |
-| **Retime** | Drag a chip. Keys snap to frames; the first key stays at 0. |
+| **Select a key** | Click its chip. The stage holds its pose, the Pose tab edits it, and the playhead moves to it, so a reference video shows that key's frame. |
+| **Retime** | Drag a chip. Keys snap to frames (a reference video's own frames, when it has them); the first key stays at 0. |
 | **Add a key** | Double-click the track (the selected pose), drag a pose from the Poses list onto it, or **+ Key** (at the playhead). A library pose dropped on it joins the motion's poses. |
 | **Delete a key** | **Delete**, or **Delete** in the Key section. |
 | **Zoom** | **Ctrl + wheel**, **−** / **+**, or **Fit**. |
 
 The shaded part of the ruler past the last key is the overlap tail: the trailing joints still arriving.
+
+With a [reference](#reference), the **Video** lane under the ruler lays the clip along the motion: a strip of
+its frames and, under them, its sound. Footsteps and impacts show as spikes, often the quickest way to time a
+contact. Drag the strip to slide the video along the motion; drag either end to trim it. The timeline runs
+to the end of the video when it is longer than the motion: past the clip's last frame the character holds
+its last pose, or cycles when the motion loops.
+
+### Transport
+
+The row at the top of the Timeline plays the motion. Left to right:
+
+| Button | Does | Key |
+|---|---|---|
+| **To the start** | The first frame (of the loop range, when one is set). | **Home** |
+| **Back one frame** | One frame back: the reference video's own frame, else one at the bake rate. **Shift** goes ten. | **,** or **←** |
+| **Play / Pause** | Plays the motion, the video with it. | **Space** |
+| **Forward one frame** | One frame on. **Shift** goes ten. | **.** or **→** |
+| **To the end** | The last frame. | **End** |
+| **Loop** | Playback wraps at the end; off, it stops there. | |
+| **Speed** | 0.1× to 2×: slow it down to read a fast action. | |
+
+**J**, **K** and **L** shuttle: **L** plays forwards and doubles the speed with each press, **J** does the same
+backwards, and **K** stops. **I** and **O** set a loop range at the playhead (its start and end); the range
+shows under the ruler, and its button beside the transport plays the whole timeline again.
+
+The timecode is minutes, seconds and the frame within the second. With a reference, the video's own frame
+number follows it.
 
 ### Key
 
@@ -207,10 +236,70 @@ The **Motion** tab holds what shapes the whole clip.
 - **Variation rate** — how fast the variation drifts.
 - **Seed** — picks another take of the variation.
 
-**Clip** — its **Frames per second**. **File ▸ Download .anim** writes `<name>.anim.json`, which holds
+**Clip** — its **Frames per second**: a common rate, the NTSC ones included (23.976, 29.97, 59.94), or any
+rate from 10 to 240. **Loop** bakes the clip to loop: set the last key to the first pose. **File ▸ Download
+.anim** writes `<name>.anim.json`, which holds
 the clip and the skeleton it was made on, and a `.motion.json` sidecar that regenerates it, both named
 after the asset (`untitled` on Scratch). **Assets ▸ Import** reads a `.motion.json` back as a new motion,
 to edit it again.
+
+## Reference
+
+The **Reference** tab links a video to the motion, to animate over filmed action: a person or an animal
+doing the move, a phone clip, a slow-motion take. The video plays with the motion frame for frame, over
+the 3D view. Step to the frame where the action turns, make a key there, and pose the character to match.
+
+The clip is kept in the library, under **/Video**; it stays in the Creator and is never sent to the Editor.
+A motion keeps only which clip it uses and how its time lines up.
+
+### Video
+
+**Load video…** adds a file: an `.mp4`, `.mov`, `.mkv` or `.webm` whose video the browser can decode (H.264,
+HEVC where the graphics card has it, VP8, VP9 or AV1; not ProRes or DNxHD). Its size, frame rate, length and
+codec show under its name. **From the library…** uses a clip already there; **Assets ▸ + Add ▸ Video
+reference…** and **Assets ▸ Import** add one too, and opening a clip in the Assets tab links it to the open
+motion. **Replace…** links another file and **Unlink** stops using one (the clip stays in the library).
+
+The first time a clip is opened its frames are read (where each one falls in time), and the Timeline's
+thumbnails and sound are made and kept with it.
+
+A phone often records at a **variable frame rate**: its frames are unevenly spaced. The tab says so, and
+every frame is then placed at its own time, so stepping and snapping still land on real frames.
+
+### Timing
+
+How the video's time lines up with the motion's. The motion's timeline is real time.
+
+- **Filmed at** — the rate the camera filmed at. It is the file's rate for ordinary footage; for slow motion
+  it is higher (a phone's 240 fps clip is stored at 30). The motion then runs at real speed, and a slow-motion
+  clip lies stretched out on the Timeline. **Real speed** sets it back to the file's rate.
+- **Offset** — the video's time at the motion's start. **Start here** makes the frame at the playhead start
+  the motion. Dragging the Video lane does the same thing by hand.
+- **In · out** — the stretch of the video used, in its own seconds. **Trim here** moves the nearer end to the
+  playhead. Dragging the lane's ends does it by hand.
+- **Motion** — the motion's bake rate. **Match video** bakes the motion at the video's real-time rate (the
+  rate it was filmed at), so every frame of the footage has a frame of the clip.
+- **Keys snap to the video's frames** — keys dragged on the Timeline, and the transport's frame steps, land on
+  the video's own frames; off, on the bake rate's.
+
+### Display
+
+How the video is drawn in the viewport:
+- **Off** hides it; **Over** draws it over the 3D view, see-through, at its **Opacity**.
+- **Difference** draws the difference of the two pictures instead: where the character covers the filmed
+  body exactly it goes dark, so a pose can be matched by making the silhouette disappear.
+- **Mirror** flips it left to right, for footage of the other side.
+- **Film gate** darkens the viewport outside the video's frame.
+- **Sound** plays the video's sound while the motion plays forwards at up to twice real speed.
+- **Decode at** — the width the video is decoded at for the viewport. A smaller size plays a 4K clip smoothly.
+
+The video is always shown whole, as large as fits the viewport.
+
+### Keys
+
+**Key from frame** makes a key at the playhead with a new pose, named after the video's frame: the motion as
+it is at that moment, ready to be posed against the frame. While a key is selected the viewport holds its
+pose over its frame, and the transport's frame steps still move the video, to compare the frames around it.
 
 ## Characters
 

@@ -6,6 +6,10 @@ import type { CharacterDoc } from '../character';
 import type { MotionDoc, MotionPose } from '../motionDoc';
 import type { MotionRig } from '../motionRig';
 import type { PoseLibraryEntry } from '../poseAsset';
+import type { MotionTransport, TransportState } from '../reference/transport';
+import type { FrameGrid, MotionReference } from '../reference/referenceDoc';
+import type { MotionStageSettings } from './motionStage';
+import type { ReferenceState } from './useReference';
 
 // The Motion Creator's shared state, for the panels around the viewport. Dockview unmounts a panel whose
 // tab is hidden, so anything that must outlive one -- the selection, the playhead -- lives here.
@@ -40,11 +44,35 @@ export interface MotionState {
   clip: BakedClip | null;
   /** The playhead, seconds (polled; the timeline reads `stageTime` per frame). */
   time: number;
-  /** The stage's playhead right now. */
+  /** The playhead right now: the transport's (Pose and Motion views) or the character's own clip's. */
   stageTime: () => number;
   scrub: (t: number) => void;
   playing: boolean;
   togglePlay: () => void;
+  /**
+   * The Motion view's clock (reference/transport.ts): its time is the playhead in the Pose and Motion views,
+   * so the reference video and the motion stay on one frame. `transportState` re-renders on its changes.
+   */
+  transport: MotionTransport;
+  transportState: TransportState;
+  /** Step `n` frames on the grid (the video's frames, else the bake rate); the clip view steps its clip. */
+  stepFrames: (n: number) => void;
+  toStart: () => void;
+  toEnd: () => void;
+  /** The frame grid keys snap to and the transport steps on. */
+  grid: FrameGrid;
+  /** The timeline's length: the clip, or the reference's out-point when later. */
+  timelineEnd: number;
+  /** The linked reference video, opened (useReference.ts). */
+  reference: ReferenceState;
+  /** Link a video (a new file, or a library clip by id); null: unlink. */
+  linkVideo: (source: File | string | null) => Promise<void>;
+  setReference: (r: MotionReference) => void;
+  /** A key at the playhead with a new pose: the motion as it is at that moment, to pose against the frame. */
+  keyFromFrame: () => void;
+  /** The stage's settings (the reference's display among them). */
+  stage: MotionStageSettings;
+  setStage: (s: MotionStageSettings) => void;
   /** The key selected on the timeline: its blend (the way into it) is the one being edited. */
   keyId: string | null;
   setKeyId: (id: string | null) => void;

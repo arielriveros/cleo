@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   creatorChannel, deleteCreatorAsset, duplicateCreatorAsset, getCreatorAsset, getCreatorFiles, hashChunks, listCreatorAssets, memoryBackend,
-  moveCreatorAsset, putCreatorAsset, renameCreatorAsset, resetCreatorChannel, setCreatorBackend, type CreatorMessage,
+  moveCreatorAsset, putCreatorAsset, putCreatorFile, renameCreatorAsset, resetCreatorChannel, setCreatorBackend, type CreatorMessage,
 } from '../src/creatorLibrary';
 
 const file = (name: string, text: string) => ({ name, mime: 'text/plain', blob: new Blob([text]) });
@@ -76,6 +76,35 @@ describe('Creator library', () => {
     expect(copy.thumbnail).toBe('data:a');
     expect((await getCreatorFiles(copy.id)).map(f => f.name)).toEqual(['pine_LOD0.glb', 'pine.foliage.json']);
     expect((await getCreatorFiles(copy.id, ['override/bark'])).length).toBe(1);
+  });
+
+  it('adds one file beside the others, quietly, in one transaction', async () => {
+    const backend = memoryBackend();
+    setCreatorBackend(backend);
+    await putCreatorAsset(input({ kind: 'video', id: 'video_a', privateFiles: [file('clip.mp4', 'video bytes')] }));
+    heard = [];
+    // Two concurrent adds both keep their names (each reads and writes the meta in one step).
+    const [a, b] = await Promise.all([
+      putCreatorFile('video_a', file('thumbs.bin', 't')),
+      putCreatorFile('video_a', file('analysis.bin', 'x')),
+    ]);
+    expect(a && b).toBe(true);
+    const meta = (await getCreatorAsset('video_a'))!;
+    expect(meta.revision).toBe(1);                                              // no new revision
+    expect(heard).toEqual([]);                                                  // and no announcement
+    expect(meta.privateFileNames.sort()).toEqual(['analysis.bin', 'clip.mp4', 'thumbs.bin']);
+    expect(meta.fileNames).toEqual(['pine_LOD0.glb', 'pine.foliage.json']);
+    // Replacing keeps one entry with the new bytes; the video is untouched.
+    await putCreatorFile('video_a', file('thumbs.bin', 't2'));
+    const files = await getCreatorFiles('video_a', ['clip.mp4', 'thumbs.bin']);
+    expect(await files[0].blob.text()).toBe('video bytes');
+    expect(await files[1].blob.text()).toBe('t2');
+    expect((await getCreatorAsset('video_a'))!.privateFileNames.filter(n => n === 'thumbs.bin').length).toBe(1);
+    // A delete removes the added files with the rest.
+    await deleteCreatorAsset('video_a');
+    expect(await backend.files('video_a', ['clip.mp4', 'thumbs.bin', 'analysis.bin'])).toEqual([]);
+    expect(await putCreatorFile('video_a', file('late.bin', 'z'))).toBe(false);
+    expect(await putCreatorFile('nope', file('late.bin', 'z'))).toBe(false);
   });
 
   it('hashes chunk boundaries', () => {

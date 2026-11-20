@@ -16,6 +16,17 @@ export interface CreatorBackend {
   files(id: string, names: string[]): Promise<CreatorFile[]>;
   /** One atomic write: the meta, the files given, and the file names to drop. */
   write(meta: CreatorAssetMeta, put: CreatorFile[], drop: string[]): Promise<void>;
+  /**
+   * One file added to (or replaced in) a stored asset, its name joined to the public or private list, read
+   * and written in ONE transaction so two concurrent adds both keep their names. False: no such asset.
+   */
+  addFile(id: string, file: CreatorFile, isPrivate: boolean): Promise<boolean>;
+}
+
+/** The meta with `name` in the public or private list (and out of the other). */
+function withFileName(meta: CreatorAssetMeta, name: string, isPrivate: boolean): CreatorAssetMeta {
+  const pub = meta.fileNames.filter(n => n !== name), priv = meta.privateFileNames.filter(n => n !== name);
+  return { ...meta, fileNames: isPrivate ? pub : [...pub, name], privateFileNames: isPrivate ? [...priv, name] : priv };
 }
 
 // --- IndexedDB ------------------------------------------------------------------------------------
@@ -85,6 +96,22 @@ export const indexedDbBackend: CreatorBackend = {
     tx.objectStore(ASSETS).put(meta, meta.id);
     return done(tx);
   },
+  async addFile(id, file, isPrivate) {
+    const db = await openCreatorDB();
+    const tx = db.transaction([ASSETS, FILES], 'readwrite');
+    const assets = tx.objectStore(ASSETS);
+    let found = false;
+    const req = assets.get(id);
+    req.onsuccess = () => {
+      const meta = req.result as CreatorAssetMeta | undefined;
+      if (!meta || meta.deleted) return;
+      found = true;
+      tx.objectStore(FILES).put({ mime: file.mime, blob: file.blob }, `${id}/${file.name}`);
+      assets.put(withFileName(meta, file.name, isPrivate), id);
+    };
+    await done(tx);
+    return found;
+  },
 };
 
 /** A backend on a Map: the tests', and anywhere IndexedDB is missing. */
@@ -99,6 +126,13 @@ export function memoryBackend(): CreatorBackend {
       for (const n of drop) files.delete(`${meta.id}/${n}`);
       for (const f of put) files.set(`${meta.id}/${f.name}`, f);
       assets.set(meta.id, structuredClone(meta));
+    },
+    async addFile(id, file, isPrivate) {
+      const meta = assets.get(id);
+      if (!meta || meta.deleted) return false;
+      files.set(`${id}/${file.name}`, file);
+      assets.set(id, withFileName(meta, file.name, isPrivate));
+      return true;
     },
   };
 }
@@ -198,6 +232,16 @@ export async function moveCreatorAsset(id: string, folder: string): Promise<void
   if (!prev || prev.deleted || (prev.folder ?? '') === clean) return;
   await b.write({ ...prev, folder: clean || undefined }, [], []);
   creatorChannel().post({ type: 'upsert', id, revision: prev.revision });
+}
+
+/**
+ * Add one file to a stored asset (or replace it), leaving every other file and the document as they are:
+ * the way to keep a cache beside a large file that must never be written again (a video reference's
+ * thumbnails and analysis). No new revision and no announcement -- nothing the editor imports changed --
+ * and not part of the content hash. Private by default. False: the asset is gone.
+ */
+export async function putCreatorFile(id: string, file: CreatorFile, options: { private?: boolean } = {}): Promise<boolean> {
+  return current().addFile(id, file, options.private !== false);
 }
 
 /** A copy of an asset under a new name and id, in the same folder: its document, files and thumbnail. */

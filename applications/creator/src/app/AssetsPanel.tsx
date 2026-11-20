@@ -12,6 +12,7 @@ import { beginLoad } from '@cleo/app-kit/feedback/loadingStore';
 import { AddMenu, ImportButton, type AddMenuItem } from '@cleo/app-kit/assets/AssetToolbar';
 import { RIGGED_ACCEPT, isModelFile } from '../core/riggedImport';
 import { importCharacter } from '../motion/characterImport';
+import { VIDEO_ACCEPT, importVideo, isVideoFile } from '../motion/reference/videoImport';
 import { motionFromFile } from '../motion/motionDoc';
 import { createCreatorAsset } from '../core/useCreatorAsset';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
@@ -20,22 +21,26 @@ import { useCreatorShell, type Tool } from './shell';
 
 // The Creator's Assets tab: the editor's asset explorer (app-kit AssetExplorer), browsing the shared
 // Creator library -- every saved asset, under a root per kind (/Foliage, /FX, /World, /Motion, /Characters
-// for uploaded rigged models, /Poses for the Motion Creator's library poses) and the folders filed in it.
+// for uploaded rigged models, /Poses for the Motion Creator's library poses, /Video for its reference clips)
+// and the folders filed in it.
 // It is the one place assets are managed: the tools' toolbars only show the asset being edited. **+ Add**
 // uploads a rigged model as a Character (motion/characterImport.ts), the way the editor's + Add imports
-// one; **Import** takes a rigged model the same way, or a `.motion.json` (the Motion Creator's sidecar) as a
-// new motion. Opening an asset switches to its tool and loads it; rename, duplicate, move and delete act
+// one, or a video as a reference clip; **Import** takes a rigged model the same way, a video, or a
+// `.motion.json` (the Motion Creator's sidecar) as a new motion. Opening an asset switches to its tool and loads it; rename, duplicate, move and delete act
 // on the library itself, so the editor's /Creator mirror follows. Kept live from the library's channel, so
 // a save in this or another window shows up at once.
 
 const ROOT: Record<CreatorAssetKind, string> = {
-  foliage: '/Foliage', fx: '/FX', world: '/World', motion: '/Motion', character: '/Characters', pose: '/Poses',
+  foliage: '/Foliage', fx: '/FX', world: '/World', motion: '/Motion', character: '/Characters', pose: '/Poses', video: '/Video',
 };
 const EXT: Record<CreatorAssetKind, string> = {
-  foliage: '.foliage', fx: '.fx', world: '.world', motion: '.motion', character: '.character', pose: '.pose',
+  foliage: '.foliage', fx: '.fx', world: '.world', motion: '.motion', character: '.character', pose: '.pose', video: '.video',
 };
-/** The tool that opens each kind: a Character is the subject the Motion Creator animates, a Pose one of its poses. */
-const TOOL_OF: Record<CreatorAssetKind, Tool> = { foliage: 'foliage', fx: 'fx', world: 'world', motion: 'motion', character: 'motion', pose: 'motion' };
+/**
+ * The tool that opens each kind: a Character is the subject the Motion Creator animates, a Pose one of its
+ * poses, a Video the reference the open motion is made against.
+ */
+const TOOL_OF: Record<CreatorAssetKind, Tool> = { foliage: 'foliage', fx: 'fx', world: 'world', motion: 'motion', character: 'motion', pose: 'motion', video: 'motion' };
 const FOLDERS_KEY = 'cleo_creator_explorer_folders';
 const MODE_KEY = 'cleo_creator_explorer_mode';
 
@@ -57,6 +62,7 @@ const ICONS: Record<CreatorAssetKind | 'folder', string> = {
   motion: glyph("<circle cx='13' cy='4' r='2'/><path d='M9 21l3-7 3 2v5'/><path d='M7 11l4-3 4 3 3-1'/><path d='M12 8v6'/>", '#d58bd8'),
   character: glyph("<circle cx='12' cy='5' r='2.5'/><path d='M12 8v7'/><path d='M7 11h10'/><path d='M9 21l3-6 3 6'/>", '#e6c26a'),
   pose: glyph("<circle cx='12' cy='4.5' r='2'/><path d='M12 7v7'/><path d='M12 9l-5-3'/><path d='M12 9l5 2'/><path d='M12 14l-4 7'/><path d='M12 14l3 3 2 4'/>", '#8bc4d8'),
+  video: glyph("<rect x='3' y='5' width='14' height='14' rx='2'/><path d='M17 10l4-2v8l-4-2'/><path d='M8 9v6l4-3z'/>", '#e08b8b'),
   folder: glyph("<path d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/>", '#c9b47a'),
 };
 
@@ -116,7 +122,7 @@ export function AssetsPanel() {
     api.intercept('create-file', (cfg: any) => {
       if (cfg.skipProvider) return true;
       if (cfg.file?.type !== 'folder' || !placeOf(cfg.parent ?? '/')) {
-        toast.info('Make folders inside /Foliage, /FX, /World, /Motion, /Characters or /Poses. Assets are made in their tool, with Save as asset, or added with + Add and Import.');
+        toast.info('Make folders inside /Foliage, /FX, /World, /Motion, /Characters, /Poses or /Video. Assets are made in their tool, with Save as asset, or added with + Add and Import.');
         return false;
       }
       return true;
@@ -218,6 +224,24 @@ export function AssetsPanel() {
       void refresh();
     }
   };
+  /** A video: a reference clip in /Video, linked to the open motion. */
+  const addVideo = async (file: File) => {
+    const load = beginLoad('Adding a reference video', [{ id: 'read', label: 'Reading the video' }], 'overlay', { showAfterMs: 120 });
+    const step = load.step('read').start(file.name);
+    try {
+      const { id, name } = await importVideo(file);
+      step.done(name);
+      toast.success(`${name} is in /Video. The Motion Creator uses it as the open motion’s reference.`);
+      requestOpen('video', id);
+      if (shell.tool !== 'motion') shell.choose('motion');
+    } catch (e) {
+      step.fail(String((e as Error)?.message ?? e));
+      toast.error(String((e as Error)?.message ?? e), { title: 'Could not add the video' });
+    } finally {
+      load.finish();
+      void refresh();
+    }
+  };
   /** `.motion.json` files (the Motion Creator's sidecars): each a new motion asset, the last one opened. */
   const addMotions = async (files: File[]) => {
     let last: string | null = null;
@@ -240,13 +264,17 @@ export function AssetsPanel() {
     setImporting(true);
     try {
       const motions = files.filter(f => /\.json$/i.test(f.name));
-      if (motions.length && motions.length === files.length) await addMotions(motions);
+      const video = files.find(f => isVideoFile(f.name));
+      if (video && files.length === 1) await addVideo(video);
+      else if (motions.length && motions.length === files.length) await addMotions(motions);
       else await addCharacter(files.filter(f => !/\.json$/i.test(f.name)));
     } finally { setImporting(false); }
   };
   const addItems: AddMenuItem[] = [
     { label: 'Rigged character…', title: 'Upload a rigged model (.fbx, .glb, .gltf): the Motion Creator can animate it, and its clips sync to the editor',
       run: () => document.getElementById('creator-character-import')?.click() },
+    { label: 'Video reference…', title: 'Upload a video (.mp4, .mov, .webm) to animate over in the Motion Creator: it plays with the motion, frame for frame',
+      run: () => document.getElementById('creator-video-import')?.click() },
   ];
 
   if (!ready) return <div className='w-full h-full flex items-center justify-center text-ui text-muted'>Loading the library…</div>;
@@ -257,10 +285,12 @@ export function AssetsPanel() {
       previews={previews} icons={icons}
       toolbarStart={<>
         <AddMenu items={addItems} title='Add an asset to the Creator library' />
-        <ImportButton accept={`${RIGGED_ACCEPT},.json`} onFiles={files => void importFiles(files)} busy={importing}
-          title='Import a rigged model (.fbx, .glb, .gltf, with its .bin and textures) as a Character, or a .motion.json as a motion' />
+        <ImportButton accept={`${RIGGED_ACCEPT},.json,${VIDEO_ACCEPT}`} onFiles={files => void importFiles(files)} busy={importing}
+          title='Import a rigged model (.fbx, .glb, .gltf, with its .bin and textures) as a Character, a video as a reference, or a .motion.json as a motion' />
         <input id='creator-character-import' className='hidden' type='file' multiple accept={RIGGED_ACCEPT}
                onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; if (files.length) void addCharacter(files); }} />
+        <input id='creator-video-import' className='hidden' type='file' accept={VIDEO_ACCEPT}
+               onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void addVideo(file); }} />
       </>}
       toolbarEnd={<span className='ml-auto min-w-0 truncate text-ui-sm text-dim hidden lg:inline'>
         Saved assets of every tool · double-click to open · they appear in the editor under /Creator
