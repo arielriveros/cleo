@@ -60,9 +60,12 @@ describe.skipIf(!present)('the Dungeon example project', () => {
     const templates = () => library('templates');
     let nodes: any[] | null = null;
     // The first read parses ~120 MB of JSON. Done once up front, so no single test carries it into a timeout.
-    beforeAll(() => { scene(); templates(); library('scripts'); }, 120_000);
+    // The walk over every node and the script index too: under a full parallel suite, the first test to need them
+    // went past the default 5 s doing it.
+    beforeAll(() => { scene(); templates(); library('scripts'); everyNode(); }, 120_000);
     const everyNode = (): any[] => nodes ??= [...allNodes(scene().scene), ...templates().flatMap((t: any) => allNodes(t.nodeJson))];
-    const scriptOf = (n: any) => library('scripts').find((s: any) => s.id === n.variables?.__scriptId?.value);
+    let scriptsById: Map<string, any> | null = null;
+    const scriptOf = (n: any) => (scriptsById ??= new Map(library('scripts').map((s: any) => [s.id, s]))).get(n.variables?.__scriptId?.value);
     const withScript = (file: string) => everyNode().filter(n => scriptOf(n)?.source?.includes(`export default class ${file}Node`));
     // Each node's parent, over the scene and every template: what Node.collider walks up through.
     let parents: Map<any, any> | null = null;
