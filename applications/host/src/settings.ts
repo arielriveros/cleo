@@ -13,7 +13,10 @@
 //   --public-address <a>  NETSYNC_PUBLIC_ADDRESS                       (the request's Host header)
 //   --session <json>      NETSYNC_SESSION             —                (none: wait for an allocation, or open now)
 //   --token-key <key>     NETSYNC_TOKEN_KEY                            (none: no join token asked)
-//   --lifecycle <name>    NETSYNC_LIFECYCLE                            none   none | agones
+//   --lifecycle <name>    NETSYNC_LIFECYCLE                            none   none | agones | edgegap
+//                         NETSYNC_CERT, NETSYNC_CERT_KEY               (made at start) the WebTransport certificate,
+//                                                                      PEM or base64 PEM (an allocator that starts
+//                                                                      the host hands it one whose hash it knows)
 //   --await-allocation    NETSYNC_AWAIT_ALLOCATION=1                   off    a warm host: no session until allocated
 //   --reuse               NETSYNC_REUSE=1                              off    after a session, wait for the next
 //   --drain-seconds <n>   NETSYNC_DRAIN_SECONDS                        30
@@ -49,7 +52,9 @@ export interface HostSettings {
     publicAddress?: string;
     session?: SessionSpec;
     tokenKey?: string;
-    lifecycle: 'none' | 'agones';
+    lifecycle: 'none' | 'agones' | 'edgegap';
+    certPem?: string;
+    keyPem?: string;
     awaitAllocation: boolean;
     reuse: boolean;
     drainSeconds: number;
@@ -98,7 +103,7 @@ export function readSettings(argv: readonly string[], env: Record<string, string
         if (!session?.id) throw new Error('--session / NETSYNC_SESSION needs an "id"');
     }
     const lifecycle = pick('--lifecycle', 'NETSYNC_LIFECYCLE') ?? 'none';
-    if (lifecycle !== 'none' && lifecycle !== 'agones') throw new Error(`--lifecycle / NETSYNC_LIFECYCLE: unknown "${lifecycle}" (none | agones)`);
+    if (lifecycle !== 'none' && lifecycle !== 'agones' && lifecycle !== 'edgegap') throw new Error(`--lifecycle / NETSYNC_LIFECYCLE: unknown "${lifecycle}" (none | agones | edgegap)`);
     const trust = pick('--trust', 'NETSYNC_TRUST');
     if (trust !== undefined && trust !== 'coop' && trust !== 'versus') throw new Error(`--trust / NETSYNC_TRUST: "${trust}" (coop | versus)`);
     const spawn = pick('--spawn', 'NETSYNC_SPAWN');
@@ -113,7 +118,9 @@ export function readSettings(argv: readonly string[], env: Record<string, string
         publicAddress: pick('--public-address', 'NETSYNC_PUBLIC_ADDRESS'),
         session,
         tokenKey: pick('--token-key', 'NETSYNC_TOKEN_KEY'),
-        lifecycle,
+        lifecycle: lifecycle as HostSettings['lifecycle'],
+        certPem: env.NETSYNC_CERT || undefined,
+        keyPem: env.NETSYNC_CERT_KEY || undefined,
         awaitAllocation: on('--await-allocation', 'NETSYNC_AWAIT_ALLOCATION'),
         reuse: on('--reuse', 'NETSYNC_REUSE'),
         drainSeconds: num('--drain-seconds', 'NETSYNC_DRAIN_SECONDS', 30)!,

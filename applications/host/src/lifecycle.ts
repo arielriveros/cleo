@@ -5,7 +5,11 @@
 //   none    VPS, Docker, Edgegap, any container platform: the control port is enough (POST /allocate, /readyz,
 //           SIGTERM). The default.
 //   agones  Kubernetes with Agones: the Agones SDK's REST sidecar (localhost:AGONES_SDK_HTTP_PORT, 9358 by
-//           default) — Ready, Health every few seconds, Allocated (watched), Shutdown.
+//           default) — Ready, Health every few seconds, Allocated (watched), Shutdown. The host's certificate hash
+//           goes on the GameServer as an annotation, where the allocator reads it.
+//   edgegap  Edgegap: the platform starts a deployment per match (the allocator hands it its session and
+//           certificate in its environment); when the session ends the host stops its own deployment
+//           (ARBITRIUM_DELETE_URL with ARBITRIUM_DELETE_TOKEN).
 
 import type { SessionSpec } from './settings';
 
@@ -71,7 +75,9 @@ export class AgonesLifecycle implements HostLifecycle {
         this._fetch = _options.fetch ?? fetch;
     }
 
-    public async start(): Promise<void> {
+    public async start(host: HostInfo): Promise<void> {
+        // Where the allocator finds the hash to pin (Agones prefixes the key: agones.dev/sdk-netsync-cert-hash).
+        await this._put('/metadata/annotation', { key: 'netsync-cert-hash', value: host.certHash });
         this._health = setInterval(() => { void this._post('/health').catch(() => {}); }, this._options.healthMs ?? 2000);
         void this._watchGameServer();
     }
@@ -94,6 +100,11 @@ export class AgonesLifecycle implements HostLifecycle {
         this._health = null;
         this._watch?.abort();
         this._watch = null;
+    }
+
+    private async _put(path: string, body: unknown): Promise<void> {
+        const res = await this._fetch(this._base + path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error(`Agones SDK ${path}: HTTP ${res.status}`);
     }
 
     private async _post(path: string): Promise<void> {
@@ -155,6 +166,30 @@ export function sessionFromGameServer(gs: any): SessionSpec {
     };
 }
 
-export function createLifecycle(name: 'none' | 'agones', log?: (line: string) => void): HostLifecycle {
-    return name === 'agones' ? new AgonesLifecycle({ log }) : new NoLifecycle();
+/**
+ * Edgegap: a deployment is one match. Its session and certificate arrive in the environment (NETSYNC_SESSION,
+ * NETSYNC_CERT); when the session ends the host stops its own deployment rather than idling until Edgegap's
+ * maximum duration.
+ */
+export class EdgegapLifecycle implements HostLifecycle {
+    public readonly name = 'edgegap';
+    constructor(private readonly _env: Record<string, string | undefined> = process.env, private readonly _fetch: typeof fetch = fetch,
+                private readonly _log?: (line: string) => void) {}
+    public async start(): Promise<void> {}
+    public async ready(): Promise<void> {}
+    public onAllocate(): void {}
+    public onShutdown(): void {}
+    public dispose(): void {}
+    public async sessionEnded(): Promise<void> {
+        const url = this._env.ARBITRIUM_DELETE_URL, token = this._env.ARBITRIUM_DELETE_TOKEN;
+        if (!url || !token) { this._log?.('edgegap: no ARBITRIUM_DELETE_URL / ARBITRIUM_DELETE_TOKEN; not stopping the deployment'); return; }
+        const res = await this._fetch(url, { method: 'DELETE', headers: { authorization: token } });
+        if (!res.ok && res.status !== 410) throw new Error(`Edgegap self-stop: HTTP ${res.status}`);
+    }
+}
+
+export function createLifecycle(name: 'none' | 'agones' | 'edgegap', log?: (line: string) => void): HostLifecycle {
+    if (name === 'agones') return new AgonesLifecycle({ log });
+    if (name === 'edgegap') return new EdgegapLifecycle(process.env, fetch, log);
+    return new NoLifecycle();
 }

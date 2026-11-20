@@ -73,6 +73,22 @@ export async function generateCertificate(validDays: number = VALID_DAYS): Promi
 }
 
 /**
+ * A certificate made elsewhere (an allocator that starts this host and must know the hash before it is up), as PEM
+ * text or base64 of the PEM (one line, for an environment variable).
+ */
+export function certificateFromPem(certText: string, keyText: string): HostCertificate {
+    const pem = (t: string) => (t.includes('-----BEGIN') ? t : Buffer.from(t.trim(), 'base64').toString('utf8'));
+    const cert = pem(certText), key = pem(keyText);
+    const x = new X509Certificate(cert);
+    return {
+        cert, key,
+        hash: createHash('sha256').update(x.raw).digest('base64'),
+        notAfter: new Date(x.validTo).toISOString(),
+        addresses: [],
+    };
+}
+
+/**
  * The cached certificate in `cacheDir`, or a new one when there is none, it expires within a day, or this
  * machine has an address it does not name.
  */

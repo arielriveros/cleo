@@ -8,7 +8,7 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cachedCertificate, generateCertificate } from './devCertificate';
+import { cachedCertificate, certificateFromPem, generateCertificate } from './devCertificate';
 import { HostApp, createLog } from './hostApp';
 import { readSettings } from './settings';
 
@@ -18,7 +18,9 @@ const log = createLog(settings.log);
 
 // Development keeps one certificate for its 14 days (a browser tab can be reloaded against the same hash); a
 // deployed host makes its own each start (it lives for a session, and its hash goes out with the allocation).
-const certificate = settings.example ? await cachedCertificate(path.join(here, '..', '.cache')) : await generateCertificate();
+// An allocator that started this host hands it a certificate whose hash it already gave the players.
+const certificate = settings.certPem && settings.keyPem ? certificateFromPem(settings.certPem, settings.keyPem)
+    : settings.example ? await cachedCertificate(path.join(here, '..', '.cache')) : await generateCertificate();
 
 const app = await HostApp.start(settings, { certificate, log });
 const { listener } = app;

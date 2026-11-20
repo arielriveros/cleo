@@ -2,10 +2,11 @@
   "name": "cleo-host",
   "version": "0.1.0",
   "private": true,
-  "description": "The NetSync dedicated host (docs/design/netsync.md): accepts WebTransport and WebSocket links and runs a session. Phase 1: links and sessions only.",
+  "description": "NetSync hosting (docs/design/netsync.md): cleo-host, the dedicated host that runs a game for its players over WebTransport and WebSocket, and cleo-allocator, the allocator and gateway in front of a fleet of them.",
   "type": "module",
   "scripts": {
     "start": "vite-node src/main.ts --",
+    "allocator": "vite-node src/allocator/main.ts --",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

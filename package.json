@@ -30,6 +30,7 @@
     "mcp:install": "cd applications/mcp && npm install",
     "host:install": "cd applications/host && npm install",
     "host": "cd applications/host && npm start --",
+    "allocator": "cd applications/host && npm run allocator --",
     "host:test": "vitest run --root applications/host",
     "install:all": "npm install && npm run apps:install && npm run desktop:install && npm run mcp:install",
     "creator": "cd applications/creator && npm run start",

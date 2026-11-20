@@ -164,9 +164,16 @@ describe('the Agones lifecycle', () => {
     it('reports Ready and Health, takes its session from an allocation, and shuts down when it ends', async () => {
         // A stand-in for the Agones SDK sidecar: records POSTs; /watch/gameserver streams the GameServer's states.
         const posts: string[] = [];
+        const annotations: string[] = [];
         let push: ((gs: unknown) => void) | null = null;
         const sidecar = createServer((req, res) => {
             if (req.method === 'POST') { posts.push(req.url!); res.end('{}'); return; }
+            if (req.method === 'PUT') {
+                let body = '';
+                req.on('data', (c) => { body += c; });
+                req.on('end', () => { annotations.push(`${req.url} ${body}`); res.end('{}'); });
+                return;
+            }
             if (req.url === '/watch/gameserver') {
                 res.writeHead(200, { 'content-type': 'application/json' });
                 push = (gs) => res.write(JSON.stringify({ result: gs }) + '\n');
@@ -183,6 +190,8 @@ describe('the Agones lifecycle', () => {
         expect(app.state).toBe('ready');
         await wait(700);
         expect(posts).toContain('/ready');
+        // The certificate hash, where the Agones fleet adapter reads it from the allocation.
+        expect(annotations).toEqual([`/metadata/annotation ${JSON.stringify({ key: 'netsync-cert-hash', value: certificate.hash })}`]);
         expect(posts.filter((p) => p === '/health').length).toBeGreaterThanOrEqual(2);
 
         // The fleet allocates this GameServer, naming the session in its annotations.

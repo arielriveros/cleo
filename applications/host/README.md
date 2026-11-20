@@ -1,4 +1,4 @@
-# cleo-host
+# cleo-host and cleo-allocator
 
 The NetSync dedicated host ([docs/design/netsync.md](../../docs/design/netsync.md)). A Node process that runs a
 game headless — a published `game.bin` on an engine with no renderer, at a fixed tick rate — and the session its
@@ -65,6 +65,30 @@ REST sidecar: Ready, Health, the allocation from `GET /watch/gameserver` — its
 copy of the player template at the spawn point. A copy goes when its player leaves; a level character waits for the
 next one.
 
+## cleo-allocator: the allocator and the gateway
+
+One small service in front of a fleet of hosts, and the only piece that stays up between matches (§7.1).
+
+```sh
+npm run allocator -- --keys                         # a join-token key pair: private for the allocator, public for hosts
+npm run allocator -- --config netsync.hosting.json  # the config file's shape is at the top of src/allocator/main.ts
+```
+
+- `POST /join {mode?, region?, name?, session?}` returns a **join ticket** — `{endpoint, token, session}` — which the
+  player app takes as `?join=<JSON>`. A session of that mode with a free seat is filled first; otherwise the fleet
+  adapter gets a new host. `GET /sessions` lists them; a session is forgotten when its host says it is over.
+- **The gateway** shares its port: `wss://<gatewayUrl>/s/<session>` is forwarded to that session's host's WebSocket
+  port (the upgrade request is passed on and the two sockets piped; frames are never parsed). TLS with
+  `tls.cert`/`tls.key`, or plain HTTP behind a TLS proxy. WebTransport goes to hosts directly.
+- **Fleet adapters** (`src/allocator/fleet.ts`): `static` (warm hosts you run, `--await-allocation --reuse`, allocated
+  over their control port), `docker` (a container per match through the Docker Engine API), `agones` (a
+  GameServerAllocation; the session goes on as the `netsync.session` annotation, the host's certificate hash comes
+  back from its `netsync-cert-hash` annotation), `edgegap` (a v2 deployment per match near the player; the host
+  stops its own deployment when the session ends). Hosts started per match get their session, the token key and a
+  certificate the allocator made (`NETSYNC_CERT`), so the hash is known before they are up.
+- **Hooks** for the developer's own backend: `onRequest(join, req)` refuses (returns a reason) or changes a join;
+  `chooseRegion(join, req)` picks the region.
+
 ## What is where
 
 | | |
@@ -77,7 +101,8 @@ next one.
 | `src/joinToken.ts`, `src/lifecycle.ts` | Join tokens; the `none` and `agones` lifecycle adapters. |
 | `src/devCertificate.ts` | Self-signed ECDSA P-256 certificate (≤ 14 days, pinned by hash). Cached in `.cache/` in development; a new one each start otherwise. |
 | `src/exampleGame.ts`, `src/webBuild.ts` | An example project folder packed (or published as a web game) the way the editor does, for development and tests. |
-| `src/main.ts` | The CLI. |
+| `src/main.ts` | The host CLI. |
+| `src/allocator/` | `allocator.ts` (join tickets, sessions), `gateway.ts` (the WebSocket entry point), `fleet.ts` (the four fleet adapters), `main.ts` (the allocator CLI). |
 
 ## Platform notes
 
