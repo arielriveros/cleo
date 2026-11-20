@@ -134,7 +134,7 @@ export type { NodeVariable, NodeVariableType, NodeVariableAccess } from "./core/
 export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
 export { TypedEmitter, engineEventBus, asDerived } from "./core/eventBus";
-export type { EngineEventMap, SceneChange, ChangeKind, StructureOp, NodePlacement } from "./core/eventBus";
+export type { EngineEventMap, SceneChange, ChangeKind, StructureOp, NodePlacement, DirtyAspect, NodeDirty } from "./core/eventBus";
 // The cross-asset reference graph. Kind-agnostic on purpose: the editor owns the per-kind readers that
 // turn an asset record into edges, and feeds them in through `setEdges`.
 export { AssetGraph, assetGraph, assetKey, refKey } from "./core/assets/assetGraph";
@@ -452,6 +452,19 @@ export type { ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerNa
 export { applyScriptDecorators, scriptMembersOf, membersOfNode, SCRIPT_METADATA } from "./core/scripting/decorators";
 export type { ScriptMember, LoweredMember } from "./core/scripting/decorators";
 export { GameEvents } from "./core/scripting/scriptEvents";
+// The event system (src/core/events, docs/scripting/events.md): channels on a hub, sync / async / deferred, events at nodes.
+export {
+    Events, EventChannel, CleoEvent, Emitter, Subject, ValueSubject, ChannelEmitter,
+    DEFAULT_CHANNEL, ANIMATION_CHANNEL, ENGINE_CHANNEL, getChannel, allChannels, splitEventName, flushAllChannels,
+    resetScriptChannels, hasScriptListeners, sendEvent, receiveRemoteEvent, setEventTransportResolver, setEventErrorReporter,
+    addTargetListener, removeTargetListener, hasTargetListener, dispatchAt,
+} from "./core/events";
+export type {
+    EventListenerFn, EventWhere, ListenOptions, EventPhase, ChannelOptions, DispatchOptions, PostOptions, NextOptions,
+    SubjectObserver, SendOptions, EventTransport, EventTransportResolver, TransportResult, RemoteEventTarget, EventDestination, EventRoute,
+} from "./core/events";
+export { observableOf } from "./core/scene/nodes/nodeScripting";
+export type { AnimationEventInfo, AnimationStateEventInfo } from "./animation/animator";
 export { lowerScriptDecorators, decoratorSiteAt, type DecoratorSite } from "./core/scripting/scriptDecoratorLowering";
 export { Game, Net, setGameHost, setMovieRender, type MovieRenderInfo } from "./core/game";
 export { NodeNet } from "./core/net/sceneNet";

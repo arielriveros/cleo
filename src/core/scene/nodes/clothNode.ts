@@ -396,7 +396,7 @@ export class ClothNode extends ModelNode {
             bit[i + 2] = nx * tan[i + 1] - ny * tan[i];
         }
         geometry.invalidateBounds();
-        this.invalidateWorldBounds();
+        this.markDirty('bounds');
         if (!this.initialized || !this._attributes) return false;
         this.model.mesh.updateVertexData(geometry.getData(this._attributes));
         return true;

@@ -5,7 +5,14 @@ import { logScriptError } from "../../scripting/scriptErrors";
 import { bindDataAccessors, canAccessVariable } from "./nodeVariables";
 import { createScriptImporter, resolveScriptModule, scriptModulesVersion, ScriptFactory, SCRIPT_HANDLERS } from "../../scripting/scriptRuntime";
 import { membersOfNode, scriptMembersOf, setNodeScriptMembers } from "../../scripting/decorators";
-import { GameEvents } from "../../scripting/scriptEvents";
+import { ENGINE_CHANNEL, addTargetListener, getChannel, releaseTarget, removeChannelListenersOwnedBy } from "../../events/hub";
+import { setEventErrorReporter } from "../../events/dispatcher";
+import { ValueSubject } from "../../events/subject";
+
+// A listener that throws, anywhere in the event system, is reported as a script error with its event's name. The
+// engine channel's own listeners propagate instead (it does not isolate); a throw from its frame flush lands here.
+setEventErrorReporter((error, event) =>
+    logScriptError(`Error in a listener of '${event.qualifiedName}'`, error, event.channel === ENGINE_CHANNEL ? 'Runtime' : 'Script'));
 
 /**
  * The bridge between a user script and a live node: the `this` proxy, and the two ways a compiled script
@@ -323,6 +330,8 @@ function attachClassScript(node: Node, Ctor: new (...args: any[]) => any): void 
     // What the class's decorators declared (`@child`, `@onAction`, ...): the node is not an instance of the
     // class, so it is remembered for the node — fillScriptRefs and the scene's action dispatch read it.
     setNodeScriptMembers(node, scriptMembersOf(Ctor));
+    // `@observable` fields become accessors now, holding the value the defaults (or scriptVars) gave them.
+    installObservables(node);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -434,35 +443,62 @@ function scriptPrototypeChain(node: Node, proto: any): any[] {
 }
 
 /* -------------------------------------------------------------------------- */
-/* @onEvent / @every / @onEnter / @onExit / @onHold / @onTap                    */
+/* @onEvent / @eventListener / @every / @onEnter / @onExit / @onHold / @onTap   */
 /* -------------------------------------------------------------------------- */
 
-/** Calls a decorated method, reporting a throw or a rejected promise instead of letting it escape. */
-function runDecorated(node: Node, method: string, label: string, arg?: unknown): void {
-    try {
-        const result = (node as any)[method]?.(arg);
-        if (result && typeof result.then === 'function')
-            result.catch((e: any) => logScriptError(`Error in ${method} (${label}) for node ${node.name}`, e, 'Script'));
-    }
-    catch (e) { logScriptError(`Error in ${method} (${label}) for node ${node.name}`, e, 'Script'); }
+/**
+ * Calls a decorated method, reporting a throw or a rejected promise instead of letting it escape. Returns what
+ * the method returned (a promise too, already guarded), so an event's `results` and `request` see it.
+ */
+function runDecorated(node: Node, method: string, label: string, ...args: unknown[]): unknown {
+    return runDecoratedWith(node, method, label, args);
 }
 
-/** What undoes a node's `@onEvent` subscriptions, `@every` timers and input routing: run on despawn. */
+/** {@link runDecorated} with the arguments as an array: what an event listener hands on, with no second copy. */
+function runDecoratedWith(node: Node, method: string, label: string, args: readonly unknown[]): unknown {
+    try {
+        const fn = (node as any)[method];
+        if (typeof fn !== 'function') return undefined;
+        const result = args.length === 0 ? fn.call(node) : args.length === 1 ? fn.call(node, args[0]) : fn.apply(node, args);
+        if (result && typeof result.then === 'function')
+            return result.then(undefined, (e: any) => { logScriptError(`Error in ${method} (${label}) for node ${node.name}`, e, 'Script'); });
+        return result;
+    }
+    catch (e) { logScriptError(`Error in ${method} (${label}) for node ${node.name}`, e, 'Script'); }
+    return undefined;
+}
+
+/** What undoes a node's event listeners, `@every` timers and input routing: run on despawn. */
 const lifeSubs = new WeakMap<Node, (() => void)[]>();
 
+/** `'game:Died'` shown as `'Died'`: the channel is named only when it is not the game's. */
+function eventLabel(channel: string, name: string): string {
+    return channel === 'game' ? name : `${channel}:${name}`;
+}
+
 /**
- * Start what a script's decorators run for as long as the node is awake: `@onEvent` listeners, `@every`
- * timers, and the scene's polling for `@onHold` / `@onTap`. Called when the node spawns; releaseScriptLife
- * undoes it when the node despawns or is removed, so a gone node is never called.
+ * Start what a script's decorators run for as long as the node is awake: `@onEvent` and `@eventListener`
+ * listeners, `@every` timers, and the scene's polling for `@onHold` / `@onTap`. Called when the node spawns;
+ * releaseScriptLife undoes it when the node despawns or is removed, so a gone node is never called.
  */
 export function bindScriptLife(node: Node): void {
     const members = membersOfNode(node);
     if (!members.length) return;
     releaseScriptLife(node);
+    installObservables(node);
     const subs: (() => void)[] = [];
     let timedInput = false;
     for (const m of members) {
-        if (m.kind === 'event') subs.push(GameEvents.on(m.name, payload => runDecorated(node, m.method, `@onEvent '${m.name}'`, payload)));
+        if (m.kind === 'event') {
+            const label = `@onEvent '${eventLabel(m.channel, m.name)}'`;
+            subs.push(getChannel(m.channel).on(m.name, (...args: unknown[]) => runDecoratedWith(node, m.method, label, args),
+                { once: m.once, priority: m.priority, where: m.where }));
+        }
+        else if (m.kind === 'targetEvent') {
+            const label = `@eventListener '${eventLabel(m.channel, m.name)}'`;
+            subs.push(addTargetListener(node, `${m.channel}:${m.name}`, (...args: unknown[]) => runDecoratedWith(node, m.method, label, args),
+                { once: m.once, priority: m.priority, where: m.where, capture: m.capture }));
+        }
         else if (m.kind === 'every') subs.push(node.every(m.seconds, () => runDecorated(node, m.method, `@every ${m.seconds}`)));
         else if (m.kind === 'hold' || m.kind === 'tap') timedInput = true;
     }
@@ -474,12 +510,64 @@ export function bindScriptLife(node: Node): void {
     if (subs.length) lifeSubs.set(node, subs);
 }
 
-/** Stop what bindScriptLife started. Safe to call on a node that never bound. */
+/**
+ * Stop what bindScriptLife started, and what the node's script subscribed with `this.listen`. Safe to call on a
+ * node that never bound.
+ */
 export function releaseScriptLife(node: Node): void {
+    removeChannelListenersOwnedBy(node);
     const subs = lifeSubs.get(node);
     if (!subs) return;
     lifeSubs.delete(node);
     for (const off of subs) off();
+}
+
+/**
+ * Forget a node for good (its scene is being disposed): its decorated life, its `this.listen` subscriptions and
+ * every listener added at it. A node that only despawned keeps what `addEventListener` added, as a DOM element does.
+ */
+export function releaseNodeEvents(node: Node): void {
+    releaseScriptLife(node);
+    releaseTarget(node);
+}
+
+/* -------------------------------------------------------------------------- */
+/* @observable                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Each node's `@observable` fields: the subject holding each one's value. */
+const observed = new WeakMap<Node, Map<string, ValueSubject<unknown>>>();
+
+/**
+ * Turn the node's `@observable` fields into accessors over a {@link ValueSubject}, so that setting one to a new
+ * value dispatches its event at the node. Idempotent: a field already observed is left alone.
+ */
+export function installObservables(node: Node): void {
+    let fields: Map<string, ValueSubject<unknown>> | undefined;
+    for (const m of membersOfNode(node)) {
+        if (m.kind !== 'observable') continue;
+        fields ??= observed.get(node);
+        if (fields?.has(m.field)) continue;
+        if (!fields) { fields = new Map(); observed.set(node, fields); }
+        const subject = new ValueSubject<unknown>((node as any)[m.field]);
+        fields.set(m.field, subject);
+        const channel = getChannel(m.channel);
+        const name = m.name;
+        // Asked on every set: when nobody listens to this event anywhere, a set costs the comparison and no more.
+        subject.subscribe((value, previous) => { if (channel.hasListeners(name)) channel.fire(name, [value, previous], node); }, false);
+        Object.defineProperty(node, m.field, {
+            get: () => subject.value,
+            // The same value again is the usual set (a script writing its state every frame): settled right here.
+            set: (value: unknown) => { if (value !== subject.value) subject.set(value); },
+            enumerable: true,
+            configurable: true,
+        });
+    }
+}
+
+/** The subject behind a node's `@observable` field: subscribe to it to watch the field. Null for any other field. */
+export function observableOf(node: Node, field: string): ValueSubject<unknown> | null {
+    return observed.get(node)?.get(field) ?? null;
 }
 
 /** Whether `other` is what an `@onEnter` / `@onExit` filter names: by node name or by a variable it holds, on it or an ancestor. */

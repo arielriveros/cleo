@@ -30,8 +30,8 @@ function text(parts: ts.SymbolDisplayPart[]): string {
 }
 
 describe('the script decorators', () => {
-    it('are the 15 that cleo/decorators exports', () => {
-        expect(NAMES).toEqual(['attribute', 'child', 'every', 'find', 'netcall', 'onAction', 'onEnter', 'onEvent', 'onExit', 'onHold', 'onTap', 'options', 'pick', 'save', 'synced']);
+    it('are the 19 that cleo/decorators exports', () => {
+        expect(NAMES).toEqual(['attribute', 'child', 'eventDispatch', 'eventListener', 'every', 'find', 'netcall', 'observable', 'onAction', 'onClipEvent', 'onEnter', 'onEvent', 'onExit', 'onHold', 'onTap', 'options', 'pick', 'save', 'synced']);
         for (const name of NAMES) expect(exports.has(name), name).toBe(true);
     });
 

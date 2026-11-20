@@ -83,17 +83,27 @@ while the game is paused. They need no timer of your own: no `heldSeconds` copy 
 ## Events and timers
 
 ```ts
-@onEvent('PlayerDied') died(info) { … }      // GameEvents.emit('PlayerDied', info) anywhere
-@every(0.5) think() { … }                    // every half second of unpaused game time
+@onEvent('PlayerDied') died(info) { … }        // GameEvents.emit('PlayerDied', info) anywhere
+@eventListener('Shot') shot(result) { … }      // a 'Shot' dispatched at this node or beneath it
+@eventDispatch('Shot') fire() { return hit }   // each call sends 'Shot' with what it returned
+@onClipEvent('footstep') step(info) { … }      // a marker on a clip this character's animator plays
+@observable hp = 100                           // setting it sends 'hpChanged' (value, previous)
+@every(0.5) think() { … }                      // every half second of unpaused game time
 ```
 
-`GameEvents` is a small message channel for your game: `GameEvents.emit(name, payload)`,
-`GameEvents.on(name, fn)` (returns the function that stops listening) and `GameEvents.off(name, fn)`. It
-is not the engine's `engineEventBus`.
+`@onEvent` hears an event sent anywhere on its channel. `@eventListener` hears only what is dispatched
+at its node or bubbles up from beneath it, so a character's script hears its own gun and animator and no
+one else's. Both take options: `once`, `priority`, `where` (fields the first argument must have) and a
+channel (`'combat:Hit'`). [Events](events.md) explains channels, how an event travels through the tree,
+and sync, async and deferred delivery.
 
-Both run **while the node is awake**: they start when it spawns and stop when it despawns or is removed,
-so a gone node is never called, and a node that wakes again listens again. No setup in `onStart`, and no
-cleanup in `onDespawn`.
+`GameEvents` is the game channel in its original one-payload form: `GameEvents.emit(name, payload)`,
+`GameEvents.on(name, fn)` (returns the function that stops listening) and `GameEvents.off(name, fn)`.
+`Events` is the full one.
+
+All of them run **while the node is awake**: they start when it spawns and stop when it despawns or is
+removed, so a gone node is never called, and a node that wakes again listens again. No setup in
+`onStart`, and no cleanup in `onDespawn`.
 
 ## Triggers: `@onEnter` and `@onExit`
 

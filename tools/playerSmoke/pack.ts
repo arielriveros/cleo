@@ -55,7 +55,14 @@ const probe = (wantWorker: boolean) => `function(__cleoImport, __cleoExports) {
   const cleo = __cleoImport('cleo');
   let frames = 0;
   let leaving = false;
+  // The event system in the published player: a deferred event posted on the first frame must have reached
+  // its listener by the report, delivered by the frame's own flush.
+  const deferred = [];
   this.onUpdate = function () {
+    if (frames === 0) {
+      cleo.Events.on('smoke:Later', (v) => deferred.push(v));
+      cleo.Events.post('smoke:Later', 1);
+    }
     if (leaving || ++frames < 90) return;
     const engine = cleo.CleoEngine.instance;
     const physics = engine.physics;
@@ -87,6 +94,24 @@ const probe = (wantWorker: boolean) => `function(__cleoImport, __cleoExports) {
           cleo.applyScriptDecorators(Probe, [[[onAction('Jump')], 'method', 'jump', 0]]);
           const m = cleo.scriptMembersOf(Probe);
           return m.length === 1 && m[0].kind === 'action' && m[0].action === 'Jump' ? 'ok' : JSON.stringify(m);
+        } catch (e) { return String(e && e.message); }
+      })(),
+      // The event system: a method decorated with @eventDispatch sends its result at a node, which bubbles to
+      // an ancestor's listener and then the channel's; and the deferred event posted on the first frame arrived.
+      events: (() => {
+        try {
+          const { eventDispatch } = __cleoImport('cleo/decorators');
+          const Probe = class { fire() { return 7; } };
+          cleo.applyScriptDecorators(Probe, [[[eventDispatch('smoke:Shot', 'extra')], 'method', 'fire', 0]]);
+          const parent = new cleo.Node('smokeParent'), child = new cleo.Node('smokeChild');
+          parent.addChild(child);
+          const heard = [];
+          const offAt = parent.addEventListener('smoke:Shot', (v, x) => heard.push('parent ' + v + ' ' + x));
+          const offOn = cleo.Events.on('smoke:Shot', (v) => heard.push('channel ' + v));
+          const result = Probe.prototype.fire.call(child);
+          offAt(); offOn();
+          const ok = result === 7 && heard.join('|') === 'parent 7 extra|channel 7' && deferred.join() === '1';
+          return ok ? 'ok' : JSON.stringify({ result, heard, deferred });
         } catch (e) { return String(e && e.message); }
       })(),
     };

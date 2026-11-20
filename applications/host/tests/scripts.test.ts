@@ -8,10 +8,12 @@ import { packExampleGame } from '../src/exampleGame';
 import { LOSSY, world, type TestPeer, type World } from './helpers/world';
 
 const DOOR = `import { Node } from 'cleo'
-import { netcall, synced } from 'cleo/decorators'
+import { netcall, synced, observable, eventListener } from 'cleo/decorators'
 export default class NetDoor extends Node {
-  @synced({ onChange: 'swing' }) open = false
+  @synced({ onChange: 'swing' }) @observable open = false
   swings = 0
+  openings = 0
+  @eventListener('openChanged') opened(now: boolean) { if (now) this.openings++ }
   @netcall({ to: 'host', anyone: true }) toggle() { this.open = !this.open }
   swing(was: boolean) { this.swings++ }
 }`;
@@ -51,6 +53,16 @@ export default class NetGun extends Node {
   @netcall({ to: 'owner' }) hint(text: string) { this.lastHint = text }
 }`;
 
+// The event system over the network: a ring dispatched at the bell on one machine is dispatched at every
+// machine's copy of it, once each.
+const BELL = `import { Node } from 'cleo'
+import { eventDispatch, eventListener } from 'cleo/decorators'
+export default class NetBell extends Node {
+  rings: string[] = []
+  @eventDispatch({ name: 'Rung', to: 'all' }) ring(by: string) { return by }
+  @eventListener('Rung') heard(by: string) { this.rings.push(by) }
+}`;
+
 const scriptNode = (name: string, id: string, script: string) => ({ type: 'node', name, id, script, position: [0, 0, 0], children: [] });
 
 let w: World;
@@ -69,6 +81,7 @@ beforeAll(async () => {
                 scriptNode('Door', 'net-door', DOOR),
                 scriptNode('Scoreboard', 'net-scoreboard', SCOREBOARD),
                 scriptNode('Pickup', 'net-pickup', PICKUP),
+                scriptNode('Bell', 'net-bell', BELL),
             );
             const player = data.templates.find((t: any) => t.name === 'Player');
             player.node.children.push(scriptNode('Gun', 'gun-in-template', GUN));
@@ -120,6 +133,10 @@ describe('NetSync phase 7: scripts', () => {
         for (const scene of [w.runtime.scene, a.scene, b.scene]) expect(named(scene, 'Door').open).toBe(true);
         expect(named(a.scene, 'Door').swings).toBe(1);
         expect(named(b.scene, 'Door').swings).toBe(1);
+        // The field is @observable too: where scripts run (the host, and A, which predicts), setting it there —
+        // by the toggle on the host, by the arriving value on A — was heard as 'openChanged'.
+        expect(named(w.runtime.scene, 'Door').openings).toBe(1);
+        expect(named(a.scene, 'Door').openings).toBe(1);
     });
 
     it('lets only its owner fire a player’s gun, and tells everyone of the shot', async () => {
@@ -172,6 +189,25 @@ describe('NetSync phase 7: scripts', () => {
             // Once on the host, once on B (the host passes it on), not again on A.
             expect(heard).toEqual(['A', 'A']);
         } finally { off(); }
+    });
+
+    it("dispatches an @eventDispatch({ to: 'all' }) at every machine’s copy of the node, once each", async () => {
+        // A follow peer (B) runs no scripts, so each machine's copy is listened to by hand as well.
+        const machines: [string, Scene][] = [['host', w.runtime.scene], ['A', a.scene], ['B', b.scene]];
+        const heard: string[] = [];
+        const offs = machines.map(([label, scene]) => named(scene, 'Bell').addEventListener('Rung', (by: string) => heard.push(`${label} heard ${by}`)));
+        try {
+            named(w.runtime.scene, 'Bell').ring('host');
+            await w.run(10);
+            expect(heard.sort()).toEqual(['A heard host', 'B heard host', 'host heard host']);
+            heard.length = 0;
+            // From a player: heard there at once, and on the host and the other player through the host.
+            named(a.scene, 'Bell').ring('A');
+            await w.run(10);
+            expect(heard.sort()).toEqual(['A heard A', 'B heard A', 'host heard A']);
+            // The machines that run scripts heard it in the script's own @eventListener too.
+            for (const scene of [w.runtime.scene, a.scene]) expect(named(scene, 'Bell').rings).toEqual(['host', 'A']);
+        } finally { for (const off of offs) off(); }
     });
 
     it('gives a late joiner every synced field as it is now', async () => {

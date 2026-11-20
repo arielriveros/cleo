@@ -125,6 +125,32 @@ describe('scene memory', () => {
         expect(lever.restoredWith).toBeUndefined();   // onRestore ran, with no onSave data
     });
 
+    it('brings an @observable @save field back, and it still sends its change event after', async () => {
+        const GAUGE = `
+            import { Node } from 'cleo'
+            import { observable, eventListener } from 'cleo/decorators'
+            export default class Gauge extends Node {
+              @observable level = 1
+              heard: number[] = []
+              @eventListener('levelChanged') changed(v: number) { this.heard.push(v) }
+            }
+        `;
+        const game = makeGame({
+            A: node('root', { name: 'root' }, [scripted('Gauge', GAUGE, ['level'])]),
+            B: node('root', { id: 'rootB' }, [node('Elsewhere')]),
+        });
+        game.enter('A');
+        game.find('Gauge').level = 5;
+        expect(game.find('Gauge').heard).toEqual([5]);
+        await Game.loadScene('B');
+        await Game.loadScene('A');
+        const gauge = game.find('Gauge');
+        expect(gauge.level).toBe(5);
+        expect(gauge.heard, 'a restore before the node listens is not heard').toEqual([]);
+        gauge.level = 6;
+        expect(gauge.heard).toEqual([6]);
+    });
+
     it('keeps a removed node removed across several visits, and its namesake where it was', async () => {
         const game = makeGame(world());
         game.enter('A');

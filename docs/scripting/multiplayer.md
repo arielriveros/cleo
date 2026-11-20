@@ -102,6 +102,12 @@ game event on other machines, where `@onEvent('Cheer')` methods and `GameEvents`
 `'all'` (the host and every peer, the default), `'peers'` or `'host'`. A peer's event to `'all'` reaches the host,
 which passes it on to the other peers. Offline it does nothing; raise it locally with `GameEvents.emit` as usual.
 
+The event system can send any event over the network with `to`:
+`@eventDispatch({ name: 'Rung', to: 'all' })`, or `Events.send('RoundOver', [winner], { to: 'all' })`. An
+event dispatched at a node arrives dispatched at each machine's copy of that node, so `@eventListener` hears
+it there. Every machine among the `to` hears it once, the sender included. Offline it is simply delivered
+here. See [Events](events.md#over-the-network).
+
 ## Random numbers: `Game.random`
 
 Roll gameplay dice (loot, spread, AI choices) **on the host** with `Game.random()`, and sync the result: a roll

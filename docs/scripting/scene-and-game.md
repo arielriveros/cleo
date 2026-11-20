@@ -213,6 +213,10 @@ Three things this does deliberately:
 
 ## The event bus
 
+The engine's own events travel on the `engine` channel of the event system ([Events](events.md));
+`engineEventBus` is a typed view of it. For a game's own events use `Events`, `GameEvents` and the
+event decorators instead.
+
 ```ts
 import { engineEventBus } from 'cleo'
 
@@ -226,6 +230,8 @@ engineEventBus.off(…) ; engineEventBus.once(…) ; engineEventBus.emit(…)
 | `LOG` / `LOG_UPDATE` / `LOG_CLEAR` | Logger traffic |
 | `RENDER_SETTINGS_CHANGED` | |
 | `INPUT_ACTION` / `INPUT_MAP_CHANGED` | |
+| `ASSET_CHANGED` | `{ origin, affected }` |
+| `NODE_DIRTY` | `{ node, aspects, scene }`: what `node.markDirty` said went stale, once per node per frame, before it is drawn |
 
 `ChangeKind` is one of `structure`, `visibility`, `name`, `transform`, `variable`, `physics`,
 `script`, `material`, `texture`, `light`, `camera`, `environment`, `component`. A `structure`

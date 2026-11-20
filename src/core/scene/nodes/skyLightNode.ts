@@ -1,4 +1,5 @@
 import type { Scene } from "../scene";
+import type { DirtyAspect } from "../../eventBus";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
@@ -116,8 +117,14 @@ export class SkyLightNode extends Node {
     }
 
     public get needsProjection(): boolean { return this._needsProjection; }
-    /** Force a re-projection on the next frame (the sky changed, or the editor asked). */
-    public markDirty(): void { this._needsProjection = true; }
+    /**
+     * Force a re-projection on the next frame (the sky changed, or the editor asked): the `'render'` aspect, the
+     * default. Other aspects (bounds, lists) are not the sky's and leave the projection alone.
+     */
+    public override markDirty(aspect: DirtyAspect = 'render'): void {
+        if (aspect === 'render') this._needsProjection = true;
+        super.markDirty(aspect);
+    }
     public markProjected(): void { this._needsProjection = false; }
 
     public getBoundingBox(): { min: vec3, max: vec3 } {

@@ -9,7 +9,17 @@ import type { RenderSettings } from "../graphics/renderer";
 import type { SequenceNode, SequencePlayOptions } from "./scene/nodes/sequenceNode";
 import { captureOutgoing } from "./save/session";
 import { seededRandom } from "./math";
-import type { NetEventTarget } from "./net/sceneNet";
+import type { NetEventTarget, SceneNet } from "./net/sceneNet";
+import { setEventTransportResolver } from "./events/broker";
+
+// How an event sent `to` other machines finds its session: the scene of the node it is dispatched at (one process
+// may run a host and its peers, each with a scene of its own), or, for a broadcast, the engine's current scene.
+setEventTransportResolver((target) => {
+  const net: SceneNet | null | undefined = (target as { scene?: { net?: SceneNet | null } | null } | null)?.scene?.net
+    ?? CleoEngine.instance?.scene?.net;
+  const send = net?.sendEvent;
+  return send ? (channel, name, args, to, at) => send.call(net, channel, name, args, to, at as never) : null;
+});
 
 /** Game.random's stream (see Game.seedRandom). Seeded from the clock until a game seeds it. */
 let randomStream: () => number = seededRandom((Date.now() ^ 0x5bd1e995) >>> 0);

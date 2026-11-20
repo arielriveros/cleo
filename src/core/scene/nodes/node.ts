@@ -18,7 +18,10 @@ import type { NodeVariable, NodeVariableType, NodeVariableAccess } from "./nodeV
 import { attachScriptFactory, fillScriptRefs, bindScriptLife, releaseScriptLife } from "./nodeScripting";
 import { parseChild } from "./childParser";
 import type { BVH } from "../../bvh";
-import type { ChangeKind } from "../../eventBus";
+import type { ChangeKind, DirtyAspect, NodeDirty } from "../../eventBus";
+import { addTargetListener, dispatchAt, listenOwned, removeTargetListener, sendEvent, type SendOptions } from "../../events/hub";
+import type { CleoEvent } from "../../events/event";
+import type { Emitter, EventListenerFn, ListenOptions } from "../../events/emitter";
 import { decomposeTRS, eulerFromQuatDeg } from "../../math";
 import { asksLooseSeeThrough } from "./cameraLayersLegacy";
 // Type-only: actionMap is a pure leaf with no imports of its own, so this closes no cycle.
@@ -59,6 +62,19 @@ export interface DespawnOptions {
  * a resting body is pressed into its surface by gravity and measures a small downward drift.
  */
 const FALLING_SPEED = -0.5;
+
+/**
+ * Tell the engine channel that `aspect` of `node` went stale: one NODE_DIRTY per node per frame, if anyone listens.
+ * The node is the coalescing key, so a later aspect folds into the event already waiting, allocating nothing.
+ */
+function postNodeDirty(node: Node, aspect: DirtyAspect): void {
+  if (!engineEventBus.hasListeners('NODE_DIRTY')) return;
+  const queued = engineEventBus.queuedPayload('NODE_DIRTY', node);
+  if (queued !== undefined) { queued.aspects.add(aspect); return; }
+  const payload: NodeDirty = { node, aspects: new Set<DirtyAspect>(), scene: node.scene };
+  payload.aspects.add(aspect);
+  engineEventBus.post('NODE_DIRTY', payload, node);
+}
 
 /**
  * How much of the frame's motion is allowed to blur this node.
@@ -109,6 +125,11 @@ export class Node {
   protected readonly _children: Node[];
   protected _scene: Scene | null;
   protected readonly _nodeType: NodeType;
+  /**
+   * @internal The listeners added at this node, per channel (src/core/events/eventTarget.ts). Null, on the
+   * prototype, until the first one: a dispatch walking a node's ancestors reads a property, not a WeakMap.
+   */
+  declare public _eventTargets: Map<string, Emitter> | null;
 
   protected readonly  _localTransform: mat4;
   protected _worldTransform: mat4
@@ -644,9 +665,11 @@ export class Node {
     if (!snapshot) {
       this._worldSnapshot = new Float32Array(world);
       this._transformVersion++;
+      postNodeDirty(this, 'transform');
     } else if (!Node._sameMatrix(world, snapshot)) {
       snapshot.set(world);
       this._transformVersion++;
+      postNodeDirty(this, 'transform');
     }
 
     // Dormant subtrees are skipped: nothing reads their matrices, and spawn() recomputes them first.
@@ -955,6 +978,57 @@ export class Node {
    *  the cancel function. */
   public every(seconds: number, cb: () => void): () => void {
     return this.scene ? this.scene.scheduleEvery(this, seconds, cb) : () => {};
+  }
+
+  // ---- Events (src/core/events, docs/scripting/events.md) ------------------------------------------------
+
+  /**
+   * Dispatch `name` at this node, now: it travels down to this node (capture), reaches it, bubbles back up
+   * through its ancestors, and ends at the channel's own listeners (`@onEvent`, `Events.on`). Listeners are
+   * called with `args`. Returns the event: what listeners returned (`results`) and whether one cancelled it.
+   *
+   *   this.dispatchEvent('Opened', this.name)        // @eventListener('Opened') on this node or an ancestor
+   *   this.dispatchEvent('combat:Hit', target, 10)   // on the combat channel
+   */
+  public dispatchEvent(name: string, ...args: unknown[]): CleoEvent {
+    return dispatchAt(this, name, args);
+  }
+
+  /** As {@link dispatchEvent}, awaiting each listener's promise in turn. Resolves to the event. */
+  public dispatchEventAsync(name: string, ...args: unknown[]): Promise<CleoEvent> {
+    return sendEvent(name, args, this, { mode: 'async' }) as Promise<CleoEvent>;
+  }
+
+  /**
+   * Dispatch `name` at this node with every option: `mode` (`'sync'`, `'async'`, `'deferred'`), `bubbles`,
+   * `broadcast`, and `to` (`'local'`, or in a NetSync game `'host'`, `'peers'`, `'all'`). Returns the event
+   * (sync), a promise of it (async), or null (deferred, or not delivered on this machine).
+   */
+  public sendEvent(name: string, args: unknown[] = [], options: SendOptions = {}): CleoEvent | Promise<CleoEvent> | null {
+    return sendEvent(name, args, this, options);
+  }
+
+  /**
+   * Listen at this node: `fn` hears `name` when it is dispatched at this node or bubbles up from beneath it
+   * (`capture: true`: on its way down to a node beneath). Kept until removed, through despawns, as a DOM
+   * element keeps its listeners. Returns the function that stops listening.
+   */
+  public addEventListener(name: string, fn: EventListenerFn, options?: ListenOptions): () => void {
+    return addTargetListener(this, name, fn, options);
+  }
+
+  /** Stop `fn` listening at this node. Returns whether it was. */
+  public removeEventListener(name: string, fn: EventListenerFn, capture?: boolean): boolean {
+    return removeTargetListener(this, name, fn, capture);
+  }
+
+  /**
+   * Listen to `name` on its channel, from anywhere, until this node despawns or is removed: `Events.on`
+   * with the cleanup done for you, as `this.after` does for timers. Subscribe in `onSpawn` to listen again
+   * after a respawn. Returns the function that stops listening sooner.
+   */
+  public listen(name: string, fn: EventListenerFn, options?: ListenOptions): () => void {
+    return listenOwned(this, name, fn, options);
   }
 
   public start(): void {
@@ -1540,7 +1614,7 @@ export class Node {
     this._drawDistance = Number.isFinite(value) && value > 0 ? value : 0;
     if (this._drawDistance === 0) this.setDrawCulled(false);
     // The scene keeps the list of draw-distance nodes with its other derived node lists.
-    this._scene?.invalidateNodeLists();
+    this.markDirty('lists');
     this._notifyChange('component', 'drawDistance', prev, this._drawDistance);
   }
 
@@ -1576,7 +1650,7 @@ export class Node {
     const prev = this._socketAttachment;
     this._socketAttachment = value && value.socket ? { target: value.target || 'parent', socket: value.socket } : null;
     // The scene keeps the list of socket followers with its other derived node lists.
-    this._scene?.invalidateNodeLists();
+    this.markDirty('lists');
     this._notifyChange('component', 'socketAttachment', prev, this._socketAttachment);
   }
 
@@ -2659,7 +2733,28 @@ export class Node {
    * for the object-space half).
    */
   public invalidateWorldBounds(): void {
-    this._worldSphereDirty = true;
-    this._worldBoxDirty = true;
+    this.markDirty('bounds');
+  }
+
+  /**
+   * Say that `aspect` of this node went stale (see {@link DirtyAspect}). What keeps the node itself correct
+   * happens now — `'bounds'` dirties its world bounds caches, `'lists'` has the scene rebuild its typed node
+   * lists — and the engine channel is told with a `NODE_DIRTY` event, once per node per frame, delivered before
+   * the frame is drawn: everything else that caches something about the node (the editor's selection outline,
+   * a sync, a bake) listens there instead of being called from here.
+   *
+   * Subclasses that bake something of their own (a sky light's projection) override it, and call this one.
+   */
+  public markDirty(aspect: DirtyAspect = 'render'): void {
+    if (aspect === 'bounds') {
+      this._worldSphereDirty = true;
+      this._worldBoxDirty = true;
+    } else if (aspect === 'lists') {
+      this._scene?.invalidateNodeLists();
+    }
+    postNodeDirty(this, aspect);
   }
 }
+
+// Every node answers `_eventTargets` (null) from here until a listener is added at it: see eventTarget.ts.
+Object.defineProperty(Node.prototype, '_eventTargets', { value: null, writable: true, configurable: true, enumerable: false });

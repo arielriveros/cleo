@@ -7,13 +7,17 @@
 //   calls    `@netcall`s: peer → host for `to: 'host'` (if the peer owns the node, or the call allows anyone);
 //            host → peers for `'all'` and `'owner'`. Reliable on the control lane, or not on the pulse lane.
 //   events   `this.net.emit` / `Net.emit`: a game event raised on other machines (`@onEvent`, GameEvents). A peer's
-//            event goes to the host, which raises it and passes it on as asked.
+//            event goes to the host, which raises it and passes it on as asked. The event system's own sends
+//            (`@eventDispatch({ to })`, `Events.send(name, args, { to })`) ride the same message as a hub envelope
+//            `{ $hub: args, $target: node }`, and arrive dispatched at the receiving machine's copy of that node.
 //
 // Values travel as JSON, with node references by id (host and peers share node ids) and typed arrays as arrays.
 
 import { ByteReader, ByteWriter } from '../bytes';
 import { FIRST_APP_TYPE } from '../session/messages';
 import { GameEvents } from '../../core/scripting/scriptEvents';
+import { receiveRemoteEvent, splitEventName } from '../../core/events/hub';
+import type { RemoteEventTarget } from '../../core/events/broker';
 import { NETCALL_ORIGINAL, membersOfNode } from '../../core/scripting/decorators';
 import { Logger } from '../../core/logger';
 import type { NetCallOptions, NetEventTarget, SceneNet } from '../../core/net/sceneNet';
@@ -69,6 +73,30 @@ function eventMessage(name: string, payload: unknown, to: NetEventTarget): Uint8
     return new ByteWriter(64).u8(SCRIPT_EVENT).string(name).string(encodeValue(payload)).string(to).finish();
 }
 
+/** An event-system send, as it travels: its arguments, and the node it was dispatched at. */
+interface HubEnvelope { $hub: unknown[]; $target?: Node | null }
+
+function isHubEnvelope(payload: unknown): payload is HubEnvelope {
+    return !!payload && typeof payload === 'object' && Array.isArray((payload as HubEnvelope).$hub);
+}
+
+/** The SCRIPT_EVENT message for an event-system send: its qualified name, and the envelope. */
+function hubMessage(channel: string, name: string, args: unknown[], to: RemoteEventTarget, target: object | null): Uint8Array {
+    const envelope: HubEnvelope = { $hub: args };
+    if (target && isNode(target)) envelope.$target = target;
+    return eventMessage(`${channel}:${name}`, envelope, to);
+}
+
+/** Raise an event that arrived on this machine: an event-system send at its node (or broadcast), else a game event. */
+function deliverNetEvent(name: string, payload: unknown): void {
+    if (isHubEnvelope(payload)) {
+        const [channel, plain] = splitEventName(name);
+        receiveRemoteEvent(channel, plain, payload.$hub, payload.$target ?? null);
+        return;
+    }
+    GameEvents.emit(name, payload);
+}
+
 const warned = new Set<string>();
 function warnOnce(key: string, message: string): void {
     if (warned.has(key)) return;
@@ -114,6 +142,14 @@ export class ScriptHost {
             },
             call: (node, method, original, args, options) => self._call(node, method, original, args, options),
             emit: (name, payload, to) => self._emit(name, payload, to, null),
+            // The event system's sends with `to`: out to the peers as asked; this machine hears 'all' and 'host'.
+            sendEvent: (channel, name, args, to, target) => {
+                if (to === 'all' || to === 'peers') {
+                    const msg = hubMessage(channel, name, args, 'peers', target);
+                    for (const peer of self._session.peers.values()) if (peer.connected) peer.sendControl(msg);
+                }
+                return { local: to === 'all' || to === 'host' };
+            },
         };
         _session.route('control', SCRIPT_CALL, (peer, m) => this._onCall(peer, m));
         _session.route('pulse', SCRIPT_CALL_FAST, (peer, m) => this._onCall(peer, m));
@@ -225,7 +261,7 @@ export class ScriptHost {
             const msg = eventMessage(name, payload, 'peers');
             for (const peer of this._session.peers.values()) if (peer.connected && peer !== from) peer.sendControl(msg);
         }
-        if (to === 'all' || to === 'host') GameEvents.emit(name, payload);
+        if (to === 'all' || to === 'host') deliverNetEvent(name, payload);
     }
 
     private _onEvent(peer: HostPeer, m: Uint8Array): void {
@@ -258,6 +294,11 @@ export class ScriptPeer {
             caller: 0,
             call: (node, method, _original, args, options) => self._call(node, method, args, options),
             emit: (name, payload, to) => self._session.sendControl(eventMessage(name, payload, to)),
+            // The event system's sends with `to`: to the host, which passes them on; this machine is one of the 'peers'.
+            sendEvent: (channel, name, args, to, target) => {
+                self._session.sendControl(hubMessage(channel, name, args, to, target));
+                return { local: to === 'all' || to === 'peers' };
+            },
         };
         _sync.scene.net = this._net;
         // Fields arrive on the control lane after the table and spawns they belong to.
@@ -297,7 +338,7 @@ export class ScriptPeer {
         const r = new ByteReader(m, 1);
         if (m[0] === SCRIPT_EVENT) {
             const name = r.string(), json = r.string();
-            GameEvents.emit(name, decodeValue(json, this._sync.scene));
+            deliverNetEvent(name, decodeValue(json, this._sync.scene));
             return;
         }
         // Fields.
