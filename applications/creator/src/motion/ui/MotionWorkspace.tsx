@@ -39,6 +39,9 @@ import { defaultCalibration, solveCalibration, type CalibrationDoc } from '../re
 import { analysisFrameAt, readAnalysis } from '../reference/cv/analysisView';
 import { followCrop } from '../reference/cv/signal';
 import { timelineTimeOf } from '../reference/referenceDoc';
+import { TrackOverlay } from './TrackOverlay';
+import { newTrack, plantFeet as plantFeetIn, withSeed, type TrackRole } from '../reference/tracks';
+import type { Extremity } from '../reference/cv/silhouette';
 import { loadSavedPresets, type BlendPreset } from '../blendCurve';
 import { boneGroups, defaultParts } from '../parts';
 import {
@@ -631,8 +634,51 @@ export function MotionWorkspace() {
     setDoc({ ...d, poses, keys });
     toast.success(`${added} key${added === 1 ? '' : 's'} at the candidates: pose each against its frame.`);
   };
-  /** The subject crop for the Over display (none while looking through or Behind: the camera needs the whole frame). */
-  const cropMode = lookThrough || stageSettings.refMode !== 'over' || !analysisView ? 'none' : stageSettings.refCrop;
+  // --- Tracking ---
+  const [showTracks, setShowTracks] = useState(false);
+  const [trackRole, setTrackRole] = useState<TrackRole>('footL');
+  const [placingTrack, setPlacingTrack] = useState(false);
+  const [suggestions, setSuggestions] = useState<Extremity[]>([]);
+  useEffect(() => { setSuggestions([]); setPlacingTrack(false); }, [doc.reference?.videoId]);
+  const suggestPoints = async () => {
+    const ref = docRef.current.reference, v = referenceRef.current.video, a = referenceRef.current.analysis;
+    if (!ref || !v) return;
+    const at = videoTimeOf(ref, transport.time);
+    // The shot the frame is in: between the cuts around it, when the clip has been analysed.
+    let shot: [number, number] = [v.start, v.start + v.duration];
+    if (a && analysisView) {
+      for (const c of analysisView.cuts) { const t = a.times[c]; if (t <= at) shot = [t, shot[1]]; else { shot = [shot[0], t]; break; } }
+    }
+    const found = await referenceRef.current.suggest(at, shot);
+    setSuggestions(found);
+    if (!found.length) toast.info('No moving subject on this frame: the suggestions need a still camera and something moving.');
+  };
+  const placeTrack = (frame: number, x: number, y: number) => {
+    const r = referenceRef.current;
+    r.setTracks({ ...r.tracks, tracks: [...r.tracks.tracks, newTrack(trackRole, frame, x, y)] });
+    setPlacingTrack(false);
+    setSuggestions(s => s.filter(p => Math.hypot(p.x - x, p.y - y) > 0.01));
+  };
+  const seedTrack = (id: string, frame: number, x: number, y: number) => {
+    const r = referenceRef.current;
+    r.setTracks({ ...r.tracks, tracks: r.tracks.tracks.map(t => (t.id === id ? withSeed(t, frame, x, y) : t)) });
+  };
+  const plantFeet = () => {
+    const d = docRef.current, ref = d.reference, v = referenceRef.current.video, stage = stageRef.current;
+    if (!ref?.camera || !v || !rig || !stage) { toast.info('Set up the reference camera first (Camera, Calibrate or Match pose).'); return; }
+    if (!referenceRef.current.tracks.result) { toast.info('Track the feet first.'); return; }
+    const foot = rig.bySlot.get('foot.L') ?? rig.bySlot.get('foot.R');
+    const footHeight = foot !== undefined ? rig.restModel.pos[foot][1] * stage.displayScale : 0.08;
+    const { doc: next, planted, inContact } = plantFeetIn(d, ref, ref.camera, { width: v.width, height: v.height, fps: v.fps }, referenceRef.current.tracks,
+      footHeight, w => { const m = stage.modelOf(w); return [m[0], m[1], m[2]]; });
+    if (!inContact) { toast.info('No key falls inside a foot’s contact: key the frames where a foot is planted.'); return; }
+    if (!planted) { toast.info('The tracked feet never reach the ground through this camera: check the camera, and that each foot track sits on the foot.'); return; }
+    setDoc(next);
+    toast.success(`${planted} foot goal${planted === 1 ? '' : 's'} planted where the tracked feet meet the ground.`);
+  };
+
+  /** The subject crop for the Over display (none while looking through, Behind or tracking: they need the whole frame). */
+  const cropMode = lookThrough || showTracks || stageSettings.refMode !== 'over' || !analysisView ? 'none' : stageSettings.refCrop;
   const cropAt = useMemo(() => {
     if (cropMode !== 'follow' || !analysisView?.followSize || !reference.analysis) return null;
     const times = reference.analysis.times, size = analysisView.followSize;
@@ -676,7 +722,7 @@ export function MotionWorkspace() {
 
   // The context's callbacks read the latest state through this, so they can stay in a memoised value.
   const actions = { setPose, saveToLibrary, setPoseId, scrub, togglePlay, stepFrames, toStart, toEnd, linkVideo, setReference, keyFromFrame,
-                    setLookThrough, viewCamera, setCamera, setCalibration, jointPositions, addKeysAtCandidates };
+                    setLookThrough, viewCamera, setCamera, setCalibration, jointPositions, addKeysAtCandidates, suggestPoints, plantFeet };
   const live = useRef(actions);
   live.current = actions;
   const value = useMemo<MotionState>(() => ({
@@ -695,10 +741,12 @@ export function MotionWorkspace() {
     calibrating, setCalibrating, calibration, setCalibration: (c, done) => live.current.setCalibration(c, done), solve,
     placingPin, setPlacingPin, jointPositions: () => live.current.jointPositions(), subjectHeight,
     analysisView, addKeysAtCandidates: () => live.current.addKeysAtCandidates(),
+    showTracks, setShowTracks, trackRole, setTrackRole, placingTrack, setPlacingTrack, suggestions,
+    suggestPoints: () => live.current.suggestPoints(), plantFeet: () => live.current.plantFeet(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [doc, rig, poseId, libraryPoseId, pose, libraryPoses, bone, view, clip, time, playing, keyId, partId, savedPresets, character, sourceClip, sourceAnimations,
        transportState, grid, timelineEnd, reference, stageSettings, gateView, lookThrough, calibrating, calibration, solve, placingPin, subjectHeight,
-       analysisView]);
+       analysisView, showTracks, trackRole, placingTrack, suggestions]);
 
   const duration = clip?.samplers[0]?.input.at(-1) ?? motionDuration(doc);
   /** The pinned joints where the reference camera sees them now (video pixels). */
@@ -731,6 +779,11 @@ export function MotionWorkspace() {
                             setPlacingPin(null);
                           }}
                           onChange={setCalibration} />
+    )}
+    {showTracks && video && gateView.gate && reference.timestamps && view !== 'clip' && (
+      <TrackOverlay gate={gateView.gate} videoW={video.width} videoH={video.height} player={reference.player} timestamps={reference.timestamps}
+                    state={reference.tracks} placing={placingTrack} suggestions={suggestions}
+                    onPlace={placeTrack} onSeed={seedTrack} />
     )}
     <ViewportOverlay
       readout={rig && <>

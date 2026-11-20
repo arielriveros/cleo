@@ -10,6 +10,9 @@ import {
   type AudioPeaks, type ThumbStrip,
 } from '../reference/referenceCache';
 import type { AnalysisResult } from '../reference/cv/analysisJob';
+import type { TrackResult } from '../reference/cv/trackJob';
+import type { Extremity } from '../reference/cv/silhouette';
+import { EMPTY_TRACKS, TRACKS_FILE, normaliseTracks, tracksBlob, type TracksState } from '../reference/tracks';
 import type { VideoAssetDoc } from '../reference/videoDoc';
 
 // The Motion Creator's linked reference clip, opened: the player that shows its frames, its frame
@@ -38,6 +41,14 @@ export interface ReferenceState {
   analyzing: number | null;
   analyze: () => Promise<void>;
   cancelAnalysis: () => void;
+  /** Reference ▸ Tracking: the clip's tracks and the tracker's last result (kept with the clip). */
+  tracks: TracksState;
+  setTracks: (next: TracksState) => void;
+  /** Tracking progress (0..1) while it runs, else null. */
+  tracking: number | null;
+  trackAll: () => Promise<void>;
+  /** The subject's silhouette's extremities at video time `at` (unit square), the shot spanning `shot`. */
+  suggest: (at: number, shot: [number, number]) => Promise<Extremity[]>;
 }
 
 const THUMB_HEIGHT = 54;
@@ -53,6 +64,11 @@ export function useReference(videoId: string | undefined, proxyWidth: number): R
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [analyzing, setAnalyzing] = useState<number | null>(null);
   const analysisAbort = useRef<AbortController | null>(null);
+  const [tracks, setTracksState] = useState<TracksState>(EMPTY_TRACKS);
+  const [tracking, setTracking] = useState<number | null>(null);
+  const tracksRef = useRef(tracks);
+  tracksRef.current = tracks;
+  const saveTimer = useRef(0);
   const proxy = useRef(proxyWidth);
   proxy.current = proxyWidth;
 
@@ -70,7 +86,7 @@ export function useReference(videoId: string | undefined, proxyWidth: number): R
   // The linked clip: its player, then its frames, thumbnails and peaks.
   useEffect(() => {
     setPlayer(null); setTimestamps(null); setThumbs(null); setPeaks(null); setError(null); setBusy(null); setAnalysis(null);
-    analysisAbort.current?.abort(); setAnalyzing(null);
+    analysisAbort.current?.abort(); setAnalyzing(null); setTracksState(EMPTY_TRACKS); setTracking(null);
     if (!videoId) return;
     const abort = new AbortController();
     let opened: ReferencePlayer | null = null;
@@ -90,6 +106,8 @@ export function useReference(videoId: string | undefined, proxyWidth: number): R
         const [an] = await getCreatorFiles(videoId, [ANALYSIS_FILE]);
         const kept = an ? await unpackAnalysis(an.blob) : null;
         if (kept && !abort.signal.aborted) setAnalysis(kept);
+        const [tf] = await getCreatorFiles(videoId, [TRACKS_FILE]);
+        if (tf && !abort.signal.aborted) { try { setTracksState(normaliseTracks(JSON.parse(await tf.blob.text()))); } catch { /* a broken file: none */ } }
         // Thumbnails: kept beside the clip once made.
         const [cached] = await getCreatorFiles(videoId, [THUMBS_FILE]);
         let strip = cached ? await unpackThumbs(cached.blob) : null;
@@ -148,11 +166,51 @@ export function useReference(videoId: string | undefined, proxyWidth: number): R
     }
   };
 
+  /** The tracks changed: kept with the clip after a quiet spell. */
+  const setTracks = (next: TracksState) => {
+    setTracksState(next);
+    tracksRef.current = next;
+    if (!videoId) return;
+    window.clearTimeout(saveTimer.current);
+    const id = videoId;
+    saveTimer.current = window.setTimeout(() => {
+      void putCreatorFile(id, { name: TRACKS_FILE, mime: 'application/json', blob: tracksBlob(tracksRef.current) });
+    }, 400);
+  };
+  const trackAll = async () => {
+    if (!videoId || !player || !tracksRef.current.tracks.length) return;
+    setTracking(0);
+    try {
+      const r = await referenceClient().run<TrackResult | null>(videoId, player.blob,
+        { job: 'track', tracks: tracksRef.current.tracks.map(t => ({ id: t.id, seeds: t.seeds })) },
+        { progress: (d, n) => setTracking(n ? Math.min(1, d / n) : 0) });
+      if (!r) return;
+      setTracks({
+        ...tracksRef.current,
+        result: {
+          times: Array.from(r.times),
+          points: Object.fromEntries(r.tracks.map(t => [t.id, Array.from(t.points)])),
+          error: Object.fromEntries(r.tracks.map(t => [t.id, Array.from(t.error)])),
+        },
+      });
+    } catch (e) {
+      if (!isAbort(e)) setError(String((e as Error)?.message ?? e));
+    } finally {
+      setTracking(null);
+    }
+  };
+  const suggest = async (at: number, shot: [number, number]) => {
+    if (!videoId || !player) return [];
+    try { return await referenceClient().run<Extremity[]>(videoId, player.blob, { job: 'extremities', at, shot }); }
+    catch { return []; }
+  };
+
   const meta = library.find(a => a.id === videoId);
   return {
     videoId: videoId ?? null, name: meta?.name ?? null, video: player?.doc ?? null, player,
     timestamps: timestamps?.timestamps ?? null, vfr: timestamps?.vfr ?? false,
     thumbs: thumbUrls, peaks, busy, error, library,
     analysis, analyzing, analyze, cancelAnalysis: () => analysisAbort.current?.abort(),
+    tracks, setTracks, tracking, trackAll, suggest,
   };
 }

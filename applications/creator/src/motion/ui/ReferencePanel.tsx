@@ -6,6 +6,7 @@ import { rateLabel } from '../reference/videoDoc';
 import { VIDEO_ACCEPT } from '../reference/videoImport';
 import { useMotion } from './motionContext';
 import { ReferenceCameraSections } from './ReferenceCameraSections';
+import { TRACK_ROLES, footContacts, roleOf, type TrackRole } from '../reference/tracks';
 import type { ReferenceMode } from './motionStage';
 
 // The Reference tab: a video the motion is made against. Link a clip (a new file, or one already in the
@@ -140,6 +141,8 @@ export function ReferencePanel() {
 
       <AnalysisSection />
 
+      <TrackingSection />
+
       <ReferenceCameraSections />
 
       <Collapsable title='Keys' persistKey='cleo_creator_motion_ref_keys'>
@@ -194,6 +197,72 @@ function AnalysisSection() {
             ]} />
         </div>
       </>)}
+    </Collapsable>
+  );
+}
+
+/** Reference ▸ Tracking: points followed through the clip, and the feet planted from them. */
+function TrackingSection() {
+  const {
+    reference: r, showTracks, setShowTracks, trackRole, setTrackRole, placingTrack, setPlacingTrack, suggestions, suggestPoints, plantFeet, doc,
+  } = useMotion();
+  const tracks = r.tracks.tracks;
+  const busy = r.tracking !== null;
+  const fps = r.video?.fps ?? 30;
+  const summary = (id: string, role: TrackRole) => {
+    const pts = r.tracks.result?.points[id];
+    if (!pts) return 'not tracked yet';
+    let found = 0;
+    for (let i = 0; i < pts.length; i += 2) if (Number.isFinite(pts[i])) found++;
+    const share = `${Math.round((found / Math.max(1, pts.length / 2)) * 100)}% followed`;
+    return role === 'footL' || role === 'footR' ? `${share} · ${footContacts(pts, fps).length} contacts` : share;
+  };
+  const remove = (id: string) => r.setTracks({ ...r.tracks, tracks: tracks.filter(t => t.id !== id) });
+  const setRole = (id: string, role: TrackRole) => r.setTracks({ ...r.tracks, tracks: tracks.map(t => (t.id === id ? { ...t, role } : t)) });
+  return (
+    <Collapsable title='Tracking' persistKey='cleo_creator_motion_ref_tracking'>
+      <div className='pb-1 text-ui-xs text-dim'>
+        Follow a foot, a hand or the head through the clip: put a point on it, Track, and correct it on any frame by dragging it there.
+      </div>
+      <Toggle label='Show the tracks' checked={showTracks} onChange={on => { setShowTracks(on); if (!on) setPlacingTrack(false); }} />
+      <div className='flex items-center gap-1 pt-1'>
+        <Select className='min-w-0 flex-1' value={trackRole} onChange={e => setTrackRole(e.target.value as TrackRole)} title='What the next point is'>
+          {TRACK_ROLES.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}
+        </Select>
+        <Button size='sm' active={placingTrack} title='Then click it on the frame' onClick={() => { setShowTracks(true); setPlacingTrack(!placingTrack); }}>
+          {placingTrack ? 'Click the frame…' : 'Add point'}
+        </Button>
+        <Button size='sm' variant='ghost' disabled={!r.player} title='The subject’s furthest points on this frame (head, hands, feet, a tail): click one to track it'
+                onClick={() => { setShowTracks(true); void suggestPoints(); }}>Suggest</Button>
+      </div>
+      {suggestions.length > 0 && <div className='pt-1 text-ui-xs text-dim'>{suggestions.length} suggestions on the frame: click one to track it as the {roleOf(trackRole).label.toLowerCase()}.</div>}
+      {tracks.length > 0 && (
+        <div className='flex flex-col pt-1'>
+          {tracks.map(t => (
+            <div key={t.id} className='flex items-center gap-1 text-ui-sm'>
+              <span className='inline-block h-2.5 w-2.5 shrink-0 rounded-full' style={{ background: roleOf(t.role).color }} />
+              <Select className='w-28' value={t.role} onChange={e => setRole(t.id, e.target.value as TrackRole)}>
+                {TRACK_ROLES.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}
+              </Select>
+              <span className='min-w-0 flex-1 truncate text-ui-xs text-dim' title={`${t.seeds.length} frame${t.seeds.length === 1 ? '' : 's'} set by hand`}>{summary(t.id, t.role)}</span>
+              <Button size='sm' variant='remove' onClick={() => remove(t.id)} title='Remove the track'>Remove</Button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className='flex items-center gap-1 pt-1'>
+        <Button size='sm' disabled={!tracks.length || busy || !r.player} onClick={() => void r.trackAll()}
+                title='Follow every point through the clip (in the background), from each frame it was set on'>{busy ? 'Tracking…' : 'Track'}</Button>
+        {busy && (
+          <div className='h-1.5 min-w-0 flex-1 overflow-hidden rounded bg-surface'>
+            <div className='h-full bg-primary' style={{ width: `${Math.round((r.tracking ?? 0) * 100)}%` }} />
+          </div>
+        )}
+        <div className='flex-1' />
+        <Button size='sm' disabled={!r.tracks.result || !doc.reference?.camera}
+                title={doc.reference?.camera ? 'In every key where a tracked foot is planted, put the foot’s IK goal where it meets the ground' : 'Needs the reference camera (Camera, Calibrate or Match pose)'}
+                onClick={plantFeet}>Plant feet</Button>
+      </div>
     </Collapsable>
   );
 }

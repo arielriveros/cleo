@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button, CloseIcon, Collapsable, NumberInput, Select, Toggle } from '@cleo/app-kit/ui';
 import { TransportBar, clampZoom, fitZoom, formatTick, rulerTicks, timeToX, xToTime, zoomStep } from '@cleo/app-kit/timeline';
 import { promptDialog } from '@cleo/app-kit/feedback/dialogStore';
@@ -13,7 +13,8 @@ import { POSE_DRAG_TYPE, useMotion } from './motionContext';
 import { PartBlendFields } from './PartsPanel';
 import { VIDEO_LANE_H, VideoLane } from './VideoLane';
 import { ANALYSIS_LANE_H, AnalysisLane } from './AnalysisLane';
-import { snapToGrid, videoFrameAt } from '../reference/referenceDoc';
+import { footContacts, roleOf, trackTurns } from '../reference/tracks';
+import { snapToGrid, timelineTimeOf, videoFrameAt } from '../reference/referenceDoc';
 import { rateLabel } from '../reference/videoDoc';
 
 // The Motion Creator's timeline, docked under the viewport: the motion as a row of POSES on a time ruler,
@@ -69,7 +70,24 @@ export function TimelinePanel() {
   const snap = (t: number) => snapToGrid(t, grid);
   const ref = doc.reference;
   const videoLane = !!ref && !!reference.video;
-  const analysisLane = videoLane && !!analysisView && !!reference.analysis;
+  // Tracked feet's contacts and hands' turns, on the timeline.
+  const trackMarks = useMemo(() => {
+    const res = reference.tracks.result, r = doc.reference;
+    if (!res || !r) return null;
+    const fpsV = reference.video?.fps ?? 30;
+    const at = (i: number) => timelineTimeOf(r, res.times[i]);
+    const contacts: { t0: number; t1: number; color: string; label: string }[] = [];
+    const turnMarks: { t: number; color: string; label: string }[] = [];
+    for (const t of reference.tracks.tracks) {
+      const pts = res.points[t.id];
+      if (!pts) continue;
+      const role = roleOf(t.role);
+      if (t.role === 'footL' || t.role === 'footR') for (const [a, b] of footContacts(pts, fpsV)) contacts.push({ t0: at(a), t1: at(b), color: role.color, label: role.label });
+      else for (const i of trackTurns(pts, fpsV)) turnMarks.push({ t: at(i), color: role.color, label: role.label });
+    }
+    return { contacts, turns: turnMarks, times: Float64Array.from(res.times) };
+  }, [reference.tracks, reference.video, doc.reference]);
+  const analysisLane = videoLane && ((!!analysisView && !!reference.analysis) || !!trackMarks);
   const top = RULER_H + (videoLane ? VIDEO_LANE_H : 0) + (analysisLane ? ANALYSIS_LANE_H : 0);
   const x = (t: number) => timeToX(t, pxPerSec, GUTTER);
   const tAt = (clientX: number) => {
@@ -257,7 +275,8 @@ export function TimelinePanel() {
                 )}
                 {analysisLane && (
                   <div className='absolute inset-x-0 border-b border-border/40' style={{ top: RULER_H + VIDEO_LANE_H, height: ANALYSIS_LANE_H }}>
-                    <AnalysisLane reference={ref!} times={reference.analysis!.times} view={analysisView!} x={x} width={width}
+                    <AnalysisLane reference={ref!} times={reference.analysis?.times ?? trackMarks!.times} view={reference.analysis ? analysisView : null}
+                                  contacts={trackMarks?.contacts} turns={trackMarks?.turns} x={x} width={width}
                                   onSeek={t => { transport.pause(); transport.seek(t); if (view === 'pose') setView('motion'); }} />
                   </div>
                 )}

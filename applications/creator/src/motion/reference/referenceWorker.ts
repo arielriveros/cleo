@@ -12,12 +12,15 @@ import { ALL_FORMATS, AudioSampleSink, BlobSource, CanvasSink, EncodedPacketSink
 import { isVariableRate } from './videoDoc';
 import type { AudioPeaks, ThumbStrip } from './referenceCache';
 import { runAnalysisJob, type AnalysisJob } from './cv/analysisJob';
+import { runExtremitiesJob, runTrackJob, type ExtremitiesJob, type TrackJob } from './cv/trackJob';
 
 export type ReferenceJob =
   | { job: 'timestamps' }
   | { job: 'thumbs'; every: number; height: number }
   | { job: 'peaks'; perSecond: number }
-  | AnalysisJob;
+  | AnalysisJob
+  | TrackJob
+  | ExtremitiesJob;
 
 export interface TimestampsResult { timestamps: Float64Array; vfr: boolean; }
 
@@ -121,6 +124,8 @@ self.onmessage = async (e: MessageEvent<ReferenceWorkerIn>) => {
       case 'thumbs': result = await thumbs(ctx, msg.every, msg.height); break;
       case 'peaks': { const r = await peaks(ctx, msg.perSecond); result = r; if (r) transfer.push(r.peaks.buffer); break; }
       case 'analyze': result = await runAnalysisJob(ctx, msg, transfer); break;
+      case 'track': result = await runTrackJob(ctx, msg, transfer); break;
+      case 'extremities': result = await runExtremitiesJob(ctx, msg); break;
     }
     post({ id, type: 'result', result }, transfer);
   } catch (err) {

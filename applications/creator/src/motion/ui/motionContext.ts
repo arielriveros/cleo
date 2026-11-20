@@ -14,6 +14,8 @@ import type { Rect } from '../reference/gate';
 import type { ReferenceCamera, Vec3 } from '../reference/referenceCamera';
 import type { CalibrationDoc, SolveResult } from '../reference/calibrate';
 import type { AnalysisView } from '../reference/cv/analysisView';
+import type { TrackRole } from '../reference/tracks';
+import type { Extremity } from '../reference/cv/silhouette';
 
 // The Motion Creator's shared state, for the panels around the viewport. Dockview unmounts a panel whose
 // tab is hidden, so anything that must outlive one -- the selection, the playhead -- lives here.
@@ -105,6 +107,19 @@ export interface MotionState {
   analysisView: AnalysisView | null;
   /** A key (and a pose from the motion there) at every key-pose candidate inside the clip. */
   addKeysAtCandidates: () => void;
+  /** Reference ▸ Tracking over the video. */
+  showTracks: boolean;
+  setShowTracks: (on: boolean) => void;
+  /** The role a new track takes, and whether a click on the frame starts one. */
+  trackRole: TrackRole;
+  setTrackRole: (r: TrackRole) => void;
+  placingTrack: boolean;
+  setPlacingTrack: (on: boolean) => void;
+  /** The silhouette's furthest points on the frame shown, offered as tracks. */
+  suggestions: Extremity[];
+  suggestPoints: () => Promise<void>;
+  /** IK foot goals from the foot tracks' contacts, in the keys inside them. */
+  plantFeet: () => void;
   /** The key selected on the timeline: its blend (the way into it) is the one being edited. */
   keyId: string | null;
   setKeyId: (id: string | null) => void;

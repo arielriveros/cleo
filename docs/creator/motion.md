@@ -167,7 +167,9 @@ its last pose, or cycles when the motion loops.
 
 Once the clip is [analysed](#analysis), the **Motion energy** lane under it draws how much the subject
 changes from frame to frame: the curve dips where the action holds or turns. A yellow mark at a dip is a
-key-pose candidate (click it to go there), a shaded stretch is held frames, and a red line is a cut.
+key-pose candidate (click it to go there), a shaded stretch is held frames, and a red line is a cut. With
+[tracks](#tracking), a tracked foot's contacts show along its bottom in the track's colour, and a dot at the
+top marks where a tracked hand or head turns (click it to go there).
 
 ### Transport
 
@@ -327,6 +329,29 @@ checked by eye.
 
 A clip filmed with a moving camera has no still background: the tab warns that the subject's box is then
 unreliable. The key candidates still come from the whole frame's energy.
+
+### Tracking
+
+Follows points through the clip: a foot, a hand, the head, anything with a little texture. No AI here
+either: each point's small window is matched from frame to frame by the Lucas–Kanade method, coarse to
+fine, and every step is checked by tracking back to where it came from. A point that does not come back
+(hidden behind a leg, blurred) is lost there rather than guessed on.
+
+- **Show the tracks** draws each point on the frame shown, with a short trail of where it was and will be.
+- Pick what the point is (**Left foot**, **Right foot**, **Left hand**, **Right hand**, **Head**,
+  **Other**), **Add point**, and click it on the frame. **Suggest** offers the subject's furthest points on
+  the frame (head, hands, feet, a tail: the ends of its silhouette, for animals too); click one to track it.
+- **Track** follows every point through the whole clip. When a point slips, step to a frame where it is
+  wrong and drag it into place: that frame becomes a seed, and the stretches either side are tracked again
+  from it and blended. Change a track's role in the list; **Remove** deletes it.
+- A foot track's **contacts** are where it stays still: planted. A hand's or the head's turns are where it
+  reverses: extremes worth a key.
+- **Plant feet** sets the foot's IK goal in every key inside one of its contacts: over the point where the
+  tracked foot meets the floor through the reference [camera](#camera), at the foot's standing height. A pose
+  another key shares is copied for the key first. It needs the camera set up, and works best tracking a
+  textured point on the shoe near the sole: a point on the outline's edge can slide onto the floor behind.
+
+The tracks belong to the clip and are kept with it, whichever motion uses it.
 
 ### Camera
 
