@@ -1,6 +1,6 @@
 // cleo-host (docs/design/netsync.md §7): a NetSync dedicated host. Runs a game headless at a fixed tick rate and
-// accepts peers over WebTransport and WebSocket. Phase 2: the game runs and peers join a session alongside it;
-// phase 3 sends them its state.
+// accepts peers over WebTransport and WebSocket. Peers that join are sent the game's state every tick (phase 3:
+// spawns, removals and every synced node's transform; src/netsync/sync).
 //
 //   npm start -- --game path/to/game.bin [--scripts path/to/game.scripts.js]
 //   npm start -- --example ../editor/public/examples/firing-line
@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HostSession, hashContent } from '../../../src/netsync';
+import { HostSession, SyncHost, hashContent } from '../../../src/netsync';
 import { cachedCertificate } from './devCertificate';
 import { HostListener } from './hostListener';
 import { HostRuntime } from './hostRuntime';
@@ -70,18 +70,22 @@ const listener = await HostListener.start({
 
 // Tick 0 of the game is tick 0 of the session clock, so a tick number means the same moment to both.
 if (runtime) {
+    const sync = new SyncHost(session, () => runtime!.scene, { sceneKey: () => runtime!.sceneName });
     runtime.start(performance.now() - session.timeMs());
     let last = 0;
     runtime.onTick = (tick) => {
+        sync.tick(tick);
         if (tick - last < tickRate * 10) return;
         last = tick;
         const s = runtime!.stats();
         const peers = [...session.peers.values()].map((p) => `${p.id}:${p.connected ? p.linkKind : 'held'}`).join(' ') || 'none';
-        log(`tick ${tick}: ${s.meanMs} ms mean, ${s.p95Ms} p95, ${s.maxMs} max (budget ${Math.round(1000 / tickRate)}), skipped ${s.skipped}; peers ${peers}`);
+        const bytes = [...session.peers.values()].map((p) => sync.peerStats(p.id)?.maxBytesPerTick ?? 0);
+        log(`tick ${tick}: ${s.meanMs} ms mean, ${s.p95Ms} p95, ${s.maxMs} max (budget ${Math.round(1000 / tickRate)}), skipped ${s.skipped}; ` +
+            `${sync.syncedCount} synced; peers ${peers}${bytes.length ? `, peak ${Math.max(...bytes)} B/tick` : ''}`);
     };
 }
 
-console.log(`cleo-host (NetSync phase 2)
+console.log(`cleo-host (NetSync phase 3)
   WebTransport  udp/${listener.webTransportPort}  /netsync   cert sha-256 ${certificate.hash} (expires ${certificate.notAfter})
   WebSocket     tcp/${listener.webSocketPort}  /ws
   Endpoint      http://localhost:${listener.webSocketPort}/endpoint  (a HostEndpoint for PeerSession.join)

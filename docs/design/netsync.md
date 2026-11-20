@@ -1,6 +1,6 @@
 # NetSync — online multiplayer for Cleo (plan)
 
-Status: **phase 2 done** (phase 0 open: Safari) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
+Status: **phase 3 done** (phase 0 open: Safari; 50-AI host budget open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
 Target: **physics sandbox shooter — co-op PvE (≤ 50 AI) and 8v8 deathmatch with bots, ≤ 16 peers** ·
 Started 2026-11-19
 
@@ -593,6 +593,27 @@ Phases 0–3 are the foundation; 4–6 make the target game playable; 7–9 make
 | 1 | **Done (2026-11-19).** Peers connect over either link (and fall back), are seated, agree with the host on the tick within one tick (tested at 100 ms RTT with jitter and 10 % loss), and take their seat back after a drop. Verified in Node over real sockets and in Chrome, Edge and Firefox against `cleo-host`. | `src/netsync/` (links, sessions, clock, ticker), `applications/host` (see its README) (listeners, CLI), tests `tests/netsync*.test.ts`, `applications/host/tests` |
 
 | 2 | **Done (2026-11-19).** The Sandbox and Firing Line examples run headless on the host from a game.bin — models, shared clips, scripts and script modules (inline or extracted to game.scripts.js), physics on Jolt — at 30 Hz. `cleo-host --example …/firing-line` plays the bot match in real time. | `src/core/engine.ts` (`headless`), `src/graphics/rhi/null/nullDevice.ts`, `applications/editor/src/player/gameContent.ts` (the player's loader, now shared), `applications/host/src/hostRuntime.ts`, `exampleGame.ts`, `applications/host/tests/hostRuntime.test.ts` |
+
+| 3 | **Done (2026-11-19), except the 50-AI part of the exit criterion** (see phase-2 findings). Peers get the table of synced nodes, every template copy spawned on the host (with the host's node ids, so later messages and saves name the same nodes), every removal, and per-tick state; a peer that joins late or resumes gets the same baseline. Measured on the Sandbox over loopback at 150 ms RTT, jitter and 5 % loss: 200 props and an explosion, 16 peers (and a TCP-like link for the WebSocket fallback) — every peer within 1200 B/tick, props at rest cost 0 B/tick, everyone converges within 2 mm, a prop in flight is drawn within 2.6 cm (p50) of where the host had it; the host's sync work for 16 peers is 0.7 ms a tick (p95 1.3 ms). | `src/netsync/sync/` (`quantize.ts`, `syncMessages.ts`, `syncHost.ts`, `syncPeer.ts`), `tests/netsyncQuantize.test.ts`, `applications/host/tests/sync.test.ts`; `cleo-host` runs `SyncHost` on its game |
+
+Phase-3 details and findings:
+- **Rows are absolute, not bit-deltas.** Each row is a node's full quantized state (≈24 bytes with a velocity),
+  and a node is sent only when it differs from what that peer has acknowledged. Every datagram stands alone,
+  so loss costs freshness, never correctness. Bit-level delta compression against a baseline (Fiedler) is the
+  next step if bandwidth gets tight; with 200 props in the air the 1200 B budget updates each about every
+  4 ticks, which is where the 23 cm p95 follow error during an explosion comes from.
+- **Acknowledgement is per datagram**, not per tick: a tick's rows can span two datagrams, and acknowledging
+  the tick when only one arrived marked the other's rows delivered (found by the 200-prop test).
+- **Synced nodes (v1):** dynamic colliders, characters, and anything with a truthy `netSync` variable;
+  transforms are LOCAL. Kinematic movers (doors, platforms) need `netSync` until phase 7's inspector.
+- **Rotation error** of the 32-bit smallest-three quaternion is up to 0.23°, not the 0.1° first assumed.
+- **Peers only follow.** A peer that also ran the game's scripts would spawn things of its own (the Firing
+  Line manager fills the match with bots on every machine). Until phase 7's `this.net.isHost`, a peer's scene
+  must not run gameplay scripts; the tests use a parsed, unstarted scene.
+- **Not yet:** priority by distance and scope (no peer owns a character until phase 4), animation state
+  (phase 8: followed characters do not animate), the simulation range measured from peers.
+- `PeerSession` now holds app control and bulk messages that arrive before a handler is attached (the host
+  sends its baseline right after the Welcome).
 
 Phase-2 findings:
 - **CPU budget is not met at 50 AI yet.** Firing Line on the development machine: 12 fighters ~4–5 ms per

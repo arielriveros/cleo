@@ -66,10 +66,26 @@ export class PeerSession extends TypedEmitter<PeerSessionEvents> {
     public readonly peerId: number;
     public readonly tickRate: number;
     public readonly clock: ClockSync;
-    /** App messages (type ≥ FIRST_APP_TYPE) from the host. */
-    public onControl: ((message: Uint8Array) => void) | null = null;
+    /**
+     * App messages (type ≥ FIRST_APP_TYPE) from the host. Control and bulk messages that arrive before a
+     * handler is set — the host sends its state right after the Welcome, before `join()` has even resolved —
+     * are kept and delivered, in order, when it is set. Pulses are not kept: a late pulse is a stale one.
+     */
+    public get onControl(): ((message: Uint8Array) => void) | null { return this._appControl; }
+    public set onControl(handler: ((message: Uint8Array) => void) | null) {
+        this._appControl = handler;
+        if (handler) for (const m of this._heldControl.splice(0)) handler(m);
+    }
     public onPulse: ((message: Uint8Array) => void) | null = null;
-    public onBulk: ((message: Uint8Array) => void) | null = null;
+    public get onBulk(): ((message: Uint8Array) => void) | null { return this._appBulk; }
+    public set onBulk(handler: ((message: Uint8Array) => void) | null) {
+        this._appBulk = handler;
+        if (handler) for (const m of this._heldBulk.splice(0)) handler(m);
+    }
+    private _appControl: ((message: Uint8Array) => void) | null = null;
+    private _appBulk: ((message: Uint8Array) => void) | null = null;
+    private readonly _heldControl: Uint8Array[] = [];
+    private readonly _heldBulk: Uint8Array[] = [];
 
     private _link: NetLink;
     private _fallbackReason: string | null;
@@ -164,8 +180,14 @@ export class PeerSession extends TypedEmitter<PeerSessionEvents> {
     private _attach(link: NetLink): void {
         link.onControl = (m) => this._onControl(m);
         link.onPulse = (m) => this._onPulse(m);
-        link.onBulk = (m) => { this._lastHeard = this._scheduler.now(); this.onBulk?.(m); };
+        link.onBulk = (m) => { this._lastHeard = this._scheduler.now(); this._deliver(this._appBulk, this._heldBulk, m); };
         link.onClose = (reason) => { if (link === this._link) this._dropped(reason); };
+    }
+
+    /** Hand an app message to its handler, or keep it (up to a limit) until one is set. */
+    private _deliver(handler: ((m: Uint8Array) => void) | null, held: Uint8Array[], m: Uint8Array): void {
+        if (handler) handler(m);
+        else if (held.length < 10_000) held.push(m);
     }
 
     private _detach(link: NetLink): void {
@@ -176,7 +198,7 @@ export class PeerSession extends TypedEmitter<PeerSessionEvents> {
     private _onControl(m: Uint8Array): void {
         this._lastHeard = this._scheduler.now();
         if (m.length === 0) return;
-        if (m[0] >= FIRST_APP_TYPE) { this.onControl?.(m); return; }
+        if (m[0] >= FIRST_APP_TYPE) { this._deliver(this._appControl, this._heldControl, m); return; }
         if (m[0] === SessionControl.bye) {
             let reason = 'host said bye';
             try { reason = decodeBye(new ByteReader(m, 1)).reason || reason; } catch { /* keep default */ }

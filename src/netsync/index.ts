@@ -26,3 +26,11 @@ export { HostPeer, HostSession } from './session/hostSession';
 export type { HostSessionEvents, HostSessionOptions } from './session/hostSession';
 export { JoinRefusedError, PeerSession } from './session/peerSession';
 export type { JoinOptions, PeerSessionEvents, PeerState } from './session/peerSession';
+
+// Phase 3: synced state.
+export { packQuaternion, quantizeState, sameState, unpackQuaternion, POSITION_SCALE, VELOCITY_SCALE } from './sync/quantize';
+export type { QState } from './sync/quantize';
+export { SyncHost, defaultIsSynced } from './sync/syncHost';
+export type { SyncHostOptions, SyncPeerStats } from './sync/syncHost';
+export { SyncPeer } from './sync/syncPeer';
+export type { SyncPeerOptions } from './sync/syncPeer';
