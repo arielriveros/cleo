@@ -23,6 +23,7 @@ import type { HostPeer, HostSession } from '../session/hostSession';
 import type { PeerSession } from '../session/peerSession';
 import type { SyncHost } from './syncHost';
 import type { SyncPeer } from './syncPeer';
+import type { LagCompensator } from './weapons';
 
 export const SCRIPT_FIELDS = FIRST_APP_TYPE + 12;
 export const SCRIPT_CALL = FIRST_APP_TYPE + 13;
@@ -80,6 +81,10 @@ function warnOnce(key: string, message: string): void {
 export interface ScriptHostOptions {
     /** The peer that owns a node (drives the character it belongs to), or 0. RemoteControl.ownerOf, usually. */
     ownerOf?: (node: Node) => number;
+    /** The session's game mode, for scripts (`this.net.mode`). */
+    mode?: () => string;
+    /** Every synced body's recent poses (recorded each tick), for `this.net.rewound`: lag-compensated script shots. */
+    history?: LagCompensator;
 }
 
 export interface ScriptHostStats { calls: number; refused: number; fieldsSent: number; events: number; }
@@ -99,6 +104,14 @@ export class ScriptHost {
             peerId: 0,
             ownerOf: (node) => self._options.ownerOf?.(node) ?? 0,
             get caller() { return self._caller; },
+            get mode() { return self._options.mode?.() ?? ''; },
+            rewound: <T>(tick: number, fn: () => T): T => {
+                const h = self._options.history;
+                if (!h || h.newestTick < 0) return fn();
+                // Never ahead of the present, never further back than the history holds.
+                const at = Math.max(h.newestTick - h.ticks + 1, Math.min(h.newestTick, tick));
+                return h.rewound(at, fn);
+            },
             call: (node, method, original, args, options) => self._call(node, method, original, args, options),
             emit: (name, payload, to) => self._emit(name, payload, to, null),
         };
@@ -240,6 +253,7 @@ export class ScriptPeer {
         this._net = {
             role: 'peer',
             get peerId() { return self._session.peerId; },
+            get viewTick() { return self._sync.renderTick(); },
             ownerOf: (node) => self._owns(node) ? self._session.peerId : 0,
             caller: 0,
             call: (node, method, _original, args, options) => self._call(node, method, args, options),

@@ -20,6 +20,9 @@ fields and `@netcall` methods simply run.
 | `this.net.owner` | The player who owns this node (it is in their character's tree), 0 for the host's own. |
 | `this.net.isOwner` | This machine controls this node: its player's character (on a peer), anything else (on the host). |
 | `this.net.caller` | On the host, inside a `@netcall` a player made: that player's number. |
+| `this.net.mode` | On the host: the session's game mode (`coop`, `deathmatch`…), what the player asked the allocator for. '' elsewhere. |
+| `this.net.viewTick` | On a player's machine: the host tick it is showing other machines' nodes at (for shots, below). |
+| `this.net.rewound(tick, fn)` | On the host: run `fn` with every synced body back where it was at `tick` (below). |
 | `this.net.emit(name, payload, to)` | Raise a game event on other machines (below). |
 
 Decide game rules on the host, and let peers show the result:
@@ -71,6 +74,27 @@ import { netcall } from 'cleo/decorators'
 The arguments travel like `@synced` values. A peer calling a `to: 'all'` or `to: 'owner'` method is ignored (only
 the host tells others), with a warning in the console.
 
+## Shots: what the player saw
+
+A player sees other machines' characters about a round trip in the past, so a shot judged against the host's
+present misses anything that moves. Send the tick the player was seeing with the shot, and judge it there:
+
+```ts
+// On the player's machine, when it fires:
+this.shoot(origin, dir, this.net.viewTick)
+
+@netcall({ to: 'host' }) shoot(origin: number[], dir: number[], seen: number) {
+  // Every synced body back where the player saw it, for the raycast; put back after.
+  this.net.rewound(seen, () => {
+    const hit = this.scene!.physics.raycast(origin, add(origin, scale(dir, 200)))
+    if (hit?.node) damage(hit.node)
+  })
+}
+```
+
+The host goes back at most a second. Offline and on a peer `rewound` simply runs the function. Firing Line's
+player script does exactly this ([its online notes](../editor/fps-example.md#online)).
+
 ## Events: `Net.emit`
 
 `this.net.emit('Cheer', { from: 'A' }, 'all')` (or `Net.emit` from code that is not a node's script) raises the
@@ -86,6 +110,12 @@ a run.
 
 ## Gotchas
 
+- On a player's machine the network is attached before the scene starts, so `onStart` already knows `this.net`.
+  Set a match up only on the host (`if (!this.net.isHost) return` in `onStart`).
+- A script's `this` and the scene's node for the same object may be two different objects: compare nodes by `id`
+  when you keep your own lists.
+- Module-level variables are shared by every scene a process runs (a test, an editor running host and players):
+  find what belongs to a scene through the node asking (`node.scene`), not one global.
 - A node no player owns is the host's: on a peer, `isOwner` is false for it, so its `to: 'host'` netcalls need
   `anyone: true`.
 - `onChange` does not run on the host (it set the value) and not for the value a node starts with.

@@ -1,5 +1,5 @@
 import { CharacterNode, Logger } from 'cleo'
-import { attribute } from 'cleo/decorators'
+import { attribute, synced } from 'cleo/decorators'
 import type { Node, TemplateName } from 'cleo'
 import { WEAPONS, aimDirection, canDamage, clamp, combatantOf, manager, rotationOntoNormal, spreadDirection } from '@/FPS/Scripts/FpsShared'
 import type { WeaponSpec } from '@/FPS/Scripts/FpsShared'
@@ -27,15 +27,21 @@ import type { WeaponSpec } from '@/FPS/Scripts/FpsShared'
  *
  * `team` is just a string. The Game Manager (FpsGameManager) sets it from the match mode; with no manager in
  * the scene it is whatever the template says, and two combatants are hostile when their teams differ.
+ *
+ * ## Online
+ *
+ * The host decides every hit (`receiveHit` does nothing on a player's machine). Health, team, name, kills,
+ * deaths and death are `@synced`: the host's values reach every player, and `onDeadSeen` lets a player's machine
+ * play what the host's `onDeath` started (a ragdoll, the death screen).
  */
 export default class FpsCombatantNode extends CharacterNode {
-  @attribute
+  @attribute @synced
   public displayName: string = 'Combatant'
-  @attribute
+  @attribute @synced
   public team: string = 'red'
   @attribute
   public maxHp: number = 100
-  @attribute
+  @attribute @synced
   public hp: number = 100
   /** Which WEAPONS entry this fighter uses. */
   @attribute
@@ -67,9 +73,12 @@ export default class FpsCombatantNode extends CharacterNode {
   public tracerTemplate: TemplateName = 'FPS Tracer' as TemplateName
 
   // ----- runtime, read by others -----------------------------------------------------------------------
+  @synced({ onChange: 'deadChanged' })
   public isDead: boolean = false
   public isCrouching: boolean = false
+  @synced
   public kills: number = 0
+  @synced
   public deaths: number = 0
   /** Where the last hit on this fighter came from (a world point), for the player's damage indicator. */
   public lastHitFrom: number[] = [0, 0, 0]
@@ -92,11 +101,11 @@ export default class FpsCombatantNode extends CharacterNode {
     const spec = this.spec
     this.ammo = spec.mag
     this.reserve = spec.reserve
-    manager()?.register?.(this)
+    manager(this)?.register?.(this)
   }
 
   onDespawn() {
-    manager()?.unregister?.(this)
+    manager(this)?.unregister?.(this)
   }
 
   /** The current weapon's numbers. */
@@ -123,14 +132,15 @@ export default class FpsCombatantNode extends CharacterNode {
    * kill is `die`.
    */
   public receiveHit(damage: number, from: Node | null, point?: ArrayLike<number>, zone: string = 'body', dir?: ArrayLike<number>): boolean {
-    if (this.isDead || damage <= 0) return false
+    // Online, only the host deals damage: what a player's machine thinks it hit, the host judges.
+    if (!this.net.isHost || this.isDead || damage <= 0) return false
     this.hp = Math.max(0, this.hp - damage)
     const f = (from as any)?.worldPosition
     if (f) { this.lastHitFrom = [f[0], f[1], f[2]]; this.lastHitAt = this._time }
     const at = point ? [point[0], point[1], point[2]] : this.chest
     this._blood(at, dir)
     this.onHurt(damage, from, zone)
-    manager()?.onDamaged?.(this, from, damage, zone)
+    manager(this)?.onDamaged?.(this, from, damage, zone)
     if (this.hp <= 0) this.die(from, zone, dir)
     return true
   }
@@ -144,12 +154,18 @@ export default class FpsCombatantNode extends CharacterNode {
     this.deaths++
     const killer = combatantOf(from)
     if (killer && killer !== this) killer.kills++
-    manager()?.onKilled?.(this, killer, zone)
+    manager(this)?.onKilled?.(this, killer, zone)
     this.onDeath(killer, zone, dir)
   }
 
-  /** The end: play the animation, ragdoll, drop the weapon. */
+  /** The end: play the animation, ragdoll, drop the weapon. On the host (and offline). */
   protected onDeath(killer: any, zone: string, dir?: ArrayLike<number>): void {}
+
+  /** A player's machine hears the host's `isDead` change (see @synced): its own end, or its return. */
+  public deadChanged(_was: boolean): void { this.onDeadSeen(this.isDead) }
+
+  /** What a player's machine shows of a death the host decided (`dead`), or a return (`!dead`). */
+  protected onDeadSeen(dead: boolean): void {}
 
   /** Full health and a full magazine, alive again (the manager moves the body). */
   public resetForRespawn(): void {
@@ -181,7 +197,7 @@ export default class FpsCombatantNode extends CharacterNode {
     const muzzle = this.muzzleWorld(origin)
     const per = new Map<any, { damage: number, zone: string, point: number[] }>()
     const pellets = Math.max(1, spec.pellets)
-    manager()?.makeNoise?.(origin, spec.key === 'pistol' ? 38 : 60, this)
+    manager(this)?.makeNoise?.(origin, spec.key === 'pistol' ? 38 : 60, this)
 
     for (let i = 0; i < pellets; i++) {
       const d = spreadDirection(dir, i === 0 && pellets === 1 ? coneDeg : coneDeg)
@@ -263,7 +279,7 @@ export default class FpsCombatantNode extends CharacterNode {
     this.spawnFx(this.impactTemplate, at, rot)
     if (!onCorpse) {
       const decal = this.spawnFx(this.holeTemplate, at, [rot[0], rot[1], Math.random() * 360])
-      if (decal) manager()?.registerDecal?.(decal)
+      if (decal) manager(this)?.registerDecal?.(decal)
     }
   }
 

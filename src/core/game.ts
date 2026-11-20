@@ -307,6 +307,10 @@ export const Net = {
   get peerId(): number {
     return CleoEngine.instance?.scene?.net?.peerId ?? 0;
   },
+  /** The session's game mode (`coop`, `deathmatch`…) on the host; '' on a peer and offline. */
+  get mode(): string {
+    return CleoEngine.instance?.scene?.net?.mode ?? '';
+  },
   /**
    * Raise game event `name` with `payload` on other machines, where `@onEvent(name)` methods and GameEvents
    * listeners receive it. `to`: `'all'` (default: the host and every peer), `'peers'`, or `'host'`.

@@ -124,8 +124,8 @@ export default class FpsBotNode extends FpsCombatantNode {
   // =================================================================================================
 
   onStart() {
-    super.onStart()
     this.setVariable('isBot', true, 'boolean', 'public')
+    super.onStart()
     this.facingMode = 'aim'
     this.acceleration = 14
     this._home = Array.from(this.worldPosition as ArrayLike<number>)
@@ -188,9 +188,12 @@ export default class FpsBotNode extends FpsCombatantNode {
 
   onUpdate(delta: number) {
     this._time += delta
+    // Online, the host runs every bot: a player's machine draws it where the host has it, animated by the host's
+    // animator parameters. Its brain, its gun and its health are the host's alone.
+    if (!this.net.isHost) return
     this._stateTime += delta
     if (this.isDead) { this._deadFrame(); return }
-    const gm = manager()
+    const gm = manager(this)
     const intent = this.drive()
     intent.sprint = false
     if (gm?.matchOver) { this._stand(intent); return }
@@ -322,11 +325,11 @@ export default class FpsBotNode extends FpsCombatantNode {
   private _callForHelp(): void {
     this._calledAt = this._time
     const at = this.worldPosition
-    manager()?.callReinforcements?.(this.team, [at[0], at[1], at[2]], this)
+    manager(this)?.callReinforcements?.(this.team, [at[0], at[1], at[2]], this)
   }
 
   private _findCover(far: boolean = false): boolean {
-    const gm = manager()
+    const gm = manager(this)
     const from = this.worldPosition
     const threatAt = this._lastKnown ?? (this._target?.worldPosition as number[] | undefined)
     if (!gm || !threatAt) return false
@@ -620,6 +623,11 @@ export default class FpsBotNode extends FpsCombatantNode {
     // The Collider goes with it: it is the bot's body, and the root its template places.
     this.after(this.corpseSeconds, () => (this.collider ?? this).remove({ fade: 1.2 }))
     // The death sound is the `death` marker on the death clip.
+  }
+
+  /** A player's machine: the host's death clip arrives through the animator; the body falls a moment after it. */
+  protected onDeadSeen(dead: boolean): void {
+    if (dead && this.net.isPeer) this.after(1.8, () => { if (this.isDead) this._ragdoll() })
   }
 
   private _pickDeath(killer: any, zone: string, dir?: ArrayLike<number>): string {

@@ -110,7 +110,9 @@ export class HostApp {
         if (this.state !== 'ready') return false;
         this.sessionSpec = spec;
         this._persistent = persistent;
-        if (spec.scene && this.runtime && spec.scene !== this.runtime.sceneName) await this.runtime.loadScene(spec.scene);
+        // A fresh match for the session: its scene, set up for its mode (the game's scripts read `this.net.mode` as
+        // the scene starts, and a warm host started its scene before it had a session).
+        if (this.runtime && (spec.scene || spec.mode)) await this.runtime.loadScene(spec.scene ?? this.runtime.sceneName);
         this._setState('allocated');
         this._log('info', `session ${spec.id} allocated${spec.mode ? ` (${spec.mode})` : ''}`, { session: spec.id, mode: spec.mode, scene: this.runtime?.sceneName });
         return true;
@@ -284,7 +286,9 @@ export class HostApp {
             },
         });
 
-        const { sync, remote } = runtime ? HostApp._play(runtime, session, game, tickRate, log) : { sync: null, remote: null };
+        // The session's mode, else the game's own (Project › NetSync › Game mode: what Play › Multiplayer plays).
+        const modeOf = () => app?.sessionSpec?.mode || (typeof runtime?.config?.netsync?.mode === 'string' ? runtime.config.netsync.mode : '');
+        const { sync, remote } = runtime ? HostApp._play(runtime, session, game, tickRate, log, modeOf) : { sync: null, remote: null };
         const lifecycle = options.lifecycle ?? createLifecycle(settings.lifecycle, (l) => log('info', l));
         app = new HostApp(settings, runtime, session, listener, sync, remote, lifecycle, web, log, exit, contentHash, tickRate);
         await app._startControl();
@@ -301,7 +305,8 @@ export class HostApp {
     }
 
     /** Everything that plays the game with the peers: possession, sync, scripts, carrying, weapons, animation. */
-    private static _play(runtime: HostRuntime, session: HostSession, game: ReturnType<typeof withGameDefaults>, tickRate: number, log: HostLog) {
+    private static _play(runtime: HostRuntime, session: HostSession, game: ReturnType<typeof withGameDefaults>, tickRate: number, log: HostLog,
+                         modeOf: () => string) {
         // Possession: a joining player gets a character the level placed for a player while one is free, then a
         // copy of the player template (when the game names one) spread out from the spawn point; it goes when the
         // player leaves, and a level character goes back to waiting.
@@ -335,10 +340,10 @@ export class HostApp {
             sceneKey: () => runtime.sceneName,
             focusOf: (peerId) => remote.controllerOf(peerId)?.possessed?.worldPosition ?? null,
         });
-        const scripts = new ScriptHost(session, sync, () => runtime.scene, { ownerOf: (node) => remote.ownerOf(node) ?? 0 });
+        const lag = new LagCompensator(sync);
+        const scripts = new ScriptHost(session, sync, () => runtime.scene, { ownerOf: (node) => remote.ownerOf(node) ?? 0, mode: () => modeOf(), history: lag });
         const pawnOf = (peerId: number) => remote.controllerOf(peerId)?.possessed ?? null;
         const carry = new CarryHost(session, sync, { pawnOf, trust: game.trust, gravity: () => runtime.engine.physics.gravity });
-        const lag = new LagCompensator(sync);
         let lastTick = 0;
         new WeaponHost(session, sync, lag, () => runtime.scene, {
             pawnOf, trust: game.trust, physics: () => runtime.engine.physics, currentTick: () => lastTick,

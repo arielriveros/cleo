@@ -13,6 +13,7 @@ import { readExample } from '../../../tools/exampleKit/readExample.mjs';
 import { packGameBin } from '../../editor/src/features/publish/pack';
 import { attachScriptModules, bakeTemplates } from '../../editor/src/features/publish/buildGameData';
 import { sharedAnimationData } from '../../editor/src/features/publish/sharedAnimations';
+import { parseProjectSettings, projectSettingsConfig } from '../../editor/src/features/options/projectSettings';
 
 export interface ExampleGameOptions {
     /** Physics backend to record in the game's config. Default: the engine's default. */
@@ -61,8 +62,10 @@ export async function exampleGameData(dir: string, options: ExampleGameOptions =
         if (shared.retargets) data.retargets = shared.retargets;
     }
     const config: Record<string, any> = {};
+    // The project's own settings, as Publish writes them (physics, online play…), when the example carries any.
+    if (libs.projectSettings) Object.assign(config, projectSettingsConfig(parseProjectSettings(libs.projectSettings)));
     if (libs.inputMap) config.input = libs.inputMap;
-    if (options.physicsBackend) config.physics = { backend: options.physicsBackend };
+    if (options.physicsBackend) config.physics = { ...(config.physics ?? {}), backend: options.physicsBackend };
     data.config = config;
     options.edit?.(data);
     return data;

@@ -28,6 +28,12 @@ export interface SceneNet {
     ownerOf(node: Node): number;
     /** The peer whose `@netcall` is running right now on the host, else 0. */
     readonly caller: number;
+    /** The session's game mode, as the allocator or the host was given it (`coop`, `deathmatch`…), or ''. On the host. */
+    readonly mode?: string;
+    /** A peer: the host tick it is drawing other machines' nodes at (fractional). */
+    readonly viewTick?: number;
+    /** The host: run `fn` with every synced body back where it was at `tick` (see NodeNet.rewound). */
+    rewound?<T>(tick: number, fn: () => T): T;
     /** Route a `@netcall`: run `original` here, send it on, or both, as `options` say. */
     call(node: Node, method: string, original: (...args: unknown[]) => unknown, args: unknown[], options: NetCallOptions): unknown;
     /** Raise a game event (`@onEvent`, GameEvents) on other machines. */
@@ -61,6 +67,33 @@ export class NodeNet {
     public get isOwner(): boolean { return this.owner === this.peerId; }
     /** On the host, inside a `@netcall` a peer made: that peer's id. Otherwise 0. */
     public get caller(): number { return this._net?.caller ?? 0; }
+    /**
+     * The session's game mode — what the player asked the allocator for (`coop`, `deathmatch`…) or the host was
+     * started with — on the host; '' on a peer and offline. Read it where the host sets the match up.
+     */
+    public get mode(): string { return this._net?.mode ?? ''; }
+
+    /**
+     * On a player's machine: the host tick it is showing other machines' nodes at — about a round trip behind the
+     * host's present. Send it with a shot, and the host can judge the shot against what this player saw
+     * ({@link rewound}). 0 on the host and offline.
+     */
+    public get viewTick(): number { return this._net?.viewTick ?? 0; }
+
+    /**
+     * On the host: run `fn` with every synced body (characters, props) moved back to where it was at host tick
+     * `tick` — what a player saw when it fired — and put them back after. A raycast inside hits what the player
+     * aimed at, though it has moved on since (lag compensation). Up to a second back; offline and on a peer it simply
+     * runs `fn`.
+     *
+     *   @netcall({ to: 'host' }) fire(origin: number[], dir: number[], seen: number) {
+     *     this.net.rewound(seen, () => this.shootRay(origin, dir))
+     *   }
+     */
+    public rewound<T>(tick: number, fn: () => T): T {
+        const net = this._net;
+        return net?.rewound && Number.isFinite(tick) && tick > 0 ? net.rewound(tick, fn) : fn();
+    }
 
     /** Raise game event `name` with `payload` on other machines (offline: nothing — there are none). */
     public emit(name: string, payload?: unknown, to: NetEventTarget = 'all'): void {

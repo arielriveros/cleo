@@ -296,7 +296,8 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
 
   // Async because terrain splat/height payloads are DEFLATE-compressed and DecompressionStream
   // has no synchronous form.
-  const startScene = async (id: string, onProgress?: LoadProgressListener, prepare?: (json: any) => void) => {
+  /** Build scene `id` and start it; with `hold`, leave it unstarted and return what starts it (a NetSync peer's). */
+  const startScene = async (id: string, onProgress?: LoadProgressListener, prepare?: (json: any) => void, hold?: boolean): Promise<(() => void) | void> => {
     const entry = table[id];
     if (!entry) { Logger.warn(`loadScene: no scene "${id}"`, 'Player'); return; }
     currentId = id;
@@ -332,6 +333,7 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     // A script that paused before switching (a menu) must not land in a frozen scene.
     engine.isPaused = false;
     onProgress?.(0.9, 'Starting');
+    if (hold) return () => { scene.start(); options.onSceneStarted?.(entry.name); };
     await new Promise<void>(resolve => setTimeout(() => { scene.start(); resolve(); }, 100));
     options.onSceneStarted?.(entry.name);
   };
@@ -344,7 +346,7 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
       // Held keys and in-flight gestures only — NOT the map. Un-binding the game between scenes would
       // leave the next one dead.
       engine.input.resetState();
-      return startScene(id, loadOptions?.onProgress).catch(fail);
+      return startScene(id, loadOptions?.onProgress).then(() => {}, fail);
     },
     currentSceneName: () => table[currentId]?.name ?? '',
     sceneNames: () => Object.values(table).map(s => s.name),
@@ -381,8 +383,8 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
         conditions: net.conditions,
         physics: engine.physics,
         loadScene: async (name, prepare) => {
-          await startScene((name && resolve(name)) || currentId, undefined, prepare);
-          return engine.scene;
+          const start = await startScene((name && resolve(name)) || currentId, undefined, prepare, true);
+          return { scene: engine.scene, start: start ?? (() => {}) };
         },
       }),
       texturesLoaded,

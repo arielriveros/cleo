@@ -44,7 +44,7 @@ export async function simulatedPeerScene(bin: Uint8Array): Promise<{ scene: Scen
     await physics.load();
     physics.initialize();
     physics.scene = scene;
-    scene.start();
+    // Started by `join` once the peer's parts are attached: its scripts' onStart must see the network.
     return { scene, physics, authored };
 }
 
@@ -85,6 +85,8 @@ export interface WorldOptions {
     scripts?: boolean;
     /** Animation: followed characters' animators driven by the host's parameters and events. */
     anim?: boolean;
+    /** The session's game mode, for the game's scripts (`this.net.mode`). */
+    mode?: string;
 }
 
 export async function world(bin: Uint8Array, options: WorldOptions = {}) {
@@ -99,13 +101,13 @@ export async function world(bin: Uint8Array, options: WorldOptions = {}) {
     });
     const pawnOf = (peerId: number) => remote?.controllerOf(peerId)?.possessed ?? null;
     const carry = remote && options.play ? new CarryHost(session, sync, { pawnOf, trust: options.play.trust }) : null;
-    const history = options.play ? new LagCompensator(sync) : null;
+    const history = options.play || options.scripts ? new LagCompensator(sync) : null;
     const weapons = remote && options.play && history ? new WeaponHost(session, sync, history, () => runtime.scene, {
         pawnOf, trust: options.play.trust, physics: () => runtime.engine.physics, currentTick: () => tick - 1, ...options.play.weapons,
     }) : null;
     runtime.onBeforeTick = (t) => { remote?.beforeTick(t); carry?.beforeTick(t, 1 / 30); };
     const anim = options.anim ? new AnimHost(session, sync) : null;
-    const scripts = options.scripts ? new ScriptHost(session, sync, () => runtime.scene, { ownerOf: (n) => remote?.ownerOf(n) ?? 0 }) : null;
+    const scripts = options.scripts ? new ScriptHost(session, sync, () => runtime.scene, { ownerOf: (n) => remote?.ownerOf(n) ?? 0, mode: () => options.mode ?? '', history: history ?? undefined }) : null;
     const peers: TestPeer[] = [];
     let tick = 0;
     /** ms spent in SyncHost.tick, per tick (the sync layer's own cost on the host). */
@@ -242,6 +244,8 @@ export async function world(bin: Uint8Array, options: WorldOptions = {}) {
             };
             peer.script = new ScriptPeer(peerSession, peer.sync, { ownRoot });
         }
+        // A predicting peer's scene runs its scripts: started now, with this.net in place for every onStart.
+        if (simulated) scene.start();
         peers.push(peer);
         return peer;
     };

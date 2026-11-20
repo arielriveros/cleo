@@ -37,9 +37,10 @@ export interface NetSyncJoinOptions {
     conditions?: LinkConditions;
     /**
      * Build the game scene named `sceneName` (the entry scene when null), passing its JSON through `prepare` before
-     * it is parsed, make it the engine's scene and start it. The client makes it a follower scene that way.
+     * it is parsed, and make it the engine's scene — WITHOUT starting it. The client makes it a follower scene that
+     * way, attaches the network to it (so every script's onStart sees `this.net`), then calls `start`.
      */
-    loadScene: (sceneName: string | null, prepare: (json: any) => void) => Promise<Scene>;
+    loadScene: (sceneName: string | null, prepare: (json: any) => void) => Promise<{ scene: Scene; start: () => void }>;
     /** The engine's physics: put on this thread (prediction reads the character's body as each frame leaves it). */
     physics: { setWorkerMode(mode: 'off'): void };
 }
@@ -88,9 +89,12 @@ export class NetSyncClient {
             // character's spawn is applied (SyncPeer holds nothing back once it exists).
             const commands = new PeerCommands(session);
             const authored: FollowerOriginals = new Map();
-            const scene = await options.loadScene(null, (json) => followerSceneJson(json, authored));
+            const { scene, start } = await options.loadScene(null, (json) => followerSceneJson(json, authored));
             const sync = new SyncPeer(session, scene, { simulated: true, authored, isOwn: (id) => id === commands.pawnId });
-            return new NetSyncClient(session, commands, sync, scene, () => (scene as any).physics ?? null);
+            const client = new NetSyncClient(session, commands, sync, scene, () => (scene as any).physics ?? null);
+            // Only now: a script's onStart asks `this.net` whether this machine is the host.
+            start();
+            return client;
         } catch (e) {
             session.leave();
             throw e;

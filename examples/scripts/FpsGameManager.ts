@@ -1,7 +1,7 @@
 import { Game, Logger, Node } from 'cleo'
-import { attribute } from 'cleo/decorators'
+import { attribute, synced } from 'cleo/decorators'
 import type { TemplateName } from 'cleo'
-import { GAME_TYPES, GAME_TYPE_ALIASES, combatantOf, distance3, fps, findByVariable, planarDistance } from '@/FPS/Scripts/FpsShared'
+import { GAME_TYPES, GAME_TYPE_ALIASES, MODE_GAME_TYPES, combatantOf, distance3, fps, findByVariable, planarDistance } from '@/FPS/Scripts/FpsShared'
 
 /**
  * FPS example — the match. Put ONE of these (the "FPS Game Manager" template) at the scene root and the
@@ -21,6 +21,22 @@ import { GAME_TYPES, GAME_TYPE_ALIASES, combatantOf, distance3, fps, findByVaria
  *   ffa              everyone for themselves
  *   teamDeathmatch   two teams, split down the middle (six against six)
  *   oneVsAll         the player against everyone else (a scene with no player: the first fighter against the rest)
+ *   coop             the players on one team against the bots
+ *
+ * ## Online
+ *
+ * The host runs the match; on a player's machine this node only answers the HUD, from `@synced` fields (the score,
+ * the team names, the feed, the clock, the end-of-match banner). The session's mode (`this.net.mode`: `coop`,
+ * `deathmatch`...) picks the game type over `gameType`. Players join and leave during the match:
+ *
+ *   coop             every player on Blue, `coopBots` bots on Red (a horde: up to 50)
+ *   teamDeathmatch   `onlineTeamSize` a side (8 against 8): players are spread over the teams, and bots fill the
+ *                    seats players do not take — a player who joins takes a bot's place, one who leaves gets one
+ *   ffa              everyone for themselves, bots filling up to `onlineTeamSize` times two
+ *
+ * The level's own player character (the one an offline game is played with) is removed when the match starts
+ * online: every player gets a character of their own (the project's NetSync player template). At the end the
+ * match starts again where it is, rather than reloading the scene.
  *
  * ## For the other scripts
  *
@@ -36,7 +52,7 @@ import { GAME_TYPES, GAME_TYPE_ALIASES, combatantOf, distance3, fps, findByVaria
 export default class FpsGameManagerNode extends Node {
   /** The game type: how the scene's fighters are dealt into teams (the dropdown lists GAME_TYPES in FpsShared). */
   @attribute
-  public gameType: 'oneVsAll' | 'teamDeathmatch' | 'ffa' = 'oneVsAll'
+  public gameType: 'oneVsAll' | 'teamDeathmatch' | 'ffa' | 'coop' = 'oneVsAll'
   /**
    * Bot templates the manager spawns when the scene holds fewer fighters than the game type needs, cycling
    * through the list, at spawn points. A scene with enough bots of its own never uses it.
@@ -65,6 +81,12 @@ export default class FpsGameManagerNode extends Node {
   /** Move every fighter onto a spawn point when the match starts (when the scene has spawn points). */
   @attribute
   public spawnAtStart: boolean = true
+  /** Online co-op: the bots against the players (a horde; the host runs up to about 50). */
+  @attribute('Online')
+  public coopBots: number = 24
+  /** Online team deathmatch: fighters a side, bots filling the seats players do not take. */
+  @attribute('Online')
+  public onlineTeamSize: number = 8
   /** Bullet holes kept in the world; older ones are removed. */
   @attribute
   public maxDecals: number = 90
@@ -75,19 +97,38 @@ export default class FpsGameManagerNode extends Node {
   @attribute
   public spawnSafeDistance: number = 14
 
-  // ----- runtime, read by the HUD ----------------------------------------------------------------------
+  // ----- runtime, read by the HUD (synced: a player's machine reads the host's) -------------------------
+  @synced
   public matchOver: boolean = false
+  @synced
   public winner: string = ''
+  @synced
   public message: string = ''
+  /** Whole seconds left (0 with no time limit). */
+  @synced
   public timeLeft: number = 0
   public elapsed: number = 0
+  /** The game type being played (the session's mode online, else `gameType`). */
+  @synced
+  public activeType: string = ''
+  /** Each team's score, and its name. */
+  @synced
+  public scores: Record<string, number> = {}
+  @synced
+  public teamNames: Record<string, string> = {}
+  /** The kill feed, as the HUD shows it. */
+  @synced
+  public feedLines: string[] = []
 
-  /** The game type under its current name (a project saved before the rename still says `oneVsThree` or `team2v2`). */
-  private get _type(): string { return GAME_TYPE_ALIASES[this.gameType as string] ?? this.gameType }
+  /**
+   * The game type: online, the session's mode when it names one; else `gameType` under its current name (a project
+   * saved before the rename still says `oneVsThree` or `team2v2`).
+   */
+  private get _type(): string {
+    return MODE_GAME_TYPES[this.net.mode] ?? GAME_TYPE_ALIASES[this.gameType as string] ?? this.gameType
+  }
 
   private _fighters: Set<any> = new Set()
-  private _scores: Map<string, number> = new Map()
-  private _teamNames: Map<string, string> = new Map()
   private _decals: Node[] = []
   private _spawns: Node[] = []
   private _covers: Node[] = []
@@ -103,31 +144,46 @@ export default class FpsGameManagerNode extends Node {
 
   onStart() {
     fps.gm = this
+    if (this.scene) fps.byScene.set(this.scene, this)
     this.setVariable('fpsManager', true, 'boolean', 'public')
+    // A player's machine: the host runs the match; this node only answers the HUD.
+    if (!this.net.isHost) return
     this.matchOver = false
     this.elapsed = 0
     this.timeLeft = this.timeLimit * 60
+    this.activeType = this._type
     // The fighters start on this same pass; deal them in just after.
     this.after(0.15, () => this._begin())
   }
 
   onDespawn() {
     if (fps.gm === this) fps.gm = null
+    if (this.scene && fps.byScene.get(this.scene) === this) fps.byScene.delete(this.scene)
   }
 
   onUpdate(delta: number) {
+    if (!this.net.isHost) return
     this.elapsed += delta
     this._scan -= delta
     if (this._scan <= 0) { this._scan = 0.5; this._sweep() }
     this._feed = this._feed.filter(f => f.until > this.elapsed)
+    const lines = this._feed.map(f => f.text)
+    if (lines.join('\n') !== this.feedLines.join('\n')) this.feedLines = lines
     if (this.matchOver || !this._started) return
     if (this.timeLimit > 0) {
-      this.timeLeft = Math.max(0, this.timeLimit * 60 - this.elapsed)
-      if (this.timeLeft <= 0) this._endMatch(this._leader())
+      const left = Math.max(0, this.timeLimit * 60 - this.elapsed)
+      this.timeLeft = Math.ceil(left)
+      if (left <= 0) this._endMatch(this._leader())
     }
   }
 
   private _begin(): void {
+    // Online, every player brings a character of their own: the one the level placed for an offline game goes.
+    if (this.net.online) {
+      for (const c of [...(this.scene?.characters ?? [])] as any[]) {
+        if (c.getVariable?.('isPlayer') && c.net?.owner === 0) { this._forget(c); (c.collider ?? c).remove({ immediate: true }) }
+      }
+    }
     this._sweep()
     this._spawns = findByVariable(this.scene!.root, 'fpsSpawn')
     this._covers = findByVariable(this.scene!.root, 'fpsCover')
@@ -137,9 +193,19 @@ export default class FpsGameManagerNode extends Node {
     else this._deal()
   }
 
+  /** How many fighters the match holds: online, by the players in it and the mode; offline, the game type's minimum. */
+  private _target(): number {
+    const humans = [...this._fighters].filter(f => isHuman(f)).length
+    if (this.net.online) {
+      if (this._type === 'coop') return humans + Math.max(0, Math.min(50, this.coopBots))
+      if (this._type === 'teamDeathmatch' || this._type === 'ffa') return Math.max(humans, this.onlineTeamSize * 2)
+    }
+    return (GAME_TYPES[this._type] ?? GAME_TYPES.oneVsAll).minFighters
+  }
+
   /** Spawn bots until the scene holds the game type's minimum. Returns whether any were spawned. */
   private _fillIn(): boolean {
-    const need = (GAME_TYPES[this._type] ?? GAME_TYPES.oneVsAll).minFighters - this._fighters.size
+    const need = this._target() - this._fighters.size
     const templates = (this.botTemplates ?? []).filter(Boolean)
     if (need <= 0 || !templates.length) return false
     const parent = this.scene!.root.getChildByName('Bots')[0] ?? undefined
@@ -166,13 +232,17 @@ export default class FpsGameManagerNode extends Node {
       for (const f of this._ordered()) this._place(f, this._pickSpawn(f))
     }
     this._started = true
+    this.activeType = this._type
     this._announce(`${this._modeName()} - ${this._fighters.size} fighters`)
   }
 
   /** Register every combatant the scene holds that has not reported in. */
   private _sweep(): void {
     for (const c of this.scene?.characters ?? []) if ((c as any).getVariable?.('fpsCombatant')) this.register(c)
-    for (const f of [...this._fighters]) if (!f.scene || f.markForRemoval) this._fighters.delete(f)
+    let left = false
+    for (const f of [...this._fighters]) if (!f.scene || f.markForRemoval) { this._fighters.delete(f); if (isHuman(f)) left = true }
+    // Online, a player whose character went without a word (its player left): a bot takes the seat.
+    if (left && this.net.online && this._started && !this.matchOver) this._fillIn()
   }
 
   // =================================================================================================
@@ -180,49 +250,96 @@ export default class FpsGameManagerNode extends Node {
   // =================================================================================================
 
   public register(c: any): void {
-    if (this._fighters.has(c)) return
+    // By node: a script's `this` and the scene's node for the same fighter are two objects.
+    if (this._fighters.has(c) || [...this._fighters].some(f => f.id === c.id)) return
     this._fighters.add(c)
+    if (!this.net.isHost) return
     // One that arrives mid-match (a respawn) joins the team it was given, or the smaller one.
     if (this._started && !this._snapshots.has(c)) this._joinLate(c)
   }
 
-  public unregister(c: any): void { this._fighters.delete(c) }
+  public unregister(c: any): void {
+    this._forget(c)
+    // Online, a player who leaves gives the seat back: a bot takes it.
+    if (this.net.isHost && this.net.online && this._started && !this.matchOver && isHuman(c)) this.after(0.2, () => this._fillIn())
+  }
 
   public get fighters(): any[] { return [...this._fighters] }
+
+  /** Drop a fighter from the match (whichever object it was registered as). */
+  private _forget(c: any): void {
+    for (const f of [...this._fighters]) if (f === c || f.id === c.id) this._fighters.delete(f)
+  }
 
   /** The player first, then the bots in scene order: the order teams are dealt in. */
   private _ordered(): any[] {
     return [...this._fighters].sort((a, b) => (b.getVariable?.('isPlayer') ? 1 : 0) - (a.getVariable?.('isPlayer') ? 1 : 0))
   }
 
+  /**
+   * Deal the fighters into teams, the players first: ffa everyone alone; oneVsAll the first against the rest; coop
+   * the players against the bots; otherwise the smaller team each time, so the players spread over both and the
+   * bots fill them up (offline, one player: half and half, as before).
+   */
   private _assignTeams(): void {
     const list = this._ordered()
-    const n = list.length
-    this._teamNames.clear()
+    const scores: Record<string, number> = {}, names: Record<string, string> = {}
+    const size: Record<string, number> = { blue: 0, red: 0 }
     list.forEach((f, i) => {
       let team: string
       if (this._type === 'ffa') team = `solo-${i}`
       else if (this._type === 'oneVsAll') team = i === 0 ? 'blue' : 'red'
-      else team = i < Math.ceil(n / 2) ? 'blue' : 'red'
+      else if (this._type === 'coop') team = isHuman(f) ? 'blue' : 'red'
+      else team = size.blue <= size.red ? 'blue' : 'red'
+      size[team] = (size[team] ?? 0) + 1
       f.team = team
-      this._scores.set(team, 0)
-      this._teamNames.set(team, this._type === 'ffa' ? (f.displayName || `Fighter ${i + 1}`) : team === 'blue' ? 'Blue' : 'Red')
+      scores[team] = 0
+      names[team] = this._type === 'ffa' ? (f.displayName || `Fighter ${i + 1}`) : team === 'blue' ? 'Blue' : 'Red'
     })
+    this.scores = scores
+    this.teamNames = names
   }
 
   private _joinLate(c: any): void {
     if (this._type === 'ffa') {
-      const team = `solo-${this._scores.size}`
+      const team = `solo-${Object.keys(this.scores).length}`
       c.team = team
-      this._scores.set(team, 0)
-      this._teamNames.set(team, c.displayName || 'Fighter')
+      this.scores = { ...this.scores, [team]: 0 }
+      this.teamNames = { ...this.teamNames, [team]: c.displayName || 'Fighter' }
+      if (isHuman(c)) this._makeRoom()
+      if (isHuman(c)) this._place(c, this._pickSpawn(c))
       return
     }
-    const counts = new Map<string, number>()
-    for (const f of this._fighters) if (f !== c) counts.set(f.team, (counts.get(f.team) ?? 0) + 1)
-    if (this._type === 'oneVsAll') c.team = 'red'
-    else c.team = (counts.get('blue') ?? 0) <= (counts.get('red') ?? 0) ? 'blue' : 'red'
-    if (!this._scores.has(c.team)) this._scores.set(c.team, 0)
+    const counts = new Map<string, number>(), humans = new Map<string, number>()
+    for (const f of this._fighters) if (f !== c) {
+      counts.set(f.team, (counts.get(f.team) ?? 0) + 1)
+      if (isHuman(f)) humans.set(f.team, (humans.get(f.team) ?? 0) + 1)
+    }
+    const smaller = (counts.get('blue') ?? 0) <= (counts.get('red') ?? 0) ? 'blue' : 'red'
+    if (this._type === 'coop') c.team = isHuman(c) ? 'blue' : 'red'
+    else if (this._type === 'oneVsAll') c.team = isHuman(c) && this.net.online ? 'blue' : 'red'
+    else if (isHuman(c)) {
+      // A player joins the side with fewer players (then the smaller side), and takes a bot's place there.
+      const hb = humans.get('blue') ?? 0, hr = humans.get('red') ?? 0
+      c.team = hb < hr ? 'blue' : hr < hb ? 'red' : smaller
+    } else c.team = smaller
+    if (!(c.team in this.scores)) this.scores = { ...this.scores, [c.team]: 0 }
+    if (!(c.team in this.teamNames)) this.teamNames = { ...this.teamNames, [c.team]: c.team === 'blue' ? 'Blue' : 'Red' }
+    if (isHuman(c)) {
+      if (this._type !== 'coop') this._makeRoom(c.team)
+      this._place(c, this._pickSpawn(c))
+    }
+  }
+
+  /** Online: a player has joined a full match; a bot (of `team`, if given) goes to make room. */
+  private _makeRoom(team?: string): void {
+    if (!this.net.online || this._fighters.size <= this._target()) return
+    const bots = [...this._fighters].filter(f => !isHuman(f) && (!team || f.team === team))
+    const bot = bots.find(b => !b.isDead) ?? bots[0]
+    if (!bot) return
+    this._forget(bot)
+    this._snapshots.delete(bot)
+    ;(bot.collider ?? bot).remove({ immediate: true })
   }
 
   public isHostile(a: any, b: any): boolean { return !!a && !!b && a !== b && a.team !== b.team }
@@ -232,13 +349,15 @@ export default class FpsGameManagerNode extends Node {
     return a.team !== b.team || this.friendlyFire
   }
 
-  public teamName(team: string): string { return this._teamNames.get(team) ?? team }
+  public teamName(team: string): string { return this.teamNames[team] ?? team }
 
-  public scoreOf(team: string): number { return this._scores.get(team) ?? 0 }
+  public scoreOf(team: string): number { return this.scores[team] ?? 0 }
+
+  private _setScore(team: string, score: number): void { this.scores = { ...this.scores, [team]: score } }
 
   /** [team, score] best first. */
   public standings(): { team: string, name: string, score: number }[] {
-    return [...this._scores].map(([team, score]) => ({ team, name: this.teamName(team), score })).sort((a, b) => b.score - a.score)
+    return Object.entries(this.scores).map(([team, score]) => ({ team, name: this.teamName(team), score })).sort((a, b) => b.score - a.score)
   }
 
   private _modeName(): string {
@@ -262,12 +381,12 @@ export default class FpsGameManagerNode extends Node {
     if (this.matchOver) return
     if (killer && killer !== victim && killer.team !== victim.team) {
       const total = this.scoreOf(killer.team) + 1
-      this._scores.set(killer.team, total)
+      this._setScore(killer.team, total)
       this._feed.push({ text: `${killer.displayName} > ${victim.displayName}${zone === 'head' ? '  [headshot]' : ''}`, until: this.elapsed + 6 })
       if (this.scoreLimit > 0 && total >= this.scoreLimit) { this._endMatch(this.teamName(killer.team)); return }
     } else {
       // A kill by a teammate or by the world costs the victim's team a point.
-      this._scores.set(victim.team, this.scoreOf(victim.team) - 1)
+      this._setScore(victim.team, this.scoreOf(victim.team) - 1)
       this._feed.push({ text: `${victim.displayName} died`, until: this.elapsed + 6 })
     }
     const isPlayer = !!victim.getVariable?.('isPlayer')
@@ -282,12 +401,14 @@ export default class FpsGameManagerNode extends Node {
     const spawn = this._pickSpawn(victim)
     if (victim.getVariable?.('isPlayer') || !victim.respawnTemplate) {
       // The player (and any fighter without a template) is reset in place.
-      if (!victim.scene) return
+      if (!victim.scene || !victim.isDead) return
       victim.resetForRespawn()
       this._place(victim, spawn)
       victim.respawned?.()
       return
     }
+    // Respawned once (an online match that restarted brings its dead back at once; their own timer then finds this).
+    if (!this._snapshots.has(victim)) return
     const snap = this._snapshots.get(victim)
     this._snapshots.delete(victim)
     const at = spawn ? Array.from(spawn.worldPosition as ArrayLike<number>) : Array.from(victim.worldPosition as ArrayLike<number>)
@@ -347,7 +468,28 @@ export default class FpsGameManagerNode extends Node {
     this.matchOver = true
     this.winner = winner
     this.message = winner === 'Draw' ? 'DRAW' : `${winner.toUpperCase()} WINS`
+    // Online the match starts again where it is (the players keep their characters); offline the scene reloads.
+    if (this.net.online) { this.after(this.restartSeconds, () => this._restartMatch()); return }
     this.after(this.restartSeconds, () => { Game.loadScene(Game.sceneName).catch(e => Logger.warn('FPS: could not restart the match: ' + e, 'Script')) })
+  }
+
+  /** Online: scores to nothing, everyone alive on a spawn point, the clock from the start. */
+  private _restartMatch(): void {
+    this.matchOver = false
+    this.winner = ''
+    this.message = ''
+    this.elapsed = 0
+    this.timeLeft = this.timeLimit * 60
+    const zero: Record<string, number> = {}
+    for (const team of Object.keys(this.scores)) zero[team] = 0
+    this.scores = zero
+    for (const f of [...this._fighters]) {
+      f.kills = 0
+      f.deaths = 0
+      if (f.isDead) { this._respawn(f); continue }
+      this._place(f, this._pickSpawn(f))
+    }
+    this._announce(`${this._modeName()} - a new match`)
   }
 
   // =================================================================================================
@@ -358,7 +500,7 @@ export default class FpsGameManagerNode extends Node {
     this._feed.push({ text, until: this.elapsed + 5 })
   }
 
-  public get feed(): string[] { return this._feed.map(f => f.text) }
+  public get feed(): string[] { return this.feedLines }
 
   // =================================================================================================
   // Noise, reinforcements
@@ -449,3 +591,6 @@ export default class FpsGameManagerNode extends Node {
     }
   }
 }
+
+/** A fighter a player drives (an FpsPlayer), not a bot. */
+function isHuman(f: any): boolean { return !!f?.getVariable?.('isPlayer') }

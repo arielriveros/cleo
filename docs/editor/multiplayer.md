@@ -53,6 +53,22 @@ While it runs, the dialog shows the **NetSync readings**:
 
 **Stop** closes the windows and the host's game. A change in the editor reaches the game on the next Start.
 
+## Firing Line online, from the example to a VPS
+
+The Firing Line example is an online game already (see [its notes](fps-example.md#online)). To play it with
+friends on a server of your own:
+
+1. **Open it**: the projects list › Examples › Firing Line.
+2. **Try it here**: start the dev host (`npm run host -- --dev`), then Play's menu › **Multiplayer…** with two
+   players or more. Set **Options › Project › NetSync › Game mode** to `coop` (the players against a horde of
+   bots) or `deathmatch` (eight against eight, bots in the empty seats) first.
+3. **Name the allocator**: Options › Project › NetSync › **Allocator** `https://play.example.com` (your domain).
+4. **Publish › Web**, then publish the host from the same build:
+   `npm run publish-host -- --game <the web build's folder> --out firing-line-host`.
+5. **Deploy** the host folder on a VPS: [Hosting › One VPS, step by step](../reference/netsync-hosting.md#one-vps-step-by-step).
+6. **Play**: put the web build online and open it. Every player who opens it is sent to a session of the
+   project's game mode; add `?mode=deathmatch` (or `coop`) to the address to choose, and `?name=…` for a name.
+
 ## Publishing
 
 - **Publish › Web** builds the page players open (with Online play on, it asks the allocator for a host).

@@ -535,7 +535,14 @@ function fixMatch(bundle, scene) {
   for (const t of bundle.libraries.templates) {
     if (botNames.includes(t.name) && t.nodeJson?.scriptVars) t.nodeJson.scriptVars.respawnTemplate = t.name
   }
-  walkNodes(root, n => { if (botNames.includes(n.name) && n.scriptVars && 'respawnTemplate' in n.scriptVars) n.scriptVars.respawnTemplate = n.name })
+  // A placed bot comes back as the template it was placed from: its Collider names the template (every bot
+  // template's Character is called the same, so the Character's own name says nothing).
+  const templateName = new Map(bundle.libraries.templates.map(t => [t.id, t.name]))
+  walkNodes(root, n => {
+    const name = templateName.get(n.variables?.__templateId?.value)
+    if (!botNames.includes(name)) return
+    for (const c of n.children ?? []) if (c.type === 'character' && c.scriptVars && 'respawnTemplate' in c.scriptVars) c.scriptVars.respawnTemplate = name
+  })
   const gm = findNode(root, n => n.name === 'FPS Game Manager')
   if (gm?.scriptVars) {
     const alias = { oneVsThree: 'oneVsAll', team2v2: 'teamDeathmatch' }
