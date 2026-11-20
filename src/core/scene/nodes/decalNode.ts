@@ -291,7 +291,7 @@ export class DecalNode extends Node {
     public set size(v: [number, number, number]) {
         this._size = [Math.max(MIN_EXTENT, Math.abs(v[0])), Math.max(MIN_EXTENT, Math.abs(v[1])),
                       Math.max(MIN_EXTENT, Math.abs(v[2]))];
-        this.invalidateWorldBounds();
+        this.markDirty('bounds');
     }
 
     /**

@@ -337,7 +337,7 @@ export default class Hero extends Node { ${wrong} }
     try {
       const head = `
 import { Node } from 'cleo'
-import { child, find, onAction, onHold, onTap, onEvent, every, onEnter, onExit, attribute, save, options, pick } from 'cleo/decorators'
+import { child, find, onAction, onHold, onTap, onEvent, every, onEnter, onExit, attribute, save, options, pick, eventListener, eventDispatch, observable, onClipEvent } from 'cleo/decorators'
 import type { ActionState } from 'cleo'
 export default class Hero extends Node {
 `;
@@ -361,6 +361,14 @@ export default class Hero extends Node {
   @attribute('Combat', { min: 0, max: 1, step: 0.05, label: 'Crit' }) crit = 0.1
   @attribute({ readonly: true, showIf: ['mode', 'ranged'] }) private hidden2 = 2
   @attribute({ color: true }) tint: [number, number, number] = [1, 1, 1]
+  @onEvent('combat:Hit', { once: true, priority: 2, where: { team: 'red' } }) hitBy(target: Node, damage: number) {}
+  @eventListener('Shot', { capture: true }) shot(result: { damage: number }, kind: string) {}
+  @eventDispatch('Shot', 'pistol') fire() { return { damage: 10 } }
+  @eventDispatch({ name: 'Saved', mode: 'async', to: 'all' }) async saveGame() { return 'slot' }
+  @observable lives = 3
+  @observable('ui:Score') score = 0
+  @onClipEvent('footstep') step(info: { clip: string }) {}
+  @onClipEvent('hit', 'Swing') swing() {}
 }`);
       const ok = await typecheck();
       expect(ok.out).toBe('');
@@ -376,6 +384,9 @@ export default class Hero extends Node {
         `@every('x') think() {}`,
         `@onEnter('P') hit(other: string) {}`,
         `@attribute({ min: 'x' }) n = 1`,
+        `@onEvent('Died', { once: 'yes' }) died() {}`,
+        `@eventDispatch({ name: 'X', mode: 'later' }) fire() {}`,
+        `@observable(3) lives = 3`,
       ]) {
         await writeScript('Player/Hero.ts', `${head}  ${wrong}\n}`);
         expect((await typecheck()).ok, wrong).toBe(false);

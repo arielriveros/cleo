@@ -98,6 +98,8 @@ async function run(c, port) {
         if (c.decals ? s.smoke.absent !== null : !/Decals feature/.test(s.smoke.absent ?? '')) why.push(`DecalNode: ${s.smoke.absent ?? 'defined'}`);
         // A published script's decorators come from 'cleo/decorators', which the player registers itself.
         if (s.smoke.decorators !== 'ok') why.push(`decorators: ${s.smoke.decorators}`);
+        // The event system: decorators, events at nodes and the frame's deferred flush, in the published player.
+        if (s.smoke.events !== 'ok') why.push(`events: ${s.smoke.events}`);
         // SaveGame through the shell: a file in <profile>/saves, and, from the second game on, the one an
         // earlier game (another process) wrote, already listed when this one started.
         const sv = s.smoke.saves;

@@ -16,6 +16,7 @@ import { featureById } from '../../modules/catalog';
 // Leaves too: the shared lexing, and the pass that turns decorators into a call the class runs on itself.
 import { IDENT_PART, IDENT_START, isValuePosition, skipRegex, skipString, skipTrivia } from './scriptLexer';
 import { lowerScriptDecorators } from './scriptDecoratorLowering';
+import { resetScriptChannels } from '../events/hub';
 
 export type ScriptModule = Record<string, any>;
 
@@ -242,12 +243,17 @@ export function setScriptModuleProvider(provider: ((id: string) => ScriptModuleF
     moduleCache.clear();
 }
 
-/** Forget every user module, source and cached evaluation. Called when play starts and stops. */
+/**
+ * Forget every user module, source and cached evaluation, and what the last run's scripts left on the event
+ * channels (listeners added by hand, deferred events, sticky values; the engine channel is kept). Called when play
+ * starts and stops, and when a host or player starts a game.
+ */
 export function resetScriptModules(): void {
     userSources.clear();
     moduleCache.clear();
     loadingStack.length = 0;
     lastCycle = null;
+    resetScriptChannels();
 }
 
 /** The user module ids currently known (sources registered for the eval path). */

@@ -12,6 +12,7 @@ import {
 } from "../../../animation/spriteAnimation";
 import type { SpriteAnimationSet, SpriteClip } from "../../../animation/spriteAnimation";
 import { isCharacterBody2D } from "./nodeType";
+import { ANIMATION_CHANNEL, getChannel, hasScriptListeners, resolveEvent } from "../../events/hub";
 
 /**
  * A sprite that plays a frame sequence.
@@ -298,6 +299,11 @@ export class AnimatedSpriteNode extends SpriteNode {
             const name = clip.name;
             this.onAnimationFinished(name);
             if (this.parent) this.parent.onAnimationFinished(name);
+            // The event system hears it at the frame's event flush, as a skeletal animator's ActionFinished.
+            if (hasScriptListeners()) {
+                const channel = getChannel(ANIMATION_CHANNEL);
+                if (channel.hasListeners('ClipFinished')) channel.defer('ClipFinished', [{ clip: name, node: this }], { target: this });
+            }
             // A once-clip with a follow-on plays it, unless a machine is choosing.
             if (clip.next && this._clip === clip && (!machine || !this._machineOn)) this._startClip(clip.next);
         }
@@ -329,6 +335,12 @@ export class AnimatedSpriteNode extends SpriteNode {
         for (const event of frame.events ?? []) {
             this.onAnimationEvent(event, clip.name);
             if (this.parent) this.parent.onAnimationEvent(event, clip.name);
+            // And the event system, as a clip marker on a skeletal animator: at this sprite, bubbling up to its parent
+            // (`@onClipEvent` there), then the `animation` channel. `'channel:name'` picks another channel.
+            if (hasScriptListeners()) {
+                const [channel, name] = resolveEvent(event, ANIMATION_CHANNEL);
+                if (channel.hasListeners(name)) channel.fire(name, [{ event: name, clip: clip.name, state: this.state, layer: null, node: this, frame: index }], this);
+            }
         }
     }
 

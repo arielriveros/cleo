@@ -87,6 +87,7 @@ After that the two halves are independent, and you can read either first:
 |---|---|
 | [Getting started](scripting/getting-started.md) | What a script is and how it attaches to a node |
 | [Decorators](scripting/decorators.md) | Find nodes, route input and mark fields with `@child`, `@find`, `@onAction`, `@onHold`, `@onEvent`, `@onEnter`, `@save` |
+| [Events](scripting/events.md) | Channels, events at nodes, sync, async and deferred delivery, and the event decorators |
 | [Lifecycle](scripting/lifecycle.md) | Every hook, its ordering, timers, spawning and despawning |
 | [Node API](scripting/node-api.md) | Transforms, hierarchy, lookups, variables |
 | [Motion and physics](scripting/motion-and-physics.md) | Bodies, velocity, measured motion, raycasts, collisions |

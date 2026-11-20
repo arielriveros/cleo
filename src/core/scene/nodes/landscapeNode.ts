@@ -66,7 +66,7 @@ export class LandscapeNode extends Node {
             if (!chunk.dirty || !node) continue;
             // Sculpting moves chunk vertices without moving the node, so nothing else invalidates the
             // cached world bounds. Must run before the `initialized` gate.
-            node.invalidateWorldBounds();
+            node.markDirty('bounds');
             if (node.initialized) {
                 chunk.model.mesh.updateVertexData(chunk.model.geometry.getData(TERRAIN_ATTRIBUTES));
                 chunk.dirty = false;

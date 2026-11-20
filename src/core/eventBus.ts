@@ -1,4 +1,5 @@
-// Imports must stay type-only (bar ./typedEmitter, which imports nothing): this module has to be dependency-free at runtime (see engineEventBus).
+// Imports must stay type-only (bar ./typedEmitter and ./events, which import nothing outside themselves): this module
+// has to be dependency-free at runtime (see engineEventBus).
 import type { LogEntry } from './logger';
 import type { Node } from './scene/nodes/node';
 import type { Scene } from './scene/scene';
@@ -7,6 +8,8 @@ import type { AssetRef } from './assets/assetGraph';
 // TypedEmitter lives in its own dependency-free module so code outside the engine graph (NetSync's Node
 // host) can use it without type-checking the scene graph this file's event map names.
 import { TypedEmitter } from './typedEmitter';
+import { ChannelEmitter } from './events/channelEmitter';
+import { ENGINE_CHANNEL, getChannel } from './events/hub';
 export { TypedEmitter };
 
 /**
@@ -87,6 +90,29 @@ export interface SceneChange {
   scene?: Scene | null;
 }
 
+/**
+ * What about a node went stale, as `Node.markDirty` says it:
+ * - `'transform'`: its world matrix was recomposed (it, or an ancestor, moved);
+ * - `'bounds'`: its world bounds must be recomputed (a cloth step, a sculpt, a decal resized);
+ * - `'lists'`: the scene's typed node lists must be rebuilt (draw distance, socket attachment);
+ * - `'geometry'`: the mesh it draws was replaced;
+ * - `'material'`: what it is drawn with changed;
+ * - `'render'`: anything else the renderer bakes from it (a sky light's projection, an atmosphere's tables).
+ */
+export type DirtyAspect = 'transform' | 'bounds' | 'lists' | 'geometry' | 'material' | 'render';
+
+/**
+ * Payload of `NODE_DIRTY`: everything that went stale on one node since the last flush. Coalesced — however often
+ * a node is marked in a frame, it is reported once, with every aspect together — and delivered at the engine
+ * channel's flush, after the scene's update and before the frame is drawn.
+ */
+export interface NodeDirty {
+  node: Node;
+  aspects: Set<DirtyAspect>;
+  /** The scene the node was in when it was first marked, or null. */
+  scene: Scene | null;
+}
+
 /** Engine bus event catalog: event name -> payload type. `void` means "emitted with no argument". */
 export interface EngineEventMap {
   /** Any node/scene mutation. Structural kinds re-filter the scene; all kinds mark the editor dirty. */
@@ -124,14 +150,21 @@ export interface EngineEventMap {
    * editor. A published game never populates the graph, so it pays nothing either way.
    */
   ASSET_CHANGED: { origin: AssetRef; affected: AssetRef[] };
+  /**
+   * A node went stale in some way (see {@link DirtyAspect}): posted by `Node.markDirty`, coalesced per node, and
+   * delivered once per frame before it is drawn. Never posted while nothing listens, so it costs nothing then.
+   * The node has already done what keeps it correct (its own caches, the scene's lists): this tells everyone else.
+   */
+  NODE_DIRTY: NodeDirty;
 }
 
 /**
- * The engine-wide event bus, and the same object as `CleoEngine.eventEmitter`. It must stay in this
- * dependency-free module: `Logger` emits through it, so putting it on the engine class would make every
+ * The engine-wide event bus, and the same object as `CleoEngine.eventEmitter`: a typed view of the hub's `engine`
+ * channel (src/core/events), so the engine's own traffic travels on the same system as the game's. It must stay in
+ * this dependency-free module: `Logger` emits through it, so putting it on the engine class would make every
  * module that logs — including WebGL-free algorithm modules — pull in the whole renderer graph.
  */
-export const engineEventBus = new TypedEmitter<EngineEventMap>();
+export const engineEventBus: ChannelEmitter<EngineEventMap> = new ChannelEmitter<EngineEventMap>(getChannel(ENGINE_CHANNEL));
 
 /**
  * Authoring gate for property-level SCENE_CHANGED events (the kinds fired from every setter). Default

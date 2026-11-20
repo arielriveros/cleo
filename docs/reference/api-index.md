@@ -80,7 +80,11 @@ Layout helpers: `uiSetRect`, `uiSolveRect`, `uiRootScale`, `uiProjectToScreen`, 
 | `setScriptProvider`, `resolveNodeScript` | The no-eval path a published build uses. |
 | `attachScriptFactory`, `unwrapScriptNode` | Bind a factory to a node. |
 | `getData`, `setData`, `bindDataAccessors`, `canAccessVariable` | The variable access boundary. |
-| `GameEvents` | Named messages between scripts: `emit`, `on`, `off`. What `@onEvent` listens to. |
+| `GameEvents` | Named messages between scripts: `emit`, `on`, `off`. The game channel's one-payload form. |
+| `Events` | The event system: channels (`'channel:Name'`), sync, async (`emitAsync`) and deferred (`post`) delivery, `next`, `request`, `route`, `send`. See [Events](../scripting/events.md). |
+| `EventChannel`, `CleoEvent`, `Emitter`, `Subject`, `ValueSubject`, `ChannelEmitter` | Its parts: a channel, the event being delivered, a listener store, watched values, the typed view `engineEventBus` is. |
+| `getChannel`, `dispatchAt`, `addTargetListener`, `sendEvent`, `hasScriptListeners`, `resetScriptChannels` | The event system for engine code. |
+| `observableOf` | The `ValueSubject` behind a node's `@observable` field. |
 | `applyScriptDecorators`, `scriptMembersOf`, `membersOfNode` | What the script compile calls, and how the engine reads a class's decorators back. |
 | `lowerScriptDecorators`, `decoratorSiteAt` | How the compile rewrites decorators, and where the script editor's `@` completion applies. |
 | `ActionName` / `ProjectActions` / `ScriptPickKind` *(types)* | An input action's name, checked against the project's input map. |
@@ -102,7 +106,9 @@ one from there fails to load, with an error saying where it went.
 |---|---|
 | `child`, `find` | Fill a field with a node found by name: under this one, or anywhere in the scene. |
 | `onAction`, `onHold`, `onTap` | Call a method on an input action: a press (or another change), a hold, a tap. |
-| `onEvent`, `every` | Call a method on a `GameEvents` message, or every so many seconds of game time. |
+| `onEvent`, `every` | Call a method on an event sent anywhere on its channel, or every so many seconds of game time. |
+| `eventListener`, `onClipEvent` | Call a method on an event dispatched at this node or beneath it; on a clip's event marker. |
+| `eventDispatch`, `observable` | Send an event with a method's result each time it runs; when a field takes a new value. |
 | `onEnter`, `onExit` | Call a method when a trigger overlap begins or ends. |
 | `attribute`, `save`, `options`, `pick` | Show a field in the inspector, keep it in saves, offer its values from a list or by kind. |
 | `ActionWhen` / `AttributeOptions` *(types)* | Which change of an action `@onAction` answers; how an `@attribute` row shows. |

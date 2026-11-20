@@ -16,6 +16,38 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **One event system for scripts, animators and the engine.**
+  - *Channels.* Every event travels on a named channel of one hub: `game` (scripts; what `GameEvents` always was),
+    `animation` (what animators fire), `engine` (the engine's own traffic; `engineEventBus` is a view of it) and any
+    a game names, written `'channel:Name'`. `Events` sends on them sync (`emit`), async (`emitAsync`, each
+    listener's promise awaited in turn; `emitParallel`) or deferred (`post`, delivered at the frame's event flush,
+    held while paused), and adds `next`, `request`, sticky events, routes between channels and `send` with every
+    option.
+  - *Events at nodes.* `this.dispatchEvent` dispatches at a node: down through its ancestors (capture), the node,
+    back up (bubble), then the channel's own listeners, DOM-style, with `stopPropagation`. `this.addEventListener`
+    listens at a node, and `this.listen` listens on a channel until the node despawns.
+  - *Decorators.* `@eventListener(name)` hears what is dispatched at its node or beneath it; `@eventDispatch(name,
+    ...extras)` sends a method's result each time it runs (async methods awaited, `Events.cancel` to skip, a long
+    form with `mode` and `to`); `@observable` sends `<field>Changed` when a field takes a new value; `@onClipEvent`
+    hears a clip's event marker with no subscribing or cleanup. `@onEvent` takes `once`, `priority`, `where` and a
+    channel.
+  - *Animators.* Clip markers are dispatched at the animator's node on the `animation` channel, so a character's
+    script hears its own animator; state enter and exit, finished actions and sprite clip ends are sent too.
+  - *Engine internals.* `node.markDirty(aspect)` keeps the node correct at once and posts one coalesced `NODE_DIRTY`
+    per node per frame on the engine channel, before the frame is drawn, and only while someone listens.
+  - *Online.* `to: 'host' | 'peers' | 'all'` sends an event to other machines in a NetSync game, dispatched at each
+    machine's copy of its node.
+  - *The Sandbox's scripts use it.* The guns tell each shot as `weapon:Shot` at their grip, and the player takes the
+    recoil from it; the weapon in the hands is an `@observable` (`weapon:Equipped` shows its model), and so is the
+    Game Manager's light setup (`sandbox:LightSetup` updates the HUD).
+  - *Fixes on the way.* A scene re-reads its node lists only for its own structural changes, not every open tab's.
+    A disposed scene is collected now: before, a scene whose scripts used `@onEvent` stayed in memory with every
+    node in it, and its handlers kept being called (30 Play sessions of a 300-node scene held 92 MB). Events still
+    queued about a disposed scene's nodes are dropped, and listeners a game added by hand no longer survive a Stop.
+  - *Performance.* Measured against the previous engine in one bundled build: a frame of 2000 nodes or of 200
+    animators costs the same; subscribing and unsubscribing a crowd of 10,000 listeners is faster (removal is O(1));
+    an emit nobody listens to builds nothing, and one with a listener costs 25-60 ns more than the old emitters
+    for error isolation, priorities and `Events.current`.
 - **A pistol and a rifle in the Sandbox, carried over the walk, aimed where the camera looks, and fired.**
   - *The weapons.* Q takes out the pistol, then the rifle, then puts it away (RB on a pad); holding the right mouse
     button aims it (LT): the character faces the camera and strafes, turns in place sooner, and the camera moves in

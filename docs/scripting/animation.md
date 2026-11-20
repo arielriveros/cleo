@@ -305,7 +305,27 @@ additive — in the editor's [Action slots](../editor/animation.md#action-slots)
 An event marker fires a named event at a time you scrub on the timeline. That is how a footstep
 sound, a hit frame or a particle burst stays in sync with the animation rather than with a timer.
 
-Markers come from two places, and both arrive through the same callback:
+The simplest way to hear one is a decorator on the character's script:
+
+```ts
+import { onClipEvent } from 'cleo/decorators'
+
+@onClipEvent('footstep') step(info) { this.playFootstep() }          // any clip's footstep marker
+@onClipEvent('hit', 'Heavy Attack') heavyHit(info) { this.land(2) }  // only that clip's
+```
+
+The animator dispatches each marker at its model node on the `animation` channel, and the marker
+bubbles up through the character. So the script on the character root hears its own animator, and
+no other character's. `info` is `{ event, clip, state, layer, node, animator }`.
+
+Like every decorator, it listens only while the node is awake. There is no subscribing in `onStart`
+and no unsubscribing in `onDespawn`, and a pooled character that respawns hears each marker once.
+`@eventListener('animation:hit')` is the same with more options, and `@onEvent('animation:footstep')`
+hears every character's footsteps: a footstep sound system on its own node, for example. The
+animator also sends `StateEnter`, `StateExit` and `ActionFinished` on that channel, at the frame's
+event flush. [Events](events.md#animation-events) has the table.
+
+Markers come from two places, and both arrive through the decorators and through the callback:
 
 - **On the clip** (`Animation.events`, authored on the Events track of the clip player and of the
   Animator's transport). These fire wherever the clip plays — a base state, a layer or an action slot.
@@ -322,8 +342,8 @@ stop()      // unsubscribe
 
 `onAnimationEvent` is a method on the ANIMATOR, not a node lifecycle hook — there is no
 `onAnimationEvent()` alongside `onStart`/`onUpdate`. It also has no automatic cleanup, unlike
-`this.after`: keep the returned function and call it from `onDespawn`, or a node that respawns will
-hold two listeners and do everything twice.
+`this.after` and the decorators: keep the returned function and call it from `onDespawn`, or a node
+that respawns will hold two listeners and do everything twice. Prefer `@onClipEvent`.
 
 Marker times are in CLIP seconds, so a state playing at `speed: 1.5` fires the marker at
 `time / 1.5` wall-clock seconds. A marker beyond a state's `exitTime` is never reached at all.

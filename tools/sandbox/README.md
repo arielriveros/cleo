@@ -108,5 +108,10 @@ The files:
   times the default's.
 - **`environment.json`**: the sky, sun, sky light and render settings the scene starts with.
 
-After changing `examples/scripts/SandboxPlayer.ts` or `SandboxCamera.ts`, run the build again: the scene embeds the
-scripts' source.
+After changing any `examples/scripts/Sandbox*.ts`, run the build again: the scene and the templates embed the
+scripts' source (the Sandbox suite checks they match).
+
+The scripts talk through events (docs/scripting/events.md):
+- SandboxGun dispatches `weapon:Shot` at its grip, and SandboxPlayer's `@eventListener` takes the recoil from it.
+- SandboxPlayer's `@observable` `weapon` sends `weapon:Equipped`, which shows the weapon in the hand.
+- SandboxGameManager's `@observable` `setup` sends `sandbox:LightSetup`, which the HUD line answers.

@@ -38,6 +38,12 @@ export interface SceneNet {
     call(node: Node, method: string, original: (...args: unknown[]) => unknown, args: unknown[], options: NetCallOptions): unknown;
     /** Raise a game event (`@onEvent`, GameEvents) on other machines. */
     emit(name: string, payload: unknown, to: NetEventTarget): void;
+    /**
+     * Send an event-system event (`@eventDispatch({ to })`, `Events.send(name, args, { to })`) to other machines,
+     * where it is dispatched at their copy of `target` (or broadcast on its channel). Returns whether this machine
+     * is one of those it is for, and so should deliver it here too.
+     */
+    sendEvent?(channel: string, name: string, args: unknown[], to: NetEventTarget, target: Node | null): { local: boolean };
 }
 
 /**

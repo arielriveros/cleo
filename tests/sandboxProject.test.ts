@@ -18,6 +18,7 @@ import { fieldWeights, poseSampleKey } from '../src/animation/animationField';
 import { resolveTablePose } from '../src/animation/animationPose';
 import { reembedPoses } from '../applications/editor/src/utils/animationControllers';
 import { registerTemplates, clearTemplates } from '../src/core/scene/templates';
+import { Events } from '../src/core/events';
 
 // The Sandbox example: a mannequin with ALS-style locomotion built from the engine's own tools (tools/sandbox).
 // Almost everything that can go wrong with it is silent: a parameter bound to a field that does not exist reads
@@ -2079,6 +2080,47 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(gun.shots).toBe(shots);
         input.release('Sprint'); input.setMove(0, 0);
         } finally { clearTemplates(); }
+    });
+
+    it('tells each shot as weapon:Shot, which the holder hears for its recoil and anyone may hear', () => {
+        withEffects();
+        const heard: { gun: string; recoil: boolean; atGun: boolean }[] = [];
+        const off = Events.on('weapon:Shot', (shot: any) => heard.push({
+            gun: shot.gun.name, recoil: !!shot.recoil, atGun: Events.current?.target === shot.gun,
+        }));
+        try {
+            const p = play(OPEN);
+            p.run(0.5);
+            equip(p, 2);
+            const gun = gunOf(p, 'Rifle Grip');
+            input.press('Aim');
+            p.run(0.6);
+            const pitch0 = p.rigs[0].pitch;
+            input.tap('Fire');
+            p.run(0.05);
+            input.release('Aim');
+            // Dispatched at the gun, with the pull's recoil; the holder's listener kicked the camera with it.
+            expect(heard).toEqual([{ gun: 'Rifle Grip', recoil: true, atGun: true }]);
+            expect(gun.shots).toBe(1);
+            expect(p.rigs[0].pitch).toBeLessThan(pitch0);
+        } finally { off(); clearTemplates(); }
+    });
+
+    it('shows the model of the weapon in the hands through weapon:Equipped', () => {
+        const p = play(OPEN);
+        p.run(0.3);
+        const pistol = gunOf(p, 'Pistol Grip'), rifle = gunOf(p, 'Rifle Grip');
+        const told: [number, number][] = [];
+        const off = p.player.addEventListener('weapon:Equipped', (now: number, was: number) => told.push([now, was]));
+        try {
+            equip(p, 1);
+            expect([pistol.visible, rifle.visible]).toEqual([true, false]);
+            equip(p, 2);
+            expect([pistol.visible, rifle.visible]).toEqual([false, true]);
+            equip(p, 0);
+            expect([pistol.visible, rifle.visible]).toEqual([false, false]);
+            expect(told).toEqual([[1, 0], [2, 1], [0, 2]]);
+        } finally { off(); }
     });
 
     it('never shoots itself, and passes through the stairs\' ramps', () => {

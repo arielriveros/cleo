@@ -1,5 +1,6 @@
 import { Texture } from "../../../graphics/texture";
 import type { Scene } from "../scene";
+import type { DirtyAspect } from "../../eventBus";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
@@ -408,8 +409,14 @@ export class SkyAtmosphereNode extends Node {
     public get cubemapResolution(): number { return this._cubemapResolution; }
     public get needsBake(): boolean { return this._needsBake; }
     public get lastSunDir(): [number, number, number] { return this._lastSunDir; }
-    /** Force a re-bake on the next frame (e.g. editor "Rebake" button). */
-    public markDirty(): void { this._needsBake = true; }
+    /**
+     * Force a re-bake on the next frame (e.g. editor "Rebake" button): the `'render'` aspect, the default. Other
+     * aspects (bounds, lists) are not the atmosphere's and leave the bake alone.
+     */
+    public override markDirty(aspect: DirtyAspect = 'render'): void {
+        if (aspect === 'render') this._needsBake = true;
+        super.markDirty(aspect);
+    }
     /** Store a freshly-created render-target cubemap (disposes any previous one). */
     public setCubemap(cube: Texture, resolution: number): void {
         if (this._cubemap && this._cubemap !== cube) this._cubemap.delete();

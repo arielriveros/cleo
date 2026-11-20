@@ -14,6 +14,7 @@ import { Node } from '../core/scene/nodes/node';
 import { ModelNode } from '../core/scene/nodes/modelNode';
 import { canAccessVariable } from '../core/scene/nodes/nodeVariables';
 import { actionsFor, runEventActions, type EventActionBinding } from './eventActions';
+import { ANIMATION_CHANNEL, getChannel, hasScriptListeners, resolveEvent } from '../core/events/hub';
 import { InputSystem } from '../input/inputSystem';
 import { Logger } from '../core/logger';
 import { LogTally, plural } from '../core/logTally';
@@ -322,6 +323,40 @@ export interface AnimationTransition {
      * start — a second hit replays the flinch. Off, a transition into the current state never fires.
      */
     canTransitionToSelf?: boolean;
+}
+
+/**
+ * What an animation event marker is heard with on the event system (`@onClipEvent`, `@eventListener('animation:…')`):
+ * the marker, the clip it is on, and where the machine was.
+ */
+export interface AnimationEventInfo {
+    /** The marker's name (without a `channel:` prefix, if it had one). */
+    event: string;
+    /** The clip it is on. */
+    clip: string;
+    /** The state playing that clip, on its layer; null for an action playing in a slot. */
+    state: string | null;
+    /** The layer or action slot that played it; null for the base layer. */
+    layer: string | null;
+    /** The node the animator belongs to (the character's model). */
+    node: Node | null;
+    animator: Animator;
+}
+
+/** What `StateEnter`, `StateExit` and `ActionFinished` are heard with on the `animation` channel. */
+export interface AnimationStateEventInfo {
+    /** The state entered (StateEnter) or left (StateExit); null for ActionFinished. */
+    state: string | null;
+    /** The state left, or null (the first state, or an action). */
+    from: string | null;
+    /** The state entered, or null for an action. */
+    to: string | null;
+    /** The layer the state is on (null for the base layer), or the action's slot. */
+    layer: string | null;
+    /** ActionFinished: the action's clip. */
+    clip?: string;
+    node: Node | null;
+    animator: Animator;
 }
 
 export interface AnimationEventMarker {
@@ -1028,6 +1063,9 @@ export class Animator {
     private _paramValues: Map<string, number | boolean> = new Map();
     private _currentStateName: string | null = null;
     private _eventCallbacks: ((eventName: string, clipName: string) => void)[] = [];
+    /** A layer's or slot's animator: the character's animator it plays for, and its layer's name. */
+    private _overlayOwner: Animator | null = null;
+    private _overlayName: string | null = null;
     private _prevEventTime: number = 0;
     /** A clip just started: the next event window opens before time 0, so a marker at 0 fires (see _fireDueEvents). */
     private _eventFromStart: boolean = false;
@@ -3897,8 +3935,11 @@ export class Animator {
             // clip starts, so a clip already playing out under an empty state keeps what it had.
             this._extractRoot = false;
         }
-        this._noteStateChange(this._currentStateName, name);
+        const leftState = this._currentStateName;
+        this._noteStateChange(leftState, name);
         this._currentStateName = name;
+        if (leftState !== null) this._postAnimationEvent('StateExit', { state: leftState, from: leftState, to: name, layer: this._overlayName });
+        this._postAnimationEvent('StateEnter', { state: name, from: leftState, to: name, layer: this._overlayName });
         this._prevEventTime = 0;
         this._stateTime = 0;
 
@@ -4227,7 +4268,8 @@ export class Animator {
         const machineEvents = this._stateMachine?.events ?? this._externalEvents ?? [];
         const clipEvents = this._currentAnimation?.events ?? [];
         // A layer or slot forwards to the root, which owns the callbacks and the bound actions.
-        const hasListeners = this._eventCallbacks.length > 0 || (!this._isOverlay && (this._stateMachine?.eventActions?.length ?? 0) > 0);
+        const hasListeners = this._eventCallbacks.length > 0
+            || (!this._isOverlay && ((this._stateMachine?.eventActions?.length ?? 0) > 0 || hasScriptListeners()));
         if ((machineEvents.length === 0 && clipEvents.length === 0) || !this._currentAnimation || !hasListeners) {
             this._prevEventTime = curTime;
             return;
@@ -4258,10 +4300,13 @@ export class Animator {
     }
 
     /**
-     * One event: the effects bound to it on this machine's Event Actions first, then the `onAnimationEvent` listeners.
+     * One event: the effects bound to it on this machine's Event Actions first, then the `onAnimationEvent` listeners,
+     * then the event system: dispatched at the character's node on the `animation` channel (src/core/events), so
+     * `@onClipEvent` / `@eventListener('animation:…')` on it or an ancestor and `@onEvent('animation:…')` anywhere
+     * hear it. A marker named `'channel:name'` goes to that channel instead.
      * A layer or slot has no bindings of its own; it hands its events to the character's root animator, which runs them.
      */
-    private _dispatchEvent(eventName: string, clipName: string): void {
+    private _dispatchEvent(eventName: string, clipName: string, layer: string | null = null, state?: string | null): void {
         if (!this._isOverlay) {
             const actions = actionsFor(this._stateMachine?.eventActions, eventName, clipName);
             if (actions.length > 0 && this._node) runEventActions(this._node, actions);
@@ -4271,6 +4316,31 @@ export class Animator {
             try { cb(eventName, clipName); }
             catch (e) { Logger.error(`Error in onAnimationEvent('${eventName}') for node ${this._node?.name}: ${e}`, 'Script'); }
         }
+        if (!this._isOverlay && hasScriptListeners()) {
+            const [channel, name] = resolveEvent(eventName, ANIMATION_CHANNEL);
+            // Only an event someone listens to (here or at any node) is built at all.
+            if (channel.hasListeners(name)) {
+                const info: AnimationEventInfo = {
+                    event: name, clip: clipName, state: state === undefined ? this._currentStateName : state, layer,
+                    node: this._node, animator: this,
+                };
+                channel.fire(name, [info], this._node);
+            }
+        }
+    }
+
+    /**
+     * A state or action event (`StateEnter`, `StateExit`, `ActionFinished`): posted on the `animation` channel at the
+     * character's node, and delivered at the frame's event flush -- never inside the state change itself, where a
+     * listener that set a trigger or forced a state would re-enter the machine mid-transition.
+     */
+    private _postAnimationEvent(name: 'StateEnter' | 'StateExit' | 'ActionFinished', info: Omit<AnimationStateEventInfo, 'node' | 'animator'>): void {
+        const root = this._overlayOwner ?? this;
+        if (!hasScriptListeners()) return;
+        const channel = getChannel(ANIMATION_CHANNEL);
+        if (!channel.hasListeners(name)) return;
+        const payload: AnimationStateEventInfo = { ...info, node: root._node, animator: root };
+        channel.defer(name, [payload], { target: root._node });
     }
 
     /**
@@ -4289,7 +4359,7 @@ export class Animator {
     private _buildOverlays(sm: AnimationStateMachine): void {
         if (!this._animatedModel) return;
         (sm.layers ?? []).forEach((layer, i) => {
-            const child = this._createOverlayAnimator();
+            const child = this._createOverlayAnimator(layer.name);
             child.setStateMachine({ parameters: [], states: layer.states, transitions: layer.transitions, groups: layer.groups, events: sm.events });
             child._paramValues = this._paramValues;
             // A layer that starts on a clip is simply there from the first frame; fading it in would show
@@ -4310,16 +4380,18 @@ export class Animator {
         this._overlays.sort((a, b) => a.order - b.order);
     }
 
-    private _createOverlayAnimator(): Animator {
+    private _createOverlayAnimator(name: string): Animator {
         const child = new Animator(this._animatedModel!, undefined, { overlay: true });
         child._blendTime = this._blendTime;
+        child._overlayOwner = this;
+        child._overlayName = name;
         // A layer's or slot's events are the character's events.
-        child.onAnimationEvent((eventName, clipName) => this._dispatchEvent(eventName, clipName));
+        child.onAnimationEvent((eventName, clipName) => this._dispatchEvent(eventName, clipName, name, child._currentStateName));
         return child;
     }
 
     private _addSlot(def: AnimationSlotDef, layerCount: number): Overlay {
-        const child = this._createOverlayAnimator();
+        const child = this._createOverlayAnimator(def.name);
         child._externalEvents = this._stateMachine?.events ?? null;
         const after = def.afterLayer === undefined ? layerCount : clamp(Math.floor(def.afterLayer), 0, layerCount);
         const overlay: Overlay = {
@@ -4631,8 +4703,13 @@ export class Animator {
         }
 
         const exists = !!this._animatedModel?.animations.some(a => a.name === clipName);
-        let resolve!: () => void;
-        const finished = new Promise<void>(r => { resolve = r; });
+        let resolveFinished!: () => void;
+        const finished = new Promise<void>(r => { resolveFinished = r; });
+        // Over: faded out, replaced, or stopped. Its `finished` resolves, and the event system hears `ActionFinished`.
+        const resolve = (): void => {
+            resolveFinished();
+            this._postAnimationEvent('ActionFinished', { state: null, from: null, to: null, layer: slotName, clip: clipName });
+        };
         const action: ActionState = {
             clipName, loop: !!options.loop, blendOut: Math.max(0, options.blendOut ?? 0.2),
             stopping: false, done: false, resolve,
@@ -4665,7 +4742,7 @@ export class Animator {
         if (!exists) {
             Logger.warn(`playAction: no clip named "${clipName}"`, 'Animation');
             action.done = true;
-            resolve();
+            resolveFinished();   // never played, so never finished playing: no ActionFinished
             return handle;
         }
 

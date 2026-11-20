@@ -179,6 +179,20 @@ describe('AnimatedSpriteNode clips', () => {
         expect(sprite.clip).toBe('idle');
     });
 
+    it('sends its frame events and clip ends on the event system too, heard at its parent', () => {
+        const { scene, sprite, body } = warrior();
+        const heard: string[] = [];
+        const offs = [
+            body.addEventListener('animation:swing', (info: any) => heard.push(`swing ${info.clip} ${typeof info.frame} ${info.node === sprite}`)),
+            body.addEventListener('animation:ClipFinished', (info: any) => heard.push(`finished ${info.clip}`)),
+        ];
+        try {
+            sprite.play('attack');
+            run(scene, 0.5);
+            expect(heard).toEqual(['swing attack number true', 'finished attack']);
+        } finally { for (const off of offs) off(); }
+    });
+
     it('switches its hitboxes on for the frames that list them', () => {
         const { scene, sprite, sword } = warrior();
         // Set from the first frame the sprite plays in its character.

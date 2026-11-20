@@ -25,8 +25,10 @@
 // follows a space -- inside backticks and ``` fences too -- and the hover then shows the rest as that tag
 // (tests/decoratorDocs.test.ts holds the line).
 //
-// A leaf: type-only imports.
+// A leaf: type-only imports, bar the event system (src/core/events), which imports nothing outside itself.
 import type { NetCallOptions, NetCallTarget, SceneNet } from '../net/sceneNet';
+import { ANIMATION_CHANNEL, CANCEL_EVENT, DEFAULT_CHANNEL, fireEvent, splitEventName } from '../events/hub';
+import type { EventDestination } from '../events/broker';
 import type { Node } from '../scene/nodes/node';
 import type { ActionState } from '../../input/actionMap';
 import type { ActionName, ScriptPickKind } from './fieldTypes';
@@ -55,7 +57,10 @@ export type ActionWhen = 'started' | 'released' | 'performed' | 'changed';
 export type ScriptMember =
     | { kind: 'child' | 'find'; field: string; name: string; optional: boolean }
     | { kind: 'action'; method: string; action: string; when: ActionWhen }
-    | { kind: 'event'; method: string; name: string }
+    | { kind: 'event'; method: string; name: string; channel: string; once: boolean; priority: number; where?: EventWhereLiteral }
+    | { kind: 'targetEvent'; method: string; name: string; channel: string; capture: boolean; once: boolean; priority: number; where?: EventWhereLiteral }
+    | { kind: 'dispatch'; method: string; name: string; channel: string }
+    | { kind: 'observable'; field: string; name: string; channel: string }
     | { kind: 'every'; method: string; seconds: number }
     | { kind: 'enter' | 'exit'; method: string; filter: string }
     | { kind: 'hold'; method: string; action: string; seconds: number }
@@ -179,21 +184,230 @@ export function onAction(action: ActionName, when: ActionWhen = 'started'): Meth
     };
 }
 
+/** A `where` written in a decorator: fields the event's first argument must have, compared with `===`. */
+export type EventWhereLiteral = Readonly<Record<string, string | number | boolean | null>>;
+
+/** What `@onEvent` takes after the event's name. Every option is optional; write them as literals. */
+export interface EventListenerOptions {
+    /** The channel, when the name does not say one (`'combat:Hit'` does). The game channel by default. */
+    channel?: string;
+    /** Only the first event of each life of the node (heard again after a respawn). */
+    once?: boolean;
+    /** Higher runs before lower; equal ones in the order the nodes spawned. Default 0. */
+    priority?: number;
+    /** Only events whose first argument has these fields: `{ where: { team: 'red' } }`. */
+    where?: EventWhereLiteral;
+}
+
+/** What `@eventListener` takes after the event's name: `@onEvent`'s options, and `capture`. */
+export interface TargetListenerOptions extends EventListenerOptions {
+    /**
+     * Hear it on its way DOWN to a node beneath this one, before that node's own listeners (and so before the
+     * bubble back up): a parent that must see an event first.
+     */
+    capture?: boolean;
+}
+
+function splitListened(label: string, name: string, options: EventListenerOptions | undefined, fallback: string): [channel: string, name: string] {
+    const qualified = needName(label, name);
+    if (options !== undefined && (options === null || typeof options !== 'object'))
+        throw new TypeError(`${label}('${qualified}', options): options must be an object, such as { once: true }`);
+    return splitEventName(qualified, options?.channel ?? fallback);
+}
+
+function listenerFields(options: EventListenerOptions | undefined): { once: boolean; priority: number; where?: EventWhereLiteral } {
+    const out: { once: boolean; priority: number; where?: EventWhereLiteral } = {
+        once: !!options?.once,
+        priority: typeof options?.priority === 'number' && Number.isFinite(options.priority) ? options.priority : 0,
+    };
+    if (options?.where && typeof options.where === 'object') out.where = { ...options.where };
+    return out;
+}
+
 /**
- * Calls the method with the payload whenever a game event of that name is emitted, while the node is awake.
+ * Calls the method whenever an event of that name is sent on its channel, from anywhere, while the node is awake.
  *
- * Listens from the node's spawn until it despawns or is removed: no setup in `onStart`, no cleanup.
+ * Listens from the node's spawn until it despawns or is removed: no setup in `onStart`, no cleanup. The method is
+ * called with the event's arguments. It also hears an event dispatched at a node, once that event has finished
+ * bubbling; `Events.current.target` says which node.
  *
  * - `@onEvent('PlayerDied') died(info) { … }` — for `GameEvents.emit('PlayerDied', info)` anywhere
+ * - `@onEvent('combat:Hit') hit(target, damage) { … }` — on the combat channel
+ * - `@onEvent('Died', { where: { team: 'red' }, once: true }) firstRed(info) { … }`
  *
- * @param name The event's name, as `GameEvents.emit` sends it.
+ * @param name The event's name, as `GameEvents.emit` or `Events.emit` sends it; `'channel:Name'` for a channel
+ * other than the game's.
+ * @param options `channel`, `once`, `priority`, and `where` (fields the first argument must have).
  */
-export function onEvent(name: string): MethodDecorator<[payload: any]> {
-  const event = needName('@onEvent', name);
-  return function <This>(_method: (this: This, payload: any) => unknown, context: ClassMethodDecoratorContext<This>): void {
-    record('@onEvent', context, { kind: 'event', method: memberName('@onEvent', context, 'method'), name: event });
+export function onEvent(name: string, options?: EventListenerOptions): MethodDecorator<any[]> {
+  const [channel, event] = splitListened('@onEvent', name, options, DEFAULT_CHANNEL);
+  return function <This>(_method: (this: This, ...args: any[]) => unknown, context: ClassMethodDecoratorContext<This>): void {
+    record('@onEvent', context, { kind: 'event', method: memberName('@onEvent', context, 'method'), name: event, channel, ...listenerFields(options) });
   };
 }
+
+/**
+ * Calls the method when an event of that name is dispatched at this node, or bubbles up from a node beneath it,
+ * while the node is awake.
+ *
+ * Events travel DOM-style: down to the node they are dispatched at (capture), that node, back up through its
+ * ancestors (bubble), and last to the channel's own listeners (`@onEvent`). A character's script hears what its
+ * model's animator, its weapon or its hitbox dispatches, and no other character's. The method is called with the
+ * event's arguments; `Events.current` is the event (`target`, `stopPropagation()`).
+ *
+ * - `@eventListener('Shot') shot(result) { … }` — for `@eventDispatch('Shot')` on this node or beneath it
+ * - `@eventListener('animation:footstep') step(info) { … }` — a clip marker from this character's animator
+ * - `@eventListener('Damaged', { capture: true }) shield(hit) { … }` — before the node that was hit hears it
+ *
+ * @param name The event's name; `'channel:Name'` for a channel other than the game's.
+ * @param options `channel`, `capture`, `once`, `priority`, and `where` (fields the first argument must have).
+ */
+export function eventListener(name: string, options?: TargetListenerOptions): MethodDecorator<any[]> {
+  const [channel, event] = splitListened('@eventListener', name, options, DEFAULT_CHANNEL);
+  return function <This>(_method: (this: This, ...args: any[]) => unknown, context: ClassMethodDecoratorContext<This>): void {
+    record('@eventListener', context, {
+      kind: 'targetEvent', method: memberName('@eventListener', context, 'method'), name: event, channel,
+      capture: !!options?.capture, ...listenerFields(options),
+    });
+  };
+}
+
+/**
+ * Calls the method when this node's animator, or one beneath it (the character's model), reaches an event marker
+ * on a clip, while the node is awake.
+ *
+ * The method gets what the marker fired with: `{ event, clip, state, layer, node, animator }`. No subscribing in
+ * `onStart`, no unsubscribing in `onDespawn`: a pooled character that respawns hears each marker once.
+ *
+ * - `@onClipEvent('hit') land(info) { … }` — every clip's `hit` marker
+ * - `@onClipEvent('footstep', 'Run') step(info) { … }` — only the Run clip's
+ *
+ * @param name The marker's name, as the clip's events track shows it.
+ * @param clip Only this clip's marker. Empty (the default) for any clip.
+ */
+export function onClipEvent(name: string, clip: string = ''): MethodDecorator<[info: any]> {
+  const [channel, event] = splitListened('@onClipEvent', name, undefined, ANIMATION_CHANNEL);
+  return function <This>(_method: (this: This, info: any) => unknown, context: ClassMethodDecoratorContext<This>): void {
+    record('@onClipEvent', context, {
+      kind: 'targetEvent', method: memberName('@onClipEvent', context, 'method'), name: event, channel,
+      capture: false, once: false, priority: 0, ...(clip ? { where: { clip } } : {}),
+    });
+  };
+}
+
+/** What `@eventDispatch` takes in its long form. */
+export interface EventDispatchOptions {
+    /** The event's name; `'channel:Name'` for a channel other than the game's. */
+    name: string;
+    /** The channel, when the name does not say one. */
+    channel?: string;
+    /** Sent after the method's result: listeners get `(result, ...args)`. Literals. */
+    args?: unknown[];
+    /**
+     * `'sync'` (the default): listeners run before the method's caller continues. `'async'`: their promises are
+     * awaited, and the method resolves after they settle. `'deferred'`: they run at the frame's event flush.
+     */
+    mode?: 'sync' | 'async' | 'deferred';
+    /** Up through this node's ancestors after it (default true). */
+    bubbles?: boolean;
+    /** On to the channel's own listeners (`@onEvent`) at the end (default true). */
+    broadcast?: boolean;
+    /**
+     * This machine only (`'local'`, the default), or in a NetSync game also `'host'`, `'peers'` or `'all'`, where
+     * it is dispatched at each machine's copy of this node. Offline it is simply delivered here.
+     */
+    to?: EventDestination;
+}
+
+/**
+ * Sends an event each time the method runs, with what it returned: dispatched at this node, it bubbles up
+ * through its ancestors (`@eventListener`) and ends at the channel's listeners (`@onEvent`).
+ *
+ * Listeners get `(result, ...extras)`. An async method's result is awaited first. Returning `Events.cancel`
+ * sends nothing that time, and the caller gets `undefined`.
+ *
+ * - `@eventDispatch('Shot') fire() { return { damage: 10 } }` — listeners get `{ damage: 10 }`
+ * - `@eventDispatch('Shot', 'pistol') fire() { … }` — listeners get `(result, 'pistol')`
+ * - `@eventDispatch({ name: 'Saved', mode: 'async' }) async save() { … }` — resolves once the listeners have
+ *
+ * @param name The event's name (`'channel:Name'` for another channel), or the long form's options: `name`,
+ * `channel`, `args`, `mode` (`'sync'`, `'async'`, `'deferred'`), `bubbles`, `broadcast`, `to`.
+ * @param extras Literals sent after the method's result.
+ */
+export function eventDispatch(name: string | EventDispatchOptions, ...extras: unknown[]): MethodDecorator<any[]> {
+    const options: EventDispatchOptions = typeof name === 'string' ? { name, args: extras } : name;
+    if (!options || typeof options !== 'object') throw new TypeError(`@eventDispatch needs an event name, or { name, ... }`);
+    const [channel, event] = splitEventName(needName('@eventDispatch', options.name), options.channel ?? DEFAULT_CHANNEL);
+    const qualified = `${channel}:${event}`;
+    const trailing = Array.isArray(options.args) ? options.args.slice() : [];
+    const mode = options.mode ?? 'sync';
+    if (mode !== 'sync' && mode !== 'async' && mode !== 'deferred')
+        throw new TypeError(`@eventDispatch mode must be 'sync', 'async' or 'deferred', not '${String(mode)}'`);
+    const send = { mode, bubbles: options.bubbles, broadcast: options.broadcast, to: options.to ?? 'local' } as const;
+    return function <This>(method: (this: This, ...args: any[]) => unknown, context: ClassMethodDecoratorContext<This>): any {
+        const label = memberName('@eventDispatch', context, 'method');
+        record('@eventDispatch', context, { kind: 'dispatch', method: label, name: event, channel });
+        const original = method;
+        const sent = (self: unknown, value: unknown): unknown => {
+            if (value === CANCEL_EVENT) return undefined;
+            const delivered = fireEvent(qualified, trailing.length === 0 ? [value] : [value, ...trailing], self && typeof self === 'object' ? self : null, send);
+            return delivered instanceof Promise ? delivered.then(() => value) : value;
+        };
+        const dispatching = function (this: unknown, ...args: unknown[]): unknown {
+            const result = original.apply(this as This, args);
+            if (result && typeof (result as PromiseLike<unknown>).then === 'function')
+                return Promise.resolve(result).then((value) => sent(this, value));
+            return sent(this, result);
+        };
+        // Written above a @netcall (so wrapping its router), the network must still find the method a call runs.
+        const netOriginal = (original as any)[NETCALL_ORIGINAL];
+        if (netOriginal) Object.defineProperty(dispatching, NETCALL_ORIGINAL, { value: netOriginal });
+        return dispatching;
+    };
+}
+
+/** What `observable` is: the bare decorator, and the way of calling it with the event's name. */
+export interface ObservableDecorator {
+    /**
+     * Sends `<field>Changed` at this node whenever the field is set to a different value, with `(value, previous)`.
+     *
+     * - `@observable hp = 100` — then `@eventListener('hpChanged') bar(hp, was) { … }`
+     */
+    <This, V>(value: undefined, context: ClassFieldDecoratorContext<This, V>): void;
+    /**
+     * Sends `event` at this node whenever the field is set to a different value, with `(value, previous)`.
+     *
+     * - `@observable('HealthChanged') hp = 100`
+     *
+     * @param event The event's name; `'channel:Name'` for a channel other than the game's.
+     */
+    (event?: string): FieldDecorator;
+}
+
+/**
+ * Sends an event at this node whenever the field is set to a value other than the one it holds (`!==`), with
+ * `(value, previous)`: `<field>Changed` by default, which `@eventListener('hpChanged')` on it or an ancestor hears.
+ *
+ * An array or object changed in place is not a new value: assign a new one (`this.items = [...this.items, x]`).
+ *
+ * - `@observable hp = 100`
+ * - `@observable('ui:ScoreChanged') score = 0`
+ */
+export const observable: ObservableDecorator = function observable(event?: unknown, context?: unknown): any {
+    const apply = (name: string | undefined) =>
+        function <This, V>(_value: undefined, ctx: ClassFieldDecoratorContext<This, V>): void {
+            const field = memberName('@observable', ctx, 'field');
+            const [channel, plain] = splitEventName(name || `${field}Changed`, DEFAULT_CHANNEL);
+            record('@observable', ctx, { kind: 'observable', field, name: plain, channel });
+        };
+    // Bare `@observable`: called as the decorator itself, with the field's context.
+    if (event === undefined && context && typeof context === 'object' && 'kind' in (context as object)) {
+        apply(undefined)(undefined, context as ClassFieldDecoratorContext<unknown, unknown>);
+        return undefined;
+    }
+    if (event !== undefined && typeof event !== 'string') throw new TypeError(`@observable takes the event's name, or nothing`);
+    return apply(event as string | undefined);
+} as ObservableDecorator;
 
 /**
  * Calls the method every `seconds` of unpaused game time, from the node's spawn until it despawns.
@@ -544,6 +758,8 @@ const byNode = new WeakMap<object, readonly ScriptMember[]>();
 /** The key under which a derived class's decorator replaces its base's on the same member. */
 function overrideKey(m: ScriptMember): string {
     return m.kind === 'action' ? `action:${m.method}:${m.action}:${m.when}`
+        : m.kind === 'event' || m.kind === 'targetEvent' || m.kind === 'dispatch' ? `${m.kind}:${m.method}:${m.channel}:${m.name}`
+        : m.kind === 'observable' ? `observable:${m.field}`
         : 'method' in m ? `${m.kind}:${m.method}:${'name' in m ? m.name : 'action' in m ? m.action : 'filter' in m ? m.filter : ''}`
         : m.kind === 'child' || m.kind === 'find' ? `ref:${m.field}`
         : `${m.kind}:${m.field}`;

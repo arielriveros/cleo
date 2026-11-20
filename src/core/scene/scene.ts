@@ -52,6 +52,8 @@ import { resetAIStats } from "../../ai/aiStats";
 import type { AISystem } from "../../ai/aiSystem";
 import type { SceneChange } from "../eventBus";
 import { authoring } from "../eventBus";
+import { discardQueuedFor, flushChannels } from "../events/hub";
+import { releaseNodeEvents } from "./nodes/nodeScripting";
 import { cloneNodeJson, regenerateNodeIds } from "./nodeJson";
 import { v4 as uuidv4 } from 'uuid';
 import { getTemplate, templateNames } from "./templates";
@@ -452,6 +454,9 @@ export class Scene {
 
     /** Bound once so {@link dispose} can unsubscribe it — `off` matches by identity. */
     private readonly _onSceneChanged = (e: SceneChange): void => {
+        // The bus is process-global: another scene's change (another editor tab, a thumbnail scene, the play
+        // scene) says nothing about this one's lists. An event that names no scene (the editor's own) still counts.
+        if (e && e.scene !== undefined && e.scene !== this) return;
         if (!e || e.kind === 'structure' || e.kind === 'visibility' || e.kind === 'name') this._onChange();
     };
 
@@ -565,6 +570,12 @@ export class Scene {
             all.push(node);
             for (const child of node.children) queue.push(child);
         }
+        // Before the cut: a script's listeners (decorated, `this.listen`, `addEventListener`) hold their node, and the
+        // event channels outlive every scene.
+        for (const node of all) releaseNodeEvents(node);
+        // And what is still queued about them (NODE_DIRTY, an animator's StateEnter, a deferred dispatch): a queue
+        // must neither keep this scene's nodes alive nor tell the next scene about them.
+        discardQueuedFor(new Set(all));
         this._root.scene = null; // recurses through the whole tree, emitting nothing
         for (const node of all) {
             node.parent = null;
@@ -849,6 +860,15 @@ export class Scene {
 
             sceneStats.nodeLoopMs = performance.now() - loopStart;
 
+            // THE EVENT FLUSH. What this frame posted for later (`Events.post`, `@eventDispatch` deferred) is
+            // delivered here: after physics hooks, timers, brains, scripts and animators have all run, before the
+            // 2D physics, the cameras and the late updates read the state. Held while paused, as timers are.
+            if (this._hasStarted && !paused) {
+                authoring.derived++;
+                try { flushChannels(true); }
+                finally { authoring.derived--; }
+            }
+
             // THE 2D PHYSICS PASS. After every script has said what its body wants (a jump, a steer), before
             // the cameras follow: 2D colliders with mass fall, 2D character bodies move through the tilemaps
             // and 2D colliders, and 2D triggers report who came and went. Only while the game plays.
@@ -956,6 +976,10 @@ export class Scene {
             this._updateAudio();
 
             this._solveUI();
+
+            // The engine channel's deferred events (NODE_DIRTY): every frame, in the editor and while paused, once
+            // everything has moved and before the frame is drawn.
+            flushChannels(false);
 
             sceneStats.nodes = this._nodes.size;
             sceneStats.frameMs = performance.now() - frameStart;
