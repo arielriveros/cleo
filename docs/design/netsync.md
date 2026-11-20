@@ -754,8 +754,10 @@ Phase-2 findings:
 - **Physics simulation range is camera-relative.** The host turns the global range off, but a body's own
   `simulationRange` still measures from the scene's active camera. Phase 3 measures it from the nearest
   peer's character instead.
-- **Content hash** is SHA-256 of the game.bin bytes (`cleo-host` prints it); peers must compute the same
-  (phase 3 decides whether to hash the manifest only, which is cheaper in a browser).
+- **Content hash** is carried in the pack: `packGameBin` writes `manifest.contentHash`, a 64-bit fingerprint
+  of the manifest and every chunk's bytes, so a browser peer reads it from the header instead of hashing the
+  file. The manifest alone is not enough (its chunk refs are offsets and lengths, blind to a same-size edit).
+  `cleo-host` uses it, and hashes the whole file (SHA-256) only for packs made before it existed.
 - **The client fixed-tick mode moved to phase 5**, where prediction is its first user; building it now would
   mean guessing its requirements. The scene input-source change moved to phase 4 for the same reason.
 - Script modules are reset per game (`resetScriptModules`): a host process that ran one game must not leak

@@ -137,6 +137,8 @@ export class HostRuntime {
     }
 
     public get scene(): Scene { return this.engine.scene; }
+    /** The game's fingerprint from its manifest (players compare it to join), or null for a pack too old to carry one. */
+    public get contentHash(): string | null { return (this._content.header.manifest as any).contentHash ?? null; }
     public get sceneName(): string { return (this._content.header.manifest as any).scenes?.[this._currentId]?.name ?? ''; }
     public get running(): boolean { return this._ticker.running; }
 

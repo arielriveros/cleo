@@ -46,10 +46,11 @@ if (gamePath || examplePath) {
         log(`packing ${examplePath}`);
         bin = await packExampleGame(examplePath!);
     }
-    // Peers must run exactly this game: the session refuses a peer whose content hash differs.
-    contentHash = await hashContent([bin]);
     const t0 = performance.now();
     runtime = await HostRuntime.open({ bin, scripts }, { tickRate, physicsBackend: arg('--physics'), logging: args.includes('--verbose') });
+    // Peers must run exactly this game: the session refuses a peer whose content hash differs. The pack carries
+    // its own fingerprint; an older one is hashed whole.
+    contentHash = runtime.contentHash ?? await hashContent([bin]);
     log(`game loaded in ${Math.round(performance.now() - t0)} ms: scene "${runtime.sceneName}", ${[...runtime.scene.nodes].length} nodes, physics ${runtime.engine.physics.backend}`);
     runtime.onSceneStarted = (name) => log(`scene "${name}" started`);
 }
