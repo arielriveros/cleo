@@ -543,6 +543,15 @@ function fixMatch(bundle, scene) {
     if (!botNames.includes(name)) return
     for (const c of n.children ?? []) if (c.type === 'character' && c.scriptVars && 'respawnTemplate' in c.scriptVars) c.scriptVars.respawnTemplate = name
   })
+  // The player template's Controller drives the Character in the template — not the level's player, whose id an
+  // older export left in it: every copy (one per player online) would reach out of its own tree for that one.
+  for (const t of bundle.libraries.templates) {
+    if (t.name !== 'FPS Player') continue
+    const nodes = []
+    walkNodes(t.nodeJson, n => nodes.push(n))
+    const character = nodes.find(n => n.type === 'character')
+    for (const n of nodes) if (n.type === 'controller' && character) n.possessedId = character.id
+  }
   const gm = findNode(root, n => n.name === 'FPS Game Manager')
   if (gm?.scriptVars) {
     const alias = { oneVsThree: 'oneVsAll', team2v2: 'teamDeathmatch' }

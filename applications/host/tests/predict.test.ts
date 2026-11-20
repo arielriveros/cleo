@@ -115,6 +115,20 @@ describe('NetSync phase 5: a peer predicts its own character', () => {
         expect(vec3.distance(local(), onHost())).toBeLessThan(0.03);
     });
 
+    it('puts its character back where the host has it resting, when the host says nothing (it fell through the floor here)', async () => {
+        await w.run(30);
+        const body = (me.predictor!.pawn!.parent as any).body;
+        const before = me.predictor!.stats.quietSnaps;
+        // Only on this machine: the host's character stands still, so the host sends nothing of it.
+        const p = body.position.toArray();
+        body.position.set(p[0], p[1] - 6, p[2]);
+        body.wakeUp?.();
+        await w.run(45);
+        console.log(`fell through the floor here: ${me.predictor!.stats.quietSnaps - before} quiet snap(s); now ${(vec3.distance(local(), onHost()) * 100).toFixed(1)} cm from the host`);
+        expect(me.predictor!.stats.quietSnaps).toBeGreaterThan(before);
+        expect(vec3.distance(local(), onHost())).toBeLessThan(0.05);
+    });
+
     it('turns its character to the host’s facing when only the host turned it', async () => {
         const hostPawn = subtree(spawned.get(me.session.peerId)!).find((n) => n.nodeType === 'character')!;
         const pawn = me.predictor!.pawn!;

@@ -264,7 +264,9 @@ export class RemoteControl {
     };
 
     private _tellPeer(peer: HostPeer, controller: ControllerNode): void {
-        peer.sendControl(encodePossess(controller.id, controller.possessedId ?? ''));
+        // The character it actually drives: a stored id can be stale (a template whose character was rebuilt), which
+        // the controller resolves past, but the peer would look for and never find.
+        peer.sendControl(encodePossess(controller.id, controller.possessed?.id ?? controller.possessedId ?? ''));
     }
 }
 

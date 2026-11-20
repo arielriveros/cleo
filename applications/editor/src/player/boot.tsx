@@ -384,6 +384,9 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
         physics: engine.physics,
         loadScene: async (name, prepare) => {
           const start = await startScene((name && resolve(name)) || currentId, undefined, prepare, true);
+          // Every texture in before joining: decoding them holds the page's thread, and the host waits only so long
+          // for a joining player to speak.
+          await texturesLoaded;
           return { scene: engine.scene, start: start ?? (() => {}) };
         },
       }),

@@ -71,6 +71,11 @@ describe('Firing Line online: co-op', () => {
         }
     });
 
+    it('tells each player which character is theirs (the one it spawned, though the template names a stale id)', () => {
+        expect(a.predictor!.pawn).toBe(x.playerOf(a, a.scene));
+        expect(a.predictor!.pawn!.parent?.nodeType).toBe('collider');
+    });
+
     it('shows each player only their own HUD and viewmodel', async () => {
         await x.w.run(2);
         const hudOf = (player: any) => subtree(player).find((n: any) => n.name === 'HUD') as any;

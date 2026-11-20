@@ -702,6 +702,26 @@ Phase-9 details and findings:
     bot's `respawnTemplate` to "FPS Bot" (now the template it was placed from).
   - Online, a match restarts in place rather than reloading the scene, since peers do not follow a host's scene
     change yet.
+- **Firing Line played in the browser** (2026-11-20; editor dev server, Play › Multiplayer, two Chrome windows on the
+  same machine as the editor and the dev host). Co-op: both players joined (one over WebTransport, one over
+  WebSocket with 75 ms lag, jitter and 2 % loss), both on Blue against the horde, the score and feed the same in
+  both; Player 1 walked, fired, was shot (the HUD's damage edge), died and respawned. Found and fixed on the way:
+  - **The player template's controller drove the level's player.** The "FPS Player" template held the level
+    player's character id (an older export), which a copy's controller resolved to — so the host told each player
+    the wrong character, and no player's machine predicted its own. The generator now points the template's
+    controller at its own character; `RemoteControl` reports the character a controller actually drives.
+  - **Players were dropped while their page loaded.** A player joined, then built a 300 MB scene and decoded its
+    textures on the page's thread — longer than the host waits to hear from a player (5 s) — and was dropped, or
+    refused before its hello. `NetSyncClient` now builds the scene and loads its textures before joining, and
+    retries a join a link failed (never one the host refused). The first frames' shader compiles can still stall
+    a page for seconds; the session then resumes in its held seat, as designed.
+  - **A prediction gone wrong while the host was quiet was never corrected.** The host sends a character's state
+    only when it changes; a player standing still on the host is silent, and a copy that had fallen through the
+    floor on the player's machine fell forever (52 m off). The predictor now puts its character back where a quiet
+    host last had it resting, once that has lasted half a second plus a round trip and it is further than the snap
+    distance off (`quietSnaps`).
+  With everything on one machine (two rendering game windows, the editor, the host) the host's tick rose to about
+  30 ms mean and it skipped ticks, which showed as frequent corrections; a host has a machine of its own.
 - **Open from 9a:** a host scene change (`Game.loadScene` on the host) is not followed yet (the peer stays in
   its scene); mouse look is applied at frame rate locally but reaches the host once per tick, as everything
   else does; the NetSync chunk ships in every player build's core (a feature chunk of its own would keep it

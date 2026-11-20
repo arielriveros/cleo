@@ -74,7 +74,11 @@ export class NetSyncClient {
     /** Join the host at `options.endpoint` and start following its game. */
     public static async join(options: NetSyncJoinOptions): Promise<NetSyncClient> {
         options.physics.setWorkerMode('off');
-        const session = await PeerSession.join({
+        // The scene first, before there is a session to keep alive: building a large one holds the page's thread for
+        // seconds, and a session that hears nothing for that long is dropped by the host.
+        const authored: FollowerOriginals = new Map();
+        const { scene, start } = await options.loadScene(null, (json) => followerSceneJson(json, authored));
+        const join = () => PeerSession.join({
             endpoint: options.endpoint, contentHash: options.contentHash, name: options.name, token: options.token,
             connectOptions: options.connectOptions,
             ...(options.conditions ? {
@@ -84,12 +88,19 @@ export class NetSyncClient {
                 },
             } : {}),
         });
+        // A link that fails on the way in (the page busy past the host's patience, a network blip) is tried again; a
+        // host that REFUSED the join (another build, full, no valid token) has answered, and is not asked again.
+        let session: PeerSession | null = null;
+        for (let attempt = 1; !session; attempt++) {
+            try { session = await join(); } catch (e) {
+                if (attempt >= 3 || /refused/i.test(String((e as Error)?.message ?? e))) throw e;
+                await new Promise((r) => setTimeout(r, 500 * attempt));
+            }
+        }
         try {
             // Commands first: the host's word on which character is this player's must be read before that
             // character's spawn is applied (SyncPeer holds nothing back once it exists).
             const commands = new PeerCommands(session);
-            const authored: FollowerOriginals = new Map();
-            const { scene, start } = await options.loadScene(null, (json) => followerSceneJson(json, authored));
             const sync = new SyncPeer(session, scene, { simulated: true, authored, isOwn: (id) => id === commands.pawnId });
             const client = new NetSyncClient(session, commands, sync, scene, () => (scene as any).physics ?? null);
             // Only now: a script's onStart asks `this.net` whether this machine is the host.
