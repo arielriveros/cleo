@@ -85,4 +85,6 @@ WebSocket (forced, and fallback after a WebTransport failure) passed every test 
 - [ ] A real network: host on a Linux VPS, peer on Wi-Fi / mobile, with real loss and RTT.
 - [ ] A network that blocks UDP (or a firewall rule dropping UDP 4433) to confirm the timeout path in a browser.
 - [x] Linux host: self-test passes in `node:24-trixie-slim` (fails to load the addon in `node:24-slim`).
-- [ ] Linux arm64 host.
+- [x] Linux arm64 host: self-test passes all three cases in `node:24-trixie-slim` on linux/arm64 (Docker, QEMU
+      emulation, 2026-11-20): the prebuilt quiche addon loads, 1200-byte datagrams arrive, 30 Hz pulses at
+      33 ms p50. Timings under emulation say nothing about real arm64 speed; a native machine is still to run.

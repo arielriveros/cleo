@@ -167,7 +167,7 @@ Spike and full results: [tools/netsyncSpike/README.md](../../tools/netsyncSpike/
 - [x] Electron 31 (desktop build) connects over WebTransport.
 - [x] Prebuilt addon installs without a compiler on Windows x64 and Linux x64. Linux needs glibc ≥ 2.38:
       base the host image on `node:24-trixie-slim` (the bookworm-based `node:24-slim` cannot load it).
-      [ ] Linux arm64.
+      [x] Linux arm64 (`node:24-trixie-slim`, emulated: the self-test passes all three cases).
 - [x] WebSocket fallback: forced, closed port (fails at once) and silently dropped UDP (fails at the
       timeout) all fall back and pass every test.
 - Findings for later phases: bind the host to `::` (Chrome tries `::1` for `localhost` and does not retry
@@ -589,7 +589,7 @@ Phases 0–3 are the foundation; 4–6 make the target game playable; 7–9 make
 
 | Phase | State | Where |
 |---|---|---|
-| 0 | Done except Safari on a real Apple device, a real network, Linux arm64 | [tools/netsyncSpike](../../tools/netsyncSpike/README.md) |
+| 0 | Done except Safari on a real Apple device and a real network (Linux arm64 passes under emulation, 2026-11-20) | [tools/netsyncSpike](../../tools/netsyncSpike/README.md) |
 | 1 | **Done (2026-11-19).** Peers connect over either link (and fall back), are seated, agree with the host on the tick within one tick (tested at 100 ms RTT with jitter and 10 % loss), and take their seat back after a drop. Verified in Node over real sockets and in Chrome, Edge and Firefox against `cleo-host`. | `src/netsync/` (links, sessions, clock, ticker), `applications/host` (see its README) (listeners, CLI), tests `tests/netsync*.test.ts`, `applications/host/tests` |
 
 | 2 | **Done (2026-11-19).** The Sandbox and Firing Line examples run headless on the host from a game.bin — models, shared clips, scripts and script modules (inline or extracted to game.scripts.js), physics on Jolt — at 30 Hz. `cleo-host --example …/firing-line` plays the bot match in real time. | `src/core/engine.ts` (`headless`), `src/graphics/rhi/null/nullDevice.ts`, `applications/editor/src/player/gameContent.ts` (the player's loader, now shared), `applications/host/src/hostRuntime.ts`, `exampleGame.ts`, `applications/host/tests/hostRuntime.test.ts` |
