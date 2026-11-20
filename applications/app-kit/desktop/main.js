@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, protocol, net, shell, screen } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, protocol, net, shell, screen, utilityProcess } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -8,6 +8,7 @@ const { GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme, writeDeskt
 const scriptWorkspace = require('./scriptWorkspace');
 const movieFiles = require('./movieFiles');
 const playWindow = require('./playWindow');
+const devHostProcess = require('./devHostProcess');
 const debugPort = require('./debugPort');
 const windowControls = require('./windowControls');
 
@@ -494,3 +495,9 @@ windowControls.registerIpc({ ipcMain, BrowserWindow, screen });
 const play = playWindow.registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, icon: APP_ICON });
 // Their debug port for VS Code (Options ▸ Editor ▸ Scripts ▸ Debug scripts with), only while the editor asks.
 debugPort.registerIpc({ ipcMain, play, product: `Cleo/${app.getVersion()}` });
+
+// --- Dev host IPC ------------------------------------------------------------------------------
+//
+// Play › Multiplayer's local NetSync host, started by the editor instead of in a terminal; see devHostProcess.js.
+
+devHostProcess.registerIpc({ ipcMain, app, BrowserWindow, utilityProcess });

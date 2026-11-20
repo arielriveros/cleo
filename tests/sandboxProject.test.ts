@@ -45,7 +45,7 @@ let authoring = false;
 let input: FakeInput;
 /** Every world a test played: disposed after it, since a WASM backend's heap is fixed (Jolt's 128 MB holds a few). */
 const played: PhysicsSystem[] = [];
-beforeEach(() => { authoring = CleoEngine.authoringMode; CleoEngine.authoringMode = false; input = fakeInput(); });
+beforeEach(() => { authoring = CleoEngine.authoringMode; CleoEngine.authoringMode = false; input = fakeInput(['Move', 'Drive']); });
 afterEach(() => {
     CleoEngine.authoringMode = authoring; input.restore();
     for (const p of played.splice(0)) p.dispose();
@@ -576,9 +576,30 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             expect(named(node).script, node).toBe(script.source);
         }
         const actions = read('libraries', 'inputMap.json').maps.find((m: any) => m.name === 'Gameplay').actions.map((a: any) => a.name);
-        for (const a of ['Move', 'Look', 'Jump', 'Sprint', 'Walk', 'Interact', 'Day', 'Sunset', 'Night']) expect(actions).toContain(a);
+        for (const a of ['Move', 'Look', 'Jump', 'Sprint', 'Walk', 'Interact', 'Drive', 'Day', 'Sunset', 'Night']) expect(actions).toContain(a);
         // The camera's framing follows the sprint: no action switches it.
         expect(actions).not.toContain('Camera');
+    });
+
+    it('lays the gamepad out as asked: X jumps, A runs, the triggers drive, the sticks look twice as fast', () => {
+        const gameplay = read('libraries', 'inputMap.json').maps.find((m: any) => m.name === 'Gameplay');
+        const bindings = (name: string) => gameplay.actions.find((a: any) => a.name === name).bindings;
+        const pad = (name: string) => bindings(name).filter((b: any) => b.source.device === 'gamepad').map((b: any) => b.source.button);
+        expect(pad('Jump')).toEqual(['x']);
+        expect(pad('Sprint')).toEqual(['a']);
+        // The sticks at twice the engine default's rate (4); the mouse as it was (no scale at all).
+        const look = bindings('Look');
+        const scale = (b: any) => b.processors?.find((p: any) => p.kind === 'scale')?.factor;
+        expect(look.filter((b: any) => b.source.device === 'gamepadAxis').map((b: any) => [b.source.axis, scale(b)])).toEqual([['rightStickX', 8], ['rightStickY', -8]]);
+        for (const b of look.filter((b: any) => b.source.device === 'pointer')) expect(scale(b), b.id).toBeUndefined();
+        // In the car: the left stick only steers, the right trigger drives on, the left one brakes and reverses.
+        const drive = bindings('Drive');
+        const padDrive = drive.filter((b: any) => b.source.device === 'gamepad' || b.source.device === 'gamepadAxis')
+            .map((b: any) => `${b.source.button ?? b.source.axis} ${b.part}`);
+        expect(padDrive).toEqual(['leftStickX x', 'rightTrigger up', 'leftTrigger down']);
+        // The keys drive as Move's do.
+        const keys = (bs: any[]) => bs.filter((b: any) => b.source.device === 'key').map((b: any) => `${b.source.code} ${b.part}`);
+        expect(keys(drive)).toEqual(keys(bindings('Move')));
     });
 
     // ----- playing it -------------------------------------------------------------------------------
@@ -851,6 +872,48 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         // (The running landing is the running jump's own last 0.3 s, left a little before its end.)
         const landing = p.visits.find(v => v.state === 'LandRun')!;
         expect(landing.seconds).toBeGreaterThan(0.18);
+    });
+
+    it('jumps on the move the way it flies, not the way the camera looks, and faces the camera again once down', () => {
+        const p = play(OPEN);
+        p.run(0.5);
+        const aim = p.yawOf(p.player);
+        // A strafe to the right at a jog: the body faces the camera, travelling 90 degrees off it.
+        input.setMove(1, 0);
+        p.run(1.2);
+        expect(Math.abs(wrap(p.yawOf(p.player) - aim)), 'strafes facing the camera').toBeLessThan(10);
+        const v0 = p.player.velocity;
+        expect(Math.abs(wrap(Math.atan2(v0[0], v0[2]) * DEG - aim)), 'travels off the camera').toBeGreaterThan(70);
+        input.tap('Jump');
+        let offTravel = Infinity, airborne = 0;
+        p.run(1.5, () => {
+            if (!p.player.isJumping) return;
+            airborne++;
+            const v = p.player.velocity;
+            offTravel = Math.abs(wrap(p.yawOf(p.player) - Math.atan2(v[0], v[2]) * DEG));
+        });
+        expect(airborne, 'flies').toBeGreaterThan(10);
+        expect(p.trace).toContain('JumpRun');
+        // Facing where it flies by the time it comes down: the running jump goes the way the body does.
+        expect(offTravel, 'faces its flight').toBeLessThan(5);
+        // Down again and still strafing: the camera's way once more.
+        p.run(1);
+        expect(Math.abs(wrap(p.yawOf(p.player) - aim)), 'faces the camera again').toBeLessThan(10);
+        input.setMove(0, 0);
+    });
+
+    it('keeps facing as it stood through a standing jump, the camera turned away', () => {
+        const p = play(OPEN);
+        p.run(0.5);
+        const start = p.yawOf(p.player);
+        input.tap('Jump');
+        p.run(0.1);
+        // The camera swung round while in the air: nothing turns the body for the jump.
+        p.rigs[0].setOrbit(start + 60, 12);
+        p.run(0.2);
+        expect(p.player.isJumping).toBe(true);
+        expect(Math.abs(wrap(p.yawOf(p.player) - start))).toBeLessThan(2);
+        p.run(1.5);
     });
 
     for (const [height, landing] of [[0.3, 'LandSoft'], [1, 'LandSoft'], [2, 'LandSoft'], [3.5, 'LandHard']] as const) {
@@ -1698,6 +1761,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const controller = inside.find((n: any) => n.type === 'controller');
         const rigNode = inside.find((n: any) => n.type === 'cameraRig');
         expect([controller.possessedId, controller.aimSourceId, controller.controlSource]).toEqual([null, rigNode.id, 'player']);
+        // It drives on Drive (the triggers), not Move; X holds the hand brake as it jumps on foot.
+        expect([controller.moveAction, controller.lookAction, controller.jumpAction]).toEqual(['Drive', 'Look', 'Jump']);
         expect(rigNode.followId).toBe(inside.find((n: any) => n.name === 'Camera Target').id);
         expect(inside.find((n: any) => n.type === 'camera').active).toBe(false);
         // The Door Zone looks for the characters.

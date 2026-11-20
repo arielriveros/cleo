@@ -80,6 +80,19 @@ contextBridge.exposeInMainWorld('cleoDesktop', {
     },
   },
 
+  // Play › Multiplayer's dev host (devHostProcess.js): started by the editor on 127.0.0.1:`port`, or one already
+  // there used as it is. `onEvent` says when the editor's own host stopped by itself. Returns an unsubscribe.
+  devHost: {
+    start: (port) => ipcRenderer.invoke('devhost:start', port),
+    stop: () => ipcRenderer.invoke('devhost:stop'),
+    status: () => ipcRenderer.invoke('devhost:status'),
+    onEvent: (cb) => {
+      const listener = (_event, payload) => cb(payload);
+      ipcRenderer.on('devhost:event', listener);
+      return () => ipcRenderer.removeListener('devhost:event', listener);
+    },
+  },
+
   // The script workspace: a folder on disk that mirrors the project's script library so it can be edited
   // in VSCode. `onChange` is push, not poll -- the main process watches the folder and sends a coalesced
   // changeset whenever the disk diverges from what it last wrote.

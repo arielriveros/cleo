@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState, type PointerEvent, type MouseEvent, type ReactNode } from 'react';
 import { cn } from './cn';
 import { getWindowBridge, type WindowBridge, type WindowState } from '../platform/desktopWindow';
+import { isTitleBarPress } from './titleBarPress';
 
-/** What in the title bar is a control: a press on one is a click. A press anywhere else drags the window. */
-export const TITLEBAR_CONTROL = "button, a, input, select, textarea, [role='button'], [role='menuitem']";
+export { TITLEBAR_CONTROL } from './titleBarPress';
 
-const onControl = (target: EventTarget | null) => target instanceof Element && !!target.closest(TITLEBAR_CONTROL);
+/** A press (or double-click) on the bar itself, not on a control or on a modal or menu it hosts (titleBarPress.ts). */
+const onBar = (e: PointerEvent<HTMLElement> | MouseEvent<HTMLElement>) =>
+  isTitleBarPress(e.currentTarget, e.target, e.clientX, e.clientY);
 
 /**
- * The handlers that make a title bar move its window: press anywhere but a control and drag, double-click to
- * maximize or restore. The main process does the moving (app-kit/desktop/windowControls.js): CSS
+ * The handlers that make a title bar move its window: press anywhere on the bar but a control and drag,
+ * double-click to maximize or restore. The main process does the moving (app-kit/desktop/windowControls.js): CSS
  * `app-region: drag` is ignored on the editor's cross-origin-isolated page. Pointer capture keeps the release
  * coming here even when the cursor has left the window, and every way a press can end ends the drag.
  */
@@ -23,7 +25,7 @@ export function useTitleBarDrag(bridge: WindowBridge | undefined) {
   };
   return {
     onPointerDown: (e: PointerEvent<HTMLElement>) => {
-      if (e.button !== 0 || onControl(e.target)) return;
+      if (e.button !== 0 || !onBar(e)) return;
       e.preventDefault();               // no text selection, no focus change
       e.currentTarget.setPointerCapture(e.pointerId);
       dragging.current = true;
@@ -33,7 +35,7 @@ export function useTitleBarDrag(bridge: WindowBridge | undefined) {
     onPointerCancel: end,
     onLostPointerCapture: end,
     onDoubleClick: (e: MouseEvent<HTMLElement>) => {
-      if (!onControl(e.target)) void bridge.toggleMaximize();
+      if (onBar(e)) void bridge.toggleMaximize();
     },
   };
 }

@@ -78,9 +78,10 @@ function centredBounds(area, width, height) {
 
 function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, icon }) {
   /**
-   * sessionId -> { win, ownerId, owner, debug, debugOptions, navigated }: the play windows open now, which
-   * editor window asked for each, and the script debugger's session on it (null until attached, or when not
-   * asked for). `navigated`: the page has committed, so a debugger can attach to it.
+   * sessionId -> { win, ownerId, owner, debug, debugOptions, navigated, multiplayer }: the play windows open
+   * now, which editor window asked for each, and the script debugger's session on it (null until attached, or
+   * when not asked for). `navigated`: the page has committed, so a debugger can attach to it. `multiplayer`: a
+   * Play › Multiplayer player's window, one of several.
    */
   const windows = new Map();
   /** The VS Code debug port (debugPort.js), once main.js has made it. It holds a window's session instead of
@@ -108,7 +109,7 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     // First: detaching resumes a page stopped at a breakpoint, which a window being torn down must not be.
     if (entry.debug) { entry.debug.detach(); entry.debug = null; }
     if (debugPort) debugPort.detach(entry.sessionId);
-    remember(entry.win);
+    if (!entry.multiplayer) remember(entry.win);
     if (!entry.win.isDestroyed()) entry.win.destroy();
   }
 
@@ -118,8 +119,10 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     const owner = event.sender;
     const ownerId = owner.id;
 
-    // One game window per editor window: a new session replaces the old one's window.
-    for (const entry of [...windows.values()]) if (entry.ownerId === ownerId) destroy(entry);
+    // Play › Multiplayer opens a window per player (each with its `join`); the editor closes those itself.
+    const multiplayer = !!(options.join && typeof options.join === 'object');
+    // One game window per editor window: a new session replaces the old one's window. Not a player's.
+    if (!multiplayer) for (const entry of [...windows.values()]) if (entry.ownerId === ownerId && !entry.multiplayer) destroy(entry);
 
     const width = clampInt(options.width, MIN_WIDTH, 7680, 1280);
     const height = clampInt(options.height, MIN_HEIGHT, 4320, 720);
@@ -127,12 +130,17 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     // The script debugger, when the editor has one to drive the game with.
     const debugOptions = options.debug && typeof options.debug === 'object'
       ? { pauseOnExceptions: !!options.debug.pauseOnExceptions } : null;
-    const saved = fitSavedBounds(readSavedBounds(), screen.getAllDisplays().map(d => d.workArea));
+    const workAreas = screen.getAllDisplays().map(d => d.workArea);
+    // A player's window goes where the editor spread it (so none sits over another), never where the last Play
+    // in window was; Play in window opens where it was last.
+    const placed = multiplayer && options.position && typeof options.position === 'object'
+      ? fitSavedBounds({ x: options.position.x, y: options.position.y, width, height }, workAreas) : null;
+    const saved = multiplayer ? null : fitSavedBounds(readSavedBounds(), workAreas);
     const ownerWindow = BrowserWindow.fromWebContents(owner);
     const area = (ownerWindow ? screen.getDisplayMatching(ownerWindow.getBounds()) : screen.getPrimaryDisplay()).workArea;
 
     const win = new BrowserWindow({
-      ...(saved || centredBounds(area, width, height)),
+      ...(saved || placed || centredBounds(area, width, height)),
       // A fresh window is sized by its CONTENT, the game's resolution; a remembered one by its frame.
       useContentSize: !saved,
       minWidth: MIN_WIDTH,
@@ -186,14 +194,14 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     contents.on('render-process-gone', (_e, details) => {
       send(owner, { sessionId, type: 'crashed', reason: (details && details.reason) || 'crashed' });
     });
-    win.on('close', () => remember(win));
+    win.on('close', () => { if (!multiplayer) remember(win); });
     win.on('closed', () => {
       if (windows.get(sessionId)?.win === win) windows.delete(sessionId);
       targetsChanged();
       send(owner, { sessionId, type: 'closed' });
     });
 
-    windows.set(sessionId, { sessionId, win, ownerId, owner, debug: null, debugOptions, navigated: false });
+    windows.set(sessionId, { sessionId, win, ownerId, owner, debug: null, debugOptions, navigated: false, multiplayer });
     win.loadURL(`${page}?session=${sessionId}${joinQuery(options && options.join)}`);
     return { ok: true };
   });

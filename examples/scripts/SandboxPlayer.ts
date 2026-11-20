@@ -22,6 +22,8 @@ import { attribute } from 'cleo/decorators'
  *     goes, in any direction (facing `velocity`); after a sprint the body stays as it stopped until the camera moves;
  *   - the RUNNING TURN: a sprint reversed holds `runTurn` (-1 left, +1 right) while the animator's turn clip turns
  *     the body by its root motion;
+ *   - the JUMP's facing: a jump taken off on the move faces the way it flies, not the camera (as on the stairs, and
+ *     as ALS's in-air rotation), turning to its velocity through the flight; a standing jump keeps facing;
  *   - the LEAN: the sideways acceleration in the body's frame, as two layer weights (`leanLeft`, `leanRight`), and
  *     the forward one as a third (`leanForward`), weight into the step as it sets off and speeds up;
  *   - travel eased down when going backwards, to the speed the backward clips cover, so their feet do not slide;
@@ -91,6 +93,10 @@ export default class SandboxPlayerNode extends CharacterNode {
 
     @attribute('Running Turn', { min: 0.2, max: 3, step: 0.05 })
     private runTurnSeconds: number = 1.2
+
+    /** Taking off faster than this over the ground (m/s), a jump faces the way it flies; slower, as it stood. */
+    @attribute('Jump', { min: 0, max: 5, step: 0.1 })
+    private jumpTurnSpeed: number = 1
 
     /** Sideways acceleration (m/s2) that leans the body all the way. */
     @attribute('Lean', { min: 0.5, max: 20, step: 0.5 })
@@ -253,6 +259,8 @@ export default class SandboxPlayerNode extends CharacterNode {
     private _wasSprinting: boolean = false
     private _afterSprint: boolean = false
     private _stopYaw: number = 0
+    /** The heading the jump in flight faces (degrees); null a jump that keeps facing, undefined on the ground. */
+    private _jumpYaw: number | null | undefined = undefined
     /** The Character's own Acceleration, as authored: what everything but a sprint take-off uses. */
     private _acceleration: number = -1
     /** The stairs' collision layer bit (`stairsLayer`), looked up once. */
@@ -304,6 +312,8 @@ export default class SandboxPlayerNode extends CharacterNode {
         const pace = this._stairsToward(delta, travel, runGait)
         this._lean = this._leanToward(delta, facing, run)
         this._lookToward(delta, intent.aimYaw - bodyYaw, intent.aimPitch)
+        // In a jump taken off on the move, the body faces the way it flies, whatever the stick and the camera do.
+        const jumpFacing = this._jumpTurn(delta, v, bodyYaw)
         // The turn in place waits for the head: it engages only once the camera has stayed round this long.
         this.turnSettleSeconds = this.turnDelay
         this.turnSettleFarSeconds = this.turnDelay * this.farTurnShare
@@ -317,7 +327,7 @@ export default class SandboxPlayerNode extends CharacterNode {
             if (this._wasSprinting) { this._afterSprint = true; this._stopYaw = intent.aimYaw; this._wasSprinting = false }
             if (this._afterSprint && Math.abs(this._wrap(intent.aimYaw - this._stopYaw)) > this.lookAroundAngle) this._afterSprint = false
             // Standing on a flight: no turning in place on the steps.
-            this.facingMode = this._afterSprint || this.onStairs ? 'none' : 'aim'
+            this.facingMode = jumpFacing || this._afterSprint || this.onStairs ? 'none' : 'aim'
             return
         }
 
@@ -344,7 +354,7 @@ export default class SandboxPlayerNode extends CharacterNode {
         }
         // While the turn clip turns the body, nothing else may. On a flight it faces the way it goes: the stair
         // clips go forward only.
-        this.facingMode = this.runTurn !== 0 ? 'none' : sprinting || this.stairs !== 0 ? 'velocity' : 'aim'
+        this.facingMode = jumpFacing || this.runTurn !== 0 ? 'none' : sprinting || this.stairs !== 0 ? 'velocity' : 'aim'
         this._wasSprinting = sprinting
         this._afterSprint = false
 
@@ -376,6 +386,25 @@ export default class SandboxPlayerNode extends CharacterNode {
             return
         }
         intent.speedScale *= scale * this._directionScale
+    }
+
+    /**
+     * The jump's facing. Decided at take-off (`isJumping` comes up the frame after the jump launches, with its
+     * velocity): faster than `jumpTurnSpeed` over the ground, the body turns toward its horizontal velocity at the
+     * Character's turnSpeed until it lands, as `velocity` facing turns it on the stairs (holding the last heading
+     * while the velocity is too slow to read, against a wall); slower, nothing turns it. True while it turns the
+     * body itself, which the Character must then leave alone (`facingMode` 'none').
+     */
+    private _jumpTurn(delta: number, v: ArrayLike<number>, bodyYaw: number): boolean {
+        if (!this.isJumping) { this._jumpYaw = undefined; return false }
+        const speed = Math.hypot(v[0], v[2])
+        if (this._jumpYaw === undefined) this._jumpYaw = speed > this.jumpTurnSpeed ? Math.atan2(v[0], v[2]) * 180 / Math.PI : null
+        if (this._jumpYaw === null) return false
+        if (speed > 0.3) this._jumpYaw = Math.atan2(v[0], v[2]) * 180 / Math.PI
+        const diff = this._wrap(this._jumpYaw - bodyYaw)
+        const step = Math.min(Math.abs(diff), this.turnSpeed * delta)
+        if (step > 1e-4) this.setWorldYaw(bodyYaw + Math.sign(diff) * step)
+        return true
     }
 
     /**

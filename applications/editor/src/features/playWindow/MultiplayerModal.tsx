@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Button, DocScope, Modal, ModalFooter, ModalHeader, NumberInput, Select, TextInput, cn } from '@cleo/app-kit/ui'
 import { multiplayerPlay, useMultiplayerPlay, type MultiplayerPlayer } from './multiplayerPlay'
+import { desktopDevHost } from './desktopPlay'
 
 // Play › Multiplayer (multiplayerPlay.ts): the players, their links and networks, Start / Stop, and while it runs
 // the host's and each player's readings — the NetSync debugger. The explanations are in docs/editor/multiplayer.md.
@@ -14,8 +15,11 @@ export default function MultiplayerModal(props: {
 }) {
   const mp = useMultiplayerPlay()
   const c = multiplayerPlay()
-  useEffect(() => { void c.probe() }, [mp.devHost])
+  // On opening, the desktop editor starts the dev host if none answers; an address being typed is only asked.
+  const opened = useRef(false)
+  useEffect(() => { void c.probe(!opened.current); opened.current = true }, [mp.devHost])
   const running = mp.status === 'running' || mp.status === 'starting'
+  const managed = !!desktopDevHost()
   const setPlayer = (i: number, patch: Partial<MultiplayerPlayer>) =>
     c.setPlayers(mp.players.map((p, j) => (j === i ? { ...p, ...patch } : p)))
 
@@ -27,13 +31,19 @@ export default function MultiplayerModal(props: {
           <div className='flex items-center gap-2'>
             <span className='w-[110px] text-muted'>Dev host</span>
             <TextInput value={mp.devHost} onChange={v => c.setDevHost(v.trim())} disabled={running} />
-            <span className={cn('inline-block h-2 w-2 rounded-full', mp.hostReachable ? 'bg-success' : mp.hostReachable === false ? 'bg-danger' : 'bg-control')} />
-            <Button size='sm' variant='ghost' onClick={() => void c.probe()}>Check</Button>
+            <span className={cn('inline-block h-2 w-2 rounded-full',
+              mp.hostReachable ? 'bg-success' : mp.hostStarting ? 'bg-warning' : mp.hostReachable === false ? 'bg-danger' : 'bg-control')} />
+            <Button size='sm' variant='ghost' disabled={mp.hostStarting} onClick={() => void c.probe(true)}>Check</Button>
           </div>
-          {mp.hostReachable === false &&
-            <p className='text-ui-sm text-warning'>
-              No dev host there. Start one in a terminal at the repository: <code>npm run host -- --dev</code>
-            </p>}
+          {mp.hostStarting
+            ? <p className='text-ui-sm text-muted'>Starting the dev host…</p>
+            : mp.hostReachable === false && (mp.hostNote
+              ? <p className='text-ui-sm text-warning whitespace-pre-wrap'>{mp.hostNote}</p>
+              : managed
+                ? <p className='text-ui-sm text-warning'>No dev host there. Check starts one when the address is this machine's.</p>
+                : <p className='text-ui-sm text-warning'>
+                    No dev host there. Start one in a terminal at the repository: <code>npm run host -- --dev</code>
+                  </p>)}
 
           <table className='w-full text-ui-sm'>
             <thead className='text-dim'>
@@ -88,7 +98,9 @@ export default function MultiplayerModal(props: {
 /** The NetSync debugger: the host's tick and traffic, and each player's link and prediction. */
 function NetSyncReadings() {
   const mp = useMultiplayerPlay()
+  const c = multiplayerPlay()
   const h = mp.host
+  const blocked = mp.windows.some(w => w.missing === 'blocked')
   return (
     <div className='flex flex-col gap-2 border-t border-control pt-2'>
       <div className='text-ui-sm'>
@@ -112,18 +124,31 @@ function NetSyncReadings() {
             return (
               <tr key={w.sessionId} className='text-muted'>
                 <td className='text-fg'>{w.player.name}</td>
-                {w.failed ? <td colSpan={5} className='text-danger-fg'>{w.failed}</td> : r ? <>
+                {w.failed ? <td colSpan={5} className='text-danger-fg'>{w.failed}</td> : w.missing ? (
+                  <td colSpan={5}>
+                    <span className='text-warning'>
+                      {w.missing === 'closed' ? 'Its window was closed.' : 'No window: the browser most likely blocked the pop-up.'}
+                    </span>{' '}
+                    <Button size='sm' variant='ghost' onClick={() => c.reopen(w.sessionId)}>Open</Button>
+                  </td>
+                ) : r ? <>
                   <td>{r.peerId}</td>
                   <td title={r.fallbackReason ?? undefined}>{r.link}{r.fallbackReason ? ' (fallback)' : ''}</td>
                   <td>{r.rttMs} ms</td>
                   <td>{r.corrections} of {r.checked}</td>
                   <td>{r.maxErrorCm} cm</td>
-                </> : <td colSpan={5}>joining…</td>}
+                </> : <td colSpan={5}>{w.open ? 'joining…' : 'opening…'}</td>}
               </tr>
             )
           })}
         </tbody>
       </table>
+      {blocked &&
+        <p className='text-ui-sm text-muted'>
+          A browser lets one click open one pop-up, so Start opens the first player's window and the rest wait for
+          their Open. To have Start open them all, allow pop-ups for this site: the blocked pop-up icon at the right
+          of the address bar › Always allow.
+        </p>}
     </div>
   )
 }

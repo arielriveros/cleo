@@ -136,6 +136,25 @@ export class PipelineCache {
     /** Bumped whenever a cached pipeline (a shadow caster's) may no longer be the one `get` would build. */
     public epoch: number = 0;
 
+    /**
+     * Whether a draw that can go without its pipeline for a while ({@link getOrDefer}: a material's, the
+     * water's) has one it lacks built OFF the main thread, rather than at once. Set per frame by the renderer:
+     * on for a frame shown on screen; off for a frame that is kept (an offscreen capture, a movie frame, a
+     * thumbnail). A probe capture inside a frame (`FrameView.capturing`) never defers either: its faces are
+     * kept, and must hold everything.
+     *
+     * Why: on WebGPU creating a pipeline is when its shader really compiles, synchronously, and Chromium's
+     * D3D12 backend compiles a large fragment stage with FXC on the GPU process's main thread, which also
+     * composites: the forward `pbr` program took 19 s there, the whole window frozen, the first time a
+     * transparent material came into view (the Sandbox car's glass, as the camera turned). Off the main
+     * thread the frames go on; the draw waits for its pipeline instead.
+     */
+    public deferMisses = false;
+
+    /** Pipelines being built off the main thread, by key, and the keys whose async build failed (built at once). */
+    private readonly _pending = new Set<string>();
+    private readonly _asyncFailed = new Set<string>();
+
     /** `get`'s logical -> variant resolution, valid for `_variantMemoFilter`. */
     private readonly _variantMemo = new Map<string, { program: string; wgsl?: string;
                                                       entryPoints?: { vertex?: string; fragment?: string; compute?: string } } | null>();
@@ -153,6 +172,10 @@ export class PipelineCache {
      * targets, blends) compiles its module once. WebGPU parses and validates WGSL per module.
      */
     private readonly _moduleCache = new Map<string, Map<string, ShaderModule>>();
+
+    /** {@link warm} starts this many builds, then waits this long before the next ones. */
+    public static WARM_BATCH = 4;
+    public static WARM_GAP_MS = 16;
 
     /** A colour target's write mask with every channel off: a depth-only draw into a colour pass. */
     private static readonly _NO_COLOR_WRITE: [boolean, boolean, boolean, boolean] = [false, false, false, false];
@@ -215,6 +238,43 @@ export class PipelineCache {
             && slot.depthStencil === options.depthStencil && slot.colorWrite === colorWrite)
             return slot.pipeline;
         const pipeline = this.get(program, reflection, options);
+        this._remember(memo, owner, slot, pipeline, program, reflection, target, filter, cubeFace, cullMode, targets,
+                       topology, vertex, builtFor, options, colorWrite);
+        return pipeline;
+    }
+
+    /**
+     * {@link memoized} for a draw that can go without its pipeline for a while: null while a first pipeline is
+     * built off the main thread (see {@link getOrDefer}), and the caller skips the draw.
+     */
+    public memoizedOrDefer(memo: PipelineMemo, owner: object, program: string, reflection: PipelineReflection,
+                           options: PipelineOptions): RenderPipeline | null {
+        const target = options.target ?? this._passes.target;
+        const filter = this._host.filter();
+        const cubeFace = this._view.cubeFace && device.capabilities.conventions.originTopLeft;
+        const cullMode = options.cullMode ?? 'none', targets = options.targets ?? 1;
+        const topology = options.topology ?? 'triangle-list', vertex = options.vertex ?? false;
+        const builtFor = options.builtFor ?? null, colorWrite = options.colorWrite ?? true;
+        const slot = memo.slots.get(owner);
+        if (slot && slot.pipeline && slot.program === program && slot.reflection === reflection
+            && slot.target === target && slot.filter === filter && slot.cubeFace === cubeFace
+            && slot.cullMode === cullMode && slot.targets === targets && slot.topology === topology
+            && slot.vertex === vertex && slot.builtFor === builtFor && slot.blend === options.blend
+            && slot.depthStencil === options.depthStencil && slot.colorWrite === colorWrite)
+            return slot.pipeline;
+        const pipeline = this.getOrDefer(program, reflection, options);
+        // Not remembered while it builds: the next draw asks again, and finds it once it is ready.
+        if (pipeline) this._remember(memo, owner, slot, pipeline, program, reflection, target, filter, cubeFace, cullMode,
+                                     targets, topology, vertex, builtFor, options, colorWrite);
+        return pipeline;
+    }
+
+    /** Write `owner`'s memo slot (see {@link memoized}). */
+    private _remember(memo: PipelineMemo, owner: object, slot: MemoSlot | undefined, pipeline: RenderPipeline,
+                      program: string, reflection: PipelineReflection, target: RenderTarget | null | undefined,
+                      filter: ShadowFilter, cubeFace: boolean, cullMode: CullMode, targets: number,
+                      topology: PrimitiveTopology, vertex: PipelineOptions['vertex'], builtFor: string | null,
+                      options: PipelineOptions, colorWrite: boolean): void {
         if (!slot) {
             slot = { pipeline, program, reflection, target, filter, cubeFace, cullMode, targets, topology, vertex,
                      builtFor, blend: options.blend, depthStencil: options.depthStencil, colorWrite };
@@ -225,7 +285,6 @@ export class PipelineCache {
             slot.topology = topology; slot.vertex = vertex; slot.builtFor = builtFor; slot.blend = options.blend;
             slot.depthStencil = options.depthStencil; slot.colorWrite = colorWrite;
         }
-        return pipeline;
     }
 
     /**
@@ -233,6 +292,31 @@ export class PipelineCache {
      * cached on a string key: two draws wanting the same program and state must get the same object.
      */
     public get(program: string, reflection: PipelineReflection, options: PipelineOptions = {}): RenderPipeline {
+        return this._lookup(program, reflection, options, false)!;
+    }
+
+    /**
+     * {@link get} for a draw that can go without its pipeline for a while (an object that shows up a moment
+     * late), never for a pass whose output a later one reads. While {@link deferMisses} is on, on a backend
+     * whose pipeline creation compiles (WebGPU), a pipeline not built yet is built off the main thread
+     * (`createRenderPipelineAsync`) and this answers null until it is ready: the caller skips the draw. An
+     * async build that fails falls back to building at once, as `get` does, next time.
+     */
+    public getOrDefer(program: string, reflection: PipelineReflection, options: PipelineOptions = {}): RenderPipeline | null {
+        return this._lookup(program, reflection, options, this._deferring());
+    }
+
+    /** Pipelines being built off the main thread right now. */
+    public get pendingBuilds(): number { return this._pending.size; }
+
+    /** Whether a miss may be built off the main thread this draw (see {@link deferMisses}). */
+    private _deferring(): boolean {
+        return this.deferMisses && !this._view.capturing && !!device
+            && device.capabilities.conventions.pipelineCreationCompiles && typeof device.createRenderPipelineAsync === 'function';
+    }
+
+    /** `get`'s body: null only when `defer` and the pipeline is being built off the main thread. */
+    private _lookup(program: string, reflection: PipelineReflection, options: PipelineOptions, defer: boolean): RenderPipeline | null {
         const { blend, depthStencil, cullMode = 'none', targets = 1,
                 topology = 'triangle-list', vertex = false, builtFor = null, colorWrite = true } = options;
         // A logical name served by a variant (programVariants.ts): WebGPU compiles the WGSL handed in
@@ -286,6 +370,10 @@ export class PipelineCache {
                                          !!reflection.vertexWgsl, this._formatKey(target, targets),
                                          blend ?? null, resolvedDepth ?? null, colorWrite);
         let pipeline = this._byKey.get(key);
+        if (!pipeline && defer && !this._asyncFailed.has(key)) {
+            if (!this._pending.has(key)) this._buildAsync(key, program, reflection, target, options, resolvedDepth, cubeFace);
+            return null;
+        }
         if (!pipeline) {
             const buildStart = performance.now();
             const colorFormats = target ? target.colorViews.slice(0, targets).map(v => v.texture.format) : [];
@@ -318,6 +406,51 @@ export class PipelineCache {
             }
         }
         return pipeline;
+    }
+
+    /**
+     * Start building `key`'s pipeline off the main thread: its shader modules now (parsing WGSL is quick; the
+     * compile is the pipeline's), the pipeline by `createRenderPipelineAsync`, cached under `key` when ready.
+     * Recorded as a recipe at once, as `get` records what it builds.
+     */
+    private _buildAsync(key: string, program: string, reflection: PipelineReflection, target: RenderTarget | null | undefined,
+                        options: PipelineOptions, depthStencil: DepthStencilState | undefined, cubeFace: boolean): void {
+        const { blend, cullMode = 'none', targets = 1, topology = 'triangle-list', vertex = false, builtFor = null,
+                colorWrite = true } = options;
+        const colorFormats = target ? target.colorViews.slice(0, targets).map(v => v.texture.format) : [];
+        const module = this.shaderModuleFor(program, reflection, !reflection.vertexWgsl);
+        const vertexModule = reflection.vertexWgsl
+            ? device.createShaderModule({
+                label: program, program, stage: ShaderStage.VERTEX,
+                source: reflection.vertexWgsl.wgsl,
+                entryPoints: { vertex: reflection.vertexWgsl.entryPoint },
+                resources: reflection.resources,
+              })
+            : module;
+        const recipe: PipelineRecipe = {
+            program, cullMode, targets, topology, vertex, builtFor, cubeFace, colorFormats,
+            blend: blend ?? null,
+            depthStencil: depthStencil ?? null,
+            ...(colorWrite ? {} : { colorWrite: false }),
+        };
+        this._pending.add(key);
+        const start = performance.now();
+        device.createRenderPipelineAsync!(this._describe(recipe, vertexModule, module)).then((pipeline) => {
+            this._pending.delete(key);
+            if (this._byKey.has(key)) return;
+            this._byKey.set(key, pipeline);
+            shaderOptimizerStats.pipelinesDeferred++;
+            const ms = performance.now() - start;
+            if (ms > 1000) Logger.info(`[shaders] pipeline '${program}' built off the main thread in ${(ms / 1000).toFixed(1)} s`, 'Renderer');
+        }, (e) => {
+            this._pending.delete(key);
+            this._asyncFailed.add(key);
+            Logger.warn(`[shaders] could not build pipeline '${program}' off the main thread (built at once instead): ${e}`, 'Renderer');
+        });
+        if (!reflection.vertexWgsl && !program.startsWith('custom') && !this._pipelineRecipes.has(key)) {
+            this._pipelineRecipes.set(key, { ...recipe, colorFormats: colorFormats.slice() });
+            shaderOptimizerStats.recipesRecorded = this._pipelineRecipes.size;
+        }
     }
 
     private static _depthKey(d: DepthStencilState): string {
@@ -417,18 +550,18 @@ export class PipelineCache {
     }
 
     /**
-     * Build the config's recorded pipelines ahead of use, off the main thread (WebGPU's
-     * `createRenderPipelineAsync`), so the first frame that draws each one finds it ready instead of
-     * stalling to compile it. Resolves when all are done; a recipe whose program this build does not have
-     * is skipped. A no-op on WebGL2, where a pipeline is a state bundle over an already-linked program.
+     * Build the config's recorded pipelines ahead of use (or `recipes`: the editor's, from the project's last
+     * sessions), off the main thread (WebGPU's `createRenderPipelineAsync`), so the first frame that draws
+     * each one finds it ready instead of stalling to compile it. Resolves when all are done; a recipe whose
+     * program this build does not have is skipped. A draw that wants one still building waits for it
+     * ({@link getOrDefer}). A no-op on WebGL2, where a pipeline is a state bundle over an already-linked program.
      */
-    public async warm(onProgress?: (done: number, total: number) => void): Promise<number> {
-        const recipes = this._warmRecipes;
+    public async warm(onProgress?: (done: number, total: number) => void, recipes: PipelineRecipe[] = this._warmRecipes): Promise<number> {
         if (!recipes.length || !device?.capabilities.conventions.pipelineCreationCompiles) return 0;
         const create = device.createRenderPipelineAsync?.bind(device);
         if (!create) return 0;
         let done = 0, warmed = 0;
-        const jobs = recipes.map(async (r) => {
+        const job = async (r: PipelineRecipe) => {
             try {
                 const built = this._recipePipeline(r, create);
                 if (built) {
@@ -443,7 +576,15 @@ export class PipelineCache {
             } finally {
                 onProgress?.(++done, recipes.length);
             }
-        });
+        };
+        // A few at a time, a frame apart: making each one's shader module parses and validates its WGSL on the
+        // GPU process's main thread, and sixty started at once held a frame up for most of a second.
+        const jobs: Promise<void>[] = [];
+        for (let i = 0; i < recipes.length; i++) {
+            jobs.push(job(recipes[i]));
+            if ((i + 1) % PipelineCache.WARM_BATCH === 0 && i + 1 < recipes.length)
+                await new Promise(resolve => setTimeout(resolve, PipelineCache.WARM_GAP_MS));
+        }
         await Promise.all(jobs);
         shaderOptimizerStats.pipelinesWarmed += warmed;
         return warmed;
@@ -464,9 +605,13 @@ export class PipelineCache {
         const key = PipelineCache._keyOf(r.program, r.cullMode, r.targets, r.topology, r.vertex, r.builtFor,
                                          r.cubeFace, false, r.colorFormats.join(','), r.blend, r.depthStencil,
                                          r.colorWrite !== false);
-        if (this._byKey.has(key)) return null;
+        if (this._byKey.has(key) || this._pending.has(key)) return null;
         const module = this.shaderModuleFor(r.program, reflection, true);
-        return create(this._describe(r, module, module)).then(pipeline => [key, pipeline] as [string, RenderPipeline]);
+        // Pending while it builds, so a draw that wants it meanwhile waits rather than building it again.
+        this._pending.add(key);
+        return create(this._describe(r, module, module)).then(
+            (pipeline) => { this._pending.delete(key); return [key, pipeline] as [string, RenderPipeline]; },
+            (e) => { this._pending.delete(key); throw e; });
     }
 
     /**

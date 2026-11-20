@@ -341,7 +341,8 @@ export class GeometryPass {
         const material = first.model.material;
         const reflection = GEOMETRY_PROGRAMS[shaderType];
         if (!reflection) return;
-        const pipeline = this._pipelines.memoized(this._instancedMemo, material, shaderType, reflection, {
+        // Built off the main thread the first time (PipelineCache.getOrDefer): the group waits for it.
+        const pipeline = this._pipelines.memoizedOrDefer(this._instancedMemo, material, shaderType, reflection, {
             cullMode: ModelDraw.cullFor(material.config.side),
             depthStencil: DEPTH_WRITE,
             targets: 3,
@@ -349,6 +350,7 @@ export class GeometryPass {
             vertex: 'model+instance',
             builtFor: material.type,
         });
+        if (!pipeline) return;
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));

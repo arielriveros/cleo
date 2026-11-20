@@ -29,6 +29,8 @@ export interface ShaderOptimizerStats {
     moduleReuses: number;
     /** Pipelines built ahead of use from a recorded list (`config.graphics.pipelines`). */
     pipelinesWarmed: number;
+    /** Pipelines a draw found missing and had built off the main thread instead of stalling (WebGPU). */
+    pipelinesDeferred: number;
     /** Distinct pipeline recipes recorded this session (what a publish would warm). */
     recipesRecorded: number;
 }
@@ -36,7 +38,7 @@ export interface ShaderOptimizerStats {
 export const shaderOptimizerStats: ShaderOptimizerStats = {
     materialWrites: 0, materialSkips: 0, fallbackDraws: 0, pipelinesBuilt: 0,
     asyncCompiles: 0, pendingCompiles: 0, syncCompiles: 0, worstStallMs: 0, worstStallName: '',
-    moduleReuses: 0, pipelinesWarmed: 0, recipesRecorded: 0,
+    moduleReuses: 0, pipelinesWarmed: 0, pipelinesDeferred: 0, recipesRecorded: 0,
 };
 
 export function resetShaderOptimizerFrame(): void {

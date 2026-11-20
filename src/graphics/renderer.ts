@@ -794,6 +794,10 @@ export class Renderer {
         if (!this._capture.presentTarget && !this._movie.active
             && (this._viewportEmpty || this._canvas.width === 0 || this._canvas.height === 0)) return;
         this._programs.pollVariantFilter();
+        // A frame shown on screen may draw a material without its first pipeline while that is built off the
+        // main thread (PipelineCache.deferMisses); a frame that is kept (an offscreen capture, a movie frame, a
+        // thumbnail) builds what it draws first, as the probe captures inside a frame do.
+        this._pipelines.deferMisses = !this._capture.presentTarget && !this._movie.active && !this._thumbnailMode;
         // The shader optimizer's frame: counters zeroed, material memos expired (a material may have been
         // edited since the last frame), and any background compile that finished swapped in.
         resetShaderOptimizerFrame();
@@ -1826,12 +1830,13 @@ export class Renderer {
     }
 
     /**
-     * Build the config's recorded pipelines ahead of use, off the main thread (WebGPU's
+     * Build the config's recorded pipelines ahead of use (or `recipes`, as `pipelineRecipes` gives them: the
+     * editor warms what the project needed in its last sessions), off the main thread (WebGPU's
      * `createRenderPipelineAsync`), so the first frame that draws each one finds it ready. Resolves when
      * all are done; a no-op on WebGL2. See PipelineCache.warm.
      */
-    public warmPipelines(onProgress?: (done: number, total: number) => void): Promise<number> {
-        return this._pipelines.warm(onProgress);
+    public warmPipelines(onProgress?: (done: number, total: number) => void, recipes?: unknown): Promise<number> {
+        return this._pipelines.warm(onProgress, recipes === undefined ? undefined : parseRecipes(recipes));
     }
 
     /**

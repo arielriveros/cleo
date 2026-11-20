@@ -116,6 +116,17 @@ export class WaterPasses {
         // river runs: still water raises none.
         this._liveWaves(scene, nodes, ground);
 
+        // The surface's pipeline first, for the target it will draw into: the first one is built off the main
+        // thread on WebGPU (PipelineCache.getOrDefer: the water program compiled for 9 s there), and until it
+        // is ready there is no water to draw.
+        const sceneTarget = this._targets.scene.renderTarget;
+        const depthFormat = sceneTarget.depthView?.texture.format;
+        const pipeline = this._pipelines.getOrDefer('water', WaterProgram, {
+            cullMode: 'none', vertex: 'model', builtFor: 'water', target: sceneTarget,
+            depthStencil: depthFormat ? { format: depthFormat, depthWriteEnabled: true, depthCompare: 'less-equal' } : undefined,
+        });
+        if (!pipeline) return;
+
         // The opaque scene's colour, for refraction: the transparents' copy, taken earlier here.
         const w = this._host.renderWidth, h = this._host.renderHeight;
         const fbo = this._targets.refraction = sizedTarget(this._targets.refraction, () => new Framebuffer({
@@ -124,12 +135,7 @@ export class WaterPasses {
 
         const sm = this._shaderManager;
         const cam = this._view.camera;
-        const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'water', false, undefined, false);
-        const depthFormat = this._targets.scene.renderTarget.depthView?.texture.format;
-        const pipeline = this._pipelines.get('water', WaterProgram, {
-            cullMode: 'none', vertex: 'model', builtFor: 'water',
-            depthStencil: depthFormat ? { format: depthFormat, depthWriteEnabled: true, depthCompare: 'less-equal' } : undefined,
-        });
+        const pass = this._passes.beginFullscreenPass(sceneTarget, 'water', false, undefined, false);
         pass.setPipeline(pipeline);
         sm.bind('water');
         const { sunColor, ambient, sunDir } = this._light(scene);

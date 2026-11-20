@@ -23,6 +23,7 @@
       "scriptWorkspace.js",
       "movieFiles.js",
       "playWindow.js",
+      "devHostProcess.js",
       "windowControls.js",
       "playDebugger.js",
       "debugPort.js",
@@ -32,6 +33,16 @@
       {
         "from": "../../editor/dist",
         "to": "editor"
+      },
+      {
+        "from": "../../host/dist",
+        "to": "host",
+        "filter": ["**/*", "!**/*.map"]
+      },
+      {
+        "from": "../../host/node_modules",
+        "to": "host/node_modules",
+        "filter": ["**/*", "!@types/**", "!**/*.d.ts", "!**/*.map"]
       }
     ],
     "directories": {

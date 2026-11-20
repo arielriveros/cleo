@@ -300,7 +300,7 @@ export class ModelDraw {
             // frame, not per chunk.
             this._materials.applyTerrainProperties(mat);
             if (!reflection) return false;
-            const pipeline = this._pipelines.memoized(state.memo, mat, shaderType, reflection, {
+            const pipeline = this._pipelines.memoizedOrDefer(state.memo, mat, shaderType, reflection, {
                 cullMode: ModelDraw.cullFor(mat.config.side),
                 depthStencil: state.depthStencil,
                 blend: state.blend,
@@ -311,6 +311,8 @@ export class ModelDraw {
                 // of this one precisely so ModelNode.initializeModel could reflect its attributes.
                 builtFor: 'terrain',
             });
+            // Still being built off the main thread (PipelineCache.getOrDefer): this range waits for it.
+            if (!pipeline) return false;
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._bindGroups.terrainGroup(pipeline, mat));
             this._bindFrameLighting(pass, pipeline, state);
@@ -322,8 +324,8 @@ export class ModelDraw {
             // See `PostEffects.screenMaterialPass` for what the WGSL is and why the vertex stage is a
             // separate module (absent on WebGL2 and for a material that could not translate). The
             // reflection is kept per material, so the same object comes back and the memo hits.
-            const pipeline = this._pipelines.memoized(state.memo, mat, shaderType,
-                                                      customPipelineReflection(mat, state.customMode), {
+            const pipeline = this._pipelines.memoizedOrDefer(state.memo, mat, shaderType,
+                                                             customPipelineReflection(mat, state.customMode), {
                 cullMode: ModelDraw.cullFor(mat.config.side),
                 depthStencil: state.depthStencil,
                 blend: state.blend,
@@ -334,6 +336,7 @@ export class ModelDraw {
                 // to its material program's attributes, so a Basic skinned model is 20 bytes.
                 builtFor: node.model.material.type,
             });
+            if (!pipeline) return false;
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._bindGroups.customGroup(pipeline, mat, state.envCube));
             this._bindFrameLighting(pass, pipeline, state);
@@ -341,7 +344,10 @@ export class ModelDraw {
             return true;
         }
         if (!reflection) return false;
-        const pipeline = this._pipelines.memoized(state.memo, mat, shaderType, reflection, {
+        // A material's first pipeline on WebGPU is built off the main thread (PipelineCache.getOrDefer): its
+        // shader compiles as the pipeline is made, which for the big PBR programs takes seconds. Until then
+        // this range is not drawn: the object shows up a moment late instead of the window freezing.
+        const pipeline = this._pipelines.memoizedOrDefer(state.memo, mat, shaderType, reflection, {
             cullMode: ModelDraw.cullFor(mat.config.side),
             // Depth writes follow the CALLER's state, not the material's, and come in rather than from
             // GLState — the descriptor must be a pure function of its arguments or the cache key is wrong.
@@ -352,6 +358,7 @@ export class ModelDraw {
             vertex: animated ? 'model+skin' : 'model',
             builtFor: node.model.material.type,   // skinned too — see the custom branch
         });
+        if (!pipeline) return false;
         pass.setPipeline(pipeline);
         this._materials.applyProperties(mat);
         pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, mat, state.envCube));

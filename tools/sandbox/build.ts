@@ -53,7 +53,12 @@ import { sandboxInputMap } from './inputMap'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
 const PREPARED = path.join(ROOT, 'build', 'sandbox_prepared')
-const OUT = path.join(ROOT, 'applications', 'editor', 'public', 'examples', 'sandbox')
+// `--out <folder>`: write the bundle there instead (for building beside a dev server that watches the examples:
+// this removes the folder it writes and rebuilds it, which can crash Vite's watcher; copy the files that changed).
+const OUT_FLAG = process.argv.indexOf('--out')
+const OUT = OUT_FLAG >= 0 && process.argv[OUT_FLAG + 1]
+    ? path.resolve(process.argv[OUT_FLAG + 1])
+    : path.join(ROOT, 'applications', 'editor', 'public', 'examples', 'sandbox')
 const SCRIPTS = path.join(ROOT, 'examples', 'scripts')
 const PROJECT = 'Sandbox'
 const CREATED_AT = 1795100000000
@@ -788,8 +793,9 @@ function carNode() {
                 children: [{ type: 'camera', id: CAR_RIG_ID + ':camera', name: 'Car Camera', camera: { type: 'perspective', fov: 60, near: 0.05, far: 2000, left: -1, right: 1, bottom: -1, top: 1 }, active: false }],
             },
             {
+                // Drive (inputMap.ts), not Move: on a pad the triggers are the pedals and the left stick only steers.
                 type: 'controller', id: id('car:controller'), name: 'Car Controller', possessedId: null, controlSource: 'player',
-                moveAction: 'Move', lookAction: 'Look', jumpAction: 'Jump', sprintAction: '', crouchAction: '',
+                moveAction: 'Drive', lookAction: 'Look', jumpAction: 'Jump', sprintAction: '', crouchAction: '',
                 aimSource: 'node', aimSourceId: CAR_RIG_ID, driveAimTarget: true,
             },
         ],

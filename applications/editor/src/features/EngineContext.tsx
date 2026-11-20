@@ -16,6 +16,7 @@ import { EditorSessionsContext, type EditorSessionsContextValue } from "./Editor
 import { useStableActions } from "@cleo/app-kit/utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
+import { savePipelineRecipes, warmProjectPipelines } from "../utils/pipelineWarmup";
 import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, setMovieRender, engineEventBus, parseRuntimeScene, setSaveStore, resetSaveSession, beginSaveSessionFrom } from "cleo";
 import type { SaveDocument } from "cleo";
 import { playSaveStore, type PlaySavesConfig } from "./saves/playSaves";
@@ -6284,6 +6285,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editorSceneRef.current.dimension = dimensionOfScene(meta.openSceneId);
     scenesLoadedRef.current = true;
     sceneStep.done(meta.scenes.find(s => s.id === meta!.openSceneId)?.name ?? '');
+    // WebGPU: the pipelines this project needed last time, built in the background now (utils/pipelineWarmup.ts),
+    // so the first look at a material does not wait seconds for its shader to compile.
+    void warmProjectPipelines(instanceRef.current?.renderer);
   };
 
   useEffect(() => {
@@ -6383,8 +6387,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
       // Tracked: a project switch requested while this load still runs waits for it before another opens.
       trackProjectWrite(initializeEngine()).catch(() => { /* reported above */ });
+      // The pipelines this session built, remembered for the project's next one (utils/pipelineWarmup.ts).
+      const rememberPipelines = () => savePipelineRecipes(instanceRef.current?.renderer);
+      window.addEventListener('pagehide', rememberPipelines);
       return () => {
         alive = false;
+        window.removeEventListener('pagehide', rememberPipelines);
+        // Before the next project opens: the active project is still this one.
+        rememberPipelines();
         CleoEngine.eventEmitter.off('SCENE_CHANGED', bridge);
         releaseEngineProject();
         instanceRef.current = null;
@@ -7046,6 +7056,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // A movie session that ended early (an error before its engine took over) leaves the loop detached.
     instance?.attachLoop();
     if (!instance) return;
+    // What the session built, for the project's next one to warm (utils/pipelineWarmup.ts).
+    savePipelineRecipes(instance.renderer);
     // Before the play scene is released: disposing it would take the editor camera down with it.
     if (isSimulatingRef.current) recallEditorCamera(playSceneRef.current);
     isSimulatingRef.current = false;

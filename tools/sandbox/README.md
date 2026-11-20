@@ -9,6 +9,8 @@ To build it:
 node --max-old-space-size=8192 tools/sandbox/prepare.mjs                  # the FBX files, once (and when they change)
 npx vite-node --config vitest.config.ts tools/sandbox/build.ts --report   # what was measured, nothing written
 npx vite-node --config vitest.config.ts tools/sandbox/build.ts
+npx vite-node --config vitest.config.ts tools/sandbox/build.ts --out <folder>   # elsewhere: while a dev server
+                                                                            # watches the examples, then copy what changed
 npm --prefix applications/editor run examples:list
 npx vitest run tests/sandboxProject.test.ts --project engine
 ```
@@ -82,7 +84,9 @@ The files:
   its blending, and makes three templates with one instance each (`templatizeSubtree`): **Player**, **Environment**
   (the sun, sky atmosphere and sky light under one root) and **Course** (the merged Static Collision, templatized
   after the merge, which leaves a template instance alone).
-- **`inputMap.ts`**: the default input map, plus Walk.
+- **`inputMap.ts`**: the default input map (without Fire), plus Walk, Interact, Drive (the car's Controller reads it:
+  the triggers are the pedals) and the light setups; the pad's Jump on X, Sprint on A, its look at `PAD_LOOK_RATE`
+  times the default's.
 - **`environment.json`**: the sky, sun, sky light and render settings the scene starts with.
 
 After changing `examples/scripts/SandboxPlayer.ts` or `SandboxCamera.ts`, run the build again: the scene embeds the

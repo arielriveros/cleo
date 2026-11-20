@@ -24,9 +24,9 @@
     {
       "slug": "firing-line",
       "name": "Firing Line",
-      "description": "A first-person shooter: walk, sprint, crouch, aim down sights, hip and aimed fire, reloads and three weapons against bots that search, take cover, retreat when hurt and call for reinforcements. One scene, one Game Manager with a game-type list (one against all, team deathmatch, free for all): put the manager and some fighters in any scene and it plays.",
+      "description": "A first-person shooter: walk, sprint, crouch, aim down sights, hip and aimed fire, reloads and three weapons against bots that search, take cover, retreat when hurt and call for reinforcements. One scene, one Game Manager with a game-type list (one against all, team deathmatch, free for all, co-op): put the manager and some fighters in any scene and it plays. Online too: co-op against a horde of bots, or eight against eight with bots in the empty seats (Play › Multiplayer).",
       "order": 2,
-      "bytes": 315121684,
+      "bytes": 315168357,
       "sceneCount": 1,
       "textureCount": 149,
       "createdAt": 1794173811120
@@ -54,11 +54,11 @@
     {
       "slug": "sandbox",
       "name": "Sandbox",
-      "description": "A locomotion sandbox in the style of Advanced Locomotion System v4: a mannequin that walks and jogs in eight directions facing the camera, sprints freely, sets off, stops and turns round with their own clips, leans into curves, turns in place when you look away, jumps, falls and lands soft or hard, with its feet planted and locked by IK on ramps, stairs and bumps. Two camera rigs (V switches). All of it is the animator, the Character node and one input-only script.",
+      "description": "A locomotion sandbox in the style of Advanced Locomotion System v4: a mannequin that walks and jogs in eight directions facing the camera, sprints freely, sets off, stops and turns round with their own clips, leans into curves, turns in place when you look away, jumps, falls and lands soft or hard, climbs stairs, with its feet planted and locked by IK on ramps, stairs and bumps. And a car to get into (E by the driver's door) and drive on the vehicle simulation. All of it is the animator, the Character, Controller and Vehicle nodes and a few input-only scripts. Car model: \"Dirty car\" by 3D Error 404 (CC-BY-4.0).",
       "order": 5,
-      "bytes": 13754630,
+      "bytes": 20017001,
       "sceneCount": 1,
-      "textureCount": 4,
+      "textureCount": 11,
       "createdAt": 1795100000000
     }
   ]

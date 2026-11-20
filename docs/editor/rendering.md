@@ -617,10 +617,17 @@ Its sections, in order:
   a full-res one. It is the number that explains a frame whose triangle count is trivial.
 - **Shaders** — how programs, pipelines and material parameters reach the GPU: material writes and
   the draws that found their material already in place; programs built after boot (background, sync,
-  pending); stand-in draws; the worst stall; pipelines built, recorded and warmed. A program nobody
-  built at boot compiles in the background while its family's uber program draws in its place; *sync*
-  builds are the ones that held a frame up. Recorded pipelines ship with a publish, and the player
-  builds them during its loading screen.
+  pending); stand-in draws; the worst stall; pipelines built, recorded, warmed and built off the main
+  thread. A program nobody built at boot compiles in the background while its family's uber program
+  draws in its place; *sync* builds are the ones that held a frame up. Recorded pipelines ship with a
+  publish, and the player builds them during its loading screen.
+  - **On WebGPU** a pipeline is where its shader really compiles, and on Windows a big one (the
+    forward PBR, the water) takes seconds. A material, or the water, that the frame finds without its
+    pipeline has it built **off the main thread** and is drawn once it is ready: it shows up a moment
+    late rather than freezing the window. Captures, bakes, thumbnails and movie frames build what they
+    draw first, so nothing they keep goes missing.
+  - The editor remembers the pipelines each project built (on this machine) and builds them in the
+    background as the project opens, so after the first session the late ones are rare.
 - **Memory** — texture count and megabytes, estimated GPU memory, and the JS heap (Chromium only).
   *GPU est.* is computed from each texture's requested format and mip chain, so it estimates texture
   memory, not total VRAM.

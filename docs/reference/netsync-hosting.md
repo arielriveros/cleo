@@ -83,6 +83,7 @@ Every setting is a flag or an environment variable (what platforms set); what ne
 | `NETSYNC_LIFECYCLE` | `none` | `none`, `agones` or `edgegap` |
 | `NETSYNC_DRAIN_SECONDS`, `NETSYNC_EMPTY_SECONDS`, `NETSYNC_JOIN_SECONDS` | 30, 30, 120 | grace periods (below) |
 | `NETSYNC_LOG=json` | text | one JSON object per line, for a log collector |
+| `NETSYNC_CACHE` | `.cache` beside the host | development (`--dev`, `--example`): where the certificate is kept across restarts |
 
 **A session's life.** A host with a session takes players until everyone has left (for `NETSYNC_EMPTY_SECONDS`),
 or ends it when nobody came (`NETSYNC_JOIN_SECONDS`); then it exits — the platform starts a fresh one — or, with

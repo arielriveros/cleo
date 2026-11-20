@@ -7,7 +7,7 @@ import { InputSystem } from '../../src/input/inputSystem';
  * (call `endFrame()` after each `scene.update`), held until released -- the input system's own contract.
  */
 export interface FakeInput {
-    /** The `Move` vector (x right, y up). */
+    /** The `Move` vector (x right, y up): every action named as a move action reads it. */
     setMove(x: number, y?: number): void;
     press(action: string): void;
     release(action: string): void;
@@ -18,14 +18,16 @@ export interface FakeInput {
     restore(): void;
 }
 
-export function fakeInput(moveAction: string = 'Move'): FakeInput {
+/** `moveActions`: the vector actions `setMove` sets (the Sandbox's car drives on its own, Drive). */
+export function fakeInput(moveActions: string | string[] = 'Move'): FakeInput {
+    const moves = new Set(Array.isArray(moveActions) ? moveActions : [moveActions]);
     const held = new Set<string>();
     const edges = new Set<string>();
     const tapped = new Set<string>();
     const move: [number, number] = [0, 0];
     const sys = InputSystem.instance;
     const spies = [
-        vi.spyOn(sys, 'vector').mockImplementation((action: string) => action === moveAction ? [move[0], move[1]] : [0, 0]),
+        vi.spyOn(sys, 'vector').mockImplementation((action: string) => moves.has(action) ? [move[0], move[1]] : [0, 0]),
         vi.spyOn(sys, 'pressed').mockImplementation((action: string) => held.has(action)),
         vi.spyOn(sys, 'started').mockImplementation((action: string) => edges.has(action)),
     ];

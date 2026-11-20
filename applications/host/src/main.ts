@@ -18,17 +18,26 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 if (process.argv.includes('--help') || process.argv.includes('-h')) { console.log(HELP); process.exit(0); }
 const settings = readSettings(process.argv.slice(2), process.env);
 const log = createLog(settings.log);
+const cacheDir = settings.cacheDir ?? path.join(here, '..', '.cache');
 
 if (process.argv.includes('--dev')) {
     // Play › Multiplayer's host: waits for the editor's game on localhost (devHost.ts).
     const dev = await DevHost.start({
-        certificate: await cachedCertificate(path.join(here, '..', '.cache')), log,
+        certificate: await cachedCertificate(cacheDir), log,
         port: settings.controlPort > 0 ? settings.controlPort : 4490, udpPort: settings.udpPort, tcpPort: settings.tcpPort,
     });
     console.log(`cleo-host --dev: waiting for the editor's Play › Multiplayer on http://127.0.0.1:${dev.port} (players join on udp/${dev.udpPort}, tcp/${dev.tcpPort})`);
     const stop = async () => { await dev.close(); process.exit(0); };
     process.on('SIGINT', () => void stop());
     process.on('SIGTERM', () => void stop());
+    // Started by the desktop editor (app-kit/desktop/devHostProcess.js): gone with it, even when it crashed and
+    // could not say so, so no orphan keeps the ports.
+    if (settings.ownerPid) {
+        const owner = settings.ownerPid;
+        setInterval(() => {
+            try { process.kill(owner, 0); } catch { log('info', `the editor (process ${owner}) is gone: stopping`); void stop(); }
+        }, 2000).unref();
+    }
     await new Promise(() => {});
 }
 
@@ -36,7 +45,7 @@ if (process.argv.includes('--dev')) {
 // deployed host makes its own each start (it lives for a session, and its hash goes out with the allocation).
 // An allocator that started this host hands it a certificate whose hash it already gave the players.
 const certificate = settings.certPem && settings.keyPem ? certificateFromPem(settings.certPem, settings.keyPem)
-    : settings.example ? await cachedCertificate(path.join(here, '..', '.cache')) : await generateCertificate();
+    : settings.example ? await cachedCertificate(cacheDir) : await generateCertificate();
 
 const app = await HostApp.start(settings, { certificate, log });
 const { listener } = app;

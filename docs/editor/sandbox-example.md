@@ -57,15 +57,17 @@ Each is placed once.
 |---|---|---|
 | Move (jog) | W A S D or the arrows | left stick, pushed all the way |
 | Walk | hold Left Ctrl | left stick, pushed partway (or hold LB) |
-| Sprint (any direction, facing it) | hold Left Shift | L3 |
-| Jump | Space | A |
-| Look | the mouse (click the view to capture it) | right stick |
+| Sprint (any direction, facing it) | hold Left Shift | hold A |
+| Jump | Space | X |
+| Look | the mouse (click the view to capture it) | right stick (twice the engine default's rate) |
 | Zoom | the wheel | |
 | Get into the car, or out of it | E, by the driver's door | Y |
 | Day, dusk, night | 1, 2, 3 | d-pad left, up, right |
 
-In the car, Move drives and steers (W forward; S brakes, then reverses), Space holds the hand brake, and Look turns
-the camera, which swings back behind the car when you leave it alone.
+In the car, the **Drive** action drives and steers: W forward, S brakes, then reverses, A and D steer; on a gamepad
+the right trigger drives on and the left one brakes, then reverses (both analog), and the left stick steers (its up
+and down do nothing here). Space (X) holds the hand brake, and Look (the mouse, the right stick) turns the camera,
+which swings back behind the car when you leave it alone.
 
 **The course.** You start facing +Z.
 
@@ -129,6 +131,7 @@ What each layer is for:
 | Leaning the whole body into a change of direction at a jog or a sprint, and forward into a start | Three additive **lean** layers |
 | Turning in place when the camera swings more than 70 degrees away | The Character's turn request, and the turn clips' **root motion** |
 | Jump, fall, soft and hard landings | The animator, from `isJumping`, `isGrounded`, `airTime` and `verticalSpeed` |
+| A jump on the move going the way it flies, not the way the camera looks | The script turns the body to the jump's velocity through the flight (facing **None** meanwhile; ALS's in-air rotation) |
 | Crouching through a hard landing where it came down, whatever the stick says | The hard landing's **root motion**, and its state's **hold** switch |
 | Rolling out of a far fall while running, and running on | The **LandRoll** state, entered from the fall by the graph alone (`Running` and `Speed`) |
 | Looking round at the camera standing still, before turning to it | The additive **Look** layer (a blend space of look poses), and the Character's turn delay |
@@ -383,6 +386,10 @@ for:
   - At a sprint, facing is **Velocity**.
   - After a sprint stops, facing is **None** until the camera swings more than `lookAroundAngle` (20 degrees). The
     body stays as it stopped rather than turning to the camera by itself.
+  - In a jump taken off faster than `jumpTurnSpeed` (1 m/s), facing is **None** and the script turns the body
+    toward the jump's own velocity at the Character's turn speed, as **Velocity** turns it on the stairs: a jump
+    off a strafe or a backpedal flies facing forward, whatever the stick and the camera do in the air. Once down,
+    facing is **Aim** again. A standing jump keeps facing as it stood.
 - **The running turn.** When a sprint faster than `runTurnSpeed` is asked to go more than `runTurnAngle`
   (135 degrees) back, the script holds `runTurn`, with facing **None**, so the clip turns the body. It lets go once
   the body is within 30 degrees of the new way.

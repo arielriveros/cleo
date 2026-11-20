@@ -34,14 +34,21 @@ on the host.
 Plays the game online on this machine: a local host and a game window per player, each joined to it as a
 published page would be. It is under the Play button's menu (the arrow beside it).
 
-1. Start the **dev host** once, in a terminal at the repository: `npm run host -- --dev`. It waits on
-   `http://127.0.0.1:4490` for the editor. The dot beside **Dev host** turns green when the editor reaches it.
+1. The **dev host** runs the game for the players, on `http://127.0.0.1:4490`. In the **desktop editor** it starts
+   by itself when the dialog opens (or on **Check**) and stops when the editor quits: nothing to run. The first
+   start from the repository takes about half a minute, while the engine compiles. In a **browser**, start it once
+   in a terminal at the repository: `npm run host -- --dev` (in PowerShell, `npm.cmd run host -- --dev`:
+   PowerShell's `npm` drops the `--`, and a host without `--dev` is not one the editor can use). The dot beside
+   **Dev host** turns green when the editor reaches it.
 2. Set up the **players**: a name, the **Link** — *WebTransport* (the normal path, falling back to WebSocket when
    it cannot), or *WebSocket (fallback)* to play the fallback on purpose — and a worse network than this machine
    has: **Lag** (ms added each way), **Jitter** (ms of random extra) and **Loss** (% of the player's state
    updates lost). Up to 8.
-3. **Start.** The windows open at once and show their loading screens while the game is built (as Play in window
-   builds it); the dev host then runs it and every window joins.
+3. **Start.** The windows open at once, spread across the screen, and show their loading screens while the game is
+   built (as Play in window builds it); the dev host then runs it and every window joins. In a browser, one click
+   may open only one pop-up: the other players' rows then say the pop-up was blocked, with an **Open** button
+   each (one click per window). To have Start open them all, allow pop-ups for the editor's page once (the
+   blocked pop-up icon at the right of the address bar › Always allow). A window you close gets an **Open** too.
 
 While it runs, the dialog shows the **NetSync readings**:
 
@@ -59,7 +66,8 @@ The Firing Line example is an online game already (see [its notes](fps-example.m
 friends on a server of your own:
 
 1. **Open it**: the projects list › Examples › Firing Line.
-2. **Try it here**: start the dev host (`npm run host -- --dev`), then Play's menu › **Multiplayer…** with two
+2. **Try it here**: Play's menu › **Multiplayer…** (in a browser, start the dev host first:
+   `npm run host -- --dev`) with two
    players or more. Set **Options › Project › NetSync › Game mode** to `coop` (the players against a horde of
    bots) or `deathmatch` (eight against eight, bots in the empty seats) first.
 3. **Name the allocator**: Options › Project › NetSync › **Allocator** `https://play.example.com` (your domain).

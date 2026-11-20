@@ -21,6 +21,8 @@ export interface PlayWindowOpenOptions {
    * checks every value (a host on this machine only) before it goes into the game page's address.
    */
   join?: PlayWindowJoin
+  /** With `join`: where the player's window goes (screen pixels, its top-left), so the players' windows spread. */
+  position?: { x: number; y: number }
 }
 
 export interface PlayWindowJoin {
@@ -82,6 +84,34 @@ export function desktopPlay(): DesktopPlayBridge | undefined {
   if (!play || typeof play.open !== 'function' || typeof play.close !== 'function'
     || typeof play.focus !== 'function' || typeof play.onEvent !== 'function') return undefined
   return play
+}
+
+/** What the shell says of starting the dev host. */
+export interface DevHostStartResult {
+  ok: boolean
+  /** The shell started it (false: one was already answering there, started in a terminal). */
+  started?: boolean
+  external?: boolean
+  error?: string
+}
+
+/**
+ * Play › Multiplayer's dev host, run by the desktop shell (app-kit/desktop/devHostProcess.js): no terminal. A shell
+ * from before it has none of it, and then the dialog asks for `npm run host -- --dev` as on the web.
+ */
+export interface DesktopDevHostBridge {
+  /** Start the dev host on 127.0.0.1:`port` (or use the one already there). Resolves once it answers. */
+  start(port: number): Promise<DevHostStartResult>
+  stop(): Promise<{ ok: boolean }>
+  /** The shell's own dev host stopped by itself: its exit code and last lines. Returns an unsubscribe. */
+  onEvent(cb: (event: { type: 'exit'; port: number; code: number | null; tail: string[] }) => void): () => void
+}
+
+export function desktopDevHost(): DesktopDevHostBridge | undefined {
+  if (typeof window === 'undefined') return undefined
+  const host = (window as any).cleoDesktop?.devHost as DesktopDevHostBridge | undefined
+  if (!host || typeof host.start !== 'function' || typeof host.stop !== 'function' || typeof host.onEvent !== 'function') return undefined
+  return host
 }
 
 /** The VS Code debug port's half. A shell from before it has none of it. */

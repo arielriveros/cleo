@@ -123,7 +123,7 @@ type Sample = {
   aiPathMs: number; aiQueries: number; aiAgents: number; navBuildMs: number; navBuilds: number; navReused: number;
   matWrites: number; matSkips: number; fallbackDraws: number; pipelinesBuilt: number;
   asyncCompiles: number; pendingCompiles: number; syncCompiles: number; worstStallMs: number; worstStallName: string;
-  moduleReuses: number; pipelinesWarmed: number; recipesRecorded: number;
+  moduleReuses: number; pipelinesWarmed: number; pipelinesDeferred: number; recipesRecorded: number;
   textures: number; textureMB: number; gpuMB: number;
   heapUsedMB: number | null; heapLimitMB: number | null;
   lights: number; sprites: number; spritesDrawn: number; spriteDraws: number;
@@ -150,7 +150,7 @@ const EMPTY: Sample = {
   aiPathMs: 0, aiQueries: 0, aiAgents: 0, navBuildMs: 0, navBuilds: 0, navReused: 0,
   matWrites: 0, matSkips: 0, fallbackDraws: 0, pipelinesBuilt: 0,
   asyncCompiles: 0, pendingCompiles: 0, syncCompiles: 0, worstStallMs: 0, worstStallName: '',
-  moduleReuses: 0, pipelinesWarmed: 0, recipesRecorded: 0,
+  moduleReuses: 0, pipelinesWarmed: 0, pipelinesDeferred: 0, recipesRecorded: 0,
   textures: 0, textureMB: 0, gpuMB: 0, heapUsedMB: null, heapLimitMB: null,
   lights: 0, sprites: 0, spritesDrawn: 0, spriteDraws: 0,
   width: 0, height: 0, renderWidth: 0, renderHeight: 0, renderScale: 1,
@@ -408,6 +408,7 @@ export default function PerformancePanel({ physicsThread, playPin, active = true
           worstStallName: shaderOptimizerStats.worstStallName,
           moduleReuses: shaderOptimizerStats.moduleReuses,
           pipelinesWarmed: shaderOptimizerStats.pipelinesWarmed,
+          pipelinesDeferred: shaderOptimizerStats.pipelinesDeferred,
           recipesRecorded: shaderOptimizerStats.recipesRecorded,
           textures,
           textureMB: textureBytes / MB,
@@ -824,8 +825,8 @@ export default function PerformancePanel({ physicsThread, playPin, active = true
              title='This frame: draws made with the uber program while the specialised one compiles.' />
         <Row label='Worst stall' value={d.worstStallMs > 0 ? `${fmt(d.worstStallMs, 1)} ms · ${d.worstStallName}` : '—'}
              hl={d.worstStallMs > 16} title='The longest synchronous program or pipeline build this session.' />
-        <Row label='Pipelines' value={`${d.pipelinesBuilt} built this frame · ${d.recipesRecorded} recorded · ${d.pipelinesWarmed} warmed`}
-             title='Recorded pipelines ship with a publish, and the player builds them during its loading screen.' />
+        <Row label='Pipelines' value={`${d.pipelinesBuilt} built this frame · ${d.recipesRecorded} recorded · ${d.pipelinesWarmed} warmed · ${d.pipelinesDeferred} off the main thread`}
+             title='Recorded pipelines ship with a publish, and the player builds them during its loading screen. On WebGPU a material whose pipeline is not built yet has it built off the main thread, and shows up once it is ready.' />
         <Row label='· module reuses' value={`${d.moduleReuses}`}
              title='Pipelines that reused a compiled shader module instead of compiling the program again.' />
       </div></Collapsable>
