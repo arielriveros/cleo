@@ -14,7 +14,8 @@ import NodeRefInput from '../NodeRefInput'
 // Fields write the node and mark the scene changed; a vehicle already driving in Play is built again from them
 // (VehicleNode.rebuild).
 
-const PLAYER_HINT = "Drive it from the player's input: Move steers and drives, Jump holds the hand brake. Off: a script sets throttle, steer, brake and handBrake."
+const PLAYER_HINT = "Drive it from the player's input: Move steers and drives, Jump holds the hand brake. Off: a Controller that possesses it drives it, or a script sets throttle, steer, brake and handBrake."
+const PARKED_HINT = 'Brakes and hand brake on, throttle and steering ignored, whoever drives: an empty car, or one whose driver is still getting in. A script turns it off to drive away.'
 const REVERSE_HINT = "The throttle held against the way it rolls brakes first, then reverses once nearly stopped, like a road car's pedals."
 const LSD_HINT = 'Limited-slip differentials send torque to the wheel that grips. Off: open differentials, a spinning wheel takes it all.'
 const CAST_HINT = "What each wheel finds the ground with. Cylinder follows kerbs and bumps by the tyre's real shape (Jolt); the Cannon and Rapier backends cast a ray whatever is chosen."
@@ -99,17 +100,18 @@ export function VehicleEditor(props: { node: VehicleNode }) {
 
           <SectionTitle title='Drive' className='mt-3 mb-1' />
           <div className='mb-2'>
-            <SegmentedControl joined value={n.drive} options={DRIVES} onChange={v => apply({ drive: v })} />
+            <SegmentedControl joined value={n.drivetrain} options={DRIVES} onChange={v => apply({ drivetrain: v })} />
           </div>
-          {n.drive === 'none' && <p className='text-ui-sm text-muted mb-2'>Nothing drives it: it rolls, steers and brakes.</p>}
-          {n.drive === 'motors' && <p className='text-ui-sm text-muted mb-2'>Each wheel's motor (torque, top speed) is set on the wheel. A wheel with no torque only rolls.</p>}
-          {n.drive === 'engine' && n.wheels.every(w => !w.driven) && <p className='text-ui-sm text-warning mb-2'>Mark the wheels the engine turns as Driven, on each wheel.</p>}
+          {n.drivetrain === 'none' && <p className='text-ui-sm text-muted mb-2'>Nothing drives it: it rolls, steers and brakes.</p>}
+          {n.drivetrain === 'motors' && <p className='text-ui-sm text-muted mb-2'>Each wheel's motor (torque, top speed) is set on the wheel. A wheel with no torque only rolls.</p>}
+          {n.drivetrain === 'engine' && n.wheels.every(w => !w.driven) && <p className='text-ui-sm text-warning mb-2'>Mark the wheels the engine turns as Driven, on each wheel.</p>}
 
           <SectionTitle title='Driving' className='mt-3 mb-1' />
           {toggle('Player input', 'playerInput', PLAYER_HINT)}
+          {toggle('Parked', 'parked', PARKED_HINT)}
           {toggle('Auto reverse', 'autoReverse', REVERSE_HINT)}
 
-          {n.drive === 'engine' && <>
+          {n.drivetrain === 'engine' && <>
             <SectionTitle title='Engine' className='mt-3 mb-1' />
             {slider('Torque', 'maxTorque', 0, 3000, 10)}
             {slider('Idle RPM', 'minRpm', 300, 3000, 50)}
@@ -206,7 +208,7 @@ function WheelList({ vehicle }: { vehicle: VehicleNode }) {
             <span className='w-3.5 h-3.5 shrink-0 text-muted'><WheelIcon /></span>
             <span className='truncate'>{w.name}</span>
             <span className='ml-auto text-dim shrink-0'>
-              {vehicle.drive === 'engine' && w.driven ? 'driven' : vehicle.drive === 'motors' && w.motorTorque > 0 ? 'motor' : ''}
+              {vehicle.drivetrain === 'engine' && w.driven ? 'driven' : vehicle.drivetrain === 'motors' && w.motorTorque > 0 ? 'motor' : ''}
               {w.steerAngle > 0 ? ' · steers' : ''}
             </span>
           </button>
@@ -272,8 +274,8 @@ function LiveReadout({ node, live }: { node: VehicleNode; live: boolean }) {
   return (
     <div className='flex flex-col gap-0.5'>
       {row('Speed', `${(values.speed * 3.6).toFixed(0)} km/h`)}
-      {node.drive === 'engine' && row('RPM', values.rpm.toFixed(0))}
-      {node.drive === 'engine' && row('Gear', values.gear > 0 ? String(values.gear) : values.gear < 0 ? 'R' : 'N')}
+      {node.drivetrain === 'engine' && row('RPM', values.rpm.toFixed(0))}
+      {node.drivetrain === 'engine' && row('Gear', values.gear > 0 ? String(values.gear) : values.gear < 0 ? 'R' : 'N')}
       {row('On the ground', `${values.grounded} / ${node.wheels.length}`)}
     </div>
   )
@@ -310,10 +312,10 @@ export function WheelEditor(props: { node: WheelNode }) {
           {slider('Brake', 'brakeTorque', 0, 10000, 50, 0)}
           {slider('Hand brake', 'handBrakeTorque', 0, 10000, 50, 0)}
 
-          {vehicle?.drive === 'engine' && <Toggle className='mb-2 mt-2' checked={n.driven} onChange={checked => apply({ driven: checked })}
+          {vehicle?.drivetrain === 'engine' && <Toggle className='mb-2 mt-2' checked={n.driven} onChange={checked => apply({ driven: checked })}
             label={<span className={cn(labelClass, hintAffordance(DRIVEN_HINT))} title={DRIVEN_HINT}>Driven</span>} />}
 
-          {vehicle?.drive === 'motors' && <>
+          {vehicle?.drivetrain === 'motors' && <>
             <SectionTitle title='Motor' className='mt-3 mb-1' />
             {slider('Torque', 'motorTorque', 0, 3000, 10, 0)}
             <Slider label='Top speed' min={1} max={300} step={1} value={Math.round(n.motorTopSpeed * 3.6)}

@@ -10,7 +10,7 @@ import {
 import type {
     FacingMode, LocomotionSense, LocomotionState, LocomotionTuning, MoveDirSource,
 } from "../../control/locomotion";
-import { consumeRequest, createIntent, decayRequests } from "../../control/intent";
+import { clearIntent, consumeRequest, createIntent, decayRequests, INTENT_REQUESTS } from "../../control/intent";
 import type { ControlIntent } from "../../control/intent";
 import type { ControllerNode } from "./controllerNode";
 import type { RigidBody } from "../../../physics/body";
@@ -166,6 +166,8 @@ export class CharacterNode extends Node {
 
     private readonly _intent: ControlIntent = createIntent();
     private _locomotion: LocomotionState = createLocomotionState();
+    /** Its Collider's body is out of the world (ColliderNode.physicsEnabled off): carried, not walking. */
+    private _riding: boolean = false;
     private _controller: ControllerNode | null = null;
     /** Something wrote intent this frame. Cleared after every step — see {@link drive}. */
     private _driven: boolean = false;
@@ -242,6 +244,25 @@ export class CharacterNode extends Node {
     }
 
     private _stepLocomotion(delta: number): void {
+        // Carried with its body out of the world (a seat in a car): it neither walks nor falls, and nothing it was
+        // asked before it sat down (a buffered jump) waits for it to stand up.
+        if (this.collider?._bodySuspended) {
+            if (!this._riding) {
+                this._riding = true;
+                this._locomotion = createLocomotionState();
+                clearIntent(this._intent);
+                for (const kind of INTENT_REQUESTS) this._intent.requests[kind] = 0;
+                this.isJumping = false;
+                this.turnRequest = 0;
+            }
+            this._driven = false;
+            return;
+        }
+        if (this._riding) {
+            // Back on its feet: a fresh start, not the step it was in when it sat down.
+            this._riding = false;
+            this._locomotion = createLocomotionState();
+        }
         if (!this._driven && !this.driveWhenUnpossessed) return;
         this._driven = false;
 

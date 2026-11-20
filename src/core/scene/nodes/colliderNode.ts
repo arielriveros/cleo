@@ -68,6 +68,27 @@ export class ColliderNode extends Node {
      */
     public get isDynamic(): boolean { return this.mass > 0; }
 
+    /**
+     * Whether its body is in the physics world (Play only; never saved). Off takes the body out, keeping it
+     * built: nothing collides with it, gravity leaves it be, and the node moves freely meanwhile, carried by a
+     * parent it was moved under (a character in a car seat), a script or root motion. On puts the body back
+     * where the node is now, at rest. A Character in it neither walks nor falls while it is off.
+     */
+    public get physicsEnabled(): boolean { return !this._bodySuspended; }
+    public set physicsEnabled(on: boolean) {
+        if (on === !this._bodySuspended) return;
+        this._bodySuspended = !on;
+        this._clearSimulatedPose();
+        const physics = this._scene?.physics, body = this._body;
+        // No body or no physics yet: the next physics step applies it.
+        if (!physics || !body) return;
+        if (!on) { physics.suspendBody(body); return; }
+        // Where the node is NOW: world caches refresh only in the scene's transform pass, and a script may have
+        // just moved or reparented it.
+        this.updateTransforms(this._parent ? this._parent.worldTransform : null);
+        physics.resumeBody(body, this.worldPosition, this.worldQuaternion);
+    }
+
     constructor(name: string, id: string = uuidv4()) {
         super(name, 'collider', id);
         this.wantsPhysicsBuild = true;

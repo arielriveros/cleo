@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AIM_SOURCES, AI_GOALS, CONTROL_SOURCES, CharacterBody2DNode, CharacterNode, ControllerNode, Node } from 'cleo'
+import { AIM_SOURCES, AI_GOALS, CONTROL_SOURCES, CharacterBody2DNode, CharacterNode, ControllerNode, Node, isVehicle } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import NodeRefInput from '../NodeRefInput'
 import ActionSelect from '../../input/ActionSelect'
@@ -85,13 +85,13 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
     </div>
   )
 
-  // A controller possesses a CHARACTER (3D) or a CHARACTER BODY 2D, and never itself.
-  const characters = (node: Node) => node instanceof CharacterNode || node instanceof CharacterBody2DNode
+  // A controller possesses a CHARACTER (3D), a CHARACTER BODY 2D or a VEHICLE, and never itself.
+  const possessable = (node: Node | null | undefined): node is Node =>
+    node instanceof CharacterNode || node instanceof CharacterBody2DNode || isVehicle(node)
 
   // "Possess selected" is the fast path: pick the character in the tree, then one click here.
   const selected = selectedNode ? editorScene.getNodeById(selectedNode) : null
-  const canPossessSelected = (selected instanceof CharacterNode || selected instanceof CharacterBody2DNode)
-    && selected.id !== state.possessedId
+  const canPossessSelected = possessable(selected) && selected.id !== state.possessedId
 
   // Documented on the AI agents page, not with the other node-type editors.
   return (
@@ -99,8 +99,8 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
     <Collapsable title='Controller' doc='editor/ai-agents#the-controller-inspector' icon={<ControllerIcon />} persistKey='controller'>
       <div className='w-full p-2'>
         <SectionTitle title='Possession' className='mt-3 mb-1' />
-        <NodeRefInput value={state.possessedId} scene={editorScene} filter={characters}
-          placeholder='No character'
+        <NodeRefInput value={state.possessedId} scene={editorScene} filter={possessable}
+          placeholder='No character or vehicle'
           onChange={(id) => apply({ possessedId: id })} />
         {canPossessSelected && (
           <Button size='sm' variant='ghost' className='mt-1'
@@ -110,7 +110,7 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
         )}
         {!state.possessedId && (
           <p className='text-ui-sm text-muted mt-1'>
-            This controller drives nothing until it possesses a Character.
+            This controller drives nothing until it possesses a Character or a Vehicle.
           </p>
         )}
 

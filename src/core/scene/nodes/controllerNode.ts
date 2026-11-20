@@ -53,7 +53,8 @@ import type { FuzzyModel } from "../../../ai/fuzzyModel";
 import { featureFactory } from "../../features/registry";
 import { aiStats } from "../../../ai/aiStats";
 import { vec3 } from "gl-matrix";
-import { isCharacterBody2D } from "./nodeType";
+import { isCharacterBody2D, isVehicle } from "./nodeType";
+import type { VehicleNode } from "./vehicleNode";
 
 /**
  * A whisker hit whose surface faces up at least this much (cos 50 deg) is ground to walk on, not a
@@ -124,14 +125,22 @@ export type BlackboardValue = number | boolean | string;
  */
 export type Pawn = CharacterNode | CharacterBody2DNode;
 
+/**
+ * Everything a controller can possess: a {@link Pawn}, or a {@link VehicleNode} (feature `vehicles`), which
+ * takes the same intent through `drive()` and reads its `move` as steering and throttle. A player drives a
+ * vehicle; the AI steering below walks pawns only.
+ */
+export type Possessable = Pawn | VehicleNode;
+
 export class ControllerNode extends Node {
     // ----- possession ------------------------------------------------------------------------------
     // The id is the truth and the node handle is a resolution cache — CameraRigNode's pattern, for the
     // same reason: parse is depth-first, so the target very often does not exist yet.
     private _possessedId: string | null = null;
-    private _possessed: Pawn | null = null;
+    private _possessed: Possessable | null = null;
     private _warnedDanglingPossessed: boolean = false;
     private _warnedStolen: boolean = false;
+    private _warnedVehicleAi: boolean = false;
 
     // ----- source ----------------------------------------------------------------------------------
     public controlSource: ControlSource = 'player';
@@ -371,8 +380,8 @@ export class ControllerNode extends Node {
 
     // ----- possession ------------------------------------------------------------------------------
 
-    /** The character this controller drives, or null. Resolved through a cache. */
-    public get possessed(): Pawn | null { return this._resolvePossessed(); }
+    /** The character (or vehicle) this controller drives, or null. Resolved through a cache. */
+    public get possessed(): Possessable | null { return this._resolvePossessed(); }
 
     public get possessedId(): string | null { return this._possessedId; }
     public set possessedId(id: string | null) {
@@ -392,10 +401,10 @@ export class ControllerNode extends Node {
      * and pretending it cannot happen. Last-possess-wins is also what makes "the player takes over this
      * NPC" a single call rather than a handshake with the AI controller.
      */
-    public possess(node: Pawn | null): this {
+    public possess(node: Possessable | null): this {
         // The script proxy's `set` trap forwards values untouched, so an assignment from a script would
         // otherwise store a Proxy that never compares equal to the real node.
-        const raw = node ? unwrapScriptNode(node) as Pawn : null;
+        const raw = node ? unwrapScriptNode(node) as Possessable : null;
         if (raw === this._possessed && raw?.id === this._possessedId) return this;
 
         this._detach();
@@ -437,7 +446,7 @@ export class ControllerNode extends Node {
         this._possessed = null;
     }
 
-    private _resolvePossessed(): Pawn | null {
+    private _resolvePossessed(): Possessable | null {
         const id = this._possessedId;
         if (!id) return (this._possessed = null);
         const cache = this._possessed;
@@ -447,9 +456,15 @@ export class ControllerNode extends Node {
         const found = this._scene?.getNodeById(id) ?? null;
         // An id pointing at some other node type resolves to NULL rather than to something that cannot be
         // driven — a controller quietly steering a light would be harder to diagnose than one doing nothing.
-        this._possessed = found instanceof CharacterNode || isCharacterBody2D(found) ? found : null;
+        this._possessed = found instanceof CharacterNode || isCharacterBody2D(found) || isVehicle(found) ? found : null;
         if (this._possessed) this._possessed._setController(this);
         return this._possessed;
+    }
+
+    /** The possessed node when it walks (a Character or a 2D body): what navigation, perception and steering use. */
+    private _resolvePawn(): Pawn | null {
+        const pawn = this._resolvePossessed();
+        return pawn && !isVehicle(pawn) ? pawn : null;
     }
 
     // ----- navigation -------------------------------------------------------------------------------
@@ -467,7 +482,7 @@ export class ControllerNode extends Node {
 
     /** Planar distance still to walk, or 0 when there is no route. Backs the `pathRemaining` sense. */
     public get pathRemaining(): number {
-        const pawn = this._resolvePossessed();
+        const pawn = this._resolvePawn();
         if (!pawn || !hasPath(this._path)) return 0;
         const p = pawn.worldPosition;
         return remainingDistance(this._path, vec3.set(this._selfPos, p[0], p[1], p[2]), this._resolveUp());
@@ -545,7 +560,7 @@ export class ControllerNode extends Node {
             if (this._possessedId && !this._warnedDanglingPossessed) {
                 this._warnedDanglingPossessed = true;
                 Logger.warn(
-                    `Controller '${this._name}' possesses '${this._possessedId}', which is not a Character or a Character Body 2D ` +
+                    `Controller '${this._name}' possesses '${this._possessedId}', which is not a Character, a Character Body 2D or a Vehicle ` +
                     `in this scene. It will drive nothing until that node exists.`, 'Scene');
             }
             return;
@@ -553,6 +568,7 @@ export class ControllerNode extends Node {
 
         // A 2D body moves in world axes: no camera basis, no aim rig to steer.
         const flat = isCharacterBody2D(pawn);
+        const vehicle = isVehicle(pawn);
         const basisYaw = flat ? 0 : this._basisYaw();
 
         switch (this.controlSource) {
@@ -562,9 +578,19 @@ export class ControllerNode extends Node {
                 // and the camera gizmo on it -- along with the view.
                 if (authoring.enabled) { clearIntent(this._intent); break; }
                 this._readPlayer();
-                applyPlayerReading(this._intent, this._reading, basisYaw, pawn.jumpBufferSeconds);
+                applyPlayerReading(this._intent, this._reading, basisYaw, vehicle ? 0 : pawn.jumpBufferSeconds);
                 break;
             case 'ai':
+                if (vehicle) {
+                    // AI steering walks: it has no answer for throttle and steering. A brain may still write the
+                    // intent itself from onThink, below.
+                    clearIntent(this._intent);
+                    if (!this._warnedVehicleAi) {
+                        this._warnedVehicleAi = true;
+                        Logger.warn(`Controller '${this._name}' is AI but possesses the vehicle '${pawn.name}': AI steering only walks, so it asks nothing of it. Write its intent from onThink instead.`, 'Scene');
+                    }
+                    break;
+                }
                 this._steer(pawn, delta);
                 break;
             case 'none':
@@ -609,6 +635,7 @@ export class ControllerNode extends Node {
         // The press EDGE, not the held state: a held button must not re-raise the request every frame,
         // which would make the jump buffer meaningless.
         this._reading.jump = this.jumpAction ? input.started(this.jumpAction) : false;
+        this._reading.jumpHeld = this.jumpAction ? input.pressed(this.jumpAction) : false;
         this._reading.sprint = this.sprintAction ? input.pressed(this.sprintAction) : false;
         this._reading.crouch = this.crouchAction ? input.pressed(this.crouchAction) : false;
     }
@@ -624,7 +651,7 @@ export class ControllerNode extends Node {
      * senses nothing is reading while nothing moves, is the one part of this that would be felt.
      */
     public perceive(delta: number): void {
-        const pawn = this._resolvePossessed();
+        const pawn = this._resolvePawn();
         if (!pawn || this.controlSource !== 'ai') return;
         if (isCharacterBody2D(pawn)) { this._perceive2D(pawn, delta); return; }
 
@@ -1130,7 +1157,7 @@ export class ControllerNode extends Node {
      * which for a controller that has never flocked is 0 forever.
      */
     public get neighborCount(): number {
-        const pawn = this._resolvePossessed();
+        const pawn = this._resolvePawn();
         if (pawn) this._gatherNeighbours(pawn);
         return this._neighbourCount;
     }
@@ -1328,7 +1355,7 @@ export class ControllerNode extends Node {
 
         if (!this._goalContext) {
             this._goalContext = {
-                read: (source) => this._readSource(source, this._possessed ?? pawn),
+                read: (source) => this._readSource(source, this._resolvePawn() ?? pawn),
                 met: (condition) => !!condition
                     && conditionNodeMet(this._behaviorRuntime.ctx, condition),
                 drive: (goal, targetKey, speedScale) => {
@@ -1686,7 +1713,7 @@ export class ControllerNode extends Node {
      * A copy rather than handing over the record: two controllers briefly naming one pawn would otherwise
      * alias the same object, and the pawn's jump consumption would reach back into a controller's state.
      */
-    private _publish(pawn: Pawn): void {
+    private _publish(pawn: Possessable): void {
         const target = pawn.drive();
         target.move[0] = this._intent.move[0];
         target.move[1] = this._intent.move[1];
@@ -1697,6 +1724,7 @@ export class ControllerNode extends Node {
         target.aimPitch = this._intent.aimPitch;
         target.sprint = this._intent.sprint;
         target.crouch = this._intent.crouch;
+        target.jumpHeld = this._intent.jumpHeld;
         target.speedScale = this._intent.speedScale;
         // Requests are RAISED into the pawn, never copied wholesale: the pawn owns the countdown, and
         // overwriting it with the controller's zero would cancel a buffered jump every frame.

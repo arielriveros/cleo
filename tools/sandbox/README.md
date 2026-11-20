@@ -15,6 +15,9 @@ npx vitest run tests/sandboxProject.test.ts --project engine
 
 The files:
 
+- **`car.ts`**: the car, `build/car/dirty_car.glb`, read in metres and mirrored to left-hand drive: its body, its
+  windows, its four wheels cut apart, the chassis boxes, and where the Seat, the Enter Point and the Exit Point go
+  (from the car clips' root motion). `build.ts` makes the Car template of it.
 - **`prepare.mjs`** (plain Node, assimp). It reads `build/LocomotionPack/Mannequin.fbx` and builds a skin in metres,
   with a weightless **Pivot** joint above the hips, a welded mesh and its maps at half size. It retargets every
   other `.fbx` onto that skin, keeping each clip's travel. It writes `build/sandbox_prepared/` (gitignored), and

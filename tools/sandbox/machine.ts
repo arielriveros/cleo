@@ -8,7 +8,8 @@
 //
 // The shape follows Advanced Locomotion System v4: Idle and a looking-direction locomotion blend while grounded,
 // turn-in-place clips while idle, a stop, a jump entered at take-off, a fall loop, and a soft or hard landing
-// chosen while still in the air.
+// chosen while still in the air. And the car: getting in, driving and getting out, the one part entered by TRIGGERS
+// (EnterCar, ExitCar), which SandboxPlayer fires by name as the Car hands it the seat or takes it back.
 
 import type { AnimationCondition, AnimationConditionGroup, AnimationState, AnimationStateMachine, AnimationTransition } from '../../src/animation/animator'
 import type { AnimationField } from '../../src/animation/animationField'
@@ -36,6 +37,9 @@ const edge = (from: string, to: string, condition: AnimationConditionGroup | nul
     ...(o.stay ? { minDwell: o.stay } : {}),
     ...(o.exit !== undefined ? { hasExitTime: true, exitTime: o.exit } : { hasExitTime: false }),
 })
+
+/** The triggers that put the character into the car and take it out (SandboxPlayer's enterTrigger and exitTrigger). */
+export const CAR_TRIGGERS = { enter: 'EnterCar', exit: 'ExitCar' } as const
 
 /** Speeds the machine's thresholds and the character's tuning are built from, all measured. */
 export interface Speeds {
@@ -353,6 +357,12 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
         state('LandHard', 'LandHard', 760, 900, { holdMovement: true }),
         // A far fall while running rolls instead, carried on by the run's own speed.
         state('LandRoll', 'LandRoll', 940, 900, { speed: rollRate }),
+        // The car. Entered by its triggers from whatever is playing; getting in and out are root motion (they carry the
+        // Character from the door to the Seat and back, its body out of the world meanwhile), driving holds still on
+        // the Seat. No feet planted or placed: the car's floor is not the ground the feet would look for.
+        state('CarEnter', 'CarEnter', 1300, 120, { triggers: [{ trigger: CAR_TRIGGERS.enter, blendTime: 0.3 }], footLock: false, ikWeight: 0, holdMovement: true }),
+        state('CarDrive', 'CarDrive', 1300, 260, { loop: true, footLock: false, ikWeight: 0, holdMovement: true }),
+        state('CarExit', 'CarExit', 1300, 400, { triggers: [{ trigger: CAR_TRIGGERS.exit, blendTime: 0.25 }], footLock: false, ikWeight: 0, holdMovement: true }),
     ]
     // Up and down a flight: the stairs' blend space (Climb x Speed), in step with the walk's (one sync group), the
     // feet on the treads at full weight whatever the pace and planted by the clips' windows at any height (the upper
@@ -490,6 +500,11 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
         T.push(edge('Stairs', 'Locomotion', all(offFlight!), { blend: 0.3, stay: 0.2 }))
         airborne('Stairs')
     }
+    // The car: seated once in (at the clip's very end, so all of its travel has carried the Character), and back on
+    // its feet once out. Nothing else leaves these states: their group (Car) has no transitions of its own, and the
+    // machine has no Any State.
+    T.push(edge('CarEnter', 'CarDrive', null, { blend: 0.4, exit: 1 }))
+    T.push(edge('CarExit', 'Idle', null, { blend: 0.3, exit: 1 }))
     for (const s of grounded) if (!states.some(x => x.name === s)) throw new Error(`no state ${s}`)
 
     return {
@@ -518,6 +533,8 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
             variable('OnStairs', 'onStairs', 'boolean', 'variable'),
             variable('Stairs', 'stairs', 'number', 'variable'),
             { ...variable('StairRate', 'stairRate', 'number', 'variable'), default: 1 },
+            { name: CAR_TRIGGERS.enter, type: 'trigger', default: false },
+            { name: CAR_TRIGGERS.exit, type: 'trigger', default: false },
         ] as any,
         states,
         transitions: T,
@@ -528,6 +545,8 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
             { name: 'Running Turn', states: ['RunTurnL', 'RunTurnR'], x: 880, y: 260 },
             { name: 'Air', states: ['JumpStand', 'JumpRun', 'Fall', 'FallFar'], x: 300, y: 620 },
             { name: 'Landing', states: ['JumpLand', 'LandRun', 'LandSoft', 'LandHard', 'LandRoll'], x: 680, y: 620 },
+            // Getting in, driving, getting out: drawn as one node (its triggers enter it from anywhere).
+            { name: 'Car', states: ['CarEnter', 'CarDrive', 'CarExit'], x: 1080, y: 520 },
         ],
         events: [],
         // Weight shifting into a change of direction (ALS's lean): an additive tilt of the whole body about the

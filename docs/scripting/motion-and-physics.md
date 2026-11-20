@@ -92,6 +92,23 @@ it is **Blocked by** and the ones it **Sees through**, and goes by the body's la
 with `simulatePhysics` off can be non-colliding for gameplay yet still push a camera out of it, and a body on
 No Camera is passed straight through.
 
+### Turning a body off for a while
+
+A Collider's `physicsEnabled` (Play only, never saved) takes its body out of the physics world, keeping it built:
+nothing collides with it, gravity leaves it be, and its node moves freely meanwhile — carried by a parent it was
+moved under, set by a script, or moved by an animator's root motion. Turned back on, the body comes back where the
+node is then, at rest. A Character in it neither walks nor falls while it is off, and is still standing when it
+comes back if it was standing when it left. The Sandbox's driver rides in its car's seat this way.
+
+```ts
+const body = this.collider as ColliderNode
+body.physicsEnabled = false
+body.reparent(seat)            // keeps where it is in the world; Node.reparent(parent, keepWorld = true)
+// ... later
+body.reparent(this.scene.root)
+body.physicsEnabled = true     // back in the world, where the node is
+```
+
 > **A collider offset from the mesh moves the centre of mass** only once you call `recenterMass()`:
 > until then the mass sits at the node origin, and an object whose collider sits off-centre tilts to the
 > ground normal. Either way `body.position` is the node's position, not the centre of mass's.
@@ -487,8 +504,10 @@ of by clips. This is the usual stand-in for a death animation when you do not ha
 
 ## Vehicles
 
-*(unreleased)* A [Vehicle node](../editor/vehicles.md) drives its chassis Collider on its Wheels. A script
-attached to it (or to anything that can find it) sets the driver's input each frame:
+*(unreleased)* A [Vehicle node](../editor/vehicles.md) drives its chassis Collider on its Wheels. A
+[Controller](characters-and-controllers.md#possession) can possess it, as it does a Character: its intent's `move`
+steers and drives, the jump button held holds the hand brake. `parked = true` holds it still whatever drives it.
+Or a script attached to it (or to anything that can find it) sets the driver's input each frame:
 
 ```ts
 import { Input, VehicleNode } from 'cleo'
@@ -535,7 +554,7 @@ trailer.hitchTarget = car.id       // towed from the next Play
 ```
 
 With electric motors instead of an engine, give the wheels that drive a `motorTorque` (N·m) and a
-`motorMaxSpeed` (rad/s at the wheel), and set `drive: 'motors'`:
+`motorMaxSpeed` (rad/s at the wheel), and set `drive: 'motors'` (on a Vehicle node, its `drivetrain`):
 
 ```ts
 const rover = new Vehicle({

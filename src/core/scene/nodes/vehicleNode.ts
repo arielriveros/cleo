@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 import { WheelNode } from "./wheelNode";
 import { applyVehiclePreset } from "./vehiclePresets";
-import { DEG2RAD, finiteOr } from "../../math";
+import { DEG2RAD, clamp, finiteOr } from "../../math";
 import { Input } from "../../../input/inputApi";
 import { Vehicle } from "../../../physics/vehicle";
 import {
@@ -11,6 +11,8 @@ import {
 } from "../../../physics/pal/vehicle/vehicleDesc";
 import type { PhysicsBody } from "../../../physics/physicsBody";
 import type { JointHandle } from "../../../physics/pal/types";
+import { clearIntent, createIntent, type ControlIntent } from "../../control/intent";
+import type { ControllerNode } from "./controllerNode";
 
 const CASTS: readonly VehicleCast[] = ['ray', 'sphere', 'cylinder'];
 const DRIVES: readonly VehicleDrive[] = ['none', 'engine', 'motors'];
@@ -26,8 +28,9 @@ const AXLE_TOLERANCE = 0.3;
  * this node's +Z with its +Y up.
  *
  * Driven by {@link throttle}, {@link steer}, {@link brake} and {@link handBrake}, which a script sets each
- * frame, or by the player's input with {@link playerInput} on (`Move` steers and drives, `Jump` holds the
- * hand brake).
+ * frame, by a Controller that possesses it (its intent's `move` x steers and y drives, the jump button held
+ * holds the hand brake), or by the player's input with {@link playerInput} on (`Move` steers and drives,
+ * `Jump` holds the hand brake). {@link parked} overrides all three: brakes on, nothing drives.
  *
  * Like a Character, it does its own work in `update` after the script's `onUpdate` (a script's method of the
  * same name would shadow a class one), so a script attached to it can drive it.
@@ -37,7 +40,7 @@ export class VehicleNode extends Node {
      * What powers it: an engine through a gearbox to the wheels marked `driven`, an electric motor in each
      * wheel (its `motorTorque` and `motorTopSpeed`), or nothing: it rolls, steers and brakes, pushed or towed.
      */
-    public drive: VehicleDrive = 'none';
+    public drivetrain: VehicleDrive = 'none';
 
     // ---- engine and gearbox (serialized) ----
 
@@ -71,8 +74,16 @@ export class VehicleNode extends Node {
     public maxPitchRoll: number = 180;
     /** The throttle against the way it rolls brakes, then reverses once nearly stopped. */
     public autoReverse: boolean = true;
-    /** Drive from the player's input: `Move` (x steers, y drives), `Jump` holds the hand brake. */
+    /**
+     * Drive from the player's input: `Move` (x steers, y drives), `Jump` holds the hand brake. A Controller
+     * that possesses the vehicle takes over from it.
+     */
     public playerInput: boolean = false;
+    /**
+     * Parked: the brakes and the hand brake on, throttle and steering ignored, whoever is driving. An empty car,
+     * or one whose driver is still getting in.
+     */
+    public parked: boolean = false;
 
     // ---- lean (a motorcycle; serialized) ----
 
@@ -106,6 +117,11 @@ export class VehicleNode extends Node {
     public handBrake: number = 0;
 
     private _vehicle: Vehicle | null = null;
+    /** What a possessing Controller (or a script) wrote this frame: see {@link drive}. */
+    private readonly _intent: ControlIntent = createIntent();
+    private _controller: ControllerNode | null = null;
+    /** Something wrote intent this frame. Cleared after every step. */
+    private _driven: boolean = false;
     private _wheels: WheelNode[] = [];
     private _chassis: PhysicsBody | null = null;
     /** The hitch's joint and the two bodies it was made between (it is made again if either changes). */
@@ -126,6 +142,34 @@ export class VehicleNode extends Node {
     public get speed(): number { return this._vehicle?.speed ?? 0; }
     public get rpm(): number { return this._vehicle?.rpm ?? 0; }
     public get gear(): number { return this._vehicle?.gear ?? 0; }
+
+    /** This frame's intent as it was last written. */
+    public get intent(): Readonly<ControlIntent> { return this._intent; }
+
+    /**
+     * The intent, MARKED FRESH: what a possessing Controller writes through each frame (a pawn's protocol, as a
+     * Character's). `move` x steers (+1 right), y drives (+1 forward; against the way it rolls it brakes, then
+     * reverses), `jumpHeld` holds the hand brake. Only while a controller possesses it: on its own the
+     * vehicle takes {@link throttle} and the rest, or {@link playerInput}.
+     */
+    public drive(): ControlIntent {
+        this._driven = true;
+        return this._intent;
+    }
+
+    /** The controller currently possessing this vehicle, or null. Set by `ControllerNode.possess`. */
+    public get controller(): ControllerNode | null { return this._controller; }
+    public get isControlled(): boolean { return this._controller !== null; }
+
+    /** Called by {@link ControllerNode} only: the back-pointer. A released vehicle lets go of the controls. */
+    public _setController(controller: ControllerNode | null): void {
+        if (this._controller && !controller) {
+            this.throttle = 0; this.steer = 0; this.brake = 0; this.handBrake = 0;
+            clearIntent(this._intent);
+            this._driven = false;
+        }
+        this._controller = controller;
+    }
 
     /** Its wheels: the WheelNodes under it (not under a Collider nested in it). */
     public get wheels(): WheelNode[] {
@@ -190,6 +234,8 @@ export class VehicleNode extends Node {
     }
 
     public onDespawn(): void {
+        // The controller detaches itself (ControllerNode._detach); a vehicle that leaves keeps no stale wish.
+        this._driven = false;
         if (this._vehicle) this._scene?.physics?.removeVehicle(this._vehicle);
         this._vehicle = null;
         this._chassis = null;
@@ -237,16 +283,27 @@ export class VehicleNode extends Node {
             physics.addVehicle(body, v);
             this._chassis = body;
         }
-        if (this.playerInput) {
+        if (this._controller) {
+            // A controller that wrote nothing this frame (its source off, or nothing to read) asks for nothing.
+            const i = this._intent, fresh = this._driven;
+            this.steer = fresh ? clamp(i.move[0], -1, 1) : 0;
+            this.throttle = fresh ? clamp(i.move[1], -1, 1) : 0;
+            this.brake = 0;
+            this.handBrake = fresh && i.jumpHeld ? 1 : 0;
+        } else if (this.playerInput) {
             const move = Input.vector('Move');
             this.steer = move[0];
             this.throttle = move[1];
             this.handBrake = Input.pressed('Jump') ? 1 : 0;
         }
-        v.throttle = this.throttle;
-        v.steer = this.steer;
-        v.brake = this.brake;
-        v.handBrake = this.handBrake;
+        this._driven = false;
+        // A controller raises requests (a jump press) into every pawn; a vehicle has none to take.
+        for (const kind of Object.keys(this._intent.requests) as (keyof ControlIntent['requests'])[]) this._intent.requests[kind] = 0;
+        const parked = this.parked;
+        v.throttle = parked ? 0 : this.throttle;
+        v.steer = parked ? 0 : this.steer;
+        v.brake = parked ? 1 : this.brake;
+        v.handBrake = parked ? 1 : this.handBrake;
         v.autoReverse = this.autoReverse;
         if (this.hitchTarget || this._hitch) this._syncHitch(body);
         this._poseWheels(v);
@@ -324,7 +381,7 @@ export class VehicleNode extends Node {
             return { left: sorted[0], right: sorted.length > 1 ? sorted[sorted.length - 1] : -1, all: sorted };
         });
         const differentials: VehicleDifferentialDesc[] = [];
-        if (this.drive === 'engine') for (const p of pairs) {
+        if (this.drivetrain === 'engine') for (const p of pairs) {
             const driven = p.all.filter(i => wheels[i].driven);
             if (driven.length === 0) continue;
             const left = driven.includes(p.left) ? p.left : -1, right = p.right >= 0 && driven.includes(p.right) ? p.right : -1;
@@ -336,7 +393,7 @@ export class VehicleNode extends Node {
             : [];
 
         return {
-            drive: this.drive,
+            drive: this.drivetrain,
             up: [this._vUp[0], this._vUp[1], this._vUp[2]],
             forward: [this._vForward[0], this._vForward[1], this._vForward[2]],
             wheels: descs,
@@ -359,12 +416,12 @@ export class VehicleNode extends Node {
 
     protected _serializePayload(): any {
         return {
-            drive: this.drive,
+            drivetrain: this.drivetrain,
             maxTorque: this.maxTorque, minRpm: this.minRpm, maxRpm: this.maxRpm,
             gearRatios: [...this.gearRatios], reverseRatio: this.reverseRatio, finalDrive: this.finalDrive,
             shiftUpRpm: this.shiftUpRpm, shiftDownRpm: this.shiftDownRpm, shiftTime: this.shiftTime, clutchStrength: this.clutchStrength,
             limitedSlip: this.limitedSlip, antiRoll: this.antiRoll, cast: this.cast, maxPitchRoll: this.maxPitchRoll,
-            autoReverse: this.autoReverse, playerInput: this.playerInput,
+            autoReverse: this.autoReverse, playerInput: this.playerInput, parked: this.parked,
             lean: this.lean, maxLean: this.maxLean, leanSpring: this.leanSpring, leanDamping: this.leanDamping,
             hitchTarget: this.hitchTarget, hitchPoint: [...this.hitchPoint],
         };
@@ -393,7 +450,10 @@ export class VehicleNode extends Node {
         node.maxPitchRoll = Math.min(180, positive(json.maxPitchRoll, node.maxPitchRoll));
         node.autoReverse = bool(json.autoReverse, node.autoReverse);
         node.playerInput = bool(json.playerInput, node.playerInput);
-        if (DRIVES.includes(json.drive)) node.drive = json.drive;
+        node.parked = bool(json.parked, node.parked);
+        // `drive` until 2026-11-19 (the name went to the pawn's drive(), as on a Character).
+        const drivetrain = json.drivetrain ?? json.drive;
+        if (DRIVES.includes(drivetrain)) node.drivetrain = drivetrain;
         node.lean = bool(json.lean, node.lean);
         node.maxLean = Math.min(85, positive(json.maxLean, node.maxLean));
         node.leanSpring = nonNegative(json.leanSpring, node.leanSpring);
@@ -408,7 +468,7 @@ export class VehicleNode extends Node {
         const node = new VehicleNode(json.name, json.id);
         VehicleNode.readSettings(node, json);
         Node.finishParse(node, parent, json);
-        // Saved before vehicles had a drive: its driven wheels were the engine's.
-        if (!DRIVES.includes(json.drive)) node.drive = node.wheels.some(w => w.driven) ? 'engine' : 'none';
+        // Saved before vehicles had a drivetrain: its driven wheels were the engine's.
+        if (!DRIVES.includes(json.drivetrain ?? json.drive)) node.drivetrain = node.wheels.some(w => w.driven) ? 'engine' : 'none';
     }
 }

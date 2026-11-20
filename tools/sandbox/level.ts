@@ -8,7 +8,9 @@
 //   platforms    0.3, 0.6, 1.0, 2.0 and 3.5 m, the tall ones reached by a ramp: jump on, drop off
 //   gap          two 1 m blocks 2 m apart, for a running jump
 //   pillars, wall  close to the start, for the camera: it sees through the pillars and pulls in for the wall
+//   barriers     round the edge of the ground, so the car stays on it
 //   props        loose rigid bodies over all of it: crates, barrels, balls and planks to push, knock over and roll
+//   car          a drivable car parked on the open ground (the Car template, build.ts), by CAR below
 //
 // Pure data: build.ts turns each piece into a collider with its mesh under it (a flight of stairs into two: its steps
 // and its ramp), then folds the static ones into Static Collision colliders, one per collision layer, with the
@@ -110,6 +112,9 @@ export const TREAD = 0.3
 export function course(): Piece[] {
     const out: Piece[] = []
     out.push({ kind: 'box', name: 'Ground', size: [120, 1, 120], position: [0, -0.5, 0], material: 'floor' })
+    // A low barrier round the ground's edge: the car could be driven off it otherwise.
+    for (const [name, x, z, w, d] of [['North', 0, 59.75, 120, 0.5], ['South', 0, -59.75, 120, 0.5], ['East', -59.75, 0, 0.5, 119], ['West', 59.75, 0, 0.5, 119]] as const)
+        out.push({ kind: 'box', name: `Barrier ${name}`, size: [w, 1, d], position: [x, 0.5, z], material: 'accent' })
 
     // Ramps: a ramp rising toward +Z onto a 1.5 m platform, one lane per angle.
     const rampHeight = 1.5
@@ -164,6 +169,12 @@ export function course(): Piece[] {
     out.push({ kind: 'box', name: 'Wall', size: [8, 3, 0.4], position: [-10, 1.5, -6], material: 'accent' })
     return out
 }
+
+/**
+ * Where the car is parked, and facing (yaw degrees): on the open ground right of the platforms, its nose toward +X
+ * and forty metres of flat ahead of it, the driver's door (its left) toward the pillars.
+ */
+export const CAR = { position: [17, 0, 1.5] as [number, number, number], yaw: 90 }
 
 /** Where the player starts, and facing (yaw degrees; 0 = +Z). */
 export const SPAWN = { position: [0, 0.02, 0] as [number, number, number], yaw: 0 }

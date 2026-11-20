@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { Node } from '../src/core/scene/nodes/node';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 import { VehicleNode } from '../src/core/scene/nodes/vehicleNode';
@@ -8,6 +8,9 @@ import { installFeatures } from '../src/core/features/registry';
 import vehicles from '../src/modules/vehicles/index';
 import { TEST_PHYSICS } from './helpers/testPhysics';
 import { LoopbackPort } from '../src/physics/worker/ports';
+import { ControllerNode } from '../src/core/scene/nodes/controllerNode';
+import { Logger } from '../src/core/logger';
+import { fakeInput, type FakeInput } from './helpers/fakeInput';
 
 // Vehicles as nodes: a Vehicle stands in its chassis Collider, its Wheels under it, and drives on every
 // backend (this suite runs again on Rapier and Jolt, vitest.config.ts PHYSICS_SUITES), inline and in the
@@ -156,17 +159,17 @@ describe(`a Vehicle node (${TEST_PHYSICS})`, () => {
         expect(worker.vehicle.vehicle!.wheel(2).grounded).toBe(true);
     });
 
-    it('loads a vehicle saved before drives as engine-driven, and saves its drive', async () => {
+    it('loads a vehicle saved before drives as engine-driven, and saves its drivetrain', async () => {
         const { vehicle } = build();
-        expect(vehicle.drive).toBe('engine');
-        expect(((await vehicle.serialize()) as any).drive).toBe('engine');
+        expect(vehicle.drivetrain).toBe('engine');
+        expect(((await vehicle.serialize()) as any).drivetrain).toBe('engine');
     });
 
     it('adds wheels at the chassis corners, axle by axle, with no mesh', () => {
         const root = new Node('root');
         parseNodeJson(root, { ...car(), children: [{ type: 'vehicle', name: 'Vehicle', id: 'vehicle', position: [0, 0, 0], ...IDENT, children: [] }] });
         const vehicle = root.getChildByName('Car')[0].getChildByName('Vehicle')[0] as VehicleNode;
-        expect(vehicle.drive).toBe('none');
+        expect(vehicle.drivetrain).toBe('none');
         const made = [vehicle.addWheel(), vehicle.addWheel(), vehicle.addWheel(), vehicle.addWheel(), vehicle.addWheel()];
         expect(made.map(w => [...w.position].map(x => +x.toFixed(2)))).toEqual([
             [0.8, -0.5, 1.3], [-0.8, -0.5, 1.3], [0.8, -0.5, -1.3], [-0.8, -0.5, -1.3], [0.8, -0.5, -2.5],
@@ -179,7 +182,7 @@ describe(`a Vehicle node (${TEST_PHYSICS})`, () => {
     it("drives on its wheels' motors, held to their top speed", () => {
         const root = new Node('root');
         parseNodeJson(root, floor());
-        parseNodeJson(root, { ...car(), children: [{ type: 'vehicle', name: 'Vehicle', id: 'vehicle', position: [0, 0, 0], ...IDENT, drive: 'motors', children: [] }] });
+        parseNodeJson(root, { ...car(), children: [{ type: 'vehicle', name: 'Vehicle', id: 'vehicle', position: [0, 0, 0], ...IDENT, drivetrain: 'motors', children: [] }] });
         const vehicle = root.getChildByName('Car')[0].getChildByName('Vehicle')[0] as VehicleNode;
         for (let i = 0; i < 4; i++) {
             const w = vehicle.addWheel();
@@ -204,5 +207,104 @@ describe(`a Vehicle node (${TEST_PHYSICS})`, () => {
         frame(0.1);
         // Its node still in the scene: it puts the vehicle back.
         expect(p.vehicles.size).toBe(1);
+    });
+});
+
+// A player's Controller possesses the Vehicle (the Sandbox's car): its intent drives it, Parked holds it.
+describe(`a Vehicle possessed by a Controller (${TEST_PHYSICS})`, () => {
+    let input: FakeInput;
+    beforeAll(async () => {
+        installFeatures([vehicles]);
+        await new PhysicsSystem({ backend: TEST_PHYSICS }).load();
+    });
+    beforeEach(() => { input = fakeInput(); });
+    afterEach(() => { input.restore(); });
+
+    /** The car with a player Controller possessing its Vehicle, thinking before every frame as the scene's control pass does. */
+    function driven() {
+        const b = build();
+        const controller = new ControllerNode('Driver');
+        controller.controlSource = 'player';
+        b.root.addChild(controller);
+        (controller as any)._scene = (b.vehicle as any)._scene;
+        controller.possess(b.vehicle);
+        const frame = (seconds: number) => {
+            for (let t = 0; t < seconds - 1e-9; t += 1 / 60) { controller.think(1 / 60); b.frame(1 / 60); input.endFrame(); }
+        };
+        return { ...b, controller, frame };
+    }
+
+    it('drives from the intent: Move steers and drives, the jump button held holds the hand brake', () => {
+        const { vehicle, chassis, controller, frame } = driven();
+        expect(controller.possessed).toBe(vehicle);
+        expect(vehicle.controller).toBe(controller);
+        frame(1.5);
+        const z0 = chassis.worldPosition[2];
+        input.setMove(0, 1);
+        frame(2);
+        expect(vehicle.throttle).toBe(1);
+        expect(vehicle.speed).toBeGreaterThan(3);
+        expect(chassis.worldPosition[2] - z0).toBeGreaterThan(3);
+        input.setMove(1, 1);
+        frame(0.3);
+        expect(vehicle.steer).toBe(1);
+        expect(vehicle.vehicle!.wheel(0).steerAngle).toBeLessThan(-0.3);
+        input.press('Jump');
+        frame(0.1);
+        expect(vehicle.handBrake).toBe(1);
+        input.release('Jump');
+        frame(0.1);
+        expect(vehicle.handBrake).toBe(0);
+    });
+
+    it('takes no player input of its own while possessed, and lets go of the controls when released', () => {
+        const { vehicle, controller, frame } = driven();
+        vehicle.playerInput = true;
+        frame(1);
+        input.setMove(0, 1);
+        controller.controlSource = 'none';
+        frame(0.5);
+        // The controller's source asks for nothing: the vehicle's own playerInput does not take over.
+        expect(vehicle.throttle).toBe(0);
+        controller.controlSource = 'player';
+        frame(0.5);
+        expect(vehicle.throttle).toBe(1);
+        controller.release();
+        expect(vehicle.controller).toBeNull();
+        expect([vehicle.throttle, vehicle.steer, vehicle.brake, vehicle.handBrake]).toEqual([0, 0, 0, 0]);
+    });
+
+    it('holds still while Parked, whatever the driver asks', () => {
+        const { vehicle, chassis, frame } = driven();
+        vehicle.parked = true;
+        frame(1.5);
+        const at = [...chassis.worldPosition];
+        input.setMove(1, 1);
+        frame(2);
+        expect(Math.hypot(chassis.worldPosition[0] - at[0], chassis.worldPosition[2] - at[2])).toBeLessThan(0.05);
+        expect(Math.abs(vehicle.vehicle!.wheel(0).steerAngle)).toBeLessThan(0.01);
+        vehicle.parked = false;
+        frame(1.5);
+        expect(vehicle.speed).toBeGreaterThan(1);
+    });
+
+    it('an AI Controller asks nothing of it, and says so once', () => {
+        const warn = vi.spyOn(Logger, 'warn');
+        const { vehicle, controller, frame } = driven();
+        controller.controlSource = 'ai';
+        input.setMove(0, 1);
+        frame(1);
+        expect(vehicle.throttle).toBe(0);
+        expect(warn.mock.calls.filter(c => String(c[0]).includes('AI steering only walks'))).toHaveLength(1);
+        warn.mockRestore();
+    });
+
+    it('reads a vehicle saved with `drive` (before drivetrain) as its drivetrain', async () => {
+        const root = new Node('root');
+        parseNodeJson(root, { ...car(), children: [{ type: 'vehicle', name: 'Vehicle', id: 'vehicle', position: [0, 0, 0], ...IDENT, drive: 'motors', children: [] }] });
+        const vehicle = root.getChildByName('Car')[0].getChildByName('Vehicle')[0] as VehicleNode;
+        expect(vehicle.drivetrain).toBe('motors');
+        const json = await vehicle.serialize() as any;
+        expect([json.drivetrain, json.drive]).toEqual(['motors', undefined]);
     });
 });

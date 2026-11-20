@@ -16,6 +16,28 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **A car in the Sandbox, and Controllers that drive vehicles.**
+  - *The car.* The Sandbox has a car to get into by its door (Interact, E), drive and get out of again: the vehicle
+    simulation with the Car preset, on a model's own wheels ("Dirty car" by 3D Error 404, CC-BY-4.0), with Mixamo
+    clips for getting in, driving and getting out. It is the **Car** template: its chassis, body and windows, four
+    wheels each turning its tyre, a seat with where getting in starts and getting out ends, a door zone, its own
+    camera rig and its own Controller. Getting in switches the Controller in possession: the character lets go of
+    its own, the car's possesses the Vehicle, and the car's camera takes the view from where the character's was.
+    A moving car brakes to a stop before the driver gets out. A low barrier now runs round the course's edge.
+  - *Controllers drive vehicles.* A Controller can possess a Vehicle as it does a Character: Move steers and drives,
+    the jump button held holds the hand brake (`ControlIntent.jumpHeld`), Look turns its camera rig. A Vehicle can
+    be **Parked** (brakes on, nothing drives it). The Vehicle's drive setting is now `drivetrain` (`drive` is still
+    read).
+  - *A body turned off for a while.* A Collider's `physicsEnabled` takes its body out of the physics world and puts
+    it back where the node is then, at rest: a character rides in a seat, carried by the car, neither walking nor
+    falling, and is still standing when it gets out. `Node.reparent` moves a node under another, keeping where it
+    is in the world.
+  - *Root motion that travels and turns.* A clip that both walks and turns (getting into a car) carries the character
+    along its own path: its travel used to be turned twice by the turn already applied, so a quarter turn and then a
+    step went sideways.
+  - *Brakes that hold.* A braked vehicle no longer creeps on cannon (a parked car slid 12 cm/s on flat ground: each
+    braked wheel stopped the whole car, four times over): the brakes are held one wheel after another, with the
+    gravity of the step. Player contract 47.
 - **Stairs in the Sandbox, and characters that stand on slopes.**
   - *Stair clips.* The Sandbox goes up and down its flights with the pack's stair clips, from one 2D blend space
     (Climb by speed): walking and running, at a stair pace (one step a tread), facing the way it goes, slowing

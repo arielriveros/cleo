@@ -238,3 +238,13 @@ describe('applyPlayerReading', () => {
         expect(source.move[0]).toBe(1);
     });
 });
+
+describe('the jump button held', () => {
+    it('is the held state the reading carries, apart from the press that raises a jump', () => {
+        const held = applyPlayerReading(createIntent(), { move: [0, 0], look: [0, 0], jump: false, sprint: false, crouch: false, jumpHeld: true }, 0, 0.15);
+        expect(held.jumpHeld).toBe(true);
+        expect(held.requests.jump).toBe(0);
+        expect(applyPlayerReading(createIntent(), { move: [0, 0], look: [0, 0], jump: true, sprint: false, crouch: false }, 0, 0.15).jumpHeld).toBe(false);
+        expect(clearIntent(held).jumpHeld).toBe(false);
+    });
+});

@@ -21,14 +21,21 @@ Playable            <- CharacterNode. Has the RigidBody. Must sit at the scene R
 
 ```ts
 type Pawn = CharacterNode | CharacterBody2DNode
-possess(node: Pawn | null): this               // last-possess-wins, warns when stealing
+type Possessable = Pawn | VehicleNode
+possess(node: Possessable | null): this        // last-possess-wins, warns when stealing
 release(): this
-get possessed: Pawn | null
+get possessed: Possessable | null
 get/set possessedId: string | null
 ```
 
 A controller drives a 2D body (`CharacterBody2DNode`) exactly as it drives a Character — see
 [2D pawns](#2d-pawns).
+
+It drives a [Vehicle](../editor/vehicles.md) too, through the same intent: `move` x steers (+1 right), `move` y
+drives (+1 forward; held against the way it rolls it brakes, then reverses), and `jumpHeld`, the jump button held,
+holds the hand brake. Only a player source drives one (AI steering walks: an AI controller asks nothing of a
+vehicle, and warns once, unless its `onThink` writes the intent). Possessing a car and releasing the character is
+how a player gets into it: see the [Sandbox example](../editor/sandbox-example.md#the-car).
 
 `possessedId` is remapped when a template is instantiated, so a spawned copy possesses **its own**
 character rather than the template's. That is why the controller belongs *inside* the template, as a

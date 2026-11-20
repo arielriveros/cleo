@@ -11,10 +11,11 @@ does. It can:
 - look round at the camera standing still, its head first and its body after a second;
 - jump, fall, and land soft or hard, a hard landing crouching where it came down, or rolling if it is still running;
 - climb a flight of stairs at a stair pace, one step a tread, with stair clips that hand over in step with the walk;
-- stand on a stair ramp or a slope without sliding down it.
+- stand on a stair ramp or a slope without sliding down it;
+- get into a car by its door, drive it, and get out again (see [The car](#the-car)).
 
-Everything that is the character is one **Player** template, placed once; the sky is the **Environment** template
-and the course the **Course** template.
+Everything that is the character is one **Player** template, placed once; the sky is the **Environment** template,
+the course the **Course** template, and the car the **Car** template.
 
 Its feet stay planted and locked on ramps, stairs and bumps. To try it, open **Sandbox** from the example gallery
 and press Play.
@@ -48,6 +49,10 @@ Each is placed once.
 | Jump | Space | A |
 | Look | the mouse (click the view to capture it) | right stick |
 | Zoom | the wheel | |
+| Get into the car, or out of it | E, by the driver's door | Y |
+
+In the car, Move drives and steers (W forward; S brakes, then reverses), Space holds the hand brake, and Look turns
+the camera, which swings back behind the car when you leave it alone.
 
 **The course.** You start facing +Z.
 
@@ -64,6 +69,8 @@ Each is placed once.
 - **Behind**: a ramp up onto a 1 m block, a 2 m gap, and a second block, for a running jump.
 - **Beside the start**: three pillars and a wall, for the camera. It sees through the pillars and pulls in for the
   wall.
+- **To the left, past the pillars**: the car, parked facing +X, its driver's door toward the pillars, with forty
+  metres of open ground ahead of it. A low barrier runs round the edge of the ground.
 
 ### Collision layers: stairs, bumps and pillars
 
@@ -423,6 +430,50 @@ are the Controller's. The four framing distances are `public`, so each copy of t
 character; `switchSeconds` and `sprintHold` are `private`. Under pointer lock the
 engine drops the glitched mouse readings that used to swing the view round (see
 [Input](../scripting/input.md)).
+
+## The car
+
+A car to get into and drive, on the [vehicle simulation](vehicles.md) with the **Car** preset's settings, laid out
+on the model's own wheels. Everything that is the car is one template, **Car** (`/Vehicles/Car/Car.tpl`):
+
+```
+Car                 the chassis: a Collider with mass (1200 kg), two boxes (the lower body, the cabin), on the
+│                   Vehicle layer; SandboxCar
+├─ Body             the Car Body model: the body, and the windows (blended, so a node of their own)
+├─ Vehicle          the Car preset: an engine and a five-speed automatic, rear-wheel drive; Parked until driven
+│  └─ Wheels        Wheel FL, FR, RL, RR, each turning its tyre (the Car Wheel model)
+├─ Seat             where the driver sits; Enter Point (where getting in starts) and Exit Point (where it ends)
+├─ Door Zone        a box by the driver's door: Interact there gets in
+├─ Camera Target    what the car's camera follows
+├─ Car Camera Rig   SandboxCarCamera; its camera off until someone drives
+└─ Car Controller   a player Controller, possessing nothing until someone gets in
+```
+
+**Getting in.** Stand by the driver's door and press Interact (E). The Player gives up its own Controller, takes its
+body out of the physics world ([Turning a body off](../scripting/motion-and-physics.md#turning-a-body-off-for-a-while))
+and moves under the Seat; it fires its animator's `EnterCar` trigger and steps onto the Enter Point while the clip
+reaches for the door. The clip's root motion carries it from there into the seat: its walk in and its quarter turn
+both move the Character. The car's Controller possesses the Vehicle (the switch in possession), and the car's camera
+takes the view from exactly where the Player's camera was, then eases out to a chase framing. The car stays Parked
+until the driver is seated, then the Driving loop plays.
+
+**Getting out.** Press Interact again. A moving car first brakes to a stop (it is Parked). If the Exit Point beside
+the door is clear, the Player fires `ExitCar`, and the clip's root motion carries it out to the Exit Point while
+the car's camera eases back toward the Player's. Once it is on its feet, back in the animator's Idle, its body is put
+back in the world on the ground, it takes its own Controller back, and its camera takes the view, looking where the
+car's camera looked.
+
+**The clips** come from `build/car` (`tools/sandbox/clips.ts` `carClips`): getting in and out have their ground travel
+and their yaw moved onto the Pivot joint, as root motion, and driving is held in place; each is placed so the next
+starts in the pose the last one ends in (the Mixamo driving loop sits 22 cm lower than the end of getting in). The
+Seat, the Enter Point and the Exit Point are worked out from the clips' root motion, so the seated hips land on the
+cushion.
+
+**The model** is "Dirty car" by 3D Error 404 (CC-BY-4.0, Sketchfab), imported at its own size, 6 m long: the clips'
+seated pose fits its cabin. It is mirrored to left-hand drive, since the Mixamo clips get in on the driver's left.
+
+What the car does not do yet: the doors do not open (the character passes through the door), the hands are not
+placed on the wheel by IK, and the driver does not lean or turn the wheel with the steering.
 
 ## Things to push
 

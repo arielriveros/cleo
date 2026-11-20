@@ -467,6 +467,12 @@ On a [Character](characters-and-controllers.md), root motion ADDS to the charact
 whose clip should be the only thing moving it (a hard landing, a stagger) sets `holdMovement`
 ([Holding the character still](#driving-a-state-machine)).
 
+A clip that both travels and turns (getting into a car: a step in, a quarter turn to face ahead) carries the
+character along the path the clip takes: each frame's travel goes the way the clip faces at that moment, so a turn
+and then a step moves it where the clip's step goes. The root's travel is in the clip's own frame, as the clip was
+authored. With a body switched off (`physicsEnabled`, [Motion and physics](motion-and-physics.md#turning-a-body-off-for-a-while)),
+root motion moves its node directly.
+
 ## Ragdolls
 
 ```ts

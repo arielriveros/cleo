@@ -1,6 +1,7 @@
 // The Sandbox example: a gray-box course and a Mixamo mannequin that moves the way Advanced Locomotion System v4
 // does, built only from the engine's own tools: the Character and Controller nodes, Camera Rigs, a blend space,
-// one animator, foot placement, and one input-only script.
+// one animator, foot placement, and one input-only script. And a car to get into and drive: the vehicle simulation
+// with the Car preset, as the Car template (its own Controller, camera rig and scripts).
 //
 //   node --max-old-space-size=8192 tools/sandbox/prepare.mjs                      (the FBX files, once)
 //   npx vite-node --config vitest.config.ts tools/sandbox/build.ts [--report]
@@ -11,6 +12,9 @@
 
 import fs from 'fs'
 import path from 'path'
+// Every feature installed: the car's Vehicle and Wheel nodes are the vehicles feature's, and parse into plain nodes
+// (their fields lost) without it.
+import '../../src/modules/all'
 import { fileURLToPath } from 'url'
 import { mat4, vec3 } from 'gl-matrix'
 import { Geometry } from '../../src/core/geometry'
@@ -33,7 +37,10 @@ import { geometryJson } from '../valley/meshes.mjs'
 import { makeClips, characterAcceleration, LEAN_BONES, LOOK_BONES, ROLES, type MadeClip } from './clips'
 import { boneOf, bodyRoll, clipSeconds } from './measure'
 import { locomotionField, lookField, machineTimings, stairPaces, stairsField, stateMachine, RUN_SPEED_GATE, STAIR_RATE, type Speeds } from './machine'
-import { course, props, PROP_KINDS, SPAWN, TREAD, type Piece, type Prop } from './level'
+import { course, props, PROP_KINDS, SPAWN, TREAD, CAR, type Piece, type Prop } from './level'
+import { readCar, seatPoints, rounded, type CarPart } from './car'
+import { rotateByYaw, type YawPose } from '../../src/core/math'
+import type { VehicleNode } from '../../src/core/scene/nodes/vehicleNode'
 import { sandboxInputMap } from './inputMap'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -53,15 +60,16 @@ const round = (v: number, f = 1e5) => Math.round(v * f) / f
  * course's own. Foot Detail is what the feet stand on and the capsule passes through: the stairs' steps and the
  * bumps (left out of the capsule's Collides with; props land on them and the camera stops at them). Stair Ramp is
  * the ramp laid over each flight, which only the Character layer collides with: what the capsule climbs. The
- * pillars are on the engine's See Through, which the camera sees through.
+ * pillars are on the engine's See Through, which the camera sees through. Vehicle is the car's chassis.
  */
 const LAYERS = {
     ...LAYER,
     CHARACTER: 1 << 4,
     FOOT_DETAIL: 1 << 5,
     STAIR_RAMP: 1 << 6,
+    VEHICLE: 1 << 7,
 }
-const LAYER_NAMES = DEFAULT_LAYER_NAMES.map((n, i) => (i === 4 ? 'Character' : i === 5 ? 'Foot Detail' : i === 6 ? 'Stair Ramp' : n))
+const LAYER_NAMES = DEFAULT_LAYER_NAMES.map((n, i) => (i === 4 ? 'Character' : i === 5 ? 'Foot Detail' : i === 6 ? 'Stair Ramp' : i === 7 ? 'Vehicle' : n))
 /** A piece's layer (level.ts), as bits. */
 const PIECE_LAYER = { footDetail: LAYERS.FOOT_DETAIL, seeThrough: LAYERS.SEE_THROUGH } as const
 /** What the player's capsule collides with: everything but the feet's detail, which it walks on through. */
@@ -236,7 +244,41 @@ const materials = [
     { id: id('mat:prop'), name: 'Prop Grid', material: pbr([0.9, 0.62, 0.3], { textures: { baseColorTexture: TEX.grid }, ...PROP_UV }), textureIds: [TEX.grid] },
     { id: id('mat:propAccent'), name: 'Prop Accent Grid', material: pbr([0.35, 0.5, 0.85], { textures: { baseColorTexture: TEX.grid }, ...PROP_UV }), textureIds: [TEX.grid] },
 ]
-const matById = (mid: string) => JSON.parse(JSON.stringify(materials.find(m => m.id === mid)!.material))
+// The car's, from its file: the body, the windows (blended: a fixed opacity, no shadow) and the wheels, each with the
+// maps it carries (glTF metal-roughness: G roughness, B metalness).
+const CAR_FILE = path.join(ROOT, 'build', 'car', 'dirty_car.glb')
+const car = readCar(CAR_FILE)
+const carImage = (texture: number | undefined) => {
+    if (texture === undefined) return null
+    const image = car.textures[texture]
+    const tid = id('tex:car:' + image)
+    return textures.addBytes(tid, car.images[image].bytes, COLOR_MAP, car.images[image].mime)
+}
+const CAR_PART_NAMES = ['Car Body', 'Car Glass', 'Car Wheels']
+const carMaterials = car.materials.map((m: any, i: number) => {
+    const p = m.pbrMetallicRoughness ?? {}
+    const maps: Record<string, string> = {}
+    const base = carImage(p.baseColorTexture?.index), mr = carImage(p.metallicRoughnessTexture?.index), normal = carImage(m.normalTexture?.index)
+    if (base) maps.baseColorTexture = base
+    if (mr) maps.metallicRoughnessTexture = mr
+    if (normal) maps.normalMap = normal
+    const blend = m.alphaMode === 'BLEND'
+    const color = p.baseColorFactor ?? [1, 1, 1, 1]
+    const name = CAR_PART_NAMES[i] ?? m.name
+    for (const [slot, tid] of Object.entries(maps))
+        if (!textureFolders.some(t => t.id === tid))
+            textureFolders.push({ id: tid, folder: '/Vehicles/Car/Textures', name: `${name} ${slot === 'baseColorTexture' ? 'Base Color' : slot === 'normalMap' ? 'Normal' : 'Metal Roughness'}` })
+    return {
+        id: id('mat:car:' + i), name,
+        material: pbr([color[0], color[1], color[2]], {
+            metallic: p.metallicFactor ?? 1, roughness: p.roughnessFactor ?? 1, opacity: blend ? color[3] : 1, textures: maps,
+            config: { side: m.doubleSided ? 'double' : 'front', wireframe: false, transparent: blend, castShadow: !blend, probeable: true },
+        }),
+        textureIds: [...new Set(Object.values(maps))],
+    }
+})
+const carMaterialOf = (part: CarPart) => carMaterials[part.material]
+const matById = (mid: string) => JSON.parse(JSON.stringify([...materials, ...carMaterials].find(m => m.id === mid)!.material))
 const LEVEL_MAT = { floor: id('mat:floor'), block: id('mat:block'), accent: id('mat:accent') }
 const PROP_MAT = { prop: id('mat:prop'), propAccent: id('mat:propAccent') }
 
@@ -335,6 +377,32 @@ const modelAsset = {
     },
 }
 
+// The car's two models, imported from its file: the body and its windows as one (two nodes: one is blended), and a
+// wheel (the front left; the four are alike), placed four times by the template.
+const CAR_BODY_MODEL_ID = id('model:car:body')
+const CAR_WHEEL_MODEL_ID = id('model:car:wheel')
+const carMeshJson = (key: string, part: CarPart) => {
+    const mat = carMaterialOf(part)
+    return {
+        id: id(`model:car:${key}`), name: part.name, type: 'model', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: [],
+        variables: vars({ __materialId: mat.id }), spawnOnStart: true,
+        model: { geometry: geometryJson(part), material: matById(mat.id) },
+    }
+}
+const carModelAsset = (mid: string, name: string, parts: [string, CarPart][]) => {
+    const used = [...new Set(parts.map(([, part]) => carMaterialOf(part)))]
+    return {
+        id: mid, name, thumbnail: '',
+        textureIds: [...new Set(used.flatMap(m => m.textureIds))], materialIds: used.map(m => m.id),
+        nodeJson: {
+            id: id(`model:${name}:root`), name, type: 'node', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+            variables: {}, spawnOnStart: true, children: parts.map(([key, part]) => carMeshJson(key, part)),
+        },
+    }
+}
+const carBodyAsset = carModelAsset(CAR_BODY_MODEL_ID, 'Car Body', [['body', car.body], ['glass', car.glass]])
+const carWheelAsset = carModelAsset(CAR_WHEEL_MODEL_ID, 'Car Wheel', [['tyre', car.wheel]])
+
 // =====================================================================================================
 // Scripts
 // =====================================================================================================
@@ -343,7 +411,11 @@ const playerSource = fs.readFileSync(path.join(SCRIPTS, 'SandboxPlayer.ts'), 'ut
 const playerScript = { id: id('script:SandboxPlayer'), name: 'SandboxPlayer', baseType: 'character', source: playerSource, kind: 'class', variables: parseScriptVariables(playerSource) }
 const cameraSource = fs.readFileSync(path.join(SCRIPTS, 'SandboxCamera.ts'), 'utf8')
 const cameraScript = { id: id('script:SandboxCamera'), name: 'SandboxCamera', baseType: 'cameraRig', source: cameraSource, kind: 'class', variables: parseScriptVariables(cameraSource) }
-const scriptAssets = [playerScript, cameraScript]
+const carSource = fs.readFileSync(path.join(SCRIPTS, 'SandboxCar.ts'), 'utf8')
+const carScript = { id: id('script:SandboxCar'), name: 'SandboxCar', baseType: 'collider', source: carSource, kind: 'class', variables: parseScriptVariables(carSource) }
+const carCameraSource = fs.readFileSync(path.join(SCRIPTS, 'SandboxCarCamera.ts'), 'utf8')
+const carCameraScript = { id: id('script:SandboxCarCamera'), name: 'SandboxCarCamera', baseType: 'cameraRig', source: carCameraSource, kind: 'class', variables: parseScriptVariables(carCameraSource) }
+const scriptAssets = [playerScript, cameraScript, carScript, carCameraScript]
 function withScript(json: any, asset: any, scriptVars: Record<string, unknown>) {
     const known = new Set(asset.variables.map((v: any) => v.name))
     for (const key of Object.keys(scriptVars)) if (!known.has(key)) throw new Error(`${asset.name} has no field "${key}"`)
@@ -564,13 +636,157 @@ function playerNode() {
     }
 }
 
+// =====================================================================================================
+// The car
+// =====================================================================================================
+
+const CAR_ID = id('car:collider')
+const CAR_TEMPLATE_ID = id('template:car')
+const CAR_VEHICLE_ID = id('car:vehicle')
+const CAR_RIG_ID = id('car:rig')
+const CAR_TARGET_ID = id('car:target')
+/** The Car preset's chassis mass, kg (vehiclePresets.ts): kept when the chassis is sized to the body. */
+const CAR_MASS = 1200
+/** The wheels' springs: the Car preset's 1.5 Hz sinks the body this far onto them at rest (g / (2 pi f)^2). */
+const CAR_SPRING_HZ = 1.5
+const CAR_SAG = 9.82 / (2 * Math.PI * CAR_SPRING_HZ) ** 2
+/** The car's camera framing (SandboxCarCamera): behind and above, out of the driver's own. */
+const CAR_CAMERA_VARS = { chaseArm: 7.5, chaseHeight: 1.9 }
+/** Where the driver sits, gets in and gets out (car.ts seatPoints), from the clips. */
+const carClip = (name: string) => clips.get(name)!.car!
+const seats = seatPoints(carClip('CarEnter').seated, carClip('CarEnter').motion, carClip('CarExit').motion)
+console.log(`car: seat ${seats.seat.map(v => v.toFixed(3)).join(', ')}; enter point ${seats.enterPoint.map(v => v.toFixed(3)).join(', ')}; exit point ${seats.exitPoint.map(v => v.toFixed(3)).join(', ')}; `
+    + `wheels r ${car.wheels[0].radius.toFixed(3)} w ${car.wheels[0].width.toFixed(3)}, spring sag ${(CAR_SAG * 100).toFixed(1)} cm`)
+/** The wheels, by the order the Car preset fills them in: front left, front right, rear left, rear right. */
+const CAR_WHEEL_ORDER = ['FL', 'FR', 'RL', 'RR'] as const
+/** Each wheel's place, the hub as modelled with the spring at full stretch: lower by the sag, so the body sits as modelled. */
+const carWheelPosition = (corner: string) => {
+    const w = car.wheels.find(x => x.corner === corner)!
+    return rounded([w.centre[0], w.centre[1] - CAR_SAG, w.centre[2]])
+}
+const posed = (key: string, name: string, pose: YawPose, extra: any = {}) => ({
+    type: 'node', id: id(key), name, position: rounded(pose.slice(0, 3)), rotation: [0, Math.round(pose[3] * 100) / 100, 0], scale: [1, 1, 1], children: [], ...extra,
+})
+
+/** A model asset placed: its nodes (placeholders for the meshes, put back after the engine serializes), tagged as its instance. */
+function carInstance(key: string, name: string, asset: any, transform: any = {}) {
+    const meshes = asset.nodeJson.children.map((m: any) => {
+        const nid = id(`${key}:${m.id}`)
+        models.set(nid, { ...JSON.parse(JSON.stringify(m)), id: nid })
+        return placeholder(nid, m.name)
+    })
+    return {
+        type: 'node', id: id(key), name, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], ...transform,
+        variables: vars({ __modelId: asset.id }), children: meshes,
+    }
+}
+
+function carNode() {
+    const [lower, cabin] = car.chassis
+    const box = (b: typeof lower) => ({ type: 'box', width: round(b.size[0], 1e3), height: round(b.size[1], 1e3), depth: round(b.size[2], 1e3), offset: rounded(b.centre, 1e3), rotation: [0, 0, 0] })
+    const wheels = CAR_WHEEL_ORDER.map(corner => {
+        const w = car.wheels.find(x => x.corner === corner)!
+        return {
+            type: 'wheel', id: id('car:wheel:' + corner), name: `Wheel ${corner}`, position: carWheelPosition(corner), rotation: [0, 0, 0], scale: [1, 1, 1],
+            radius: round(w.radius, 1e3), width: round(w.width, 1e3),
+            // The tyre turned round for the right side, so its hub faces out there too.
+            children: [carInstance('car:tyre:' + corner, 'Tyre', carWheelAsset, corner.endsWith('R') ? { rotation: [0, 180, 0] } : {})],
+        }
+    })
+    // The Door Zone: a box beside the driver's door, round where getting in starts.
+    const half = Math.max(lower.size[0], cabin.size[0]) / 2
+    const zone = { width: 2.2, height: 2, depth: 2.6 }
+    const zoneX = round(half + zone.width / 2 - 0.2, 1e3)
+    return {
+        type: 'collider', id: CAR_ID, name: 'Car', position: CAR.position, rotation: [0, CAR.yaw, 0], scale: [1, 1, 1],
+        collider: {
+            mass: CAR_MASS, friction: 0.5, restitution: 0, linearDamping: 0, angularDamping: 0, simulationMode: 'always',
+            layer: LAYERS.VEHICLE, shapes: [box(lower), box(cabin)],
+        },
+        children: [
+            carInstance('car:body', 'Body', carBodyAsset),
+            {
+                type: 'vehicle', id: CAR_VEHICLE_ID, name: 'Vehicle', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+                drivetrain: 'engine', playerInput: false, parked: true,
+                children: [{ type: 'node', id: id('car:wheels'), name: 'Wheels', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: wheels }],
+            },
+            posed('car:seat', 'Seat', seats.seat, {
+                children: [
+                    posed('car:enter', 'Enter Point', yawLocal(seats.seat, seats.enterPoint)),
+                    posed('car:exit', 'Exit Point', yawLocal(seats.seat, seats.exitPoint)),
+                ],
+            }),
+            {
+                type: 'trigger', id: id('car:door'), name: 'Door Zone', position: [zoneX, zone.height / 2, round(seats.enterPoint[2], 1e3)], rotation: [0, 0, 0], scale: [1, 1, 1],
+                sensor: { layer: LAYERS.DEFAULT, mask: LAYERS.CHARACTER, shapes: [{ type: 'box', ...zone, offset: [0, 0, 0], rotation: [0, 0, 0] }] },
+                children: [],
+            },
+            { type: 'node', id: CAR_TARGET_ID, name: 'Camera Target', position: [0, CAR_CAMERA_VARS.chaseHeight, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: [] },
+            {
+                type: 'cameraRig', id: CAR_RIG_ID, name: 'Car Camera Rig', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+                followId: CAR_TARGET_ID, followOffset: [0, 0, 0], aimMode: 'orbit', followSpace: 'world', followDampingSpace: 'rig', followDamping: [0.05, 0.08, 0.05],
+                yaw: CAR.yaw, pitch: 12, pitchMin: -40, pitchMax: 60, aimDamping: 0.05, armLength: CAR_CAMERA_VARS.chaseArm, socketOffset: [0, 0.3, 0],
+                collisionEnabled: true, collisionRadius: 0.2, collisionPullTime: 0, collisionReturnTime: 0.35,
+                collisionLayers: CAMERA_BLOCKED_BY, seeThroughLayers: LAYERS.SEE_THROUGH,
+                children: [{ type: 'camera', id: CAR_RIG_ID + ':camera', name: 'Car Camera', camera: { type: 'perspective', fov: 60, near: 0.05, far: 2000, left: -1, right: 1, bottom: -1, top: 1 }, active: false }],
+            },
+            {
+                type: 'controller', id: id('car:controller'), name: 'Car Controller', possessedId: null, controlSource: 'player',
+                moveAction: 'Move', lookAction: 'Look', jumpAction: 'Jump', sprintAction: '', crouchAction: '',
+                aimSource: 'node', aimSourceId: CAR_RIG_ID, driveAimTarget: true,
+            },
+        ],
+    }
+}
+
+/** `pose` (in the car's frame) in the frame of `parent` (also in the car's). */
+function yawLocal(parent: YawPose, pose: YawPose): YawPose {
+    const [x, y, z] = rotateByYaw(pose[0] - parent[0], pose[1] - parent[1], pose[2] - parent[2], -parent[3])
+    return [x, y, z, pose[3] - parent[3]]
+}
+
+/** The Car preset's settings on the parsed Vehicle, laid out on this car: its wheels where the mesh has them, its chassis its body. */
+function fitCarPreset(root: Node) {
+    const find = (n: Node): Node | null => n.id === CAR_VEHICLE_ID ? n : n.children.reduce<Node | null>((hit, c) => hit ?? find(c), null)
+    const vehicleNode = find(root) as unknown as VehicleNode | null
+    if (!vehicleNode || vehicleNode.nodeType !== 'vehicle') throw new Error('the car has no Vehicle node: is the vehicles feature installed?')
+    const chassis = vehicleNode.collider as any
+    const shapes = JSON.parse(JSON.stringify(chassis.shapes)), mass = chassis.mass
+    if (!vehicleNode.applyPreset('car')) throw new Error('no Car vehicle preset')
+    chassis.shapes = shapes
+    chassis.mass = mass
+    const wheels = vehicleNode.wheels
+    if (wheels.length !== 4) throw new Error(`the Car preset left ${wheels.length} wheels`)
+    wheels.forEach((w, i) => {
+        const corner = CAR_WHEEL_ORDER[i], data = car.wheels.find(x => x.corner === corner)!
+        w.setPosition(carWheelPosition(corner) as any)
+        w.radius = round(data.radius, 1e3)
+        w.width = round(data.width, 1e3)
+    })
+    vehicleNode.parked = true
+    vehicleNode.playerInput = false
+}
+
+/** Nothing of the course stands where the car is parked, nor in its Door Zone (a box round the car and its door). */
+function checkCarSpot(pieces: Piece[], placed: Prop[]) {
+    const reach = 3.5   // half its length and a margin
+    const near = (p: number[]) => Math.hypot(p[0] - CAR.position[0], p[2] - CAR.position[2]) < reach + 1
+    const blocked = [
+        ...pieces.filter(p => p.name !== 'Ground' && near(p.position)).map(p => p.name),
+        ...placed.filter(p => near(p.position)).map(p => p.name),
+    ]
+    if (blocked.length) throw new Error(`the car's spot is not clear: ${blocked.join(', ')}`)
+}
+
 async function buildScene() {
     const env = JSON.parse(fs.readFileSync(path.join(HERE, 'environment.json'), 'utf8'))
     const root = new Node('root', 'node', id('node:root'))
     // The props under one node of their own, so the tree reads: the environment, the player, the props, the course.
     const propsRoot = { type: 'node', id: id('node:props'), name: 'Props', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: props().map(propNode) }
-    const trees = [playerNode(), propsRoot, ...course().flatMap(pieceNodes)]
+    checkCarSpot(course(), props())
+    const trees = [playerNode(), carNode(), propsRoot, ...course().flatMap(pieceNodes)]
     for (const t of trees) parseNodeJson(root, t)
+    fitCarPreset(root)
     root.updateTransforms(null)
     const children: any[] = []
     for (const c of root.children) children.push(await c.serialize())
@@ -581,6 +797,8 @@ async function buildScene() {
         out.children = (n.children ?? []).map(restore)
         if (out.id === CHARACTER_ID) withScript(out, playerScript, characterScriptVars)
         if (out.id === RIG_ID_CAMERA) withScript(out, cameraScript, CAMERA_VARS)
+        if (out.id === CAR_ID) withScript(out, carScript, {})
+        if (out.id === CAR_RIG_ID) withScript(out, carCameraScript, CAR_CAMERA_VARS)
         return out
     }
     const sun = { ...env.sun, id: id('node:sun'), name: 'Sun', rotation: [52, 35, 0], light: { unit: 'photometric', color: [1, 0.95, 0.88], intensity: 95000, angularRadius: 0.01 }, castShadows: true, children: [] }
@@ -603,6 +821,10 @@ async function buildScene() {
     // and its script, the model, the Controller. The scene holds one instance of it, at the spawn.
     const playerRoot = scene.children.find((c: any) => c.name === 'Player Collider')
     const playerTemplate = templatizeSubtree(playerRoot, TEMPLATE_ID, 'Player')
+    // The car, the same way: its chassis, body, wheels, seat, camera rig, Controller and scripts (before the merge,
+    // which never touches a dynamic collider anyway).
+    const carRoot = scene.children.find((c: any) => c.id === CAR_ID)
+    const carTemplate = templatizeSubtree(carRoot, CAR_TEMPLATE_ID, 'Car')
     const merged = mergeStaticColliders(scene, { scriptStrings: new Set(), idFor: k => id('merge:' + k), layerNames: LAYER_NAMES })
     if (merged.kept.length) throw new Error(`level colliders left unmerged: ${merged.kept.join('; ')}`)
     console.log(`level: ${merged.merged} pieces in ${merged.colliders.map(c => `${c.name} (${c.shapes} shapes)`).join(', ')}`)
@@ -621,13 +843,13 @@ async function buildScene() {
     const again = mergeStaticColliders(JSON.parse(JSON.stringify(scene)), { scriptStrings: new Set(), idFor: k => k })
     if (again.merged) throw new Error('the merged level still has colliders to merge')
     // Every prop placed more than once is a template, its copies linked instances of it (crates, barrels, balls).
-    const madeProps = templatizeScene(scene, { takenNames: new Set(['Player', 'Environment', 'Course']), idFor: k => id('template:prop:' + k) })
+    const madeProps = templatizeScene(scene, { takenNames: new Set(['Player', 'Environment', 'Course', 'Car']), idFor: k => id('template:prop:' + k) })
     const propTemplates = madeProps.templates.map(m => m.template)
     console.log(`props: ${madeProps.templates.map(m => `${m.template.name} x${m.instances}`).join(', ')}`)
     const t = templatizeScene(JSON.parse(JSON.stringify(scene)), { takenNames: new Set(), idFor: k => k })
     if (t.log.length) throw new Error(`groups placed more than once without a template: ${t.log.join('; ')}`)
     const render = { ...env.render, dofEnabled: false, lensFlareIntensity: 0, chromaticAberrationStrength: 0.1, exposureCompensation: 0.3 }
-    return { scene, config: { graphics: env.graphics, render }, templates: [playerTemplate, environmentTemplate, courseTemplate, ...propTemplates] }
+    return { scene, config: { graphics: env.graphics, render }, templates: [playerTemplate, environmentTemplate, courseTemplate, carTemplate, ...propTemplates] }
 }
 
 // =====================================================================================================
@@ -641,7 +863,7 @@ async function main() {
     const { scene, config, templates } = await buildScene()
 
     const libraries: Record<string, unknown[]> = {
-        models: [modelAsset], materials, terrainMaterials: [], animationFields: [fieldAsset, lookFieldAsset, ...stairAssets.map(a => a.asset)], animControllers: [controller], boneMasks: [LEAN_MASK, LOOK_MASK],
+        models: [modelAsset, carBodyAsset, carWheelAsset], materials: [...materials, ...carMaterials], terrainMaterials: [], animationFields: [fieldAsset, lookFieldAsset, ...stairAssets.map(a => a.asset)], animControllers: [controller], boneMasks: [LEAN_MASK, LOOK_MASK],
         animations, rigs: [rig], tilesets: [], scripts: scriptAssets, templates, particleSystems: [], aiBrains: [],
     }
     for (const [name, value] of Object.entries(libraries)) writeJson(path.join(OUT, 'libraries', `${name}.json`), value)
@@ -667,7 +889,7 @@ async function main() {
             id: SCENE_ID, name: PROJECT, updatedAt: CREATED_AT, dimension: '3D',
             refs: {
                 version: SCENE_REFS_VERSION,
-                materialIds: materials.map(m => m.id), modelIds: [MODEL_ID], templateIds: templates.map((t: any) => t.id), terrainMaterialIds: [], tilesetIds: [],
+                materialIds: [...materials, ...carMaterials].map(m => m.id), modelIds: [MODEL_ID, CAR_BODY_MODEL_ID, CAR_WHEEL_MODEL_ID], templateIds: templates.map((t: any) => t.id), terrainMaterialIds: [], tilesetIds: [],
                 aiBrainIds: [], textureIds: textures.included, scriptIds: scriptAssets.map(s => s.id), animationFieldIds: [FIELD_ID, LOOK_FIELD_ID, ...stairAssets.map(a => a.asset.id)],
                 foliageModelIds: [], soundSampleIds: [], audioSourceIds: [], animationIds: animations.map(a => a.id), particleSystemIds: [],
             },
@@ -694,7 +916,13 @@ async function main() {
     add('/Characters/Mannequin', 'Player', 'template', TEMPLATE_ID)
     add('/Level', 'Environment', 'template', ENVIRONMENT_TEMPLATE_ID)
     add('/Level', 'Course', 'template', COURSE_TEMPLATE_ID)
-    for (const tpl of templates.slice(3)) add('/Level/Props', tpl.name, 'template', tpl.id)
+    add('/Vehicles/Car', 'Car', 'template', CAR_TEMPLATE_ID)
+    add('/Vehicles/Car', 'Car Body', 'model', CAR_BODY_MODEL_ID)
+    add('/Vehicles/Car', 'Car Wheel', 'model', CAR_WHEEL_MODEL_ID)
+    for (const m of carMaterials) add('/Vehicles/Car/Materials', m.name, 'material', m.id)
+    add('/Vehicles/Car/Scripts', 'SandboxCar', 'script', carScript.id)
+    add('/Vehicles/Car/Scripts', 'SandboxCarCamera', 'script', carCameraScript.id)
+    for (const tpl of templates.slice(4)) add('/Level/Props', tpl.name, 'template', tpl.id)
     for (const m of materials.slice(1)) add('/Level/Materials', m.name, 'material', m.id)
     for (const t of textureFolders) {
         add(t.folder, t.name, 'texture', t.id)
@@ -708,7 +936,7 @@ async function main() {
     writeJson(path.join(OUT, 'vfs.json'), { version: 1, folders: [...dirs].sort(), entries })
     writeJson(path.join(OUT, 'example.json'), {
         name: PROJECT,
-        description: 'A locomotion sandbox in the style of Advanced Locomotion System v4: a mannequin that walks and jogs in eight directions facing the camera, sprints freely, sets off, stops and turns round with their own clips, leans into curves, turns in place when you look away, jumps, falls and lands soft or hard, with its feet planted and locked by IK on ramps, stairs and bumps. Two camera rigs (V switches). All of it is the animator, the Character node and one input-only script.',
+        description: 'A locomotion sandbox in the style of Advanced Locomotion System v4: a mannequin that walks and jogs in eight directions facing the camera, sprints freely, sets off, stops and turns round with their own clips, leans into curves, turns in place when you look away, jumps, falls and lands soft or hard, climbs stairs, with its feet planted and locked by IK on ramps, stairs and bumps. And a car to get into (E by the driver\'s door) and drive on the vehicle simulation. All of it is the animator, the Character, Controller and Vehicle nodes and a few input-only scripts. Car model: "Dirty car" by 3D Error 404 (CC-BY-4.0).',
         order: 5,
     })
     const largest = await packFormat2(OUT)

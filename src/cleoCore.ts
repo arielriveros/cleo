@@ -31,7 +31,8 @@ export { CameraRigNode } from "./core/scene/nodes/cameraRigNode";
 // character turns intent into motion and never learns where it came from.
 export { CharacterNode } from "./core/scene/nodes/characterNode";
 export { ControllerNode, CONTROL_SOURCES, AIM_SOURCES, BRAIN_KINDS } from "./core/scene/nodes/controllerNode";
-export type { Pawn } from "./core/scene/nodes/controllerNode";
+export type { Pawn, Possessable } from "./core/scene/nodes/controllerNode";
+export { isVehicle } from "./core/scene/nodes/nodeType";
 export type { BrainKind } from "./core/scene/nodes/controllerNode";
 export type { ControlSource, AimSource, BlackboardValue } from "./core/scene/nodes/controllerNode";
 export type { FollowSpace, AimMode } from "./core/scene/nodes/cameraRigNode";

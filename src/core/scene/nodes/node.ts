@@ -18,7 +18,7 @@ import { attachScriptFactory, fillScriptRefs, bindScriptLife, releaseScriptLife 
 import { parseChild } from "./childParser";
 import type { BVH } from "../../bvh";
 import type { ChangeKind } from "../../eventBus";
-import { eulerFromQuatDeg } from "../../math";
+import { decomposeTRS, eulerFromQuatDeg } from "../../math";
 import { asksLooseSeeThrough } from "./cameraLayersLegacy";
 // Type-only: actionMap is a pure leaf with no imports of its own, so this closes no cycle.
 import type { ActionState } from "../../../input/actionMap";
@@ -165,6 +165,11 @@ export class Node {
 
   protected _body: RigidBody | null;
   protected _trigger: Trigger | null;
+  /**
+   * @internal Its body is out of the world for now (ColliderNode.physicsEnabled false): the node moves freely,
+   * pushing nothing into the body, and PhysicsSystem keeps the body out until this clears.
+   */
+  public _bodySuspended: boolean = false;
 
   protected _visible: boolean;
 
@@ -457,6 +462,35 @@ export class Node {
       get editorOwned() { return this.node!.isEditorOwned; },
       scene: node._scene,
     });
+  }
+
+  /**
+   * Moves this node under `parent`, keeping where it stands in the WORLD (its local transform solved from the
+   * new parent's world matrix); `keepWorld` false keeps the local transform instead, as {@link addChild} does.
+   * Like addChild it neither despawns nor starts the node again. World transforms are brought up to date at
+   * once, so what reads them next (root motion, a script) sees the move this same frame.
+   *
+   * @param index Where among the parent's children to insert. Appends when omitted.
+   */
+  public reparent(parent: Node, keepWorld: boolean = true, index?: number): void {
+    for (let n: Node | null = parent; n; n = n._parent)
+      if (n === this) throw new Error(`Cannot move '${this._name}' under '${parent.name}': it is inside it.`);
+    let world: mat4 | null = null;
+    if (keepWorld) {
+      this.updateTransforms(this._parent ? this._parent.worldTransform : null);
+      world = mat4.clone(this._worldTransform);
+    }
+    parent.addChild(this, index);
+    if (world) {
+      const inv = mat4.invert(Node._wm, parent.worldTransform);
+      const local = inv ? mat4.multiply(mat4.create(), inv, world) : world;
+      const t = vec3.create(), r = quat.create(), s = vec3.create();
+      decomposeTRS(local, t, r, s);
+      this.setPosition(t);
+      this.setQuaternion(r);
+      this.setScale(s);
+    }
+    this.updateTransforms(parent.worldTransform);
   }
 
   /**
@@ -1703,7 +1737,7 @@ export class Node {
       ? quat.normalize(Node._wq2, quat.multiply(Node._wq2, quat.invert(Node._wq3, parent), world))
       : world;
     this.setQuaternion(local);
-    if (this._body) this._body.setQuaternion(this._offsetRotation(quat.normalize(Node._wq, world)));
+    if (this._body && !this._bodySuspended) this._body.setQuaternion(this._offsetRotation(quat.normalize(Node._wq, world)));
     return this;
   }
 
@@ -1886,7 +1920,7 @@ export class Node {
   private _updateTranslationMatrix(): void {
     // A body lives in WORLD space: under a transformed parent its pose is the parent's world times this
     // local one, never the local values as they stand.
-    if (this._body) this._pushBodyPosition();
+    if (this._body && !this._bodySuspended) this._pushBodyPosition();
 
     mat4.fromTranslation(this._translationMatrix, this._position);
     this._notifyChange('transform', 'position');
@@ -1944,7 +1978,7 @@ export class Node {
   
   private _updateRotationMatrix(): void {
     quat.fromEuler(this._quaternion, this._euler[0], this._euler[1], this._euler[2]);
-    if (this._body) this._pushBodyRotation();
+    if (this._body && !this._bodySuspended) this._pushBodyRotation();
     mat4.fromQuat(this._rotationMatrix, this._quaternion);
     this._notifyChange('transform', 'rotation');
   }

@@ -28,6 +28,7 @@ export function isUINodeType(type: string): boolean { return UI_NODE_TYPES.has(t
 // `instanceof`, which would import the class and so the feature into every game.
 import type { CharacterBody2DNode } from './characterBody2DNode';
 import type { Camera2DNode } from './camera2DNode';
+import type { VehicleNode } from './vehicleNode';
 
 /** A 2D character body (feature `physics2d`). */
 export function isCharacterBody2D(node: unknown): node is CharacterBody2DNode {
@@ -37,4 +38,9 @@ export function isCharacterBody2D(node: unknown): node is CharacterBody2DNode {
 /** A 2D camera (feature `world2d`). */
 export function isCamera2D(node: unknown): node is Camera2DNode {
   return (node as { nodeType?: unknown } | null | undefined)?.nodeType === 'camera2D';
+}
+
+/** A vehicle (feature `vehicles`): a controller may possess one. */
+export function isVehicle(node: unknown): node is VehicleNode {
+  return (node as { nodeType?: unknown } | null | undefined)?.nodeType === 'vehicle';
 }

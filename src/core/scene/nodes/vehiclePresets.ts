@@ -11,7 +11,7 @@ import type { VehicleCast, VehicleDrive } from "../../../physics/pal/vehicle/veh
 
 /** The Vehicle fields a preset sets, every one (BASE below), so applying one never keeps the last one's. */
 export interface VehicleSettings {
-    drive: VehicleDrive;
+    drivetrain: VehicleDrive;
     maxTorque: number; minRpm: number; maxRpm: number;
     gearRatios: number[]; reverseRatio: number; finalDrive: number;
     shiftDownRpm: number; shiftUpRpm: number; shiftTime: number; clutchStrength: number;
@@ -38,7 +38,7 @@ export interface VehiclePreset extends Preset<VehicleSettings> {
 }
 
 const BASE: VehicleSettings = {
-    drive: 'engine',
+    drivetrain: 'engine',
     maxTorque: 500, minRpm: 1000, maxRpm: 6000,
     gearRatios: [2.66, 1.78, 1.3, 1, 0.74], reverseRatio: 2.9, finalDrive: 3.42,
     shiftDownRpm: 2000, shiftUpRpm: 4000, shiftTime: 0.5, clutchStrength: 10,
@@ -69,7 +69,7 @@ const settings = definePresets<VehicleSettings>(BASE, [
         shiftDownRpm: 4000, shiftUpRpm: 7200, shiftTime: 0.25, antiRoll: 4000,
     }],
     ['kart', 'Kart', 'Tiny and very stiff: an electric motor in each rear wheel to 60 km/h, no differential.', {
-        drive: 'motors', limitedSlip: false, antiRoll: 0,
+        drivetrain: 'motors', limitedSlip: false, antiRoll: 0,
     }],
     ['truck', 'Truck', 'Heavy: six wheels on three axles, both rear axles driven, a low-revving engine and six low gears.', {
         maxTorque: 2000, minRpm: 600, maxRpm: 2800, gearRatios: [7.0, 4.5, 3.0, 2.0, 1.4, 1.0], reverseRatio: 6.5, finalDrive: 4.1,
@@ -88,7 +88,7 @@ const settings = definePresets<VehicleSettings>(BASE, [
         lean: true, maxPitchRoll: 60,
     }],
     ['trailer', 'Trailer', 'Unpowered, on one axle, hitched by its tongue: set Towed by to the vehicle that pulls it.', {
-        drive: 'none', hitchPoint: [0, -0.1, 1.7], playerInput: false,
+        drivetrain: 'none', hitchPoint: [0, -0.1, 1.7], playerInput: false,
     }],
 ]);
 
