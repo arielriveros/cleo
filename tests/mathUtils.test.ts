@@ -371,3 +371,40 @@ describe('upright poses (yawPoseMul / yawPoseInvert / yawPoseLerp)', () => {
         expect(Math.abs(mid[3])).toBeCloseTo(180, 6);
     });
 });
+
+describe('solveLinear and image-plane lines', () => {
+    it('solves a system, pivoting past a zero on the diagonal', () => {
+        const x = M.solveLinear([[0, 2, 1], [1, 1, 0], [3, 0, 2]], [2, 3, 13])!;
+        [3, 0, 2].forEach((v, i) => expect(x[i]).toBeCloseTo(v, 12));
+        // A least-squares fit through its normal equations: y = 2x + 1 from noisy-free samples.
+        const pts = [[0, 1], [1, 3], [2, 5], [3, 7]];
+        const ata = [[0, 0], [0, 0]], atb = [0, 0];
+        for (const [px, py] of pts) {
+            const row = [px, 1];
+            for (let i = 0; i < 2; i++) { atb[i] += row[i] * py; for (let j = 0; j < 2; j++) ata[i][j] += row[i] * row[j]; }
+        }
+        const [m, c] = M.solveLinear(ata, atb)!;
+        expect(m).toBeCloseTo(2, 12);
+        expect(c).toBeCloseTo(1, 12);
+    });
+
+    it('reports a singular system as null and leaves its arguments alone', () => {
+        const a = [[1, 2], [2, 4]], b = [1, 2];
+        expect(M.solveLinear(a, b)).toBeNull();
+        expect(a).toEqual([[1, 2], [2, 4]]);
+        expect(M.solveLinear([[0, 0], [0, 0]], [0, 0])).toBeNull();
+    });
+
+    it('finds where two image lines cross, and none for parallel ones', () => {
+        const l = M.lineThrough([0, 0], [2, 2]), m = M.lineThrough([0, 4], [4, 0]);
+        const p = M.intersectLines(l, m)!;
+        expect(p[0]).toBeCloseTo(2, 12);
+        expect(p[1]).toBeCloseTo(2, 12);
+        // Every point of a line satisfies it.
+        expect(l[0] * 7 + l[1] * 7 + l[2]).toBeCloseTo(0, 12);
+        expect(M.intersectLines(M.lineThrough([0, 0], [1, 1]), M.lineThrough([0, 1], [1, 2]))).toBeNull();
+        // Nearly parallel lines meet far away (a vanishing point well outside the frame).
+        const far = M.intersectLines(M.lineThrough([0, 0], [100, 1]), M.lineThrough([0, 10], [100, 10.9]))!;
+        expect(far[0]).toBeCloseTo(10000, 6);
+    });
+});

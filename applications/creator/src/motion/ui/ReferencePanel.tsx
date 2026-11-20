@@ -5,6 +5,7 @@ import { referenceSpan, videoFrameAt, videoTimeOf } from '../reference/reference
 import { rateLabel } from '../reference/videoDoc';
 import { VIDEO_ACCEPT } from '../reference/videoImport';
 import { useMotion } from './motionContext';
+import { ReferenceCameraSections } from './ReferenceCameraSections';
 import type { ReferenceMode } from './motionStage';
 
 // The Reference tab: a video the motion is made against. Link a clip (a new file, or one already in the
@@ -121,6 +122,7 @@ export function ReferencePanel() {
           options={[
             { value: 'off', label: 'Off', title: 'Hide the video' },
             { value: 'over', label: 'Over', title: 'The video over the 3D view, see-through' },
+            { value: 'behind', label: 'Behind', title: 'The video behind the character, where no geometry is (the floor is hidden)' },
           ]} />
         <div className={stage.refMode !== 'over' || stage.refDifference ? 'pointer-events-none opacity-50' : undefined}>
           <Slider label='Opacity' min={0.05} max={1} step={0.01} readout value={stage.refOpacity} onChange={v => setStage({ ...stage, refOpacity: v })} />
@@ -135,6 +137,8 @@ export function ReferencePanel() {
           </Select>
         </Row>
       </Collapsable>
+
+      <ReferenceCameraSections />
 
       <Collapsable title='Keys' persistKey='cleo_creator_motion_ref_keys'>
         <div className='pb-1 text-ui-xs text-dim'>Step to a frame where the action turns (, and . step a frame), then make a key there and pose the character to match.</div>

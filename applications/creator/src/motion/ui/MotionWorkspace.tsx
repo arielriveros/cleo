@@ -31,6 +31,11 @@ import { normaliseVideoDoc, rateLabel } from '../reference/videoDoc';
 import { useReference } from './useReference';
 import { ReferencePanel } from './ReferencePanel';
 import { ReferenceOverlay } from './ReferenceOverlay';
+import { CalibrationOverlay } from './CalibrationOverlay';
+import { useReferenceBackdrop } from './referenceBackdrop';
+import type { Rect } from '../reference/gate';
+import { projectPoint, cameraBasis, videoFovOfView, viewportFov, type ReferenceCamera, type Vec2 } from '../reference/referenceCamera';
+import { defaultCalibration, solveCalibration, type CalibrationDoc } from '../reference/calibrate';
 import { loadSavedPresets, type BlendPreset } from '../blendCurve';
 import { boneGroups, defaultParts } from '../parts';
 import {
@@ -531,6 +536,75 @@ export function MotionWorkspace() {
       toast.error(String((e as Error)?.message ?? e), { title: 'Could not use the video' });
     }
   };
+  // --- Matching the stage camera to the video's ---
+  const [gateView, setGateView] = useState<{ gate: Rect | null; view: { w: number; h: number } }>({ gate: null, view: { w: 0, h: 0 } });
+  const gateRef = useRef(gateView);
+  gateRef.current = gateView;
+  const gateKey = gateView.gate ? `${gateView.gate.w.toFixed(1)}x${gateView.gate.h.toFixed(1)}@${gateView.view.w}x${gateView.view.h}` : '';
+  const [lookThrough, setLookThroughState] = useState(false);
+  const lookRef = useRef(lookThrough);
+  lookRef.current = lookThrough;
+  const [calibrating, setCalibrating] = useState<'off' | 'lines' | 'pins'>('off');
+  const [calibDraft, setCalibDraft] = useState<CalibrationDoc | null>(null);
+  const [placingPin, setPlacingPin] = useState<string | null>(null);
+  const video = reference.video;
+  const subjectHeight = rig ? rig.height * (stageRef.current?.displayScale ?? 1) : 1.75;
+  useEffect(() => { setCalibDraft(null); setPlacingPin(null); }, [doc.reference?.videoId]);
+  const calibration = doc.reference && video ? calibDraft ?? doc.reference.calib ?? defaultCalibration(video.width, video.height, subjectHeight) : null;
+  const solve = useMemo(() => (calibration && video ? solveCalibration(calibration, video.width, video.height) : null), [calibration, video]);
+
+  /** The view framed through a reference camera: its place, its roll, the video's lens in this viewport's gate. */
+  const frameThrough = (cam: ReferenceCamera) => {
+    const o = orbit.current, gv = gateRef.current;
+    if (!o || !gv.gate || gv.view.h < 1) return;
+    o.frame({ target: [...cam.target], distance: cam.distance, pitch: cam.pitch, yaw: cam.yaw, roll: cam.roll, fov: viewportFov(cam.vfov, gv.gate.h, gv.view.h) });
+  };
+  useEffect(() => {
+    const cam = doc.reference?.camera;
+    if (lookThrough && cam) frameThrough(cam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lookThrough, doc.reference?.camera, gateKey]);
+  const setLookThrough = (on: boolean) => {
+    setLookThroughState(on);
+    if (!on) { const c = orbit.current?.current(); if (c) orbit.current!.frame({ ...c, roll: undefined, fov: undefined }); }
+  };
+  /** The view as a reference camera: the orbit, with the video's lens (from the view's when it has none). */
+  const viewCamera = (): ReferenceCamera | null => {
+    const o = orbit.current?.current(), gv = gateRef.current;
+    if (!o || !camera) return null;
+    const own = docRef.current.reference?.camera;
+    const vfov = lookRef.current && own ? own.vfov : gv.gate && gv.view.h > 0 ? videoFovOfView(camera.camera.fov, gv.gate.h, gv.view.h) : camera.camera.fov;
+    return { target: [...o.target] as Vec3, distance: o.distance, pitch: o.pitch, yaw: o.yaw, roll: o.roll ?? 0, vfov };
+  };
+  const setCamera = (c: ReferenceCamera) => {
+    const ref = docRef.current.reference;
+    if (ref) setDoc({ ...docRef.current, reference: { ...ref, camera: c } });
+  };
+  /**
+   * A calibration edit: solved at once (and shown through, when looking through); when the edit is done it
+   * is written, with the solved camera when the lines, origin or scale changed (not for a pin).
+   */
+  const setCalibration = (next: CalibrationDoc, done: boolean) => {
+    const ref = docRef.current.reference, v = referenceRef.current.video;
+    if (!ref || !v) return;
+    const res = solveCalibration(next, v.width, v.height);
+    const before = calibDraft ?? ref.calib ?? defaultCalibration(v.width, v.height, subjectHeight);
+    const lines = JSON.stringify({ ...next, pins: [] }) !== JSON.stringify({ ...before, pins: [] }) || !ref.camera;
+    if (res.ok && lines && lookRef.current) frameThrough(res.solve.camera);
+    if (!done) { setCalibDraft(next); return; }
+    setCalibDraft(null);
+    setDoc({ ...docRef.current, reference: { ...ref, calib: next, ...(res.ok && lines ? { camera: res.solve.camera } : {}) } });
+  };
+  const jointPositions = () => {
+    const out = new Map<string, Vec3>();
+    for (const [k, v] of stageRef.current?.jointWorld() ?? []) out.set(k, [v[0], v[1], v[2]]);
+    return out;
+  };
+  // Behind: the frames to the renderer's backdrop, the floor out of the way.
+  const behind = !!doc.reference && stageSettings.refMode === 'behind' && view !== 'clip';
+  useReferenceBackdrop(instance, reference.player, gateView.gate, gateView.view, behind, stageSettings.refFlip);
+  useEffect(() => { stageRef.current?.setFloorSuppressed(behind); }, [behind, rig]);
+
   // A clip opened from the Assets explorer (or just added there) becomes this motion's reference.
   useEffect(() => {
     const take = () => { const id = takeOpen('video'); if (id) void live.current.linkVideo(id); };
@@ -562,8 +636,10 @@ export function MotionWorkspace() {
   };
 
   // The context's callbacks read the latest state through this, so they can stay in a memoised value.
-  const live = useRef({ setPose, saveToLibrary, setPoseId, scrub, togglePlay, stepFrames, toStart, toEnd, linkVideo, setReference, keyFromFrame });
-  live.current = { setPose, saveToLibrary, setPoseId, scrub, togglePlay, stepFrames, toStart, toEnd, linkVideo, setReference, keyFromFrame };
+  const actions = { setPose, saveToLibrary, setPoseId, scrub, togglePlay, stepFrames, toStart, toEnd, linkVideo, setReference, keyFromFrame,
+                    setLookThrough, viewCamera, setCamera, setCalibration, jointPositions };
+  const live = useRef(actions);
+  live.current = actions;
   const value = useMemo<MotionState>(() => ({
     doc, setDoc, rig, poseId, setPoseId: id => live.current.setPoseId(id), libraryPoseId, setLibraryPoseId,
     pose, setPose: p => live.current.setPose(p), libraryPoses, saveToLibrary: id => void live.current.saveToLibrary(id),
@@ -575,15 +651,45 @@ export function MotionWorkspace() {
     transport, transportState, stepFrames: n => live.current.stepFrames(n), toStart: () => live.current.toStart(), toEnd: () => live.current.toEnd(),
     grid, timelineEnd, reference, linkVideo: src => live.current.linkVideo(src), setReference: r => live.current.setReference(r),
     keyFromFrame: () => live.current.keyFromFrame(), stage: stageSettings, setStage: setStageSettings,
+    gate: gateView.gate, viewSize: gateView.view, lookThrough, setLookThrough: on => live.current.setLookThrough(on),
+    viewCamera: () => live.current.viewCamera(), setCamera: c => live.current.setCamera(c),
+    calibrating, setCalibrating, calibration, setCalibration: (c, done) => live.current.setCalibration(c, done), solve,
+    placingPin, setPlacingPin, jointPositions: () => live.current.jointPositions(), subjectHeight,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [doc, rig, poseId, libraryPoseId, pose, libraryPoses, bone, view, clip, time, playing, keyId, partId, savedPresets, character, sourceClip, sourceAnimations,
-       transportState, grid, timelineEnd, reference, stageSettings]);
+       transportState, grid, timelineEnd, reference, stageSettings, gateView, lookThrough, calibrating, calibration, solve, placingPin, subjectHeight]);
 
   const duration = clip?.samplers[0]?.input.at(-1) ?? motionDuration(doc);
+  /** The pinned joints where the reference camera sees them now (video pixels). */
+  function projectedPins(): Map<string, Vec2> {
+    const out = new Map<string, Vec2>();
+    const cam = doc.reference?.camera;
+    if (!cam || !video) return out;
+    const b = cameraBasis(cam), world = jointPositions();
+    for (const p of calibration?.pins ?? []) {
+      const w = world.get(p.joint);
+      const pr = w && projectPoint(b, cam.vfov, video.width, video.height, w);
+      if (pr) out.set(p.joint, pr.px);
+    }
+    return out;
+  }
   const overlay = (<>
     <ReferenceOverlay player={reference.player} visible={!!doc.reference && stageSettings.refMode === 'over' && view !== 'clip'}
                       opacity={stageSettings.refOpacity} difference={stageSettings.refDifference} flip={stageSettings.refFlip}
-                      gate={stageSettings.refGate && !!doc.reference && stageSettings.refMode !== 'off' && view !== 'clip'} />
+                      gate={stageSettings.refGate && !!doc.reference && stageSettings.refMode !== 'off' && view !== 'clip'}
+                      onGate={(gate, view) => setGateView({ gate, view })} />
+    {calibration && video && gateView.gate && calibrating !== 'off' && view !== 'clip' && (
+      <CalibrationOverlay gate={gateView.gate} videoW={video.width} videoH={video.height} calib={calibration}
+                          solve={solve?.ok ? solve.solve : null} show={{ lines: calibrating === 'lines', pins: calibrating === 'pins' }}
+                          projected={calibrating === 'pins' ? projectedPins() : undefined}
+                          placing={placingPin}
+                          onPlace={at => {
+                            if (!placingPin) return;
+                            setCalibration({ ...calibration, pins: [...calibration.pins.filter(p => p.joint !== placingPin), { joint: placingPin, at }] }, true);
+                            setPlacingPin(null);
+                          }}
+                          onChange={setCalibration} />
+    )}
     <ViewportOverlay
       readout={rig && <>
         {rigName} · {view === 'pose' ? `Pose “${pose.name}”`

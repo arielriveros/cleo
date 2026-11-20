@@ -325,6 +325,22 @@ export class Texture {
         this._gpu.uploadRegion(x, y, width, height, data);
     }
 
+    /**
+     * Fill the texture from any browser picture source -- a canvas, a decoded video frame, an ImageBitmap --
+     * at its size, reallocating when that changed. The image path (flip, mipmaps when the texture has them),
+     * for pictures that change every frame: a reference video drawn behind the scene.
+     */
+    public uploadSource(source: TexImageSource, width: number, height: number): void {
+        this._data = null;
+        if (width !== this._width || height !== this._height) {
+            this._width = width;
+            this._height = height;
+            this._syncGpuSize();
+        }
+        this._gpu.upload2D(source, width, height, this._mipMap);
+        this._finishUpload();
+    }
+
     public updateImg(data: HTMLImageElement | null): void {
         if (this._gpu.dimension !== '2d') {
             Logger.error('Cannot update 2D texture with cubemap face', 'Texture');

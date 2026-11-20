@@ -103,7 +103,21 @@ export class MotionStage {
     this.raf = requestAnimationFrame(frame);
   }
 
+  private lastSettings: MotionStageSettings | null = null;
+  private floorSuppressed = false;
+
+  /**
+   * Hide the floor whatever the settings say: the reference video is drawn BEHIND the character, where no
+   * geometry is, and a floor would cover the filmed ground.
+   */
+  setFloorSuppressed(on: boolean): void {
+    if (on === this.floorSuppressed) return;
+    this.floorSuppressed = on;
+    if (this.lastSettings) this.apply(this.lastSettings);
+  }
+
   apply(s: MotionStageSettings): void {
+    this.lastSettings = s;
     if (this.sun) {
       aimSun(this.sun, { lightYaw: s.sunYaw, lightElevation: s.sunElevation });
       (this.sun.light as DirectionalLight).intensity = 60000;
@@ -111,10 +125,11 @@ export class MotionStage {
     this.world.ambientLight = vec3.fromValues(8000, 8000, 8000);
     this.engine.renderer.setGridVisible(s.grid);
     this.skeleton = s.skeleton !== false;
-    if (s.ground && !this.ground) {
+    const ground = s.ground && !this.floorSuppressed;
+    if (ground && !this.ground) {
       this.ground = new ModelNode(PREFIX + 'ground', new Model(Geometry.Plane(30, 30), Material.PBR({ baseColor: [0.32, 0.31, 0.29], roughness: 0.95 })));
       this.world.addNode(this.ground);
-    } else if (!s.ground && this.ground) {
+    } else if (!ground && this.ground) {
       this.world.removeNode(this.ground);
       this.ground = null;
     }
@@ -211,6 +226,24 @@ export class MotionStage {
   /** The clip's playhead, seconds. */
   time(): number { return this.models[0]?.node.animator?.currentTime ?? 0; }
   playing(): boolean { return !!this.models[0]?.node.animator?.isPlaying; }
+
+  /** Every joint's position in the scene right now, by bone name: the pose on screen (Match pose pins them). */
+  jointWorld(): Map<string, vec3> {
+    const out = new Map<string, vec3>();
+    const body = this.models[0];
+    const animator = body?.node.animator;
+    const skin = body?.model.skin as Skin | undefined;
+    if (!body || !animator || !skin) return out;
+    const nodeWorld = body.node.worldTransform as unknown as mat4;
+    skin.joints.forEach((j, i) => {
+      const name = skin.nodeNames?.get(j.nodeIndex);
+      const jm = animator.getJointModelMatrix(i);
+      if (!name || !jm) return;
+      const w = mat4.multiply(mat4.create(), nodeWorld, jm as mat4);
+      out.set(name, vec3.fromValues(w[12], w[13], w[14]));
+    });
+    return out;
+  }
 
   /** Hold a pose right now, without waiting for the panels' debounced rebake: what a viewport drag shows. */
   showPoseNow(rig: MotionRig, pose: MotionPose): void { this.show(bakePose(rig, pose), false, 0); }

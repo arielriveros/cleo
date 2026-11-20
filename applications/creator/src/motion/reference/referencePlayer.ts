@@ -30,6 +30,8 @@ export interface ShownFrame {
 }
 
 const AUDIO_MAX_SECONDS = 600;
+/** Frame versions across every player, so a new clip's first frame never repeats a version already uploaded. */
+let frameVersions = 0;
 
 export class ReferencePlayer {
   readonly doc: VideoAssetDoc;
@@ -38,7 +40,6 @@ export class ReferencePlayer {
   private readonly track: InputVideoTrack;
   private sink: CanvasSink;
   private width: number;
-  private version = 0;
   private disposed = false;
   /** The frame on screen (null: none, outside the clip). */
   current: ShownFrame | null = null;
@@ -98,7 +99,7 @@ export class ReferencePlayer {
       this.current = null;
     } else {
       if (this.current && this.current.canvas === w.canvas && this.current.timestamp === w.timestamp) return;
-      this.current = { canvas: w.canvas, timestamp: w.timestamp, width: w.canvas.width, height: w.canvas.height, version: ++this.version };
+      this.current = { canvas: w.canvas, timestamp: w.timestamp, width: w.canvas.width, height: w.canvas.height, version: ++frameVersions };
     }
     for (const fn of this.listeners) fn(this.current);
   }

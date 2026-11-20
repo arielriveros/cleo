@@ -92,6 +92,19 @@ describe('where the chrome passes draw', () => {
         expect(bodyOf('renderEditorOverlay')).toContain("_beginOverlayPass('overlay.helpers')");
     });
 
+    it('draws the reference picture first in the overlay layer, behind the scene, never in a pane', () => {
+        const body = bodyOf('_renderReferenceBackdrop');
+        expect(body).toContain("_beginOverlayPass('overlay.reference')");
+        // At the far plane under LEQUAL against the scene's depth, which it never writes.
+        expect(body).toMatch(/depthWriteEnabled: false, depthCompare: 'less-equal'/);
+        expect(body).toContain('this._view.preview');
+        expect(body).not.toContain('_targets.scene.renderTarget');
+        // Before the grid, so the grid and every helper and gizmo draw over it.
+        const overlay = bodyOf('renderEditorOverlay');
+        expect(overlay.indexOf('_renderReferenceBackdrop()')).toBeGreaterThan(-1);
+        expect(overlay.indexOf('_renderReferenceBackdrop()')).toBeLessThan(overlay.indexOf('this._renderGrid()'));
+    });
+
     it('keeps the composite past the display resolve', () => {
         // `present` is the last chain node; the overlay node is added after it, and passes keep the
         // order they were added in. Reordering these two would tonemap and grade the chrome.

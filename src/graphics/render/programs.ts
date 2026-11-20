@@ -86,6 +86,7 @@ import FilmGrainProgram from '../shaders/wgsl/filmGrain.wgsl';
 import ComposerProgram from '../shaders/wgsl/composer.wgsl';
 import VolumetricGodRaysProgram from '../shaders/wgsl/volumetricGodRays.wgsl';
 import GridProgram from '../shaders/wgsl/grid.wgsl';
+import ReferenceBackdropProgram from '../shaders/wgsl/referenceBackdrop.wgsl';
 import OutlinePostProgram from '../shaders/wgsl/outlinePost.wgsl';
 import MotionBlurVelocityProgram from '../shaders/wgsl/motionBlurVelocity.wgsl';
 import TaaResolveProgram from '../shaders/wgsl/taaResolve.wgsl';
@@ -180,7 +181,7 @@ export {
     MovieAccumulateProgram, SpriteProgram, PixelUpscaleProgram, WaterProgram, WaterUnderwaterProgram,
     WaterWaveFieldProgram, WaterWaveAdvectProgram, WaterWaveStepProgram,
     WaterFlowGroundProgram, WaterFlowShiftProgram, WaterFlowAdvectProgram, WaterFlowLimitProgram, WaterFlowDepthProgram,
-    WaterFlowAccelerateProgram, WaterFlowWavesProgram, WaterFlowSurfaceProgram,
+    WaterFlowAccelerateProgram, WaterFlowWavesProgram, WaterFlowSurfaceProgram, ReferenceBackdropProgram,
 };
 
 // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
@@ -376,6 +377,8 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['waterFlowAccelerate',          WaterFlowAccelerateProgram],
         ['waterFlowWaves',               WaterFlowWavesProgram],
         ['waterFlowSurface',             WaterFlowSurfaceProgram],
+        // An animator's reference video behind the scene, in the editor overlay layer (render/editorOverlays.ts). APPENDED.
+        ['referenceBackdrop',            ReferenceBackdropProgram],
     ];
 }
 

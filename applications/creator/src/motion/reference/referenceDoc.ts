@@ -9,6 +9,9 @@
 // the motion and re-imports its clip in the editor -- so how it is drawn (opacity, flip, difference) lives
 // in the stage settings, and tracks live on the video asset.
 
+import { normaliseCamera, type ReferenceCamera } from './referenceCamera';
+import { normaliseCalibration, type CalibrationDoc } from './calibrate';
+
 /** The real-time frame grid: the video's own frames (exact even for variable frame rate), or an even rate. */
 export type FrameGrid = { frames: ArrayLike<number> } | { fps: number };
 
@@ -22,6 +25,13 @@ export interface MotionReference {
   /** The stretch of the video shown, video seconds. */
   in: number;
   out: number;
+  /**
+   * The camera it was filmed with, in the stage's world (referenceCamera.ts): what Look through frames.
+   * Written only by an explicit action (Set from view, a calibration, Match pose).
+   */
+  camera?: ReferenceCamera;
+  /** What was drawn on the frame to solve the camera (calibrate.ts): the lines, origin, scale and pins. */
+  calib?: CalibrationDoc;
 }
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -34,7 +44,13 @@ export function normaliseReference(raw: unknown): MotionReference | undefined {
   const speed = finite(r.speed) && r.speed > 0 ? Math.min(64, Math.max(1 / 64, r.speed)) : 1;
   const inT = finite(r.in) ? Math.max(0, r.in) : 0;
   const out = finite(r.out) && r.out > inT ? r.out : inT + 1;
-  return { videoId: r.videoId, offset: finite(r.offset) ? Math.min(36000, Math.max(-36000, r.offset)) : inT, speed, in: inT, out };
+  const camera = normaliseCamera(r.camera);
+  // The calibration's own frame size is unknown here: missing fields take a 1080p frame's defaults.
+  const calib = normaliseCalibration(r.calib, 1920, 1080);
+  return {
+    videoId: r.videoId, offset: finite(r.offset) ? Math.min(36000, Math.max(-36000, r.offset)) : inT, speed, in: inT, out,
+    ...(camera ? { camera } : {}), ...(calib ? { calib } : {}),
+  };
 }
 
 /** A new reference over a whole clip: its first frame at timeline 0, played at real time. */

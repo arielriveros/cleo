@@ -13,8 +13,9 @@ import type { DepthStencilState } from '../rhi/types';
 import { ModelDraw } from './modelDraw';
 import type { MaterialDrawState } from './modelDraw';
 import { DEPTH_ALWAYS, DEPTH_TEST, PipelineMemo } from './pipelineCache';
-import { GridProgram, OverlayCompositeProgram, OutlineProgram, FORWARD_PROGRAMS, BasicInstancedProgram } from './programs';
+import { GridProgram, OverlayCompositeProgram, OutlineProgram, FORWARD_PROGRAMS, BasicInstancedProgram, ReferenceBackdropProgram } from './programs';
 import type { SkeletonOverlay } from './settingsTypes';
+import type { Texture } from '../texture';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -81,6 +82,9 @@ export class EditorOverlays {
     // Editor skeleton overlay: drawn instanced + always-on-top in the gizmo pass (set by the editor).
     public skeletonOverlay: SkeletonOverlay | null = null;
 
+    /** A reference picture behind the scene (Renderer.setReferenceBackdrop): its texture, placed and faded. */
+    public referenceBackdrop: { texture: Texture; rect: [number, number, number, number]; opacity: number; flipX: boolean } | null = null;
+
     /** Every GI Volume's probes shown (Renderer.setGiProbesVisible); a selected volume shows its own anyway. */
     public giProbesVisible: boolean = false;
     private readonly _giProbeNodes: GIVolumeNode[] = [];
@@ -140,6 +144,25 @@ export class EditorOverlays {
         }
         this._shaderManager.setUniform('u_fadeFar', fadeFar);
 
+        this._passes.drawFullscreenAndEnd(pass);
+    }
+
+    /**
+     * The reference picture behind the scene: one fullscreen pass at the far plane, LEQUAL against the
+     * scene's live depth, so it shows only where nothing was drawn. First into the layer, so the grid and
+     * every helper, gizmo and the skeleton draw over it. Never written to depth (the attachment is the
+     * scene's), never in a preview pane (it belongs to the editing view's framing).
+     */
+    private _renderReferenceBackdrop(): void {
+        const b = this.referenceBackdrop;
+        if (!b || this._view.preview || b.opacity <= 0) return;
+        const pass = this._beginOverlayPass('overlay.reference');
+        const pipeline = this._pipelines.fullscreen('referenceBackdrop', ReferenceBackdropProgram, OVERLAY_BLEND,
+            { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' });
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [b.texture]));
+        this._shaderManager.setUniform('u_backdropRect', b.rect);
+        this._shaderManager.setUniform('u_backdropParams', [b.opacity, b.flipX ? 1 : 0, 0, 0]);
         this._passes.drawFullscreenAndEnd(pass);
     }
 
@@ -315,6 +338,8 @@ export class EditorOverlays {
         const sceneDrawPreExposure = this._view.drawPreExposure;
         this._view.drawPreExposure = 1;
         try {
+            // A reference picture behind everything (an animator's video), under the grid.
+            if (this.referenceBackdrop && this._passes.beginPass('overlay')) this._renderReferenceBackdrop();
             // Editor infinite grid, composited over the scene/skybox and occluded by geometry.
             if (this._passes.beginPass('grid')) this._renderGrid();
 

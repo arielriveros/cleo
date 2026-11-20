@@ -246,8 +246,10 @@ to edit it again.
 ## Reference
 
 The **Reference** tab links a video to the motion, to animate over filmed action: a person or an animal
-doing the move, a phone clip, a slow-motion take. The video plays with the motion frame for frame, over
-the 3D view. Step to the frame where the action turns, make a key there, and pose the character to match.
+doing the move, a phone clip, a slow-motion take. The video plays with the motion frame for frame, over the
+3D view or behind the character, and the stage's camera can be set up as the one that filmed it, so the
+character stands in the footage's perspective. Step to the frame where the action turns, make a key there,
+and pose the character to match.
 
 The clip is kept in the library, under **/Video**; it stays in the Creator and is never sent to the Editor.
 A motion keeps only which clip it uses and how its time lines up.
@@ -286,6 +288,8 @@ How the video's time lines up with the motion's. The motion's timeline is real t
 
 How the video is drawn in the viewport:
 - **Off** hides it; **Over** draws it over the 3D view, see-through, at its **Opacity**.
+- **Behind** draws it behind the character, wherever nothing else is: the floor is hidden, the grid and the
+  skeleton stay on top. With [Look through](#camera) the character then stands in the footage.
 - **Difference** draws the difference of the two pictures instead: where the character covers the filmed
   body exactly it goes dark, so a pose can be matched by making the silhouette disappear.
 - **Mirror** flips it left to right, for footage of the other side.
@@ -294,6 +298,47 @@ How the video is drawn in the viewport:
 - **Decode at** — the width the video is decoded at for the viewport. A smaller size plays a 4K clip smoothly.
 
 The video is always shown whole, as large as fits the viewport.
+
+### Camera
+
+The camera the video was filmed with, as the stage's camera.
+
+- **Look through** frames the viewport as the video: the reference camera's place, roll and lens, with the
+  video's frame filling the film gate. Orbiting still works and moves the view, not the camera.
+- **Set from view** makes the view as it is now the reference camera: orbit until the grid lies on the filmed
+  floor and the character stands where the subject does, then set it. Without a camera yet, Look through
+  starts from the view.
+- **Lens** — the focal length, on the chosen **sensor** (a phone's is usually quoted as a 35 mm equivalent:
+  use Full frame). A frame filmed upright takes the sensor's long side.
+- **Turn** turns the camera about the subject, so it faces another way in the shot.
+
+The line under the lens reads the camera back: its field of view, tilt, roll and height over the ground.
+
+### Calibrate
+
+Solves the camera from lines drawn on the frame, with no guessing by eye. **Show the lines** draws them over
+the video:
+- the **red** lines go along one direction of the filmed floor (tile edges, a road, the foot of a wall), the
+  **blue** along the direction square to it. Each pair is dashed on to where it meets: its vanishing point.
+  The yellow dashed line is the horizon they give.
+- the **white cross** goes under the subject's feet: the world's origin, where the character stands.
+- the **green mark** goes on top of the subject's head, straight above the cross: with its **Height** it sets
+  how far away the camera is. **Ruler** instead takes two points on the floor a known **Length** apart.
+
+**Two axes** solves the lens too, from where the two pairs meet. When one direction of the floor runs
+straight across the frame (a shot square to a wall), its lines never meet: use **One axis + lens**, give the
+lens, and draw the blue lines along the floor going away and one red line across it (for the roll).
+
+The camera follows every drag, and is set when the drag ends. The line under the switches says what was
+solved, or what is wrong (lines that never meet, a cross above the horizon).
+
+### Match pose
+
+Solves the camera from the character itself. Pose the character as the subject is in the frame, pick a
+joint, **Pin**, and click where that joint is in the video; do the same for four joints or more, spread over
+the body. **Match the camera** finds the camera that puts each joint on its pin. **Solve the lens too**
+frees the lens as well (five pins or more). **Show the pins** draws them, each with a line to where the
+camera puts its joint; the error in pixels follows the button.
 
 ### Keys
 

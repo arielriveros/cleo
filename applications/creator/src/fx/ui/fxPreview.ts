@@ -30,8 +30,23 @@ export function aimSun(sun: LightNode, p: Pick<FxParams, 'lightYaw' | 'lightElev
   sun.setRotation([p.lightElevation, p.lightYaw + 180, 0]);
 }
 
-/** Orbit state: a target, a distance and two angles, in the engine's degrees. */
-export interface Orbit { target: [number, number, number]; distance: number; pitch: number; yaw: number }
+/**
+ * Orbit state: a target, a distance and two angles, in the engine's degrees. Optionally a roll about the view
+ * axis and a vertical field of view (looking through a filmed camera, Motion's Reference); absent, the
+ * camera's own up and field of view are left as they were.
+ */
+export interface Orbit { target: [number, number, number]; distance: number; pitch: number; yaw: number; roll?: number; fov?: number }
+
+/** The camera's `up` for a forward and a roll in degrees (the engine's lookAt takes the roll there). */
+function rolledUpOf(f: readonly number[], roll: number): [number, number, number] {
+  let r = [f[1] * 0 - f[2] * 1, f[2] * 0 - f[0] * 0, f[0] * 1 - f[1] * 0];   // forward × +Y
+  let len = Math.hypot(r[0], r[1], r[2]);
+  if (len < 1e-9) { r = [1, 0, 0]; len = 1; }
+  r = r.map(v => v / len);
+  const u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];   // right × forward
+  const a = roll * Math.PI / 180;
+  return [0, 1, 2].map(i => u[i] * Math.cos(a) - r[i] * Math.sin(a)) as [number, number, number];
+}
 
 /**
  * An orbit camera for inspecting one object: left-drag orbits, right-drag pans the target, the wheel
@@ -41,6 +56,10 @@ export interface Orbit { target: [number, number, number]; distance: number; pit
 export function installOrbitCamera(camera: CameraNode, initial: Orbit): { frame(o: Orbit): void; current(): Orbit; restore(): void } {
   const previous = camera.onUpdate;
   const previousNear = camera.camera.near;
+  const previousFov = camera.camera.fov;
+  const previousUp: [number, number, number] = [camera.camera.up[0], camera.camera.up[1], camera.camera.up[2]];
+  // Whether this orbit changed the camera's up or field of view (a roll, a lens), to put back when it stops.
+  let rolled = false, lensed = false;
   let o: Orbit = { ...initial, target: [...initial.target] as [number, number, number] };
   // Effects run from a 4 cm candle to a 12 m explosion: the near plane and the closest zoom follow what is
   // framed, so a candle can be looked at from a hand's breadth and a blast is not clipped up close.
@@ -56,7 +75,14 @@ export function installOrbitCamera(camera: CameraNode, initial: Orbit): { frame(
     const f = [Math.cos(p) * Math.sin(y), -Math.sin(p), Math.cos(p) * Math.cos(y)];
     camera.setPosition([o.target[0] - f[0] * o.distance, o.target[1] - f[1] * o.distance, o.target[2] - f[2] * o.distance]);
     camera.setRotation([o.pitch, o.yaw, 0]);
+    if (o.roll) { camera.camera.up = rolledUpOf(f, o.roll) as any; rolled = true; }
+    else if (rolled) { camera.camera.up = previousUp as any; rolled = false; }
   };
+  const lens = () => {
+    if (o.fov !== undefined) { camera.camera.fov = o.fov; lensed = true; }
+    else if (lensed) { camera.camera.fov = previousFov; lensed = false; }
+  };
+  lens();
 
   camera.onUpdate = (dt: number) => {
     const input = InputSystem.instance;
@@ -85,9 +111,13 @@ export function installOrbitCamera(camera: CameraNode, initial: Orbit): { frame(
   place();
 
   return {
-    frame(next: Orbit) { o = { ...next, target: [...next.target] as [number, number, number] }; fit(); place(); },
+    frame(next: Orbit) { o = { ...next, target: [...next.target] as [number, number, number] }; fit(); lens(); place(); },
     current() { return { ...o, target: [...o.target] as [number, number, number] }; },
-    restore() { camera.onUpdate = previous; camera.camera.near = previousNear; },
+    restore() {
+      camera.onUpdate = previous; camera.camera.near = previousNear;
+      if (lensed) camera.camera.fov = previousFov;
+      if (rolled) camera.camera.up = previousUp as any;
+    },
   };
 }
 

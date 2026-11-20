@@ -12,7 +12,7 @@ import { gateRect, type Rect } from '../reference/gate';
 
 export interface ReferenceOverlayProps {
   player: ReferencePlayer | null;
-  /** Shown at all (Over, with a clip). */
+  /** The picture shown (Over, with a clip). The gate can show without it (Behind draws the picture in the engine). */
   visible: boolean;
   opacity: number;
   difference: boolean;
@@ -20,8 +20,8 @@ export interface ReferenceOverlayProps {
   gate: boolean;
   /** A region of the video (its unit square) zoomed to fill the view: the subject crop; null: the whole frame. */
   crop?: { x: number; y: number; w: number; h: number } | null;
-  /** The gate as it lands in the view, for the other overlays (calibration, tracks). */
-  onGate?: (gate: Rect | null) => void;
+  /** The gate as it lands in the view and the view's size, for the other overlays and the camera. */
+  onGate?: (gate: Rect | null, view: { w: number; h: number }) => void;
 }
 
 export function ReferenceOverlay({ player, visible, opacity, difference, flip, gate, crop, onGate }: ReferenceOverlayProps) {
@@ -58,9 +58,9 @@ export function ReferenceOverlay({ player, visible, opacity, difference, flip, g
   const report = useRef(onGate);
   report.current = onGate;
   const key = rect ? `${rect.x.toFixed(1)},${rect.y.toFixed(1)},${rect.w.toFixed(1)},${rect.h.toFixed(1)}` : '';
-  useEffect(() => { report.current?.(rect); }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { report.current?.(rect, size); }, [key, size.w, size.h]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const show = visible && !!rect;
+  const show = (visible || gate) && !!rect;
   return (
     <div ref={root} className='pointer-events-none absolute inset-0 overflow-hidden'>
       <div className='absolute' style={{
@@ -71,7 +71,7 @@ export function ReferenceOverlay({ player, visible, opacity, difference, flip, g
         outline: gate ? '1px solid rgba(255, 255, 255, 0.25)' : undefined,
       }}>
         <canvas ref={canvas} className='h-full w-full' style={{
-          opacity: hasFrame ? (difference ? 1 : opacity) : 0,
+          opacity: hasFrame && visible ? (difference ? 1 : opacity) : 0,
           mixBlendMode: difference ? 'difference' : 'normal',
           transform: flip ? 'scaleX(-1)' : undefined,
         }} />
