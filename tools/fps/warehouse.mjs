@@ -535,7 +535,23 @@ function fixMatch(bundle, scene) {
   for (const t of bundle.libraries.templates) {
     if (botNames.includes(t.name) && t.nodeJson?.scriptVars) t.nodeJson.scriptVars.respawnTemplate = t.name
   }
-  walkNodes(root, n => { if (botNames.includes(n.name) && n.scriptVars && 'respawnTemplate' in n.scriptVars) n.scriptVars.respawnTemplate = n.name })
+  // A placed bot comes back as the template it was placed from: its Collider names the template (every bot
+  // template's Character is called the same, so the Character's own name says nothing).
+  const templateName = new Map(bundle.libraries.templates.map(t => [t.id, t.name]))
+  walkNodes(root, n => {
+    const name = templateName.get(n.variables?.__templateId?.value)
+    if (!botNames.includes(name)) return
+    for (const c of n.children ?? []) if (c.type === 'character' && c.scriptVars && 'respawnTemplate' in c.scriptVars) c.scriptVars.respawnTemplate = name
+  })
+  // The player template's Controller drives the Character in the template — not the level's player, whose id an
+  // older export left in it: every copy (one per player online) would reach out of its own tree for that one.
+  for (const t of bundle.libraries.templates) {
+    if (t.name !== 'FPS Player') continue
+    const nodes = []
+    walkNodes(t.nodeJson, n => nodes.push(n))
+    const character = nodes.find(n => n.type === 'character')
+    for (const n of nodes) if (n.type === 'controller' && character) n.possessedId = character.id
+  }
   const gm = findNode(root, n => n.name === 'FPS Game Manager')
   if (gm?.scriptVars) {
     const alias = { oneVsThree: 'oneVsAll', team2v2: 'teamDeathmatch' }

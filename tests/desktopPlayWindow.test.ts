@@ -221,3 +221,25 @@ describe('the script debugger relay', () => {
     await expect(session.send('Debugger.resume')).rejects.toThrow(/not attached/);
   });
 });
+
+describe('Play › Multiplayer join parameters (playWindow.joinQuery)', () => {
+  const { joinQuery } = createRequire(import.meta.url)('../applications/app-kit/desktop/playWindow.js');
+  const hash = 'Ysh4fI408UUvfFKNi9M7XZM7pEOxs7VgkW0AfRXlIoc=';
+
+  it('passes a local dev host, a name and the network conditions into the game page’s address', () => {
+    const q = new URLSearchParams(joinQuery({
+      wt: 'https://localhost:4433/netsync', hash, ws: 'ws://127.0.0.1:4480/ws', name: 'Player 2', transport: 'websocket', lag: 75, jitter: 10, loss: 2.5,
+    }).slice(1));
+    expect(Object.fromEntries(q)).toEqual({
+      wt: 'https://localhost:4433/netsync', ws: 'ws://127.0.0.1:4480/ws', hash, name: 'Player 2', transport: 'websocket', lag: '75', jitter: '10', loss: '2.5',
+    });
+    expect(joinQuery(undefined)).toBe('');
+  });
+
+  it('drops any host not on this machine and anything that is not a plain value', () => {
+    expect(joinQuery({
+      wt: 'https://example.com:4433/netsync', ws: 'ws://localhost:4480/ws"><script>', hash: 'not-a-hash', name: '<img src=x>',
+      transport: 'quic', lag: '1e9', loss: -1,
+    })).toBe('');
+  });
+});

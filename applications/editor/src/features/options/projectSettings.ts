@@ -99,6 +99,29 @@ export interface ProjectSaveSettings {
   folder: string;
 }
 
+/**
+ * Online play (NetSync, docs/design/netsync.md): what the game's dedicated host reads from it (`config.netsync`;
+ * the host's own flags and environment win) and where its published web page asks for a host to join.
+ */
+export interface ProjectNetSyncSettings {
+  /** The game is played online: published with its NetSync settings, and its page joins through the allocator. */
+  enabled: boolean;
+  /** Host ticks per second. */
+  tickRate: number;
+  /** Players per session. */
+  maxPeers: number;
+  /** The template each joining player gets a copy of, when the level has no free player character. */
+  playerTemplate: string;
+  /** Where those copies appear (spread out by player). */
+  spawn: [number, number, number];
+  /** How far players' carried props and shot claims are trusted: co-op (loosely) or versus (tightly). */
+  trust: 'coop' | 'versus';
+  /** The allocator's URL (https://play.example.com): the published page asks it for a host. Empty: none. */
+  allocator: string;
+  /** The game mode the page asks the allocator for, when its address names none. */
+  mode: string;
+}
+
 export interface ProjectSettings {
   /**
    * The settings' format (6: collision layer names, absent before and read as the engine's defaults). 2: the
@@ -121,6 +144,8 @@ export interface ProjectSettings {
    * picker shows them; a game's scripts find layers by them (`physics.layer('Enemies')`).
    */
   collisionLayers: string[];
+  /** Read tolerantly: a project from before NetSync reads as offline with the defaults. */
+  netsync: ProjectNetSyncSettings;
 }
 
 export const PROJECT_SETTINGS_VERSION = 6;
@@ -153,6 +178,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   addons: { enabled: [...LEGACY_ADDONS], settings: {} },
   saves: { version: 0, folder: '' },
   collisionLayers: parseCollisionLayers(null),
+  netsync: { enabled: false, tickRate: 30, maxPeers: 16, playerTemplate: '', spawn: [0, 1, 0], trust: 'coop', allocator: '', mode: '' },
 };
 
 /** What a save folder may be called: no path separators, nothing Windows refuses in a folder name. */
@@ -175,7 +201,7 @@ const num = (v: unknown, d: number, min: number, max: number) =>
 /** A stored blob read tolerantly: anything missing or malformed falls back to the default. */
 export function parseProjectSettings(raw: unknown): ProjectSettings {
   const o = (raw && typeof raw === 'object' ? raw : {}) as any;
-  const e = o.engine ?? {}, p = o.publish ?? {}, f = o.features ?? {}, a = o.addons ?? {}, sv = o.saves ?? {};
+  const e = o.engine ?? {}, p = o.publish ?? {}, f = o.features ?? {}, a = o.addons ?? {}, sv = o.saves ?? {}, ns = o.netsync ?? {};
   const d = DEFAULT_PROJECT_SETTINGS;
   const version = typeof o.version === 'number' && Number.isFinite(o.version) ? o.version : 1;
   // Before version 2 every project stored 'off' whether or not anyone chose it: it was the default.
@@ -223,6 +249,17 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
     },
     // Kept under `engine` for a while before it had a page of its own.
     collisionLayers: parseCollisionLayers(o.collisionLayers ?? e.collisionLayers),
+    netsync: {
+      enabled: ns.enabled === true,
+      tickRate: Math.round(num(ns.tickRate, d.netsync.tickRate, 10, 120)),
+      maxPeers: Math.round(num(ns.maxPeers, d.netsync.maxPeers, 1, 64)),
+      playerTemplate: typeof ns.playerTemplate === 'string' ? ns.playerTemplate.slice(0, 200) : '',
+      spawn: Array.isArray(ns.spawn) && ns.spawn.length === 3 && ns.spawn.every((x: unknown) => typeof x === 'number' && Number.isFinite(x))
+        ? [ns.spawn[0], ns.spawn[1], ns.spawn[2]] : [...d.netsync.spawn] as [number, number, number],
+      trust: ns.trust === 'versus' ? 'versus' : 'coop',
+      allocator: typeof ns.allocator === 'string' ? ns.allocator.trim().slice(0, 500) : '',
+      mode: typeof ns.mode === 'string' ? ns.mode.trim().slice(0, 64) : '',
+    },
   };
 }
 
@@ -256,6 +293,13 @@ export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
     // Publish-time switches, not something the running game reads (the WebGL 2 one reaches it through
     // config.graphics, see buildMultiSceneGameData).
     window: (({ onlyUsedShaders: _shaders, webgl2Fallback: _webgl2, ...w }) => w)(s.publish),
+    // Online play: the host reads these (its flags and environment win), the page reads allocator and mode.
+    ...(s.netsync.enabled ? { netsync: {
+      tickRate: s.netsync.tickRate, maxPeers: s.netsync.maxPeers, spawn: [...s.netsync.spawn], trust: s.netsync.trust,
+      ...(s.netsync.playerTemplate ? { playerTemplate: s.netsync.playerTemplate } : {}),
+      ...(s.netsync.allocator ? { allocator: s.netsync.allocator } : {}),
+      ...(s.netsync.mode ? { mode: s.netsync.mode } : {}),
+    } } : {}),
   };
 }
 

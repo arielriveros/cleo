@@ -50,7 +50,11 @@ export default class FpsHudNode extends UIRootNode {
   onUpdate(delta: number) {
     const p = this._player
     if (!p) return
-    const gm = manager()
+    // Online, every player's character carries a HUD: only this machine's player's shows.
+    const mine = !!p.net?.isOwner
+    if (this.visible !== mine) this.visible = mine
+    if (!mine) return
+    const gm = manager(this)
     const t = p._time ?? 0
 
     // ----- crosshair
@@ -103,7 +107,7 @@ export default class FpsHudNode extends UIRootNode {
       const standings = gm.standings()
       const mine = standings.find((s: any) => s.team === p.team)
       const best = standings.find((s: any) => s.team !== p.team)
-      this._text('Score', gm.gameType === 'ffa'
+      this._text('Score', (gm.activeType || gm.gameType) === 'ffa'
         ? `${mine?.score ?? 0}`  + (best ? `   best ${best.score}` : '')
         : `${gm.teamName(p.team)} ${mine?.score ?? 0}   -   ${best ? gm.teamName(best.team) : ''} ${best?.score ?? 0}`)
       this._text('Timer', gm.timeLimit > 0 ? this._clock(gm.timeLeft) : '')

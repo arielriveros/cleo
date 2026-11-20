@@ -33,15 +33,53 @@ Copy these templates in (Assets > FPS):
 
 | Game type | Teams | Fighters it needs |
 |---|---|---|
-| One against all (`oneVsThree`) | the player against everyone else | 4 |
-| Team deathmatch (`team2v2`) | two teams, split down the middle (the player and the first bot against the rest) | 4 |
-| Free for all (`ffa`) | everyone for themselves | 4 |
+| One against all (`oneVsAll`) | the player against everyone else | 12 |
+| Team deathmatch (`teamDeathmatch`) | two teams, split down the middle | 12 |
+| Free for all (`ffa`) | everyone for themselves | 12 |
+| Co-op (`coop`) | the players against the bots | 12 offline; online, the players plus `coopBots` |
 
 If the scene holds fewer fighters than the game type needs, the manager spawns the missing bots at spawn points
 from its `botTemplates` list (the four bot templates, in turn). A scene with more bots than that simply plays
 with all of them: put a manager set to Free for all and two bot instances in a scene and it is a free for all
 with two bots (plus the fill-in bots, if two is under the minimum - set `botTemplates` empty to switch the
 fill-in off).
+
+## Online
+
+Firing Line is also an online game ([Multiplayer](multiplayer.md)): its project has **Online play** on, with
+**FPS Player** as the player template. Try it with **Play › Multiplayer** (the dev host running, two players or
+more). The game mode comes from the session — what a player asked the allocator for (`?mode=coop`, `?mode=deathmatch`)
+or the project's **Game mode** — over the manager's `gameType`:
+
+- **Co-op** (`coop`): every player on Blue, a horde of `coopBots` bots on Red (24 by default; the host runs about
+  50 within its budget).
+- **Team deathmatch** (`deathmatch`): `onlineTeamSize` a side (8 against 8). Players are spread over the two
+  teams and bots take the seats left; a player who joins takes a bot's place, and one who leaves gets a bot back.
+- **Free for all** (`ffa`): everyone alone, bots filling up to sixteen.
+
+The level's own player character (the one the offline game is played with) is removed when an online match starts:
+each player brings their own. At the end of a match, the next one starts where everyone is, rather than reloading
+the scene.
+
+### How the scripts share the work
+
+The same scripts run on the host and on every player's machine; each decides by `this.net` what is its to do. They
+are a pattern for any online shooter ([Scripting › Multiplayer](../scripting/multiplayer.md)):
+
+| | Where | How |
+|---|---|---|
+| Moving, looking, crouching | the player's machine, predicted; the host replays it | the Controller's intent (crouch is its `Crouch` action) |
+| Aiming, firing, reloading (they slow the player) | the player's machine | `stance(aim, firing, reloading)`, a `@netcall` to the host when it changes |
+| A shot | decided on the player's machine, judged by the host | `shot(origin, dir, spread, weapon, this.net.viewTick)` to the host, which fires the bullet inside `this.net.rewound(...)`: against the world as the player saw it |
+| Health, death, kills, team, name | the host | `@synced` fields on FpsCombatant; `onDeadSeen` plays a death the host decided |
+| Hit marker, the hurt shake, respawn, facing after a respawn | the host tells the player's machine | `hitMarker`, `hurtFeedback`, `respawned`, `teleported`: `@netcall({ to: 'owner' })` |
+| The match: teams, bots, score, clock, feed | the host | FpsGameManager; its score, team names, feed, clock and banner are `@synced` for the HUDs |
+| Bots | the host | FpsBot returns at once on a player's machine: it is drawn where the host has it, animated by the host's animator parameters |
+| The viewmodel, the camera, the HUD, depth of field | the player's machine | shown only where `this.net.isOwner` |
+
+The magazine is the player's machine's, and the host trusts it: the host refuses a shot only when the player is
+dead, carries no such weapon, fires from more than 3.5 m away from where the host has it, or faster than the
+weapon fires.
 
 ## What the bots do
 

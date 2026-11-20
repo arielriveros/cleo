@@ -41,7 +41,8 @@
 
 import { vec3 } from "gl-matrix";
 import { base64ToBytes, bytesToBase64 } from "../core/base64";
-import { AStar, Corridor, NavMesh, Polygon, Vector3 } from "./yuka";
+import { Corridor, NavMesh, Polygon, Vector3 } from "./yuka";
+import { RegionSearch } from "./navSearch";
 import { toYuka } from "./interop";
 import type { Vec3Like } from "./interop";
 
@@ -225,6 +226,9 @@ export class CleoNavMesh {
     private _cellSize = 1;
     private _cols = 1;
     private _rows = 1;
+    // The region graph as flat arrays, for A* (see navSearch.ts); built at the first path query.
+    private _search: RegionSearch | null = null;
+    private readonly _regionPath: number[] = [];
 
     private constructor(mesh: NavMesh) {
         this._mesh = mesh;
@@ -440,10 +444,9 @@ export class CleoNavMesh {
             const target = this._nodeIndex.get(goal.region);
             if (source === undefined || target === undefined) return out;
             try {
-                const astar = new AStar(this._mesh.graph, source, target);
-                astar.search();
-                if (!astar.found) return out;
-                const regionPath = astar.getPath() as number[];
+                this._search ??= new RegionSearch(this._mesh.graph as any, this._mesh.regions.length);
+                const regionPath = this._regionPath;
+                if (!this._search.search(source, target, regionPath)) return out;
                 const corridor = new Corridor();
                 const a = toYuka(this._from, [start.x, start.y, start.z]);
                 const b = toYuka(this._to, [goal.x, goal.y, goal.z]);

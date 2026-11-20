@@ -77,6 +77,12 @@ export interface PackedSound {
 export interface PackManifest {
   format: 'cleopak';
   version: number;
+  /**
+   * A 64-bit fingerprint of everything the game is (manifest and every chunk), hex: equal only for the same
+   * build. What a NetSync host and its players compare before a player may join (docs/design/netsync.md §6.1),
+   * so neither has to hash a game.bin of tens of megabytes. Absent on packs before 2026-11-20.
+   */
+  contentHash?: string;
   /** See PLAYER_CONTRACT. Absent on games published before the guard existed. */
   contract?: number;
   entry: string;
@@ -377,6 +383,13 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
   // so a plain array is the right shape for it.
   plainifyBuffers(manifest);
 
+  // The game's fingerprint (see PackManifest.contentHash): over the manifest as it stands and every chunk, then
+  // written into the manifest itself. Chunk references are offsets and lengths, so the manifest alone would not
+  // see an edit that moves bytes without resizing them.
+  const blobBytes = new Uint8Array(blob.byteLength);
+  blob.writeInto(blobBytes, 0);
+  manifest.contentHash = contentHashOf(new TextEncoder().encode(JSON.stringify(manifest)), blobBytes);
+
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
   const blobStart = align4(PACK_HEADER_BYTES + manifestBytes.length);
   const buffer = new ArrayBuffer(blobStart + blob.byteLength);
@@ -388,10 +401,30 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
   view.setUint32(12, manifestBytes.length, true);
   out.set(manifestBytes, PACK_HEADER_BYTES);
 
-  blob.writeInto(out, blobStart);
+  out.set(blobBytes, blobStart);
 
   return {
     buffer,
     stats: { geometries: counter, textures: textures.length, sounds: sounds.length, bytes: buffer.byteLength },
   };
+}
+
+/**
+ * Two independent 32-bit hashes (FNV-1a, and a multiply-rotate mix) over `parts`, as 16 hex digits. Not
+ * cryptographic: it tells two builds apart, which is all a join check needs.
+ */
+export function contentHashOf(...parts: Uint8Array[]): string {
+  let a = 0x811c9dc5, b = 0x9e3779b9;
+  for (const bytes of parts) {
+    for (let i = 0; i < bytes.length; i++) {
+      const v = bytes[i];
+      a = Math.imul(a ^ v, 0x01000193);
+      b = Math.imul((b ^ v) + 0x7f4a7c15, 0x5bd1e995);
+      b ^= b >>> 15;
+    }
+    // Each part's length too, so a byte moved from one part to the next changes the hash.
+    a = Math.imul(a ^ bytes.length, 0x01000193);
+    b = Math.imul(b ^ bytes.length, 0x5bd1e995);
+  }
+  return (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0).toString(16).padStart(8, '0');
 }

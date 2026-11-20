@@ -26,6 +26,7 @@
 // (tests/decoratorDocs.test.ts holds the line).
 //
 // A leaf: type-only imports.
+import type { NetCallOptions, NetCallTarget, SceneNet } from '../net/sceneNet';
 import type { Node } from '../scene/nodes/node';
 import type { ActionState } from '../../input/actionMap';
 import type { ActionName, ScriptPickKind } from './fieldTypes';
@@ -62,7 +63,9 @@ export type ScriptMember =
     | { kind: 'attribute'; field: string; group?: string; options: AttributeOptions }
     | { kind: 'save'; field: string }
     | { kind: 'options'; field: string; list: string }
-    | { kind: 'pick'; field: string; pick: ScriptPickKind };
+    | { kind: 'pick'; field: string; pick: ScriptPickKind }
+    | { kind: 'synced'; field: string; onChange?: string }
+    | { kind: 'netcall'; method: string; to: NetCallTarget; reliable: boolean; anyone: boolean };
 
 type Recorded = ScriptMember extends infer M ? M extends { optional: boolean } ? Omit<M, 'optional'> : M : never;
 
@@ -348,6 +351,105 @@ export const attribute: AttributeDecorator = function attribute(group?: unknown,
     const opts = ((group && typeof group === 'object' ? group : options) ?? {}) as AttributeOptions;
     return apply(name, opts);
 } as AttributeDecorator;
+
+/** What `@synced` accepts: bare, or with options. */
+export interface SyncedOptions {
+    /**
+     * A method of this script to call on each peer when a new value arrives, with the previous value:
+     * `@synced({ onChange: 'swing' }) open = false` then `swing(was: boolean) { … }`.
+     */
+    onChange?: string;
+}
+
+/** What `synced` is: the bare decorator, and the way of calling it with options. */
+export interface SyncedDecorator {
+    /**
+     * The host keeps every peer's copy of this field up to date (docs/design/netsync.md §6.3): set it on the host,
+     * the peers see the new value, reliably and in order. Numbers, booleans, strings, arrays, plain objects and
+     * node references. Offline it is an ordinary field.
+     *
+     * - `@synced open = false`
+     */
+    <This, V>(value: undefined, context: ClassFieldDecoratorContext<This, V>): void;
+    /**
+     * As `@synced`, calling `onChange` on each peer with the previous value when a new one arrives.
+     *
+     * - `@synced({ onChange: 'swing' }) open = false`
+     *
+     * @param options `onChange`: the name of a method of this script, called on each peer with the old value.
+     */
+    (options: SyncedOptions): FieldDecorator;
+}
+
+/**
+ * Keeps every peer's copy of the field as the host has it, in a NetSync game (docs/design/netsync.md §6.3).
+ *
+ * Set the field on the host; the peers get the new value reliably and in order, and a peer that joins later gets
+ * it too. Numbers, booleans, strings, arrays, plain objects and node references. Offline it is an ordinary field.
+ *
+ * - `@synced open = false`
+ * - `@synced({ onChange: 'swing' }) open = false` — `swing(was)` runs on each peer when it changes
+ */
+export const synced: SyncedDecorator = function synced(options?: unknown, context?: unknown): any {
+    const apply = (opts: SyncedOptions) =>
+        function <This, V>(_value: undefined, ctx: ClassFieldDecoratorContext<This, V>): void {
+            const entry: Recorded = { kind: 'synced', field: memberName('@synced', ctx, 'field') };
+            if (typeof opts.onChange === 'string' && opts.onChange) (entry as { onChange?: string }).onChange = opts.onChange;
+            record('@synced', ctx, entry);
+        };
+    if (options === undefined && context && typeof context === 'object' && 'kind' in (context as object)) {
+        apply({})(undefined, context as ClassFieldDecoratorContext<unknown, unknown>);
+        return undefined;
+    }
+    return apply((options ?? {}) as SyncedOptions);
+} as SyncedDecorator;
+
+/** What `@netcall` takes. */
+export interface NetCallDecoratorOptions {
+    /** Where it runs: `'host'` (a peer asks), `'all'` (the host tells everyone) or `'owner'` (the host tells the node's player). */
+    to: NetCallTarget;
+    /** Default true. False sends it on the fast lane, where it may be lost: for effects, not for game state. */
+    reliable?: boolean;
+    /** A `to: 'host'` call a peer may make on a node it does not own (a door anyone can open). Default false. */
+    anyone?: boolean;
+}
+
+/**
+ * Runs the method on another machine of a NetSync game (docs/design/netsync.md §6.9).
+ *
+ * The arguments travel with it: numbers, strings, booleans, arrays, plain objects and node references.
+ *
+ * - `@netcall({ to: 'host' }) fire(aim: number[]) { … }` — a player's machine calls it; it runs on the host,
+ *   if that player owns this node (`anyone: true` for any player). `this.net.caller` says who.
+ * - `@netcall({ to: 'all', reliable: false }) flash() { … }` — the host calls it; it runs on the host and every peer.
+ * - `@netcall({ to: 'owner' }) hint(text: string) { … }` — the host calls it; it runs on this node's player.
+ *
+ * Offline every call simply runs. A peer calling one meant for `'all'` or `'owner'` is ignored (only the host
+ * may tell others), with a warning.
+ *
+ * @param options `to`: where it runs (`'host'`, `'all'` or `'owner'`); `reliable` (default true); `anyone`: a
+ * peer may call a `'host'` one on a node it does not own.
+ */
+export function netcall(options: NetCallDecoratorOptions): MethodDecorator<any[]> {
+    const to = options?.to;
+    if (to !== 'host' && to !== 'all' && to !== 'owner') throw new TypeError(`@netcall needs { to: 'host' | 'all' | 'owner' }`);
+    const routing: NetCallOptions = { to, reliable: options.reliable !== false, anyone: !!options.anyone };
+    return function <This>(method: (this: This, ...args: any[]) => unknown, context: ClassMethodDecoratorContext<This>): any {
+        const name = memberName('@netcall', context, 'method');
+        record('@netcall', context, { kind: 'netcall', method: name, to, reliable: routing.reliable, anyone: routing.anyone });
+        const original = method;
+        const routed = function (this: any, ...args: unknown[]): unknown {
+            const net = this?.scene?.net as SceneNet | null | undefined;
+            return net ? net.call(this, name, original as (...a: unknown[]) => unknown, args, routing) : original.apply(this, args);
+        };
+        // What the network runs when the call arrives (never the routed wrapper, which would send it on again).
+        Object.defineProperty(routed, NETCALL_ORIGINAL, { value: original });
+        return routed;
+    };
+}
+
+/** The method a `@netcall` wrapper stands for, kept on the wrapper under this symbol. */
+export const NETCALL_ORIGINAL: unique symbol = Symbol('cleo.netcall.original');
 
 /**
  * Keeps the field in saves: `SaveGame` files, and a scene's memory between visits.

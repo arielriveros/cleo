@@ -26,6 +26,7 @@ export const DECORATORS: readonly DecoratorEntry[] = [
   { name: 'find', target: 'field', snippet: "find('${1:Name}')" },
   { name: 'pick', target: 'field', snippet: "pick('$1')", suggestInside: true },
   { name: 'options', target: 'field', snippet: "options('${1:list}')" },
+  { name: 'synced', target: 'field', snippet: 'synced' },
   { name: 'onAction', target: 'method', snippet: "onAction('$1')", suggestInside: true },
   { name: 'onTap', target: 'method', snippet: "onTap('$1')", suggestInside: true },
   { name: 'onHold', target: 'method', snippet: "onHold('$1', ${2:0.5})", suggestInside: true },
@@ -33,6 +34,7 @@ export const DECORATORS: readonly DecoratorEntry[] = [
   { name: 'every', target: 'method', snippet: 'every(${1:0.5})' },
   { name: 'onEnter', target: 'method', snippet: "onEnter('${1:Player}')" },
   { name: 'onExit', target: 'method', snippet: "onExit('${1:Player}')" },
+  { name: 'netcall', target: 'method', snippet: "netcall({ to: '${1|host,all,owner|}' })" },
 ];
 
 /**

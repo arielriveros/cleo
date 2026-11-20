@@ -1125,8 +1125,11 @@ export class FoliageLayer {
             }
         } else if (this.orientation === 'free') {
             // A uniformly random orientation (Shoemake), seeded by the instance's own record so it is
-            // the same every rebuild and on every machine -- nothing extra is stored.
-            const u1 = hash01(x, z, yaw, 1), u2 = hash01(x, z, yaw, 2), u3 = hash01(x, z, yaw, 3);
+            // the same every rebuild and on every machine -- nothing extra is stored. Hashed as the record
+            // is SAVED (float32): hashed at full precision, a reload could land a value across one of the
+            // hash's rounding steps and give the instance a different orientation.
+            const fx = Math.fround(x), fz = Math.fround(z), fy = Math.fround(yaw);
+            const u1 = hash01(fx, fz, fy, 1), u2 = hash01(fx, fz, fy, 2), u3 = hash01(fx, fz, fy, 3);
             const a = Math.sqrt(1 - u1), c = Math.sqrt(u1);
             quat.set(out, a * Math.sin(2 * Math.PI * u2), a * Math.cos(2 * Math.PI * u2),
                 c * Math.sin(2 * Math.PI * u3), c * Math.cos(2 * Math.PI * u3));
@@ -1140,7 +1143,8 @@ export class FoliageLayer {
         const keys = new Float64Array(indices.length);
         for (let j = 0; j < indices.length; j++) {
             const b = indices[j] * 5;
-            keys[j] = hash01(this._instances[b], this._instances[b + 2], this._instances[b + 3], 0x5eed);
+            // As saved (float32), so the order is the same after a reload (see the 'free' orientation).
+            keys[j] = hash01(Math.fround(this._instances[b]), Math.fround(this._instances[b + 2]), Math.fround(this._instances[b + 3]), 0x5eed);
         }
         const order = new Uint32Array(indices.length);
         for (let j = 0; j < order.length; j++) order[j] = j;

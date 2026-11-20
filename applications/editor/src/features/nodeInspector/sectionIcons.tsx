@@ -53,3 +53,4 @@ export const WheelIcon = () => (<S><circle cx='12' cy='12' r='8.5' /><circle cx=
 export const AxleIcon = () => (<S><circle cx='5' cy='12' r='3.5' /><circle cx='19' cy='12' r='3.5' /><path d='M8.5 12h7' /><path d='M5 8.5v7M19 8.5v7' /></S>);
 // A floppy disk: what a save keeps (the Save card, the Saves panel).
 export const SaveIcon = () => (<S><path d='M5 4h11l3 3v13H5Z' /><path d='M8 4v5h7V4' /><rect x='8' y='13' width='8' height='5' rx='0.5' /></S>);
+export const NetSyncIcon = () => (<S><circle cx='6' cy='12' r='2.5' /><circle cx='18' cy='6' r='2.5' /><circle cx='18' cy='18' r='2.5' /><path d='M8.3 11l7.4-3.8M8.3 13l7.4 3.8' /></S>);

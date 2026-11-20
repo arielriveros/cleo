@@ -1,0 +1,18 @@
+{
+  "name": "cleo-netsync-spike",
+  "private": true,
+  "version": "0.0.0",
+  "description": "NetSync phase 0: WebTransport + WebSocket fallback spike (host + probe page). Throwaway; not part of the engine.",
+  "type": "module",
+  "scripts": {
+    "host": "node host.mjs",
+    "selftest": "node selftest.mjs"
+  },
+  "dependencies": {
+    "@fails-components/webtransport": "^1.6.12",
+    "@fails-components/webtransport-transport-http3-quiche": "^1.6.12",
+    "@peculiar/x509": "^3.1.0",
+    "reflect-metadata": "^0.2.2",
+    "ws": "^8.23.0"
+  }
+}

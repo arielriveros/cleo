@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetSync link probe</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fafafa; --muted: #6e6e73; --ok: #1a7f37; --bad: #c62828; --card: #fff; --line: #ddd; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e8e8ea; --bg: #161618; --muted: #9a9aa0; --ok: #5bd17a; --bad: #ff6b6b; --card: #202024; --line: #333; } }
+  body { font: 14px/1.45 system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 0; padding: 16px; max-width: 920px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.lead { color: var(--muted); margin: 0 0 16px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  #summary div { margin: 2px 0; }
+</style>
+</head>
+<body>
+<h1>NetSync link probe</h1>
+<p class="lead">Phase-0 spike: WebTransport (datagrams + streams) with WebSocket fallback, against the local NetSync spike host.</p>
+<div class="row">
+  <button id="auto">Run (auto: WebTransport, fallback WebSocket)</button>
+  <button id="ws">Run forcing WebSocket</button>
+  <button id="blocked">Run with UDP "blocked" (wrong WT port)</button>
+</div>
+<div id="summary"></div>
+<h2 style="font-size:15px">Log</h2>
+<pre id="log"></pre>
+<h2 style="font-size:15px">Report (also sent to the host)</h2>
+<pre id="report"></pre>
+<script type="module">
+import { runProbe } from './probe.js';
+
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+
+async function run(opts, label) {
+  for (const b of document.querySelectorAll('button')) b.disabled = true;
+  $('log').textContent = ''; $('report').textContent = ''; $('summary').textContent = '';
+  const log = (line) => { $('log').textContent += line + '\n'; };
+  let report;
+  try {
+    report = await runProbe({ base: location.origin, ...opts, log });
+  } catch (e) {
+    report = { label, fatal: String(e?.message ?? e), userAgent: navigator.userAgent, webTransport: typeof WebTransport === 'function' };
+    log('FATAL: ' + report.fatal);
+  }
+  report.label = label;
+  $('report').textContent = JSON.stringify(report, null, 2);
+  const s = $('summary');
+  const line = (ok, text) => { const d = document.createElement('div'); d.className = ok ? 'ok' : 'bad'; d.textContent = (ok ? '✓ ' : '✗ ') + text; s.append(d); };
+  if (report.link) {
+    line(true, `link: ${report.link.kind}${report.link.fallbackReason ? ' — ' + report.link.fallbackReason : ''}`);
+    line(report.link.datagramWriter !== 'none', `datagram writer: ${report.link.datagramWriter}, maxDatagramSize: ${report.link.maxDatagramSize}`);
+    for (const [k, v] of Object.entries(report.tests)) line(true, `${k}: ${JSON.stringify(v)}`);
+    for (const e of report.errors) line(false, e);
+  }
+  try {
+    await fetch('/report', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(report) });
+  } catch { /* host gone */ }
+  window.__probeReport = report;
+  for (const b of document.querySelectorAll('button')) b.disabled = false;
+}
+
+$('auto').onclick = () => run({}, 'auto');
+$('ws').onclick = () => run({ force: 'ws' }, 'force-ws');
+$('blocked').onclick = () => run({ wtPort: 9 }, 'udp-blocked');
+if (params.get('run')) {
+  const kind = params.get('run');
+  run(kind === 'ws' ? { force: 'ws' } : kind === 'blocked' ? { wtPort: 9 } : {}, kind);
+}
+</script>
+</body>
+</html>

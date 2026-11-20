@@ -75,6 +75,7 @@ After that the two halves are independent, and you can read either first:
 | [Rendering](editor/rendering.md) | Every render setting, debug channels, the performance HUD |
 | [Scripting workflow](editor/scripting-workflow.md) | Script assets, the code editor, editing in VS Code |
 | [Debugging scripts](editor/debugging.md) | Script errors that link to their line; breakpoints, stepping and variables for a game playing in a window |
+| [Multiplayer](editor/multiplayer.md) | Online play: what syncs, Play › Multiplayer with a local host and a window per player |
 | [Saves](editor/saves.md) | The Saves panel: a project's Play saves, to inspect, export, import and play from |
 | [Publishing](editor/publishing.md) | Exporting a playable game |
 | [Project features](editor/project-features.md) | Which engine features a project's games ship: presets for 2D, 3D and more |
@@ -101,6 +102,7 @@ After that the two halves are independent, and you can read either first:
 | [Terrain and tilemaps](scripting/terrain-tilemap.md) | Querying and editing at runtime |
 | [Math and utilities](scripting/math-and-utils.md) | Vectors, easing, raycasting, logging |
 | [Patterns](scripting/patterns.md) | Common recipes, and a consolidated list of gotchas |
+| [Multiplayer](scripting/multiplayer.md) | `this.net`, `@synced`, `@netcall`, `Net.emit`, `Game.random` |
 
 ## Reference
 
@@ -114,6 +116,7 @@ After that the two halves are independent, and you can read either first:
 | [File formats](reference/file-formats.md) | Asset extensions, project bundles, published builds |
 | [Physics threading](reference/physics-threading.md) | The physics step on the main thread or in a Web Worker, and measurements |
 | [Physics backends](reference/physics-backends.md) | The layer physics runs behind (Jolt by default, Rapier, cannon-es), and how a backend is added |
+| [Hosting an online game](reference/netsync-hosting.md) | Dedicated hosts, the allocator and gateway, where to run them, every host setting |
 | [Glossary](reference/glossary.md) | Terms used throughout |
 
 ## Worked examples

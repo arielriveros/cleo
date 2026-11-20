@@ -15,6 +15,7 @@ import { getPlaySession } from '../features/playWindow/sessionStore';
 import { playSaveStore, type PlaySavesConfig } from '../features/saves/playSaves';
 import { blobSource, bufferSource } from './gameSource';
 import { readGameHeader } from './unpack';
+import { netsyncFromUrl } from './netsyncJoin';
 
 const session = new URLSearchParams(location.search).get(SESSION_PARAM) ?? '';
 const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(PLAY_CHANNEL);
@@ -122,6 +123,25 @@ async function boot(stored: Blob | ArrayBuffer): Promise<void> {
       physicsWorkerFactory: createPhysicsWorker,
       onSceneStarted: name => setState({ phase: handle?.engine.isPaused ? 'paused' : 'running', scene: name }),
       onError: fail,
+      // Play › Multiplayer opens each player's window with the local host to join (netsyncJoin.ts), and reads
+      // how its link and prediction are doing every second.
+      netsync: (() => {
+        const net = netsyncFromUrl();
+        if (!net) return undefined;
+        return {
+          ...net,
+          onJoined: (client) => {
+            setInterval(() => {
+              const s = client.predictor.stats;
+              send({ type: 'netsync', report: {
+                peerId: client.session.peerId, link: client.session.linkKind ?? '', fallbackReason: client.session.fallbackReason,
+                rttMs: Math.round(client.session.clock.rttMs * 10) / 10, checked: s.checked, corrections: s.corrections,
+                maxErrorCm: Math.round(s.maxError * 1000) / 10, ticks: client.frames.ticks,
+              } });
+            }, 1000);
+          },
+        };
+      })(),
     });
     setState({ phase: handle.engine.isPaused ? 'paused' : 'running', scene: handle.currentSceneName() });
     // The editor's release-mouse key (Options ▸ Editor ▸ Viewport ▸ Play), from its own storage: this window is

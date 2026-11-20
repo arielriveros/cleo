@@ -74,7 +74,7 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
         expect(library('templates').filter((t: any) => /Game Manager/.test(t.name)).length).toBe(1);
         const field = manager.variables.find((v: any) => v.name === 'gameType');
         expect(field, 'gameType field').toBeTruthy();
-        expect([...field.choices].sort()).toEqual(['ffa', 'oneVsAll', 'teamDeathmatch']);
+        expect([...field.choices].sort()).toEqual(['coop', 'ffa', 'oneVsAll', 'teamDeathmatch']);
         expect(manager.variables.find((v: any) => v.name === 'mode')).toBeUndefined();
         const shared = library('scripts').find((a: any) => a.name === 'FpsShared').source;
         for (const type of field.choices) expect(shared, type).toMatch(new RegExp(type + ':\\s*\\{ label'));
@@ -83,7 +83,7 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
     it('sets the manager to a valid game type and lists bot templates that exist', () => {
         const managerId = library('scripts').find((a: any) => a.name === 'FpsGameManager').id;
         const node = allNodes(scenes()[0].json.scene).find((n: any) => n.variables?.__scriptId?.value === managerId);
-        expect(['ffa', 'oneVsAll', 'teamDeathmatch']).toContain(node.scriptVars.gameType);
+        expect(['coop', 'ffa', 'oneVsAll', 'teamDeathmatch']).toContain(node.scriptVars.gameType);
         expect(node.scriptVars.mode).toBeUndefined();
         const names = new Set(library('templates').map((t: any) => t.name));
         const defaults = library('scripts').find((a: any) => a.name === 'FpsGameManager').variables.find((v: any) => v.name === 'botTemplates');
@@ -215,11 +215,11 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
             expect(script.source, script.name).not.toMatch(/from\s+'\.\.?\//);
         }
     });
-    it('makes every game type twelve fighters, the player and eleven bots', () => {
+    it('makes every game type twelve fighters offline, the player and eleven bots', () => {
         const shared = lf(library('scripts').find((a: any) => a.name === 'FpsShared').source);
         const block = shared.slice(shared.indexOf('export const GAME_TYPES'), shared.indexOf('GAME_TYPE_ALIASES'));
         const mins = [...block.matchAll(/minFighters:\s*(\d+)/g)].map(m => Number(m[1]));
-        expect(mins).toEqual([12, 12, 12]);
+        expect(mins).toEqual([12, 12, 12, 12]);
     });
 
     it('has a spawn point for every fighter and each bot respawns as its own template', () => {

@@ -348,6 +348,13 @@ export class PhysicsSystem {
   public simulationRange: number = 0;
 
   /**
+   * Where simulation range is measured from, in place of the active camera: a body is in range when it is
+   * near any of these points. A NetSync host, which has no camera, measures from its players' characters.
+   * `null` (the default) is the camera. No points: nothing is frozen for range, as with no camera.
+   */
+  public simulationOrigins: (() => readonly ArrayLike<number>[]) | null = null;
+
+  /**
    * Measure the backend's own split of the step (the phases its capabilities list) into the stats. Costs a few
    * `performance.now()` per substep, so the performance HUD turns it on only while it is showing.
    */
@@ -670,8 +677,12 @@ export class PhysicsSystem {
   private _updateActivation(dt: number): void {
     const world = this._world;
     if (!world) return;
-    const cam = this._scene?.activeCamera;
-    const camPos = cam ? cam.worldPosition : null;
+    let origins: readonly ArrayLike<number>[];
+    if (this.simulationOrigins) origins = this.simulationOrigins();
+    else {
+      const cam = this._scene?.activeCamera;
+      origins = cam ? [cam.worldPosition] : [];
+    }
     let active = 0, frozen = 0, resting = 0;
 
     for (const body of this._inWorld) {
@@ -689,10 +700,14 @@ export class PhysicsSystem {
 
       const range = effectiveSimulationRange(body.simulationMode, body.simulationRange, this.simulationRange);
       let outOfRange = false;
-      if (camPos && Number.isFinite(range)) {
+      if (origins.length > 0 && Number.isFinite(range)) {
         const p = body.position;
-        const dx = p.x - camPos[0], dy = p.y - camPos[1], dz = p.z - camPos[2];
-        outOfRange = shouldFreeze(state?.reason === 'range', dx * dx + dy * dy + dz * dz, range);
+        let nearest = Infinity;
+        for (const o of origins) {
+          const dx = p.x - o[0], dy = p.y - o[1], dz = p.z - o[2];
+          nearest = Math.min(nearest, dx * dx + dy * dy + dz * dz);
+        }
+        outOfRange = shouldFreeze(state?.reason === 'range', nearest, range);
         if (outOfRange && !state) {
           const woken = this._wokenAt.get(body);
           if (woken !== undefined && this._time - woken < SIMULATION_WAKE_GRACE) outOfRange = false;

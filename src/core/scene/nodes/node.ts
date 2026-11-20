@@ -1,4 +1,5 @@
 import { mat4, vec3, quat } from "gl-matrix";
+import { NodeNet } from '../../net/sceneNet';
 import { RigidBody, Trigger } from "../../../physics/body";
 import type { TriggerOptions } from "../../../physics/body";
 import type { SimulationMode } from "../../../physics/simulationRange";
@@ -2044,6 +2045,13 @@ export class Node {
    * and the measured motion below read the collider it stands in.
    */
   public get body(): RigidBody | null { return this._body; }
+
+  /**
+   * What this node's script knows about the network (docs/design/netsync.md §6.9): `this.net.isHost`,
+   * `isOwner`, `caller`, `emit(...)`. Offline (a single-player game) it says host.
+   */
+  public get net(): NodeNet { return this._net ??= new NodeNet(this); }
+  private _net?: NodeNet;
 
   /** @internal The body this node itself owns ({@link setBody}, or a Collider node's), never a parent's. */
   public get ownBody(): RigidBody | null { return this._body; }

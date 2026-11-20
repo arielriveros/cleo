@@ -10,6 +10,8 @@ import { frameHistory, gpuProfiler } from "../graphics/gpuProfiler";
 import { frameStats } from "../graphics/renderStats";
 import { engineStats, frameAccount } from "./engineStats";
 import { TimeDilation, type DilateOptions } from "./timeDilation";
+import { setDevice } from "../graphics/rhi/deviceHandle";
+import { NullDevice } from "../graphics/rhi/null/nullDevice";
 
 interface CleoConfig {
   graphics?: {
@@ -63,6 +65,13 @@ interface CleoConfig {
     /** Longest frame delta the loop reports, seconds. See `CleoEngine.maxFrameDelta`. */
     maxFrameDelta?: number;
   }
+  /**
+   * No renderer, no canvas, no DOM: the engine simulates and draws nothing. GPU resources are made on a
+   * {@link NullDevice}, so scenes with models parse and animate as usual. The loop is detached from the
+   * start; the host advances it with {@link CleoEngine.stepFrame}. For the NetSync dedicated host
+   * (docs/design/netsync.md §7) and other headless tools.
+   */
+  headless?: boolean;
 }
 
 /**
@@ -99,7 +108,9 @@ export class CleoEngine {
   private _frameTimeScale = 1;
 
   private _viewport!: HTMLElement;
-  private _renderer: Renderer;
+  /** Null when {@link headless}. */
+  private _renderer: Renderer | null;
+  private readonly _headless: boolean;
   private _physicsSystem: PhysicsSystem;
   private _aiSystem: AISystem = new AISystem();
 
@@ -142,7 +153,10 @@ export class CleoEngine {
   }
 
   constructor(config?: CleoConfig) {
-    this._renderer = new Renderer({ clearColor: config?.graphics?.clearColor,
+    this._headless = !!config?.headless;
+    // A headless engine is stepped by its host: there is no animation frame to schedule.
+    this._loopDetached = this._headless;
+    this._renderer = this._headless ? null : new Renderer({ clearColor: config?.graphics?.clearColor,
                                     shadowMapResolution: config?.graphics?.shadowMapSize,
                                     bloom: config?.graphics?.bloom,
                                     deferred: config?.graphics?.deferred,
@@ -182,19 +196,26 @@ export class CleoEngine {
       // The physics backend's library, if it has one to load (a WASM engine), loads while the GPU comes up.
       const physicsLoaded = this._physicsSystem.load();
 
-      // Before InputSystem, which binds its listeners to the canvas, and before anything else touches
-      // the GPU.
-      report?.('device', 0, 1);
-      await this._renderer.initialize();
-      report?.('device', 1, 1);
+      const renderer = this._renderer;
+      if (renderer) {
+        // Before InputSystem, which binds its listeners to the canvas, and before anything else touches
+        // the GPU.
+        report?.('device', 0, 1);
+        await renderer.initialize();
+        report?.('device', 1, 1);
 
-      InputSystem.initialize(this._renderer.canvas);
-      window.addEventListener('resize', this.onResize.bind(this));
+        InputSystem.initialize(renderer.canvas);
+        window.addEventListener('resize', this.onResize.bind(this));
 
-      // With someone watching, compile in slices so the page can repaint between them; without, the
-      // plain synchronous path every embedder has always taken.
-      if (report) await this._renderer.preInitializeAsync((done, total) => report('shaders', done, total));
-      else this._renderer.preInitialize();
+        // With someone watching, compile in slices so the page can repaint between them; without, the
+        // plain synchronous path every embedder has always taken.
+        if (report) await renderer.preInitializeAsync((done, total) => report('shaders', done, total));
+        else renderer.preInitialize();
+      } else {
+        // Headless: meshes, textures and programs are still made (a model parses, an animator poses), on a
+        // device that keeps nothing.
+        setDevice(new NullDevice());
+      }
       await this.onPreInitialize();
 
       report?.('physics', 0, 1);
@@ -261,7 +282,7 @@ export class CleoEngine {
 
   /** Give the frame loop back after {@link detachLoop}. The first frame's delta starts from now. */
   public attachLoop(): void {
-    if (!this._loopDetached) return;
+    if (!this._loopDetached || this._headless) return;
     this._loopDetached = false;
     if (this._ready) this._startLoop();
   }
@@ -281,7 +302,7 @@ export class CleoEngine {
    * or taking another sample of a frame).
    */
   public renderFrame(): void {
-    if (this._scene) this._renderer.render(this._scene);
+    if (this._scene) this._renderer?.render(this._scene);
   }
 
   public shutdown(): void {
@@ -359,8 +380,8 @@ export class CleoEngine {
       mark = now;
       // The render clock's rate, should the project ask effects to follow the game's speed
       // (RenderSettings.effectsFollowTimeScale): this frame's scale, real time while paused.
-      this._renderer.setEffectsTimeScale(this._paused ? 1 : scale);
-      if (render) this._renderer.render(this._scene);
+      this._renderer?.setEffectsTimeScale(this._paused ? 1 : scale);
+      if (render) this._renderer?.render(this._scene);
       renderMs = performance.now() - mark;
     }
 
@@ -395,7 +416,7 @@ export class CleoEngine {
 
   public setViewport(viewport: HTMLElement) {
     this._viewport = viewport;
-    this._renderer.viewport = viewport;
+    if (this._renderer) this._renderer.viewport = viewport;
   }
 
   public setScene(scene: Scene) {
@@ -435,6 +456,7 @@ export class CleoEngine {
     const next = new PhysicsSystem({ gravity: old.gravity, backend: options.backend, layers: old.layerNames });
     next.maxSubsteps = old.maxSubsteps;
     next.simulationRange = old.simulationRange;
+    next.simulationOrigins = old.simulationOrigins;
     next.profileStep = old.profileStep;
     await next.load();
     next.initialize();
@@ -449,7 +471,7 @@ export class CleoEngine {
   }
 
   public onResize(): void {
-    this._renderer.resize();
+    this._renderer?.resize();
   }
 
   public get scene(): Scene { return this._scene; }
@@ -462,16 +484,23 @@ export class CleoEngine {
    * is being edited.
    */
   public viewRect(): DOMRect {
-    const pane = this._renderer.editingPaneRect;
+    const renderer = this.renderer;
+    const pane = renderer.editingPaneRect;
     if (!pane) return this._viewport ? this._viewport.getBoundingClientRect() : new DOMRect();
-    const canvas = this._renderer.canvas;
+    const canvas = renderer.canvas;
     const box = canvas.getBoundingClientRect();
     // Canvas pixels are CSS pixels as the renderer sizes them; scaled anyway, in case a host styles it.
     const sx = canvas.width > 0 ? box.width / canvas.width : 1;
     const sy = canvas.height > 0 ? box.height / canvas.height : 1;
     return new DOMRect(box.left + pane.x * sx, box.top + pane.y * sy, pane.w * sx, pane.h * sy);
   }
-  public get renderer(): Renderer { return this._renderer; }
+  /** The renderer. Throws on a {@link headless} engine, which has none: check that first. */
+  public get renderer(): Renderer {
+    if (!this._renderer) throw new Error('This engine runs headless: it has no renderer.');
+    return this._renderer;
+  }
+  /** True for an engine made with `headless: true`: no renderer, no DOM, stepped by its host. */
+  public get headless(): boolean { return this._headless; }
   /** The action-mapping input system: `engine.input.pressed('Jump')`, map enable/disable, rebinding. */
   public get input(): InputSystem { return InputSystem.instance; }
   public get isPaused(): boolean { return this._paused; }

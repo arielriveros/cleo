@@ -51,6 +51,8 @@ afterEach(() => {
     for (const p of played.splice(0)) p.dispose();
 });
 
+const lf = (s: string) => s.replace(/\r\n/g, '\n');
+
 describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, () => {
     const sceneFile = () => read('scenes', `${read('manifest.json').mainSceneId}.json`);
     const nodes = () => allNodes(sceneFile().scene);
@@ -569,7 +571,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     it('ships the current scripts and the actions they read', () => {
         for (const [name, node] of [['SandboxPlayer', 'Player'], ['SandboxCamera', 'Camera Rig'], ['SandboxCar', 'Car'], ['SandboxCarCamera', 'Car Camera Rig'], ['SandboxGameManager', 'Game Manager']]) {
             const script = library('scripts').find(s => s.name === name);
-            expect(script.source).toBe(readFileSync(join(__dirname, '..', 'examples', 'scripts', `${name}.ts`), 'utf8'));
+            // Line endings aside: git's autocrlf checks the files out CRLF on Windows.
+            expect(lf(script.source)).toBe(lf(readFileSync(join(__dirname, '..', 'examples', 'scripts', `${name}.ts`), 'utf8')));
             expect(named(node).script, node).toBe(script.source);
         }
         const actions = read('libraries', 'inputMap.json').maps.find((m: any) => m.name === 'Gameplay').actions.map((a: any) => a.name);

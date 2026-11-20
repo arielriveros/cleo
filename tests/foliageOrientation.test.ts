@@ -81,6 +81,17 @@ describe('foliage orientation', () => {
         expect(again.map(u => u[0].toFixed(4)).sort()).toEqual(first.map(u => u[0].toFixed(4)).sort());
     });
 
+    it('gives every instance the same orientation after a save and load, whatever yaw it drew', () => {
+        // Many instances: before orientations were hashed as saved (float32), a few in a hundred landed across
+        // a rounding step of the hash on reload and turned to another orientation.
+        const layer = layerWith('free', 400);
+        const back = FoliageLayer.deserialize(layer.serialize());
+        const a = ups(layer), b = ups(back);
+        expect(b.length).toBe(a.length);
+        const key = (u: vec3) => u.map((v) => v.toFixed(4)).join(',');
+        expect(b.map(key).sort()).toEqual(a.map(key).sort());
+    });
+
     it('re-orients in place when the rule changes, keeping every instance where it is', () => {
         const layer = layerWith();
         const before = layer.count;

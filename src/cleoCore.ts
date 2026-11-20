@@ -452,7 +452,9 @@ export { applyScriptDecorators, scriptMembersOf, membersOfNode, SCRIPT_METADATA 
 export type { ScriptMember, LoweredMember } from "./core/scripting/decorators";
 export { GameEvents } from "./core/scripting/scriptEvents";
 export { lowerScriptDecorators, decoratorSiteAt, type DecoratorSite } from "./core/scripting/scriptDecoratorLowering";
-export { Game, setGameHost, setMovieRender, type MovieRenderInfo } from "./core/game";
+export { Game, Net, setGameHost, setMovieRender, type MovieRenderInfo } from "./core/game";
+export { NodeNet } from "./core/net/sceneNet";
+export type { NetCallOptions, NetCallTarget, NetEventTarget, SceneNet } from "./core/net/sceneNet";
 export { TimeDilation, type DilateOptions } from "./core/timeDilation";
 export { showLoadingOverlay, nextFrame, whenFramesSmooth } from "./core/loadingOverlay";
 export type { LoadingOverlay, LoadingOverlayOptions } from "./core/loadingOverlay";

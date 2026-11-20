@@ -1,13 +1,13 @@
-import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, addScriptModuleSources, registerTemplates, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles, restrictFeatures, setAbsentFeatureNames, parseRuntimeScene, setSaveStore, beginSaveSessionFrom, createBridgeSaveStore, createIndexedDbSaveStore } from 'cleo';
+import { CleoEngine, PhysicsSystem, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles, restrictFeatures, setAbsentFeatureNames, setSaveStore, beginSaveSessionFrom, createBridgeSaveStore, createIndexedDbSaveStore } from 'cleo';
 import type { BackendKind, LoadProgressListener, SaveStore, SaveDocument } from 'cleo';
 import { mountVirtualControls } from './virtualControls';
-import { inflateSceneGeometry, inflateTerrainData, inflateTilemapData, readChunkSet, collectSceneRefs, collectUiTextureIds, type GameHeader, type SceneRefs } from './unpack';
+import { collectUiTextureIds, type GameHeader } from './unpack';
+import { buildGameScene, installGameContent } from './gameContent';
 import type { GameSource } from './gameSource';
 import { pool } from './byteSpans';
 import { showError, setLoadingText } from './pageStatus';
 // The page status helpers, for the pages that import them from here (session.tsx).
 export { showError, setLoadingText, hideLoadingWhenSmooth } from './pageStatus';
-import { attachSharedAnimations, attachTemplateAnimations } from './animations';
 import { PLAYER_CONTRACT } from '../features/publish/pack';
 import { physicsBackendOverride, physicsWorkerOverride } from '../features/options/projectSettings';
 
@@ -55,6 +55,23 @@ export interface PlayerBootOptions {
   startFromSave?: () => Promise<SaveDocument | null>;
   /** A failure past boot: a scene switch that threw. Defaults to {@link showError}. */
   onError?: (err: unknown) => void;
+  /**
+   * Join a NetSync host instead of playing alone (docs/design/netsync.md, phase 9): the game's scene is loaded as
+   * a follower of the host's, this player's character predicted here.
+   */
+  netsync?: PlayerNetSync;
+}
+
+/** Where a game's NetSync host is, and how to join it (a join ticket from the allocator, or Play › Multiplayer). */
+export interface PlayerNetSync {
+  endpoint: import('cleo/netsync/index').HostEndpoint;
+  connectOptions?: import('cleo/netsync/index').ConnectOptions;
+  name?: string;
+  token?: string;
+  /** A worse network than the real one, simulated on this side (Play › Multiplayer's per-player conditions). */
+  conditions?: import('cleo/netsync/index').LinkConditions;
+  /** Called once joined, with the client (the debugger reads it). */
+  onJoined?: (client: import('cleo/netsync/index').NetSyncClient) => void;
 }
 
 export interface PlayerHandle {
@@ -256,24 +273,11 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     } catch { /* skip a sound the browser cannot take */ }
   });
 
-  // Templates once, globally: the registry backs scene.instantiate and must survive a Game.loadScene
-  // switch. Geometry is inflated eagerly — a script may instantiate one at any moment. A template's GI
-  // bakes stay registered for the session; a scene's come and go with it (startScene).
-  const templateRefs: SceneRefs = { chunks: [], giBakeIds: [] };
-  for (const t of (data.templates ?? [])) {
-    const refs = collectSceneRefs(t.node, data, { data: false });
-    templateRefs.chunks.push(...refs.chunks);
-    templateRefs.giBakeIds.push(...refs.giBakeIds);
-  }
-  const templateChunks = await readChunkSet(source, header, templateRefs, claimed);
-  for (const t of (data.templates ?? [])) inflateSceneGeometry(t.node, templateChunks);
-  const permanentBakes = new Set<string>();
-  for (const b of templateChunks.giBakes) { GiBakeRegistry.set(b.id, b.bytes); permanentBakes.add(b.id); }
+  // Templates and script module sources, once for the session (gameContent.ts, shared with the NetSync host).
+  // A template's GI bakes stay registered for the session; a scene's come and go with it (startScene).
+  const content = { source, header, claimed };
+  const permanentBakes = await installGameContent(content);
   let sceneBakes: string[] = [];
-  // Shared clips are baked into the template subtrees BEFORE they are registered: the registry entry is
-  // the master `Scene.instantiate` deep-copies, and nothing revisits it after a spawn.
-  attachTemplateAnimations(data.templates, data);
-  registerTemplates(data.templates);
 
   // How the engine finds a node's precompiled script: consulted whenever a node has no `script`
   // source, including nodes created later by scene.instantiate (matched through their __sourceId).
@@ -281,9 +285,6 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   // Script modules (shared code scripts import), keyed by module id. Evaluated lazily on first import
   // and kept for the whole session, so a module's state survives Game.loadScene.
   setScriptModuleProvider(id => ((window as any).CLEO_GAME_MODULES ?? {})[id]);
-  // A pack whose scripts were NOT extracted (Play in window) keeps each node's `script` source, which the
-  // engine compiles at parse, and carries the module SOURCES here, which it compiles on first import.
-  addScriptModuleSources(data.modules);
 
   const table = data.scenes ?? {};
   let currentId = data.entry in table ? data.entry : Object.keys(table)[0];
@@ -295,7 +296,8 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
 
   // Async because terrain splat/height payloads are DEFLATE-compressed and DecompressionStream
   // has no synchronous form.
-  const startScene = async (id: string, onProgress?: LoadProgressListener) => {
+  /** Build scene `id` and start it; with `hold`, leave it unstarted and return what starts it (a NetSync peer's). */
+  const startScene = async (id: string, onProgress?: LoadProgressListener, prepare?: (json: any) => void, hold?: boolean): Promise<(() => void) | void> => {
     const entry = table[id];
     if (!entry) { Logger.warn(`loadScene: no scene "${id}"`, 'Player'); return; }
     currentId = id;
@@ -308,24 +310,9 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     // Read when the scene loads, so an unvisited scene's meshes are never touched. Into a fresh copy of its
     // JSON, every visit: the manifest's stays refs only, and what this one is inflated with goes with it once
     // the engine has parsed it (and with the engine's objects, once the scene is disposed).
-    await stage(0.1, 'Loading scene data');
-    const json = structuredClone(entry.scene);
-    const chunks = await readChunkSet(source, header, collectSceneRefs(json, data), claimed);
-    await stage(0.3, 'Unpacking models');
-    inflateSceneGeometry(json, chunks);
-    await stage(0.45, 'Unpacking terrain');
-    await inflateTerrainData(json, chunks);
-    await inflateTilemapData(json, chunks);
-    // This scene's GI captures, before its volumes parse: a volume loads its capture instead of capturing again.
-    for (const b of chunks.giBakes) GiBakeRegistry.set(b.id, b.bytes);
-    await stage(0.6, 'Building the scene');
-    const scene = new Scene();
-    // Through the save session: a scene the player comes back to (or a loaded save's) has its Saved nodes
-    // and @save fields put back as it is built. Textures are already registered.
-    parseRuntimeScene(scene, { scene: json, textures: [] }, id, true);
-    // Shared clips are not in the serialized scene by design; retarget after parse, before start.
-    attachSharedAnimations(scene, data);
-    Logger.info(`scene "${entry.name}" nodes=${[...scene.nodes].length}`, 'Player');
+    const built = await buildGameScene(content, id, stage, prepare);
+    if (!built) return;
+    const { scene } = built;
     // The scene's own look (exposure, shadows, post), as the editor shows it. A game published before
     // scenes carried one keeps the boot settings throughout.
     engine.renderer.applyRenderSettings(entry.render);
@@ -336,7 +323,7 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     // every time.
     if (outgoing && outgoing !== scene) outgoing.dispose();
     // The captures of the scene just left go with it, unless this one or a template uses them too.
-    const bakesNow = chunks.giBakes.map(b => b.id);
+    const bakesNow = built.giBakeIds;
     for (const bakeId of sceneBakes) if (!permanentBakes.has(bakeId) && !bakesNow.includes(bakeId)) GiBakeRegistry.delete(bakeId);
     sceneBakes = bakesNow;
     // The new scene needs the viewport before its first layout, or the HUD resolves against the
@@ -346,6 +333,7 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     // A script that paused before switching (a menu) must not land in a frozen scene.
     engine.isPaused = false;
     onProgress?.(0.9, 'Starting');
+    if (hold) return () => { scene.start(); options.onSceneStarted?.(entry.name); };
     await new Promise<void>(resolve => setTimeout(() => { scene.start(); resolve(); }, 100));
     options.onSceneStarted?.(entry.name);
   };
@@ -358,7 +346,7 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
       // Held keys and in-flight gestures only — NOT the map. Un-binding the game between scenes would
       // leave the next one dead.
       engine.input.resetState();
-      return startScene(id, loadOptions?.onProgress).catch(fail);
+      return startScene(id, loadOptions?.onProgress).then(() => {}, fail);
     },
     currentSceneName: () => table[currentId]?.name ?? '',
     sceneNames: () => Object.values(table).map(s => s.name),
@@ -381,6 +369,35 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
 
   // The entry scene is read while the textures are; the game starts once both are in, so it opens with every
   // texture on the GPU.
+  if (options.netsync) {
+    // Online: the scene is the host's, loaded as its follower once joined.
+    const net = options.netsync;
+    const contentHash = (data as any).contentHash;
+    if (typeof contentHash !== 'string')
+      throw new Error('This game.bin carries no content hash, which a NetSync host checks players against. Publish it again.');
+    setLoadingText('Joining…');
+    const { NetSyncClient } = await import('cleo/netsync/index');
+    const [client] = await Promise.all([
+      NetSyncClient.join({
+        endpoint: net.endpoint, connectOptions: net.connectOptions, name: net.name, token: net.token, contentHash,
+        conditions: net.conditions,
+        physics: engine.physics,
+        loadScene: async (name, prepare) => {
+          const start = await startScene((name && resolve(name)) || currentId, undefined, prepare, true);
+          // Every texture in before joining: decoding them holds the page's thread, and the host waits only so long
+          // for a joining player to speak.
+          await texturesLoaded;
+          return { scene: engine.scene, start: start ?? (() => {}) };
+        },
+      }),
+      texturesLoaded,
+    ]);
+    Logger.info(`joined a NetSync host as peer ${client.session.peerId} over ${client.session.linkKind}`, 'Player');
+    // For the browser's console and automated checks (the NetSync debugger panel reads the same client).
+    (window as any).CLEO_NETSYNC = client;
+    net.onJoined?.(client);
+    return { engine, currentSceneName: () => table[currentId]?.name ?? '' };
+  }
   await Promise.all([texturesLoaded, startScene(currentId)]);
   return { engine, currentSceneName: () => table[currentId]?.name ?? '' };
 }

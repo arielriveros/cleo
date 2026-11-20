@@ -9,7 +9,7 @@ import type { CharacterBody2DNode } from "./characterBody2DNode";
 import { CameraRigNode } from "./cameraRigNode";
 import { unwrapScriptNode } from "./nodeScripting";
 import { InputSystem } from "../../../input/inputSystem";
-import { applyPlayerReading, clearIntent, createIntent } from "../../control/intent";
+import { applyPlayerReading, clearIntent, copyIntent, createIntent } from "../../control/intent";
 import type { ControlIntent, PlayerReading } from "../../control/intent";
 import {
     align, arrive, avoidObstacles, blendSteering, cohere, createSteeringState, flee, followTarget,
@@ -92,7 +92,12 @@ const WALKABLE_NORMAL_UP = Math.cos(50 * Math.PI / 180);
  * so a fast camera swing and the strafe that should match it were one frame apart.
  */
 
-export const CONTROL_SOURCES = ['player', 'ai', 'none'] as const;
+/**
+ * Who decides the intent: the local `player` (the InputSystem), an `ai` brain, `none`, or a `remote` player —
+ * a peer of a NetSync session, whose intent the host hands over each tick in {@link ControllerNode.remoteIntent}
+ * (docs/design/netsync.md §6.5).
+ */
+export const CONTROL_SOURCES = ['player', 'ai', 'none', 'remote'] as const;
 export type ControlSource = typeof CONTROL_SOURCES[number];
 
 /** Where the "forward" of a movement intent points. */
@@ -144,6 +149,12 @@ export class ControllerNode extends Node {
 
     // ----- source ----------------------------------------------------------------------------------
     public controlSource: ControlSource = 'player';
+
+    /**
+     * With `controlSource: 'remote'`: this tick's intent from the player it stands for, or null when nothing
+     * arrived (the pawn then idles). Written by the NetSync host before the control pass; read, never kept.
+     */
+    public remoteIntent: Readonly<ControlIntent> | null = null;
 
     /**
      * ACTION NAMES, not key codes. Nothing in this file names a key, so a player can rebind every one of
@@ -307,6 +318,8 @@ export class ControllerNode extends Node {
 
     // ----- runtime state (never serialized) --------------------------------------------------------
     private readonly _intent: ControlIntent = createIntent();
+    /** What the last think handed the pawn, requests included (see {@link publishedIntent}). */
+    private readonly _published: ControlIntent = createIntent();
     private readonly _blackboard = new Map<string, BlackboardValue>();
     private _steeringState: SteeringState = createSteeringState();
     private _behaviorRuntime: BehaviorRuntime = createBehaviorRuntime();
@@ -384,6 +397,13 @@ export class ControllerNode extends Node {
     public get possessed(): Possessable | null { return this._resolvePossessed(); }
 
     public get possessedId(): string | null { return this._possessedId; }
+
+    /**
+     * The intent the last `think` handed the pawn, requests and all — what a NetSync peer sends the host as its
+     * command for the tick (docs/design/netsync.md §6.5). A copy: the pawn's countdown and the controller's own
+     * record both move on without it.
+     */
+    public get publishedIntent(): Readonly<ControlIntent> { return this._published; }
     public set possessedId(id: string | null) {
         if (id === this._possessedId) return;
         this._detach();
@@ -593,6 +613,9 @@ export class ControllerNode extends Node {
                 }
                 this._steer(pawn, delta);
                 break;
+            case 'remote':
+                this._takeRemote(pawn);
+                break;
             case 'none':
                 clearIntent(this._intent);
                 break;
@@ -613,6 +636,32 @@ export class ControllerNode extends Node {
             try { this.onThink(delta); }
             catch (e) { logScriptError(`Error in onThink function for node ${this._name}`, e, 'Script'); }
         }
+    }
+
+    /**
+     * A remote player's intent, as sent: its own move basis and aim (it looked round on its own machine), and
+     * any requests it raised. The aim rig follows that aim, so whatever reads the rig on the host — a camera ray,
+     * a script asking where the player looks — sees what the player sees.
+     */
+    private _takeRemote(pawn: Possessable): void {
+        clearIntent(this._intent);
+        const r = this.remoteIntent;
+        if (!r) return;
+        const out = this._intent;
+        out.move[0] = r.move[0];
+        out.move[1] = r.move[1];
+        out.basisYaw = r.basisYaw;
+        out.aimYaw = r.aimYaw;
+        out.aimPitch = r.aimPitch;
+        out.sprint = r.sprint;
+        out.crouch = r.crouch;
+        out.speedScale = r.speedScale;
+        for (const kind of Object.keys(r.requests) as (keyof typeof r.requests)[]) {
+            if (r.requests[kind] > 0) raiseRequest(out, kind, r.requests[kind]);
+        }
+        if (isCharacterBody2D(pawn)) return;
+        const rig = this.aimRig;
+        if (rig) { rig.yaw = r.aimYaw; rig.pitch = r.aimPitch; }
     }
 
     /** The intent's aim from the aim rig: its world yaw (also the move basis) and its pitch (positive down). */
@@ -653,6 +702,12 @@ export class ControllerNode extends Node {
     public perceive(delta: number): void {
         const pawn = this._resolvePawn();
         if (!pawn || this.controlSource !== 'ai') return;
+        // Every `perceiveEvery` frames (Scene.aiDetail), on this controller's own frame of the cycle, with all the
+        // time since it last looked: agents take turns rather than all looking on the same frame.
+        this._perceiveWait += delta;
+        if (!this._onItsFrame(this._scene?.aiDetail.perceiveEvery ?? 1, this._perceiveFrame++)) return;
+        delta = this._perceiveWait;
+        this._perceiveWait = 0;
         if (isCharacterBody2D(pawn)) { this._perceive2D(pawn, delta); return; }
 
         // Every other pawn in the scene. A player and every NPC is a Character, so this is both the
@@ -958,7 +1013,8 @@ export class ControllerNode extends Node {
         // Deflect around whatever is ahead. Gated on `avoidDistance > 0`, so the rays are not fired at all
         // unless avoidance was asked for — see `_probeObstacles`.
         if (tuning.avoidDistance > 0 && vec3.length(this._desired) > 1e-6 && pawn instanceof CharacterNode) {
-            this._probeObstacles(pawn);
+            // The whiskers every `probeEvery` frames (Scene.aiDetail); in between, the last ones still steer.
+            if (this._onItsFrame(this._scene?.aiDetail.probeEvery ?? 1, this._probeFrame++)) this._probeObstacles(pawn);
             avoidObstacles(this._desired, this._desired, this._probes, tuning, up);
         }
 
@@ -1017,7 +1073,9 @@ export class ControllerNode extends Node {
             return;
         }
 
-        if (shouldRepath(this._repathState, delta, this._targetPos, this.repath)) {
+        // A search when the policy wants one AND the scene's ration allows it (Scene.takePathSearch): otherwise the
+        // current path is followed one frame more. An agent with no path at all still waits its turn.
+        if (shouldRepath(this._repathState, delta, this._targetPos, this.repath) && (this._scene?.takePathSearch() ?? true)) {
             const found = this._scene?.ai?.findPath(source, this._selfPos, this._targetPos, this._pathScratch)
                 ?? source.mesh.findPath(this._selfPos, this._targetPos, this._pathScratch);
             // Marked BEFORE the emptiness check, so an unreachable destination is retried on the
@@ -1646,6 +1704,23 @@ export class ControllerNode extends Node {
      * `CameraRigNode._probe` does for the camera boom. The cost is `whiskerCount` raycasts per AI
      * controller per frame, which `physicsStats.rayCount` already surfaces in the performance HUD.
      */
+    private _perceiveWait = 0;
+    private _perceiveFrame = 0;
+    private _probeFrame = 0;
+    /** This controller's offset in a cycle, from its id: spreads agents over the frames of the cycle. */
+    private _cyclePhase = -1;
+
+    /** Whether frame `frame` of this controller is one of its turns in a cycle of `every` frames. */
+    private _onItsFrame(every: number, frame: number): boolean {
+        if (!(every > 1)) return true;
+        if (this._cyclePhase < 0) {
+            let h = 0;
+            for (let i = 0; i < this.id.length; i++) h = (h * 31 + this.id.charCodeAt(i)) >>> 0;
+            this._cyclePhase = h;
+        }
+        return (frame + this._cyclePhase) % Math.round(every) === 0;
+    }
+
     private _probeObstacles(pawn: CharacterNode): void {
         this._probes.length = 0;
         const physics = this._scene?.physics;
@@ -1714,6 +1789,7 @@ export class ControllerNode extends Node {
      * alias the same object, and the pawn's jump consumption would reach back into a controller's state.
      */
     private _publish(pawn: Possessable): void {
+        copyIntent(this._published, this._intent);
         const target = pawn.drive();
         target.move[0] = this._intent.move[0];
         target.move[1] = this._intent.move[1];

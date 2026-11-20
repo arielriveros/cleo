@@ -73,13 +73,24 @@ export const WEAPON_ORDER = ['pistol', 'ak47', 'shotgun']
 
 // ----- the match --------------------------------------------------------------------------------------
 
-export type FpsGameType = 'oneVsAll' | 'teamDeathmatch' | 'ffa'
+export type FpsGameType = 'oneVsAll' | 'teamDeathmatch' | 'ffa' | 'coop'
 
 /** The Game Manager's list of game types: what the dropdown offers, and what each needs of the scene. */
 export const GAME_TYPES: Record<FpsGameType, { label: string, minFighters: number }> = {
   oneVsAll: { label: 'One against all', minFighters: 12 },
   teamDeathmatch: { label: 'Team deathmatch', minFighters: 12 },
   ffa: { label: 'Free for all', minFighters: 12 },
+  // The players on one team against a horde of bots (online: the Game Manager's `coopBots` of them).
+  coop: { label: 'Co-op', minFighters: 12 },
+}
+
+/**
+ * Online, the game type a session asks for (`this.net.mode`: what the player asked the allocator for, or the host
+ * was started with), over the Game Manager's own `gameType`.
+ */
+export const MODE_GAME_TYPES: Record<string, FpsGameType> = {
+  coop: 'coop', horde: 'coop', deathmatch: 'teamDeathmatch', teamDeathmatch: 'teamDeathmatch', tdm: 'teamDeathmatch',
+  ffa: 'ffa', oneVsAll: 'oneVsAll',
 }
 
 /** Game type keys an older project may still hold, and what they are called now. */
@@ -89,18 +100,22 @@ export const GAME_TYPE_ALIASES: Record<string, FpsGameType> = { oneVsThree: 'one
  * The one global: the scene's Game Manager. Module state survives `Game.loadScene`, so the manager sets it in
  * `onStart` and clears it in `onDespawn`, and a combatant reads it through {@link manager} (never caches it).
  */
-export const fps: { gm: any } = { gm: null }
+export const fps: { gm: any, byScene: WeakMap<object, any> } = { gm: null, byScene: new WeakMap() }
 
-/** The match's manager, or null when the scene has none (combatants then fall back to their own `team`). */
-export function manager(): any {
-  const gm = fps.gm
+/**
+ * The match's manager, or null when the scene has none (combatants then fall back to their own `team`). Pass the
+ * node asking: its own scene's manager is the one (a process running a host and a player at once — a test, an
+ * editor — holds two scenes and two managers).
+ */
+export function manager(of?: any): any {
+  const gm = (of?.scene && fps.byScene.get(of.scene)) ?? fps.gm
   return gm && gm.scene && !gm.markForRemoval ? gm : null
 }
 
 /** Whether `a` may hurt `b`: different teams, or the manager allows friendly fire. */
 export function hostile(a: any, b: any): boolean {
   if (!a || !b || a === b) return false
-  const gm = manager()
+  const gm = manager(a)
   if (gm) return gm.isHostile(a, b)
   return a.team !== b.team
 }
@@ -108,7 +123,7 @@ export function hostile(a: any, b: any): boolean {
 /** Whether `a`'s bullets hurt `b`: hostile, or the manager has friendly fire on. */
 export function canDamage(a: any, b: any): boolean {
   if (!a || !b || a === b) return false
-  const gm = manager()
+  const gm = manager(a)
   return gm ? gm.canDamage(a, b) : a.team !== b.team
 }
 

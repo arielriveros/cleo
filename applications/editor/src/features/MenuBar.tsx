@@ -31,6 +31,7 @@ import {
 } from "./topbarIcons";
 import ProjectFeaturesModal from "./projectFeatures/ProjectFeaturesModal";
 import FeatureCheckModal from "./projectFeatures/FeatureCheckModal";
+import MultiplayerModal from "./playWindow/MultiplayerModal";
 import type { FeatureUsage } from "./publish/featureUsage";
 import { iconFor } from "./assets/assetKinds";
 import { useFrameSelected } from "./viewport/useFrameSelected";
@@ -127,6 +128,7 @@ export default function MenuBar() {
   const debugSession = useScriptDebugger();
   const vscodeDebug = useVsCodeDebug();
   const [showTargets, setShowTargets] = useState(false);
+  const [showMultiplayer, setShowMultiplayer] = useState(false);
   const targetsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -479,6 +481,7 @@ export default function MenuBar() {
         {showFeatures && <ProjectFeaturesModal onClose={() => setShowFeatures(false)} />}
         {showAddons && <AddonsModal onClose={() => setShowAddons(false)} />}
         {featureCheck && <FeatureCheckModal uses={featureCheck.uses} onAnswer={featureCheck.answer} />}
+        {showMultiplayer && <MultiplayerModal onClose={() => setShowMultiplayer(false)} build={buildWindowPlayData} size={windowSize} />}
         {helpDialog === 'shortcuts' && (
           <ShortcutsDialog page='editor/interface' anchor='keyboard-shortcuts' onClose={() => setHelpDialog(null)} />
         )}
@@ -598,6 +601,11 @@ export default function MenuBar() {
                 ? 'A window and a process of its own, built as Publish builds it. Keep editing; Restart picks it up.'
                 : 'A pop-up window of its own, built as Publish builds it. Keep editing; Restart picks it up.'}>
               <span className='font-semibold'>Play in window</span>
+            </MenuItem>
+            <MenuItem className='py-1.5' icon={<PlayWindowIcon />}
+              onClick={() => { setShowTargets(false); setShowMultiplayer(true); }}
+              hint='Online, on this machine: a local host and a window per player, each with its own link and network.'>
+              <span className='font-semibold'>Multiplayer…</span>
             </MenuItem>
           </div>
         )}

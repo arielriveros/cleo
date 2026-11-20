@@ -1,5 +1,5 @@
 import { CameraRigNode, Game, Input, ModelNode, Node } from 'cleo'
-import { onAction, attribute } from 'cleo/decorators'
+import { onAction, attribute, netcall } from 'cleo/decorators'
 import type { Animator } from 'cleo'
 import FpsCombatantNode from '@/FPS/Scripts/FpsCombatant'
 import { WEAPONS, aimDirection, approach, clamp, combatantOf, findByVariable, findDescendant, lerp, manager, playCue } from '@/FPS/Scripts/FpsShared'
@@ -26,6 +26,15 @@ interface Slot { key: string, ammo: number, reserve: number, view: ModelNode | n
  *
  * A bullet is `fireHitscan` (FpsCombatant): from the camera, along the rig's yaw and pitch, with the
  * current spread. The view recoils: a kick that mostly recovers, and a little shake.
+ *
+ * ## Online
+ *
+ * Every player's character runs this script on the host and on every machine; only its own player's machine
+ * (`this.net.isOwner`) reads input, draws the viewmodel, moves the camera and keeps the magazine. A shot is a
+ * `@netcall` to the host (`shot`), which fires the bullet and deals the damage; whether the player aims, fires
+ * or reloads (which change how fast it walks) goes to the host as `stance`, so both sides move the character
+ * alike. The host calls back to the player's machine for what only it shows: `hitMarker`, `hurtFeedback`,
+ * `respawned`, `teleported`. Crouching comes with the controller's own intent, on both sides.
  */
 export default class FpsPlayerNode extends FpsCombatantNode {
   @attribute
@@ -107,14 +116,21 @@ export default class FpsPlayerNode extends FpsCombatantNode {
   private _baseYawSens: number = 0
   private _basePitchSens: number = 0
   private _vmBase: number[] = [0, 0, 0]
+  // Online: what the player's machine last told the host (there), and what the host was told (here).
+  private _sentStance: string = ''
+  private _remoteAds: boolean = false
+  private _remoteFiring: boolean = false
+  private _remoteReloading: boolean = false
+  private _hostNextShot: number = 0
 
   // =================================================================================================
   // Lifecycle
   // =================================================================================================
 
   onStart() {
-    super.onStart()
+    // Before the base class registers with the manager: a player who joins a match under way is dealt in as one.
     this.setVariable('isPlayer', true, 'boolean', 'public')
+    super.onStart()
     this._rig = this._findRig()
     if (this._rig) {
       this._baseYawSens = this._rig.yawSensitivity
@@ -153,26 +169,43 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     this._time += delta
     const intent = this.drive()
     if (!this._rig) return
+    // This player's own machine (offline: always): input, the view, the weapon in hand.
+    const local = this.net.isOwner
+    if (this._viewmodels && this._viewmodels.visible !== local) this._viewmodels.visible = local
     if (this.isDead) {
       intent.move[0] = 0; intent.move[1] = 0; intent.speedScale = 0
       this.respawnIn = Math.max(0, this.respawnIn - delta)
-      this._deadCamera(delta)
+      if (local) this._deadCamera(delta)
       return
     }
-    const gm = manager()
+    const gm = manager(this)
     if (gm?.matchOver) { intent.move[0] = 0; intent.move[1] = 0; return }
 
     const spec = this.spec
     const moving = this.planarSpeed > 0.4
-    // ----- stance
-    const wantCrouch = Input.pressed('Crouch')
+    // ----- stance: crouch is in the controller's intent (Crouch), so the host has it too
+    const wantCrouch = !!intent.crouch
     this.isCrouching = wantCrouch
-    // ----- aim
-    const wantAds = Input.pressed('Aim') && !this.reloading && this._time >= this._equipUntil()
+    // ----- aim and trigger: read here on the player's machine; the host has them from `stance`
+    let wantAds: boolean, firing: boolean, reloading: boolean
+    if (local) {
+      wantAds = Input.pressed('Aim') && !this.reloading && this._time >= this._equipUntil()
+      firing = Input.pressed('Fire') && this._nextShot - this._time > -0.4
+      reloading = this.reloading
+      const stance = (wantAds ? 'a' : '-') + (firing ? 'f' : '-') + (reloading ? 'r' : '-')
+      if (this.net.isPeer && stance !== this._sentStance) { this._sentStance = stance; this.stance(wantAds, firing, reloading) }
+    } else {
+      wantAds = this._remoteAds; firing = this._remoteFiring; reloading = this._remoteReloading
+    }
     this.ads = approach(this.ads, wantAds ? 1 : 0, 1 / Math.max(0.03, this.adsSeconds) * 3, delta)
-    this.sprinting = intent.sprint && moving && !wantCrouch && !wantAds && !(Input.pressed('Fire') && this._nextShot - this._time > -0.4) && !this.reloading
+    this.sprinting = intent.sprint && moving && !wantCrouch && !wantAds && !firing && !reloading
     intent.sprint = this.sprinting
     intent.speedScale = (wantCrouch ? this.crouchSpeedScale : 1) * lerp(1, spec.adsMove, this.ads)
+    if (!local) {
+      // The host for another machine's player: it walks as the player does there; health comes back here.
+      if (this.net.isHost) this._regen(delta)
+      return
+    }
 
     // ----- the camera: eye height, field of view, sensitivity
     this._eye = approach(this._eye, wantCrouch ? this.eyeCrouch : this.eyeStand, 1 / Math.max(0.02, this.crouchSmoothing) * 2.2, delta)
@@ -198,8 +231,39 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     this.spreadNow = this._spread(moving)
     this._bloom = Math.max(0, this._bloom - 5 * delta)
 
-    // ----- health
+    // ----- health (the host's to keep)
+    if (this.net.isHost) this._regen(delta)
+  }
+
+  private _regen(delta: number): void {
     if (this._time - this._lastHurt > this.regenDelay && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.regenPerSecond * delta)
+  }
+
+  /** The player's machine says whether its player aims, fires and reloads: they change how it walks. */
+  @netcall({ to: 'host' })
+  public stance(aim: boolean, firing: boolean, reloading: boolean): void {
+    this._remoteAds = !!aim
+    this._remoteFiring = !!firing
+    this._remoteReloading = !!reloading
+  }
+
+  /**
+   * A shot, from the player's machine: the host fires the bullet (and deals the damage) from `origin` along `dir`
+   * with `cone` degrees of spread, with `weapon`, against the world as the player saw it at host tick `seen` (lag
+   * compensation: what it aimed at, where it was then). Refused when the player is dead, the weapon is not one it
+   * carries, the muzzle is far from the player, or it comes faster than the weapon fires.
+   */
+  @netcall({ to: 'host' })
+  public shot(origin: number[], dir: number[], cone: number, weapon: string, seen: number = 0): void {
+    const spec = WEAPONS[weapon]
+    if (this.isDead || !spec || !this.loadout.includes(weapon)) return
+    if (!Array.isArray(origin) || !Array.isArray(dir) || origin.length < 3 || dir.length < 3) return
+    const p = this.worldPosition
+    if (Math.hypot(origin[0] - p[0], origin[1] - p[1], origin[2] - p[2]) > 3.5) return
+    if (this.net.online && this._time < this._hostNextShot) return
+    this._hostNextShot = this._time + 60 / spec.rpm * 0.75
+    this.weapon = weapon
+    this.net.rewound(seen, () => this.fireHitscan(origin, dir, clamp(cone, 0, 30), 1))
   }
 
   private _spread(moving: boolean): number {
@@ -325,7 +389,8 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     const origin = [p[0], p[1], p[2]]
     const dir = aimDirection(rig.yaw, rig.pitch)
     const cone = this._spread(this.planarSpeed > 0.4)
-    this.fireHitscan(origin, dir, cone, 1)
+    // The bullet is the host's (offline, this machine's): it judges what it hits, as this machine saw the world.
+    this.shot(origin, [dir[0], dir[1], dir[2]], cone, this.weapon, this.net.viewTick)
     this._bloom = Math.min(spec.hipSpread * 1.6, this._bloom + spec.hipSpread * 0.12)
 
     // The view kicks up and a little aside; most of the pitch comes back (_recover).
@@ -482,12 +547,32 @@ export default class FpsPlayerNode extends FpsCombatantNode {
 
   protected onHurt(damage: number, from: Node | null, zone: string): void {
     this._lastHurt = this._time
+    const f = (from as any)?.worldPosition
+    this.hurtFeedback(damage, f ? [f[0], f[1], f[2]] : null)
+  }
+
+  /** The host to the player's machine: a hit landed on it (the shake, the sound, the damage indicator). */
+  @netcall({ to: 'owner' })
+  public hurtFeedback(damage: number, from: number[] | null): void {
+    if (from) { this.lastHitFrom = from; this.lastHitAt = this._time }
     this._rig?.shake(clamp(damage / 80, 0.05, 0.35))
     playCue(this, 'Hurt')
   }
 
   protected onDeath(killer: any, zone: string): void {
-    this.respawnIn = manager()?.playerRespawnSeconds ?? 0
+    this.respawnIn = manager(this)?.playerRespawnSeconds ?? 0
+    if (this.net.isOwner) this._deathHere()
+  }
+
+  /** On the player's own machine online: the host has said it died. */
+  protected onDeadSeen(dead: boolean): void {
+    if (!dead || !this.net.isOwner) return
+    this.respawnIn = manager(this)?.playerRespawnSeconds ?? 0
+    this._deathHere()
+  }
+
+  /** What the player's machine shows of its death: no weapon, no aim, the sound. */
+  private _deathHere(): void {
     for (const s of this._slots) if (s.view) s.view.visible = false
     this.ads = 0
     if (this._dofOn) { Game.updateRenderSettings({ dofEnabled: false }); this._dofOn = false }
@@ -504,7 +589,8 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     rig.fov = approach(rig.fov, 62, 3, delta)
   }
 
-  /** The manager has moved the body onto a spawn point and reset health: back on its feet. */
+  /** The manager has moved the body onto a spawn point and reset health: back on its feet. (Runs on the player's machine.) */
+  @netcall({ to: 'owner' })
   public respawned(): void {
     this.isCrouching = false
     this._eye = this.eyeStand
@@ -514,13 +600,15 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     this._rig?.snapToTarget()
   }
 
-  /** The manager placed this body facing `yaw`: the camera faces the same way. */
+  /** The manager placed this body facing `yaw`: the camera faces the same way. (Runs on the player's machine.) */
+  @netcall({ to: 'owner' })
   public teleported(yaw: number): void {
     this._rig?.setOrbit(yaw, 0)
     this._rig?.snapToTarget()
   }
 
-  /** A shot of ours landed: the HUD flashes its hit marker. */
+  /** A shot of ours landed: the HUD flashes its hit marker. (The host tells the player's machine.) */
+  @netcall({ to: 'owner' })
   public hitMarker(zone: string, killed: boolean): void {
     this.hitMarkerAt = this._time
     this.hitMarkerHead = zone === 'head'
