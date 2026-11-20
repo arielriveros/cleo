@@ -6,8 +6,10 @@ import { ReferencePlayer } from '../reference/referencePlayer';
 import { referenceClient, isAbort } from '../reference/referenceClient';
 import type { TimestampsResult } from '../reference/referenceWorker';
 import {
-  PEAKS_FILE, THUMBS_FILE, packPeaks, packThumbs, unpackPeaks, unpackThumbs, type AudioPeaks, type ThumbStrip,
+  ANALYSIS_FILE, PEAKS_FILE, THUMBS_FILE, packAnalysis, packPeaks, packThumbs, unpackAnalysis, unpackPeaks, unpackThumbs,
+  type AudioPeaks, type ThumbStrip,
 } from '../reference/referenceCache';
+import type { AnalysisResult } from '../reference/cv/analysisJob';
 import type { VideoAssetDoc } from '../reference/videoDoc';
 
 // The Motion Creator's linked reference clip, opened: the player that shows its frames, its frame
@@ -30,6 +32,12 @@ export interface ReferenceState {
   error: string | null;
   /** The library's reference clips, by name. */
   library: CreatorAssetMeta[];
+  /** The clip's analysis (Reference ▸ Analysis), once made: kept beside it. */
+  analysis: AnalysisResult | null;
+  /** Analyze progress (0..1) while it runs, else null. */
+  analyzing: number | null;
+  analyze: () => Promise<void>;
+  cancelAnalysis: () => void;
 }
 
 const THUMB_HEIGHT = 54;
@@ -42,6 +50,9 @@ export function useReference(videoId: string | undefined, proxyWidth: number): R
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [library, setLibrary] = useState<CreatorAssetMeta[]>([]);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [analyzing, setAnalyzing] = useState<number | null>(null);
+  const analysisAbort = useRef<AbortController | null>(null);
   const proxy = useRef(proxyWidth);
   proxy.current = proxyWidth;
 
@@ -58,7 +69,8 @@ export function useReference(videoId: string | undefined, proxyWidth: number): R
 
   // The linked clip: its player, then its frames, thumbnails and peaks.
   useEffect(() => {
-    setPlayer(null); setTimestamps(null); setThumbs(null); setPeaks(null); setError(null); setBusy(null);
+    setPlayer(null); setTimestamps(null); setThumbs(null); setPeaks(null); setError(null); setBusy(null); setAnalysis(null);
+    analysisAbort.current?.abort(); setAnalyzing(null);
     if (!videoId) return;
     const abort = new AbortController();
     let opened: ReferencePlayer | null = null;
@@ -74,6 +86,10 @@ export function useReference(videoId: string | undefined, proxyWidth: number): R
         step('Reading the frames…');
         const ts = await client.run<TimestampsResult>(videoId, blob, { job: 'timestamps' }, { signal: abort.signal });
         setTimestamps(ts);
+        // A kept analysis comes back with the clip.
+        const [an] = await getCreatorFiles(videoId, [ANALYSIS_FILE]);
+        const kept = an ? await unpackAnalysis(an.blob) : null;
+        if (kept && !abort.signal.aborted) setAnalysis(kept);
         // Thumbnails: kept beside the clip once made.
         const [cached] = await getCreatorFiles(videoId, [THUMBS_FILE]);
         let strip = cached ? await unpackThumbs(cached.blob) : null;
@@ -112,10 +128,31 @@ export function useReference(videoId: string | undefined, proxyWidth: number): R
   const thumbUrls = useMemo(() => (thumbs ? { strip: thumbs, urls: thumbs.images.map(b => URL.createObjectURL(b)) } : null), [thumbs]);
   useEffect(() => () => { thumbUrls?.urls.forEach(u => URL.revokeObjectURL(u)); }, [thumbUrls]);
 
+  const analyze = async () => {
+    if (!videoId || !player) return;
+    analysisAbort.current?.abort();
+    const abort = new AbortController();
+    analysisAbort.current = abort;
+    setAnalyzing(0);
+    try {
+      const r = await referenceClient().run<AnalysisResult | null>(videoId, player.blob, { job: 'analyze' }, {
+        signal: abort.signal, progress: (d, n) => setAnalyzing(n ? Math.min(1, d / n) : 0),
+      });
+      if (!r || abort.signal.aborted) return;
+      setAnalysis(r);
+      void putCreatorFile(videoId, { name: ANALYSIS_FILE, mime: 'application/octet-stream', blob: packAnalysis(r) });
+    } catch (e) {
+      if (!isAbort(e)) setError(String((e as Error)?.message ?? e));
+    } finally {
+      if (analysisAbort.current === abort) { analysisAbort.current = null; setAnalyzing(null); }
+    }
+  };
+
   const meta = library.find(a => a.id === videoId);
   return {
     videoId: videoId ?? null, name: meta?.name ?? null, video: player?.doc ?? null, player,
     timestamps: timestamps?.timestamps ?? null, vfr: timestamps?.vfr ?? false,
     thumbs: thumbUrls, peaks, busy, error, library,
+    analysis, analyzing, analyze, cancelAnalysis: () => analysisAbort.current?.abort(),
   };
 }

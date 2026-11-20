@@ -11,11 +11,13 @@
 import { ALL_FORMATS, AudioSampleSink, BlobSource, CanvasSink, EncodedPacketSink, Input, type InputVideoTrack } from 'mediabunny';
 import { isVariableRate } from './videoDoc';
 import type { AudioPeaks, ThumbStrip } from './referenceCache';
+import { runAnalysisJob, type AnalysisJob } from './cv/analysisJob';
 
 export type ReferenceJob =
   | { job: 'timestamps' }
   | { job: 'thumbs'; every: number; height: number }
-  | { job: 'peaks'; perSecond: number };
+  | { job: 'peaks'; perSecond: number }
+  | AnalysisJob;
 
 export interface TimestampsResult { timestamps: Float64Array; vfr: boolean; }
 
@@ -118,6 +120,7 @@ self.onmessage = async (e: MessageEvent<ReferenceWorkerIn>) => {
       case 'timestamps': { const r = await timestamps(ctx); result = r; transfer.push(r.timestamps.buffer); break; }
       case 'thumbs': result = await thumbs(ctx, msg.every, msg.height); break;
       case 'peaks': { const r = await peaks(ctx, msg.perSecond); result = r; if (r) transfer.push(r.peaks.buffer); break; }
+      case 'analyze': result = await runAnalysisJob(ctx, msg, transfer); break;
     }
     post({ id, type: 'result', result }, transfer);
   } catch (err) {

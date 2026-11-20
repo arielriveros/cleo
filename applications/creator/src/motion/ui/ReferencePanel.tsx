@@ -138,6 +138,8 @@ export function ReferencePanel() {
         </Row>
       </Collapsable>
 
+      <AnalysisSection />
+
       <ReferenceCameraSections />
 
       <Collapsable title='Keys' persistKey='cleo_creator_motion_ref_keys'>
@@ -146,6 +148,53 @@ export function ReferencePanel() {
         {view !== 'clip' && <div className='pt-1 text-ui-xs text-dim tabular-nums'>The playhead shows the video at {videoTimeOf(ref, t).toFixed(3)} s{frame !== null ? `, frame ${frame + 1}` : ' (outside the clip)'}.</div>}
       </Collapsable>
     </PanelBody>
+  );
+}
+
+/** Reference ▸ Analysis: the classical computer vision over the whole clip, and what it offers. */
+function AnalysisSection() {
+  const { reference: r, analysisView: a, addKeysAtCandidates, stage, setStage, rig, lookThrough } = useMotion();
+  const busy = r.analyzing !== null;
+  const frames = r.analysis?.times.length ?? 0;
+  return (
+    <Collapsable title='Analysis' persistKey='cleo_creator_motion_ref_analysis'>
+      <div className='pb-1 text-ui-xs text-dim'>
+        Reads the whole clip for where the action holds and turns (key poses), held frames, cuts, and the moving subject.
+      </div>
+      <div className='flex items-center gap-1'>
+        <Button size='sm' disabled={busy || !r.player} onClick={() => void r.analyze()}
+                title='Read the clip frame by frame (in the background): it is kept with the clip'>{r.analysis ? 'Analyze again' : 'Analyze'}</Button>
+        {busy && (<>
+          <div className='h-1.5 min-w-0 flex-1 overflow-hidden rounded bg-surface'>
+            <div className='h-full bg-primary' style={{ width: `${Math.round((r.analyzing ?? 0) * 100)}%` }} />
+          </div>
+          <Button size='sm' variant='ghost' onClick={r.cancelAnalysis}>Cancel</Button>
+        </>)}
+      </div>
+      {a && (<>
+        <div className='pt-1 text-ui-xs text-dim tabular-nums'>
+          {frames} frames · {a.candidates.length} key candidate{a.candidates.length === 1 ? '' : 's'}
+          {a.onEvery > 1 ? ` · animated on ${a.onEvery === 2 ? 'twos' : a.onEvery === 3 ? 'threes' : `${a.onEvery}s`}` : ''}
+          {a.cuts.length ? ` · ${a.cuts.length} cut${a.cuts.length === 1 ? '' : 's'}` : ''}
+        </div>
+        {a.cameraMoves && <div className='pt-1 text-ui-xs text-warning'>The camera moves in this clip: the subject is found against a still background, so its box is unreliable.</div>}
+        <Slider label='Key sensitivity' min={0} max={1} step={0.05} readout value={stage.refKeySensitivity}
+                onChange={v => setStage({ ...stage, refKeySensitivity: v })} />
+        <Button size='sm' disabled={!rig || !a.candidates.length} title='A key with a pose from the motion at every candidate: pose each against its frame'
+                onClick={addKeysAtCandidates}>Add keys at candidates</Button>
+        <div className='pt-2 text-ui-sm text-muted'>Subject</div>
+        <Toggle label='Show its box' checked={stage.refShowBox} onChange={v => setStage({ ...stage, refShowBox: v })} />
+        <div className='flex items-center gap-1 pt-1' title={lookThrough || stage.refMode !== 'over' ? 'Cropping is for the Over display, not while looking through' : undefined}>
+          <span className='w-16 shrink-0 text-ui-sm text-muted'>Crop</span>
+          <SegmentedControl<'none' | 'union' | 'follow'> size='sm' value={stage.refCrop} onChange={v => setStage({ ...stage, refCrop: v })}
+            options={[
+              { value: 'none', label: 'Whole', title: 'The whole frame' },
+              { value: 'union', label: 'Subject', title: 'Zoomed onto everywhere the subject goes: still' },
+              { value: 'follow', label: 'Follow', title: 'Zoomed onto the subject, following it' },
+            ]} />
+        </div>
+      </>)}
+    </Collapsable>
   );
 }
 

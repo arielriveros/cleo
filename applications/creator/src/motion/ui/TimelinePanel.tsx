@@ -12,6 +12,7 @@ import { BlendCurveEditor, blendPath } from './BlendCurveEditor';
 import { POSE_DRAG_TYPE, useMotion } from './motionContext';
 import { PartBlendFields } from './PartsPanel';
 import { VIDEO_LANE_H, VideoLane } from './VideoLane';
+import { ANALYSIS_LANE_H, AnalysisLane } from './AnalysisLane';
 import { snapToGrid, videoFrameAt } from '../reference/referenceDoc';
 import { rateLabel } from '../reference/videoDoc';
 
@@ -48,7 +49,7 @@ export function TimelinePanel() {
   const {
     doc, setDoc, poseId, setPoseId, libraryPoseId, libraryPoses, view, setView, keyId, setKeyId, partId, setPartId,
     playing, togglePlay, scrub, stageTime, clip, savedPresets, transport, transportState, stepFrames, toStart, toEnd, grid,
-    timelineEnd, reference, setReference, keyFromFrame,
+    timelineEnd, reference, setReference, keyFromFrame, analysisView,
   } = useMotion();
   const scrollRef = useRef<HTMLDivElement>(null);
   const playheadRef = useRef<HTMLDivElement>(null);
@@ -68,7 +69,8 @@ export function TimelinePanel() {
   const snap = (t: number) => snapToGrid(t, grid);
   const ref = doc.reference;
   const videoLane = !!ref && !!reference.video;
-  const top = RULER_H + (videoLane ? VIDEO_LANE_H : 0);
+  const analysisLane = videoLane && !!analysisView && !!reference.analysis;
+  const top = RULER_H + (videoLane ? VIDEO_LANE_H : 0) + (analysisLane ? ANALYSIS_LANE_H : 0);
   const x = (t: number) => timeToX(t, pxPerSec, GUTTER);
   const tAt = (clientX: number) => {
     const el = scrollRef.current!;
@@ -224,6 +226,7 @@ export function TimelinePanel() {
             <div className='shrink-0 border-r border-border' style={{ width: LABEL_W }}>
               <div style={{ height: RULER_H }} className='border-b border-border bg-surface-raised' />
               {videoLane && label(`Video · ${rateLabel(reference.video!.fps)} fps`, VIDEO_LANE_H)}
+              {analysisLane && label('Motion energy', ANALYSIS_LANE_H)}
               {label('Keys', TRACK_H)}
               {label('Base', LANE_H, undefined, () => setPartId(null), !selPart)}
               {parts.map(p => <div key={p.id}>{label(p.name, PART_H, p.color, () => setPartId(p.id), p.id === selPart?.id)}</div>)}
@@ -250,6 +253,12 @@ export function TimelinePanel() {
                   <div className='absolute inset-x-0 border-b border-border/40' style={{ top: RULER_H, height: VIDEO_LANE_H }}>
                     <VideoLane reference={ref!} video={reference.video!} thumbs={reference.thumbs} peaks={reference.peaks}
                                x={x} pxPerSec={pxPerSec} width={width} onChange={setReference} />
+                  </div>
+                )}
+                {analysisLane && (
+                  <div className='absolute inset-x-0 border-b border-border/40' style={{ top: RULER_H + VIDEO_LANE_H, height: ANALYSIS_LANE_H }}>
+                    <AnalysisLane reference={ref!} times={reference.analysis!.times} view={analysisView!} x={x} width={width}
+                                  onSeek={t => { transport.pause(); transport.seek(t); if (view === 'pose') setView('motion'); }} />
                   </div>
                 )}
                 {/* Keys */}

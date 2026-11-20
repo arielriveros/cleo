@@ -165,6 +165,10 @@ contact. Drag the strip to slide the video along the motion; drag either end to 
 to the end of the video when it is longer than the motion: past the clip's last frame the character holds
 its last pose, or cycles when the motion loops.
 
+Once the clip is [analysed](#analysis), the **Motion energy** lane under it draws how much the subject
+changes from frame to frame: the curve dips where the action holds or turns. A yellow mark at a dip is a
+key-pose candidate (click it to go there), a shaded stretch is held frames, and a red line is a cut.
+
 ### Transport
 
 The row at the top of the Timeline plays the motion. Left to right:
@@ -298,6 +302,31 @@ How the video is drawn in the viewport:
 - **Decode at** — the width the video is decoded at for the viewport. A smaller size plays a 4K clip smoothly.
 
 The video is always shown whole, as large as fits the viewport.
+
+### Analysis
+
+**Analyze** reads the whole clip in the background, frame by frame at a small size, and keeps what it
+finds with the clip. It uses no AI: every step is ordinary image arithmetic, so what it finds can be
+checked by eye.
+
+- **Key poses** — the subject's motion energy (how much its pixels change from the frame before) falls
+  where the action holds or turns: a contact, an extreme, the top of a jump. Its dips, ranked by how deep
+  they are against the curve around them and kept a little apart, are the **key candidates**. **Key
+  sensitivity** offers fewer, surer ones or more. **Add keys at candidates** makes a key at each, with a pose
+  from the motion there, ready to pose against its frame.
+- **Held frames** — a frame no different from the one before. When most of the clip holds every other
+  frame the tab says **animated on twos** (or threes): the drawings change at half the frame rate.
+- **Cuts** — a jump in the frame's brightness histogram far beyond the clip's usual change: a shot
+  change, where the clip probably wants trimming.
+- **Subject** — with a still camera, the empty scene is each pixel's median over many frames (anything
+  that moves covers a pixel in fewer than half of them), worked out per shot. What differs from it, in
+  brightness or colour, cleaned of specks and holes, is the moving subject, and its largest region its box.
+  **Show its box** outlines it over the video. **Crop** zooms the Over display onto it: **Subject** onto
+  everywhere it goes (a still crop), **Follow** onto it frame by frame (the same size throughout, so it never
+  pumps). Looking through the camera and Behind always show the whole frame.
+
+A clip filmed with a moving camera has no still background: the tab warns that the subject's box is then
+unreliable. The key candidates still come from the whole frame's energy.
 
 ### Camera
 

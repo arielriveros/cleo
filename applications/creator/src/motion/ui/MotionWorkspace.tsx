@@ -36,6 +36,9 @@ import { useReferenceBackdrop } from './referenceBackdrop';
 import type { Rect } from '../reference/gate';
 import { projectPoint, cameraBasis, videoFovOfView, viewportFov, type ReferenceCamera, type Vec2 } from '../reference/referenceCamera';
 import { defaultCalibration, solveCalibration, type CalibrationDoc } from '../reference/calibrate';
+import { analysisFrameAt, readAnalysis } from '../reference/cv/analysisView';
+import { followCrop } from '../reference/cv/signal';
+import { timelineTimeOf } from '../reference/referenceDoc';
 import { loadSavedPresets, type BlendPreset } from '../blendCurve';
 import { boneGroups, defaultParts } from '../parts';
 import {
@@ -605,6 +608,42 @@ export function MotionWorkspace() {
   useReferenceBackdrop(instance, reference.player, gateView.gate, gateView.view, behind, stageSettings.refFlip);
   useEffect(() => { stageRef.current?.setFloorSuppressed(behind); }, [behind, rig]);
 
+  // --- The analysis ---
+  const analysisView = useMemo(() => (reference.analysis && video ? readAnalysis(reference.analysis, video.fps, stageSettings.refKeySensitivity) : null),
+    [reference.analysis, video, stageSettings.refKeySensitivity]);
+  const addKeysAtCandidates = () => {
+    const d = docRef.current, c = clipRef.current, ref = d.reference, a = referenceRef.current.analysis;
+    if (!rig || !c || !ref || !a || !analysisView) return;
+    const len = c.samplers[0]?.input.at(-1) ?? 0;
+    const poses = [...d.poses], keys = [...d.keys];
+    let added = 0;
+    for (const cand of analysisView.candidates) {
+      const v = a.times[cand.frame];
+      if (v < ref.in - 1e-6 || v > ref.out + 1e-6) continue;
+      const t = transport.snap(timelineTimeOf(ref, v));
+      if (t < 0 || keys.some(k => Math.abs(k.time - t) < 0.5 / Math.max(1, d.fps))) continue;
+      const p = poseFromClip(rig, c, motionClipTime(t, len, d.loop), `Frame ${cand.frame + 1}`);
+      poses.push(p);
+      keys.push({ id: newId(), poseId: p.id, time: t, ...presetBlend() });
+      added++;
+    }
+    if (!added) { toast.info('Every candidate already has a key.'); return; }
+    setDoc({ ...d, poses, keys });
+    toast.success(`${added} key${added === 1 ? '' : 's'} at the candidates: pose each against its frame.`);
+  };
+  /** The subject crop for the Over display (none while looking through or Behind: the camera needs the whole frame). */
+  const cropMode = lookThrough || stageSettings.refMode !== 'over' || !analysisView ? 'none' : stageSettings.refCrop;
+  const cropAt = useMemo(() => {
+    if (cropMode !== 'follow' || !analysisView?.followSize || !reference.analysis) return null;
+    const times = reference.analysis.times, size = analysisView.followSize;
+    return (v: number) => { const b = analysisView.boxes[analysisFrameAt(times, v)]; return b ? followCrop(b, size) : null; };
+  }, [cropMode, analysisView, reference.analysis]);
+  const boxAt = useMemo(() => {
+    if (!stageSettings.refShowBox || !analysisView || !reference.analysis) return null;
+    const times = reference.analysis.times;
+    return (v: number) => analysisView.boxes[analysisFrameAt(times, v)] ?? null;
+  }, [stageSettings.refShowBox, analysisView, reference.analysis]);
+
   // A clip opened from the Assets explorer (or just added there) becomes this motion's reference.
   useEffect(() => {
     const take = () => { const id = takeOpen('video'); if (id) void live.current.linkVideo(id); };
@@ -637,7 +676,7 @@ export function MotionWorkspace() {
 
   // The context's callbacks read the latest state through this, so they can stay in a memoised value.
   const actions = { setPose, saveToLibrary, setPoseId, scrub, togglePlay, stepFrames, toStart, toEnd, linkVideo, setReference, keyFromFrame,
-                    setLookThrough, viewCamera, setCamera, setCalibration, jointPositions };
+                    setLookThrough, viewCamera, setCamera, setCalibration, jointPositions, addKeysAtCandidates };
   const live = useRef(actions);
   live.current = actions;
   const value = useMemo<MotionState>(() => ({
@@ -655,9 +694,11 @@ export function MotionWorkspace() {
     viewCamera: () => live.current.viewCamera(), setCamera: c => live.current.setCamera(c),
     calibrating, setCalibrating, calibration, setCalibration: (c, done) => live.current.setCalibration(c, done), solve,
     placingPin, setPlacingPin, jointPositions: () => live.current.jointPositions(), subjectHeight,
+    analysisView, addKeysAtCandidates: () => live.current.addKeysAtCandidates(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [doc, rig, poseId, libraryPoseId, pose, libraryPoses, bone, view, clip, time, playing, keyId, partId, savedPresets, character, sourceClip, sourceAnimations,
-       transportState, grid, timelineEnd, reference, stageSettings, gateView, lookThrough, calibrating, calibration, solve, placingPin, subjectHeight]);
+       transportState, grid, timelineEnd, reference, stageSettings, gateView, lookThrough, calibrating, calibration, solve, placingPin, subjectHeight,
+       analysisView]);
 
   const duration = clip?.samplers[0]?.input.at(-1) ?? motionDuration(doc);
   /** The pinned joints where the reference camera sees them now (video pixels). */
@@ -677,6 +718,7 @@ export function MotionWorkspace() {
     <ReferenceOverlay player={reference.player} visible={!!doc.reference && stageSettings.refMode === 'over' && view !== 'clip'}
                       opacity={stageSettings.refOpacity} difference={stageSettings.refDifference} flip={stageSettings.refFlip}
                       gate={stageSettings.refGate && !!doc.reference && stageSettings.refMode !== 'off' && view !== 'clip'}
+                      crop={cropMode === 'union' ? analysisView?.union : null} cropAt={cropAt} boxAt={boxAt}
                       onGate={(gate, view) => setGateView({ gate, view })} />
     {calibration && video && gateView.gate && calibrating !== 'off' && view !== 'clip' && (
       <CalibrationOverlay gate={gateView.gate} videoW={video.width} videoH={video.height} calib={calibration}

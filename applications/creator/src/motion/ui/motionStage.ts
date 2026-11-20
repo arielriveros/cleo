@@ -51,6 +51,12 @@ export interface MotionStageSettings {
   refSnap: boolean;
   /** The width the video is decoded at for the viewport, pixels (0: its own). */
   refProxy: number;
+  /** How readily the analysis offers key-pose candidates (0..1: fewer, surer ones to more). */
+  refKeySensitivity: number;
+  /** Draw the analysis's subject box over the video. */
+  refShowBox: boolean;
+  /** Zoom the video onto the subject: not at all, the box it never leaves, or following it. */
+  refCrop: 'none' | 'union' | 'follow';
 }
 
 export type ReferenceMode = 'off' | 'over' | 'behind';
@@ -58,6 +64,7 @@ export type ReferenceMode = 'off' | 'over' | 'behind';
 export const DEFAULT_MOTION_STAGE: MotionStageSettings = {
   grid: true, ground: true, skeleton: true, keepLengths: true, chain: 0, sunYaw: 35, sunElevation: 40,
   refMode: 'over', refOpacity: 0.5, refDifference: false, refFlip: false, refGate: true, refSound: true, refSnap: true, refProxy: 720,
+  refKeySensitivity: 0.5, refShowBox: false, refCrop: 'none',
 };
 
 export class MotionStage {

@@ -3,8 +3,11 @@
 // Blob: a little-endian u32 header length, a JSON header, then the binary parts it names, in order.
 // Plain functions on Blobs and typed arrays, so the tests run them without a browser.
 
+import type { AnalysisResult } from './cv/analysisJob';
+
 export const THUMBS_FILE = 'thumbs.bin';
 export const PEAKS_FILE = 'peaks.bin';
+export const ANALYSIS_FILE = 'analysis.bin';
 
 /** Bump when a cache's meaning changes: an older one is read as missing and made again. */
 export const CACHE_VERSION = 1;
@@ -56,4 +59,20 @@ export async function unpackPeaks(blob: Blob): Promise<AudioPeaks | null> {
   const c = await unpackCache(blob, 'peaks');
   if (!c || c.parts.length !== 1) return null;
   return { start: Number(c.meta.start) || 0, perSecond: Number(c.meta.perSecond) || 50, peaks: new Float32Array(await c.parts[0].arrayBuffer()) };
+}
+
+/** The analysis (cv/analysisJob.ts): its per-frame arrays, in order. */
+export const packAnalysis = (a: AnalysisResult) => packCache('analysis', { width: a.width, height: a.height, frames: a.times.length },
+  [a.times, a.energy, a.subjectEnergy, a.histDist, a.boxes, a.foreground]);
+export async function unpackAnalysis(blob: Blob): Promise<AnalysisResult | null> {
+  const c = await unpackCache(blob, 'analysis');
+  if (!c || c.parts.length !== 6) return null;
+  const [times, energy, subjectEnergy, histDist, boxes, foreground] = await Promise.all(c.parts.map(p => p.arrayBuffer()));
+  const n = Number(c.meta.frames) || 0;
+  const r: AnalysisResult = {
+    times: new Float64Array(times), energy: new Float32Array(energy), subjectEnergy: new Float32Array(subjectEnergy),
+    histDist: new Float32Array(histDist), boxes: new Float32Array(boxes), foreground: new Float32Array(foreground),
+    width: Number(c.meta.width) || 0, height: Number(c.meta.height) || 0,
+  };
+  return r.times.length === n && r.boxes.length === n * 4 ? r : null;
 }

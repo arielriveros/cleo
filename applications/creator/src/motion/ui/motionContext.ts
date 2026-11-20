@@ -13,6 +13,7 @@ import type { ReferenceState } from './useReference';
 import type { Rect } from '../reference/gate';
 import type { ReferenceCamera, Vec3 } from '../reference/referenceCamera';
 import type { CalibrationDoc, SolveResult } from '../reference/calibrate';
+import type { AnalysisView } from '../reference/cv/analysisView';
 
 // The Motion Creator's shared state, for the panels around the viewport. Dockview unmounts a panel whose
 // tab is hidden, so anything that must outlive one -- the selection, the playhead -- lives here.
@@ -100,6 +101,10 @@ export interface MotionState {
   jointPositions: () => Map<string, Vec3>;
   /** The character's standing height in the stage's world, metres (the default for scale by height). */
   subjectHeight: number;
+  /** The clip's analysis read with the stage's sensitivity: key candidates, holds, cuts, the subject's box. */
+  analysisView: AnalysisView | null;
+  /** A key (and a pose from the motion there) at every key-pose candidate inside the clip. */
+  addKeysAtCandidates: () => void;
   /** The key selected on the timeline: its blend (the way into it) is the one being edited. */
   keyId: string | null;
   setKeyId: (id: string | null) => void;
