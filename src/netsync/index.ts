@@ -43,3 +43,9 @@ export type { Command, RemoteControlOptions } from './sync/commands';
 export { followerSceneJson } from './sync/syncPeer';
 export { Predictor } from './sync/predictor';
 export type { PredictionStats, PredictorOptions } from './sync/predictor';
+
+// Phase 6: carrying and weapons.
+export { CarryHost, CarryPeer } from './sync/carry';
+export type { CarryHostOptions, CarryHostStats, CarryPeerOptions, Trust } from './sync/carry';
+export { LagCompensator, WeaponHost, WeaponPeer } from './sync/weapons';
+export type { HitEvent, HitReport, WeaponHostOptions, WeaponHostStats } from './sync/weapons';

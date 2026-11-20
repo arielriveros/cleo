@@ -57,6 +57,12 @@ export class SyncPeer {
     private _sceneId = '';
     private readonly _nodeByNet = new Map<number, Node>();
     private readonly _samples = new Map<number, Sample[]>();
+    /**
+     * Rows for NetIds not known yet. A spawn travels on the reliable lane and its first states on the unreliable
+     * one, which can overtake it — and the datagram is acknowledged all the same, so for a body at rest the host
+     * never sends that state again. Kept here (a few per NetId, for a while) and applied when the spawn lands.
+     */
+    private readonly _early = new Map<number, Sample[]>();
     private _latestSeq = -1;
     private _received = 0; // bit i: pulse latest-1-i arrived
 
@@ -67,6 +73,10 @@ export class SyncPeer {
 
     /** Nodes this peer simulates itself (its own character): never moved by `apply`, their rows go to {@link onOwnState}. */
     public isOwn: ((nodeId: string) => boolean) | null = null;
+    /** Nodes this peer moves itself for now (a prop it carries, one it just threw) — see {@link hold}. */
+    private readonly _held = new Set<string>();
+    /** Nodes coming back to following, blended from where this peer had them. */
+    private readonly _blends = new Map<string, { from: vec3; rot: quat; offset: vec3 | null; start: number; ms: number }>();
     /** The host's state for one of this peer's own nodes, as of host tick `tick` (for prediction to compare). */
     public onOwnState: ((nodeId: string, tick: number, state: QState) => void) | null = null;
     private readonly _simulated: boolean;
@@ -83,6 +93,29 @@ export class SyncPeer {
     public get scene(): Scene { return this._scene; }
     /** The host's name for the scene it is running (its table's). */
     public get sceneId(): string { return this._sceneId; }
+    /** Stop following a node: this peer moves it itself (carries it, flies it after a throw). */
+    public hold(nodeId: string): void { this._held.add(nodeId); this._blends.delete(nodeId); }
+
+    /**
+     * Follow a held node again, blending over `blendMs` from where this peer has it now to where the host's
+     * states say — so handing a thrown prop or a projectile back to the host shows no jump.
+     */
+    public release(nodeId: string, blendMs: number = 200): void {
+        this._held.delete(nodeId);
+        const node = this._scene.getNodeById(nodeId);
+        if (!node || blendMs <= 0) return;
+        this._blends.set(nodeId, {
+            from: vec3.clone(node.position as vec3), rot: quat.clone(node.quaternion as quat),
+            offset: null, start: this._session.hostTimeNow(), ms: blendMs,
+        });
+    }
+
+    /** Whether this peer moves `nodeId` itself (its own character, or a node it holds). */
+    public owns(nodeId: string): boolean { return this._held.has(nodeId) || !!this.isOwn?.(nodeId); }
+
+    /** The host tick (fractional) this peer is drawing followed nodes at: what a shot fired now was aimed at. */
+    public renderTick(): number { return this._session.hostTimeNow() / (1000 / this._session.tickRate) - this.delayTicks; }
+
     /** The NetId a node is followed under here. */
     public netIdOf(node: Node): number | undefined {
         for (const [netId, n] of this._nodeByNet) if (n === node) return netId;
@@ -98,8 +131,17 @@ export class SyncPeer {
         const renderTick = this._session.hostTimeNow() / tickMs - this.delayTicks;
         for (const [netId, samples] of this._samples) {
             const node = this._nodeByNet.get(netId);
-            if (!node || samples.length === 0 || this.isOwn?.(node.id)) continue;
+            if (!node || samples.length === 0 || this.owns(node.id)) continue;
             this._sample(samples, renderTick, tickMs);
+            const blend = this._blends.get(node.id);
+            if (blend) {
+                // The first frame back: the gap between where this peer had it and where the host's states say.
+                if (!blend.offset) blend.offset = vec3.subtract(vec3.create(), blend.from, this._pos);
+                const t = Math.min(1, (this._session.hostTimeNow() - blend.start) / blend.ms);
+                vec3.scaleAndAdd(this._pos, this._pos, blend.offset, 1 - t);
+                quat.slerp(this._rot, blend.rot, this._rot, t);
+                if (t >= 1) this._blends.delete(node.id);
+            }
             node.setPosition(this._pos);
             node.setQuaternion(this._rot);
         }
@@ -121,6 +163,7 @@ export class SyncPeer {
                 this._sceneId = t.sceneId;
                 this._nodeByNet.clear();
                 this._samples.clear();
+                this._early.clear();
                 // A new baseline restarts the host's numbering for this peer.
                 this._latestSeq = -1;
                 this._received = 0;
@@ -128,6 +171,8 @@ export class SyncPeer {
                     const node = this._scene.getNodeById(e.nodeId);
                     if (node) this._nodeByNet.set(e.netId, node);
                 }
+                // Rows may already have come for these too.
+                for (const e of t.entries) this._adoptEarly(e.netId);
                 break;
             }
             case SyncControl.spawn: {
@@ -172,7 +217,19 @@ export class SyncPeer {
         if (!made) return;
         for (const { index, netId } of s.synced) {
             const node = this._scene.getNodeById(s.ids[index]);
-            if (node) this._nodeByNet.set(netId, node);
+            if (node) { this._nodeByNet.set(netId, node); this._adoptEarly(netId); }
+        }
+    }
+
+    /** Hand rows that arrived before their node to where they belong now that it is here. */
+    private _adoptEarly(netId: number): void {
+        const early = this._early.get(netId);
+        const node = this._nodeByNet.get(netId);
+        if (!early || !node) return;
+        this._early.delete(netId);
+        for (const e of early) {
+            if (this.isOwn?.(node.id)) this.onOwnState?.(node.id, e.tick, e.state);
+            else this._store(netId, e.tick, e.state);
         }
     }
 
@@ -191,8 +248,20 @@ export class SyncPeer {
                 const { netId, state } = readRow(r);
                 this.rows++;
                 const node = this._nodeByNet.get(netId);
-                if (!node) { this.unknownRows++; continue; }
+                if (!node) {
+                    this.unknownRows++;
+                    let early = this._early.get(netId);
+                    if (!early) {
+                        if (this._early.size >= 512) this._early.delete(this._early.keys().next().value as number);
+                        early = [];
+                        this._early.set(netId, early);
+                    }
+                    early.push({ tick, state });
+                    if (early.length > 4) early.shift();
+                    continue;
+                }
                 if (this.isOwn?.(node.id)) { this.onOwnState?.(node.id, tick, state); continue; }
+                // A held node's states are still kept: following resumes from them when it is released.
                 this._store(netId, tick, state);
             }
         } catch { /* a truncated pulse: keep what was read */ }

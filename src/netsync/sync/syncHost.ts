@@ -110,6 +110,10 @@ export class SyncHost {
         _session.route('pulse', SyncPulse.ack, (peer, m) => this._onPulse(peer, m));
     }
 
+    /** The synced node a NetId stands for. */
+    public nodeOf(netId: number): Node | undefined { return this._nodeByNet.get(netId); }
+    /** Every synced node, by NetId. */
+    public get synced(): ReadonlyMap<number, Node> { return this._nodeByNet; }
     /** The NetId of a synced node, or undefined. */
     public netIdOf(node: Node): number | undefined { return this._netByNode.get(node.id); }
     /** How many nodes are synced now. */

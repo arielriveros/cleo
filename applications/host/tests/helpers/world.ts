@@ -6,8 +6,9 @@ import { quat, vec3 } from 'gl-matrix';
 import { PhysicsSystem, type ControllerNode, type Node, type Scene } from 'cleo';
 import { createIntent, type ControlIntent } from '../../../../src/core/control/intent';
 import {
-    ConditionedLink, HostSession, ManualScheduler, PeerCommands, PeerSession, Predictor, RemoteControl, SyncHost, SyncPeer,
-    createLoopbackPair, followerSceneJson, type LinkConditions, type RemoteControlOptions,
+    CarryHost, CarryPeer, ConditionedLink, HostSession, LagCompensator, ManualScheduler, PeerCommands, PeerSession, Predictor,
+    RemoteControl, SyncHost, SyncPeer, WeaponHost, WeaponPeer, createLoopbackPair, followerSceneJson,
+    type LinkConditions, type RemoteControlOptions, type Trust, type WeaponHostOptions,
 } from '../../../../src/netsync';
 import { HostRuntime } from '../../src/hostRuntime';
 import { bufferSource } from '../../../editor/src/player/gameSource';
@@ -57,9 +58,19 @@ export interface TestPeer {
     physics?: PhysicsSystem;
     /** Local ticks a predicting peer has simulated. */
     simulatedTicks?: number;
+    carry?: CarryPeer;
+    weapons?: WeaponPeer;
+    /** Where this peer holds its carried prop this tick (in its scene), or null. */
+    hold?: ((tick: number) => { pos: ArrayLike<number>; rot: ArrayLike<number> } | null) | null;
 }
 
-export async function world(bin: Uint8Array, options: { remote?: RemoteControlOptions | ((runtime: HostRuntime) => RemoteControlOptions) } = {}) {
+export interface WorldOptions {
+    remote?: RemoteControlOptions | ((runtime: HostRuntime) => RemoteControlOptions);
+    /** Carrying and weapons, at this trust level (needs `remote`: both work through each peer's character). */
+    play?: { trust?: Trust; weapons?: Partial<WeaponHostOptions> };
+}
+
+export async function world(bin: Uint8Array, options: WorldOptions = {}) {
     const s = new ManualScheduler();
     const runtime = await HostRuntime.open({ bin });
     const session = new HostSession({ contentHash: 'test', scheduler: s, tickRate: 30 });
@@ -69,19 +80,26 @@ export async function world(bin: Uint8Array, options: { remote?: RemoteControlOp
         sceneKey: () => runtime.sceneName,
         focusOf: (peerId) => remote?.controllerOf(peerId)?.possessed?.worldPosition ?? null,
     });
-    if (remote) runtime.onBeforeTick = (t) => remote.beforeTick(t);
+    const pawnOf = (peerId: number) => remote?.controllerOf(peerId)?.possessed ?? null;
+    const carry = remote && options.play ? new CarryHost(session, sync, { pawnOf, trust: options.play.trust }) : null;
+    const history = options.play ? new LagCompensator(sync) : null;
+    const weapons = remote && options.play && history ? new WeaponHost(session, sync, history, () => runtime.scene, {
+        pawnOf, trust: options.play.trust, physics: () => runtime.engine.physics, currentTick: () => tick - 1, ...options.play.weapons,
+    }) : null;
+    runtime.onBeforeTick = (t) => { remote?.beforeTick(t); carry?.beforeTick(t, 1 / 30); };
     const peers: TestPeer[] = [];
     let tick = 0;
     /** ms spent in SyncHost.tick, per tick (the sync layer's own cost on the host). */
     const syncMs: number[] = [];
     /** Host history of chosen nodes, by tick: where they were, to measure how closely a peer follows. */
-    const history = new Map<string, Map<number, vec3>>();
+    const traces = new Map<string, Map<number, vec3>>();
 
     const run = async (ticks: number, each?: (tick: number) => void) => {
         for (let i = 0; i < ticks; i++) {
             each?.(tick);
             runtime.step(1);
-            for (const [id, h] of history) {
+            history?.record(tick);
+            for (const [id, h] of traces) {
                 const n = runtime.scene.getNodeById(id);
                 if (n) h.set(tick, vec3.clone(n.position as vec3));
             }
@@ -91,10 +109,12 @@ export async function world(bin: Uint8Array, options: { remote?: RemoteControlOp
             tick++;
             await s.advance(TICK_MS);
             for (const p of peers) {
-                if (p.predictor) { simulate(p); p.sync.apply(); continue; }
+                if (p.predictor) { simulate(p); p.sync.apply(); p.weapons?.update(); continue; }
                 p.sync.apply();
+                p.weapons?.update();
                 const intent = p.drive?.(tick);
                 if (intent && p.commands) p.commands.update(intent);
+                if (p.carry) { const h = p.hold?.(tick) ?? null; p.carry.update(tick, h?.pos ?? null, h?.rot ?? null); }
             }
         }
     };
@@ -119,6 +139,7 @@ export async function world(bin: Uint8Array, options: { remote?: RemoteControlOp
             p.scene.update(dt, t * TICK_MS, false, dt);
             p.physics!.endFrame(dt);
             pred.afterTick(t);
+            if (p.carry) { const h = p.hold?.(t) ?? null; p.carry.update(t, h?.pos ?? null, h?.rot ?? null, dt); }
             p.simulatedTicks = (p.simulatedTicks ?? 0) + 1;
         }
     };
@@ -146,14 +167,23 @@ export async function world(bin: Uint8Array, options: { remote?: RemoteControlOp
             peer.physics = simulated.physics;
             peer.predictor = new Predictor(peerSession, peer.sync, peer.commands);
         }
+        if (options.play) {
+            peer.carry = new CarryPeer(peerSession, peer.sync);
+            peer.weapons = new WeaponPeer(peerSession, peer.sync);
+        }
         peers.push(peer);
         return peer;
     };
 
     return {
-        runtime, session, sync, remote, peers, run, join, history, s, syncMs,
+        runtime, session, sync, remote, carry, weapons, lag: history, peers, run, join, history: traces, s, syncMs,
         get tick() { return tick; },
-        dispose: () => { remote?.dispose(); sync.dispose(); session.close(); runtime.dispose(); },
+        dispose: () => {
+            weapons?.dispose(); carry?.dispose(); remote?.dispose(); sync.dispose(); session.close(); runtime.dispose();
+            // A predicting peer's own physics world too: Jolt's heap is a fixed 128 MB, and a test file that
+            // leaves its worlds behind cannot make new ones a few worlds later.
+            for (const p of peers) { p.predictor?.dispose(); p.physics?.dispose(); }
+        },
     };
 }
 

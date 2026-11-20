@@ -1,6 +1,6 @@
 # NetSync — online multiplayer for Cleo (plan)
 
-Status: **phase 5 done** (phase 0 open: Safari; 50-AI host budget open; browser peer runtime open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
+Status: **phase 6 done** (phase 0 open: Safari; 50-AI host budget open; browser peer runtime open) · Transport: **WebTransport, WebSocket fallback** · Host: **dedicated only** ·
 Target: **physics sandbox shooter — co-op PvE (≤ 50 AI) and 8v8 deathmatch with bots, ≤ 16 peers** ·
 Started 2026-11-19
 
@@ -599,6 +599,32 @@ Phases 0–3 are the foundation; 4–6 make the target game playable; 7–9 make
 | 4 | **Done (2026-11-19).** Each joining peer is given a character (the game decides how: `possess(peer)`; `cleo-host --player-template Player`) and drives it with commands; the host simulates it, every peer sees it. At 150 ms RTT and 5 % loss two peers moved their characters ~9 m each in 2 s in the directions they asked, a single jump press jumped once, and a silent player's character stops. Over real sockets in real time (WebTransport and WebSocket peers against `HostListener`): 8.5 m in 2 s each, ~30 commands/s. | `ControllerNode` `controlSource: 'remote'` + `remoteIntent` + `publishedIntent`; `src/netsync/sync/commands.ts` (`RemoteControl`, `CommandQueue`, `PeerCommands`); `HostSession.route` / `PeerSession.route`; `SyncHost` `focusOf`; tests `tests/netsyncCommands.test.ts`, `applications/host/tests/control.test.ts`, `realSockets.test.ts` |
 
 | 5 | **Done (2026-11-19) for the prediction itself; the browser-side peer loop is open** (see below). A peer simulates its own character ahead of the host and corrects to it. At 150 ms RTT and 5 % loss on the Sandbox: the character moves on its player's screen 2 frames after the input (its own acceleration) and on the host 6 frames after — the round trip no longer shows. Walking, strafing, sprinting, jumping and stopping on open ground: 155 host states compared, **0 corrections**, worst error 0.1 cm. Running into a wall of crates (followers on the peer, solid on the host): 16 of 79 states corrected, worst 6.8 cm, no snaps, ending 1.8 cm from the host. | `src/netsync/sync/predictor.ts`; `SyncPeer` `simulated` / `isOwn` / `onOwnState` / `followerSceneJson`; `PeerCommands.send`; `buildGameScene` `prepare`; `applications/host/tests/predict.test.ts` |
+
+| 6 | **Done (2026-11-19).** Sandbox, 150 ms RTT, 5 % loss. Carrying: the prop sits where it is held on the carrier's screen at once, within 15 cm of that on the host, stays within reach while walking, cannot be taken by another player; a throw flies 9.8 m on the host and the thrower's screen never moves it more than 31 cm in a frame (its flight speed) across the hand-over. Hitscan at a player running across the line of fire: 5 of 5 hit, all 5 only thanks to the rewind. Trust: co-op accepts a claimed near miss and clamps an old view; versus refuses both; a forged claim is refused under both. Projectile: the stand-in leaves at once, swaps for the host's with no jump (26 cm largest step at ~21 cm/frame) and lands within 1 mm of the host's. | `src/netsync/sync/carry.ts` (`CarryHost`, `CarryPeer`), `weapons.ts` (`LagCompensator`, `WeaponHost`, `WeaponPeer`); `SyncPeer` `hold` / `release` (blended) / `renderTick`; `SyncHost` `nodeOf` / `synced`; `cleo-host --trust`; `applications/host/tests/play.test.ts` |
+
+Phase-6 details and findings:
+- **Carrying** moves the host's copy by velocity toward the carrier's pose (minus the gravity the step will
+  add), so it still pushes what it meets; the pose is clamped to reach (2.5 m × 1.5 under co-op, × 1 under
+  versus) and throws to 25 m/s. A carry ends on throw, drop, leave or 15 silent ticks. After a throw the
+  thrower flies the prop on a plain ballistic arc (it touches nothing) for a round trip plus the follow delay,
+  then blends to the host's states over 200 ms. Poses are in the prop's parent space: loose props at the scene
+  root, as in the Sandbox.
+- **Hitscan** is judged at the shooter's view: the fractional host tick it was drawing (`SyncPeer.renderTick`).
+  `LagCompensator` keeps one second of every synced body's pose, moves them all back for the raycast and puts
+  them back. A co-op claim is accepted when the ray passes within 0.6 m of the bounding sphere of the claimed
+  body's colliders — generous for a thin capsule, by design (favour the shooter). Hitboxes are the collider
+  bodies, not per-bone shapes.
+- **Projectiles** are spawned on the host already advanced by the time the fire message took
+  (`currentTick − viewTick`, ballistically), and named back to the shooter by a key it chose.
+- **Bug fixed (sync, phase 3):** a spawn travels on the reliable lane and its first states on the unreliable
+  one, which can overtake it. The peer dropped rows for NetIds it did not know yet but still acknowledged the
+  datagram, so for a body at rest the host never sent that state again (a projectile's shooter, or a prop
+  spawned at rest, stayed at the template's origin). `SyncPeer` now keeps early rows and applies them when the
+  spawn lands.
+- **Bug fixed (prediction):** a body the predictor moves is woken, or physics never writes its pose to the
+  node (a character that settled where it spawned was drawn at the template's origin).
+- **Not yet:** game rules on a hit (damage, friendly fire) are the game's, through `onHit`; scripts that fire
+  weapons from `Input` on the host see nothing for a remote player until phase 7.
 
 Phase-5 details and findings:
 - **Correction by offset, not re-simulation.** The engine cannot step one body alone, and stepping the peer's

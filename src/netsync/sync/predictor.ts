@@ -139,6 +139,9 @@ export class Predictor {
             this._placed = true;
             body.position.set(state.px / POSITION_SCALE, state.py / POSITION_SCALE, state.pz / POSITION_SCALE);
             if (state.vx !== undefined) body.velocity.set(state.vx / VELOCITY_SCALE, state.vy! / VELOCITY_SCALE, state.vz! / VELOCITY_SCALE);
+            // Awake: physics writes a body's pose back to its node only while it is (one that settled where it
+            // spawned would leave the character drawn at the template's origin).
+            body.wakeUp?.();
             this._history.clear();
             vec3.zero(this._pending);
             return;
@@ -187,6 +190,7 @@ export class Predictor {
     private _moveBody(body: any, by: ArrayLike<number>): void {
         const p = body.position.toArray();
         body.position.set(p[0] + by[0], p[1] + by[1], p[2] + by[2]);
+        body.wakeUp?.();
     }
 
     public dispose(): void {

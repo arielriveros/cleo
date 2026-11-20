@@ -8,11 +8,12 @@
 //
 //   [--wt-port 4433] [--ws-port 4480] [--tick-rate 30] [--max-peers 16] [--physics jolt|rapier|cannon]
 //   [--player-template Player] [--spawn x,y,z]   each joining peer gets a copy of that template to drive
+//   [--trust coop|versus]                         how far peers' carried props and shot claims are trusted
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HostSession, RemoteControl, SyncHost, hashContent } from '../../../src/netsync';
+import { CarryHost, HostSession, LagCompensator, RemoteControl, SyncHost, WeaponHost, hashContent } from '../../../src/netsync';
 import type { ControllerNode, Node } from 'cleo';
 import { cachedCertificate } from './devCertificate';
 import { HostListener } from './hostListener';
@@ -93,14 +94,27 @@ if (runtime) {
             if (root?.scene) runtime!.scene.removeNode(root);
         },
     }) : null;
-    if (remote) runtime.onBeforeTick = (tick) => remote.beforeTick(tick);
     const sync = new SyncHost(session, () => runtime!.scene, {
         sceneKey: () => runtime!.sceneName,
         focusOf: (peerId) => remote?.controllerOf(peerId)?.possessed?.worldPosition ?? null,
     });
+    // Carrying and weapons work through each peer's character, so they come with possession.
+    const trust = arg('--trust', 'coop') === 'versus' ? 'versus' : 'coop';
+    const pawnOf = (peerId: number) => remote?.controllerOf(peerId)?.possessed ?? null;
+    const carry = remote ? new CarryHost(session, sync, { pawnOf, trust, gravity: () => runtime!.engine.physics.gravity }) : null;
+    const lag = remote ? new LagCompensator(sync) : null;
+    let lastTick = 0;
+    if (remote && lag) new WeaponHost(session, sync, lag, () => runtime!.scene, {
+        pawnOf, trust, physics: () => runtime!.engine.physics, currentTick: () => lastTick,
+        gravity: () => runtime!.engine.physics.gravity,
+        onHit: (h) => log(`peer ${h.peer.id} hit "${h.node.name}" with ${h.weapon}${h.claimed ? ' (claimed)' : ''}`),
+    });
+    if (remote) runtime.onBeforeTick = (tick) => { remote.beforeTick(tick); carry?.beforeTick(tick, 1 / tickRate); };
     runtime.start(performance.now() - session.timeMs());
     let last = 0;
     runtime.onTick = (tick) => {
+        lastTick = tick;
+        lag?.record(tick);
         sync.tick(tick);
         if (tick - last < tickRate * 10) return;
         last = tick;
@@ -112,7 +126,7 @@ if (runtime) {
     };
 }
 
-console.log(`cleo-host (NetSync phase 4)
+console.log(`cleo-host (NetSync phase 6)
   WebTransport  udp/${listener.webTransportPort}  /netsync   cert sha-256 ${certificate.hash} (expires ${certificate.notAfter})
   WebSocket     tcp/${listener.webSocketPort}  /ws
   Endpoint      http://localhost:${listener.webSocketPort}/endpoint  (a HostEndpoint for PeerSession.join)
