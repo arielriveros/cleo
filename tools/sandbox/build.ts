@@ -1,7 +1,9 @@
 // The Sandbox example: a gray-box course and a Mixamo mannequin that moves the way Advanced Locomotion System v4
 // does, built only from the engine's own tools: the Character and Controller nodes, Camera Rigs, a blend space,
 // one animator, foot placement, and one input-only script. And a car to get into and drive: the vehicle simulation
-// with the Car preset, as the Car template (its own Controller, camera rig and scripts).
+// with the Car preset, as the Car template (its own Controller, camera rig and scripts). And a pistol and a rifle to
+// carry, aim and fire (weapons/): a layer each that holds the weapon over the walk, an aim blend space each, and a
+// gun script on each that shoots by raycast and pushes what it hits, with its effects as templates (weapons/fx.ts).
 //
 //   node --max-old-space-size=8192 tools/sandbox/prepare.mjs                      (the FBX files, once)
 //   npx vite-node --config vitest.config.ts tools/sandbox/build.ts [--report]
@@ -23,6 +25,7 @@ import { parseNodeJson } from '../../src/core/scene/nodes/parseNodeJson'
 import type { Animation, Skin } from '../../src/animation/animatedModel'
 import { storeSkin, loadSkin } from '../../applications/editor/src/utils/animationAssets'
 import { toRuntimeField } from '../../applications/editor/src/utils/animationFields'
+import { resolvedPoseFor, type PoseAsset } from '../../applications/editor/src/utils/poseAssets'
 import { parseScriptVariables } from '../../applications/editor/src/utils/scripts'
 import { assetHashKey, hashAsset, ASSET_HASH_VERSION } from '../../applications/editor/src/utils/assetHash'
 import { KIND_EXT } from '../../applications/editor/src/utils/vfs'
@@ -36,7 +39,10 @@ import { encodePng, decodePng } from '../exampleKit/png.mjs'
 import { convexShape, geometryJson } from '../valley/meshes.mjs'
 import { makeClips, characterAcceleration, LEAN_BONES, LOOK_BONES, ROLES, type MadeClip } from './clips'
 import { boneOf, bodyRoll, clipSeconds } from './measure'
-import { locomotionField, lookField, machineTimings, stairPaces, stairsField, stateMachine, RUN_SPEED_GATE, STAIR_RATE, type Speeds } from './machine'
+import { aimField, locomotionField, lookField, machineTimings, poseField, stairPaces, stairsField, stateMachine, RUN_SPEED_GATE, STAIR_RATE, type PoseLink, type Speeds, type WeaponLayerSpec } from './machine'
+import { aimVariantName, weaponPoses, WEAPON_NAMES, WEAPON_SOCKETS } from './weapons/layers'
+import type { WeaponKind, WeaponModel } from './weapons/models'
+import { FX_NAMES, FLASH_LIGHT, GLOW_EXPOSURE_WEIGHT, HOLE_DECAL, TRACER, bulletHolePng, particleSystems as shotParticleSystems } from './weapons/fx'
 import { course, props, PROP_KINDS, SPAWN, TREAD, CAR, type Piece, type Prop } from './level'
 import { CAR_FIT, readCar, seatPoints, rounded, type CarPart } from './car'
 import { rotateByYaw, type YawPose } from '../../src/core/math'
@@ -196,6 +202,11 @@ const paces = stairPaces(clips, TREAD)
 console.log('stairs: ' + [...clips.values()].filter(c => c.stairs).map(c => `${c.clip.name} ${c.stairs!.stepsPerSecond.toFixed(2)} steps/s, riser ${(c.stairs!.rise * 100).toFixed(0)} cm, step ${(c.stairs!.step * 100).toFixed(0)} cm`).join('; ')
     + ` -> paces (horizontal, at ${STAIR_RATE}x) up ${paces.upWalk} / ${paces.upRun}, down ${paces.downWalk} / ${paces.downRun} m/s`)
 console.log(`hand-overs (the field's phase 0 is a ${timing.phaseFoot === 'L' ? 'left' : 'right'} plant): start -> run at ${timing.startExit}; running turns at ${JSON.stringify(timing.runTurnExit)}; running landing at ${timing.landRunExit}; stops settle at ${JSON.stringify(timing.settle)}, ${timing.stopEarly} in the run's first half and ${timing.stopLate} in its second; landing impacts (s) ${JSON.stringify(timing.impact)}`)
+// The weapons: their models, how the hands hold them, and the poses their layers hold (weapons/): each weapon's
+// Carry, Aim and Sprint, and the aim's directions as variants of Aim.
+const weaponBuild = weaponPoses(skin, new Map([...clips].map(([k, c]) => [k, c.clip])), 'Idle',
+    new Map([...raw].filter(([k]) => k.startsWith('Rifle '))), ROOT)
+for (const line of weaponBuild.report) console.log('weapons: ' + line)
 if (REPORT) process.exit(0)
 
 // Sanity: the numbers everything else is built from.
@@ -317,7 +328,8 @@ const ikRig = {
     lockDistance: 0.5,
 }
 const storedSkin = storeSkin({ ...skin, nodeTransforms: new Map([...(skin.nodeTransforms as Map<number, mat4>)].map(([k, v]) => [k, Array.from(v, x => round(x, 1e6))])) } as any)!
-const skinJson = { ...storedSkin, ikRig }
+// The weapons' grips on the right hand (weapons/layers.ts): each socket's frame is its weapon's.
+const skinJson = { ...storedSkin, ikRig, sockets: weaponBuild.sockets }
 
 const RIG_ID = id('rig:mannequin')
 const plainClip = (c: Animation) => ({
@@ -327,11 +339,19 @@ const plainClip = (c: Animation) => ({
     ...(c.rootMotion ? { rootMotion: true } : {}),
     ...(c.footLocks ? { footLocks: Object.fromEntries(Object.entries(c.footLocks).map(([k, spans]) => [k, spans.map(([a, b]) => [round(a, 1e4), round(b, 1e4)])])) } : {}),
 })
-const animations = [...clips.values()].map((c: MadeClip) => ({
-    id: id('anim:' + c.clip.name), name: c.clip.name, clips: [plainClip(c.clip)], rigId: RIG_ID, sourceSkin: storedSkin,
-    ...(c.role ? { sourceFile: `${c.role.file}.fbx` } : {}),
-}))
-const rig = { id: RIG_ID, name: 'Mannequin', skin: skinJson, ikRig, sockets: [], animationIds: animations.map(a => a.id) }
+const animations = [
+    ...[...clips.values()].map((c: MadeClip) => ({
+        id: id('anim:' + c.clip.name), name: c.clip.name, clips: [plainClip(c.clip)], rigId: RIG_ID, sourceSkin: storedSkin,
+        ...(c.role ? { sourceFile: `${c.role.file}.fbx` } : {}),
+    })),
+]
+const WEAPON_KINDS = ['pistol', 'rifle'] as const
+const WEAPON_MODEL_ID: Record<WeaponKind, string> = { pistol: id('model:pistol'), rifle: id('model:rifle') }
+const rig = {
+    id: RIG_ID, name: 'Mannequin', skin: skinJson, ikRig, animationIds: animations.map(a => a.id),
+    // Each weapon is shown on its socket in the animation editors.
+    sockets: weaponBuild.sockets.map((sk, i) => ({ id: id('socket:' + sk.name), ...sk, previewModelId: WEAPON_MODEL_ID[WEAPON_KINDS[i]] })),
+}
 
 const FIELD_ID = id('field:locomotion')
 const field = locomotionField(clips, speeds, timing.phaseFoot)
@@ -358,9 +378,57 @@ const stairAssets = stairs ? (() => {
     const { up, down, ...field } = stairs
     return [{ up, down, asset: { id: id('field:stairs'), name: 'Stairs', rigId: RIG_ID, ...field, yAxis: field.yAxis! } }]
 })() : []
+// The weapons' POSES: one Pose asset each (`Rifle Poses`, `Pistol Poses`), edited in the editor's pose mode: Carry,
+// Aim and Sprint, and the aim's directions as variants of Aim (each stores what it changes from Aim, so an edit to
+// Aim moves them all). Everything below embeds them resolved, as the editor does.
+const WEAPON_POSE_ASSET: Record<WeaponKind, string> = { pistol: id('pose:pistol'), rifle: id('pose:rifle') }
+const poseLink = (kind: WeaponKind, key: string): PoseLink => ({ assetId: WEAPON_POSE_ASSET[kind], poseId: id(`pose:${kind}:${key}`) })
+const aimKey = (yaw: number, pitch: number) => `aim:${yaw}:${pitch}`
+const weaponPoseAssets: PoseAsset[] = WEAPON_KINDS.map(kind => {
+    const set = weaponBuild.poses[kind]
+    const aim = poseLink(kind, 'aim')
+    return {
+        id: WEAPON_POSE_ASSET[kind], name: `${WEAPON_NAMES[kind]} Poses`, rigId: RIG_ID,
+        poses: [
+            { id: poseLink(kind, 'carry').poseId, name: 'Carry', bones: set.carry },
+            { id: aim.poseId, name: 'Aim', bones: set.aim },
+            { id: poseLink(kind, 'sprint').poseId, name: 'Sprint', bones: set.sprint },
+            ...set.aims.map(a => ({ id: poseLink(kind, aimKey(a.yaw, a.pitch)).poseId, name: aimVariantName(a.yaw, a.pitch), baseRef: aim, bones: a.bones })),
+        ],
+    }
+})
+const poseState = (ref: PoseLink) => ({ poseRef: ref, pose: resolvedPoseFor(weaponPoseAssets, ref)! })
+
+// The weapons' layers: each weapon's mask, its carry blend space (its poses over the walk's axes) and its aim's (the
+// aim's directions); the pistol's support hand's mask. Masks list bones by their full names.
+const boneMask = (key: string, name: string, bones: string[]) => ({ id: id('mask:' + key), name, rigId: RIG_ID, weights: Object.fromEntries(bones.map(b => [b, 1])) })
+const WEAPON_MASKS = {
+    pistol: boneMask('pistol', 'Pistol', weaponBuild.masks.pistol),
+    support: boneMask('pistolSupport', 'Pistol Support', weaponBuild.masks.support),
+    rifle: boneMask('rifle', 'Rifle', weaponBuild.masks.rifle),
+    aim: boneMask('aim', 'Aim', weaponBuild.masks.aim),
+}
+const fieldAsset2 = (key: string, name: string, f: any) => ({ id: id('field:' + key), name, rigId: RIG_ID, ...f, yAxis: f.yAxis! })
+const weaponFieldAssets: any[] = []
+const weaponLayers = Object.fromEntries(WEAPON_KINDS.map(kind => {
+    const W = WEAPON_NAMES[kind]
+    const ref = (asset: any) => { weaponFieldAssets.push(asset); return { field: toRuntimeField(asset, weaponPoseAssets), fieldId: asset.id } }
+    const directions = weaponBuild.poses[kind].aims.map(a => ({ yaw: a.yaw, pitch: a.pitch, ref: poseLink(kind, aimKey(a.yaw, a.pitch)) }))
+    const spec: WeaponLayerSpec = {
+        mask: WEAPON_MASKS[kind],
+        carry: ref(fieldAsset2(`${kind}:carry`, `${W} Carry`, poseField(field, poseLink(kind, 'carry'), poseLink(kind, 'sprint')))),
+        carryPose: poseState(poseLink(kind, 'carry')),
+        aim: poseState(poseLink(kind, 'aim')),
+        aimOffset: ref(fieldAsset2(`${kind}:aimOffset`, `${W} Aim Offset`, aimField(directions))),
+        aimMask: WEAPON_MASKS.aim,
+        ...(kind === 'pistol' ? { support: { mask: WEAPON_MASKS.support } } : {}),
+    }
+    return [kind, spec]
+})) as Record<WeaponKind, WeaponLayerSpec>
 const machine = stateMachine(clips, runtimeField, FIELD_ID, speeds, LEAN_MASK, timing,
     { mask: LOOK_MASK, field: toRuntimeField(lookFieldAsset as any), fieldId: LOOK_FIELD_ID },
-    stairAssets[0] ? { field: toRuntimeField(stairAssets[0].asset as any), fieldId: stairAssets[0].asset.id, up: stairAssets[0].up, down: stairAssets[0].down } : null)
+    stairAssets[0] ? { field: toRuntimeField(stairAssets[0].asset as any), fieldId: stairAssets[0].asset.id, up: stairAssets[0].up, down: stairAssets[0].down } : null,
+    weaponLayers)
 const controller = { id: CONTROLLER_ID, name: 'Mannequin Locomotion', rigId: RIG_ID, machine }
 
 // =====================================================================================================
@@ -413,6 +481,121 @@ const carModelAsset = (mid: string, name: string, parts: [string, CarPart][]) =>
 }
 const carBodyAsset = carModelAsset(CAR_BODY_MODEL_ID, 'Car Body', [['body', car.body], ['glass', car.glass]])
 
+// The weapons' models, from their files (weapons/models.ts): one mesh each, a submesh per material (the file's,
+// those of one colour and finish merged). In weapon space: the grip at the origin, the bore along +Z, so the mesh
+// goes straight under its socket.
+const weaponMaterials: any[] = []
+function weaponModelAsset(kind: WeaponKind) {
+    const w: WeaponModel = weaponBuild.models[kind]
+    const groups = new Map<string, { mat: any; parts: WeaponModel['parts'] }>()
+    for (const part of w.parts) {
+        const m = w.materials[part.material]
+        const finish = { color: m.color.map(c => round(c, 100)), metallic: round(m.metallic, 100), roughness: round(Math.min(0.85, m.roughness), 100) }
+        const key = JSON.stringify(finish)
+        if (!groups.has(key)) {
+            const k = groups.size
+            const mat = { id: id(`mat:${kind}:${k}`), name: `${w.name} ${k + 1}`, material: pbr(finish.color, { metallic: finish.metallic, roughness: finish.roughness }), textureIds: [] }
+            weaponMaterials.push(mat)
+            groups.set(key, { mat, parts: [] })
+        }
+        groups.get(key)!.parts.push(part)
+    }
+    const positions: number[] = [], normals: number[] = [], uvs: number[] = [], indices: number[] = [], submeshes: { start: number; count: number }[] = []
+    const mats: any[] = []
+    for (const { mat, parts } of groups.values()) {
+        const start = indices.length
+        for (const part of parts) {
+            const base = positions.length / 3
+            positions.push(...part.positions); normals.push(...part.normals); uvs.push(...part.uvs)
+            for (const i of part.indices) indices.push(base + i)
+        }
+        submeshes.push({ start, count: indices.length - start })
+        mats.push(mat)
+    }
+    const name = w.name
+    const ids = mats.map(m => m.id)
+    return {
+        id: WEAPON_MODEL_ID[kind], name, thumbnail: '', textureIds: [], materialIds: ids,
+        nodeJson: {
+            id: id(`model:${kind}:root`), name, type: 'node', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], variables: {}, spawnOnStart: true,
+            children: [{
+                id: id(`model:${kind}:mesh`), name, type: 'model', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: [], spawnOnStart: true,
+                variables: vars({ __materialId: ids[0], __materialIds: JSON.stringify(ids) }),
+                model: {
+                    geometry: geometryJson({ positions, normals, uvs, indices }), material: JSON.parse(JSON.stringify(mats[0].material)),
+                    materials: mats.map(m => JSON.parse(JSON.stringify(m.material))), submeshes,
+                },
+            }],
+        },
+    }
+}
+const weaponAssets = Object.fromEntries(WEAPON_KINDS.map(k => [k, weaponModelAsset(k)])) as Record<WeaponKind, any>
+
+// The shots' effects (weapons/fx.ts): the flash's and the impact's particle systems, the bullet hole's texture and
+// material, the tracer's glowing material.
+const SHOT_PARTICLES = shotParticleSystems(k => id('fx:' + k), k => parseInt(id('seed:' + k).slice(0, 6), 16))
+const HOLE_TEX = textures.addBytes(id('tex:bullet-hole'), bulletHolePng(), { wrapping: 'clamp', mipMap: true, mipMapFilter: 'linear' })
+textureFolders.push({ id: HOLE_TEX, folder: '/Weapons/Effects/Textures', name: 'Bullet Hole' })
+const FX_MATERIALS = {
+    hole: { id: id('mat:fx:hole'), name: 'Bullet Hole', material: pbr([1, 1, 1], { roughness: 0.9, textures: { baseColorTexture: HOLE_TEX }, config: { ...config, castShadow: false } }), textureIds: [HOLE_TEX] },
+    tracer: {
+        id: id('mat:fx:tracer'), name: 'Tracer', textureIds: [],
+        // A glow, like the flash's: a tenth of the camera's exposure, so it reads the same by day and by night.
+        material: pbr([1, 0.85, 0.5], { roughness: 0.85, emissiveFactor: [1, 0.78, 0.4], emissiveIntensity: 6, emissiveExposureWeight: GLOW_EXPOSURE_WEIGHT, config: { ...config, castShadow: false } }),
+    },
+}
+const fxNode = (key: string, name: string, type: string, extra: any = {}) => ({
+    id: id(`fx:${key}`), name, type, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: [], variables: {}, spawnOnStart: true, ...extra,
+})
+/** A particle system node; a glow's (`glow`) brightened by the camera's exposure only by GLOW_EXPOSURE_WEIGHT. */
+const particleNode = (key: string, name: string, asset: any, glow: boolean, extra: any = {}) => fxNode(key, name, 'particleSystem', {
+    particleSystem: {
+        system: JSON.parse(JSON.stringify(asset.system)), particleSystemId: asset.id, playOnStart: true, simulationSpeed: 1, spawnRateScale: 1, tint: [1, 1, 1, 1],
+        ...(glow ? { exposureWeight: GLOW_EXPOSURE_WEIGHT } : {}),
+    },
+    ...extra,
+})
+/** The four effect templates SandboxGun spawns: each its root, its script, and what it is made of. */
+function shotEffectTemplates() {
+    const flash = fxNode('flash', FX_NAMES.flash, 'node', {
+        children: [
+            // The particles fire along +Y: turned along the bore (+Z).
+            particleNode('flash:ps', 'Flash', SHOT_PARTICLES.flash, true, { rotation: [90, 0, 0] }),
+            particleNode('flash:smoke', 'Smoke', SHOT_PARTICLES.flashSmoke, false, { rotation: [90, 0, 0] }),
+            fxNode('flash:light', 'Light', 'light', {
+                position: [0, 0, FLASH_LIGHT.ahead], lightType: 'point', castShadows: false, bake: false,
+                light: { unit: 'photometric', color: FLASH_LIGHT.color, intensity: FLASH_LIGHT.lumens, range: FLASH_LIGHT.range, sourceRadius: 0.05, legacyFalloff: false },
+            }),
+        ],
+    })
+    withScript(flash, shotFxScript, { lifetime: 0.7, lightFalloff: 4 })
+    const impact = fxNode('impact', FX_NAMES.impact, 'node', {
+        children: [particleNode('impact:ps', 'Sparks', SHOT_PARTICLES.impact, true), particleNode('impact:dust', 'Dust', SHOT_PARTICLES.impactDust, false)],
+    })
+    withScript(impact, shotFxScript, { lifetime: 1.6 })
+    const hole = fxNode('hole', FX_NAMES.hole, 'node', {
+        children: [fxNode('hole:decal', 'Hole', 'decal', {
+            variables: vars({ __materialId: FX_MATERIALS.hole.id }),
+            decal: {
+                size: HOLE_DECAL.size, opacity: 1, sortOrder: 0, angleFade: HOLE_DECAL.angleFade, depthFade: HOLE_DECAL.depthFade,
+                affects: { albedo: true, normal: false, surface: true, emissive: false }, receivers: 'all', pattern: 'material',
+                material: JSON.parse(JSON.stringify(FX_MATERIALS.hole.material)),
+            },
+        })],
+    })
+    withScript(hole, holeScript, {})
+    // The streak runs back from the root (its head) along -Z.
+    const tracer = fxNode('tracer', FX_NAMES.tracer, 'node', {
+        children: [fxNode('tracer:streak', 'Streak', 'model', {
+            position: [0, 0, -TRACER.length / 2], scale: [TRACER.thickness, TRACER.thickness, TRACER.length],
+            variables: vars({ __materialId: FX_MATERIALS.tracer.id }),
+            model: { geometry: geometryOf('box', () => Geometry.Cube(1, 1, 1)), material: JSON.parse(JSON.stringify(FX_MATERIALS.tracer.material)) },
+        })],
+    })
+    withScript(tracer, tracerScript, { trail: TRACER.length })
+    return [flash, impact, hole, tracer].map(root => templatizeSubtree(root, id('template:fx:' + root.name), root.name))
+}
+
 // =====================================================================================================
 // Scripts
 // =====================================================================================================
@@ -427,7 +610,25 @@ const carCameraSource = fs.readFileSync(path.join(SCRIPTS, 'SandboxCarCamera.ts'
 const carCameraScript = { id: id('script:SandboxCarCamera'), name: 'SandboxCarCamera', baseType: 'cameraRig', source: carCameraSource, kind: 'class', variables: parseScriptVariables(carCameraSource) }
 const managerSource = fs.readFileSync(path.join(SCRIPTS, 'SandboxGameManager.ts'), 'utf8')
 const managerScript = { id: id('script:SandboxGameManager'), name: 'SandboxGameManager', baseType: 'node', source: managerSource, kind: 'class', variables: parseScriptVariables(managerSource) }
-const scriptAssets = [playerScript, cameraScript, carScript, carCameraScript, managerScript]
+const scriptOf = (name: string, baseType: string) => {
+    const source = fs.readFileSync(path.join(SCRIPTS, `${name}.ts`), 'utf8')
+    return { id: id('script:' + name), name, baseType, source, kind: 'class', variables: parseScriptVariables(source) }
+}
+// The guns, and their effects' lifetimes.
+const gunScript = scriptOf('SandboxGun', 'node')
+const shotFxScript = scriptOf('SandboxShotFx', 'node')
+const tracerScript = scriptOf('SandboxTracer', 'node')
+const holeScript = scriptOf('SandboxBulletHole', 'node')
+const WEAPON_SCRIPTS = [gunScript, shotFxScript, tracerScript, holeScript]
+const scriptAssets = [playerScript, cameraScript, carScript, carCameraScript, managerScript, ...WEAPON_SCRIPTS]
+/**
+ * Each gun's handling (SandboxGun's attributes): the pistol fires once a pull, the rifle while held; the rifle
+ * kicks less a shot but fires faster and pushes harder.
+ */
+const GUN_VARS: Record<WeaponKind, Record<string, unknown>> = {
+    pistol: { auto: false, roundsPerMinute: 420, impulse: 14, aimSpread: 0.3, hipSpread: 2.2, moveSpread: 2.5, bloomPerShot: 0.6, bloomMax: 2.5, recoilPitch: 1.6, recoilYaw: 0.4, kick: 7 },
+    rifle: { auto: true, roundsPerMinute: 700, impulse: 12, aimSpread: 0.25, hipSpread: 2.8, moveSpread: 3, bloomPerShot: 0.35, bloomMax: 3, recoilPitch: 0.9, recoilYaw: 0.45, kick: 4 },
+}
 function withScript(json: any, asset: any, scriptVars: Record<string, unknown>) {
     const known = new Set(asset.variables.map((v: any) => v.name))
     for (const key of Object.keys(scriptVars)) if (!known.has(key)) throw new Error(`${asset.name} has no field "${key}"`)
@@ -571,7 +772,7 @@ const TEMPLATE_ID = id('template:player')
 const ENVIRONMENT_TEMPLATE_ID = id('template:environment')
 const COURSE_TEMPLATE_ID = id('template:course')
 /** The camera script's framing, attached with it after serialization (the character's, so public). */
-const CAMERA_VARS = { thirdPersonArm: 3.4, shoulderArm: 1.9, shoulderOffset: 0.5, pivotHeight: 1.45 }
+const CAMERA_VARS = { thirdPersonArm: 3.4, shoulderArm: 1.9, shoulderOffset: 0.5, aimArm: 1.25, aimShoulderOffset: 0.6, pivotHeight: 1.45 }
 const CHARACTER_ID = id('player:character')
 const capsuleHeight = round(character.height, 1e3)
 
@@ -583,6 +784,25 @@ function cameraRig(rid: string, name: string, cameraName: string, o: any) {
         collisionLayers: CAMERA_BLOCKED_BY, seeThroughLayers: LAYERS.SEE_THROUGH,
         ...o,
         children: [{ type: 'camera', id: rid + ':camera', name: cameraName, camera: { type: 'perspective', fov: 60, near: 0.05, far: 2000, left: -1, right: 1, bottom: -1, top: 1 }, active: true }],
+    }
+}
+
+/**
+ * The weapons, on the Mannequin's right hand: each held by its grip socket (`Pistol Grip`, `Rifle Grip`: the socket's
+ * frame is the weapon's), its model straight under it, and a Muzzle point at the end of its bore. SandboxPlayer shows
+ * the one in the hands and hides the other.
+ */
+function weaponsNode() {
+    return {
+        type: 'node', id: id('player:weapons'), name: 'Weapons', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+        children: WEAPON_KINDS.map(kind => ({
+            type: 'node', id: id(`player:weapon:${kind}`), name: WEAPON_SOCKETS[kind], position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+            socketAttachment: { target: 'parent', socket: WEAPON_SOCKETS[kind] },
+            children: [
+                carInstance(`player:weapon:${kind}:model`, weaponAssets[kind]),
+                { type: 'node', id: id(`player:weapon:${kind}:muzzle`), name: 'Muzzle', position: rounded(weaponBuild.models[kind].muzzle), rotation: [0, 0, 0], scale: [1, 1, 1], children: [] },
+            ],
+        })),
     }
 }
 
@@ -617,6 +837,7 @@ function playerNode() {
                 pitch: 12, pitchMin: -55, pitchMax: 70, aimDamping: 0.05,
             }),
             placeholder(MODEL_NODE_ID, 'Mannequin'),
+            weaponsNode(),
             {
                 type: 'controller', id: id('player:controller'), name: 'Player Controller', possessedId: CHARACTER_ID, controlSource: 'player',
                 moveAction: 'Move', lookAction: 'Look', jumpAction: 'Jump', sprintAction: 'Sprint', crouchAction: '',
@@ -927,7 +1148,7 @@ async function hudNode() {
     const hud = new UIRootNode('HUD', 'screen', id('node:hud'))
     const panel = new UIPanelNode('Controls', id('node:hud:panel'))
     panel.anchorMin = [0, 0]; panel.anchorMax = [0, 0]
-    panel.offsetMin = [24, 24]; panel.offsetMax = [640, 168]
+    panel.offsetMin = [24, 24]; panel.offsetMax = [700, 200]
     panel.borderRadius = 10
     hud.addChild(panel)
     const line = (key: string, name: string, text: string, top: number, size: number, weight = 400) => {
@@ -941,6 +1162,28 @@ async function hudNode() {
     line('light', 'Light Setup', 'Light: Sunset', 14, 28, 600)
     line('keys', 'Light Keys', '1 Day  ·  2 Sunset  ·  3 Night', 58, 22)
     line('moves', 'Moves', 'WASD move · Shift sprint · Ctrl walk · Space jump · E car', 100, 20)
+    line('weapons', 'Weapon Keys', 'Q pistol / rifle / none · Right mouse aim · Left mouse fire', 134, 20)
+    // The crosshair, in the middle of the screen where the shots go: a dot and four ticks, which SandboxPlayer shows
+    // with a weapon out and moves out as the shot spreads.
+    const crosshair = new UIPanelNode('Crosshair', id('node:hud:crosshair'))
+    crosshair.anchorMin = [0.5, 0.5]; crosshair.anchorMax = [0.5, 0.5]
+    crosshair.offsetMin = [-40, -40]; crosshair.offsetMax = [40, 40]
+    crosshair.tint = [0, 0, 0, 0]
+    crosshair.opacity = 0
+    hud.addChild(crosshair)
+    const mark = (key: string, name: string, min: [number, number], max: [number, number], radius = 0) => {
+        const m = new UIPanelNode(name, id('node:hud:crosshair:' + key))
+        m.anchorMin = [0.5, 0.5]; m.anchorMax = [0.5, 0.5]
+        m.offsetMin = min; m.offsetMax = max
+        m.tint = [1, 1, 1, 0.9]
+        m.borderRadius = radius
+        crosshair.addChild(m)
+    }
+    mark('dot', 'Crosshair Dot', [-1.5, -1.5], [1.5, 1.5], 1.5)
+    mark('top', 'Crosshair Top', [-1, -15], [1, -8])
+    mark('bottom', 'Crosshair Bottom', [-1, 8], [1, 15])
+    mark('left', 'Crosshair Left', [-15, -1], [-8, 1])
+    mark('right', 'Crosshair Right', [8, -1], [15, 1])
     return await hud.serialize()
 }
 
@@ -965,6 +1208,7 @@ async function buildScene() {
         if (out.id === RIG_ID_CAMERA) withScript(out, cameraScript, CAMERA_VARS)
         if (out.id === CAR_ID) withScript(out, carScript, {})
         if (out.id === CAR_RIG_ID) withScript(out, carCameraScript, CAR_CAMERA_VARS)
+        for (const kind of WEAPON_KINDS) if (out.id === id(`player:weapon:${kind}`)) withScript(out, gunScript, GUN_VARS[kind])
         return out
     }
     // Dusk: the sun 9 degrees under the horizon (the end of civil twilight), so the car's lamps show; its glow is still
@@ -1023,7 +1267,7 @@ async function buildScene() {
     const t = templatizeScene(JSON.parse(JSON.stringify(scene)), { takenNames: new Set(), idFor: k => k })
     if (t.log.length) throw new Error(`groups placed more than once without a template: ${t.log.join('; ')}`)
     const render = { ...env.render, dofEnabled: false, lensFlareIntensity: 0, chromaticAberrationStrength: 0.1, exposureCompensation: 0.3, ...EXPOSURE }
-    return { scene, config: { graphics: env.graphics, render }, templates: [playerTemplate, environmentTemplate, courseTemplate, carTemplate, ...propTemplates] }
+    return { scene, config: { graphics: env.graphics, render }, templates: [playerTemplate, environmentTemplate, courseTemplate, carTemplate, ...propTemplates, ...shotEffectTemplates()] }
 }
 
 // =====================================================================================================
@@ -1037,8 +1281,11 @@ async function main() {
     const { scene, config, templates } = await buildScene()
 
     const libraries: Record<string, unknown[]> = {
-        models: [modelAsset, carBodyAsset], materials: [...materials, ...carMaterials, OCEAN_MATERIAL], terrainMaterials: [], animationFields: [fieldAsset, lookFieldAsset, ...stairAssets.map(a => a.asset)], animControllers: [controller], boneMasks: [LEAN_MASK, LOOK_MASK],
-        animations, rigs: [rig], tilesets: [], scripts: scriptAssets, templates, particleSystems: [], aiBrains: [],
+        models: [modelAsset, carBodyAsset, weaponAssets.pistol, weaponAssets.rifle], materials: [...materials, ...carMaterials, ...weaponMaterials, ...Object.values(FX_MATERIALS), OCEAN_MATERIAL], terrainMaterials: [],
+        animationFields: [fieldAsset, lookFieldAsset, ...stairAssets.map(a => a.asset), ...weaponFieldAssets], animControllers: [controller],
+        boneMasks: [LEAN_MASK, LOOK_MASK, WEAPON_MASKS.pistol, WEAPON_MASKS.support, WEAPON_MASKS.rifle, WEAPON_MASKS.aim],
+        animations, rigs: [rig], tilesets: [], scripts: scriptAssets, templates, particleSystems: Object.values(SHOT_PARTICLES), aiBrains: [],
+        poseAssets: weaponPoseAssets,
     }
     for (const [name, value] of Object.entries(libraries)) writeJson(path.join(OUT, 'libraries', `${name}.json`), value)
     writeJson(path.join(OUT, 'libraries', 'inputMap.json'), sandboxInputMap())
@@ -1063,9 +1310,9 @@ async function main() {
             id: SCENE_ID, name: PROJECT, updatedAt: CREATED_AT, dimension: '3D',
             refs: {
                 version: SCENE_REFS_VERSION,
-                materialIds: [...materials, ...carMaterials, OCEAN_MATERIAL].map(m => m.id), modelIds: [MODEL_ID, CAR_BODY_MODEL_ID], templateIds: templates.map((t: any) => t.id), terrainMaterialIds: [], tilesetIds: [],
-                aiBrainIds: [], textureIds: textures.included, scriptIds: scriptAssets.map(s => s.id), animationFieldIds: [FIELD_ID, LOOK_FIELD_ID, ...stairAssets.map(a => a.asset.id)],
-                foliageModelIds: [], soundSampleIds: [], audioSourceIds: [], animationIds: animations.map(a => a.id), particleSystemIds: [],
+                materialIds: [...materials, ...carMaterials, ...weaponMaterials, ...Object.values(FX_MATERIALS), OCEAN_MATERIAL].map(m => m.id), modelIds: [MODEL_ID, CAR_BODY_MODEL_ID, WEAPON_MODEL_ID.pistol, WEAPON_MODEL_ID.rifle], templateIds: templates.map((t: any) => t.id), terrainMaterialIds: [], tilesetIds: [],
+                aiBrainIds: [], textureIds: textures.included, scriptIds: scriptAssets.map(s => s.id), animationFieldIds: [FIELD_ID, LOOK_FIELD_ID, ...stairAssets.map(a => a.asset.id), ...weaponFieldAssets.map(a => a.id)],
+                foliageModelIds: [], soundSampleIds: [], audioSourceIds: [], animationIds: animations.map(a => a.id), particleSystemIds: Object.values(SHOT_PARTICLES).map(p => p.id),
             },
         }],
     })
@@ -1083,6 +1330,13 @@ async function main() {
     add('/Characters/Mannequin/Animation', 'Mannequin Locomotion', 'animController', CONTROLLER_ID)
     add('/Characters/Mannequin', LEAN_MASK.name, 'boneMask', LEAN_MASK.id)
     add('/Characters/Mannequin', LOOK_MASK.name, 'boneMask', LOOK_MASK.id)
+    for (const m of [WEAPON_MASKS.pistol, WEAPON_MASKS.support, WEAPON_MASKS.rifle, WEAPON_MASKS.aim]) add('/Characters/Mannequin', m.name, 'boneMask', m.id)
+    for (const a of weaponFieldAssets) add('/Characters/Mannequin/Animation/Weapons', a.name, 'animationField', a.id)
+    for (const a of weaponPoseAssets) add('/Characters/Mannequin/Animation/Weapons', a.name, 'pose', a.id)
+    for (const kind of WEAPON_KINDS) {
+        add('/Weapons', weaponAssets[kind].name, 'model', WEAPON_MODEL_ID[kind])
+        for (const m of weaponMaterials.filter(m => m.name.startsWith(WEAPON_NAMES[kind] + ' '))) add('/Weapons/Materials', m.name, 'material', m.id)
+    }
     for (const a of animations) add('/Characters/Mannequin/Animation/Clips', a.name, 'animation', a.id)
     add('/Characters/Mannequin/Materials', 'Mannequin', 'material', materials[0].id)
     add('/Characters/Mannequin/Scripts', 'SandboxPlayer', 'script', playerScript.id)
@@ -1097,7 +1351,11 @@ async function main() {
     add('/Vehicles/Car/Scripts', 'SandboxCarCamera', 'script', carCameraScript.id)
     add('/Level/Materials', 'Ocean', 'material', OCEAN_MATERIAL.id)
     add('/Level/Scripts', 'SandboxGameManager', 'script', managerScript.id)
-    for (const tpl of templates.slice(4)) add('/Level/Props', tpl.name, 'template', tpl.id)
+    const effectNames = new Set<string>(Object.values(FX_NAMES))
+    for (const tpl of templates.slice(4)) add(effectNames.has(tpl.name) ? '/Weapons/Effects' : '/Level/Props', tpl.name, 'template', tpl.id)
+    for (const s of WEAPON_SCRIPTS) add('/Weapons/Scripts', s.name, 'script', s.id)
+    for (const m of Object.values(FX_MATERIALS)) add('/Weapons/Effects/Materials', m.name, 'material', m.id)
+    for (const p of Object.values(SHOT_PARTICLES)) add('/Weapons/Effects', p.name, 'particleSystem', p.id)
     for (const m of materials.slice(1)) add('/Level/Materials', m.name, 'material', m.id)
     for (const t of textureFolders) {
         add(t.folder, t.name, 'texture', t.id)
@@ -1111,7 +1369,7 @@ async function main() {
     writeJson(path.join(OUT, 'vfs.json'), { version: 1, folders: [...dirs].sort(), entries })
     writeJson(path.join(OUT, 'example.json'), {
         name: PROJECT,
-        description: 'A locomotion sandbox in the style of Advanced Locomotion System v4: a mannequin that walks and jogs in eight directions facing the camera, sprints freely, sets off, stops and turns round with their own clips, leans into curves, turns in place when you look away, jumps, falls and lands soft or hard, climbs stairs, with its feet planted and locked by IK on ramps, stairs and bumps. And a car to get into (E by the driver\'s door) and drive on the vehicle simulation. All of it is the animator, the Character, Controller and Vehicle nodes and a few input-only scripts. Car model: "Dirty car" by 3D Error 404 (CC-BY-4.0).',
+        description: 'A locomotion sandbox in the style of Advanced Locomotion System v4: a mannequin that walks and jogs in eight directions facing the camera, sprints freely, sets off, stops and turns round with their own clips, leans into curves, turns in place when you look away, jumps, falls and lands soft or hard, climbs stairs, with its feet planted and locked by IK on ramps, stairs and bumps. And a car to get into (E by the driver\'s door) and drive on the vehicle simulation. A pistol and a rifle to carry, aim and fire (Q, right mouse, left mouse), held over the walk by a layer each, their shots raycasts that push what they hit. All of it is the animator, the Character, Controller and Vehicle nodes and a few input-only scripts. Car model: "Dirty car" by 3D Error 404 (CC-BY-4.0). Weapons: "Low-Poly G40" and "Low-Poly M4a1" by TastyTony (CC-BY-4.0).',
         order: 5,
     })
     const largest = await packFormat2(OUT)

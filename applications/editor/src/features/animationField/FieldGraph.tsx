@@ -15,7 +15,7 @@ const GRAB_RADIUS = 14
 
 export default function FieldGraph() {
   const { editorMode } = useCleoEngine()
-  const { field, clips, weights, probe, setProbe, setSample, addSample, selected, setSelected, removeSample } = useAnimationField()
+  const { field, clips, weights, probe, setProbe, setSample, addSample, selected, setSelected, removeSample, sampleInfo } = useAnimationField()
 
   const boxRef = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState({ w: 640, h: 420 })
@@ -187,7 +187,8 @@ export default function FieldGraph() {
             const w = weightOf(s.clipName)
             const active = w > 0.001
             const r = 6 + w * 8
-            const missing = !!s.clipName && !clips.includes(s.clipName)
+            const info = sampleInfo(s)
+            const missing = info.missing
             return (
               <g key={i} className='cursor-grab'>
                 {active && (
@@ -203,10 +204,10 @@ export default function FieldGraph() {
                 <text
                   x={px(s.x)} y={py(s.y ?? 0) - r - 6} textAnchor='middle' pointerEvents='none'
                   className={`fill-current text-ui-xs ${missing ? 'text-danger-fg' : active ? 'text-fg' : 'text-dim'}`}>
-                  {s.clipName || '(no clip)'}{active ? ` ${(w * 100).toFixed(0)}%` : ''}
+                  {info.label}{active ? ` ${(w * 100).toFixed(0)}%` : ''}
                 </text>
                 {missing && (
-                  <title>{`"${s.clipName}" is not a clip on this model`}</title>
+                  <title>{info.pose ? 'The pose this sample holds is gone' : `"${s.clipName}" is not a clip on this model`}</title>
                 )}
               </g>
             )
@@ -229,7 +230,7 @@ export default function FieldGraph() {
             variant='danger' size='sm' className='absolute right-2 top-2 text-ui-sm'
             title='Remove the selected sample'
             onClick={() => removeSample(selected)}>
-            ✕ Remove “{field.samples[selected].clipName || 'sample'}”
+            ✕ Remove “{sampleInfo(field.samples[selected]).label || 'sample'}”
           </Button>
         )}
       </div>

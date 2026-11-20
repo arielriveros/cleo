@@ -116,6 +116,11 @@ export function walkRefs(obj: any, out: EdgeSpec[]): void {
       push(out, 'pose', (val as any).assetId, 'poseRef.assetId')
       continue
     }
+    // A pose variant's link to its base pose: the same pair.
+    if (key === 'baseRef' && val && typeof val === 'object' && typeof (val as any).poseId === 'string') {
+      push(out, 'pose', (val as any).assetId, 'baseRef.assetId')
+      continue
+    }
     if (key === 'tilesetId') { push(out, 'tileset', val, key); continue }
     // A model's or animation's link to the shared skeleton it uses (utils/rigAssets.ts).
     if (key === 'rigId') { push(out, 'rig', val, key); continue }
@@ -233,10 +238,16 @@ export function edgesOfAsset(kind: AssetKind, asset: any): EdgeSpec[] {
       push(out, 'rig', asset.rigId, 'rigId')
       walkRefs(asset.machine, out)
       break
-    // Per-bone weights and stored poses: keyed by bone name, so the rig is their only link.
+    // Per-bone weights: keyed by bone name, so the rig is their only link.
     case 'boneMask':
+      push(out, 'rig', asset.rigId, 'rigId')
+      break
+    // Stored poses: the rig, and the asset each variant's base lives in when it is another one (a variant of
+    // a read-only Creator pose sits in a project asset).
     case 'pose':
       push(out, 'rig', asset.rigId, 'rigId')
+      for (const [i, p] of (asset.poses ?? []).entries())
+        if (p?.baseRef?.assetId && p.baseRef.assetId !== asset.id) push(out, 'pose', p.baseRef.assetId, `poses[${i}].baseRef.assetId`)
       break
     // A skeleton, plus the clips authored against it. Its `animationIds` are pushed explicitly rather than
     // through `walkRefs`, which would also walk the whole `skin` payload — thousands of matrix elements
@@ -307,8 +318,10 @@ export function edgesOfAsset(kind: AssetKind, asset: any): EdgeSpec[] {
       break
     case 'animationField':
       // A blend space is defined by a skeleton and clip names, so it points at the RIG, not at one of the
-      // characters built on it.
+      // characters built on it; and at the pose asset of every pose sample.
       push(out, 'rig', asset.rigId, 'rigId')
+      for (const [i, s] of (asset.samples ?? []).entries())
+        if (s?.poseRef?.assetId) push(out, 'pose', s.poseRef.assetId, `samples[${i}].poseRef.assetId`)
       break
     case 'script':
       // A class-based script's fields are typed values, not asset links. A node's `__scriptId` points AT

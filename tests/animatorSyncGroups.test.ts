@@ -153,3 +153,85 @@ describe('Animator — sync groups', () => {
         expect(a.fieldDebug.synced).toBe(false);
     });
 });
+
+// A LAYER state in the base's sync group follows the base's phase every frame: the Sandbox's weapon layers hold
+// the upper body over the legs' stride, and each layer clip is built against the stride frame it plays with.
+describe('Animator — a layer following the base\'s sync group', () => {
+    /** The base machine above, plus one override layer `Upper` playing `layerClip` (a 2 s cycle by default). */
+    function layered(walkGroup: string | undefined, stairsGroup: string | undefined, layerState: Partial<AnimationState> = {}): Animator {
+        const a = makeAnimator();
+        const sm = machine(walkGroup, stairsGroup);
+        sm.layers = [{
+            name: 'Upper',
+            states: [{ name: 'Hold', clipName: '', field: field('stairs'), loop: true, speed: 1, isEntry: true, syncGroup: 'Gait', ...layerState }],
+            transitions: [],
+        }];
+        a.setStateMachine(sm);
+        return a;
+    }
+    /** The one bone's x, as posed with the layer over the base: the layer's clip, since it overrides it whole. */
+    const x = (a: Animator) => a.getJointModelMatrix(0)![12];
+
+    it('takes the base\'s phase, through a clip of another length', () => {
+        const a = layered('Gait', 'Gait');
+        for (let k = 0; k < 90; k++) {
+            a.checkTriggers();
+            a.update(DT);
+            expect(a.layerPhase('Upper'), `frame ${k}`).toBeCloseTo(a.fieldDebug.phase, 9);
+        }
+        // The layer's 2 s clip shows the base's phase, not its own clock (1.5 s in, its own phase would be 0.75).
+        expect(x(a)).toBeCloseTo(a.fieldDebug.phase, 6);
+    });
+
+    it('follows the shared phase through a synced cross-fade of the base', () => {
+        const a = layered('Gait', 'Gait');
+        step(a, 0.3);
+        a.setBool('Go', true);
+        for (let k = 0; k < 30; k++) {
+            a.checkTriggers();
+            a.update(DT);
+            expect(a.layerPhase('Upper'), `frame ${k}`).toBeCloseTo(a.fieldDebug.phase, 9);
+        }
+    });
+
+    it('runs at its own rate while the base is outside the group', () => {
+        const a = layered(undefined, undefined);
+        step(a, 0.5);
+        const p0 = a.layerPhase('Upper')!;
+        a.update(DT);
+        // Its own 2 s cycle, not the base's 1 s one.
+        expect((a.layerPhase('Upper')! - p0 + 1) % 1).toBeCloseTo(DT / STAIRS, 6);
+        expect(a.layerPhase('Upper')).not.toBeCloseTo(a.fieldDebug.phase, 2);
+    });
+
+    it('cross-fades back onto the base\'s phase instead of jumping when the base re-enters the group', () => {
+        // Stairs is outside the group: the base leaves it, the layer runs free, the base comes back at phase 0.
+        const a = layered('Gait', undefined);
+        step(a, 0.3);
+        a.setBool('Go', true);
+        step(a, 0.7);
+        expect(a.currentStateName).toBe('Stairs');
+        const apart = Math.abs(a.layerPhase('Upper')! - 0);
+        expect(Math.min(apart, 1 - apart)).toBeGreaterThan(0.1);
+        a.setBool('Go', false);
+        let worst = 0, last = x(a);
+        for (let k = 0; k < 30; k++) {
+            a.checkTriggers();
+            a.update(DT);
+            worst = Math.max(worst, Math.abs(x(a) - last));
+            last = x(a);
+        }
+        expect(a.currentStateName).toBe('Walk');
+        // On the base's phase again...
+        expect(a.layerPhase('Upper')).toBeCloseTo(a.fieldDebug.phase, 9);
+        // ...without a jump: the clip moves 1/120 a frame at its own rate, the fade a few times that.
+        expect(worst).toBeLessThan(0.06);
+    });
+
+    it('leaves a held layer state outside any group where it is held', () => {
+        const a = layered('Gait', 'Gait', { syncGroup: undefined, speed: 0, field: { ...field('stairs'), samples: [{ clipName: 'stairs', x: 0, phaseOffset: 0.5 }] } });
+        step(a, 1);
+        expect(a.layerPhase('Upper')).toBe(0);
+        expect(x(a)).toBeCloseTo(0.5, 6);
+    });
+});

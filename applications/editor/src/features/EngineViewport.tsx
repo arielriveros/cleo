@@ -9,6 +9,7 @@ import WaterGizmo from "./gizmo/WaterGizmo";
 import { useCollisionShapeSelection } from "./gizmo/collisionSelection";
 import SocketPreviews from "./sockets/SocketPreviews";
 import SocketGizmo from "./sockets/SocketGizmo";
+import PoseGizmo from "./rig/PoseGizmo";
 import RagdollPreview from './rig/RagdollPreview';
 import useGizmoShortcuts from "./gizmo/useGizmoShortcuts";
 import type { TransformPatch } from "@cleo/app-kit/gizmo/gizmoDrag";
@@ -561,6 +562,8 @@ export default function EngineViewport() {
                 <AnimationSkeletonTool viewportRef={viewportRef} />
                 <AnimationPlayer />
                 <SocketPreviews />
+                {/* The pose mode's gizmo: turns a bone of the pose being edited (Poses, in the inspector). */}
+                <PoseGizmo viewportRef={viewportRef} />
             </>}
 
             {/* The rig editor draws the same bone overlay and drives the same transport, over a preview
@@ -573,6 +576,7 @@ export default function EngineViewport() {
                     the one selected in the Sockets panel. */}
                 <SocketPreviews />
                 <SocketGizmo viewportRef={viewportRef} />
+                <PoseGizmo viewportRef={viewportRef} />
                 {/* The rig's ragdoll: colliders and joint limits on the preview, and its test fall. */}
                 <RagdollPreview />
             </>}

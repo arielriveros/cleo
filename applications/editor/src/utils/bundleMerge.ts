@@ -168,6 +168,11 @@ export function remapDeep(obj: any, r: Remaps): void {
       ;(val as any).assetId = sub(r.pose, (val as any).assetId)
       continue
     }
+    // A pose variant's link to its base: the same pair, the asset half re-minted.
+    if (key === 'baseRef' && val && typeof val === 'object' && typeof (val as any).poseId === 'string') {
+      ;(val as any).assetId = sub(r.pose, (val as any).assetId)
+      continue
+    }
     // A tilemap layer's tileset link and the id on the embedded tileset copy must move together: the layer
     // looks its tileset up by id in the map's own embedded table.
     if (key === 'tilesetId') { obj[key] = sub(r.tileset, val); continue }

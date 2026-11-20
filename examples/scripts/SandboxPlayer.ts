@@ -9,6 +9,7 @@ import { attribute } from 'cleo/decorators'
  *   └─ Player           THIS script, on a Character node
  *      ├─ Camera Rig    SandboxCamera: over the shoulder, third person while sprinting
  *      ├─ Mannequin     the animated model: its Animator decides every pose
+ *      ├─ Weapons       the pistol and the rifle, each on its grip socket on the right hand (SandboxGun)
  *      └─ Player Controller
  *
  * The Controller reads Move / Look / Jump / Sprint and writes this frame's intent; the Character turns it into
@@ -40,7 +41,16 @@ import { attribute } from 'cleo/decorators'
  *   - the STAIRS: whether the body is on a flight (`onStairs`, the ramp under it on `stairsLayer`) and which way it
  *     goes along it (`stairs`, +1 up, -1 down, from the climb under its travel), the flight's pace (one tread a
  *     step, slowing down BEFORE the first riser, seen ahead), facing where it goes on the flight, and `stairRate`,
- *     how much faster the stair clips play while the body still slows onto it.
+ *     how much faster the stair clips play while the body still slows onto it;
+ *   - the WEAPONS: Equip cycles none, the pistol, the rifle: the one in the hands goes down and is put away, the next
+ *     is shown and comes up (its layer's weight, `pistolWeight` / `rifleWeight`); Aim held aims it (`aiming`, the aim
+ *     layers' weights, where the camera aims off the body in `aimYaw` / `aimPitch`), facing the camera and strafing,
+ *     turning in place sooner; a sprint lowers it (and lets go of the pistol with the support hand, `pistolSupport`);
+ *   - FIRING: Fire pulls the trigger of the weapon in the hands (its SandboxGun shoots by raycast and pushes what it
+ *     hits). Fired from the hip, the weapon comes up first and stays up `fireAimHold` seconds after the last shot.
+ *     Each shot kicks the camera up and a little aside, most of which comes back (`recoilRecovery`), and the weapon
+ *     up in the hands (its aim's pitch, settling at `kickRecovery`); the HUD's Crosshair shows where it goes, its
+ *     ticks spread as the shot does.
  *
  * It names no clip, no state and no key, and plays no animation (a car is got into by firing a trigger by name).
  *
@@ -197,6 +207,37 @@ export default class SandboxPlayerNode extends CharacterNode {
      * Seconds a metre the body takes to step onto where getting in starts, from where it stood when the player
      * pressed Interact (the clip reaches for the door meanwhile), and the most it may take.
      */
+    /** Seconds a weapon takes to come up into the hands, and to go down out of them. */
+    @attribute('Weapons', { min: 0.05, max: 2, step: 0.05 })
+    private equipSeconds: number = 0.3
+
+    /** Seconds the aim takes to come up, and to go down. */
+    @attribute('Weapons', { min: 0.02, max: 1, step: 0.01 })
+    private aimSeconds: number = 0.15
+
+    /** Aiming and standing still, the camera turned further than this (degrees) turns the body in place to it, at once. */
+    @attribute('Weapons', { min: 10, max: 120, step: 1 })
+    private aimTurnThreshold: number = 45
+
+    /** Fired from the hip, the weapon stays up (aimed) this many seconds after the last shot. */
+    @attribute('Weapons', { min: 0, max: 3, step: 0.05 })
+    private fireAimHold: number = 0.6
+
+    /** How far up the weapon must be (its aim's weight) before a shot goes. */
+    @attribute('Weapons', { min: 0, max: 1, step: 0.05 })
+    private fireAimReady: number = 0.7
+
+    /** The share of the camera's kick that comes back, and how fast (per second). */
+    @attribute('Weapons', { min: 0, max: 1, step: 0.05 })
+    private recoilRecovery: number = 0.7
+
+    @attribute('Weapons', { min: 0.5, max: 30, step: 0.5 })
+    private recoilRecoverySpeed: number = 7
+
+    /** How fast the weapon's kick in the hands settles, per second. */
+    @attribute('Weapons', { min: 0.5, max: 60, step: 0.5 })
+    private kickRecovery: number = 14
+
     @attribute('Car', { min: 0, max: 2, step: 0.05 })
     private alignSeconds: number = 0.35
 
@@ -251,6 +292,20 @@ export default class SandboxPlayerNode extends CharacterNode {
     public stairs: number = 0
     /** StairRate: how much faster the stair clips play while the body is still faster than their pace. */
     public stairRate: number = 1
+    /** The weapon in the hands: 0 none, 1 the pistol, 2 the rifle (the one shown; Equip picks the next). */
+    public weapon: number = 0
+    /** PistolWeight, RifleWeight: the weapon layers' weights, the one in the hands up, faded in and out. */
+    public pistolWeight: number = 0
+    public rifleWeight: number = 0
+    /** PistolSupport: the pistol's support hand on it, letting go as a sprint takes over from the jog. */
+    public pistolSupport: number = 0
+    /** Aiming: Aim held with a weapon in the hands, not sprinting. PistolAimWeight, RifleAimWeight: the aim layers'. */
+    public aiming: boolean = false
+    public pistolAimWeight: number = 0
+    public rifleAimWeight: number = 0
+    /** AimYaw, AimPitch: where the camera aims, off the body (degrees; yaw + left, pitch + down), for the aim blend spaces. */
+    public aimYaw: number = 0
+    public aimPitch: number = 0
 
     private _directionScale: number = 1
     private _lean: number = 0
@@ -287,9 +342,27 @@ export default class SandboxPlayerNode extends CharacterNode {
     /** Getting out: whether the animator has been seen playing it. */
     private _exitSeen: boolean = false
 
+    /** The weapon the hands go to next (Equip): 0 none, 1 the pistol, 2 the rifle. */
+    private _weaponWanted: number = 0
+    /** The aim's weight, before the weapon's own scales it. */
+    private _aim: number = 0
+    /** The Character's turn threshold as authored: aiming turns in place sooner. */
+    private _turnThreshold: number = -1
+    /** The weapons' nodes on the hand: the pistol's and the rifle's grip holders (their SandboxGun). */
+    private _weaponNodes: (Node | null)[] | null = null
+    /** Seconds the weapon stays up for a shot from the hip. */
+    private _fireHold: number = 0
+    /** The camera's kick still to come back, degrees, and the weapon's kick in the hands. */
+    private _recoilBack: number = 0
+    private _kick: number = 0
+    /** The HUD's crosshair and its four ticks (Top, Bottom, Left, Right), found once. */
+    private _crosshair: any = null
+    private _ticks: any[] = []
+
     onUpdate(delta: number) {
         if (this._carPhase !== 'none') { this._ride(delta); return }
         if (this._acceleration < 0) this._acceleration = this.acceleration
+        if (this._turnThreshold < 0) this._turnThreshold = this.turnThreshold
         const v = this.velocity
         this.groundSpeed = Math.hypot(v[0], v[2])
         const intent = this.drive()
@@ -311,21 +384,27 @@ export default class SandboxPlayerNode extends CharacterNode {
         const runGait = (intent.sprint && amount > 0.9) || !(Input.pressed('Walk') || amount < this.walkDeflection)
         const pace = this._stairsToward(delta, travel, runGait)
         this._lean = this._leanToward(delta, facing, run)
+        // The weapons: what is in the hands, and whether it aims (a sprint lowers it).
+        const sprintAsked = intent.sprint && amount > 0.9 && this.hasMoveInput
+        this._weaponsToward(delta, false, sprintAsked, intent.aimYaw - bodyYaw, intent.aimPitch)
         this._lookToward(delta, intent.aimYaw - bodyYaw, intent.aimPitch)
         // In a jump taken off on the move, the body faces the way it flies, whatever the stick and the camera do.
         const jumpFacing = this._jumpTurn(delta, v, bodyYaw)
-        // The turn in place waits for the head: it engages only once the camera has stayed round this long.
-        this.turnSettleSeconds = this.turnDelay
-        this.turnSettleFarSeconds = this.turnDelay * this.farTurnShare
+        // The turn in place waits for the head: it engages only once the camera has stayed round this long. Aiming,
+        // it turns at once, and sooner.
+        this.turnSettleSeconds = this.aiming ? 0.05 : this.turnDelay
+        this.turnSettleFarSeconds = this.aiming ? 0.05 : this.turnDelay * this.farTurnShare
+        this.turnThreshold = this.aiming ? this.aimTurnThreshold : this._turnThreshold
 
         if (!this.hasMoveInput) {
             this.acceleration = this._acceleration
             this.running = false
             this.sprinting = false
             this.runTurn = 0
-            // Stopping out of a sprint: stay as stopped until the camera is swung, rather than turning to it at once.
+            // Stopping out of a sprint: stay as stopped until the camera is swung, rather than turning to it at once
+            // (or aiming).
             if (this._wasSprinting) { this._afterSprint = true; this._stopYaw = intent.aimYaw; this._wasSprinting = false }
-            if (this._afterSprint && Math.abs(this._wrap(intent.aimYaw - this._stopYaw)) > this.lookAroundAngle) this._afterSprint = false
+            if (this._afterSprint && (this.aiming || Math.abs(this._wrap(intent.aimYaw - this._stopYaw)) > this.lookAroundAngle)) this._afterSprint = false
             // Standing on a flight: no turning in place on the steps.
             this.facingMode = jumpFacing || this._afterSprint || this.onStairs ? 'none' : 'aim'
             return
@@ -493,8 +572,115 @@ export default class SandboxPlayerNode extends CharacterNode {
     private _lookToward(delta: number, yaw: number, pitch: number) {
         this.lookYaw = Math.max(-90, Math.min(90, this._wrap(yaw)))
         this.lookPitch = Math.max(-45, Math.min(45, pitch - this.lookPitchRest))
-        const still = !this.hasMoveInput && this.isGrounded && this.groundSpeed < 0.3
+        // Aiming, the aim turns the head with the weapon.
+        const still = !this.hasMoveInput && this.isGrounded && this.groundSpeed < 0.3 && !this.aiming
         if (delta > 0) this.lookWeight += ((still ? 1 : 0) - this.lookWeight) * (1 - Math.exp(-this.lookSpeed * delta))
+    }
+
+    /**
+     * The weapons, every frame. Equip picks the next weapon (none, the pistol, the rifle, round again): the one in
+     * the hands fades its layer out over `equipSeconds` and is hidden once mostly down, then the next is shown and
+     * fades in. Aim held with one up aims it, unless the body sprints (or is told to put it away, `holster`: in a
+     * car). The pistol's support hand lets go over the speeds where the sprint takes over from the jog, unless it
+     * aims. `yaw` and `pitch`: where the camera aims, off the body.
+     */
+    private _weaponsToward(delta: number, holster: boolean, sprinting: boolean, yaw: number, pitch: number) {
+        if (!this._weaponNodes) {
+            const weapons = this.getChildByName('Weapons')[0]
+            this._weaponNodes = ['Pistol Grip', 'Rifle Grip'].map(n => weapons?.getChildByName(n)[0] ?? null)
+            this._showWeapon(this.weapon)
+        }
+        if (!holster && Input.started('Equip')) this._weaponWanted = (this._weaponWanted + 1) % 3
+        if (holster) this._weaponWanted = 0
+        // Fired from the hip: up it comes, and stays up a moment after.
+        const firing = !holster && this.weapon > 0 && this.weapon === this._weaponWanted && !sprinting && Input.pressed('Fire')
+        this._fireHold = firing ? this.fireAimHold : Math.max(0, this._fireHold - delta)
+        const step = delta > 0 ? delta / Math.max(0.01, this.equipSeconds) : 0
+        const weights = [this.pistolWeight, this.rifleWeight]
+        if (this.weapon !== this._weaponWanted) {
+            // Down out of the hands, then away; the next one shown.
+            const k = this.weapon - 1
+            if (k >= 0) weights[k] = Math.max(0, weights[k] - step)
+            if (k < 0 || weights[k] < 0.35) {
+                if (k >= 0) weights[k] = 0
+                this.weapon = this._weaponWanted
+                this._showWeapon(this.weapon)
+            }
+        } else if (this.weapon > 0) weights[this.weapon - 1] = Math.min(1, weights[this.weapon - 1] + step)
+        this.pistolWeight = weights[0]
+        this.rifleWeight = weights[1]
+        // Aiming: Aim held (or a shot from the hip), the weapon up (and staying), not sprinting.
+        this.aiming = !holster && this.weapon > 0 && this.weapon === this._weaponWanted && !sprinting && (Input.pressed('Aim') || this._fireHold > 0)
+        const aimStep = delta > 0 ? delta / Math.max(0.01, this.aimSeconds) : 0
+        this._aim = Math.max(0, Math.min(1, this._aim + (this.aiming ? aimStep : -aimStep)))
+        this.pistolAimWeight = this._aim * this.pistolWeight
+        this.rifleAimWeight = this._aim * this.rifleWeight
+        // The weapon's kick in the hands: its aim pitched up, settling back.
+        this._kick *= delta > 0 ? Math.exp(-this.kickRecovery * delta) : 1
+        this.aimYaw = Math.max(-90, Math.min(90, this._wrap(yaw)))
+        this.aimPitch = Math.max(-60, Math.min(60, pitch - this._kick))
+        // The support hand: on, but letting go between the jog's speed and the sprint's (the hold's sprint takes over).
+        const sprintShare = Math.max(0, Math.min(1, (this.groundSpeed - this.walkSpeed) / Math.max(0.01, this.runSpeed - this.walkSpeed)))
+        this.pistolSupport = this.pistolWeight * (this.aiming ? 1 : 1 - MathUtils.smoothstep(0, 1, sprintShare))
+        this._fire(delta, holster, sprinting)
+    }
+
+    /**
+     * The trigger: the weapon in the hands (its SandboxGun) fires along the camera's aim once it is up, and its
+     * recoil kicks the camera and the weapon. The camera's kick mostly comes back. The crosshair follows.
+     */
+    private _fire(delta: number, holster: boolean, sprinting: boolean) {
+        const gun = this.weapon > 0 ? this._weaponNodes?.[this.weapon - 1] as any : null
+        const rig = this.cameraRig()
+        const camera = rig?.children.find(c => c.nodeType === 'camera') ?? rig
+        const moving = Math.min(1, this.groundSpeed / Math.max(0.1, this.runSpeed))
+        if (gun?.pull && rig && camera) {
+            camera.updateTransforms(camera.parent ? camera.parent.worldTransform : null)
+            const eye = camera.worldPosition
+            const yaw = rig.yaw * Math.PI / 180, pitch = rig.pitch * Math.PI / 180
+            const look = [Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)]
+            const weight = this.weapon === 1 ? this.pistolWeight : this.rifleWeight
+            const ready = !holster && !sprinting && this.weapon === this._weaponWanted && weight >= 0.95 && this._aim >= this.fireAimReady
+            const recoil = gun.pull(!holster && Input.pressed('Fire'), ready, eye, look, this._aim, moving, (this.collider as ColliderNode | null)?.body ?? null)
+            if (recoil) {
+                rig.pitch = rig.pitch - recoil.pitch
+                rig.yaw = rig.yaw + recoil.yaw
+                this._recoilBack += recoil.pitch * this.recoilRecovery
+                this._kick += recoil.kick
+            }
+        }
+        // The camera's kick coming back.
+        if (rig && this._recoilBack > 1e-4 && delta > 0) {
+            const back = this._recoilBack * (1 - Math.exp(-this.recoilRecoverySpeed * delta))
+            rig.pitch = rig.pitch + back
+            this._recoilBack -= back
+        }
+        this._crosshairToward(gun, moving)
+    }
+
+    /** The HUD's crosshair: shown with a weapon out, brighter aimed, its ticks as far out as the shot spreads. */
+    private _crosshairToward(gun: any, moving: number) {
+        if (!this._crosshair) {
+            this._crosshair = this.findNode('Crosshair') ?? null
+            this._ticks = ['Top', 'Bottom', 'Left', 'Right'].map(n => this._crosshair?.getChildByName(`Crosshair ${n}`)[0] ?? null)
+        }
+        const c = this._crosshair
+        if (!c) return
+        const out = Math.max(this.pistolWeight, this.rifleWeight)
+        c.opacity = out * (0.5 + 0.5 * this._aim)
+        if (!gun?.spread) return
+        // Pixels from the middle: the spread's angle, at the screen's scale (a 60-degree view 1080 px tall is 18 px a degree).
+        const gap = 4 + 18 * gun.spread(this._aim, moving)
+        const [top, bottom, left, right] = this._ticks
+        if (top) { top.offsetMin = [-1, -gap - 7]; top.offsetMax = [1, -gap] }
+        if (bottom) { bottom.offsetMin = [-1, gap]; bottom.offsetMax = [1, gap + 7] }
+        if (left) { left.offsetMin = [-gap - 7, -1]; left.offsetMax = [-gap, 1] }
+        if (right) { right.offsetMin = [gap, -1]; right.offsetMax = [gap + 7, 1] }
+    }
+
+    /** Show the weapon `weapon` (1 the pistol, 2 the rifle) on the hand, and hide the other; 0 hides both. */
+    private _showWeapon(weapon: number) {
+        this._weaponNodes?.forEach((n, k) => { if (n) n.visible = weapon === k + 1 })
     }
 
     /** An angle into -180..180 degrees. */
@@ -594,6 +780,8 @@ export default class SandboxPlayerNode extends CharacterNode {
         this.leanRight = 0
         this.leanForward = 0
         this.lookWeight -= this.lookWeight * ease
+        // No weapon in a car: put away.
+        this._weaponsToward(delta, true, false, 0, 0)
         this._carTime += delta
 
         if (this._carPhase === 'entering') {

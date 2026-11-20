@@ -11,11 +11,14 @@
 // chosen while still in the air. And the car: getting in, driving and getting out, the one part entered by TRIGGERS
 // (EnterCar, ExitCar), which SandboxPlayer fires by name as the Car hands it the seat or takes it back.
 
-import type { AnimationCondition, AnimationConditionGroup, AnimationState, AnimationStateMachine, AnimationTransition } from '../../src/animation/animator'
-import type { AnimationField } from '../../src/animation/animationField'
+import type { AnimationCondition, AnimationConditionGroup, AnimationLayer, AnimationState, AnimationStateMachine, AnimationTransition } from '../../src/animation/animator'
+import { poseSampleKey, type AnimationField, type AnimationFieldSample } from '../../src/animation/animationField'
+import type { AnimationPose } from '../../src/animation/animationPose'
 import type { Skin } from '../../src/animation/animatedModel'
 import type { MadeClip } from './clips'
 import { LOOK_PITCH, LOOK_SAMPLES, LOOK_YAW } from './clips'
+import { AIM_PITCHES, AIM_YAWS } from './weapons/layers'
+import type { WeaponKind } from './weapons/models'
 import { clipSeconds, impactTime, plants } from './measure'
 import { motionConfig } from '../../src/physics/motion'
 
@@ -305,6 +308,66 @@ export function lookField(): AnimationField {
     }
 }
 
+/** A link to a pose: its Pose asset and its id there. */
+export interface PoseLink { assetId: string; poseId: string }
+/** A pose sample of a blend space (the editor embeds `pose` from `poseRef`). */
+const poseSample = (ref: PoseLink, x: number, y: number): AnimationFieldSample => ({ clipName: poseSampleKey(ref.poseId), x, y, poseRef: { ...ref } })
+
+/**
+ * A weapon's carry: a blend space of its POSES over the base layer's walk axes (`field`, the Locomotion one), the
+ * Carry pose where the walk plays any clip but the sprint's, the Sprint pose where it sprints, so the weapon goes down
+ * as the legs speed up into a sprint. Poses are held: no rate, no phase, nothing to keep in step with the legs. Plus
+ * the Carry pose at speed 0 under each direction, where the walk has nothing.
+ */
+export function poseField(field: AnimationField, carry: PoseLink, sprint: PoseLink, sprintClip = 'SprintF'): AnimationField {
+    const xs = [...new Set(field.samples.map(s => s.x))]
+    return {
+        ...field,
+        samples: [
+            ...field.samples.map(s => poseSample(s.clipName === sprintClip ? sprint : carry, s.x, s.y ?? 0)),
+            ...xs.map(x => poseSample(carry, x, 0)),
+        ],
+    }
+}
+
+/**
+ * A weapon's aim blend space: the aim's directions (variants of its Aim pose: weapons/layers.ts) over its yaw off the
+ * body (x, left +) and pitch (y, down +). On the additive aim layer each adds what it changes from Aim.
+ */
+export function aimField(directions: { yaw: number; pitch: number; ref: PoseLink }[]): AnimationField {
+    return {
+        mode: '2d',
+        xAxis: { name: 'Yaw', min: AIM_YAWS[0], max: AIM_YAWS[AIM_YAWS.length - 1], smoothing: 0.05 },
+        yAxis: { name: 'Pitch', min: AIM_PITCHES[0], max: AIM_PITCHES[AIM_PITCHES.length - 1], smoothing: 0.05 },
+        weightSmoothing: 0.03,
+        samples: directions.map(d => poseSample(d.ref, d.yaw, d.pitch)),
+    }
+}
+
+/** A blend space the machine plays, and its asset's id. */
+export interface FieldRef { field: AnimationField; fieldId: string }
+/** A pose a state holds: the link, and the pose embedded (resolved). */
+export interface PoseStateRef { poseRef: PoseLink; pose: AnimationPose }
+
+/**
+ * How Steady (`AnimationState.meshSpace`) each hold is: how much of its own chest turn it keeps over the hips. Carried,
+ * the weapon keeps over half the stride's sway and the lean into a run; aimed, it holds nearly still.
+ */
+export const WEAPON_STEADY = { carry: 0.5, aim: 0.85 }
+
+/** A weapon's layers: carrying and aiming it, its aim, and (the pistol) its support hand. */
+export interface WeaponLayerSpec {
+    mask: LeanMask
+    /** The Carry and Sprint poses over the walk (`poseField`). */
+    carry: FieldRef
+    /** The poses themselves: Carry (the support hand's layer holds it) and Aim. */
+    carryPose: PoseStateRef
+    aim: PoseStateRef
+    aimOffset: FieldRef
+    aimMask: LeanMask
+    support?: { mask: LeanMask }
+}
+
 /** The stairs' blend space the machine plays (`stairsField`), its asset id, and which directions it has. */
 export interface StairField {
     field: AnimationField
@@ -317,7 +380,8 @@ export interface StairField {
 export const GAIT_SYNC = 'Gait'
 
 export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField, fieldId: string, speeds: Speeds, lean: LeanMask, timing: MachineTimings,
-    look: { mask: LeanMask; field: AnimationField; fieldId: string }, stairs: StairField | null = null): AnimationStateMachine {
+    look: { mask: LeanMask; field: AnimationField; fieldId: string }, stairs: StairField | null = null,
+    weapons: Record<WeaponKind, WeaponLayerSpec> | null = null): AnimationStateMachine {
     const clip = (name: string) => { const c = clips.get(name); if (!c) throw new Error(`no clip ${name}`); return c }
     const jumpAir = clip('JumpAir'), runAir = clip('JumpRunAir')
     // Air clips play so their touchdown comes a little after the physics one on level ground: the landing
@@ -526,6 +590,16 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
             variable('LookYaw', 'lookYaw', 'number', 'variable'),
             variable('LookPitch', 'lookPitch', 'number', 'variable'),
             variable('LookWeight', 'lookWeight', 'number', 'variable'),
+            ...(weapons ? [
+                variable('PistolWeight', 'pistolWeight', 'number', 'variable'),
+                variable('PistolSupport', 'pistolSupport', 'number', 'variable'),
+                variable('RifleWeight', 'rifleWeight', 'number', 'variable'),
+                variable('PistolAimWeight', 'pistolAimWeight', 'number', 'variable'),
+                variable('RifleAimWeight', 'rifleAimWeight', 'number', 'variable'),
+                variable('Aiming', 'aiming', 'boolean', 'variable'),
+                variable('AimYaw', 'aimYaw', 'number', 'variable'),
+                variable('AimPitch', 'aimPitch', 'number', 'variable'),
+            ] : []),
             variable('Grounded', 'isGrounded', 'boolean', 'builtin'),
             variable('AirTime', 'airTime', 'number', 'builtin'),
             variable('VerticalSpeed', 'verticalSpeed', 'number', 'builtin'),
@@ -551,14 +625,17 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
         events: [],
         // Weight shifting into a change of direction (ALS's lean): an additive tilt of the whole body about the
         // ground under it, masked to the bones it moves, one layer each way, their weights written by SandboxPlayer
-        // from the sideways acceleration.
+        // from the sideways acceleration. Under them the weapons held (their override goes first, so the lean tilts
+        // the weapon with the body), and over them the weapons' aims and the look.
         layers: [
+            ...(weapons ? weaponHolds(weapons) : []),
             ...['Left', 'Right', 'Forward'].map(side => ({
                 name: `Lean ${side}`, blend: 'additive' as const, weightParam: `Lean${side}`,
                 maskId: lean.id, mask: { ...lean.weights },
                 states: [{ name: `Lean ${side}`, clipName: `Lean${side}`, loop: false, speed: 1, isEntry: true, x: 300, y: 200 }],
                 transitions: [],
             })),
+            ...(weapons ? (['pistol', 'rifle'] as const).map(kind => weaponAim(kind, weapons[kind])) : []),
             // ALS's look-at: the trunk and head turned toward where the camera faces, a blend space of look poses
             // added over the pose, at the weight SandboxPlayer writes (up while idle, down while moving).
             {
@@ -569,5 +646,64 @@ export function stateMachine(clips: Map<string, MadeClip>, field: AnimationField
                 transitions: [],
             },
         ],
+    }
+}
+
+const WEAPON_LAYER = { pistol: 'Pistol', rifle: 'Rifle' } as const
+/** The cross-fades into and out of aiming, seconds. */
+export const AIM_BLEND = { in: 0.2, out: 0.25 }
+
+/**
+ * The weapons held: one override layer each, at the weight SandboxPlayer writes (only the weapon in the hands has
+ * any), and the pistol's support hand on its own layer (it lets go at a sprint). Each holds its POSES (Pose assets,
+ * edited in the editor): carried, the Carry and Sprint poses over the walk (`poseField`); aimed, the Aim pose. Steady
+ * keeps the chest the pose's over whatever the legs do (walking, running, on a flight), and the hand IK keeps the
+ * left hand where the pose has it on the weapon whatever the aim layer above does to the right.
+ */
+function weaponHolds(weapons: Record<WeaponKind, WeaponLayerSpec>): AnimationLayer[] {
+    const out: AnimationLayer[] = []
+    const holding = (name: string, ref: PoseStateRef, y: number, steady: number, extra: Partial<AnimationState> = {}): AnimationState => ({
+        name, clipName: '', poseRef: { ...ref.poseRef }, pose: ref.pose, loop: true, speed: 1, ...(steady > 0 ? { meshSpace: steady } : {}), x: 300, y, ...extra,
+    })
+    const aiming = (): AnimationTransition[] => [
+        edge('Carry', 'Aim', all(yes('Aiming')), { blend: AIM_BLEND.in }),
+        edge('Aim', 'Carry', all(no('Aiming')), { blend: AIM_BLEND.out }),
+    ]
+    for (const kind of ['pistol', 'rifle'] as const) {
+        const w = weapons[kind]
+        const states: AnimationState[] = [
+            {
+                name: 'Carry', clipName: '', fieldId: w.carry.fieldId, field: w.carry.field, fieldInputs: { x: 'Direction', y: 'GroundSpeed' },
+                loop: true, speed: 1, meshSpace: WEAPON_STEADY.carry, isEntry: true, x: 300, y: 160,
+            },
+            holding('Aim', w.aim, 320, WEAPON_STEADY.aim),
+        ]
+        out.push({
+            name: WEAPON_LAYER[kind], blend: 'override', weightParam: `${WEAPON_LAYER[kind]}Weight`, maskId: w.mask.id, mask: { ...w.mask.weights },
+            states, transitions: aiming(),
+            // The rifle is held in both hands by this layer: its left hand is kept on it.
+            ...(w.support ? {} : { handIk: { hand: 'left' as const } }),
+        })
+        if (w.support) {
+            // The pistol's support hand: its own layer, holding the same poses (the left arm is all its mask lets
+            // through), so its hand IK measures the left hand on the pistol as those poses have it.
+            out.push({
+                name: 'Pistol Support', blend: 'override', weightParam: 'PistolSupport', maskId: w.support.mask.id, mask: { ...w.support.mask.weights },
+                states: [holding('Carry', w.carryPose, 160, 0, { isEntry: true }), holding('Aim', w.aim, 320, 0)],
+                transitions: aiming(),
+                handIk: { hand: 'left' },
+            })
+        }
+    }
+    return out
+}
+
+/** A weapon's aim: its aim directions added over the hold (each what it changes from Aim), at the weight SandboxPlayer writes. */
+function weaponAim(kind: WeaponKind, w: WeaponLayerSpec): AnimationLayer {
+    return {
+        name: `${WEAPON_LAYER[kind]} Aim`, blend: 'additive', weightParam: `${WEAPON_LAYER[kind]}AimWeight`,
+        maskId: w.aimMask.id, mask: { ...w.aimMask.weights },
+        states: [{ name: 'Aim', clipName: '', fieldId: w.aimOffset.fieldId, field: w.aimOffset.field, fieldInputs: { x: 'AimYaw', y: 'AimPitch' }, loop: true, speed: 0, isEntry: true, x: 300, y: 200 }],
+        transitions: [],
     }
 }

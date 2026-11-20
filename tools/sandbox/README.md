@@ -28,8 +28,10 @@ The files:
   exposure (`EXPOSURE`: a low floor and one compensation curve for the day, the dusk and the night).
 - **`prepare.mjs`** (plain Node, assimp). It reads `build/LocomotionPack/Mannequin.fbx` and builds a skin in metres,
   with a weightless **Pivot** joint above the hips, a welded mesh and its maps at half size. It retargets every
-  other `.fbx` onto that skin, keeping each clip's travel. It writes `build/sandbox_prepared/` (gitignored), and
-  converts only what changed.
+  other `.fbx` onto that skin, keeping each clip's travel, and three holds of Mixamo's Pro Rifle Pack
+  (`build/fps_prepared/pack`, as `tools/fps` unpacked `build/Pro Rifle Pack.zip`: `idle`, `idle aiming` and
+  `sprint forward`, written as `Rifle <name>`). It writes `build/sandbox_prepared/` (gitignored), and converts only
+  what changed.
 - **`clips.ts`**: which file plays what (`ROLES`), and how each kind of clip is conditioned.
   - Locomotion cycles lose only their AVERAGE travel. Pinning the hips instead turns the in-stride surge into foot
     slide.
@@ -77,6 +79,23 @@ The files:
   +1 and down -1, by speed), each sample at `STAIR_RATE` and one tread a step (`stairPaces`, which also gives the
   script its stair speeds). Its Stairs state is in the **Gait** sync group with Locomotion, so they hand over in
   step.
+- **`weapons/`**: the pistol and the rifle.
+  - **`models.ts`** reads `build/low-poly_g40.glb` and `build/low-poly_m4a1.glb` (TastyTony, CC-BY-4.0) at their
+    rest pose into weapon space: the grip at the origin (`gripBox`, `fistY`: read off a side render of each), the bore
+    along +Z, scaled to the real length; and the points the hands and the eye use (support, muzzle, butt, sights).
+  - **`poses.ts`** holds them: the right hand's grip off the rifle pack's aim (one socket per weapon on the right
+    hand), the stances (`stanceSpecs`: carry, aim, sprint), each solved by two-bone IK onto the placed weapon, and
+    the aim poses (`aimPose`: the aim stance turned, the chest taking part, the arms the rest).
+  - **`fx.ts`**: the shots' effects as data: the muzzle flash's and the impact's particle systems (the Firing Line's
+    emitters), the bullet hole's texture (`bulletHolePng`) and the tracer's streak; `build.ts` makes them the
+    `/Weapons/Effects` templates, each with its script, and puts SandboxGun (`examples/scripts/SandboxGun.ts`) on each
+    weapon's grip holder with its handling (`GUN_VARS`).
+  - **`layers.ts`** (`weaponPoses`) turns the stances into POSES: per weapon Carry, Aim and Sprint (the bones they
+    hold and the standing reference's Hips, as deltas from rest), and the 5 x 5 aim directions as variants of Aim
+    (what each changes from it). `build.ts` writes them as the **Pistol Poses** and **Rifle Poses** assets, which the
+    editor's pose mode edits; `machine.ts` holds them: `poseField` (the Carry and Sprint poses over the walk's axes),
+    `aimField` (the aim's directions), the layers at `WEAPON_STEADY` and with hand IK. `--report` prints each
+    stance's hands, butt and wrists, and how near each aim direction's bore is to its aim.
 - **`level.ts`**: the course, and its props (`props()`, `PROP_KINDS`: loose rigid bodies, each resting where it is put; `build.ts` makes every repeated one a template with `templatizeScene`). `build.ts` folds the course's colliders into Static Collision colliders with the engine's
   merge pass, one per collision layer: the course, and inside it the feet's detail (Foot Detail: the stairs' steps and
   the bumps), the ramps the capsule climbs over the stairs (Stair Ramp) and the pillars (See Through, which the

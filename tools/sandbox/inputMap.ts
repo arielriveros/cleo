@@ -1,11 +1,15 @@
-// The Sandbox's input map: the engine's default (Move, Look, Jump, Sprint, Zoom, the UI map, the touch
-// controls), without Fire, plus the actions this example adds: Walk (hold), Interact (press: get into the car by its
-// door, and out of it), Drive (the car's: steer and pedals), and Day, Sunset and Night (1, 2, 3: the Game Manager's
-// light setups). The camera's framing follows the sprint, so no action switches it.
+// The Sandbox's input map: the engine's default (Move, Look, Jump, Sprint, Fire, Zoom, the UI map, the touch
+// controls), plus the actions this example adds: Walk (hold), Interact (press: get into the car by its door, and out
+// of it), Drive (the car's: steer and pedals), Day, Sunset and Night (1, 2, 3: the Game Manager's light setups),
+// Equip (Q: the next weapon, none after the rifle) and Aim (hold the right mouse button). Fire (the left mouse
+// button) shoots the weapon in the hands. The camera's framing follows the sprint and the aim, so no action switches
+// it.
 //
 // On a gamepad: X jumps (and holds the car's hand brake), A runs, the right stick looks at twice the engine default's
-// rate (the mouse keeps its own), and in the car the left stick steers while the right trigger drives and the left
-// one brakes, then reverses. The left stick's up and down do not drive: the triggers do.
+// rate (the mouse keeps its own), the right bumper picks the next weapon, the left trigger aims and the right one
+// fires, and in the car the left stick steers while the right trigger drives and the left one brakes, then reverses
+// (the car's Controller reads Drive; on foot the player reads Aim and Fire). The left stick's up and down do not
+// drive: the triggers do.
 
 import { DEFAULT_INPUT_MAP } from '../../src/input/actionMap'
 import type { InputMap } from '../../src/input/actionMap'
@@ -16,7 +20,6 @@ export const PAD_LOOK_RATE = 2
 export function sandboxInputMap(): InputMap {
     const map: InputMap = JSON.parse(JSON.stringify(DEFAULT_INPUT_MAP))
     const gameplay = map.maps.find(m => m.name === 'Gameplay')!
-    gameplay.actions = gameplay.actions.filter(a => a.name !== 'Fire')
     const action = (name: string) => gameplay.actions.find(a => a.name === name)!
     const padButton = (name: string, button: string) => {
         for (const b of action(name).bindings) if (b.source.device === 'gamepad') (b.source as { button: string }).button = button
@@ -57,6 +60,22 @@ export function sandboxInputMap(): InputMap {
                 { id: 'drive:throttle', source: { device: 'gamepad', button: 'rightTrigger' }, part: 'up', processors: [{ kind: 'deadzone', min: 0.05, max: 0.98 }] },
                 { id: 'drive:brake', source: { device: 'gamepad', button: 'leftTrigger' }, part: 'down', processors: [{ kind: 'deadzone', min: 0.05, max: 0.98 }] },
                 { id: 'drive:stick', source: { device: 'virtual', control: 'moveStick' } },
+            ],
+        } as any,
+        // The weapons (SandboxPlayer): the next one, and aiming it.
+        {
+            name: 'Equip', kind: 'button',
+            bindings: [
+                { id: 'equip:q', source: { device: 'key', code: 'KeyQ' } },
+                { id: 'equip:pad', source: { device: 'gamepad', button: 'rightBumper' } },
+            ],
+        } as any,
+        {
+            name: 'Aim', kind: 'button',
+            bindings: [
+                { id: 'aim:mouse', source: { device: 'mouse', button: 'right' } },
+                // An analog trigger reads 0..1: pressed past the action's press point.
+                { id: 'aim:pad', source: { device: 'gamepad', button: 'leftTrigger' } },
             ],
         } as any,
         // The Game Manager's light setups (SandboxGameManager): 1 day, 2 sunset, 3 night.

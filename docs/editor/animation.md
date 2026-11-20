@@ -254,6 +254,7 @@ between two states, with its conditions.
 | **Hold** (the planted-feet icon beside **lock**) | Base layer only. While this state plays, the Character it animates stops steering: no speed, no turning; gravity is kept. Only the clip's [root motion](#root-motion) moves it. For a clip that must not travel with the speed it came in with or with the stick, a hard landing say. Its way out should wait on the input (**MoveInput**), not on speed, which is 0 meanwhile. |
 | **Group** | The [group](#state-groups) it is in, when the layer has any. The group's own transitions leave from this state too, after its own. |
 | **Sync** | Its [sync group](#sync-groups): a name it shares with the states it should hand over to in step. Pick one the animator already has, or type a new one. Not the same as **Group**. |
+| **Steady** | On an override layer: how much the state's pose keeps its own turn in model space at the top of the layer's mask (the spine of an upper-body mask), whatever the hips beneath it do. `0` (the default) rides the hips and sways with the walk; `1` holds still. See [Steady holds](#steady-holds). |
 | **Links** | The states this one connects to, and which way (→ out, ← in, ⇄ both). Drag from the state's right handle in the graph to add one. |
 
 **A selected group:**
@@ -347,9 +348,10 @@ the layer's name. It holds that layer's own settings:
 | Field | Meaning |
 |---|---|
 | **Name** | What scripts address it by. ✕ deletes the layer and its states. |
-| **Blend** | **Override** replaces the pose beneath, by weight × mask. **Additive** adds the clip's motion *relative to its own first frame* on top — breathing, recoil, a flinch. |
+| **Blend** | **Override** replaces the pose beneath, by weight × mask. **Additive** adds the clip's motion *relative to its own first frame* on top — breathing, recoil, a flinch. A pose adds what it changes from its base pose (a [variant](#variants)), or from rest. |
 | **Weight** | `0`–`1` from the slider, or **param…** to read it from a parameter every frame. |
 | **Mask** | A [bone mask](#bone-masks), or **Whole body**. |
+| **Hand IK** | **Left** or **Right**: after every layer, that hand reaches where this layer's own pose has it relative to the other hand, so a weapon held in the other hand keeps both hands on it whatever the layers above do to that hand (an aim, recoil). **Reach** is how firmly, `0`–`1` or from a parameter (`0` lets go: a sprint). **Socket**: reach a socket on the other hand instead. |
 
 Three rules worth knowing:
 
@@ -361,6 +363,17 @@ Three rules worth knowing:
 - **A deleted mask switches its layer off**, rather than letting it cover the whole body.
 - **A trigger reaches every layer.** Triggers are lowered once the base and every layer have
   evaluated, so a `Died` that sends the base to Dead also takes a layer out of what it was playing.
+
+### Steady holds
+
+An upper-body layer that holds a pose rides the hips: as the walk sways and twists the pelvis, a held
+rifle swings with it. **Steady** (a state's setting, on an override layer) keeps the top of the layer's
+mask turned the way the pose itself has it in model space. At `1` the chest holds the pose's turn
+whatever the legs do (walking, running, on a flight of stairs); at `0.5` it keeps half the hips' turn.
+Everything further down the mask rides in local space, so both hands stay on what they hold, and layers
+above (a lean) still tilt it. One held pose then replaces a per-gait upper-body clip. Steady eases over
+the transition into the state, and does nothing on an additive layer or a whole-body one (it has no top).
+The pose's own hips are what it measures by, so capture a hold with the hips as the character stands.
 
 ### One-shots as an Actions layer
 
@@ -400,21 +413,46 @@ using the mask without saving the animator again.
 ## Poses
 
 A **pose asset** (`.pose`) holds named static poses of one skeleton, each a set of per-bone changes
-from rest — a hand grip, a pointing finger, an injured stance. It is Unreal's Pose Asset.
-
-**Authoring.** Poses are made in [Cleo Creator ▸ Motion](../creator/motion.md#poses). Each pose saved
-there reaches every project's `/Creator/Poses` folder as a pose asset on its skeleton's rig, and follows
-every change made in the Creator. Its ids never change, so a state holding it keeps holding it.
-
-**Previewing.** Press **◉** on a pose row in the Skeleton part to show it on the preview character.
-Press it again, or **Clear pose preview**, to let the clip drive the bones again.
-
-**Managing.** The Skeleton part's **Poses** section lists the rig's pose assets. A pose asset from the
-Creator is read-only there; an older one of the project's own can be renamed or deleted, and so can
-its poses. States refer to a pose by id, so a rename breaks nothing.
+from rest — a hand grip, a weapon hold, an aim, an injured stance. It is Unreal's Pose Asset.
 
 **Using.** A state holds a pose: set **Plays** to **Pose** and pick it. On a masked layer, that is a
-hand closing around a weapon while the rest of the body keeps moving.
+hand closing around a weapon while the rest of the body keeps moving. A [blend space](#blend-spaces)
+sample can hold a pose too.
+
+### Editing a pose
+
+Poses are edited on the character, in the **Poses** section of the Skeleton part (the pose by itself)
+and of the Animator part (with the character's layers on):
+
+1. Press the pencil on a pose to edit it.
+2. Click a joint on the character, and turn it: with the rotate gizmo, or the **X Y Z** numbers
+   (degrees off rest, or off the base for a variant, in the parent bone's frame). **Reset** puts the
+   bone back.
+3. Every animator and blend space holding the pose follows at once. Each gizmo drag and each number
+   is one undo step.
+
+In the Animator part, **Show: Layered** keeps the character's machine running with every layer while
+you edit (turn on **Preview › simulate**): a weapon hold edited under its aim, its Steady and its hand
+IK, as the game shows it. **Pose alone** pins the pose by itself, as the Skeleton part always does.
+For a pose a blend space holds, the crosshair beside it puts the blend space's probe on that sample.
+
+**New pose** captures the character as it stands now (every bone off its rest) into the skeleton's own
+pose asset. ✕ deletes a pose; its variants then hold what they change from rest.
+
+### Variants
+
+A **variant** of a pose stores only what it changes from it: **Add variant** (the branch icon) makes
+one, listed under its base. Editing the base moves every variant with it; editing a variant changes only
+that one. On an **additive** layer a variant adds what it changes from its base, so a blend space of an
+aim pose's variants is an aim offset: edit the aim pose, and every direction follows; edit one direction,
+and only it changes. **Make independent** (the broken link) turns a variant into a pose of its own, as it
+looks now.
+
+**Poses from Cleo Creator.** Poses made in [Cleo Creator ▸ Motion](../creator/motion.md#poses) reach
+every project's `/Creator/Poses` folder as pose assets on their skeleton's rig, following every change
+made there. They are read-only in the editor (the next sync would undo an edit): show one with its icon,
+and a variant of one goes into the skeleton's own pose asset. States refer to a pose by id, so a rename
+breaks nothing.
 
 > Older projects stored poses on the rig itself. Those keep working, and the Poses section offers
 > **Move into a pose asset**, which keeps every pose id so no clip referencing one breaks.
@@ -517,7 +555,11 @@ Settings** (right) has three sections:
   applies at runtime only: the preview always tracks the probe exactly, so placing samples stays
   direct.
 - **Samples** — each sample's clip, coordinates, **rate** and **phase**, with its live weight at the
-  probe. Double-click the plot to drop a clip; **+ Sample** adds one here.
+  probe. Double-click the plot to drop a clip; **+ Sample** adds one here. A sample can hold a **pose**
+  instead (the list's **Poses**, variants under their base): a pose is held, with no rate or phase, and a
+  clip in the same blend space alone sets its cycle. The same pose at many points is one pose (a carry
+  held at every walking speed, a sprint pose at the sprint's). A blend space of a pose's
+  [variants](#variants) on an additive layer is an aim offset that follows every edit to the pose.
 
 ### Authoring one
 

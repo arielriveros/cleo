@@ -14,6 +14,10 @@ import { TEST_PHYSICS } from './helpers/testPhysics';
 import { PhysicsBody } from '../src/physics/physicsBody';
 import { ALL_LAYERS, LAYER, layerByName } from '../src/physics/collisionLayers';
 import { MaterialBinder } from '../src/graphics/render/materialBinder';
+import { fieldWeights, poseSampleKey } from '../src/animation/animationField';
+import { resolveTablePose } from '../src/animation/animationPose';
+import { reembedPoses } from '../applications/editor/src/utils/animationControllers';
+import { registerTemplates, clearTemplates } from '../src/core/scene/templates';
 
 // The Sandbox example: a mannequin with ALS-style locomotion built from the engine's own tools (tools/sandbox).
 // Almost everything that can go wrong with it is silent: a parameter bound to a field that does not exist reads
@@ -38,6 +42,8 @@ const withoutModels = (n: any): any => ({
 const FRAME = 1 / 60;
 /** A spot with open ground 15 m round it. */
 const OPEN: [number, number, number] = [32, 0.02, -30];
+/** The most an aimed rifle's chest turns over a walk's stride, degrees (Steady holds it near still). */
+const CHEST_SWAY_AIMED = 4;
 const DEG = 180 / Math.PI;
 const wrap = (a: number) => ((a + 180) % 360 + 360) % 360 - 180;
 
@@ -52,6 +58,8 @@ afterEach(() => {
 });
 
 const lf = (s: string) => s.replace(/\r\n/g, '\n');
+/** Every node of a running scene, depth first. */
+const allSceneNodes = (scene: any): any[] => { const out: any[] = []; const walk = (n: any) => { out.push(n); for (const c of n.children) walk(c); }; walk(scene.root); return out; };
 
 describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, () => {
     const sceneFile = () => read('scenes', `${read('manifest.json').mainSceneId}.json`);
@@ -73,11 +81,12 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const player = collider.children[0];
         expect(player.type).toBe('character');
         const types = player.children.map((c: any) => c.type);
-        expect(types).toEqual(['cameraRig', 'model', 'controller']);
+        expect(types).toEqual(['cameraRig', 'model', 'node', 'controller']);
+        expect(player.children[2].name).toBe('Weapons');
         const [camera] = player.children;
         expect(camera.name).toBe('Camera Rig');
         expect(camera.children[0].active).toBe(true);
-        const controller = player.children[2];
+        const controller = player.children[3];
         expect(controller.possessedId).toBe(player.id);
         expect(controller.aimSource).toBe('node');
         expect(controller.aimSourceId).toBe(camera.id);
@@ -534,9 +543,15 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             if (s.field) for (const sample of s.field.samples) expect(clipNames.has(sample.clipName), sample.clipName).toBe(true);
             else expect(clipNames.has(s.clipName), `${s.name}: ${s.clipName}`).toBe(true);
         }
-        // The layers' blend spaces (the Look layer's) play clips the skeleton owns too.
+        // The layers' blend spaces (the Look layer's) play clips the skeleton owns too; a pose sample or state holds a
+        // pose of the project's (the weapons'), embedded.
+        const poseIds = new Set(library('poseAssets').flatMap((a: any) => a.poses.map((p: any) => p.id)));
         for (const l of sm.layers) for (const s of l.states) {
-            if (s.field) for (const sample of s.field.samples) expect(clipNames.has(sample.clipName), `${l.name}: ${sample.clipName}`).toBe(true);
+            if (s.field) for (const sample of s.field.samples) {
+                if (sample.poseRef) expect(poseIds.has(sample.poseRef.poseId) && !!s.field.poses[sample.clipName], `${l.name}: ${sample.clipName}`).toBe(true);
+                else expect(clipNames.has(sample.clipName), `${l.name}: ${sample.clipName}`).toBe(true);
+            }
+            else if (s.poseRef) expect(poseIds.has(s.poseRef.poseId) && !!s.pose, `${l.name}: ${s.name}`).toBe(true);
             else expect(clipNames.has(s.clipName), `${l.name}: ${s.clipName}`).toBe(true);
         }
         const field = sm.states.find((s: any) => s.name === 'Locomotion').field;
@@ -1047,8 +1062,9 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
 
     it('leans through three additive layers masked to the bones a whole-body lean moves', () => {
         expect(machine().layers.map((l: any) => [l.name, l.blend, l.weightParam])).toEqual([
+            ['Pistol', 'override', 'PistolWeight'], ['Pistol Support', 'override', 'PistolSupport'], ['Rifle', 'override', 'RifleWeight'],
             ['Lean Left', 'additive', 'LeanLeft'], ['Lean Right', 'additive', 'LeanRight'], ['Lean Forward', 'additive', 'LeanForward'],
-            ['Look', 'additive', 'LookWeight']]);
+            ['Pistol Aim', 'additive', 'PistolAimWeight'], ['Rifle Aim', 'additive', 'RifleAimWeight'], ['Look', 'additive', 'LookWeight']]);
         const layers = machine().layers.filter((l: any) => /^Lean/.test(l.name));
         const mask = library('boneMasks').find((m: any) => m.name === 'Lean');
         expect(Object.keys(mask.weights).map(n => n.replace(/^.*:/, '')).sort()).toEqual(
@@ -1372,7 +1388,9 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const instance = named('Player Collider');
         expect(instance.variables.__templateId.value).toBe(template.id);
         const inside = allNodes(template.nodeJson);
-        expect(inside.map((n: any) => n.type)).toEqual(['collider', 'character', 'cameraRig', 'camera', 'model', 'controller']);
+        // The weapons: Weapons, then each grip holder, its model instance (a node with the mesh under it) and its Muzzle.
+        const weapon = ['node', 'node', 'model', 'node'];
+        expect(inside.map((n: any) => n.type)).toEqual(['collider', 'character', 'cameraRig', 'camera', 'model', 'node', ...weapon, ...weapon, 'controller']);
         // The instance holds just what the template holds, and references inside it point inside it.
         expect(allNodes(instance).map((n: any) => n.type)).toEqual(inside.map((n: any) => n.type));
         const ids = new Set(inside.map((n: any) => n.id));
@@ -1382,7 +1400,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             .filter((v: any) => v.attribute && !v.hidden && v.access === 'public').map((v: any) => v.name).sort();
         expect(publics('SandboxPlayer')).toEqual(['backDiagonalScale', 'backScale', 'enterTrigger', 'exitTrigger', 'runFootSpeed', 'runFootWeight', 'runTurnSpeed', 'sprintTakeoff',
             'stairDownRunSpeed', 'stairDownWalkSpeed', 'stairUpRunSpeed', 'stairUpWalkSpeed', 'stairsLayer', 'turnDelay', 'walkBackDiagonalScale', 'walkFootSpeed', 'walkScale']);
-        expect(publics('SandboxCamera')).toEqual(['pivotHeight', 'shoulderArm', 'shoulderOffset', 'thirdPersonArm']);
+        expect(publics('SandboxCamera')).toEqual(['aimArm', 'aimShoulderOffset', 'pivotHeight', 'shoulderArm', 'shoulderOffset', 'thirdPersonArm']);
         expect(inside.find((n: any) => n.type === 'character').script).toBe(named('Player').script);
         expect(inside.find((n: any) => n.type === 'cameraRig').script).toBe(named('Camera Rig').script);
     });
@@ -1553,6 +1571,534 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(lift(), 'looks down').toBeLessThan(-0.3);
     });
 
+    // ----- the weapons ------------------------------------------------------------------------------
+
+    /** A joint's model matrix (the joints are unit scale), as posed this frame. */
+    const jointMatrix = (p: ReturnType<typeof play>, base: string) => {
+        const names = new Map<number, string>(rig().skin.nodeNames);
+        const j = rig().skin.joints.findIndex((x: any) => (names.get(x.nodeIndex) ?? '').endsWith(':' + base));
+        const bind = mat4.invert(mat4.create(), rig().skin.joints[j].inverseBindMatrix as unknown as mat4)!;
+        return mat4.multiply(mat4.create(), p.animator.getFinalBoneMatrices()[j] as mat4, bind);
+    };
+    /** A weapon's frame in model space, as the hand holds it: the right hand's joint and its grip socket's offset. */
+    const weaponFrame = (p: ReturnType<typeof play>, socket: string) => {
+        const sk = rig().skin.sockets.find((x: any) => x.name === socket);
+        return mat4.multiply(mat4.create(), jointMatrix(p, 'RightHand'), mat4.fromRotationTranslation(mat4.create(), sk.offset.r, sk.offset.t));
+    };
+    /** Where the left hand's joint is in a weapon's frame: the support hand on it. */
+    const leftOnWeapon = (p: ReturnType<typeof play>, socket: string) =>
+        vec3.transformMat4(vec3.create(), mat4.getTranslation(vec3.create(), jointMatrix(p, 'LeftHand')), mat4.invert(mat4.create(), weaponFrame(p, socket))!);
+    /** Take out `weapon` (1 the pistol, 2 the rifle): tap Equip until it is up. */
+    const equip = (p: ReturnType<typeof play>, weapon: number) => {
+        for (let k = 0; k < 3 && p.player.weapon !== weapon; k++) { input.tap('Equip'); p.run(0.7); }
+        expect(p.player.weapon).toBe(weapon);
+    };
+
+    it('holds a pistol and a rifle by grip sockets on the right hand, each with its model and muzzle', () => {
+        const stored = rig().skin;
+        expect(stored.sockets.map((x: any) => [x.name, x.bone.replace(/^.*:/, '')])).toEqual([['Pistol Grip', 'RightHand'], ['Rifle Grip', 'RightHand']]);
+        expect(rig().sockets.map((x: any) => x.name)).toEqual(['Pistol Grip', 'Rifle Grip']);
+        const weapons = named('Weapons');
+        for (const [holder, model, length] of [['Pistol Grip', 'Pistol', 0.241], ['Rifle Grip', 'Rifle', 0.838]] as const) {
+            const h = weapons.children.find((c: any) => c.name === holder);
+            expect(h.socketAttachment).toEqual({ target: 'parent', socket: holder });
+            expect(h.children.map((c: any) => c.name)).toEqual([model, 'Muzzle']);
+            const asset = library('models').find((m: any) => m.name === model);
+            expect(h.children[0].variables.__modelId.value).toBe(asset.id);
+            // In weapon space, the grip at the origin and the bore along +Z: the muzzle straight ahead of it.
+            const muzzle = h.children[1].position;
+            expect(Math.abs(muzzle[0])).toBeLessThan(0.005);
+            expect(muzzle[2]).toBeGreaterThan(length * 0.6);
+            expect(muzzle[2]).toBeLessThan(length);
+        }
+        // Credited.
+        expect(JSON.parse(readFileSync(join(PROJECT, 'example.json'), 'utf8')).description).toMatch(/TastyTony \(CC-BY-4\.0\)/);
+    });
+
+    it('takes out the pistol, then the rifle, then puts it away, a tap of Equip each', () => {
+        const p = play(OPEN);
+        p.run(0.5);
+        const shown = () => ['Pistol Grip', 'Rifle Grip'].map(n => (p.scene.findNode(n) as Node).visible);
+        expect(p.player.weapon).toBe(0);
+        expect(shown()).toEqual([false, false]);
+        input.tap('Equip');
+        p.run(0.7);
+        expect(p.player.weapon).toBe(1);
+        expect(p.player.pistolWeight).toBe(1);
+        expect(p.player.pistolSupport).toBeCloseTo(1, 3);
+        expect(shown()).toEqual([true, false]);
+        expect(p.animator.layerStateName('Pistol')).toBe('Carry');
+        input.tap('Equip');
+        p.run(0.9);
+        expect(p.player.weapon).toBe(2);
+        expect([p.player.pistolWeight, p.player.rifleWeight]).toEqual([0, 1]);
+        expect(shown()).toEqual([false, true]);
+        input.tap('Equip');
+        p.run(0.7);
+        expect(p.player.weapon).toBe(0);
+        expect([p.player.pistolWeight, p.player.rifleWeight]).toEqual([0, 0]);
+        expect(shown()).toEqual([false, false]);
+    });
+
+    it('holds its weapons’ poses: the carry over the walk’s axes, the aim’s directions variants of Aim', () => {
+        const poseAssets = library('poseAssets');
+        const fields = new Map(library('animationFields').map((f: any) => [f.name, f]));
+        const walk = fields.get('Locomotion');
+        for (const W of ['Pistol', 'Rifle']) {
+            const asset = poseAssets.find((a: any) => a.name === `${W} Poses`);
+            expect(asset, W).toBeTruthy();
+            const byName = new Map<string, any>(asset.poses.map((p: any) => [p.name, p]));
+            const aim = byName.get('Aim');
+            for (const name of ['Carry', 'Aim', 'Sprint']) expect(byName.get(name).baseRef, name).toBeUndefined();
+            // The aim's 25 directions, each a variant of Aim: what it changes from it, a few bones.
+            const directions = asset.poses.filter((p: any) => p.baseRef);
+            expect(directions.length).toBe(25);
+            for (const d of directions) {
+                expect(d.baseRef).toEqual({ assetId: asset.id, poseId: aim.id });
+                expect(d.bones.length).toBeLessThan(aim.bones.length);
+            }
+            // Each hold covers its layer's mask, and has the Hips: what Steady measures the chest by.
+            const mask = machine().layers.find((l: any) => l.name === W).mask;
+            for (const name of ['Carry', 'Aim', 'Sprint']) {
+                const bones = new Set(byName.get(name).bones.map((b: any) => b.name));
+                for (const b of Object.keys(mask)) expect(bones.has(b), `${W} ${name}: ${b}`).toBe(true);
+                expect([...bones].some(b => (b as string).endsWith(':Hips')), `${W} ${name}: Hips`).toBe(true);
+            }
+            // The carry: Carry wherever the walk plays a clip, Sprint where it sprints (so the weapon goes down as the
+            // legs speed up), and Carry standing.
+            const carry = fields.get(`${W} Carry`);
+            const moving = carry.samples.slice(0, walk.samples.length);
+            expect(moving.map((s: any) => [s.x, s.y])).toEqual(walk.samples.map((s: any) => [s.x, s.y]));
+            moving.forEach((s: any, k: number) => expect(s.poseRef.poseId).toBe(byName.get(walk.samples[k].clipName === 'SprintF' ? 'Sprint' : 'Carry').id));
+            for (const s of carry.samples.slice(walk.samples.length)) expect([s.y, s.poseRef.poseId]).toEqual([0, byName.get('Carry').id]);
+            // The aim's: every direction, at its yaw and pitch.
+            const offset = fields.get(`${W} Aim Offset`);
+            expect(offset.samples.map((s: any) => s.poseRef.poseId).sort()).toEqual(directions.map((d: any) => d.id).sort());
+        }
+        // The layers: Carry (that blend space) and Aim (the pose), Steady, the aim steadier; the rifle's left hand, and
+        // the pistol's support layer, held on by hand IK. Each pose is embedded once.
+        const layers = new Map<string, any>(machine().layers.map((l: any) => [l.name, l]));
+        for (const W of ['Pistol', 'Rifle']) {
+            const l = layers.get(W);
+            const carry = l.states.find((s: any) => s.name === 'Carry'), aim = l.states.find((s: any) => s.name === 'Aim');
+            expect(Object.keys(carry.field.poses).length).toBe(2);
+            expect(carry.field.samples.every((s: any) => !s.pose)).toBe(true);
+            expect(carry.meshSpace).toBeGreaterThan(0);
+            expect(aim.pose.bones.length).toBeGreaterThan(20);
+            expect(aim.meshSpace).toBeGreaterThan(carry.meshSpace);
+            expect(l.states.some((s: any) => s.syncGroup)).toBe(false);
+        }
+        expect(layers.get('Rifle').handIk).toEqual({ hand: 'left' });
+        expect(layers.get('Pistol Support').handIk).toEqual({ hand: 'left' });
+        expect(layers.get('Pistol').handIk).toBeUndefined();
+        // No clip of their own any more: the weapons are poses.
+        expect(library('animations').some((a: any) => /^(Pistol|Rifle) /.test(a.name))).toBe(false);
+    });
+
+    it('follows an edit to a pose: Aim moves every aim direction with it, a direction moves only itself', () => {
+        const poseAssets = library('poseAssets');
+        const rifle = poseAssets.find((a: any) => a.name === 'Rifle Poses');
+        const aim = rifle.poses.find((p: any) => p.name === 'Aim');
+        const up = rifle.poses.find((p: any) => p.name === 'Aim Up 30');
+        const sm = machine();
+        const offset = (m: any) => m.layers.find((l: any) => l.name === 'Rifle Aim').states[0].field;
+        const chestOf = (bones: any[]) => bones.find((b: any) => b.name.endsWith(':Spine2')).rotation;
+        const directionChest = (m: any, poseId: string) => chestOf(resolveTablePose(offset(m).poses[poseSampleKey(poseId)], offset(m).poses).bones);
+        const heldChest = (m: any) => chestOf(m.layers.find((l: any) => l.name === 'Rifle').states.find((s: any) => s.name === 'Aim').pose.bones);
+        const degrees = (a: number[], b: number[]) => 2 * Math.acos(Math.min(1, Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]))) * DEG;
+        const nudge = quat.setAxisAngle(quat.create(), [0, 1, 0], 10 / DEG);
+
+        // Turn Aim's chest 10 degrees more.
+        const turned = JSON.parse(JSON.stringify(poseAssets));
+        const chest = turned.find((a: any) => a.id === rifle.id).poses.find((p: any) => p.id === aim.id).bones.find((b: any) => b.name.endsWith(':Spine2'));
+        chest.rotation = Array.from(quat.normalize(quat.create(), quat.multiply(quat.create(), nudge, chest.rotation)));
+        const next = reembedPoses(sm, turned)!;
+        expect(next).toBeTruthy();
+        // The hold's Aim holds it, and every direction's chest turned by the same 10 degrees, each still what it was
+        // relative to Aim.
+        expect(degrees(heldChest(next), heldChest(sm))).toBeCloseTo(10, 2);
+        for (const d of rifle.poses.filter((p: any) => p.baseRef)) {
+            expect(degrees(directionChest(next, d.id), directionChest(sm, d.id)), d.name).toBeCloseTo(10, 2);
+            expect(offset(next).poses[poseSampleKey(d.id)]).toEqual(offset(sm).poses[poseSampleKey(d.id)]);
+        }
+
+        // Turn one direction instead: only its entry changes, and the hold not at all.
+        const one = JSON.parse(JSON.stringify(poseAssets));
+        const u = one.find((a: any) => a.id === rifle.id).poses.find((p: any) => p.id === up.id);
+        u.bones = [...u.bones.filter((b: any) => !b.name.endsWith(':Head')), { name: chest.name.replace('Spine2', 'Head'), rotation: Array.from(nudge) }];
+        const only = reembedPoses(sm, one)!;
+        const changed = Object.keys(offset(sm).poses).filter(k => JSON.stringify(offset(sm).poses[k]) !== JSON.stringify(offset(only).poses[k]));
+        expect(changed).toEqual([poseSampleKey(up.id)]);
+        expect(heldChest(only)).toEqual(heldChest(sm));
+
+        // And a character playing it shows the edit at once, mid-aim, without restarting anything.
+        const p = play(OPEN);
+        p.run(0.5);
+        equip(p, 2);
+        input.press('Aim');
+        p.run(0.8);
+        const model = (p.scene.findNode('Mannequin') as any);
+        const bore = () => {
+            const m = mat4.multiply(mat4.create(), model.worldTransform as mat4, weaponFrame(p, 'Rifle Grip'));
+            return vec3.normalize(vec3.create(), vec3.sub(vec3.create(), vec3.transformMat4(vec3.create(), [0, 0, 1], m), mat4.getTranslation(vec3.create(), m)));
+        };
+        const before = bore();
+        expect(p.animator.updateStateMachine(next)).toBe(true);
+        expect(p.animator.layerStateName('Rifle')).toBe('Aim');
+        p.run(0.05);
+        expect(Math.acos(Math.min(1, vec3.dot(before, bore()))) * DEG).toBeGreaterThan(5);
+        input.release('Aim');
+    });
+
+    it('keeps an aimed rifle’s chest steady over the stride, where carried it sways with it', () => {
+        const p = play(OPEN);
+        p.run(0.5);
+        equip(p, 2);
+        const chest = () => { const r = quat.create(); mat4.getRotation(r, jointMatrix(p, 'Spine2')); return quat.normalize(r, r); };
+        const spread = () => {
+            const turns: quat[] = [];
+            p.run(1.2, () => turns.push(chest()));
+            let worst = 0;
+            for (const a of turns) for (const b of turns) worst = Math.max(worst, 2 * Math.acos(Math.min(1, Math.abs(quat.dot(a, b)))) * DEG);
+            return worst;
+        };
+        input.setMove(0, 1);
+        p.run(1.2);
+        const carried = spread();
+        input.press('Aim');
+        p.run(1.2);
+        const aimed = spread();
+        input.release('Aim'); input.setMove(0, 0);
+        console.log(`chest sway over the stride: carried ${carried.toFixed(1)}, aimed ${aimed.toFixed(1)} degrees`);
+        expect(aimed).toBeLessThan(CHEST_SWAY_AIMED);
+        expect(carried).toBeGreaterThan(aimed);
+    });
+
+    it('keeps both hands on the weapon standing, walking, jogging and sprinting', () => {
+        for (const [weapon, socket, gaits] of [[2, 'Rifle Grip', ['walk', 'jog', 'sprint']], [1, 'Pistol Grip', ['walk', 'jog']]] as const) {
+            const p = play(OPEN);
+            p.run(0.5);
+            equip(p, weapon);
+            p.run(0.5);
+            const rest = leftOnWeapon(p, socket);
+            if (weapon === 2) {
+                // On the handguard: ahead of the grip, under the bore.
+                expect(rest[2], 'ahead of the grip').toBeGreaterThan(0.1);
+                expect(Math.abs(rest[0]), 'under it').toBeLessThan(0.15);
+            } else expect(vec3.length(rest), 'round the grip (the wrist joint, a hand back from the fist)').toBeLessThan(0.15);
+            for (const gait of gaits) {
+                if (gait === 'walk') input.press('Walk'); else input.release('Walk');
+                if (gait === 'sprint') input.press('Sprint'); else input.release('Sprint');
+                input.setMove(0, 1);
+                p.run(1.2);
+                let worst = 0;
+                p.run(1.2, () => { worst = Math.max(worst, vec3.distance(leftOnWeapon(p, socket), rest)); });
+                expect(worst, `${socket} ${gait}: the left hand strays ${(worst * 100).toFixed(1)} cm off the weapon`).toBeLessThan(0.02);
+            }
+            input.release('Walk'); input.release('Sprint'); input.setMove(0, 0);
+        }
+    });
+
+    it('keeps the rifle in both hands, aimed, up a flight of stairs and turning on the spot', () => {
+        // One held pose over the climb: Steady keeps the chest the pose's whatever the hips do on the steps, and the
+        // hand IK keeps the left hand where the pose has it.
+        const f = FLIGHTS[1];
+        const p = play([f.x, 0.02, STAIRS_Z - 3]);
+        p.run(0.5);
+        equip(p, 2);
+        input.press('Aim');
+        p.run(0.8);
+        const rest = leftOnWeapon(p, 'Rifle Grip');
+        let worst = 0, climbed = 0;
+        input.setMove(0, 1);
+        p.run(5, () => {
+            worst = Math.max(worst, vec3.distance(leftOnWeapon(p, 'Rifle Grip'), rest));
+            if (p.animator.currentStateName === 'Stairs') climbed++;
+        });
+        input.setMove(0, 0);
+        expect(climbed, 'it climbed').toBeGreaterThan(30);
+        expect(worst, `the left hand strays ${(worst * 100).toFixed(1)} cm off the rifle on the flight`).toBeLessThan(0.02);
+        // Turning in place (the camera swung round while aimed): the body turns under the hold.
+        const start = p.yawOf(p.player);
+        worst = 0;
+        p.rigs[0].setOrbit(start + 90, 0);
+        p.run(1.5, () => { worst = Math.max(worst, vec3.distance(leftOnWeapon(p, 'Rifle Grip'), rest)); });
+        expect(worst, `the left hand strays ${(worst * 100).toFixed(1)} cm off the rifle turning`).toBeLessThan(0.02);
+        input.release('Aim');
+    });
+
+    it('holds each weapon with natural arms: wrists nearly straight, elbows below the shoulders', () => {
+        // The grips were once read off the wrong line through the rifle pack's hand: every hold then twisted the hands
+        // to make up for it, the wrists bent 90 to 130 degrees and the elbows splayed up and out.
+        const at = (p: ReturnType<typeof play>, base: string) => mat4.getTranslation(vec3.create(), jointMatrix(p, base));
+        /** Degrees between the forearm and the hand (wrist to the middle finger's base). */
+        const bend = (p: ReturnType<typeof play>, side: string) => {
+            const e = at(p, side + 'ForeArm'), w = at(p, side + 'Hand'), m = at(p, side + 'HandMiddle1');
+            const f = vec3.normalize(vec3.create(), vec3.sub(vec3.create(), w, e)), h = vec3.normalize(vec3.create(), vec3.sub(vec3.create(), m, w));
+            return Math.acos(Math.min(1, vec3.dot(f, h))) * DEG;
+        };
+        for (const weapon of [1, 2]) {
+            const p = play(OPEN);
+            p.run(0.5);
+            equip(p, weapon);
+            for (const [aim, move] of [[false, 0], [true, 0], [false, 1], [true, 1]] as const) {
+                if (aim) input.press('Aim'); else input.release('Aim');
+                input.setMove(0, move);
+                p.run(1);
+                let worst = 0, high = -1;
+                p.run(0.6, () => {
+                    for (const side of ['Right', 'Left']) {
+                        worst = Math.max(worst, bend(p, side));
+                        high = Math.max(high, at(p, side + 'ForeArm')[1] - at(p, side + 'Arm')[1]);
+                    }
+                });
+                const what = `weapon ${weapon}${aim ? ' aimed' : ''}${move ? ' jogging' : ''}`;
+                expect(worst, `${what}: a wrist bends ${worst.toFixed(0)} degrees`).toBeLessThan(40);
+                expect(high, `${what}: an elbow ${(high * 100).toFixed(0)} cm above its shoulder`).toBeLessThan(0.02);
+            }
+            input.release('Aim'); input.setMove(0, 0);
+        }
+    });
+
+    it('aims where the camera looks, standing and walking', () => {
+        for (const [weapon, socket] of [[2, 'Rifle Grip'], [1, 'Pistol Grip']] as const) {
+            const p = play(OPEN);
+            p.run(0.5);
+            equip(p, weapon);
+            input.press('Aim');
+            p.run(0.5);
+            expect(p.player.aiming).toBe(true);
+            expect(p.animator.layerStateName(weapon === 2 ? 'Rifle' : 'Pistol')).toBe('Aim');
+            const model = p.scene.findNode('Mannequin') as Node;
+            /** Degrees between the bore and the camera's aim. */
+            const off = () => {
+                const m = mat4.multiply(mat4.create(), model.worldTransform as mat4, weaponFrame(p, socket));
+                const bore = vec3.sub(vec3.create(), vec3.transformMat4(vec3.create(), [0, 0, 1], m), mat4.getTranslation(vec3.create(), m));
+                vec3.normalize(bore, bore);
+                const yaw = p.rigs[0].yaw / DEG, pitch = p.rigs[0].pitch / DEG;
+                const aim = [Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)];
+                return Math.acos(Math.min(1, vec3.dot(bore, aim as any))) * DEG;
+            };
+            const start = p.yawOf(p.player);
+            for (const [move, limit] of [[0, 4], [1, 6]] as const) {
+                input.setMove(0, move);
+                for (const [yaw, pitch] of [[0, 0], [0, -35], [0, 30], [25, 10], [-25, -15], [40, 0]]) {
+                    p.rigs[0].setOrbit(start + yaw, pitch);
+                    p.run(0.8);
+                    let worst = 0;
+                    p.run(0.4, () => { worst = Math.max(worst, off()); });
+                    expect(worst, `weapon ${weapon} ${move ? 'walking' : 'standing'} at ${yaw}, ${pitch}: the bore ${worst.toFixed(1)} degrees off the aim`).toBeLessThan(limit);
+                }
+                input.setMove(0, 0);
+            }
+            // Aiming faces the camera, and the camera comes in over the shoulder.
+            expect(Math.abs(wrap(p.yawOf(p.player) - p.rigs[0].yaw))).toBeLessThan(20);
+            const aimArm = library('scripts').find(x => x.name === 'SandboxCamera').variables.find((v: any) => v.name === 'aimArm').default;
+            expect(p.rigs[0].armLength).toBeCloseTo(aimArm, 2);
+            input.release('Aim');
+            p.run(0.5);
+            expect(p.player.aiming).toBe(false);
+            expect(p.player.rifleAimWeight + p.player.pistolAimWeight).toBe(0);
+        }
+    });
+
+    it('lowers the weapon to sprint, and lets go of the pistol with the support hand', () => {
+        const p = play(OPEN);
+        p.run(0.5);
+        equip(p, 1);
+        input.press('Aim');
+        input.press('Sprint');
+        input.setMove(0, 1);
+        p.run(2);
+        expect(p.player.sprinting).toBe(true);
+        expect(p.player.aiming).toBe(false);
+        expect(p.player.pistolSupport).toBeLessThan(0.05);
+        input.release('Sprint'); input.release('Aim'); input.setMove(0, 0);
+        p.run(1.5);
+        expect(p.player.pistolSupport).toBeGreaterThan(0.95);
+    });
+
+    it('moves exactly as it did unarmed while no weapon is out', () => {
+        const pose = (strip: boolean) => {
+            const p = play(OPEN, {}, {}, undefined, strip ? (sm: any) => { sm.layers = sm.layers.filter((l: any) => !/^(Pistol|Rifle)/.test(l.name)); } : undefined);
+            input.setMove(0.3, 1);
+            p.run(2);
+            input.setMove(0, 0);
+            p.run(0.5);
+            return ['Hips', 'Spine2', 'Head', 'LeftHand', 'RightHand', 'LeftFoot', 'RightToeBase'].map(b => Array.from(p.jointModel(b)));
+        };
+        const armed = pose(false), bare = pose(true);
+        armed.forEach((v, k) => v.forEach((x, a) => expect(x).toBeCloseTo(bare[k][a], 6)));
+    });
+
+    // ----- shooting ---------------------------------------------------------------------------------
+
+    /** The guns' effect templates, registered for `scene.instantiate` (models plain nodes: there is no GPU here). */
+    const withEffects = () => registerTemplates(library('templates')
+        .filter((t: any) => ['Muzzle Flash', 'Bullet Impact', 'Bullet Hole', 'Tracer'].includes(t.name))
+        .map((t: any) => ({ id: t.id, name: t.name, node: withoutModels(t.nodeJson) })));
+
+    /** Turn the camera so the crosshair (the middle of its view) looks at `target`, from wherever the camera is. */
+    const aimCamera = (p: ReturnType<typeof play>, target: ArrayLike<number>) => {
+        for (let k = 0; k < 6; k++) {
+            const cam = (p.rigs[0].children.find((c: any) => c.nodeType === 'camera') ?? p.rigs[0]) as Node;
+            const e = cam.worldPosition;
+            const d = [target[0] - e[0], target[1] - e[1], target[2] - e[2]];
+            p.rigs[0].setOrbit(Math.atan2(d[0], d[2]) * DEG, -Math.atan2(d[1], Math.hypot(d[0], d[2])) * DEG);
+            p.run(0.15);
+        }
+    };
+    const gunOf = (p: ReturnType<typeof play>, holder: string) => p.scene.findNode(holder) as any;
+
+    it('holds a gun on each weapon, and an effect template for each part of a shot', () => {
+        const templates = new Map(library('templates').map((t: any) => [t.name, t]));
+        const scriptName = (n: any) => library('scripts').find((x: any) => x.id === n.variables?.__scriptId?.value)?.name;
+        expect(scriptName(templates.get('Muzzle Flash').nodeJson)).toBe('SandboxShotFx');
+        expect(scriptName(templates.get('Bullet Impact').nodeJson)).toBe('SandboxShotFx');
+        expect(scriptName(templates.get('Bullet Hole').nodeJson)).toBe('SandboxBulletHole');
+        expect(scriptName(templates.get('Tracer').nodeJson)).toBe('SandboxTracer');
+        expect(allNodes(templates.get('Bullet Hole').nodeJson).some((n: any) => n.type === 'decal')).toBe(true);
+        expect(allNodes(templates.get('Muzzle Flash').nodeJson).map((n: any) => n.type)).toEqual(['node', 'particleSystem', 'particleSystem', 'light']);
+        // The glows take a tenth of the camera's exposure (the Sandbox goes from day to night); the smoke and dust all of it.
+        for (const name of ['Muzzle Flash', 'Bullet Impact']) {
+            const systems = allNodes(templates.get(name).nodeJson).filter((n: any) => n.type === 'particleSystem');
+            expect(systems.map((n: any) => [n.name, n.particleSystem.exposureWeight ?? 1]), name)
+                .toEqual(name === 'Muzzle Flash' ? [['Flash', 0.1], ['Smoke', 1]] : [['Sparks', 0.1], ['Dust', 1]]);
+        }
+        const ids = new Set(library('particleSystems').map((x: any) => x.id));
+        for (const n of allNodes(templates.get('Muzzle Flash').nodeJson).concat(allNodes(templates.get('Bullet Impact').nodeJson)))
+            if (n.type === 'particleSystem') expect(ids.has(n.particleSystem.particleSystemId)).toBe(true);
+        for (const holder of ['Pistol Grip', 'Rifle Grip']) {
+            const h = named('Weapons').children.find((c: any) => c.name === holder);
+            expect(scriptName(h), holder).toBe('SandboxGun');
+        }
+        expect(named('Rifle Grip').scriptVars.auto).toBe(true);
+        expect(named('Pistol Grip').scriptVars.auto).toBe(false);
+        // The crosshair is on the HUD, hidden until a weapon is out.
+        expect(allNodes(named('HUD')).filter((n: any) => /^Crosshair/.test(n.name)).map((n: any) => n.name))
+            .toEqual(['Crosshair', 'Crosshair Dot', 'Crosshair Top', 'Crosshair Bottom', 'Crosshair Left', 'Crosshair Right']);
+    });
+
+    it('shoots where the crosshair looks, the bullet pushing the crate it hits', () => {
+        withEffects();
+        try {
+            const p = play();
+            p.run(0.5);
+            equip(p, 2);
+            const crates = p.scene.findNode('Props')!.children.filter((c: any) => c.name === 'Crate Collider') as Node[];
+            const crate = crates.sort((a, b) => vec3.distance(a.worldPosition, [6.2, 0.4, 0.6]) - vec3.distance(b.worldPosition, [6.2, 0.4, 0.6]))[0];
+            const start = vec3.clone(crate.worldPosition);
+            input.press('Aim');
+            p.run(0.4);
+            aimCamera(p, [start[0], start[1] + 0.1, start[2]]);
+            const gun = gunOf(p, 'Rifle Grip');
+            const before = gun.shots;
+            input.press('Fire');
+            const hits: string[] = [];
+            p.run(0.5, () => { if (gun.lastHit) hits.push(gun.lastHit.node?.name ?? 'ground'); });
+            input.release('Fire');
+            const fired = gun.shots - before;
+            // 700 rounds a minute: five or six in half a second.
+            expect(fired).toBeGreaterThanOrEqual(5);
+            expect(fired).toBeLessThanOrEqual(7);
+            p.run(0.4);
+            // How far depends on each backend's friction (Jolt slides it most): a push, on all of them.
+            const moved = vec3.distance(crate.worldPosition, start);
+            expect(moved, `the crate moved ${(moved * 100).toFixed(1)} cm`).toBeGreaterThan(0.02);
+            // Away from the shooter, along the shot.
+            const away = [start[0] - p.collider.worldPosition[0], 0, start[2] - p.collider.worldPosition[2]];
+            const push = [crate.worldPosition[0] - start[0], 0, crate.worldPosition[2] - start[2]];
+            expect(push[0] * away[0] + push[2] * away[2]).toBeGreaterThan(0);
+            // The shots left holes on it, which ride with it.
+            const holes = allSceneNodes(p.scene).filter((n: any) => n.name === 'Bullet Hole');
+            expect(holes.length).toBeGreaterThan(0);
+            expect(holes.some((h: any) => h.parent === crate)).toBe(true);
+            input.release('Aim');
+        } finally { clearTemplates(); }
+    });
+
+    it('fires the rifle while the trigger is held and the pistol once a pull', () => {
+        withEffects();
+        try { for (const [weapon, holder] of [[2, 'Rifle Grip'], [1, 'Pistol Grip']] as const) {
+            const p = play(OPEN);
+            p.run(0.5);
+            equip(p, weapon);
+            input.press('Aim');
+            p.run(0.4);
+            const gun = gunOf(p, holder);
+            const before = gun.shots;
+            input.press('Fire');
+            p.run(1);
+            input.release('Fire');
+            const held = gun.shots - before;
+            if (weapon === 2) { expect(held).toBeGreaterThanOrEqual(11); expect(held).toBeLessThanOrEqual(13); }
+            else expect(held).toBe(1);
+            // Three pulls, three shots, as fast as the pistol cycles.
+            p.run(0.1);
+            const after = gun.shots;
+            for (let k = 0; k < 3; k++) { input.tap('Fire'); p.run(0.2); }
+            expect(gun.shots - after).toBe(3);
+            input.release('Aim');
+        } } finally { clearTemplates(); }
+    });
+
+    it('raises the weapon to fire from the hip, and kicks the camera up, most of it coming back', () => {
+        withEffects();
+        try {
+        const p = play(OPEN);
+        p.run(0.5);
+        equip(p, 1);
+        expect(p.player.aiming).toBe(false);
+        const gun = gunOf(p, 'Pistol Grip');
+        const pitch0 = p.rigs[0].pitch;
+        input.press('Fire');
+        // Not yet up: no shot on the first frame from the hip.
+        p.run(FRAME);
+        expect(gun.shots).toBe(0);
+        expect(p.player.aiming).toBe(true);
+        let kicked = 0;
+        p.run(0.3, () => { kicked = Math.max(kicked, pitch0 - p.rigs[0].pitch); });
+        input.release('Fire');
+        expect(gun.shots).toBe(1);
+        // The camera kicked up (pitch is + down)...
+        expect(kicked).toBeGreaterThan(0.1);
+        // ...and most of it comes back.
+        p.run(1);
+        const left = pitch0 - p.rigs[0].pitch;
+        expect(left).toBeLessThan(kicked * 0.6);
+        expect(left).toBeGreaterThan(0);
+        // It stays up a moment after, then goes back down.
+        expect(p.player.aiming).toBe(false);
+        // Sprinting, it does not fire.
+        input.press('Sprint');
+        input.setMove(0, 1);
+        p.run(1);
+        const shots = gun.shots;
+        input.tap('Fire');
+        p.run(0.3);
+        expect(gun.shots).toBe(shots);
+        input.release('Sprint'); input.setMove(0, 0);
+        } finally { clearTemplates(); }
+    });
+
+    it('never shoots itself, and passes through the stairs\' ramps', () => {
+        // Point blank, the camera behind and over the shoulder: every shot leaves the body alone.
+        const p = play(OPEN);
+        p.run(0.5);
+        equip(p, 2);
+        input.press('Aim');
+        p.run(0.4);
+        const gun = gunOf(p, 'Rifle Grip');
+        const body = (p.player as any).collider.body;
+        const cam = (p.rigs[0].children.find((c: any) => c.nodeType === 'camera') ?? p.rigs[0]) as Node;
+        const e = cam.worldPosition;
+        const toward = [p.collider.worldPosition[0] - e[0], p.collider.worldPosition[1] + 1 - e[1], p.collider.worldPosition[2] - e[2]];
+        const l = Math.hypot(toward[0], toward[1], toward[2]);
+        const hit = gun.fire([e[0], e[1], e[2]], [toward[0] / l, toward[1] / l, toward[2] / l], 0, body);
+        expect(hit?.node?.name ?? 'nothing').not.toBe('Player Collider');
+        input.release('Aim');
+    });
+
     it('holds a look round without twitching', () => {
         // The look poses are rest at their first frame: a looping blend space wrapped back to it every 2 s and
         // snapped the head toward centre for three frames.
@@ -1575,7 +2121,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             expect(pr.collider.canSleep, pr.name).toBe(true);
             expect(pr.variables?.__templateId, `${pr.name} is a template instance`).toBeDefined();
         }
-        const kinds = library('templates').slice(4).map((t: any) => t.name).sort();
+        const effects = ['Muzzle Flash', 'Bullet Impact', 'Bullet Hole', 'Tracer'];
+        const kinds = library('templates').slice(4).map((t: any) => t.name).filter((n: string) => !effects.includes(n)).sort();
         expect(kinds).toEqual(['Ball', 'Barrel', 'Big Ball', 'Crate', 'Large Crate', 'Plank', 'Small Crate']);
         // Placed at rest: two seconds with nobody near them moves nothing more than a barrel lying on its side rolling
         // onto a flat of its many-sided collider (a centimetre or two). The crate pyramid among them sleeps as one: on

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import TransformGizmoView from '@cleo/app-kit/gizmo/TransformGizmo';
 import type { TransformPatch } from '@cleo/app-kit/gizmo/gizmoDrag';
+import type { GizmoMode } from '@cleo/app-kit/gizmo/types';
 import { useCleoEngine } from '../EngineContext';
 import { useSelection } from '../SelectionContext';
 
@@ -13,9 +14,11 @@ interface TransformGizmoProps {
     selectedNodeId: string | null;
     onTransformChange: (nodeId: string, patch: TransformPatch) => void;
     viewportRef: React.RefObject<HTMLDivElement>;
+    /** A fixed handle set instead of the toolbar's: the pose gizmo only turns bones. */
+    mode?: GizmoMode;
 }
 
-export default function TransformGizmo({ selectedNodeId, onTransformChange, viewportRef }: TransformGizmoProps) {
+export default function TransformGizmo({ selectedNodeId, onTransformChange, viewportRef, mode }: TransformGizmoProps) {
     const { instance, editorScene, eventEmitter, withoutDirty } = useCleoEngine();
     const { gizmoMode, gizmoSpace } = useSelection();
     const [isPlayMode, setIsPlayMode] = useState(false);
@@ -27,7 +30,7 @@ export default function TransformGizmo({ selectedNodeId, onTransformChange, view
     }, [eventEmitter]);
 
     return <TransformGizmoView instance={instance} scene={editorScene} bus={eventEmitter}
-                               selectedNodeId={selectedNodeId} mode={gizmoMode} space={gizmoSpace}
+                               selectedNodeId={selectedNodeId} mode={mode ?? gizmoMode} space={gizmoSpace}
                                disabled={isPlayMode} wrap={withoutDirty}
                                onTransformChange={onTransformChange} viewportRef={viewportRef} />;
 }

@@ -64,7 +64,7 @@ import { buildMultiSceneGameData } from "./publish/buildMultiSceneGameData";
 import { isWindowPlayActive } from "./playWindow/windowPlay";
 import { sequenceKeyingActive } from "./sequencer/previewRegistry";
 import type { AnimControllerAsset } from "../utils/animationControllers";
-import { instantiateController, reembedMachine, pickControllerForRig, machineIsEmpty, buildControllerAsset } from "../utils/animationControllers";
+import { instantiateController, reembedMachine, reembedPoses, pickControllerForRig, machineIsEmpty, buildControllerAsset } from "../utils/animationControllers";
 import { actionNamesOf, machinesInNodeJson, projectTypesDeclaration, triggerNamesOf } from "../utils/projectTriggers";
 import { setProjectTypes } from "@cleo/app-kit/code/projectTypes";
 import type { BoneMaskAsset } from "../utils/boneMasks";
@@ -1901,6 +1901,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    */
   const reembedLiveMachines = () => {
     if (!animControllersLoadedRef.current || !boneMasksLoadedRef.current || !poseAssetsLoadedRef.current) return;
+    machinesEmbeddedRef.current = true;
     const libs = { ...machineLibs(), controllers: animControllersRef.current };
     for (const scene of liveScenes()) {
       for (const n of Array.from(scene.nodes)) {
@@ -1911,7 +1912,25 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
     }
   };
-  useEffect(() => { reembedLiveMachines(); }, [animControllers, boneMasks, poseAssets]);
+  // Whether the full re-embed has run once every library is in: until then a pose change runs it instead.
+  const machinesEmbeddedRef = useRef(false);
+  useEffect(() => { reembedLiveMachines(); }, [animControllers, boneMasks]);
+  /**
+   * A pose edit: only the poses re-resolve (state poses and blend spaces' pose samples, a variant through its
+   * base), swapped into what is PLAYING without restarting it (`updateStateMachine`), so the pose editor's drag
+   * shows on the character mid-stride with every layer on.
+   */
+  const reembedLivePoses = () => {
+    if (!machinesEmbeddedRef.current) { reembedLiveMachines(); return; }
+    for (const scene of liveScenes()) {
+      for (const n of Array.from(scene.nodes)) {
+        if (!(n instanceof ModelNode) || !n.animator) continue;
+        const next = reembedPoses(n.animator.getStateMachine(), poseAssetsRef.current);
+        if (next) withoutDirty(() => n.animator!.updateStateMachine(next));
+      }
+    }
+  };
+  useEffect(() => { reembedLivePoses(); }, [poseAssets]);
 
   // The trigger names the project's animators declare, published for the script editors to check scripts
   // against (utils/projectTriggers.ts): every animator asset's, every template's embedded machines', and
@@ -4990,7 +5009,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // ---- Animation Field editor ------------------------------------------------------------------------
   const { enterAnimationFieldEditor, createAnimationFieldForModel, saveAnimationField } = useAnimationFieldEditor({
-    instanceRef, animationFieldsRef, modelsRef, materialsRef, animationsRef, tabRuntimeRef,
+    instanceRef, animationFieldsRef, poseAssetsRef, modelsRef, materialsRef, animationsRef, tabRuntimeRef,
     dirtyArmedRef, eventEmitter, tabs, setActiveTab, commitTab, withoutDirty, liveScenes,
     markTabDirty, addAnimationField, updateAnimationField, ensureRigForModel,
   });
@@ -6878,7 +6897,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         if (!(node instanceof ModelNode) || !node.animator) continue;
         const sm = node.animator.getStateMachine();
         if (!sm) continue;
-        const next = reembedFields(sm as any, animationFieldsRef.current) as any;
+        const next = reembedFields(sm as any, animationFieldsRef.current, poseAssetsRef.current) as any;
         if (next !== sm) { node.animator.setStateMachine(next); count++; }
       }
     });

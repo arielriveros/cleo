@@ -5,6 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import { wrapSpan, clamp01 } from '../core/math';
+import type { AnimationPose } from './animationPose';
 
 export type AnimationFieldMode = '1d' | '2d';
 
@@ -43,7 +44,20 @@ export interface AnimationFieldSample {
      * to line up clips whose gaits start on opposite feet. Default 0.
      */
     phaseOffset?: number;
+    /**
+     * Hold this POSE instead of playing a clip (`rateScale` and `phaseOffset` do not apply; a pose has no
+     * cycle). `clipName` is then only the sample's key in the blend, unique per pose: the editor writes
+     * {@link poseSampleKey}, and embeds the pose in the field's table under it (`AnimationField.poses`) rather
+     * than here, so a pose at many points is stored once. On an additive layer a pose variant adds what it
+     * changes from its base (`AnimationPose.reference`).
+     */
+    pose?: AnimationPose;
+    /** The Pose asset (and pose within it) `pose` was embedded from. Authoring-side only. */
+    poseRef?: { assetId: string; poseId: string };
 }
+
+/** The key a pose sample goes by in a blend space (its `clipName`): one per pose. */
+export const poseSampleKey = (poseId: string): string => `pose:${poseId}`;
 
 export interface AnimationField {
     mode: AnimationFieldMode;
@@ -51,6 +65,12 @@ export interface AnimationField {
     /** Present (and used) only when mode === '2d'. */
     yAxis?: AnimationFieldAxis;
     samples: AnimationFieldSample[];
+    /**
+     * The poses its POSE samples hold, by sample key (`poseSampleKey`): each once, however many samples place it.
+     * A variant there names its base's key (`AnimationPose.base`) and stores only what it changes from it.
+     * Embedded by the editor from the samples' `poseRef`s.
+     */
+    poses?: Record<string, AnimationPose>;
     /**
      * Seconds for a clip's WEIGHT to catch up; `0` is rigid, absent means {@link DEFAULT_WEIGHT_SMOOTHING}.
      * Only this makes a departing clip fade out rather than leave the set abruptly.

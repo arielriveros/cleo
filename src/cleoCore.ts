@@ -313,7 +313,7 @@ export {
 } from "./physics/motion";
 export type { MotionRecord, MotionConfig } from "./physics/motion";
 export {
-    fieldWeights, rateScaleOf, phaseOffsetOf, coincidentSamples,
+    fieldWeights, rateScaleOf, phaseOffsetOf, coincidentSamples, poseSampleKey,
     axisSmoothing, axisDeadzone, axisWrapSpan, weightSmoothing,
     DEFAULT_AXIS_SMOOTHING, DEFAULT_WEIGHT_SMOOTHING,
 } from "./animation/animationField";
@@ -345,6 +345,7 @@ export type {
     AnimationBlendMode,
     AnimationPose,
     AnimationPoseBone,
+    AnimationHandIk,
     AnimationActionOptions,
     AnimationActionHandle,
 } from "./animation/animator";

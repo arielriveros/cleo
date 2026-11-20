@@ -120,6 +120,12 @@ case. The animator reaches the Character as root motion reaches its body: the fi
 - **Exit times** and `loopCount` count from the carried phase.
 - **Interrupted.** A synced cross-fade interrupted by another freezes as any does; the next state still starts at the
   live phase.
+- **Layers.** A layer's state in the group the base layer's current state is in FOLLOWS the base: every frame it takes
+  the base's phase, through its own clip's length, so an upper-body layer (a weapon held over the stride) keeps step
+  with the legs. When the base comes back into the group at another phase (from a start or a stop), the layer
+  cross-fades to it over 0.2 s from the pose it was showing. While the base is outside the group the layer runs on its
+  own clock. `animator.layerPhase(name)` reads where a layer is. Never put a held layer state (speed 0, a blend space
+  of aim or look poses) in a group: following would move it.
 - **Not a state group.** `syncGroup` shares a stride; `groups` share transitions.
 
 A character running a [shared animator](../editor/animation.md#shared-animators) holds a resolved
@@ -164,6 +170,39 @@ Play such a blend space at **speed 0**, with each sample's `phaseOffset` at 0.5:
 in and held, and its weights still follow the axes every frame. Looping instead, it wraps back to the clips' first
 frame (the rest the delta is taken from) once a cycle, and the pose snaps toward centre for a few frames. A state
 held at speed 0 still blends in over its transition's seconds.
+
+**Poses on layers.** A blend space can hold poses instead of clips (see [Blend spaces](#blend-spaces)): no phase, no
+clip-length trick. A pose VARIANT on an additive layer adds what it changes from its base pose, so an aim offset is an
+aim pose and its directions as variants, and an edit to the aim pose moves every direction.
+
+```ts
+interface AnimationState {
+  // ...
+  pose?: AnimationPose      // hold this pose (embedded from poseRef by the editor)
+  meshSpace?: number        // Steady, on an override layer: 0..1, how much the pose keeps its own model-space turn
+}
+interface AnimationLayer {
+  // ...
+  handIk?: { hand: 'left' | 'right'; weight?: number; weightParam?: string; socket?: string }
+}
+interface AnimationPose {
+  name?: string
+  bones: { name: string; rotation?: number[]; translation?: number[] }[]   // deltas from rest, parent frame
+  reference?: AnimationPoseBone[]   // what an additive layer measures it from: a variant's base (absent: rest)
+  base?: string                     // in a blend space's pose table only: the key of the pose it is a variant of
+}
+```
+
+- **Steady** (`meshSpace`): at each entry bone of the layer's mask (a masked bone whose parent is not, the Spine
+  of an upper-body mask) the pose is turned so the bone faces as the pose itself has it in model space (its own
+  hips; a bone it does not hold, at rest), measured against the body as the layers below compose it. 1 holds a
+  rifle's chest still over any gait; 0 rides the hips. Eased over the state's transition.
+- **Hand IK** (`handIk`): after every layer, before foot IK, that hand is moved by two-bone IK (keeping its
+  elbow's bend plane) to where the layer's OWN pose puts it relative to the other hand, or onto `socket`, by
+  `weight` (or `weightParam`) times the layer's weight and presence.
+- `animator.updateStateMachine(sm)` swaps in an edited copy of the machine playing now without restarting it
+  (the same parameters, layers and states; anything else falls back to `setStateMachine`): the editor's pose
+  mode drags through it. `animator.posedLocal(nodeIndex)` reads a bone's final local of the last pose.
 
 ## One-shots in the graph
 
@@ -354,10 +393,16 @@ interface AnimationField {
   weightSmoothing?: number
 }
 interface AnimationFieldAxis { name; min; max; smoothing?; deadzone?; wrap? }
-interface AnimationFieldSample { clipName; x; y?; rateScale?; phaseOffset? }
+interface AnimationFieldSample { clipName; x; y?; rateScale?; phaseOffset?; pose?; poseRef? }
 ```
 
 Defaults: `DEFAULT_AXIS_SMOOTHING = 0.08`, `DEFAULT_WEIGHT_SMOOTHING = 0.06`.
+
+**Pose samples.** A sample can hold a pose: its `clipName` is then its key, `poseSampleKey(poseId)` (`pose:<id>`),
+and its pose is the field's `poses[key]` (or the sample's own `pose`). A pose is held: `rateScale` and `phaseOffset`
+do not apply, and the clips alone set the cycle (a field of poses only lasts a second). The same key at many points
+is one pose. In `poses`, a variant names its base's key (`base`) and stores only what it changes from it; the
+runtime composes it, and on an additive layer adds what it changes from the base.
 
 > ### Two valid layouts, and do not mix them
 >

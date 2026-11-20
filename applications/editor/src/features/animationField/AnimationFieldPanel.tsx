@@ -22,7 +22,7 @@ function NoField() {
 
 export default function AnimationFieldPanel() {
   const {
-    field, clips, clipDurations, target, weights, selected, setSelected,
+    field, clips, clipDurations, target, weights, selected, setSelected, poses, sampleInfo, setSampleSource,
     setName, setMode, setAxis, setWeightSmoothing, addSample, setSample, removeSample, save, dirty,
   } = useAnimationField()
 
@@ -40,7 +40,8 @@ export default function AnimationFieldPanel() {
   // Samples on the same coordinate split one sample's worth of weight. A wrapping axis makes its two ends
   // the same point while the plot draws them at opposite edges, so this has to be said out loud.
   const coincidentWith: Record<number, string> = {}
-  for (const group of coincidentSamples(toRuntimeField(field))) {
+  // Every sample, a pose one too (positions are all this reads), so the indexes match the rows.
+  for (const group of coincidentSamples({ ...toRuntimeField(field), samples: field.samples })) {
     for (const i of group) {
       const others = group.filter(j => j !== i).map(j => field.samples[j].clipName || `#${j + 1}`)
       coincidentWith[i] = others.join(', ')
@@ -139,8 +140,9 @@ export default function AnimationFieldPanel() {
 
           {field.samples.map((s, i) => {
             const w = weightOf(s.clipName)
-            const missing = !!s.clipName && !clips.includes(s.clipName)
-            const length = clipDurations[s.clipName] ?? 0
+            const info = sampleInfo(s)
+            const missing = info.missing
+            const length = info.pose ? 0 : clipDurations[s.clipName] ?? 0
             const outlier = isOutlier(length)
             const offX = outside(s.x, field.xAxis)
             const offY = is2D && outside(s.y ?? 0, field.yAxis)
@@ -150,11 +152,24 @@ export default function AnimationFieldPanel() {
                 className={`flex flex-col gap-1 rounded border p-1.5 ${selected === i ? 'border-selected' : 'border-control'}`}
                 onClick={() => setSelected(i)}>
                 <div className='flex items-center gap-1'>
+                  {/* A sample plays a clip or HOLDS a pose: a pose's variants (an aim pose's directions) are
+                      listed under it, and a blend space of them follows every edit to the pose. */}
                   <Select className='min-w-0 flex-1 px-1 py-0.5' value={s.clipName}
-                    onChange={e => setSample(i, { clipName: e.target.value })}>
+                    title={info.pose ? 'Holds this pose. Edit it in the Skeleton or Animator part: every blend space using it follows.' : undefined}
+                    onChange={e => {
+                      const pose = poses.find(p => p.key === e.target.value)
+                      setSampleSource(i, pose ? { pose: pose.ref } : { clip: e.target.value })
+                    }}>
                     <option value=''>(no clip)</option>
-                    {missing && <option value={s.clipName}>{s.clipName} — missing</option>}
-                    {clips.map(c => <option key={c} value={c}>{c}</option>)}
+                    {missing && <option value={s.clipName}>{info.label} — missing</option>}
+                    <optgroup label='Clips'>
+                      {clips.map(c => <option key={c} value={c}>{c}</option>)}
+                    </optgroup>
+                    {poses.length > 0 && (
+                      <optgroup label='Poses'>
+                        {poses.map(p => <option key={p.key} value={p.key}>{'\u00a0\u00a0\u00a0'.repeat(p.depth)}{p.label}</option>)}
+                      </optgroup>
+                    )}
                   </Select>
                   <span className='w-[34px] shrink-0 text-right text-ui-xs tabular-nums text-highlight'
                     title='Live weight at the current preview point'>
@@ -180,6 +195,8 @@ export default function AnimationFieldPanel() {
                       keeps a differently-authored clip in step with the rest instead of sliding. */}
                   {/* The clip's authored length. The blend paces itself against this, so it is the number
                       that explains a corner of the field running at the wrong speed. */}
+                  {info.pose && <span className='ml-auto text-dim' title='A pose is held: it has no length, rate or phase'>pose</span>}
+                  {!info.pose && <>
                   <span className={`ml-auto tabular-nums ${outlier ? 'text-warning' : 'text-dim'}`}
                     title={outlier
                       ? `Only ${length.toFixed(2)}s, against a median of ${median.toFixed(2)}s in this field — so this clip plays about ${(median / length).toFixed(1)}x faster than the rest. Correct it with the rate below.`
@@ -207,6 +224,7 @@ export default function AnimationFieldPanel() {
                     })}>
                     ½
                   </Button>
+                  </>}
                 </div>
                 {outlier && (
                   <Button

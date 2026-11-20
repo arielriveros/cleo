@@ -6,6 +6,7 @@ import {
   AnimationFieldAsset, AnimationFieldSample, AnimationFieldAxis, AnimationFieldMode,
   toRuntimeField, DEFAULT_X_AXIS, DEFAULT_Y_AXIS,
 } from '../../utils/animationFields'
+import { lookupPose, poseChoices, poseSampleKey, type PoseAsset, type PoseRef } from '../../utils/poseAssets'
 
 // Shared editing session for one Animation Field: the plot, the sidebar and the transport all edit the SAME
 // working copy, provided from here to the whole dock. The PROBE is session state, never part of the asset.
@@ -22,6 +23,12 @@ interface AnimationFieldContextValue {
   clipDurations: Record<string, number>
   /** The working copy. Never mutate — go through the setters. */
   field: AnimationFieldAsset | null
+  /** The poses a sample can hold instead of a clip: the field's rig's, variants under their base. */
+  poses: { key: string; ref: PoseRef; label: string; depth: number }[]
+  /** What a sample shows as (a pose sample by its pose's name), and whether what it plays is gone. */
+  sampleInfo: (s: AnimationFieldSample) => { label: string; missing: boolean; pose: boolean }
+  /** Make a sample hold a pose (`ref`) or play a clip (a name). */
+  setSampleSource: (i: number, source: { clip: string } | { pose: PoseRef }) => void
 
   setName: (name: string) => void
   setMode: (mode: AnimationFieldMode) => void
@@ -68,7 +75,7 @@ export function AnimationFieldProvider({ children }: { children: ReactNode }) {
     editorScene, editingAnimationFieldId, animationFieldTargetId,
     saveAnimationField, activeTabId, markTabDirty, clearTabDirty, registerAnimationApply, dirtyTabs,
   } = useCleoEngine()
-  const { animationFields } = useAssetLibrary()
+  const { animationFields, poseAssets } = useAssetLibrary()
 
   const target = getAnimationTarget(editorScene, animationFieldTargetId)
   const clips = target ? target.model.animations.map(a => a.name) : []
@@ -135,6 +142,28 @@ export function AnimationFieldProvider({ children }: { children: ReactNode }) {
   }
   const setSample = (i: number, patch: Partial<AnimationFieldSample>) =>
     update(f => ({ ...f, samples: f.samples.map((s, idx) => idx === i ? { ...s, ...patch } : s) }))
+  // A pose sample's key is `pose:<id>`; a pose has no cycle, so its rate and phase go with the clip.
+  const setSampleSource = (i: number, source: { clip: string } | { pose: PoseRef }) =>
+    update(f => ({
+      ...f,
+      samples: f.samples.map((s, idx) => {
+        if (idx !== i) return s
+        const { poseRef: _p, pose: _q, rateScale: _r, phaseOffset: _o, ...rest } = s
+        return 'pose' in source
+          ? { ...rest, clipName: poseSampleKey(source.pose.poseId), poseRef: { ...source.pose } }
+          : { ...rest, clipName: source.clip, ...(s.poseRef ? {} : { ...(s.rateScale ? { rateScale: s.rateScale } : {}), ...(s.phaseOffset ? { phaseOffset: s.phaseOffset } : {}) }) }
+      }),
+    }))
+  const poses = poseChoices(poseAssets, field?.rigId).map(c => ({
+    key: poseSampleKey(c.pose.id), ref: { assetId: c.asset.id, poseId: c.pose.id }, label: c.pose.name, depth: c.depth,
+  }))
+  const sampleInfo = (s: AnimationFieldSample) => {
+    if (s.poseRef) {
+      const pose = lookupPose(poseAssets as PoseAsset[], s.poseRef)
+      return { label: pose?.name ?? 'missing pose', missing: !pose, pose: true }
+    }
+    return { label: s.clipName || '(no clip)', missing: !!s.clipName && !clips.includes(s.clipName), pose: false }
+  }
   const removeSample = (i: number) => {
     update(f => ({ ...f, samples: f.samples.filter((_, idx) => idx !== i) }))
     setSelected(prev => (prev === i ? -1 : prev > i ? prev - 1 : prev))
@@ -144,12 +173,12 @@ export function AnimationFieldProvider({ children }: { children: ReactNode }) {
 
   // playField must be called ONCE per target, on entry; every later change goes through
   // updateField/setFieldProbe, which leave the phase and play state alone.
-  const shapeKey = field ? JSON.stringify(toRuntimeField(field)) : ''
+  const shapeKey = field ? JSON.stringify(toRuntimeField(field, poseAssets)) : ''
   const startedForRef = useRef<string | null>(null)
   useEffect(() => {
     if (!target || !field) return
     const animator = target.animator
-    const runtime = toRuntimeField(field)
+    const runtime = toRuntimeField(field, poseAssets)
     if (startedForRef.current !== animationFieldTargetId) {
       startedForRef.current = animationFieldTargetId
       animator.playField(runtime, probe.x, probe.y)
@@ -186,7 +215,7 @@ export function AnimationFieldProvider({ children }: { children: ReactNode }) {
   })
 
   const value: AnimationFieldContextValue = {
-    target, clips, clipDurations, field,
+    target, clips, clipDurations, field, poses, sampleInfo, setSampleSource,
     setName, setMode, setAxis, setWeightSmoothing, addSample, setSample, removeSample,
     selected, setSelected,
     probe, setProbe, weights,

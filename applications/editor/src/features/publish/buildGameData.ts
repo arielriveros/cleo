@@ -10,6 +10,7 @@ import { deepClone } from '@cleo/app-kit/utils/deepClone';
 import { MODEL_ID_VAR, LEGACY_MODEL_ID_VAR } from '../../utils/models';
 import { resolveModelAnimations } from '../../utils/animationResolve';
 import type { AnimationAsset } from '../../utils/animationAssets';
+import { reembedMachine, type AnimControllerAsset, type MachineLibs } from '../../utils/animationControllers';
 
 // Sources needed to assemble a complete, self-contained game JSON.
 export interface GameDataSources {
@@ -114,7 +115,10 @@ function inlineLegacyPhysics(root: any, bodies: Record<string, any> = {}, trigge
  * Node ids inside a baked template stay as-is: they key the published build's script registry, and
  * `Scene.instantiate` records the original as `__sourceId` when it renumbers a copy.
  */
-export function bakeTemplates(templates: Template[], materials?: MaterialAsset[], scriptAssets?: ScriptAsset[]): NodeTemplate[] {
+export function bakeTemplates(
+  templates: Template[], materials?: MaterialAsset[], scriptAssets?: ScriptAsset[],
+  machineLibs?: MachineLibs & { controllers: AnimControllerAsset[] },
+): NodeTemplate[] {
   const assetById = new Map((scriptAssets ?? []).map(a => [a.id, a]));
 
   // A template subtree has no live nodes to read __scriptId off, so resolve the link from the serialized
@@ -126,8 +130,21 @@ export function bakeTemplates(templates: Template[], materials?: MaterialAsset[]
     for (const child of (json?.children ?? [])) resolveSharedScripts(child, out);
   };
 
+  // A template holds RESOLVED copies of its characters' machines, as a scene's nodes do; one saved before a pose
+  // (or a controller, a mask, a blend space) it links was edited would otherwise ship it as it was then. A scene is
+  // re-resolved by resyncScene; a template, here.
+  const reembed = (json: any): void => {
+    if (!json || typeof json !== 'object') return;
+    if (json.stateMachine?.parameters && machineLibs) {
+      const next = reembedMachine(json.stateMachine, machineLibs);
+      if (next) json.stateMachine = next;
+    }
+    for (const child of json.children ?? []) reembed(child);
+  };
+
   return templates.map(template => {
     const node = deepClone(template.nodeJson);
+    if (machineLibs) reembed(node);
     if (materials) resolveMaterialRefs(node, materials);
     // The template's own inline sources first; shared script assets fill in whatever they do not cover.
     const scripts = new Map(Object.entries(template.scripts ?? {}));

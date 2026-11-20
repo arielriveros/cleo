@@ -19,9 +19,9 @@
 import type { AnimationLayer, AnimationState, AnimationStateMachine } from 'cleo'
 import { cryptoRandomId } from './ids'
 import type { AnimationFieldAsset } from './animationFields'
-import { reembedFields } from './animationFields'
+import { machineHasPoseSamples, reembedFields } from './animationFields'
 import type { BoneMaskAsset } from './boneMasks'
-import type { PoseAsset } from './poseAssets'
+import { fieldPoseTable, poseSampleKey, resolvedPoseFor, type PoseAsset } from './poseAssets'
 
 export type AnimControllerAsset = {
   id: string
@@ -81,16 +81,17 @@ export type MachineLibs = {
   poses: PoseAsset[]
 }
 
-/** A state's pose link resolved to the embedded pose, or undefined when it dangles. */
+/**
+ * A state's pose link resolved to the embedded pose, or undefined when it dangles. A variant comes resolved,
+ * with its base as `reference` (what an additive layer measures it from).
+ */
 function poseFor(state: AnimationState, poses: PoseAsset[]): AnimationState['pose'] {
   if (!state.poseRef) return state.pose
-  const asset = poses.find(p => p.id === state.poseRef!.assetId)
-  const pose = asset?.poses.find(p => p.id === state.poseRef!.poseId)
-  return pose ? { name: pose.name, bones: clone(pose.bones) } : undefined
+  return resolvedPoseFor(poses, state.poseRef) ?? undefined
 }
 
 function resolveStates(states: AnimationState[], libs: MachineLibs): AnimationState[] {
-  const withFields = reembedFields({ states }, libs.animationFields).states
+  const withFields = reembedFields({ states }, libs.animationFields, libs.poses).states
   return withFields.map(s => {
     if (!s.poseRef) return s
     const pose = poseFor(s, libs.poses)
@@ -194,9 +195,45 @@ export function machineLinks(sm: AnimationStateMachine | null | undefined, id: s
   if (sm.controllerId === id) return true
   for (const layer of layersOf(sm)) {
     if ((layer as AnimationLayer).maskId === id) return true
-    for (const s of layer.states) if (s.fieldId === id || s.poseRef?.assetId === id) return true
+    for (const s of layer.states) {
+      if (s.fieldId === id || s.poseRef?.assetId === id) return true
+      if (s.field?.samples?.some(x => x.poseRef?.assetId === id)) return true
+    }
   }
   return !!sm.slots?.some(s => s.maskId === id)
+}
+
+/**
+ * A machine with only its POSES brought up to date: every linked state pose and every pose sample of the
+ * blend spaces it plays, re-resolved from `poses`, everything else shared. What a pose edit changes, without
+ * re-instantiating the controller, so a node keeps playing (`Animator.updateStateMachine`) and an unsaved
+ * working copy survives. A pose sample whose pose is gone is dropped, as `toRuntimeField` drops it. Null when
+ * nothing changed.
+ */
+export function reembedPoses(sm: AnimationStateMachine | null | undefined, poses: PoseAsset[]): AnimationStateMachine | null {
+  if (!sm) return null
+  let changed = false
+  const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+  const states = (list: AnimationState[]) => list.map(s => {
+    let next = s
+    if (s.poseRef) {
+      const pose = resolvedPoseFor(poses, s.poseRef) ?? undefined
+      if (!same(pose, s.pose)) next = { ...next, pose }
+    }
+    if (s.field?.samples?.some(x => x.poseRef)) {
+      const table = JSON.parse(JSON.stringify(fieldPoseTable(s.field.samples, poses)))
+      const samples = s.field.samples.filter(x => !x.poseRef || table[poseSampleKey(x.poseRef.poseId)])
+      if (samples.length !== s.field.samples.length || !same(table, s.field.poses)) {
+        const { poses: _old, ...field } = s.field
+        next = { ...next, field: { ...field, samples, ...(Object.keys(table).length ? { poses: table as any } : {}) } }
+      }
+    }
+    if (next !== s) changed = true
+    return next
+  })
+  const out: AnimationStateMachine = { ...sm, states: states(sm.states) }
+  if (sm.layers) out.layers = sm.layers.map(l => ({ ...l, states: states(l.states) }))
+  return changed ? out : null
 }
 
 /**
@@ -214,7 +251,7 @@ export function reembedMachine(
     const asset = libs.controllers.find(c => c.id === sm.controllerId)
     if (!asset) return null
     next = instantiateController(asset, libs, sm.clipOverrides)
-  } else if (sm.layers?.length || sm.slots?.length || sm.states.some(s => s.poseRef)) {
+  } else if (sm.layers?.length || sm.slots?.length || sm.states.some(s => s.poseRef) || machineHasPoseSamples(sm)) {
     next = resolveMachineLinks(sm, libs)
   } else {
     return null

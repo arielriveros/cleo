@@ -34,7 +34,13 @@ const tight = 'px-1 py-0.5'
 
 const BLEND_OPTIONS = [
   { value: 'override' as const, label: 'Override', title: 'Replace the pose beneath, by weight x mask' },
-  { value: 'additive' as const, label: 'Additive', title: 'Add the clip’s motion relative to its first frame — breathing, recoil, a flinch' },
+  { value: 'additive' as const, label: 'Additive', title: 'Add the clip’s motion relative to its first frame (a pose: what it changes from its base pose) — breathing, recoil, a flinch, an aim offset' },
+]
+
+const HAND_IK_OPTIONS = [
+  { value: 'off' as const, label: 'Off', title: 'No hand IK' },
+  { value: 'left' as const, label: 'Left', title: 'The left hand reaches where this layer’s pose has it relative to the right: a rifle’s support hand' },
+  { value: 'right' as const, label: 'Right', title: 'The right hand reaches where this layer’s pose has it relative to the left' },
 ]
 
 /** The tab strip that picks which layer the graph shows. */
@@ -113,6 +119,47 @@ export function LayerSection() {
           </Select>
         </AssetDropRow>
         {maskMissing && <p className='text-ui-xs text-warning'>That mask was deleted, so this layer affects nothing until another is picked.</p>}
+
+        {/* Support-hand IK (AnimationLayer.handIk): after every layer, one hand reaches where this layer's own
+            pose puts it relative to the other, so an aim offset or recoil on the gun hand cannot pull it off. */}
+        <div className='flex items-center gap-1'
+          title={'Support-hand IK: after every layer, this hand reaches where this layer’s own pose has it relative to the '
+            + 'other hand, so a weapon held in the other hand keeps both hands on it whatever the layers above do (an aim '
+            + 'offset, recoil) and however its poses are edited.'}>
+          <span className='text-ui-xs text-muted w-[46px] shrink-0'>Hand IK</span>
+          <SegmentedControl<'off' | 'left' | 'right'> size='sm' value={layer.handIk?.hand ?? 'off'}
+            onChange={v => setLayer(activeLayer, { handIk: v === 'off' ? undefined : { ...(layer.handIk ?? {}), hand: v } })}
+            options={HAND_IK_OPTIONS} />
+        </div>
+        {layer.handIk && (
+          <>
+            <div className='flex items-center gap-1'>
+              <span className='text-ui-xs text-muted w-[46px] shrink-0'>Reach</span>
+              {layer.handIk.weightParam
+                ? <Select className={cn(tight, 'flex-1 min-w-0')} value={layer.handIk.weightParam}
+                    title='Read how firmly the hand holds on (0..1) from this parameter every frame: 0 lets go'
+                    onChange={e => setLayer(activeLayer, { handIk: { ...layer.handIk!, weightParam: e.target.value || undefined } })}>
+                    <option value=''>(fixed)</option>
+                    {weightParams.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                  </Select>
+                : <>
+                    <Slider className='flex-1 min-w-0 my-0' editable={false} min={0} max={1} step={0.01} value={layer.handIk.weight ?? 1}
+                      onChange={v => setLayer(activeLayer, { handIk: { ...layer.handIk!, weight: v } })} />
+                    <Select className={cn(tight, 'w-[64px]')} value='' title='Drive it from a parameter instead (0 lets go: a sprint)'
+                      onChange={e => e.target.value && setLayer(activeLayer, { handIk: { ...layer.handIk!, weightParam: e.target.value } })}>
+                      <option value=''>param…</option>
+                      {weightParams.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                    </Select>
+                  </>}
+            </div>
+            <div className='flex items-center gap-1'
+              title='Optional: reach this socket (on the other hand) instead of where this layer’s pose has the hand. Then an edit to the hand in the poses is ignored.'>
+              <span className='text-ui-xs text-muted w-[46px] shrink-0'>Socket</span>
+              <TextInput className={cn(tight, 'flex-1 min-w-0')} value={layer.handIk.socket ?? ''} placeholder='(the pose’s own grip)'
+                onChange={v => setLayer(activeLayer, { handIk: { ...layer.handIk!, socket: v.trim() || undefined } })} />
+            </div>
+          </>
+        )}
       </div>
     </Collapsable>
   )

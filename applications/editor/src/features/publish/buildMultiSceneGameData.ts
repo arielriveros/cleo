@@ -108,7 +108,11 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   // Templates once, like textures: the runtime registry is global and a Game.loadScene switch must not
   // invalidate what a script can still instantiate. Every template ships — a script may name any of them.
   // Baked before the strips below, which apply to templates too.
-  const templates = bakeTemplates(src.libs.templates ?? [], src.libs.materials, src.scriptAssets)
+  const libs = src.libs as any
+  const templates = bakeTemplates(src.libs.templates ?? [], src.libs.materials, src.scriptAssets,
+    libs.animControllers && libs.boneMasks && libs.poseAssets
+      ? { controllers: libs.animControllers, boneMasks: libs.boneMasks, poses: libs.poseAssets, animationFields: libs.animationFields ?? [] }
+      : undefined)
   // Script modules ONCE for the whole game, like templates: a module's state lives across Game.loadScene,
   // and two scenes importing the same helper must get the same instance. Every scene and template is
   // stamped with its scripts' paths in place, and the union of their import closures ships here.

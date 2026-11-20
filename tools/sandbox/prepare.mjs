@@ -4,8 +4,10 @@
 //
 //     node --max-old-space-size=8192 tools/sandbox/prepare.mjs
 //
-// Reads build/LocomotionPack (the mannequin and every clip) and the car's clips in build/car (getting in, driving and
-// getting out), and writes build/sandbox_prepared/ (gitignored):
+// Reads build/LocomotionPack (the mannequin and every clip), the car's clips in build/car (getting in, driving and
+// getting out) and three poses of Mixamo's Pro Rifle Pack in build/fps_prepared/pack (`idle`, `idle aiming` and
+// `sprint forward`, written as `Rifle <name>`: the weapons' holds are built from them), and writes
+// build/sandbox_prepared/ (gitignored):
 //
 //   character.json    { skin, parts, height }: the mannequin's skeleton in METRES on unit-scale joints, its mesh
 //                     welded, and a `Pivot` joint above the hips (see below)
@@ -41,6 +43,10 @@ const ROOT = path.resolve(HERE, '..', '..')
 const PACK = path.join(ROOT, 'build', 'LocomotionPack')
 /** The car's folder: its model (build.ts reads it) and the Mixamo clips of getting in, driving and getting out. */
 const CAR = path.join(ROOT, 'build', 'car')
+// Mixamo's Pro Rifle Pack, as tools/fps unpacked it (build/Pro Rifle Pack.zip). Only the holds are read: the
+// generator builds the weapons' stances from them, not locomotion.
+const RIFLE = path.join(ROOT, 'build', 'fps_prepared', 'pack')
+const RIFLE_POSES = ['idle', 'idle aiming', 'sprint forward']
 const OUT = path.join(ROOT, 'build', 'sandbox_prepared')
 const CHARACTER = path.join(PACK, 'Mannequin.fbx')
 /** The file is in centimetres. */
@@ -243,29 +249,38 @@ async function main() {
   const { collapseFbxPivots, buildBoneMapping, retargetAnimation } = engineModules(ROOT)
   const ctx = { ajs, collapseFbxPivots, buildBoneMapping, retargetAnimation }
 
-  // Every clip file: the pack's, then the car's (a stem names its clip whichever folder it is in).
-  const fbx = (dir) => fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /\.fbx$/i.test(f) && f !== 'Mannequin.fbx').sort().map(f => [dir, f]) : []
-  const sources = [...fbx(PACK), ...fbx(CAR)]
-  const files = sources.map(([, f]) => f)
-  for (const [dir, f] of sources) {
-    const stem = f.replace(/\.fbx$/i, '')
+  // Every clip file: the pack's, then the car's (a stem names its clip whichever folder it is in), then the rifle
+  // pack's holds under `Rifle <name>` (its `idle` would otherwise be the pack's). Stamps are keyed by that name.
+  const fbx = (dir) => fs.existsSync(dir)
+    ? fs.readdirSync(dir).filter(f => /\.fbx$/i.test(f) && f !== 'Mannequin.fbx').sort()
+      .map(f => [dir, f, f.replace(/\.fbx$/i, '')])
+    : []
+  if (!RIFLE_POSES.every(p => fs.existsSync(path.join(RIFLE, `${p}.fbx`)))) {
+    throw new Error(`The rifle pack's ${RIFLE_POSES.join(', ')} are missing from ${path.relative(ROOT, RIFLE)}: unzip `
+      + `build/Pro Rifle Pack.zip there (the weapons' holds are built from them).`)
+  }
+  const sources = [...fbx(PACK), ...fbx(CAR),
+    ...RIFLE_POSES.map(p => [RIFLE, `${p}.fbx`, `Rifle ${p}`])]
+  const stems = sources.map(([, , stem]) => stem)
+  for (const [dir, f, stem] of sources) {
+    const key = `${stem}.fbx`
     const outFile = path.join(OUT, 'clips', `${stem}.json`)
     const file = path.join(dir, f)
-    if (stamps[f] === stampOf(file) && fs.existsSync(outFile)) continue
+    if (stamps[key] === stampOf(file) && fs.existsSync(outFile)) continue
     // The pack's clips were downloaded on two Mixamo characters: this one (ratio ~1) and one ~6% smaller.
     // The retarget rescales the hips by the ratio, which in-place clips want; the file is in cm, the skin in m.
     const r = await importClipFile(ctx, file, stem, target, { rootMotion: true, ratioRange: [0.8 * CM, 1.2 * CM] })
     delete r.clip.rootMotion
     fs.writeFileSync(outFile, JSON.stringify({ clip: plainClip(r.clip), seconds: r.seconds, ratio: r.ratio / CM }))
-    stamps[f] = stampOf(file)
+    stamps[key] = stampOf(file)
     console.log(`clip ${stem}: ${r.seconds.toFixed(3)} s, hips ratio ${(r.ratio / CM).toFixed(3)}`)
   }
   // Clips whose file is gone.
   for (const f of fs.readdirSync(path.join(OUT, 'clips'))) {
-    if (!files.some(x => x.replace(/\.fbx$/i, '') + '.json' === f)) fs.rmSync(path.join(OUT, 'clips', f))
+    if (!stems.some(stem => `${stem}.json` === f)) fs.rmSync(path.join(OUT, 'clips', f))
   }
   fs.writeFileSync(stampFile, JSON.stringify(stamps, null, 1))
-  console.log(`prepared ${files.length} clips into ${path.relative(ROOT, OUT)}`)
+  console.log(`prepared ${stems.length} clips into ${path.relative(ROOT, OUT)}`)
 }
 
 main().catch((e) => { console.error(e); process.exit(1) })

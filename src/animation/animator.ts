@@ -4,6 +4,7 @@ import {
     AnimationField, AnimationFieldAxis, FieldWeight, fieldWeights, rateScaleOf, phaseOffsetOf,
     axisSmoothing, axisDeadzone, axisWrapSpan, weightSmoothing,
 } from './animationField';
+import { resolveTablePose, type AnimationPose, type AnimationPoseBone } from './animationPose';
 import { clamp, dampTime, dampWrapped, decomposeTRS, DEG2RAD, planarSignedAngle, wrapSpan } from '../core/math';
 import { skeletonTopology, SkeletonTopology, isAncestorJoint, subtreeOrder } from './skeletonTopology';
 import { findKey, findKeyLinear, isSorted } from './keyframes';
@@ -17,7 +18,8 @@ import { InputSystem } from '../input/inputSystem';
 import { Logger } from '../core/logger';
 import { LogTally, plural } from '../core/logTally';
 import { rootMotionNodeOf, rootParentRotation, rootParentScale } from './clipEdit';
-import { normalizeBoneName } from './boneNames';
+import { humanoidSlotOf, normalizeBoneName } from './boneNames';
+import { socketModelMatrix } from './sockets';
 import { footLockAt, footLockKey } from './footLockWindows';
 // The condition model and evaluator live in core/conditions.ts — they read a table of named values and
 // answer yes or no, which has nothing to do with animation, and the behavior state machine needs the
@@ -201,6 +203,12 @@ export interface AnimationState {
      * planted planted, as long as phase 0 is the same foot's plant in both (a field sample's `phaseOffset`).
      * Not the state GROUPS of the graph (`AnimationStateMachine.groups`), which share transitions. Exit times and
      * `loopCount` count from the carried phase.
+     *
+     * On a LAYER, a state in a group the base layer's current state is also in FOLLOWS the base: every frame it
+     * takes the base's normalized phase (through its own length), so an upper-body layer keeps step with the legs
+     * whatever its clips' lengths. When the base comes back into the group at another phase, the layer cross-fades
+     * to it from the pose it was showing. While the base is outside the group the layer runs at its own rate.
+     * A held layer state (speed 0, a pose blend space) must not be in a group: following would move it.
      */
     syncGroup?: string;
     /** Link to the Pose asset (and pose within it) this state holds. Authoring-side only, like `fieldId`. */
@@ -210,6 +218,17 @@ export interface AnimationState {
      * to whatever is beneath — in a masked layer that is how a hand grip sits on top of locomotion.
      */
     pose?: AnimationPose;
+    /**
+     * STEADY, on an override layer: how much (0..1, default 0) the layer's pose keeps its own MODEL-space turn
+     * at the top of its mask, whatever the body beneath does. At each entry bone of the layer's mask (a masked
+     * bone whose parent is not: the Spine of an upper-body mask) the pose is turned so the bone faces as the
+     * layer's own pose has it (its own hips; a bone it does not hold, at rest), measured against the body as
+     * the layers BELOW compose it, so layers above (a lean) still tilt it. Everything further down the mask
+     * rides in local space, so a weapon held in both hands stays in them. At 0 the layer rides the hips and
+     * sways with the walk, as before; one held pose at 0.4..1 replaces a per-gait upper-body clip. Eased over
+     * the cross-fade; an empty state holds it. No effect on an additive layer or a whole-body (mask-less) one.
+     */
+    meshSpace?: number;
     /**
      * Triggers that enter this state directly, by name, from whatever state its layer is in — no
      * transition needed. A script firing `setTrigger('Roll')` plays the state listing `Roll`. Checked after
@@ -388,6 +407,27 @@ export interface AnimationLayer {
     maskId?: string;
     /** Bone NAME -> weight 0..1, embedded on Apply. Absent = the whole body; a bone not listed = 0. */
     mask?: Record<string, number>;
+    /**
+     * SUPPORT-HAND IK: after every layer, this hand reaches where the layer's OWN pose puts it relative to the
+     * other hand (or a socket), so a weapon held in the other hand keeps both hands on it whatever the layers
+     * above do to that hand (an aim offset, sway, recoil) and however its poses are edited.
+     */
+    handIk?: AnimationHandIk;
+}
+
+/** A layer's support-hand IK (see {@link AnimationLayer.handIk}). */
+export interface AnimationHandIk {
+    /** The hand that reaches: `'left'` keeps a left hand on a weapon held in the right. */
+    hand: 'left' | 'right';
+    /** 0..1, default 1, times the layer's weight and presence. */
+    weight?: number;
+    /** A float (or bool) parameter to read it from each frame instead of `weight`: 0 lets go (a sprint). */
+    weightParam?: string;
+    /**
+     * Reach this socket (the hand's frame on it) instead of where the layer's own pose puts the hand relative
+     * to the other one. An edit to the reaching hand in the layer's poses is then ignored.
+     */
+    socket?: string;
 }
 
 /** A named slot actions play into. Placed after layer `afterLayer` (0 = right above the base). */
@@ -400,19 +440,8 @@ export interface AnimationSlotDef {
     mask?: Record<string, number>;
 }
 
-/** One bone of a pose, as a delta from its REST — the same form a rig pose stores. */
-export interface AnimationPoseBone {
-    name: string;
-    /** Rotation delta, quaternion [x,y,z,w], applied as `delta x rest`. */
-    rotation?: number[];
-    /** Translation delta added to the rest translation. */
-    translation?: number[];
-}
-
-export interface AnimationPose {
-    name?: string;
-    bones: AnimationPoseBone[];
-}
+// Poses (and a variant's `reference`, what an additive layer measures it from) live in animationPose.ts.
+export type { AnimationPose, AnimationPoseBone };
 
 /** Options for {@link Animator.playAction}. */
 export interface AnimationActionOptions {
@@ -485,6 +514,31 @@ interface Overlay {
     /** Seconds the presence takes to cross the full 0..1 range. */
     fadeSeconds: number;
     action: ActionState | null;
+    /**
+     * Steady's entry bones (masked joints whose parent joint is not), each with the nodes from the root down to
+     * its parent frame. Resolved with `mask`; null while it is (and for a whole-body layer: no entries).
+     */
+    entries: Map<number, number[]> | null;
+    /** Its layer's Steady (`AnimationState.meshSpace`) this frame, 0 for slots and additive layers. */
+    steadyNow: number;
+    /** The layer's support-hand IK, if it has one. */
+    handIk: AnimationHandIk | null;
+}
+
+/**
+ * What `Animator.updateStateMachine` may swap in place: the same parameters (names and types), the same layers
+ * and slots in order, and on the base and every layer the same states playing the same KIND of thing (a clip by
+ * name, a pose, a blend space). What those poses and blend spaces hold, transitions, weights and masks may differ.
+ */
+function machineShape(sm: AnimationStateMachine): string {
+    const states = (list: AnimationState[]) =>
+        list.map(s => `${s.name}=${s.pose ? 'pose' : s.field ? 'field' : 'clip:' + (s.clipName ?? '')}`).join('|');
+    return JSON.stringify([
+        sm.parameters.map(p => `${p.name}:${p.type}`),
+        states(sm.states),
+        (sm.layers ?? []).map(l => [l.name, states(l.states)]),
+        (sm.slots ?? []).map(s => s.name),
+    ]);
 }
 
 /** The first trigger a transition's conditions read (the one that starts what it enters), or null. */
@@ -688,6 +742,10 @@ class Bone {
     public startTR(): { t: vec3; r: quat } {
         return this._startTR ??= this.sampleTR(0);
     }
+    /** Fix what {@link startTR} answers to a given pose instead of the first frame: a pose variant's base. */
+    public seedStart(t: vec3, r: quat): void {
+        this._startTR = { t: vec3.clone(t), r: quat.clone(r) };
+    }
 
     /** Overwrite the local transform directly — root motion locks the root bone to a fixed pose with this. */
     public setLocalTransform(m: mat4): void {
@@ -702,6 +760,10 @@ class Bone {
     public get name(): string { return this._name; }
     public get id(): number { return this._id; }
 }
+
+// The additive reference of each pose clip's bones (`Animator._poseClipOf`): its base pose for a variant, rest
+// otherwise. Seeded onto every bone map built from that clip (`_buildBoneMapFor`), so `startTR` answers it.
+const POSE_REFERENCES = new WeakMap<Animation, Map<number, { t: vec3; r: quat }>>();
 
 // One line per scene build, not four plus one per clip for every character: a Valley-sized scene logged
 // thousands, which evicted the warnings that explain a broken setup from the log ring.
@@ -737,6 +799,14 @@ function boneKey(nodeIndex: number): string {
 /** Read-only identity, for a node with neither a pose source nor a rest transform. */
 const IDENTITY: mat4 = mat4.create();
 
+/**
+ * A layer following the base's sync group (AnimationState.syncGroup) further than this from the base's phase (a
+ * share of the cycle) cross-fades to it, over LAYER_REACQUIRE_BLEND seconds, instead of jumping. Closer than this
+ * is the ordinary frame-to-frame drift of a layer whose clip is another length, and it simply snaps.
+ */
+const LAYER_REACQUIRE_GAP = 0.02;
+const LAYER_REACQUIRE_BLEND = 0.2;
+
 // Blend scratch. Every helper below fully consumes its inputs before returning.
 const MIX_BONES: Bone[] = [];
 const MIX_WEIGHTS: number[] = [];
@@ -754,6 +824,10 @@ const IK_UP = vec3.create(), IK_ORIGIN = vec3.create(), IK_FORWARD = vec3.create
 const IK_ANKLE_WORLD = vec3.create(), IK_FROM = vec3.create(), IK_TO = vec3.create();
 const IK_HIT_MODEL = vec3.create(), IK_TMP = vec3.create(), IK_SHIFT = vec3.create(), IK_O = vec3.create();
 const IK_INV = mat4.create(), IK_FRAME = mat4.create(), IK_ROT = mat4.create(), IK_AROUND = mat4.create();
+// Support-hand IK (`_applyHandIk`).
+const HIK_TARGET = mat4.create(), HIK_LEAD = mat4.create(), HIK_REACH = mat4.create(), HIK_TMP = mat4.create();
+const HIK_ROOT = vec3.create(), HIK_MID = vec3.create(), HIK_TIP = vec3.create(), HIK_GOAL = vec3.create(), HIK_AT = vec3.create();
+const HIK_T = vec3.create(), HIK_S = vec3.create(), HIK_CUR = quat.create(), HIK_WANT = quat.create(), HIK_ID = quat.create();
 const IK_NEW_GLOBAL = mat4.create();
 const IK_HIP = vec3.create(), IK_KNEE = vec3.create(), IK_ANKLE = vec3.create(), IK_EASED = vec3.create();
 const IK_UNLOCKED = vec3.create(), IK_LOCK_PULL = vec3.create(), IK_LOCK_FROM_HIP = vec3.create();
@@ -832,6 +906,8 @@ interface FieldEntry {
     rateScale: number;
     /** Fraction of a cycle this clip is shifted by. See {@link AnimationFieldSample.phaseOffset}. */
     phaseOffset: number;
+    /** A pose sample (`AnimationFieldSample.pose`): held, so it has no cycle of its own. */
+    pose?: boolean;
 }
 
 // Damped weight below which a fading clip stops being posed. Larger than animationField's own epsilon:
@@ -906,8 +982,11 @@ export class Animator {
     private _overlays: Overlay[] = [];
     /** Set by `_recomputePose`, so `update` can tell whether the overlays still need a pose this frame. */
     private _posedThisFrame: boolean = false;
-    /** Pose states turned into clips, keyed by the state object. */
-    private _poseClips: WeakMap<AnimationState, Animation> = new WeakMap();
+    /**
+     * Poses turned into clips, keyed by the pose object (a state's, or a blend-space sample's). A re-embed makes
+     * new objects, so an edited pose is rebuilt.
+     */
+    private _poseClips: WeakMap<AnimationPose, Animation> = new WeakMap();
     private _bones: Map<string, Bone> = new Map();
     private _skin: Skin | null = null;
     private _playing: boolean = false;
@@ -1003,7 +1082,7 @@ export class Animator {
     // 50/50 crossing and fire event markers at random.
     private _fieldDominant: string | null = null;
     /** Bone maps per clip, built once. Weights change every frame; bone maps must not be rebuilt with them. */
-    private _fieldBoneCache: Map<string, { bones: Map<string, Bone>; duration: number; animation: Animation }> = new Map();
+    private _fieldBoneCache: Map<string, { bones: Map<string, Bone>; duration: number; animation: Animation; pose?: boolean; field?: AnimationField | null }> = new Map();
     /** Cached skeleton hierarchy; see _topology(). */
     private _topologyCache: SkeletonTopology | null = null;
     private _topologySkin: Skin | null = null;
@@ -1238,6 +1317,10 @@ export class Animator {
             }
         }
 
+        // A pose clip's additive reference is its base pose (or rest), not its first frame, which is the pose itself.
+        const refs = POSE_REFERENCES.get(animation);
+        if (refs) for (const bone of bones.values()) { const ref = refs.get(bone.id); if (ref) bone.seedStart(ref.t, ref.r); }
+
         return bones;
     }
 
@@ -1384,8 +1467,22 @@ export class Animator {
         this._prevEventTime = this._currentTime;
     }
 
-    /** The bone map + duration for a clip in the active field, built once and cached by clip name. */
-    private _fieldClip(clipName: string): { bones: Map<string, Bone>; duration: number; animation: Animation } | null {
+    /**
+     * The bone map + duration for a clip in the active field, built once and cached by clip name. A POSE sample
+     * (`pose`) is its pose held as a clip (`_poseClipOf`) under the sample's key: one entry per key while the field
+     * is the same (a blend space places one pose at many points), rebuilt when the field is swapped (an edit). One
+     * fading out after its sample left the field is asked for without its pose, and the cache still has it.
+     */
+    private _fieldClip(clipName: string, pose?: AnimationPose): { bones: Map<string, Bone>; duration: number; animation: Animation; pose?: boolean } | null {
+        const held = this._fieldBoneCache.get(clipName);
+        if (pose || held?.pose) {
+            if (held?.pose && (held.field === this._fieldDef || !pose)) return held;
+            const clip = this._poseClipOf(pose!, pose!.name ?? clipName);
+            if (held && held.animation === clip) { held.field = this._fieldDef; return held; }
+            const entry = { bones: this._buildBoneMapFor(clip), duration: 1, animation: clip, pose: true, field: this._fieldDef };
+            this._fieldBoneCache.set(clipName, entry);
+            return entry;
+        }
         const animation = this._animatedModel?.animations.find(a => a.name === clipName);
         if (!animation) return null;
 
@@ -1420,7 +1517,7 @@ export class Animator {
             const weight = damped.get(w.sample.clipName);
             if (weight === undefined) continue;   // damped out, or already emitted for a duplicated clip
             damped.delete(w.sample.clipName);
-            const clip = this._fieldClip(w.sample.clipName);
+            const clip = this._fieldClip(w.sample.clipName, this._samplePose(field, w.sample.clipName, w.sample.pose));
             if (!clip) {
                 // Skipping keeps the rest of the blend alive, but a field where EVERY sample is
                 // unresolvable holds the bind pose silently. Warn once per clip name.
@@ -1436,13 +1533,14 @@ export class Animator {
                 duration: clip.duration,
                 weight,
                 ...meta,
+                ...(clip.pose ? { pose: true } : {}),
             });
         }
 
         // Whatever is LEFT in `damped` is fading out and must still be posed. Its sample is gone, so rate
         // scale and phase offset come from the remembered meta — defaulting the offset to 0 would jog it.
         for (const [clipName, weight] of damped) {
-            const clip = this._fieldClip(clipName);
+            const clip = this._fieldClip(clipName, this._samplePose(field, clipName));
             if (!clip) continue;
             const meta = this._fieldSampleMeta.get(clipName);
             entries.push({
@@ -1450,6 +1548,7 @@ export class Animator {
                 duration: clip.duration, weight,
                 rateScale: meta?.rateScale ?? 1,
                 phaseOffset: meta?.phaseOffset ?? 0,
+                ...(clip.pose ? { pose: true } : {}),
             });
         }
 
@@ -1466,6 +1565,14 @@ export class Animator {
         // NOT used for timing — _getAnimationDuration is field-aware.
         const dominant = this._resolveFieldDominant(entries);
         this._currentAnimation = dominant ? dominant.animation : null;
+    }
+
+    // A pose sample's pose: on the sample, or the field's pose table's entry for its key (a variant there composed
+    // onto its base: `resolveTablePose`). Undefined for a clip sample.
+    private _samplePose(field: AnimationField, clipName: string, onSample?: AnimationPose): AnimationPose | undefined {
+        if (onSample) return onSample;
+        const entry = field.poses?.[clipName];
+        return entry ? resolveTablePose(entry, field.poses) : undefined;
     }
 
     // Move the probe towards what the parameters ask for: deadband first (below it the probe does not
@@ -1588,8 +1695,14 @@ export class Animator {
     /** Weighted duration of the active field: what one full cycle of the blended motion lasts. */
     private _fieldDuration(entries: FieldEntry[] | null): number {
         if (!entries || entries.length === 0) return 0;
-        let d = 0;
-        for (const e of entries) d += e.weight * (e.duration / e.rateScale);
+        let d = 0, clips = 0, poses = 0;
+        for (const e of entries) {
+            if (e.pose) { poses += e.weight; continue; }
+            d += e.weight * (e.duration / e.rateScale);
+            clips += e.weight;
+        }
+        // A pose has no cycle: the clips' alone sets it, over their own weight; a field of poses only, one second.
+        if (poses > 0) return clips > 1e-9 ? d / clips : 1;
         return d;
     }
 
@@ -1811,10 +1924,71 @@ export class Animator {
         const sm = this._stateMachine;
         if (!group || !sm || !this._currentStateName || this._currentStateName === name) return null;
         if (this._stateByName(sm, this._currentStateName)?.syncGroup !== group || !this._loop) return null;
+        return this._cyclePhase();
+    }
+
+    /** Where the current state is in its cycle, 0..1: a blend space's phase, a clip's time over its length. */
+    private _cyclePhase(): number | null {
         if (this._fieldEntries) return this._fieldPhase;
         if (!this._currentAnimation) return null;
         const duration = this._getAnimationDuration();
         return duration > 0 ? (this._currentTime % duration) / duration : null;
+    }
+
+    /** The current state's sync group and phase, when it is a looping state in one: what a layer follows. */
+    private _leadPhase(): { group: string; phase: number } | null {
+        const sm = this._stateMachine;
+        if (!sm || !this._currentStateName || !this._loop || !this._playing) return null;
+        const group = this._stateByName(sm, this._currentStateName)?.syncGroup;
+        if (!group) return null;
+        const phase = this._cyclePhase();
+        return phase === null ? null : { group, phase };
+    }
+
+    /**
+     * Keep every layer whose state shares the base's sync group on the base's phase (AnimationState.syncGroup).
+     * Runs after the base advanced this frame and before the pose is composed, so the layer is posed at this
+     * frame's phase, not the last one's.
+     */
+    private _followSyncedLayers(pose: boolean): void {
+        const lead = this._leadPhase();
+        for (const o of this._overlays) {
+            if (o.kind !== 'layer') continue;
+            const child = o.animator;
+            const sm = child._stateMachine;
+            const state = sm && child._currentStateName ? child._stateByName(sm, child._currentStateName) : null;
+            if (!lead || !state || state.syncGroup !== lead.group || child._overlayEmpty || !child._playing) continue;
+            child._followPhase(lead.phase, pose, o.presence > 0);
+        }
+    }
+
+    /**
+     * Move this (layer) animator to `phase` of its current cycle, re-posing it when `pose`. A jump on screen (the
+     * base came back into the group at another phase) cross-fades from the pose shown, over LAYER_REACQUIRE_BLEND.
+     */
+    private _followPhase(phase: number, pose: boolean, visible: boolean): void {
+        const current = this._cyclePhase();
+        if (current === null) return;
+        const gap = Math.abs(phase - current);
+        if (visible && pose && !this._isBlending && Math.min(gap, 1 - gap) > LAYER_REACQUIRE_GAP) {
+            this._freezeOutgoingPose();
+            this._currentBlendTime = 0;
+            this._activeBlendTime = LAYER_REACQUIRE_BLEND;
+        }
+        const entries = this._fieldEntries;
+        if (entries) {
+            this._fieldPhase = phase;
+            this._currentTime = phase * this._fieldDuration(entries);
+            // A synced cross-fade inside the layer moves both of its sides on the one phase.
+            if (this._isBlending && this._syncedBlend && this._previousFieldEntries) this._previousFieldPhase = phase;
+            if (pose) {
+                this._poseFieldAt(entries, phase);
+                if (this._isBlending && this._previousFieldEntries) this._poseFieldAt(this._previousFieldEntries, this._previousFieldPhase);
+            }
+        } else {
+            this._currentTime = phase * this._getAnimationDuration();
+            if (pose) for (const bone of this._bones.values()) bone.update(this._currentTime);
+        }
     }
 
     private _stateByName(sm: AnimationStateMachine, name: string): AnimationState | null {
@@ -2076,6 +2250,9 @@ export class Animator {
                 this._pinPreviousRoot();
             }
         }
+
+        // Layers in this state's sync group take this frame's phase before the pose is composed.
+        if (!this._isOverlay && this._overlays.length) this._followSyncedLayers(pose);
 
         // Turn the current bone local transforms into final skinning matrices.
         if (pose) this._recomputePose();
@@ -2415,6 +2592,22 @@ export class Animator {
     private readonly _poseLocals = new Map<number, mat4>();
     private readonly _poseGlobals = new Map<number, mat4>();
     private readonly _globalPool = new Map<number, mat4>();
+    // Copies of the last pose's locals, kept only once `posedLocal` has been asked for (the editor's pose gizmo):
+    // `_poseLocals` holds scratch that the next character to pose reuses.
+    private _keepPosedLocals = false;
+    private readonly _posedLocalCopies = new Map<number, mat4>();
+
+    /**
+     * A node's LOCAL transform in the last pose, everything applied (layers, IK, editor overrides): what the
+     * editor's pose gizmo turns a bone from. Null before the first pose, and on a layer's own animator. The
+     * first call starts keeping copies, re-posing once to fill them.
+     */
+    public posedLocal(nodeIndex: number): mat4 | null {
+        if (this._isOverlay) return null;
+        if (!this._keepPosedLocals) { this._keepPosedLocals = true; this._recomputePose(); }
+        const m = this._posedLocalCopies.get(nodeIndex);
+        return m ? mat4.clone(m) : null;
+    }
 
     private _recomputePose(): void {
         // A layer's animator hands its pose to the parent; skinning matrices are the parent's job.
@@ -2427,6 +2620,9 @@ export class Animator {
         const skin = this._skin;
         const localTransforms = this._poseLocals;
         localTransforms.clear();
+        for (const o of this._overlays) {
+            o.steadyNow = o.kind === 'layer' && o.blend !== 'additive' && o.presence > 0 ? o.animator._steadyNow() : 0;
+        }
         for (let jointIndex = 0; jointIndex < skin.joints.length; jointIndex++) {
             const nodeIndex = skin.joints[jointIndex].nodeIndex;
             localTransforms.set(nodeIndex, this._resolveLocal(nodeIndex));
@@ -2454,6 +2650,8 @@ export class Animator {
         // After the pose is accumulated and before the bind matrices fold in: IK needs to know where the
         // feet ended up, and writing corrected LOCALS lets the loop above be re-run verbatim.
         // Each IK change re-accumulates the subtree it moved, so nothing is left to redo afterwards.
+        // The support hands first: foot IK's pelvis drop then carries both hands together.
+        if (this._overlays.length) this._applyHandIk(localTransforms, globalTransforms, topo);
         this._applyFootIk(localTransforms, globalTransforms, topo);
         this._ikDelta = 0;
 
@@ -2465,6 +2663,13 @@ export class Animator {
             const globalTransform = globalTransforms.get(joint.nodeIndex) ?? IDENTITY;
             mat4.multiply(this._finalBoneMatrices[jointIndex], globalTransform, joint.inverseBindMatrix);
             mat4.copy(this._jointModelMatrices[jointIndex] ??= mat4.create(), globalTransform);
+        }
+        if (this._keepPosedLocals) {
+            for (const [nodeIndex, local] of localTransforms) {
+                let copy = this._posedLocalCopies.get(nodeIndex);
+                if (!copy) { copy = mat4.create(); this._posedLocalCopies.set(nodeIndex, copy); }
+                mat4.copy(copy, local);
+            }
         }
     }
 
@@ -2495,6 +2700,115 @@ export class Animator {
         }
         const nodeIndex = skin.joints[jointIndex].nodeIndex;
         mat4.multiply(out, out, this._poseLocals.get(nodeIndex) ?? skin.nodeTransforms?.get(nodeIndex) ?? IDENTITY);
+    }
+
+    // ---- Support-hand IK --------------------------------------------------------------------------
+    // A layer's `handIk`: one hand reaching where the layer's own pose puts it relative to the other. Model space,
+    // after every layer and before foot IK.
+
+    // Each arm's chain (upper arm, forearm, hand, by node), the joint both arms hang from, and the nodes from that
+    // joint down to each hand. Found once per skin by humanoid slot; null when the skin has no two hands.
+    private _handChainsCache: {
+        left: [number, number, number]; right: [number, number, number];
+        fromCommon: { left: number[]; right: number[] };
+    } | null | undefined = undefined;
+
+    private _handChains(topo: SkeletonTopology): NonNullable<Animator['_handChainsCache']> | null {
+        if (this._handChainsCache !== undefined) return this._handChainsCache;
+        const skin = this._skin!;
+        const handJoint = (slot: string): number => {
+            for (let j = 0; j < skin.joints.length; j++) {
+                const name = skin.nodeNames?.get(skin.joints[j].nodeIndex);
+                if (name && humanoidSlotOf(name) === slot) return j;
+            }
+            return -1;
+        };
+        const chainOf = (hand: number): [number, number, number] | null => {
+            const fore = hand >= 0 ? topo.parentJoint[hand] : -1;
+            const upper = fore >= 0 ? topo.parentJoint[fore] : -1;
+            return upper >= 0 ? [skin.joints[upper].nodeIndex, skin.joints[fore].nodeIndex, skin.joints[hand].nodeIndex] : null;
+        };
+        const lh = handJoint('hand.L'), rh = handJoint('hand.R');
+        const left = chainOf(lh), right = chainOf(rh);
+        if (!left || !right) return (this._handChainsCache = null);
+        // The joints above each hand, nearest first; the first one the left hand's line shares is the common one.
+        const above = (j: number) => { const out: number[] = []; for (let p = topo.parentJoint[j], g = 0; p >= 0 && g < 256; p = topo.parentJoint[p], g++) out.push(p); return out; };
+        const rightUp = new Set(above(rh));
+        const common = above(lh).find(j => rightUp.has(j));
+        if (common === undefined) return (this._handChainsCache = null);
+        // The nodes from the common joint (not included) down to a hand: joints and the non-joint nodes between.
+        const down = (hand: number): number[] => {
+            const out: number[] = [];
+            for (let j = hand, g = 0; j >= 0 && j !== common && g < 256; j = topo.parentJoint[j], g++) {
+                out.unshift(skin.joints[j].nodeIndex);
+                out.unshift(...(topo.parentChain[j] ?? []));
+            }
+            return out;
+        };
+        return (this._handChainsCache = { left, right, fromCommon: { left: down(lh), right: down(rh) } });
+    }
+
+    // The product of a layer's own locals along `nodes` (top-down): a hand's transform relative to the common joint,
+    // as the layer's pose has it. A node the layer does not hold is taken as the body has it.
+    private _layerChain(out: mat4, nodes: number[], o: Overlay, localTransforms: Map<number, mat4>): mat4 {
+        mat4.identity(out);
+        for (const n of nodes) {
+            const local = o.animator._sourceLocal(n) ?? localTransforms.get(n) ?? this._skin!.nodeTransforms?.get(n) ?? IDENTITY;
+            mat4.multiply(out, out, local);
+        }
+        return out;
+    }
+
+    private _applyHandIk(localTransforms: Map<number, mat4>, globalTransforms: Map<number, mat4>, topo: SkeletonTopology): void {
+        for (const o of this._overlays) {
+            const ik = o.handIk;
+            if (!ik || o.kind !== 'layer' || o.presence <= 0) continue;
+            let w = ik.weight ?? 1;
+            if (ik.weightParam) {
+                const v = this._paramValues.get(ik.weightParam);
+                if (typeof v === 'number') w = v;
+                else if (typeof v === 'boolean') w = v ? 1 : 0;
+            }
+            w = clamp(w, 0, 1) * this._overlayWeight(o) * o.presence;
+            if (!(w > 1e-4)) continue;
+            const chains = this._handChains(topo);
+            if (!chains) return;
+            const reach = ik.hand === 'left' ? chains.left : chains.right;
+            const lead = ik.hand === 'left' ? chains.right : chains.left;
+            const leadGlobal = globalTransforms.get(lead[2]);
+            const upper = globalTransforms.get(reach[0]), fore = globalTransforms.get(reach[1]), hand = globalTransforms.get(reach[2]);
+            if (!leadGlobal || !upper || !fore || !hand) continue;
+
+            // Where the hand goes: on the socket, or where the layer's pose has it relative to the other hand.
+            if (ik.socket) {
+                const skin = this._skin!;
+                if (!socketModelMatrix(HIK_TARGET, skin, ik.socket, j => globalTransforms.get(skin.joints[j].nodeIndex) ?? null)) continue;
+            } else {
+                const leadChain = this._layerChain(HIK_LEAD, ik.hand === 'left' ? chains.fromCommon.right : chains.fromCommon.left, o, localTransforms);
+                const reachChain = this._layerChain(HIK_REACH, ik.hand === 'left' ? chains.fromCommon.left : chains.fromCommon.right, o, localTransforms);
+                if (!mat4.invert(HIK_TMP, leadChain)) continue;
+                mat4.multiply(HIK_TARGET, leadGlobal, mat4.multiply(HIK_TMP, HIK_TMP, reachChain));
+            }
+
+            mat4.getTranslation(HIK_ROOT, upper);
+            mat4.getTranslation(HIK_MID, fore);
+            mat4.getTranslation(HIK_TIP, hand);
+            vec3.lerp(HIK_GOAL, HIK_TIP, mat4.getTranslation(HIK_AT, HIK_TARGET), w);
+            // No pole: the arm keeps the bend plane its pose has (the elbow where the pose put it).
+            const solve = solveTwoBone({ root: HIK_ROOT, mid: HIK_MID, tip: HIK_TIP, target: HIK_GOAL });
+            this._rotateGlobal(reach[0], solve.rootDelta, localTransforms, globalTransforms, topo);
+            this._reaccumulate(localTransforms, globalTransforms, topo, reach[0]);
+            this._rotateGlobal(reach[1], solve.midDelta, localTransforms, globalTransforms, topo);
+            this._reaccumulate(localTransforms, globalTransforms, topo, reach[1]);
+
+            // And the hand turned onto the target's frame, by the same weight.
+            decomposeTRS(globalTransforms.get(reach[2])!, HIK_T, HIK_CUR, HIK_S);
+            decomposeTRS(HIK_TARGET, HIK_T, HIK_WANT, HIK_S);
+            quat.multiply(HIK_WANT, HIK_WANT, quat.invert(HIK_CUR, HIK_CUR));
+            quat.slerp(HIK_WANT, quat.identity(HIK_ID), HIK_WANT, w);
+            this._rotateGlobal(reach[2], HIK_WANT, localTransforms, globalTransforms, topo);
+            this._reaccumulate(localTransforms, globalTransforms, topo, reach[2]);
+        }
     }
 
     // ---- Foot IK ----------------------------------------------------------------------------------
@@ -3362,6 +3676,59 @@ export class Animator {
         this.resetStateMachine();
     }
 
+    /**
+     * Swap in an edited copy of the machine playing now WITHOUT restarting it: parameters, current states and
+     * their phases carry on, and what the edit changed shows at once (a pose edited in the editor, the poses of a
+     * blend space). Only for a machine of the same shape (`machineShape`: parameters, layers and slots, every
+     * layer's states and what kind of thing each plays); anything else falls back to {@link setStateMachine},
+     * which re-enters the entry states. Returns whether it was swapped in place.
+     */
+    public updateStateMachine(sm: AnimationStateMachine): boolean {
+        const old = this._stateMachine;
+        if (this._isOverlay || !old || machineShape(old) !== machineShape(sm)) { this.setStateMachine(sm); return false; }
+        this._stateMachine = sm;
+        this._rebindCurrentState();
+        for (const o of this._overlays) {
+            if (o.kind === 'slot') {
+                const def = sm.slots?.find(s => s.name === o.name);
+                if (def) { o.blend = def.blend ?? 'override'; o.maskSpec = def.mask ?? null; o.mask = null; }
+                continue;
+            }
+            const layer = sm.layers?.find(l => l.name === o.name);
+            if (!layer) continue;
+            o.blend = layer.blend ?? 'override';
+            o.maskSpec = layer.mask ?? null;
+            o.mask = null;
+            o.weight = clamp(layer.weight ?? 1, 0, 1);
+            o.weightParam = layer.weightParam;
+            o.handIk = layer.handIk ?? null;
+            const child = o.animator;
+            child._stateMachine = { parameters: [], states: layer.states, transitions: layer.transitions, groups: layer.groups, events: sm.events };
+            child._rebindCurrentState();
+        }
+        this._recomputePose();
+        return true;
+    }
+
+    // After `updateStateMachine`: the current state's pose or blend space, if the new machine holds another one,
+    // takes over at once, at the same time and phase, without a cross-fade.
+    private _rebindCurrentState(): void {
+        const state = this._stateMachine?.states.find(s => s.name === this._currentStateName);
+        if (!state) return;
+        if (this._isOverlay && (state.pose || state.field || state.clipName)) this._steadyTarget = clamp(state.meshSpace ?? 0, 0, 1);
+        if (state.pose) {
+            const clip = this._poseClipOf(state.pose, state.pose.name ?? state.name);
+            if (clip === this._currentAnimation) return;
+            this._currentAnimation = clip;
+            this._bones = this._buildBoneMapFor(clip);
+            for (const bone of this._bones.values()) bone.update(this._currentTime);
+        } else if (state.field && this._fieldDef && state.field !== this._fieldDef) {
+            this._fieldDef = state.field;
+            this._refreshFieldWeights();
+            if (this._fieldEntries) this._poseFieldAt(this._fieldEntries, this._fieldPhase);
+        }
+    }
+
     /** No clips at all on the model yet: shared clips still to be attached (see `_setWhileClipsPending`). */
     private _clipsPending(): boolean {
         return (this._animatedModel?.animations?.length ?? 0) === 0;
@@ -3515,6 +3882,12 @@ export class Animator {
         // A sync group's hand-over: read where the stride is before anything below resets it.
         const carried = this._syncedPhase(name, state);
         if (this._isOverlay) {
+            // Steady eases from what the layer showed to this state's over the cross-fade; an empty state holds it.
+            this._steadyFrom = this._steadyNow();
+            const empty = !state || (!state.pose && !state.field && !state.clipName);
+            this._steadyTarget = empty ? this._steadyFrom : clamp(state!.meshSpace ?? 0, 0, 1);
+            // A layer fading back in from nothing shows its state's Steady from the start.
+            this._steadyFade = wasEmpty ? 0 : Math.max(0, blendOverride ?? this._blendTime);
             // Leaving a clip for an empty state keeps that clip's foot-IK weight for the fade-out. Read
             // before the name changes: it is the state being left that answers.
             if (!this._overlayEmpty) this._overlayFadeIkWeight = this._stateIkWeightOfState();
@@ -3540,7 +3913,7 @@ export class Animator {
         }
 
         if (state?.pose) {
-            this._playClip(this._poseClip(state), true, !(this._isOverlay && wasEmpty));
+            this._playClip(this._poseClipOf(state.pose, state.pose.name ?? state.name), true, !(this._isOverlay && wasEmpty));
             if (blendOverride !== undefined) this._activeBlendTime = Math.max(0, blendOverride);
             this._speed = 1;
             return;
@@ -3930,7 +4303,7 @@ export class Animator {
                 weight: clamp(layer.weight ?? 1, 0, 1), weightParam: layer.weightParam,
                 order: i + 1,
                 presence: present, presenceTarget: present, fadeSeconds: this._blendTime,
-                action: null,
+                action: null, entries: null, steadyNow: 0, handIk: layer.handIk ?? null,
             });
         });
         for (const slot of sm.slots ?? []) this._addSlot(slot, sm.layers?.length ?? 0);
@@ -3955,7 +4328,7 @@ export class Animator {
             maskSpec: def.mask ?? null, mask: null,
             weight: 1, order: after + 0.5,
             presence: 0, presenceTarget: 0, fadeSeconds: 0.15,
-            action: null,
+            action: null, entries: null, steadyNow: 0, handIk: null,
         };
         this._overlays.push(overlay);
         return overlay;
@@ -4029,7 +4402,29 @@ export class Animator {
             if (nodeIndex !== undefined && w > 0) mask.set(nodeIndex, clamp(w, 0, 1));
         }
         o.mask = mask;
+        o.entries = this._skin ? this._entryPaths(mask) : null;
         return mask;
+    }
+
+    // A mask's entry bones (masked joints whose parent joint is not) and, for each, the nodes from the root down
+    // to its parent frame, joints and the non-joint nodes between them in order: what Steady measures along.
+    private _entryPaths(mask: Map<number, number>): Map<number, number[]> {
+        const topo = this._topology();
+        const joints = this._skin!.joints;
+        const pathTo = (j: number, depth = 0): number[] => {
+            const pj = topo.parentJoint[j];
+            const above = pj >= 0 && depth < 256 ? [...pathTo(pj, depth + 1), joints[pj].nodeIndex] : [];
+            return [...above, ...(topo.parentChain[j] ?? [])];
+        };
+        const out = new Map<number, number[]>();
+        for (const nodeIndex of mask.keys()) {
+            const j = topo.jointOfNode.get(nodeIndex);
+            if (j === undefined) continue;
+            const pj = topo.parentJoint[j];
+            if (pj >= 0 && mask.has(joints[pj].nodeIndex)) continue;
+            out.set(nodeIndex, pathTo(j));
+        }
+        return out;
     }
 
     // An overlay's weight this frame: its parameter's when it names one, else its own.
@@ -4043,23 +4438,82 @@ export class Animator {
     }
 
     // Blend every overlay onto a bone's base local, in order.
-    private _applyOverlays(nodeIndex: number, base: mat4): mat4 {
+    // Blend the overlays below `upTo` (all of them by default) onto a bone's base local, in order.
+    private _applyOverlays(nodeIndex: number, base: mat4, upTo: number = this._overlays.length): mat4 {
         let local = base;
-        for (const o of this._overlays) {
+        for (let k = 0; k < upTo; k++) {
+            const o = this._overlays[k];
             if (o.presence <= 0) continue;
             const mask = this._overlayMask(o);
             const maskWeight = mask ? (mask.get(nodeIndex) ?? 0) : 1;
             if (maskWeight <= 0) continue;
             const w = this._overlayWeight(o) * maskWeight * o.presence;
             if (w <= 0) continue;
-            const layer = o.animator._sourceLocal(nodeIndex);
+            let layer = o.animator._sourceLocal(nodeIndex);
             // A layer that does not animate this bone leaves it to the layers beneath.
             if (!layer) continue;
+            if (o.steadyNow > 0) {
+                const path = o.entries?.get(nodeIndex);
+                if (path) layer = this._steadied(layer, path, k, o, o.steadyNow);
+            }
             local = o.blend === 'additive'
                 ? this._addTransform(local, layer, o.animator._additiveReference(nodeIndex), w)
                 : this._blendTransforms(local, layer, w);
         }
         return local;
+    }
+
+    // A node's local with the base and the overlays below `k` applied: the body as layer k finds it.
+    private _localBelow(nodeIndex: number, k: number): mat4 {
+        const override = this._boneOverrides?.get(nodeIndex);
+        if (override) return override;
+        const base = this._sourceLocal(nodeIndex) ?? this._skin!.nodeTransforms?.get(nodeIndex) ?? IDENTITY;
+        return k > 0 ? this._applyOverlays(nodeIndex, base, k) : base;
+    }
+
+    // Scratch for `_steadied`, one set per nesting depth: measuring the body below a Steady layer can meet
+    // another Steady layer beneath it.
+    private _steadyScratch: { f: quat; g: quat; t: vec3; r: quat; s: vec3 }[] = [];
+    private _steadyDepth = 0;
+
+    // A Steady layer's local at one of its entry bones (`AnimationState.meshSpace`): turned so the bone keeps, by
+    // `s`, the model-space turn the layer's own pose gives it. F is its parent frame's turn in the body as the
+    // overlays below this one compose it; G the same frame in the layer's own pose (a joint it does not hold, at
+    // rest; the non-joint nodes between joints as the body has them, so they cancel). Rotations only, read with
+    // the scale divided out (the 0.01 Armature). The local turn R becomes slerp(I, inv(F) G, s) x R.
+    private _steadied(layer: mat4, path: number[], k: number, o: Overlay, s: number): mat4 {
+        const depth = this._steadyDepth++;
+        const sc = this._steadyScratch[depth] ??= { f: quat.create(), g: quat.create(), t: vec3.create(), r: quat.create(), s: vec3.create() };
+        try {
+            const topo = this._topology();
+            const rest = this._skin!.nodeTransforms;
+            quat.identity(sc.f);
+            quat.identity(sc.g);
+            for (const n of path) {
+                decomposeTRS(this._localBelow(n, k), sc.t, sc.r, sc.s);
+                quat.multiply(sc.f, sc.f, sc.r);
+                if (topo.jointOfNode.has(n)) decomposeTRS(o.animator._sourceLocal(n) ?? rest?.get(n) ?? IDENTITY, sc.t, sc.r, sc.s);
+                quat.multiply(sc.g, sc.g, sc.r);
+            }
+            quat.multiply(sc.g, quat.invert(sc.f, sc.f), sc.g);           // D = inv(F) x G
+            quat.slerp(sc.g, quat.identity(sc.f), sc.g, s);
+            decomposeTRS(layer, sc.t, sc.r, sc.s);
+            quat.normalize(sc.r, quat.multiply(sc.r, sc.g, sc.r));
+            return mat4.fromRotationTranslationScale(arenaMat(), sc.r, sc.t, sc.s);
+        } finally {
+            this._steadyDepth--;
+        }
+    }
+
+    // How much of a layer's pose holds its model-space turn right now: the current state's `meshSpace`, eased
+    // from what the layer showed over the transition into it. Timed by the state's own clock, not the clip
+    // cross-fade: two states holding one pose do not cross-fade at all.
+    private _steadyFrom = 0;
+    private _steadyTarget = 0;
+    private _steadyFade = 0;
+    private _steadyNow(): number {
+        if (this._steadyFade <= 0 || this._stateTime >= this._steadyFade) return this._steadyTarget;
+        return this._steadyFrom + (this._steadyTarget - this._steadyFrom) * (this._stateTime / this._steadyFade);
     }
 
     // The additive reference for a bone: the current clip's first frame, or a field's (`_fieldReference`).
@@ -4112,16 +4566,20 @@ export class Animator {
         return mat4.fromRotationTranslationScale(arenaMat(), BL_R0, BL_T0, BL_S0);
     }
 
-    // A pose state as a clip: every listed bone held at `delta x rest` across one second. Two identical
-    // keys, because a zero-length clip would wrap by `% 0`.
-    private _poseClip(state: AnimationState): Animation {
-        const cached = this._poseClips.get(state);
+    // A pose as a clip: every listed bone held at `delta x rest` across one second. Two identical keys, because
+    // a zero-length clip would wrap by `% 0`. Its additive reference (POSE_REFERENCES) is `pose.reference` (a
+    // variant's base) or rest, so on an additive layer a pose adds what it changes from its base.
+    private _poseClipOf(pose: AnimationPose, label: string): Animation {
+        const cached = this._poseClips.get(pose);
         if (cached) return cached;
         const nodeOf = this._nodeOfBoneName();
+        const reference = new Map<string, AnimationPoseBone>();
+        for (const b of pose.reference ?? []) reference.set(b.name, b);
 
         const samplers: AnimationSampler[] = [];
         const channels: AnimationChannel[] = [];
-        for (const bone of state.pose?.bones ?? []) {
+        const refs = new Map<number, { t: vec3; r: quat }>();
+        for (const bone of pose.bones ?? []) {
             const nodeIndex = nodeOf(bone.name);
             if (nodeIndex === undefined) continue;
             const rest = this._skin?.nodeTransforms?.get(nodeIndex) ?? mat4.create();
@@ -4140,9 +4598,19 @@ export class Animator {
                 samplers.push({ input: [0, 1], output: [t[0], t[1], t[2], t[0], t[1], t[2]], interpolation: 'LINEAR' } as AnimationSampler);
                 channels.push({ samplerIndex: samplers.length - 1, targetNodeIndex: nodeIndex, targetPath: 'translation' } as AnimationChannel);
             }
+
+            const ref = reference.get(bone.name);
+            refs.set(nodeIndex, {
+                t: ref?.translation ? vec3.add(vec3.create(), restT, vec3.fromValues(ref.translation[0], ref.translation[1], ref.translation[2])) : vec3.clone(restT),
+                r: ref?.rotation
+                    ? quat.normalize(quat.create(), quat.multiply(quat.create(),
+                        quat.fromValues(ref.rotation[0], ref.rotation[1], ref.rotation[2], ref.rotation[3]), restR))
+                    : quat.clone(restR),
+            });
         }
-        const clip: Animation = { name: `pose:${state.pose?.name ?? state.name}`, samplers, channels };
-        this._poseClips.set(state, clip);
+        const clip: Animation = { name: `pose:${label}`, samplers, channels };
+        POSE_REFERENCES.set(clip, refs);
+        this._poseClips.set(pose, clip);
         return clip;
     }
 
@@ -4279,6 +4747,15 @@ export class Animator {
     public layerStateTime(layer: string): number {
         const o = this._overlays.find(x => x.kind === 'layer' && x.name === layer);
         return o && !o.animator._overlayEmpty && o.animator._currentAnimation ? o.animator._currentTime : 0;
+    }
+
+    /**
+     * Where a layer's current state is in its cycle, 0..1 (a blend space's phase, a clip's time over its length),
+     * or null when the layer is unknown or plays nothing. A layer state in the base's sync group reads the base's.
+     */
+    public layerPhase(layer: string): number | null {
+        const o = this._overlays.find(x => x.kind === 'layer' && x.name === layer);
+        return o && !o.animator._overlayEmpty ? o.animator._cyclePhase() : null;
     }
 
     /** Length in clip seconds of the clip a layer's current state plays, or 0 (see layerStateTime). */

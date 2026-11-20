@@ -14,6 +14,7 @@ import ConditionTree from './ConditionTree'
 import { AssetDropRow, LayerSection, SlotsSection } from './LayerPanels'
 import { EventActionsSection } from './EventActionsPanel'
 import AnimationAssetPicker from './AnimationAssetPicker'
+import PoseLibrary from '../rig/PoseLibrary'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { BoltIcon, Button, ButtonWithConfirm, cn, ComboSelect, controlClass, FileButton, hintClass, JOINED_DIVIDER_CLASS, JOINED_GROUP_CLASS, NumberInput, OptionalNumberInput, SectionTitle, SegmentedControl, Select, TextInput, Toggle } from '@cleo/app-kit/ui'
 import { clamp } from '@cleo/app-kit/utils/math';
@@ -220,7 +221,28 @@ export function StateMachinePanel() {
         </div>
       </Collapsable>
       <PreviewSection />
+      <PoseSection />
     </div>
+  )
+}
+
+// ---- Poses -------------------------------------------------------------------------------------------
+// The pose mode on the preview character with its machine running (Layered): a weapon hold edited under its
+// aim, Steady and hand IK, every blend space holding the pose following the drag. See rig/PoseLibrary.
+function PoseSection() {
+  const { target, modelId, simulate } = useStateMachine()
+  const { models, rigs } = useAssetLibrary()
+  const { stateMachineTargetId } = useEditorSessions()
+  const rigId = modelId ? models.find(m => m.id === modelId)?.rigId : undefined
+  const rig = rigId ? rigs.find(r => r.id === rigId) : undefined
+  if (!target || !rig) return null
+  return (
+    <Collapsable title='Poses'>
+      <div className='p-2 flex flex-col gap-1'>
+        {!simulate && <p className={cn(hintClass, 'text-ui-xs')}>Turn on <b>simulate</b> above to edit a pose with the layers on.</p>}
+        <PoseLibrary rigId={rig.id} rigName={rig.name} targetId={stateMachineTargetId} layered />
+      </div>
+    </Collapsable>
   )
 }
 
@@ -228,7 +250,7 @@ export function StateMachinePanel() {
 function SelectedState() {
   const {
     sm, selection, setSelection, clips, setState, removeState, stateIndex, links, animationFields, fieldOf, poseAssets,
-    activeLayer, addTriggerParam, groups, groupOf, moveToGroup,
+    activeLayer, addTriggerParam, groups, groupOf, moveToGroup, fullSm,
   } = useStateMachine()
   if (selection?.kind !== 'state') return null
   const i = stateIndex(selection.name)
@@ -536,15 +558,33 @@ function SelectedState() {
       <div className='flex items-center gap-1 text-ui-xs'
         title={'States in one sync group hand over in step: the state entered starts at the phase of the cycle the one '
           + 'left was at, and through the cross-fade the two move as one. For blend spaces whose phase 0 is the same '
-          + 'foot’s plant (a walk and a stair climb, say). Not the same as the state groups above, which share '
-          + 'transitions.'}>
+          + 'foot’s plant (a walk and a stair climb, say). On a layer, a state in the group the base layer’s state is '
+          + 'in follows the base’s phase every frame (an upper body keeping step with the legs); never put a held '
+          + 'state (speed 0) in one. Not the same as the state groups above, which share transitions.'}>
         <span className='text-muted w-[42px] shrink-0'>Sync</span>
         <div className='flex-1 min-w-0'>
           <ComboSelect value={s.syncGroup ?? ''} noun='sync group' allowEmpty allowCustom
-            choices={[...new Set(sm.states.map(x => x.syncGroup).filter((g): g is string => !!g))].map(value => ({ value }))}
+            choices={[...new Set([...sm.states, ...(activeLayer > 0 ? fullSm.states : [])]
+              .map(x => x.syncGroup).filter((g): g is string => !!g))].map(value => ({ value }))}
             onChange={v => setState(i, { syncGroup: v.trim() || undefined })} />
         </div>
       </div>
+
+      {/* Steady (AnimationState.meshSpace), on an override layer: the pose keeps its own model-space turn at the
+          top of the layer's mask, so one held pose sits still over every gait. */}
+      {activeLayer > 0 && (fullSm.layers?.[activeLayer - 1]?.blend ?? 'override') !== 'additive' && (
+        <div className='flex items-center gap-1 text-ui-xs'
+          title={'Steady: how much this state’s pose keeps its own turn in model space at the top of the layer’s mask (the '
+            + 'spine of an upper-body mask), whatever the hips beneath do. 0 rides the hips and sways with the walk; 1 holds '
+            + 'still, so one held pose (a rifle hold) works over every gait and on stairs. Everything below the top of the '
+            + 'mask rides with it, so both hands stay on what they hold; layers above (a lean) still tilt it. A layer with '
+            + 'no mask has no top, and this does nothing there.'}>
+          <span className='text-muted w-[42px] shrink-0'>Steady</span>
+          <OptionalNumberInput className={cn(tight, 'w-[56px]')} value={s.meshSpace ?? 0}
+            onChange={v => setState(i, { meshSpace: v === undefined || v <= 0 ? undefined : clamp(v, 0, 1) })} />
+          <span className='text-dim'>0 rides the hips, 1 holds still</span>
+        </div>
+      )}
 
       <SectionTitle title='Links' className='mt-1' />
       {linked.length === 0

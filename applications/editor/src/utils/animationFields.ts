@@ -2,6 +2,7 @@ import { Node, ModelNode, AnimatedModel } from 'cleo'
 import type { AnimationField, AnimationFieldMode, AnimationFieldAxis, AnimationFieldSample } from 'cleo'
 import { cryptoRandomId } from './ids'
 import type { ModelAsset } from './models'
+import { fieldPoseTable, poseSampleKey, type PoseAsset } from './poseAssets'
 
 // A reusable, named Animation Field asset — the editor's blend space. A field places clips from ONE
 // animated model at coordinates in a 1D or 2D parameter space; sampling it produces a weighted mix of the
@@ -53,16 +54,28 @@ export function buildAnimationFieldAsset(name: string, rigId: string, id?: strin
  * The engine-facing view of a field: exactly what an AnimationState embeds.
  * `yAxis` must be dropped in 1D mode — the asset keeps it for the editor, but shipping it would make an
  * embedded copy look changed whenever the user merely touched the hidden axis.
+ *
+ * A POSE sample (`poseRef`) plays under the key `pose:<poseId>`, its pose embedded once in the field's pose
+ * table (`poses`: `fieldPoseTable`, a variant as what it changes from its base); one whose pose is gone is
+ * dropped, as a state whose pose is gone holds nothing. Without `poses` (a caller that does not have the
+ * library) the table of `previous` (the copy being replaced) is kept.
  */
-export function toRuntimeField(asset: AnimationFieldAsset): AnimationField {
+export function toRuntimeField(asset: AnimationFieldAsset, poses?: PoseAsset[], previous?: AnimationField): AnimationField {
+  const table = fieldPoseTable(asset.samples, poses, previous?.poses as any)
   const field: AnimationField = {
     mode: asset.mode,
     xAxis: { ...asset.xAxis },
-    samples: asset.samples.map(s => ({ ...s })),
+    samples: asset.samples.flatMap(s => {
+      const { pose: _p, ...rest } = s
+      if (!s.poseRef) return [{ ...rest }]
+      const key = poseSampleKey(s.poseRef.poseId)
+      return table[key] ? [{ ...rest, poseRef: { ...s.poseRef }, clipName: key }] : []
+    }),
   }
   if (asset.mode === '2d') field.yAxis = { ...asset.yAxis }
   // Only written when authored: absent means the engine's default, which must stay changeable.
   if (typeof asset.weightSmoothing === 'number') field.weightSmoothing = asset.weightSmoothing
+  if (Object.keys(table).length) field.poses = JSON.parse(JSON.stringify(table))
   return field
 }
 
@@ -121,13 +134,13 @@ export function sampleRate(s: AnimationFieldSample): number {
  * `fields` is the whole library, so a machine referencing several refreshes them all in one pass. A state
  * whose field asset was deleted has its copy CLEARED, degrading it to "no clip".
  */
-export function reembedFields<T extends { states: any[]; layers?: { states: any[] }[] }>(sm: T, fields: AnimationFieldAsset[]): T {
+export function reembedFields<T extends { states: any[]; layers?: { states: any[] }[] }>(sm: T, fields: AnimationFieldAsset[], poses?: PoseAsset[]): T {
   if (!sm?.states) return sm
   let changed = false
   const embed = (list: any[]) => list.map(s => {
     if (!s.fieldId) return s
     const asset = fields.find(f => f.id === s.fieldId)
-    const next = asset ? toRuntimeField(asset) : undefined
+    const next = asset ? toRuntimeField(asset, poses, s.field) : undefined
     if (JSON.stringify(next ?? null) === JSON.stringify(s.field ?? null)) return s
     changed = true
     return { ...s, field: next }
@@ -136,6 +149,12 @@ export function reembedFields<T extends { states: any[]; layers?: { states: any[
   // Controller layers play fields too, and are re-embedded by exactly the same rule.
   const layers = sm.layers?.map(l => ({ ...l, states: embed(l.states) }))
   return changed ? { ...sm, states, ...(layers ? { layers } : {}) } : sm
+}
+
+/** True when any state of a machine, on any layer, plays a blend space with a pose sample. */
+export function machineHasPoseSamples(sm: { states?: any[]; layers?: { states?: any[] }[] } | null | undefined): boolean {
+  const has = (states?: any[]) => !!states?.some(s => s.field?.samples?.some((x: AnimationFieldSample) => x.poseRef))
+  return has(sm?.states) || !!sm?.layers?.some(l => has(l.states))
 }
 
 /** True when any state of a machine, on any layer, plays the given field. Decides who needs re-embedding. */

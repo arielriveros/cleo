@@ -190,6 +190,52 @@ describe('Animator — pose states', () => {
         expect(localAngle(a, 0)).toBeCloseTo(30, 3);   // Hips not in the pose: the base shows through
         expect(localAngle(a, 1)).toBeCloseTo(25, 3);   // Spine: rest (identity) x 25
     });
+
+    const q4 = (deg: number) => { const q = qy(deg); return [q[0], q[1], q[2], q[3]]; };
+    const additivePose = (pose: AnimationState['pose'], weight = 1) => machine({
+        layers: [{ name: 'Aim', blend: 'additive', weight, states: [state('Aim', '', { isEntry: true, pose })], transitions: [] }],
+    });
+
+    it('on an additive layer, adds what a variant changes from its base (`reference`)', () => {
+        const a = makeAnimator();
+        // A variant at 50 whose base is at 20: it adds 30 over whatever is beneath (the base's 30).
+        a.setStateMachine(additivePose({ name: 'Up', bones: [{ name: 'Spine', rotation: q4(50) }], reference: [{ name: 'Spine', rotation: q4(20) }] }));
+        frame(a);
+        expect(localAngle(a, 0)).toBeCloseTo(30, 3);   // not in the pose
+        expect(localAngle(a, 1)).toBeCloseTo(60, 3);
+    });
+
+    it('on an additive layer, adds a pose with no reference as its delta from rest, by the layer weight', () => {
+        const a = makeAnimator();
+        a.setStateMachine(additivePose({ name: 'Lean', bones: [{ name: 'Spine', rotation: q4(25) }] }));
+        frame(a);
+        expect(localAngle(a, 1)).toBeCloseTo(55, 3);
+        const b = makeAnimator();
+        b.setStateMachine(additivePose({ name: 'Lean', bones: [{ name: 'Spine', rotation: q4(25) }] }, 0.5));
+        frame(b);
+        expect(localAngle(b, 1)).toBeCloseTo(42.5, 3);
+    });
+
+    it('a bone the reference does not list is measured from rest', () => {
+        const a = makeAnimator();
+        a.setStateMachine(additivePose({
+            name: 'Up', bones: [{ name: 'Hips', rotation: q4(10) }, { name: 'Spine', rotation: q4(50) }],
+            reference: [{ name: 'Spine', rotation: q4(50) }],
+        }));
+        frame(a);
+        expect(localAngle(a, 0)).toBeCloseTo(40, 3);   // Hips: 10 from rest
+        expect(localAngle(a, 1)).toBeCloseTo(30, 3);   // Spine: the same as its base, nothing added
+    });
+
+    it('a re-embedded pose (a new object) is rebuilt', () => {
+        const a = makeAnimator();
+        a.setStateMachine(additivePose({ name: 'Lean', bones: [{ name: 'Spine', rotation: q4(10) }] }));
+        frame(a);
+        expect(localAngle(a, 1)).toBeCloseTo(40, 3);
+        a.setStateMachine(additivePose({ name: 'Lean', bones: [{ name: 'Spine', rotation: q4(20) }] }));
+        frame(a);
+        expect(localAngle(a, 1)).toBeCloseTo(50, 3);
+    });
 });
 
 describe('Animator — actions', () => {

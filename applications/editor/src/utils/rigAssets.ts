@@ -103,8 +103,11 @@ export type RigAsset = {
   thumbnail?: string
 }
 
-/** One bone's contribution to a shared pose, as a delta from its rest. Mirrors {@link StoredPoseBone}. */
-export type RigPose = { id: string; name: string; bones: StoredPoseBone[] }
+/**
+ * A named pose: per-bone deltas from rest ({@link StoredPoseBone}). A VARIANT names its base (`baseRef`) and
+ * stores its bones RELATIVE to it (poseAssets.ts `composePoseBones`), so editing the base moves the variant.
+ */
+export type RigPose = { id: string; name: string; bones: StoredPoseBone[]; baseRef?: { assetId: string; poseId: string } }
 
 /**
  * One attach point. `offset` is in the bone's frame with the bone's own scale removed, so its units are

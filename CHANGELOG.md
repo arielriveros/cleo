@@ -16,6 +16,52 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **A pistol and a rifle in the Sandbox, carried over the walk, aimed where the camera looks, and fired.**
+  - *The weapons.* Q takes out the pistol, then the rifle, then puts it away (RB on a pad); holding the right mouse
+    button aims it (LT): the character faces the camera and strafes, turns in place sooner, and the camera moves in
+    over the shoulder. Sprinting lowers it, and lets go of the pistol with the left hand; getting into the car puts
+    it away. Each weapon hangs on a grip socket of its own on the right hand, with a Muzzle node at the end of its
+    bore. Models: "Low-Poly G40" and "Low-Poly M4a1" by TastyTony (CC-BY-4.0).
+  - *A layer for each, holding poses.* The **Pistol** and **Rifle** layers hold the spine, the head and the arms at
+    the low ready or aimed, and the pistol's support hand has a layer of its own. All of it is POSES you can edit
+    (**Pistol Poses**, **Rifle Poses**): Carry, Aim and Sprint, held over the walk by Steady layers (the chest keeps
+    the pose's turn over the hips, walking, running and on the stairs: about 9 degrees of a jog's sway carrying,
+    under 3 aiming), the left hand kept on the weapon by hand IK, and the legs, foot placement and foot locking
+    untouched.
+  - *Aim blend spaces of pose variants.* **Pistol Aim** and **Rifle Aim** are additive layers like the Look layer: a
+    blend space each of the aim's 25 directions over its yaw and pitch off the body, each a VARIANT of the Aim pose
+    (what it changes from it), so editing Aim moves every direction and editing one moves only it; the bore points
+    where the camera looks (within 4 degrees standing, 6 walking, in the tests).
+  - *Solved, then editable.* The poses are first solved at build time by two-bone IK onto the placed weapon
+    (`tools/sandbox/weapons`), the right hand closing round each grip as Mixamo's Pro Rifle Pack's does round its
+    rifle's, each elbow where its wrist bends least and kept down: the wrists bend 3 to 25 degrees, as the pack's
+    own holds do. The rifle is carried low across the body as the pack's idle carries it, and the pistol at the low
+    ready with the arms out. There are no weapon clips at all.
+  - *Layers in step with the legs.* A layer's state in the sync group of the base layer's current state now follows
+    the base's phase every frame (`state.syncGroup` on a layer), cross-fading onto it when the base comes back into
+    the group at another phase; `animator.layerPhase(name)` reads it. Player contract 48.
+  - *Pose variants and pose blend spaces.* A pose can be a VARIANT of another: it stores only what it changes from
+    it, so editing the base moves every variant (an aim pose and its directions). A blend space sample can hold a
+    pose instead of a clip (each pose stored once in the blend space however many points it is at), and on an
+    additive layer a variant adds what it changes from its base: an aim offset that follows every edit to the aim.
+  - *Edit poses in the editor.* The Skeleton and Animator parts' **Poses**: pick a pose, click a joint and turn it
+    with the rotate gizmo or the numbers, on the character with its weapon in its hand, and every animator and
+    blend space holding it follows the drag; in the Animator, with every layer on (`Animator.updateStateMachine`
+    swaps the edit in without restarting the machine). New pose (captured from the character), Add variant, Make
+    independent, undo. Creator poses stay read-only: a variant of one goes into the skeleton's own pose asset.
+  - *Steady layers and hand IK.* A layer state's **Steady** (`meshSpace`) keeps its pose's own model-space turn at
+    the top of the layer's mask whatever the hips do, so one held pose works over every gait; a layer's **Hand IK**
+    (`handIk`) keeps one hand where its pose has it relative to the other (or on a socket), after every layer.
+    Player contract 48.
+  - *Firing.* The left mouse button (RT) fires: the pistol once a pull, the rifle while held, from the hip bringing
+    the weapon up first. Each shot is two raycasts, from the camera through the crosshair and then from the muzzle to
+    that point, so cover stops it; it never meets the shooter or the stairs' ramps. A hit pushes a dynamic body along
+    the shot at the point hit (a crate shoves and tips, a ball flies, capped at 2.5 m/s a hit), and leaves sparks, dust
+    and a bullet hole that moves with the body; a tracer and a muzzle flash go with each shot (templates in
+    `/Weapons/Effects`, the Firing Line's flash and impact). Spread widens from the hip, on the move and as it keeps
+    firing, and the HUD's new crosshair shows it; each shot kicks the camera up, mostly coming back, and the weapon
+    in the hands. All of it is a gun script on each weapon (`SandboxGun`) and the player's: raycasts and impulses.
+
 - **A car in the Sandbox, and Controllers that drive vehicles.**
   - *The car.* The Sandbox has a car to get into by its door (Interact, E), drive and get out of again: the vehicle
     simulation with the Car preset, on a model's own wheels ("Dirty car" by 3D Error 404, CC-BY-4.0), with Mixamo

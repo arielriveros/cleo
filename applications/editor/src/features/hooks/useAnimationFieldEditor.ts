@@ -13,6 +13,7 @@ import { createAssetEditScene } from '../demoScene/createAssetEditScene';
 import { createAnimationEditorScene } from '../demoScene/createAnimationEditorScene';
 import { SCENE_TAB_ID } from '../engineContextTypes';
 import type { EditorTab } from '../engineContextTypes';
+import type { PoseAsset } from '../../utils/poseAssets';
 
 type TabRuntime = { scene: Scene; rootId: string };
 
@@ -27,6 +28,8 @@ type TabRuntime = { scene: Scene; rootId: string };
 export function useAnimationFieldEditor(deps: {
   instanceRef: React.MutableRefObject<CleoEngine | null>;
   animationFieldsRef: React.MutableRefObject<AnimationFieldAsset[]>;
+  /** The pose library: a blend space's pose samples embed their poses from it. */
+  poseAssetsRef: React.MutableRefObject<PoseAsset[]>;
   modelsRef: React.MutableRefObject<ModelAsset[]>;
   materialsRef: React.MutableRefObject<MaterialAsset[]>;
   animationsRef: React.MutableRefObject<AnimationAsset[]>;
@@ -44,7 +47,7 @@ export function useAnimationFieldEditor(deps: {
   updateAnimationField: (id: string, f: AnimationFieldAsset) => void;
 }) {
   const {
-    instanceRef, animationFieldsRef, modelsRef, materialsRef, animationsRef, tabRuntimeRef,
+    instanceRef, animationFieldsRef, poseAssetsRef, modelsRef, materialsRef, animationsRef, tabRuntimeRef,
     dirtyArmedRef, eventEmitter, tabs, setActiveTab, commitTab, withoutDirty, liveScenes,
     markTabDirty, addAnimationField, updateAnimationField, ensureRigForModel,
   } = deps;
@@ -153,7 +156,7 @@ export function useAnimationFieldEditor(deps: {
         if (!(n instanceof ModelNode) || !n.animator) continue;
         const sm = n.animator.getStateMachine();
         if (!machineUsesField(sm, asset.id)) continue;
-        n.animator.setStateMachine(reembedFields(sm as any, fields) as any);
+        n.animator.setStateMachine(reembedFields(sm as any, fields, poseAssetsRef.current) as any);
         count++;
       }
     }

@@ -373,12 +373,18 @@ export function collectReferencedBoneMaskIds(scene: Scene | null | undefined): S
   return set
 }
 
-/** POSE asset ids a scene references: `poseRef.assetId` on any state, base machine and layers alike. */
+/**
+ * POSE asset ids a scene references: `poseRef.assetId` on any state, base machine and layers alike, and on
+ * every pose sample of the blend spaces they play.
+ */
 export function collectReferencedPoseAssetIds(scene: Scene | null | undefined): Set<string> {
   const set = new Set<string>()
   for (const sm of sceneMachines(scene)) {
     for (const layer of [sm, ...(sm.layers ?? [])]) {
-      for (const state of layer?.states ?? []) if (state?.poseRef?.assetId) set.add(state.poseRef.assetId)
+      for (const state of layer?.states ?? []) {
+        if (state?.poseRef?.assetId) set.add(state.poseRef.assetId)
+        for (const s of state?.field?.samples ?? []) if (s?.poseRef?.assetId) set.add(s.poseRef.assetId)
+      }
     }
   }
   return set

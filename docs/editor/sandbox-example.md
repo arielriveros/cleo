@@ -12,7 +12,9 @@ does. It can:
 - jump, fall, and land soft or hard, a hard landing crouching where it came down, or rolling if it is still running;
 - climb a flight of stairs at a stair pace, one step a tread, with stair clips that hand over in step with the walk;
 - stand on a stair ramp or a slope without sliding down it;
-- get into a car by its door, drive it, and get out again (see [The car](#the-car)).
+- get into a car by its door, drive it, and get out again (see [The car](#the-car));
+- carry a pistol or a rifle at the low ready, aim it where the camera looks and fire it, walking, jogging and running
+  with it, its shots raycasts that push what they hit (see [The weapons](#the-weapons)).
 
 Everything that is the character is one **Player** template, placed once; the sky is the **Environment** template,
 the course the **Course** template, and the car the **Car** template.
@@ -36,8 +38,8 @@ It uses only what the engine has:
 
 - a **Character** and a **Controller**;
 - one **Camera Rig**, with a script that frames it over the shoulder, and in third person while sprinting;
-- three blend spaces (locomotion, the look-at, and the stairs, up and down) and one animator, its states in
-  groups;
+- blend spaces (locomotion, the look-at, the stairs, up and down, and each weapon's carry, aim and aim poses) and
+  one animator, its states in groups, with a layer for each weapon;
 - foot placement and foot locking on the skeleton;
 - one script on the Character, which handles input and writes the values the animator reads.
 
@@ -63,6 +65,9 @@ Each is placed once.
 | Zoom | the wheel | |
 | Get into the car, or out of it | E, by the driver's door | Y |
 | Day, dusk, night | 1, 2, 3 | d-pad left, up, right |
+| Next weapon (pistol, rifle, none) | Q | RB |
+| Aim | hold the right mouse button | hold LT |
+| Fire | the left mouse button (hold for the rifle) | RT |
 
 In the car, the **Drive** action drives and steers: W forward, S brakes, then reverses, A and D steer; on a gamepad
 the right trigger drives on and the left one brakes, then reverses (both analog), and the left stick steers (its up
@@ -445,9 +450,12 @@ switches it.
 - **Third person** (sprinting, and `sprintHold` 0.4 s after): `thirdPersonArm` 3.4 m back, orbiting `pivotHeight`
   1.45 m above the feet.
 
+- **Aiming** (its script's `aiming`): `aimArm` 1.25 m back and `aimShoulderOffset` 0.6 m to the right, in over
+  `aimSeconds` (0.25 s), on top of whichever of the two framings it is in.
+
 It eases the arm, the socket offset and the pivot height, and never touches where the camera looks: yaw and pitch
-are the Controller's. The four framing distances are `public`, so each copy of the template can frame its own
-character; `switchSeconds` and `sprintHold` are `private`. Under pointer lock the
+are the Controller's. The six framing distances are `public`, so each copy of the template can frame its own
+character; `switchSeconds`, `sprintHold` and `aimSeconds` are `private`. Under pointer lock the
 engine drops the glitched mouse readings that used to swing the view round (see
 [Input](../scripting/input.md)).
 
@@ -508,6 +516,122 @@ What the car does not do yet: the doors do not open (the character passes throug
 reach the steering wheel (the clips are for a seat further forward; no hand IK), the driver does not lean or turn
 the wheel with the steering, and the seated feet go through the floor (no leg IK).
 
+## The weapons
+
+A pistol and a rifle, carried in the right hand: **Q** takes out the pistol, then the rifle, then puts it away (RB
+on a pad), and holding the **right mouse button** aims it (LT). Aiming, the character faces the camera and
+strafes, turns in place as soon as the camera is 45 degrees round (`aimTurnThreshold`), and the camera moves in
+over the shoulder. Sprinting lowers the weapon (and lets go of the pistol with the left hand); getting into the car
+puts it away.
+
+```
+Player
+├─ ...
+├─ Mannequin
+└─ Weapons
+   ├─ Pistol Grip   on the Mannequin's Pistol Grip socket: the Pistol model, and its Muzzle
+   └─ Rifle Grip    on the Rifle Grip socket: the Rifle model, and its Muzzle
+```
+
+**On the hand.** Each weapon hangs on a socket of its own on the right hand (`Pistol Grip`, `Rifle Grip`, on the
+Mannequin rig, shown with their weapon in the animation editors). The socket's frame is the weapon's: its grip at the
+origin, its bore along +Z. Under it, the weapon's model sits at the origin, and a **Muzzle** node marks the end of
+its bore, for whatever fires it. The script shows the one in the hands and hides the other.
+
+**The poses.** Everything about how each weapon is held is a POSE, in a Pose asset per weapon (**Pistol Poses**,
+**Rifle Poses**, in `/Characters/Mannequin/Animation/Weapons`), editable in the editor (see
+[Editing a pose](animation.md#editing-a-pose)):
+
+- **Carry**, **Aim** and **Sprint**: the stances, the spine, the head, both arms and the fingers.
+- **Aim Left 45 Up 30** and the rest, 25 in all: the aim's directions, each a [variant](animation.md#variants) of
+  **Aim** that stores only what it changes from it (the upper spine, the head, the arms).
+
+Edit **Aim** and every aim direction moves with it; edit one direction and only it changes. Edit **Carry** and the
+weapon is carried that way at every gait and on the stairs.
+
+**The layers.** Each weapon has an override layer, **Pistol** and **Rifle**, which holds the spine, the head and the
+arms (the pistol's left arm is on a layer of its own, **Pistol Support**, so it can let go at a sprint). Its weight
+is the script's (`pistolWeight`, `rifleWeight`): one at a time, faded out and in over `equipSeconds` (0.3 s).
+
+- **Carry** is a blend space of the poses over the base layer's walk axes (**Pistol Carry**, **Rifle Carry**): the
+  Carry pose wherever the walk plays a clip and standing, the Sprint pose where it sprints, so the weapon goes down
+  as the legs speed up. **Aim** holds the Aim pose.
+- Both are **Steady** (see [Steady holds](animation.md#steady-holds)): the chest keeps the pose's own turn over the
+  hips, whatever the legs do, walking, running or on a flight of stairs, so one pose is the whole hold. Carrying,
+  at 0.5, it keeps half the hips' sway and lean into a run (about 9 degrees of sway at a jog); aiming, at 0.85,
+  nearly none (under 3), so the weapon stays on target. The legs are never touched, so foot placement and foot
+  locking work as they do unarmed.
+- **Hand IK** keeps the left hand on the weapon (the **Rifle** layer's, and **Pistol Support**'s): it goes where
+  the pose has it relative to the right hand, whatever the aim layer above does to the right arm, and however the
+  poses are edited. The pistol's lets go with the support layer at a sprint.
+- **The stances.** Carrying: the rifle low across the body, its muzzle ahead to the left (the rifle pack's idle);
+  the pistol at the low ready, two-handed with the arms out and its muzzle 45 degrees down. Aiming: the rifle
+  shouldered, the head down on the stock and the sights at the eye; the pistol pushed out under the eye. At a
+  sprint: the rifle across the chest (the rifle pack's sprint carry), the pistol one-handed by the thigh.
+
+**The aim.** **Pistol Aim** and **Rifle Aim** are additive layers like the **Look** layer: each a blend space of the
+25 aim directions (**Pistol Aim Offset**, **Rifle Aim Offset**) over the aim's yaw off the body (`aimYaw`, -90 to
+90) and its pitch (`aimPitch`, -60 to 60, the camera's own). Each adds what its direction changes from **Aim**: the
+chest takes most of the yaw and part of the pitch, the arms the rest (the rifle turning about the shoulder pocket,
+the pistol about the eye), the head following the sights. Their weight is the aim's (`aimSeconds`, 0.15 s) times
+the weapon's. Aiming, the Look layer is off: the aim turns the head.
+
+**How the hands hold them.** The poses are first worked out at build time (`tools/sandbox/weapons/poses.ts`): the
+weapon is placed, and both arms are solved onto it by two-bone IK, each elbow where its wrist bends least, kept
+down, and the forearms taking most of the wrists' twist. The right hand closes round each grip as the Mixamo **Pro
+Rifle Pack**'s does round its rifle's in its `idle aiming` (read by `tools/sandbox/prepare.mjs` from
+`build/fps_prepared/pack`), where the rifle is aimed level from fist to fist; the left hand round the rifle's
+handguard as the pack's does, and round the pistol's grip hand as the grip hand mirrored, free to roll round the
+bore. The fingers are the pack's. Held so, the wrists bend 3 to 25 degrees, as the pack's own holds do.
+
+**The models** are "Low-Poly G40" and "Low-Poly M4a1" by TastyTony (CC-BY-4.0, Sketchfab), read at their rest pose
+(`tools/sandbox/weapons/models.ts`) and scaled to the real weapons' lengths: 24 cm (a Glock 40) and 84 cm (an
+M4A1 with its stock out).
+
+### Firing
+
+**The trigger.** Fire (the left mouse button, RT) shoots the weapon in the hands. The pistol fires once a pull, up to
+420 rounds a minute; the rifle fires while the trigger is held, at 700. Fired from the hip, the weapon comes up first
+(it aims), and stays up `fireAimHold` (0.6 s) after the last shot: a pull made while it comes up fires as soon as it
+is up (`pullBuffer`, 0.35 s). A sprint, the car and a weapon going in or out of the hands hold fire.
+
+**A shot is two raycasts** (`examples/scripts/SandboxGun.ts`, on each weapon's grip holder):
+
+1. From the camera through the crosshair, the middle of the screen, up to `range` (200 m): what the player aims at.
+2. From the Muzzle to that point: what the bullet meets on its way there. A corner the camera sees past but the gun
+   does not stops the shot.
+
+Neither meets the shooter's own body, the trigger zones or the **Stair Ramp** layer (`passThroughLayers`: the ramps
+are there to be walked on, not seen), so a shot hits the steps.
+
+**What a hit does.** A dynamic body hit takes an `impulse` along the shot at the point it was hit (14 N·s from the
+pistol, 12 from the rifle, a few times a real bullet's), so a crate shoves and tips, a barrel rolls, a ball flies;
+no hit speeds anything up by more than `maxPushSpeed` (2.5 m/s), so a 3 kg ball is not shot off the course. Every hit
+sprays sparks and dust (**Bullet Impact**) and leaves a hole (**Bullet Hole**, a decal that fades after 40 s), which
+moves with the body it is on. The shot draws a **Tracer** from the muzzle and a **Muzzle Flash** (particles and a
+point light). These four are templates in `/Weapons/Effects`, each with its own script (`SandboxShotFx`,
+`SandboxBulletHole`, `SandboxTracer`); the flash and the impact are the Firing Line's effects. Their glows (the flash,
+the sparks) take only a tenth of the camera's exposure (`exposureWeight` 0.1): the Sandbox goes from day to night,
+and a glow tuned for one blazes white in the other. Their smoke and dust are lit, and exposed like the scene. Each gun keeps its last
+`maxHoles` (60) holes.
+
+**Spread** is a cone round the crosshair: 0.3 degrees aimed and 2.2 from the hip for the pistol (0.25 and 2.8 for
+the rifle), wider at a run (`moveSpread`) and wider the longer it fires (`bloomPerShot`, up to `bloomMax`, settling
+at `bloomRecovery` degrees a second). The HUD's **Crosshair** shows it: a dot and four ticks, as far out as the shot
+spreads, shown with a weapon out and brighter aimed.
+
+**Recoil.** Each shot kicks the camera up (`recoilPitch`: 1.6 degrees the pistol, 0.9 the rifle) and a little aside
+(`recoilYaw`); 70% of the pitch comes back (SandboxPlayer's `recoilRecovery`, at `recoilRecoverySpeed`), so a held
+rifle climbs slowly. The weapon kicks up in the hands too (the gun's `kick`, through the aim blend space's pitch),
+settling at `kickRecovery`.
+
+Each gun's numbers are its script's attributes, set on its holder (`Pistol Grip`, `Rifle Grip`) in the Player
+template.
+
+What the weapons do not do yet: no reloading or ammunition, no sound, no hit reactions beyond the push (nothing in the
+Sandbox takes damage), no draw or holster animation (the arms move straight into the hold and the weapon appears in
+the hand), and the hold is the same whichever way the character moves (only the legs walk sideways or back).
+
 ## Things to push
 
 The **Props** node holds loose rigid bodies over the course, each a template (`/Level/Props`), each resting where
@@ -558,6 +682,12 @@ clips, not typed in.
   straight and cannot reach back to the lock.
 - **Blends between gaits.** A quick change from forward to sideways blends two clips whose feet do not plant
   together, so for a step the blend lifts a foot the lock was holding, and it slides back to the animation.
+- **Weapons over clips other than the walk's.** A weapon layer's clips are built against the walk's and the stairs'
+  hips. Over a start, a stop, a turn in place, a jump or a landing, the chest follows those clips' hips instead, so
+  the weapon tilts with them for as long as they play.
+- **Two hands across a change of stance.** Going into or out of an aim, or between the carry and the sprint, the two
+  arms are blended separately, so for the blend's length the support hand comes off the weapon by a few
+  centimetres.
 - **Running landings.** The running landing is the running jump's own last 0.3 s, so a landing at a run is brief.
 - **The stair clips' steps.** The clips step 23 cm risers 24 cm apart, and the flights have 15 and 20 cm risers
   30 cm apart. Foot placement takes up the riser and foot locking the stride: a planted foot creeps 2 to 13 cm/s.
