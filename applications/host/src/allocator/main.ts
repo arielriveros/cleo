@@ -33,7 +33,9 @@ const log = (line: string) => console.log(`[${new Date().toISOString().slice(11,
 
 if (args.includes('--keys')) {
     const k = generateTokenKeys();
-    console.log(`# The allocator's (keep secret): NETSYNC_TOKEN_PRIVATE_KEY\n${k.privateKey}\n# Every host's: NETSYNC_TOKEN_KEY\n${k.publicKey}`);
+    const oneLine = (pem: string) => pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
+    console.log(`# The allocator's, secret (for an env file, one line):\nNETSYNC_TOKEN_PRIVATE_KEY=${oneLine(k.privateKey)}\n` +
+        `# Every host's (public):\nNETSYNC_TOKEN_KEY=${oneLine(k.publicKey)}\n\n# The same as PEM:\n${k.privateKey}${k.publicKey}`);
     process.exit(0);
 }
 

@@ -65,6 +65,19 @@ REST sidecar: Ready, Health, the allocation from `GET /watch/gameserver` — its
 copy of the player template at the spawn point. A copy goes when its player leaves; a level character waits for the
 next one.
 
+## Publishing a game's host
+
+```sh
+npm run build:host                                                     # dist/cleo-host.mjs, dist/cleo-allocator.mjs
+npm run publish-host -- --game <Publish ▸ Web folder> --out <folder>    # or --example <project folder>
+```
+
+The folder (`src/publishHost.ts`) holds the built host and allocator, `package.json` (their npm packages: the
+WebTransport addon is native), the game (`game/game.bin`, `game/game.scripts.js` — the web build's, so one content
+hash), a `Dockerfile` (`node:24-trixie-slim`), `docker-compose.yml` + `netsync.hosting.json` + `.env.example` for
+one VPS (two warm hosts, the allocator + gateway on 443), `deploy/cleo-host@.service` (systemd),
+`deploy/agones-fleet.yaml` and `deploy/edgegap.md`, and a README saying which to start from.
+
 ## cleo-allocator: the allocator and the gateway
 
 One small service in front of a fleet of hosts, and the only piece that stays up between matches (§7.1).

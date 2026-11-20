@@ -10,9 +10,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cachedCertificate, certificateFromPem, generateCertificate } from './devCertificate';
 import { HostApp, createLog } from './hostApp';
-import { readSettings } from './settings';
+import { HELP, readSettings } from './settings';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+if (process.argv.includes('--help') || process.argv.includes('-h')) { console.log(HELP); process.exit(0); }
 const settings = readSettings(process.argv.slice(2), process.env);
 const log = createLog(settings.log);
 
