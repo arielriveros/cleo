@@ -523,7 +523,9 @@ export default class Drive extends VehicleNode {
 ```
 
 What it reads back after each step: `speed` (forward, m/s), `rpm`, `gear` (`-1` reverse, `0` neutral),
-and per wheel `vehicle.wheel(i)`, which gives `grounded`, `suspensionLength`, `compression` (0–1),
+`braking` (0–1: how hard its brakes are on, counting Parked and a throttle held against the way it rolls,
+which brakes before it reverses; what brake lamps follow) and `reversing` (in reverse gear: what reversing
+lamps follow), and per wheel `vehicle.wheel(i)`, which gives `grounded`, `suspensionLength`, `compression` (0–1),
 `steerAngle`, `rotation`, `angularVelocity`, `contactPoint`, `contactNormal`, `longitudinalSlip` and
 `lateralSlip`.
 

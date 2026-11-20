@@ -51,6 +51,7 @@ import { shapeScaleFactors } from '../features/gizmo/collisionGizmoMath';
 import { selectedCollisionShape, type CollisionChannel } from '../features/gizmo/collisionSelection';
 import { ensureLiveTriggerOverlay, dropLiveTriggerOverlay, LIVE_TRIGGERS, type LiveTriggerSource } from './liveTriggerOverlay';
 import { ensureWindFieldOverlay, dropWindFieldOverlay, windOverlayWanted, WIND_FIELD_OVERLAY } from './windFieldOverlay';
+import { inHullSources, type HullSourceEntry } from './hullSources';
 
 /**
  * Editor-only visual helpers (light/probe icons, camera frustum gizmos, physics debug wireframes),
@@ -140,17 +141,18 @@ const sigMapFor = (scene: Scene): Map<string, string> => {
  * default) — the space collider shapes are authored in. Editor helpers and gizmos are skipped, and so
  * are nested Colliders.
  * `includeSkinned` must be false for a hull: a skinned bind pose does not follow the animation.
+ * `sources`: only the meshes they name (a hull's `sources`, see hullSources.ts); every one when absent.
  */
-function collectMeshPositions(root: Node, includeSkinned: boolean, frame: Node = root): number[][] {
+function collectMeshPositions(root: Node, includeSkinned: boolean, frame: Node = root, sources?: readonly string[]): number[][] {
   const out: number[][] = [];
   const rootInv = Vec.mat4.invert(Vec.mat4.create(), frame.worldTransform);
   if (!rootInv) return out;
 
-  const visit = (node: Node) => {
+  const visit = (node: Node, path: string) => {
     if (isEditorOwnedName(node.name) || (node as any).isGizmo) return;
     // A Collider inside this one is a body of its own (a door in a wall), and fits its own shapes.
     if (node !== root && node instanceof ColliderNode) return;
-    if (node instanceof ModelNode) {
+    if (node instanceof ModelNode && inHullSources(path, sources)) {
       const model = node.model;
       const skinned = model instanceof AnimatedModel && model.hasSkin;
       const positions = skinned && !includeSkinned ? null : model.geometry?.positions;
@@ -169,9 +171,9 @@ function collectMeshPositions(root: Node, includeSkinned: boolean, frame: Node =
         }
       }
     }
-    for (const child of node.children) visit(child);
+    for (const child of node.children) visit(child, path ? `${path}/${child.name}` : child.name);
   };
-  visit(root);
+  visit(root, '');
   return out;
 }
 
@@ -183,10 +185,44 @@ export function meshPositions(root: Node, frame: Node = root): number[][] {
   return collectMeshPositions(root, true, frame);
 }
 
-/** Vertices to hull, or null when there is nothing usable. Skinned meshes are excluded — see above. */
-export function collectHullPositions(root: Node, frame: Node = root): number[][] | null {
-  const out = collectMeshPositions(root, false, frame);
+/**
+ * Vertices to hull, or null when there is nothing usable. Skinned meshes are excluded — see above.
+ * `sources`: only the meshes a hull's `sources` name, by their paths from `root` (hullSources.ts).
+ */
+export function collectHullPositions(root: Node, frame: Node = root, sources?: readonly string[]): number[][] | null {
+  const out = collectMeshPositions(root, false, frame, sources);
   return out.length >= 4 ? out : null;
+}
+
+/** Whether `node` holds a mesh a hull can take: its own geometry, not skinned. */
+function holdsHullMesh(node: Node): boolean {
+  if (!(node instanceof ModelNode)) return false;
+  const model = node.model;
+  if (model instanceof AnimatedModel && model.hasSkin) return false;
+  return (model?.geometry?.positions?.length ?? 0) > 0;
+}
+
+/**
+ * The nodes under `source` (a hull's fit source, itself first) that hold a mesh a hull can take or lead to
+ * one, depth first, by their paths of names from it: what a hull's Meshes picker lists. The walk
+ * {@link collectHullPositions} takes: no editor helpers, nested Colliders or skinned meshes.
+ */
+export function hullSourceTree(source: Node): HullSourceEntry[] {
+  const out: HullSourceEntry[] = [];
+  const visit = (node: Node, path: string, depth: number): boolean => {
+    if (isEditorOwnedName(node.name) || (node as any).isGizmo) return false;
+    if (node !== source && node instanceof ColliderNode) return false;
+    const at = out.length;
+    const mesh = holdsHullMesh(node);
+    out.push({ path, name: node.name, depth, mesh });
+    let any = mesh;
+    for (const child of node.children) if (visit(child, path ? `${path}/${child.name}` : child.name, depth + 1)) any = true;
+    // Nothing to hull here or under it: not listed.
+    if (!any) out.length = at;
+    return any;
+  };
+  visit(source, '', 0);
+  return out;
 }
 
 /**
@@ -998,10 +1034,11 @@ function migrateConvexShapes(owners: readonly (ColliderNode | TriggerNode)[]) {
     const entry = target as { shapes: ShapeDescription[] };
     if (!entry.shapes.some((s) => s.type === 'convex' && s.v !== HULL_VERSION)) continue;
 
-    // The hull is of what the collider carries: the meshes under it, in its own space.
-    const positions = collectHullPositions(target);
+    // The hull is of what the collider carries: the meshes under it (those it was built from), in its own space.
+    const source = shapeFitSource(target);
     entry.shapes = entry.shapes.map((s) => {
       if (s.type !== 'convex' || s.v === HULL_VERSION) return s;
+      const positions = collectHullPositions(source, target, s.sources);
       const hull = positions ? hullFromPositions(positions, s.quality) : null;
       return hull
         ? { ...s, vertices: hull.vertices, faces: hull.faces, offset: hull.center, v: HULL_VERSION }

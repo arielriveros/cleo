@@ -91,6 +91,8 @@ cast: 'ray' | 'sphere' | 'cylinder'
 autoReverse: boolean ; playerInput: boolean
 throttle: number ; steer: number ; brake: number ; handBrake: number   // the driver, each frame (not saved)
 get speed: number ; get rpm: number ; get gear: number
+get braking: number              // 0..1: the brake, Parked, or a throttle held against its travel
+get reversing: boolean           // in reverse gear
 get vehicle: Vehicle | null      // built when the scene runs
 get wheels: WheelNode[]
 rebuild(): void                  // after changing wheels or settings in Play

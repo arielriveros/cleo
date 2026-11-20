@@ -21,6 +21,18 @@ const ExitIcon = () => (
   </svg>
 )
 
+/**
+ * Marks the element Play goes fullscreen with: the viewport panel, holding the engine's canvas AND what is drawn
+ * over it as DOM (the game UI, the touch controls). Fullscreen shows only the fullscreen element's subtree, so
+ * the canvas's own wrapper alone would leave the HUD behind.
+ */
+export const PLAY_SURFACE_ATTR = 'data-cleo-play-surface'
+
+/** What goes fullscreen for the viewport `el`: the play surface round it, else `el` itself. */
+export function playFullscreenTarget<T extends { closest(selector: string): unknown }>(el: T): T {
+  return (el.closest(`[${PLAY_SURFACE_ATTR}]`) as T | null) ?? el
+}
+
 /** Whether this page can go fullscreen itself (a browser that allows it, not the desktop shell). */
 export function canPlayFullscreen(): boolean {
   return typeof document !== 'undefined' && !!document.fullscreenEnabled && !getShellBridge()
@@ -38,7 +50,7 @@ export default function PlayFullscreenButton({ target }: { target: RefObject<HTM
 
   const toggle = () => {
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
-    else void target.current?.requestFullscreen?.().catch(() => {})
+    else if (target.current) void playFullscreenTarget(target.current).requestFullscreen?.().catch(() => {})
   }
   return (
     <button type='button' data-cleo-overlay className={EYE_TRIGGER_CLASS} onClick={toggle}

@@ -141,7 +141,15 @@ export class VehicleNode extends Node {
     /** Forward speed, m/s. */
     public get speed(): number { return this._vehicle?.speed ?? 0; }
     public get rpm(): number { return this._vehicle?.rpm ?? 0; }
+    /** The gear engaged: 1, 2, … forward, -1 reverse, 0 neutral. */
     public get gear(): number { return this._vehicle?.gear ?? 0; }
+    /**
+     * How hard its brakes are on, 0 .. 1: the brake, Parked, and a throttle held against the way it rolls (which
+     * brakes before it reverses). What brake lamps follow. The hand brake is not counted.
+     */
+    public get braking(): number { return this._vehicle?.brakeApplied ?? 0; }
+    /** In reverse gear: what reversing lamps follow. */
+    public get reversing(): boolean { return this.gear < 0; }
 
     /** This frame's intent as it was last written. */
     public get intent(): Readonly<ControlIntent> { return this._intent; }

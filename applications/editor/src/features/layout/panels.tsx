@@ -56,6 +56,7 @@ import ProjectOptionsPanel, { INPUT_PAGE_ID } from '../options/ProjectOptionsPan
 import { useOptionPageShown } from '@cleo/app-kit/ui/OptionsShell';
 import AssetsExplorer from '../assets/AssetsExplorer';
 import { useCleoEngine, MODE_RENDERS_VIEWPORT } from '../EngineContext';
+import { PLAY_SURFACE_ATTR } from '../PlayFullscreenButton';
 import { TextInput, cn, labelClass } from '@cleo/app-kit/ui';
 import { DocHover } from '@cleo/app-kit/ui/DocTooltip';
 import { DocScope, useDocEntry } from '@cleo/app-kit/docs/DocScope';
@@ -63,12 +64,13 @@ import { useDocTargetRef } from '@cleo/app-kit/docs/docTargets';
 import { PANEL_TAB_DOC_PAGE, PANEL_TAB_DOC_SECTION, panelDocPage } from './panelTitles';
 
 // The wrapper must stay `relative` so UIOverlay/StateGraph/LoadingScreen (absolute inset-0) and the
-// data-cleo-overlay HUD anchor to the viewport, not the dock. Its group is locked and headerless.
+// data-cleo-overlay HUD anchor to the viewport, not the dock. Its group is locked and headerless. It is also what
+// Play's fullscreen takes (PLAY_SURFACE_ATTR): the canvas and the game UI painted over it go fullscreen together.
 function ViewportPanel(_: IDockviewPanelProps) {
   const { editorMode, inputMap, isPlayMode } = useCleoEngine();
   const previewTouch = useOptionPageShown(INPUT_PAGE_ID) && editorMode === 'options';
   return (
-    <div className="relative h-full w-full overflow-hidden">
+    <div className="relative h-full w-full overflow-hidden" {...{ [PLAY_SURFACE_ATTR]: '' }}>
       <EngineViewport />
       {/* On-screen touch controls. Drawn while playing (where they are live) and while authoring them
           in Options > Project > Input (where `alwaysShow` previews them on a desktop, which has no touch screen to

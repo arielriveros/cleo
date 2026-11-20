@@ -17,10 +17,10 @@ import { attribute } from 'cleo/decorators'
 export default class SandboxCarCameraNode extends CameraRigNode {
     /** The chase framing: how far behind the camera sits (m), and how high over the car's floor it orbits. */
     @attribute('Framing', { min: 1, max: 20, step: 0.1 })
-    public chaseArm: number = 7.5
+    public chaseArm: number = 6.5
 
     @attribute('Framing', { min: 0, max: 5, step: 0.05 })
-    public chaseHeight: number = 1.9
+    public chaseHeight: number = 1.6
 
     /** Seconds the view takes to ease out to the chase framing once the driver's camera hands over. */
     @attribute('Switch', { min: 0, max: 5, step: 0.05 })

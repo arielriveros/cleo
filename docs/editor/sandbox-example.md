@@ -17,6 +17,18 @@ does. It can:
 Everything that is the character is one **Player** template, placed once; the sky is the **Environment** template,
 the course the **Course** template, and the car the **Car** template.
 
+The course stands on an open **Ocean** whose surface is 2 m under the ground. It starts at dusk: the sun 9 degrees
+under the horizon, under sunset clouds (the Environment's Volumetric Clouds, the Sunset preset with more and
+smaller clouds). The bounced light on the course is a **GI Volume** over the whole floor, one layer of probes 2 m
+up, 20 by 20 (captured when the scene opens), and a **Light Probe** over the whole scene gives the reflections,
+and the light over the platforms' tops where the GI Volume ends.
+
+**Light setups.** The **Game Manager** node's script (SandboxGameManager) switches three: **1** day, **2** the
+dusk, **3** night (the d-pad's left, up and right on a pad). A setup is where the sun is; the sky, the clouds, the
+moon, the Sky Light, the GI Volume and the Light Probe follow it, and the eye adapts. How dark the dusk and the
+night look is the project's exposure compensation curve, set once in the render settings rather than by the
+script. The **HUD** in the top left corner says which setup is on and lists the keys.
+
 Its feet stay planted and locked on ramps, stairs and bumps. To try it, open **Sandbox** from the example gallery
 and press Play.
 
@@ -50,6 +62,7 @@ Each is placed once.
 | Look | the mouse (click the view to capture it) | right stick |
 | Zoom | the wheel | |
 | Get into the car, or out of it | E, by the driver's door | Y |
+| Day, dusk, night | 1, 2, 3 | d-pad left, up, right |
 
 In the car, Move drives and steers (W forward; S brakes, then reverses), Space holds the hand brake, and Look turns
 the camera, which swings back behind the car when you leave it alone.
@@ -437,11 +450,12 @@ A car to get into and drive, on the [vehicle simulation](vehicles.md) with the *
 on the model's own wheels. Everything that is the car is one template, **Car** (`/Vehicles/Car/Car.tpl`):
 
 ```
-Car                 the chassis: a Collider with mass (1200 kg), two boxes (the lower body, the cabin), on the
-│                   Vehicle layer; SandboxCar
-├─ Body             the Car Body model: the body, and the windows (blended, so a node of their own)
+Car                 the chassis: a Collider with mass (1200 kg), one convex hull of the body and the windows (its
+│                   Meshes: Car Body, not the wheels), on the Vehicle layer; SandboxCar
+├─ Car Body         the Car Body model: the body, and the windows (blended, so a node of their own)
+├─ Lights           Headlight L/R (spot lights), Tail Light L/R (red), Reverse Light L/R (white)
 ├─ Vehicle          the Car preset: an engine and a five-speed automatic, rear-wheel drive; Parked until driven
-│  └─ Wheels        Wheel FL, FR, RL, RR, each turning its tyre (the Car Wheel model)
+│  └─ Wheels        Wheel FL, FR, RL, RR, each turning the wheel's mesh right under it
 ├─ Seat             where the driver sits; Enter Point (where getting in starts) and Exit Point (where it ends)
 ├─ Door Zone        a box by the driver's door: Interact there gets in
 ├─ Camera Target    what the car's camera follows
@@ -451,8 +465,9 @@ Car                 the chassis: a Collider with mass (1200 kg), two boxes (the 
 
 **Getting in.** Stand by the driver's door and press Interact (E). The Player gives up its own Controller, takes its
 body out of the physics world ([Turning a body off](../scripting/motion-and-physics.md#turning-a-body-off-for-a-while))
-and moves under the Seat; it fires its animator's `EnterCar` trigger and steps onto the Enter Point while the clip
-reaches for the door. The clip's root motion carries it from there into the seat: its walk in and its quarter turn
+and moves under the Seat, turned the way it faces (a character's facing is its Character's own turn, which the
+Collider takes over for the ride); it fires its animator's `EnterCar` trigger and steps onto the Enter Point while
+the clip reaches for the door, so it gets in straight however it stood. The clip's root motion carries it from there into the seat: its walk in and its quarter turn
 both move the Character. The car's Controller possesses the Vehicle (the switch in possession), and the car's camera
 takes the view from exactly where the Player's camera was, then eases out to a chase framing. The car stays Parked
 until the driver is seated, then the Driving loop plays.
@@ -463,17 +478,28 @@ the car's camera eases back toward the Player's. Once it is on its feet, back in
 back in the world on the ground, it takes its own Controller back, and its camera takes the view, looking where the
 car's camera looked.
 
+**The lamps.** The car's script switches its lights. An empty car's are off. With someone in it the headlights
+are on (spot lights ahead and a little down, casting shadows) and the tail lights glow red; they light up in full
+while the car brakes, which includes S held against the way it rolls and the stop before getting out. The
+reverse lights come on in reverse. Each light gives the brightness it is set to when on (the tail lights: braking),
+so they are tuned on the lights themselves; SandboxCar's **Tail Share** sets the tail lights' glow when not
+braking. The Sandbox is set at dusk, the sun 9 degrees under the horizon, so they show.
+
 **The clips** come from `build/car` (`tools/sandbox/clips.ts` `carClips`): getting in and out have their ground travel
 and their yaw moved onto the Pivot joint, as root motion, and driving is held in place; each is placed so the next
 starts in the pose the last one ends in (the Mixamo driving loop sits 22 cm lower than the end of getting in). The
-Seat, the Enter Point and the Exit Point are worked out from the clips' root motion, so the seated hips land on the
-cushion.
+clips sit the hips about 20 cm higher than this car's cushion, so getting in lowers them the rest of the way as it
+sits down, and getting out raises them as it stands up. The Seat, the Enter Point and the Exit Point are worked out
+from the clips' root motion, so the seated hips land on the cushion, the driver's back against the seat's backrest.
+That is 18 cm further back than the clips' hands reach the steering wheel from, so the hands fall short of it.
 
-**The model** is "Dirty car" by 3D Error 404 (CC-BY-4.0, Sketchfab), imported at its own size, 6 m long: the clips'
-seated pose fits its cabin. It is mirrored to left-hand drive, since the Mixamo clips get in on the driver's left.
+**The model** is "Dirty car" by 3D Error 404 (CC-BY-4.0, Sketchfab), scaled to 0.83 of its own size, 5 m long: as
+tight round a seated driver as it goes, the head just under the roof (`tools/sandbox/car.ts` `CAR_FIT`). It is
+mirrored to left-hand drive, since the Mixamo clips get in on the driver's left.
 
-What the car does not do yet: the doors do not open (the character passes through the door), the hands are not
-placed on the wheel by IK, and the driver does not lean or turn the wheel with the steering.
+What the car does not do yet: the doors do not open (the character passes through the door), the hands do not
+reach the steering wheel (the clips are for a seat further forward; no hand IK), the driver does not lean or turn
+the wheel with the steering, and the seated feet go through the floor (no leg IK).
 
 ## Things to push
 

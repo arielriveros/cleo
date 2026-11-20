@@ -504,6 +504,15 @@ export default class SandboxPlayerNode extends CharacterNode {
         this._ownController = this.controller
         this._ownController?.release()
         body.physicsEnabled = false
+        // Where the character faces is its own turn (the Character turns itself, not its Collider), and the step
+        // and the clip's root motion turn the Collider: fold the one into the other first, so they turn all of it.
+        const facing = this.worldForward
+        const heading = Math.atan2(facing[0], facing[2]) * 180 / Math.PI
+        body.setWorldYaw(heading)
+        body.updateTransforms(body.parent ? body.parent.worldTransform : null)
+        // The same heading in the world: no turn of its own left under the Collider.
+        this.setWorldYaw(heading)
+        this.updateTransforms(body.worldTransform)
         body.reparent(seat)
         this._seat = seat
         // The step: from where it stands to where the clip starts, both in the seat's frame, eased in over the

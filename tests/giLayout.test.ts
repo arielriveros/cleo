@@ -129,6 +129,20 @@ describe('grids', () => {
         expect(Math.min(...idx)).toBeGreaterThanOrEqual(0);
         expect(Math.max(...idx)).toBeLessThan(27);
     });
+
+    it('find a flat cage along an axis with one probe: its layer takes the whole axis', () => {
+        const idx = new Int32Array(8), w = new Float32Array(8);
+        const counts = [3, 1, 3];
+        for (const y of [-0.4, 0, 0.4]) {
+            gridCage([0.5, y, 1.25], counts, idx, w);
+            expect(w.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 6);
+            // Every index a real probe of the 3 x 1 x 3; the far-y corners name the near ones again, unweighted.
+            expect(Math.min(...idx)).toBeGreaterThanOrEqual(0);
+            expect(Math.max(...idx)).toBeLessThan(9);
+            for (const s of [2, 3, 6, 7]) expect([idx[s], w[s]]).toEqual([idx[s - 2], 0]);
+            expect(w[0]).toBeCloseTo(0.5 * 0.75, 6);
+        }
+    });
 });
 
 describe('atlases', () => {

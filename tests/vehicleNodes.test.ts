@@ -136,13 +136,22 @@ describe(`a Vehicle node (${TEST_PHYSICS})`, () => {
         vehicle.throttle = 1;
         frame(3);
         expect(vehicle.speed).toBeGreaterThan(5);
+        expect([vehicle.braking, vehicle.reversing]).toEqual([0, false]);
         vehicle.throttle = -1;
         frame(1);
-        // Braking, not yet reversing.
+        // Braking, not yet reversing: what brake lamps follow, though no brake was asked for.
         expect(vehicle.speed).toBeGreaterThan(-0.5);
+        expect(vehicle.brake).toBe(0);
+        expect(vehicle.braking).toBe(1);
         frame(6);
         expect(vehicle.speed).toBeLessThan(-1);
         expect(vehicle.gear).toBeLessThan(0);
+        // Reversing, the throttle now with the way it rolls: no braking.
+        expect([vehicle.braking, vehicle.reversing]).toEqual([0, true]);
+        // Parked brakes it in full.
+        vehicle.parked = true;
+        frame(0.1);
+        expect(vehicle.braking).toBe(1);
     });
 
     it('drives the same with the physics worker stepping it', () => {

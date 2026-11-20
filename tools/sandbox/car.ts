@@ -3,29 +3,83 @@
 //
 // The file is in centimetres, its front +Z, its left +X, its origin on the ground under the middle of the body. It is
 // mirrored across its centre line on the way in: the model is right-hand drive (its steering wheel on the right),
-// and the Mixamo clips get in on the driver's LEFT. It is kept at its own size (6 m long, 1.79 m tall): the clips'
-// seated pose fits its cabin (scaled to a sedan's 4.7 m, the head goes through the roof).
+// and the Mixamo clips get in on the driver's LEFT. It is scaled as tight round the seated driver as the clips allow
+// (CAR_FIT: 5 m long, 1.49 m tall), the hips sat down onto the cushion.
 //
 //   body, glass  the body (opaque) and the windows (blended): one node each under one Body node (the renderer picks a
-//                pass per node, so the two cannot share one mesh)
+//                pass per node, so the two cannot share one mesh); the chassis Collider is one convex hull of the two
 //   wheels       one mesh holding all four: cut apart by which corner each triangle is at, each centred on its hub
-//                (a Wheel node turns its own tyre, so each is its own node); the front left one is the Car Wheel model
-//   chassis      two boxes for the Collider: the lower body, and the cabin above the beltline
+//                (a Wheel node turns the mesh under it, so each is its own node); the front left one, placed under
+//                each Wheel node (turned round on the right)
+//   lamps        where the head, tail and reversing lamps are on its front and rear faces
 
 import { mat4 } from 'gl-matrix'
 import { readGltf, partsOf, boundsOf } from '../valley/meshes.mjs'
 import { localMatrix } from '../exampleKit/fbxImport.mjs'
 import { rotateByYaw, yawPoseInvert, yawPoseMul, type YawPose } from '../../src/core/math'
 
-/** Centimetres to metres. */
-export const CAR_SCALE = 0.01
+/** The model at its own size (centimetres to metres, mirrored): where the driver's seat and wheel are. */
+const NATIVE = {
+    /** The top of the driver's cushion, and the roof's lining over it, m above the ground. */
+    cushion: 0.575, roof: 1.72,
+    /** The steering wheel's grip, its centre (x, y, z). */
+    wheel: [0.489, 0.981, 0.715] as const,
+}
+/** The seated clips (clips.ts carClips): the buttocks this far under the hips, the top of the head this far over them. */
+const SEATED = { buttocks: 0.161, head: 0.762 }
+/** Between the seated head and the roof's lining, m. */
+const HEAD_ROOM = 0.03
+/**
+ * How far behind the steering wheel's centre the hips sit for the seated clips' hands to meet its grip, m: measured
+ * at the model's own size (the hips at z 0.26 with the wheel's centre at 0.715). The character is not scaled with the
+ * car, so it stays this far behind whatever size the car is.
+ */
+const REACH = 0.455
+/**
+ * How much further back the hips sit so the driver's back is against the seat's backrest, m: the gap between the
+ * seated clips' back (the driving clip skinned on the Mannequin) and the backrest's front at the lower back, where
+ * it is narrowest (18.7 cm at REACH, measured at CAR_FIT's size). The hands then fall short of the steering wheel by
+ * as much, until the clips are reworked for this seat.
+ */
+const SEAT_BACK = 0.18
 
 /**
- * Where the driver's hips sit, seated, in the (mirrored) car's frame, x and z: over the cushion of the driver's seat,
- * far enough forward that the hands of the seated clips meet the steering wheel's grip (its centre at x 0.489,
- * z 0.715). Measured on the model; the height is the clips' own (getting in ends with the hips that high).
+ * The car's size and its driver's place, as tight as the seated clips allow: scaled so a seated driver's buttocks are
+ * on the cushion and its head HEAD_ROOM under the roof (0.83 of its own size: 5 m long, a big saloon).
+ *
+ *   size      the scale on the model's own size
+ *   seatHips  where the seated hips sit, m above the floor: on the scaled cushion. The seated clips sit them higher
+ *             (they are fitted to a taller seat); getting in lowers them the rest of the way (carClips' `seatHips`)
+ *   hipsXZ    where they sit in the car's frame, x and z: under the steering wheel, REACH and SEAT_BACK behind it
  */
-const SEATED_HIPS_XZ: [number, number] = [0.48, 0.26]
+const SIZE = Math.round((SEATED.buttocks + SEATED.head + HEAD_ROOM) / (NATIVE.roof - NATIVE.cushion) * 100) / 100
+export const CAR_FIT = {
+    size: SIZE,
+    seatHips: NATIVE.cushion * SIZE + SEATED.buttocks,
+    hipsXZ: [0.98 * NATIVE.wheel[0] * SIZE, NATIVE.wheel[2] * SIZE - REACH - SEAT_BACK] as [number, number],
+}
+
+/**
+ * Where a lamp's light goes at the model's own size (m, the left one of each pair: the right one is mirrored), read
+ * off the front and rear faces: just off the lens, `inset` in from the bumper's face (the bumpers stand out
+ * further). The headlamps are on the grille panel between the bumper and the bonnet; the tail lamp clusters are
+ * above the rear bumper at the corners, red outboard and the reversing lamp inboard.
+ */
+const LAMPS_NATIVE = {
+    head: { x: 0.66, y: 0.82, inset: 0.07 },
+    tail: { x: 0.90, y: 0.87, inset: 0.05 },
+    reverse: { x: 0.58, y: 0.87, inset: 0.05 },
+}
+
+/** A lamp's place in the car's frame: `[x, y, z]` of the left one. */
+export interface CarLamps {
+    head: [number, number, number]
+    tail: [number, number, number]
+    reverse: [number, number, number]
+}
+
+/** The file's centimetres to the car's metres. */
+export const CAR_SCALE = 0.01 * CAR_FIT.size
 
 export interface CarPart {
     name: string
@@ -46,19 +100,16 @@ export interface CarWheel {
     width: number
 }
 
-export interface CarBox {
-    size: [number, number, number]
-    centre: [number, number, number]
-}
-
 export interface CarModel {
     body: CarPart
     glass: CarPart
     /** The front left wheel, centred on its hub, its axle along X, its hub facing +X (outward on the left). */
     wheel: CarPart
     wheels: CarWheel[]
-    /** The lower body, and the cabin over it: the chassis Collider's two boxes. */
-    chassis: [CarBox, CarBox]
+    /** Half the body's width below its mirrors, m. */
+    halfWidth: number
+    /** Its lamps, on its front and rear faces. */
+    lamps: CarLamps
     /** The body's bounds. */
     min: [number, number, number]
     max: [number, number, number]
@@ -136,32 +187,17 @@ export function readCar(file: string): CarModel {
         wheels.push({ corner, centre, radius: (b.size[1] + b.size[2]) / 4, width: b.size[0] })
         if (corner === 'FL') {
             for (let k = 0; k < part.positions.length; k += 3) for (let a = 0; a < 3; a++) part.positions[k + a] -= centre[a]
-            canonical = { ...part, name: 'Tyre' }
+            canonical = { ...part, name: 'Wheel Mesh' }
         }
     }
 
-    // The chassis: the lower body (its length and its width below the mirrors, from the sill up to the beltline) and the
-    // cabin (what is above the beltline: the glasshouse and the roof).
+    // Its width along the doors, between the sills and the beltline (the mirrors stand out above it), at its own size.
     const bb = boundsOf([body])
     const p = body.positions
-    const BELT = 1.15
-    let halfWidth = 0, cabinMin = [Infinity, Infinity], cabinMax = [-Infinity, -Infinity], top = 0
+    let halfWidth = 0
     for (let k = 0; k < p.length; k += 3) {
-        const x = p[k], y = p[k + 1], z = p[k + 2]
-        if (y > 0.45 && y < 0.95) halfWidth = Math.max(halfWidth, Math.abs(x))
-        // Its width over the mirrors (they stand out at the beltline), its length and height from all of it.
-        if (y > BELT + 0.25) { cabinMin[0] = Math.min(cabinMin[0], x); cabinMax[0] = Math.max(cabinMax[0], x) }
-        if (y > BELT + 0.1) {
-            cabinMin[1] = Math.min(cabinMin[1], z); cabinMax[1] = Math.max(cabinMax[1], z)
-            top = Math.max(top, y)
-        }
-    }
-    const bottom = bb.min[1]
-    const lower: CarBox = { size: [2 * halfWidth, BELT - bottom, bb.size[2]], centre: [0, (BELT + bottom) / 2, (bb.min[2] + bb.max[2]) / 2] }
-    const cabinHalf = Math.max(Math.abs(cabinMin[0]), Math.abs(cabinMax[0]))
-    const cabin: CarBox = {
-        size: [2 * cabinHalf, top - BELT, cabinMax[1] - cabinMin[1]],
-        centre: [0, (top + BELT) / 2, (cabinMin[1] + cabinMax[1]) / 2],
+        const y = p[k + 1] / CAR_FIT.size
+        if (y > 0.45 && y < 0.95) halfWidth = Math.max(halfWidth, Math.abs(p[k]))
     }
 
     const images = (gltf.images ?? []).map((img: any) => {
@@ -171,7 +207,12 @@ export function readCar(file: string): CarModel {
     })
     const textures = (gltf.textures ?? []).map((t: any) => t.source)
     return {
-        body, glass, wheel: canonical!, wheels, chassis: [lower, cabin],
+        body, glass, wheel: canonical!, wheels, halfWidth,
+        lamps: {
+            head: [LAMPS_NATIVE.head.x * SIZE, LAMPS_NATIVE.head.y * SIZE, bb.max[2] - LAMPS_NATIVE.head.inset * SIZE],
+            tail: [LAMPS_NATIVE.tail.x * SIZE, LAMPS_NATIVE.tail.y * SIZE, bb.min[2] + LAMPS_NATIVE.tail.inset * SIZE],
+            reverse: [LAMPS_NATIVE.reverse.x * SIZE, LAMPS_NATIVE.reverse.y * SIZE, bb.min[2] + LAMPS_NATIVE.reverse.inset * SIZE],
+        },
         min: bb.min as any, max: bb.max as any,
         materials: gltf.materials, images, textures,
     }
@@ -189,7 +230,7 @@ export function seatPoints(seated: YawPose, enter: YawPose, exit: YawPose): { se
     // Facing ahead (+Z) once the hips are turned by the Seat's yaw; at the hips' own height (the Seat on the floor).
     const yaw = -seated[3]
     const [x, , z] = rotateByYaw(seated[0], seated[1], seated[2], yaw)
-    const seat: YawPose = [SEATED_HIPS_XZ[0] - x, 0, SEATED_HIPS_XZ[1] - z, yaw]
+    const seat: YawPose = [CAR_FIT.hipsXZ[0] - x, 0, CAR_FIT.hipsXZ[1] - z, yaw]
     return { seat, enterPoint: yawPoseMul(seat, yawPoseInvert(enter)), exitPoint: yawPoseMul(seat, exit) }
 }
 

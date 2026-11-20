@@ -38,6 +38,23 @@ describe('Play and the browser’s keys', () => {
     expect(ctx).toContain('}, [blocksUnload]);')
   })
 
+  it('takes the game UI into fullscreen with the canvas: the viewport panel goes fullscreen, not the canvas wrapper', async () => {
+    const { playFullscreenTarget, PLAY_SURFACE_ATTR } = await import('../src/features/PlayFullscreenButton')
+    // The panel is marked as the play surface, and holds the viewport and the game UI layer.
+    const panels = read('features', 'layout', 'panels.tsx')
+    const surface = panels.indexOf('[PLAY_SURFACE_ATTR]: \'\'')
+    expect(surface).toBeGreaterThan(0)
+    expect(panels.indexOf('<EngineViewport />', surface)).toBeGreaterThan(surface)
+    expect(panels.indexOf('<UIEditorLayer />', surface)).toBeGreaterThan(surface)
+    // The button takes the surface round the viewport, or the viewport itself when there is none.
+    const panel = { closest: () => null }
+    const viewport = { closest: (sel: string) => (sel === `[${PLAY_SURFACE_ATTR}]` ? panel : null) }
+    expect(playFullscreenTarget(viewport)).toBe(panel)
+    const lone = { closest: () => null }
+    expect(playFullscreenTarget(lone)).toBe(lone)
+    expect(read('features', 'PlayFullscreenButton.tsx')).toContain('playFullscreenTarget(target.current).requestFullscreen')
+  })
+
   it('offers fullscreen in Play, on the web, as an icon', () => {
     const viewport = read('features', 'EngineViewport.tsx')
     expect(viewport).toContain('{isPlayMode && !isSimulating && canPlayFullscreen() && <PlayFullscreenButton target={viewportRef} />}')

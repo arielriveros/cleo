@@ -15,9 +15,15 @@ npx vitest run tests/sandboxProject.test.ts --project engine
 
 The files:
 
-- **`car.ts`**: the car, `build/car/dirty_car.glb`, read in metres and mirrored to left-hand drive: its body, its
-  windows, its four wheels cut apart, the chassis boxes, and where the Seat, the Enter Point and the Exit Point go
-  (from the car clips' root motion). `build.ts` makes the Car template of it.
+- **`car.ts`**: the car, `build/car/dirty_car.glb`, read in metres at `CAR_FIT`'s size (as tight round the seated
+  clips as the cabin allows) and mirrored to left-hand drive: its body, its windows, its four wheels cut apart, its
+  lamps, and where the Seat, the Enter Point and the Exit Point go (from the car clips' root motion, the driver's back
+  against the backrest). `build.ts` makes the Car template of it: its chassis one convex hull of the body and the
+  windows, each wheel's mesh right under its Wheel node, and its head, tail and reverse lights.
+- **`build.ts`** also lays out the world round the course: the Environment (sun, sky, sky light, sunset clouds), the
+  open Ocean, a one-layer GI Volume over the floor, a Light Probe over everything, the Game Manager
+  (`examples/scripts/SandboxGameManager.ts`: the light setups on 1, 2, 3) and its HUD, and the render settings'
+  exposure (`EXPOSURE`: a low floor and one compensation curve for the day, the dusk and the night).
 - **`prepare.mjs`** (plain Node, assimp). It reads `build/LocomotionPack/Mannequin.fbx` and builds a skin in metres,
   with a weightless **Pivot** joint above the hips, a welded mesh and its maps at half size. It retargets every
   other `.fbx` onto that skin, keeping each clip's travel. It writes `build/sandbox_prepared/` (gitignored), and

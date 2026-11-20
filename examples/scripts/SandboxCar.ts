@@ -1,5 +1,5 @@
 import { ColliderNode, Input } from 'cleo'
-import type { ActionName, CameraRigNode, ControllerNode, Node, VehicleNode } from 'cleo'
+import type { ActionName, CameraRigNode, ControllerNode, LightNode, Node, PointLight, Spotlight, VehicleNode } from 'cleo'
 import { attribute, child } from 'cleo/decorators'
 
 /** What the car asks of the character who drives it (SandboxPlayer). */
@@ -22,9 +22,10 @@ interface CarCamera extends Node {
  * The Sandbox car: getting in, driving, getting out. Attach to the car's root, its chassis **Collider**:
  *
  *   Car                 THIS script; the chassis (a dynamic Collider)
- *   ├─ Body             the car's body and its windows
+ *   ├─ Car Body         the car's body and its windows
+ *   ├─ Lights           Headlight L/R (spot), Tail Light L/R (red), Reverse Light L/R (white): switched by THIS
  *   ├─ Vehicle          the vehicle simulation (Car preset), Parked unless someone drives
- *   │  └─ Wheels        the four Wheel nodes, each turning its tyre
+ *   │  └─ Wheels        the four Wheel nodes, each turning its wheel's mesh
  *   ├─ Seat             where the driver sits: Enter Point (where getting in starts), Exit Point (where getting out ends)
  *   ├─ Door Zone        a box by the driver's door: Interact there gets in
  *   ├─ Camera Target    what the car's camera rig follows
@@ -37,6 +38,10 @@ interface CarCamera extends Node {
  * takes its own Controller back; the view goes back to its camera.
  *
  * The car decides when; the character decides how (its animator's triggers, its root motion). It plays nothing.
+ *
+ * The lamps: each light under Lights gives what it is set to when on. With someone in the car the headlights are on
+ * and the tail lights glow at `tailShare` of theirs, full while the car brakes (its `braking`: the brake pedal,
+ * Parked, or S held against the way it rolls); the reverse lights are on in reverse. An empty car's are all off.
  */
 export default class SandboxCarNode extends ColliderNode {
     /** The action that gets in and out. */
@@ -65,6 +70,21 @@ export default class SandboxCarNode extends ColliderNode {
     private _controller: ControllerNode = null
     @child('Car Camera Rig')
     private _camera: CarCamera = null
+    @child('Lights')
+    private _lightsNode: Node = null
+
+    /** The tail lights' glow while the car is not braking, as a share of their braking brightness. */
+    @attribute('Lights', { min: 0, max: 1, step: 0.01 })
+    public tailShare: number = 0.2
+    /** Braking harder than this (0 .. 1) lights the brake lights. */
+    @attribute('Lights', { min: 0, max: 1, step: 0.01 })
+    public brakeThreshold: number = 0.05
+    /** Seconds a lamp takes to come on or go off. */
+    @attribute('Lights', { min: 0, max: 1, step: 0.01 })
+    public lampSeconds: number = 0.06
+
+    /** Each lamp, the lumens it was set to (what it gives when on), and its kind (by its name). */
+    private _lamps: { light: LightNode; lumens: number; kind: 'head' | 'tail' | 'reverse' }[] | null = null
 
     /** Parked (empty), entering (the driver getting in), driving, stopping (braking to let the driver out), exiting. */
     private _state: 'parked' | 'entering' | 'driving' | 'stopping' | 'exiting' = 'parked'
@@ -106,6 +126,36 @@ export default class SandboxCarNode extends ColliderNode {
                     this._state = 'parked'
                 }
                 break
+        }
+        this._updateLamps(delta)
+    }
+
+    /** The lamps toward what the car is doing: off when empty; on, braking and reversing with a driver. */
+    private _updateLamps(delta: number) {
+        const first = this._lamps === null
+        if (first) {
+            this._lamps = []
+            for (const c of this._lightsNode?.children ?? []) {
+                const light = c as LightNode
+                if (c.nodeType !== 'light' || !light.light) continue
+                const kind = c.name.startsWith('Head') ? 'head' : c.name.startsWith('Tail') ? 'tail' : c.name.startsWith('Reverse') ? 'reverse' : null
+                if (kind) this._lamps.push({ light, lumens: (light.light as PointLight | Spotlight).intensity, kind })
+            }
+        }
+        const vehicle = this._vehicle
+        const occupied = this._state !== 'parked'
+        const braking = occupied && !!vehicle && vehicle.braking > this.brakeThreshold
+        const reversing = occupied && !!vehicle?.reversing
+        // An instant switch on the first frame (the lamps as set are the lit ones), a bulb's warm-up after.
+        const k = first || !(this.lampSeconds > 0) ? 1 : 1 - Math.exp(-delta / this.lampSeconds)
+        for (const lamp of this._lamps!) {
+            const share = lamp.kind === 'head' ? (occupied ? 1 : 0)
+                : lamp.kind === 'tail' ? (braking ? 1 : occupied ? this.tailShare : 0)
+                : reversing ? 1 : 0
+            const light = lamp.light.light as PointLight | Spotlight
+            const target = lamp.lumens * share
+            light.intensity += (target - light.intensity) * k
+            if (Math.abs(light.intensity - target) < lamp.lumens * 1e-3) light.intensity = target
         }
     }
 

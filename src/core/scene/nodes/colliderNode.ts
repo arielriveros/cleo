@@ -16,6 +16,11 @@ export interface ColliderShape {
     width?: number; height?: number; depth?: number;
     radius?: number; numSegments?: number;
     quality?: string; vertices?: number[][]; faces?: number[][]; v?: number;
+    /**
+     * A convex hull's: the meshes the editor built it from, as paths of node names from the node ('Body', and
+     * all under it). Authoring data; the physics reads only the vertices and faces.
+     */
+    sources?: string[];
     [key: string]: unknown;
 }
 

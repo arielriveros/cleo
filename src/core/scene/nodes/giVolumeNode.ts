@@ -24,6 +24,9 @@ import { boxBlendFractions, boxInverseMatrix, boxWeight, boxWorldBounds } from "
  * the ceiling see through them, to the outside's light or the inside of the slab, and each one that does
  * is a bright or a black cell in the room. Between the outer probes and the faces the lookup holds the
  * outer probes' light.
+ * One probe along an axis is a single layer at the middle of the box on that axis, whatever the inset: its
+ * light holds through the box's whole depth along it (a floor's one layer of probes, a probe's height up,
+ * lighting everything from the ground to the box's top).
  * Nested volumes apply the smaller first (the room's before the hamlet's round it), each claiming its
  * feathered weight of what the ones before it left, as light probes do.
  */
@@ -36,8 +39,8 @@ export const GI_RAY_COUNTS: readonly GiRayCount[] = [64, 256];
 export type GiCaptureResolution = 16 | 32;
 export const GI_CAPTURE_RESOLUTIONS: readonly GiCaptureResolution[] = [16, 32];
 
-/** Probes along one axis: at least two (the grid spans the box corner to corner). */
-export const MIN_GI_PROBES_PER_AXIS = 2;
+/** Probes along one axis: one is a single layer at the box's middle on that axis (see GIVolumeNode). */
+export const MIN_GI_PROBES_PER_AXIS = 1;
 export const MAX_GI_PROBES_PER_AXIS = 128;
 /** No side goes below this, so the box never inverts. */
 export const MIN_GI_VOLUME_SIZE = 0.01;
@@ -136,7 +139,7 @@ export class GIVolumeNode extends Node {
     public get probeCounts(): [number, number, number] { return this._probeCounts; }
     public set probeCounts(v: [number, number, number]) {
         const c = (x: number) => Math.min(MAX_GI_PROBES_PER_AXIS, Math.max(MIN_GI_PROBES_PER_AXIS,
-            Number.isFinite(+x) ? Math.round(+x) : MIN_GI_PROBES_PER_AXIS));
+            Number.isFinite(+x) ? Math.round(+x) : 2));
         const next: [number, number, number] = [c(v[0]), c(v[1]), c(v[2])];
         if (next[0] !== this._probeCounts[0] || next[1] !== this._probeCounts[1] || next[2] !== this._probeCounts[2]) this._captureRequested = true;
         this._probeCounts = next;
@@ -215,10 +218,17 @@ export class GIVolumeNode extends Node {
 
     // --- Geometry ---
 
-    /** Distance between neighbouring probes along each local axis, in local units. */
+    /** The inset along local axis `a`: a single probe on it sits at the middle (half its one cell in). */
+    private _axisInset(a: number): number { return this._probeCounts[a] === 1 ? 0.5 : this._probeInset; }
+
+    /**
+     * Distance between neighbouring probes along each local axis, in local units. Along an axis with one
+     * probe, the box's side: the one cell its probe stands in the middle of.
+     */
     public get localSpacing(): [number, number, number] {
-        const s = this._size, n = this._probeCounts, e = 2 * this._probeInset;
-        return [s[0] / (n[0] - 1 + e), s[1] / (n[1] - 1 + e), s[2] / (n[2] - 1 + e)];
+        const s = this._size, n = this._probeCounts;
+        const along = (a: number) => s[a] / (n[a] - 1 + 2 * this._axisInset(a));
+        return [along(0), along(1), along(2)];
     }
 
     /** Distance between neighbouring probes along each axis, in world units. */
@@ -238,8 +248,9 @@ export class GIVolumeNode extends Node {
      * box's minimum corner, moved in by the inset.
      */
     public gridToWorld(out: mat4): mat4 {
-        const s = this._size, sp = this.localSpacing, e = this._probeInset;
-        mat4.translate(out, this.worldTransform, [(e * sp[0]) - 0.5 * s[0], (e * sp[1]) - 0.5 * s[1], (e * sp[2]) - 0.5 * s[2]]);
+        const s = this._size, sp = this.localSpacing;
+        const start = (a: number) => this._axisInset(a) * sp[a] - 0.5 * s[a];
+        mat4.translate(out, this.worldTransform, [start(0), start(1), start(2)]);
         return mat4.scale(out, out, sp);
     }
 

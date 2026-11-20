@@ -106,7 +106,9 @@ fn giSampleVolume(v: i32, P: vec3<f32>, N: vec3<f32>, V: vec3<f32>) -> vec4<f32>
     let counts = u_giVolumes.u_giCounts[v];
     let n = vec3<f32>(f32(counts.x), f32(counts.y), f32(counts.z));
     let g = clamp((u_giVolumes.u_giWorldToGrid[v] * vec4<f32>(biased, 1.0)).xyz, vec3<f32>(0.0), n - vec3<f32>(1.0));
-    let base = min(floor(g), n - vec3<f32>(2.0));
+    // (At least 0: an axis with one probe has no second to blend toward, and its g is 0.)
+    let base = max(min(floor(g), n - vec3<f32>(2.0)), vec3<f32>(0.0));
+    let single = n < vec3<f32>(1.5);
     let frac = g - base;
     let maxDistance = bias.z;
     let moments2 = vec2<f32>(maxDistance, maxDistance * maxDistance);
@@ -129,6 +131,8 @@ fn giSampleVolume(v: i32, P: vec3<f32>, N: vec3<f32>, V: vec3<f32>) -> vec4<f32>
         let oy = (s >> 1u) & 1;
         let oz = (s >> 2u) & 1;
         let offset = vec3<f32>(f32(ox), f32(oy), f32(oz));
+        // Along an axis with one probe there is no far corner: its layer lights the whole of that axis.
+        if (any(single & (offset > vec3<f32>(0.5)))) { continue; }
         let probe = probe0 + ox + oy * counts.x + oz * strideZ;
         // The probe's light first: its alpha is the probe's state (giStateStamp.wgsl, 1 = active), and
         // only ACTIVE probes answer. No probe-data fetch: v1 keeps every probe on its grid point.
