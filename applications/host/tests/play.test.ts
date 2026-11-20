@@ -92,6 +92,32 @@ describe('NetSync phase 6: carrying', () => {
         await w.run(60);
         expect(vec3.distance(mine.position as vec3, crate!.position as vec3)).toBeLessThan(0.02);
     });
+
+    it('stops a thrown prop’s flight on the thrower’s screen where it meets something', async () => {
+        const { w, a, hostRoot } = x;
+        const me = hostRoot(a);
+        let crate: Node | null = null;
+        await w.run(1, () => { crate = w.runtime.scene.instantiate('Small Crate', { position: [me.position[0] - 1.2, 0.4, me.position[2]] }); });
+        await w.run(30);
+        const mine = a.scene.getNodeById(crate!.id)!;
+        expect(a.carry!.grab(mine)).toBe(true);
+        const held = () => { const p = a.scene.getNodeById(me.id)!.position; return [p[0] - 1, p[1] + 1.2, p[2]]; };
+        a.hold = () => ({ pos: held(), rot: [0, 0, 0, 1] });
+        await w.run(20);
+        // Hurled at the ground: a plain arc would carry it a metre into the floor before the host's states arrive.
+        a.hold = null;
+        const stopped = a.carry!.flightsStopped;
+        a.carry!.throw([0, -8, 2]);
+        let lowest = Infinity;
+        await w.run(20, () => { lowest = Math.min(lowest, mine.position[1]); });
+        console.log(`thrown at the floor: lowest on the thrower's screen ${lowest.toFixed(2)} m (the host's crate rests at ${crate!.position[1].toFixed(2)} m)`);
+        expect(a.carry!.flightsStopped).toBe(stopped + 1);
+        // The crate is 1 m a side (it rests at 0.5): a plain arc took it to -1 m. The sweep is sampled at about
+        // half its radius, so it may stop a little short or deep.
+        expect(lowest).toBeGreaterThan(0.25);
+        await w.run(40);
+        expect(vec3.distance(mine.position as vec3, crate!.position as vec3)).toBeLessThan(0.02);
+    });
 });
 
 describe('NetSync phase 6: hitscan', () => {

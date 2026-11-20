@@ -182,7 +182,7 @@ export async function world(bin: Uint8Array, options: WorldOptions = {}) {
             peer.predictor = new Predictor(peerSession, peer.sync, peer.commands);
         }
         if (options.play) {
-            peer.carry = new CarryPeer(peerSession, peer.sync);
+            peer.carry = new CarryPeer(peerSession, peer.sync, { physics: () => peer.physics ?? null });
             peer.weapons = new WeaponPeer(peerSession, peer.sync);
         }
         if (options.anim) peer.anim = new AnimPeer(peerSession, peer.sync);

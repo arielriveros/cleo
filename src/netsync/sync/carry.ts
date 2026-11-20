@@ -6,6 +6,8 @@
 // carrier's character and under a speed cap: co-op trust validates loosely, `versus` tightly. Everyone else follows
 // the prop as usual. A throw gives the host the prop back with the thrower's velocity (capped); the thrower keeps
 // flying it on its own screen for a moment and then blends to the host's states, so the hand-over shows no jump.
+// That flight is a plain arc; with the peer's physics to ask, it stops where the arc first meets something (a wall,
+// the floor, another prop) and hands over to the host there, rather than passing through.
 //
 //   peer → host  grab {netId} · throw {netId, velocity} · drop {netId}   control lane
 //   peer → host  pose {netId, tick, position, rotation}                  pulse lane, every tick
@@ -17,6 +19,7 @@ import { FIRST_APP_TYPE } from '../session/messages';
 import type { Node } from '../../core/scene/nodes/node';
 import type { HostPeer, HostSession } from '../session/hostSession';
 import type { PeerSession } from '../session/peerSession';
+import type { PhysicsSystem } from '../../physics/physicsSystem';
 import { packQuaternion, unpackQuaternion } from './quantize';
 import type { SyncHost } from './syncHost';
 import type { SyncPeer } from './syncPeer';
@@ -200,6 +203,8 @@ export interface CarryPeerOptions {
     /** Blend from this peer's flight to the host's states, ms. Default 200. */
     blendMs?: number;
     gravity?: ArrayLike<number>;
+    /** This peer's physics, when it runs some (a predicting peer): a thrown prop's flight stops on what it hits. */
+    physics?: () => PhysicsSystem | null;
 }
 
 export class CarryPeer {
@@ -210,6 +215,8 @@ export class CarryPeer {
 
     private _netId = 0;
     private readonly _flying = new Map<string, { node: Node; vel: vec3; until: number }>();
+    /** Thrown props whose flight here ended on something they hit (for tests and the debugger). */
+    public flightsStopped = 0;
 
     constructor(private readonly _session: PeerSession, private readonly _sync: SyncPeer, private readonly _options: CarryPeerOptions = {}) {
         _session.route('control', CARRY_STATE, (m) => {
@@ -259,11 +266,38 @@ export class CarryPeer {
                 this._sync.release(id, this._options.blendMs ?? 200);
                 continue;
             }
-            // A plain ballistic arc until the host's states take over (it touches nothing on the way).
-            const p = vec3.scaleAndAdd(vec3.create(), f.node.position as vec3, f.vel, dt);
+            // A ballistic arc until the host's states take over — or until it meets something.
+            const from = f.node.position as vec3;
+            const p = vec3.scaleAndAdd(vec3.create(), from, f.vel, dt);
             vec3.scaleAndAdd(f.vel, f.vel, g as vec3, dt);
+            const stop = this._hit(f.node, from, p);
+            if (stop) {
+                // Where it meets it: the host's states (the bounce) take over from there.
+                f.node.setPosition(stop);
+                this._flying.delete(id);
+                this.flightsStopped++;
+                this._sync.release(id, this._options.blendMs ?? 200);
+                continue;
+            }
             f.node.setPosition(p);
         }
+    }
+
+    /** Where a prop moving `from` → `to` this tick must stop (it touches something on the way), or null. */
+    private _hit(node: Node, from: vec3, to: vec3): vec3 | null {
+        const physics = this._options.physics?.();
+        if (!physics) return null;
+        // A sphere the prop's size, swept along this tick's step. Followers (every prop the host simulates) are
+        // ghosts to this peer's solver, but still things to hit. Something it was touching already as it left the
+        // hand (the thrower) is not something it flew into.
+        const hits = physics.sweepSphere(from, to, innerRadius(node), {
+            includeGhosts: true,
+            filter: (owner) => !owner || !isWithin(owner, node),
+        });
+        let first = Infinity;
+        for (const h of hits) if (h.fraction > 0) first = Math.min(first, h.fraction);
+        if (!Number.isFinite(first)) return null;
+        return vec3.lerp(vec3.create(), from, to, first);
     }
 
     /** Throw the carried prop with `velocity` (m/s, world). */
@@ -290,4 +324,26 @@ export class CarryPeer {
     }
 
     public dispose(): void { this._session.route('control', CARRY_STATE, null); }
+}
+
+/**
+ * The radius of the largest sphere inside the prop's collider shapes (a box's smallest half side): what it can be
+ * swept as without stopping short of what it touches. 0.2 m for a node with no shapes.
+ */
+function innerRadius(node: Node): number {
+    const shapes: any[] = (node as any).shapes ?? [];
+    const scale = node.scale;
+    const k = Math.min(Math.abs(scale[0]), Math.abs(scale[1]), Math.abs(scale[2])) || 1;
+    let r = 0;
+    for (const s of shapes) {
+        if (s.type === 'box') r = Math.max(r, Math.min(s.width ?? 1, s.height ?? 1, s.depth ?? 1) / 2);
+        else if (typeof s.radius === 'number') r = Math.max(r, s.radius);
+    }
+    return r > 0 ? r * k : 0.2;
+}
+
+/** Whether `node` is `root` or inside it. */
+function isWithin(node: Node, root: Node): boolean {
+    for (let n: Node | null = node; n; n = n.parent) if (n === root) return true;
+    return false;
 }

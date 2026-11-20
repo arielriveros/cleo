@@ -656,8 +656,11 @@ Phase-6 details and findings:
 - **Carrying** moves the host's copy by velocity toward the carrier's pose (minus the gravity the step will
   add), so it still pushes what it meets; the pose is clamped to reach (2.5 m × 1.5 under co-op, × 1 under
   versus) and throws to 25 m/s. A carry ends on throw, drop, leave or 15 silent ticks. After a throw the
-  thrower flies the prop on a plain ballistic arc (it touches nothing) for a round trip plus the follow delay,
-  then blends to the host's states over 200 ms. Poses are in the prop's parent space: loose props at the scene
+  thrower flies the prop on a ballistic arc for a round trip plus the follow delay, then blends to the host's
+  states over 200 ms. A thrower that runs physics (`CarryPeerOptions.physics`) sweeps the prop's size along
+  each step and ends the flight where it first touches something (followers included), handing over to the
+  host's states (the bounce) there: a crate hurled at the floor stopped 0.37 m up (it rests at 0.5) where the
+  plain arc took it a metre into the ground. Poses are in the prop's parent space: loose props at the scene
   root, as in the Sandbox.
 - **Hitscan** is judged at the shooter's view: the fractional host tick it was drawing (`SyncPeer.renderTick`).
   `LagCompensator` keeps one second of every synced body's pose, moves them all back for the raycast and puts
