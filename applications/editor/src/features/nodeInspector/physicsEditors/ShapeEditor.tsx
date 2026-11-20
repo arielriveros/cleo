@@ -1,9 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { HullQuality } from 'cleo';
 import { ShapeDescription } from '../../EngineContext';
 import { HULL_QUALITIES } from './hullQuality';
 import { PRIMITIVE_SHAPE_TYPES, shapeTypeLabel, type PrimitiveShapeType } from './shapeListOps';
 import { MIN_SHAPE_SIZE } from '../../gizmo/collisionGizmoMath';
+import { hullSourcesFor, includedMeshes, type HullSourceEntry } from '../../../utils/hullSources';
+import { HullMeshPicker, hullMeshCount } from './HullMeshPicker';
 import {
   PropertyTable, PropertyRow, OptionalNumberInput, Button, VectorInput, SegmentedControl, Hint, SectionTitle, Popover,
   MenuItem, cn,
@@ -55,8 +57,13 @@ export interface ShapeRowActions {
   fit?: () => void;
   /** "Copy to trigger" / "Copy to rigid body"; absent when the other channel cannot take it. */
   copy?: { label: string; run: () => void };
-  /** Rebuild a convex hull at a new definition, in place. Absent when the node has no usable mesh. */
-  regenerateHull?: (quality: HullQuality) => boolean;
+  /**
+   * Rebuild a convex hull in place, at a definition and from the meshes `sources` name (hullSources.ts;
+   * every one when absent). Absent when the node has no usable mesh.
+   */
+  regenerateHull?: (quality: HullQuality, sources?: string[]) => boolean;
+  /** The meshes a hull can be built from, for its Meshes picker. */
+  hullTree?: readonly HullSourceEntry[];
 }
 
 /**
@@ -77,6 +84,11 @@ export default function ShapeEditor(props: {
   const { actions } = props;
   const patch = (p: Partial<ShapeDescription>) => props.setShape({ ...s, ...p } as ShapeDescription, Object.keys(p).join(','));
   const rowRef = useRef<HTMLDivElement>(null);
+  // A hull's meshes, ticked off until none form one: said so instead of a hull that is not rebuilt.
+  const [hullFailed, setHullFailed] = useState(false);
+  const hullTree = actions.hullTree ?? [];
+  const sources = s.type === 'convex' ? s.sources : undefined;
+  const pickMeshes = actions.regenerateHull && s.type === 'convex' && (hullMeshCount(hullTree) > 1 || sources !== undefined);
 
   // A shape picked in the viewport brings its row into view.
   useEffect(() => { if (props.selected) rowRef.current?.scrollIntoView({ block: 'nearest' }); }, [props.selected]);
@@ -146,10 +158,18 @@ export default function ShapeEditor(props: {
               { actions.regenerateHull
                 ? <SegmentedControl
                     size='sm' grow options={HULL_QUALITIES} value={s.quality}
-                    onChange={(v) => actions.regenerateHull!(v as HullQuality)}
+                    onChange={(v) => actions.regenerateHull!(v as HullQuality, sources)}
                   />
                 : <Hint>Source mesh unavailable.</Hint> }
             </PropertyRow>
+            { pickMeshes && <PropertyRow label='Meshes'>
+              <HullMeshPicker tree={hullTree} included={includedMeshes(hullTree, sources)}
+                onChange={(next) => {
+                  const picked = hullSourcesFor(hullTree, next);
+                  setHullFailed(!(picked === undefined || picked.length > 0) || !actions.regenerateHull!(s.quality, picked));
+                }} />
+              { hullFailed && <Hint className='mt-1'>Those meshes are too few or too flat to form a hull: it is as it was.</Hint> }
+            </PropertyRow> }
             <PropertyRow label='Geometry'>
               <span className='text-ui text-muted tabular-nums'>{s.vertices.length} vertices · {s.faces.length} faces</span>
             </PropertyRow>

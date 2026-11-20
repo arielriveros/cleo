@@ -68,6 +68,11 @@ export type ConvexShapeDescription = {
    * an older one (or none) is rebuilt from its node's mesh by the editor-helper reconciler on load.
    */
   v?: number;
+  /**
+   * The meshes it was built from, as paths of node names from its node (the editor's hullSources.ts):
+   * 'Body' takes that node and everything under it. Absent: every mesh under the node.
+   */
+  sources?: string[];
 };
 
 export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | CapsuleShapeDescription | PlaneShapeDescription | ConvexShapeDescription;

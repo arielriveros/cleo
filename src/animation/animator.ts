@@ -2221,12 +2221,15 @@ export class Animator {
         if (this._isOverlay) { this._extractRootTravel(bone, cur, prev, curTime, duration, looped); return; }
 
         if (looped && duration > 0) {
-            // Two spans across the loop point: prev→end and start→cur.
+            // Two spans across the loop point: prev→end and start→cur. The second walks on from where the
+            // whole cycle left the body facing: turned by the loop's own turn (end against start).
             const end = bone.sampleTR(duration);
             const start = bone.sampleTR(0);
             vec3.sub(deltaT, end.t, prev.t);
             const seg2 = vec3.create();
             vec3.sub(seg2, cur.t, start.t);
+            const loopTurn = quat.multiply(quat.create(), end.r, quat.invert(quat.create(), start.r));
+            vec3.transformQuat(seg2, seg2, loopTurn);
             vec3.add(deltaT, deltaT, seg2);
 
             const spanEnd = quat.create();
@@ -2239,6 +2242,12 @@ export class Animator {
             quat.multiply(deltaR, cur.r, quat.invert(quat.create(), prev.r));
         }
         quat.normalize(deltaR, deltaR);
+
+        // The travel is in the clip's frame, but the target has already turned by every rotation applied so far
+        // (prev against the pin), and Wp below includes that turn. Undo it, or a clip that turns AND travels (a
+        // quarter turn, then a step) has its later travel turned twice: the step goes sideways.
+        const turned = quat.multiply(quat.create(), this._rootRefR, quat.invert(quat.create(), prev.r));
+        vec3.transformQuat(deltaT, deltaT, turned);
 
         // Rotate the translation by Wp, and CONJUGATE the rotation by it, so a yaw about the armature's
         // up-axis becomes a yaw about world up. (An action's slot animator has no node: Wp is then the

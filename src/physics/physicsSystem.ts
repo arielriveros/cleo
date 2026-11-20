@@ -186,6 +186,11 @@ export class PhysicsSystem {
   private _motionCfg = new WeakMap<PhysicsBody, MotionConfig>();
   /** Per body: how long it has been continuously airborne / grounded, in unpaused seconds. */
   private _airborne = new WeakMap<PhysicsBody, { airTime: number; groundedTime: number }>();
+  /**
+   * Node bodies taken out of the world for now (ColliderNode.physicsEnabled false), and whether each stood on
+   * the ground when it left: a character carried in a car seat neither falls nor lands while it rides.
+   */
+  private _suspended = new Map<PhysicsBody, { grounded: boolean }>();
   /** Scratch for the per-frame body facing; never escapes the write-back pass. */
   private _forwardScratch = vec3.create();
   /** Scratch for the per-frame node-space body position; never escapes the write-back pass. */
@@ -497,6 +502,7 @@ export class PhysicsSystem {
         // update() runs only while unpaused, so the grace window cannot expire behind a paused game.
         this._time += stepDt;
         this._stampGroundContacts(result.contacts);
+        this._holdSuspendedGround();
         this._recordTouching(result.contacts);
         // Must follow the stamps, so the clocks agree with what isGrounded answers this frame.
         this._updateAirborneTimes(stepDt);
@@ -522,6 +528,14 @@ export class PhysicsSystem {
         const ownBody = node.ownBody;
         if ((!ownBody && !node.trigger) || !node.hasStarted) continue;
 
+        // Its body turned off or back on (ColliderNode.physicsEnabled) before there was a body or a system to
+        // tell: applied now. A suspended body stays out of the world and its node moves on its own.
+        const suspended = !!ownBody && node._bodySuspended && !node.markForRemoval;
+        if (ownBody && !node.markForRemoval && suspended !== this._suspended.has(ownBody)) {
+          if (suspended) this.suspendBody(ownBody);
+          else this.resumeBody(ownBody, node.worldPosition, node.worldQuaternion);
+        }
+
         // BOTH, when a node has both: a solid door or gate with an interaction zone around it. This used to
         // be `node.body || node.trigger`, which silently left such a node's trigger out of the world.
         for (const bodyToAdd of [ownBody, node.trigger]) {
@@ -530,12 +544,12 @@ export class PhysicsSystem {
             // Removing the body is what stops the callbacks: the 'collide' listener registered in
             // Node.setBody/setTrigger is an anonymous arrow, so removeEventListener can never match it.
             this.removeBody(bodyToAdd);
-          } else if (!this._inWorld.has(bodyToAdd)) {
+          } else if (!this._inWorld.has(bodyToAdd) && !(suspended && bodyToAdd === ownBody)) {
             this._enterWorld(bodyToAdd);
           }
         }
 
-        if (ownBody) {
+        if (ownBody && !suspended) {
           // Where the NODE sits, not where the body's centre of mass does: with an offset collider the
           // two differ by RigidBody's centre-of-mass offset (see RigidBody.recenterMass).
           const pos = ownBody.position.toArray();
@@ -772,6 +786,52 @@ export class PhysicsSystem {
     if (stamp) stamp.time = this._time;
   }
 
+  /**
+   * Take a node's body out of the world for now, keeping it built (see ColliderNode.physicsEnabled): no
+   * collisions, no gravity, nothing read back to its node, which moves freely meanwhile (carried by a parent,
+   * moved by a script or by root motion). Its measured speed reads 0. Whether it stood on the ground is kept, so
+   * it neither falls nor lands while out, nor when it comes back.
+   */
+  public suspendBody(body: PhysicsBody): void {
+    if (!this._world || this._suspended.has(body)) return;
+    this._suspended.set(body, { grounded: this.isGrounded(body) });
+    body.velocity.set(0, 0, 0);
+    body.angularVelocity.set(0, 0, 0);
+    this.removeBody(body, true);
+    this._motion.set(body, createMotionRecord());
+    this._holdRequests.delete(body);
+    this._restTime.delete(body);
+  }
+
+  /** Put a body {@link suspendBody} took out back in the world, at the node pose given, at rest. */
+  public resumeBody(body: PhysicsBody, position: ArrayLike<number>, rotation: ArrayLike<number>): void {
+    const was = this._suspended.get(body);
+    if (!this._world || !was) return;
+    this._suspended.delete(body);
+    body.setTransform(position, rotation);
+    body.velocity.set(0, 0, 0);
+    body.angularVelocity.set(0, 0, 0);
+    if (!this._inWorld.has(body)) this._enterWorld(body);
+    this._motion.set(body, createMotionRecord());
+    if (was.grounded) {
+      const stamp = this._ground.get(body);
+      if (stamp) stamp.time = this._time;
+    }
+  }
+
+  /** Whether {@link suspendBody} has `body` out of the world. */
+  public isSuspended(body: PhysicsBody): boolean { return this._suspended.has(body); }
+
+  /** A suspended body that stood on the ground still does: its stamp kept fresh (see _holdGround). */
+  private _holdSuspendedGround(): void {
+    if (this._suspended.size === 0) return;
+    for (const [body, state] of this._suspended) {
+      if (!state.grounded) continue;
+      const stamp = this._ground.get(body);
+      if (stamp) stamp.time = this._time;
+    }
+  }
+
   /** Whether this system is holding `body` asleep (out of range or at rest). For tests and the HUD. */
   public isFrozen(body: PhysicsBody): boolean { return this._frozen.has(body); }
 
@@ -820,6 +880,7 @@ export class PhysicsSystem {
    */
   public removeBody(body: PhysicsBody, keep = false): void {
     if (!this._world) return;
+    if (!keep) this._suspended.delete(body);
     const wasIn = this._inWorld.delete(body);
     if (keep) { if (wasIn) body._disable(); }
     else if (body.world === this._world) { this._bodies.delete(body.handle); body._release(true); }
@@ -1527,6 +1588,7 @@ export class PhysicsSystem {
     this._world.clear();
     this._inWorld.clear();
     this._frozen.clear();
+    this._suspended.clear();
     // The scene is going away: no exits are reported for it.
     this._triggerPairs.clear();
     this._reportedPairs.clear();

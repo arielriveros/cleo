@@ -107,7 +107,7 @@ describe(`vehicle presets (${TEST_PHYSICS})`, () => {
             const collider = vehicle.collider as ColliderNode;
             expect(collider.mass).toBe(preset.chassis.mass);
             expect(collider.shapes[0]).toMatchObject({ type: 'box', width: preset.chassis.size[0], height: preset.chassis.size[1], depth: preset.chassis.size[2] });
-            expect(vehicle.drive).toBe(preset.options.drive);
+            expect(vehicle.drivetrain).toBe(preset.options.drivetrain);
         }
     });
 

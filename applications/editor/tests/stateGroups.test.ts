@@ -192,7 +192,7 @@ describe('state groups: the graph', () => {
     const sm: AnimationStateMachine = find(scene).stateMachine
     const top = graphPlan(sm, null)
     expect(top.states.sort()).toEqual(['Idle', 'Locomotion', 'Stairs', 'Start'])
-    expect(top.groups.map(g => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing'])
+    expect(top.groups.map(g => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car'])
     const drawn = new Set(top.links.flatMap(l => [...l.forward, ...l.backward]))
     const memberOf = new Map(sm.groups!.flatMap(g => g.states.map(s => [s, g.name] as const)))
     for (const t of sm.transitions) {

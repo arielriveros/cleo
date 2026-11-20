@@ -131,6 +131,30 @@ describe('Animator — root motion', () => {
         expect(quat.getAxisAngle(vec3.create(), r)).toBeCloseTo(0); // ~identity: no residual rotation on the mesh
     });
 
+    it('walks the way it has turned: a quarter turn, then a step, goes where the clip goes', () => {
+        // Turn 90 degrees left (+Y) over the first half, then step 1 m along the way it now faces: +X in the clip.
+        const s = Math.sin(Math.PI / 4), c = Math.cos(Math.PI / 4);
+        const clip: Animation = {
+            name: 'turnThenStep', rootMotion: true,
+            samplers: [
+                { input: [0, 0.5, 1], output: [0, 0, 0, 1, 0, s, 0, c, 0, s, 0, c], interpolation: 'LINEAR' },
+                { input: [0, 0.5, 1], output: [0, 0, 0, 0, 0, 0, 1, 0, 0], interpolation: 'LINEAR' },
+            ],
+            channels: [
+                { samplerIndex: 0, targetNodeIndex: 0, targetPath: 'rotation' },
+                { samplerIndex: 1, targetNodeIndex: 0, targetPath: 'translation' },
+            ],
+        };
+        const node = makeNode();
+        const a = makeAnimator([clip], node);
+        a.playAnimationByName('turnThenStep', false, false);
+        a.play();
+        for (let k = 0; k < 12; k++) a.update(1 / 12 - 1e-4);
+        // Not turned twice: the step goes along +X, as in the clip, not along -Z.
+        expect(node.position[0]).toBeCloseTo(1, 1);
+        expect(Math.abs(node.position[2])).toBeLessThan(0.05);
+    });
+
     it('drives the nearest bodied ancestor, pushing rotation into its physics body', () => {
         const root = makeNode({ withBody: true });
         const model = makeNode({ parent: root });

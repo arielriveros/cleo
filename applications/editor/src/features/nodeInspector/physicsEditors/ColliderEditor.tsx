@@ -10,12 +10,14 @@ import {
   clampShape, convertShape, duplicateShape, fitShapeToPoints, indexAfterMove, moveShape, newRowKey, reconcileRowKeys,
   removeShapeAt, shapeRowTitle, tidyShape, type PrimitiveShapeType,
 } from './shapeListOps';
-import { collectHullPositions, hasFitMesh, meshBounds, meshPositions, shapeFitSource } from '../../../utils/editorHelpers';
+import { collectHullPositions, hasFitMesh, hullSourceTree, meshBounds, meshPositions, shapeFitSource } from '../../../utils/editorHelpers';
+import { hullSourcesFor, includedMeshes, type HullSourceEntry } from '../../../utils/hullSources';
+import { HullMeshPicker, hullMeshCount } from './HullMeshPicker';
 import {
   COLLISION_SHAPE_FRAME, COLLISION_SHAPES_EDITED, remapCollisionShapeSelection, selectedCollisionShape,
   setCollisionShapeSelection, useCollisionShapeSelection, type CollisionChannel,
 } from '../../gizmo/collisionSelection';
-import { Field, Slider, Toggle, Select, NumberInput, Button, PresetMenu, Section, Hint, SegmentedControl, DocScope, cn, labelClass } from '@cleo/app-kit/ui'
+import { Field, Slider, Toggle, Select, NumberInput, Button, PresetMenu, Section, Hint, SegmentedControl, DocScope, DocHover, useDocEntry, cn, labelClass } from '@cleo/app-kit/ui'
 import { PhysicsIcon, ShapeIcon } from '../sectionIcons'
 import { PairInput } from '../propertyEditors/ui2D'
 import { LayerMaskSelect, LayerSelect } from './layerPickers'
@@ -86,9 +88,12 @@ interface ShapeListApi {
   selected: number;
   canHull: boolean;
   canFit: boolean;
+  /** The meshes a hull can be built from (empty without any): what the Meshes picker lists. */
+  hullTree: HullSourceEntry[];
   addShape: (type: string) => void;
-  addHull: (quality: HullQuality) => boolean;
-  regenerateHull: (index: number, quality: HullQuality) => boolean;
+  /** `sources`: the meshes to build it from (hullSources.ts); every one when absent. */
+  addHull: (quality: HullQuality, sources?: string[]) => boolean;
+  regenerateHull: (index: number, quality: HullQuality, sources?: string[]) => boolean;
   setShape: (index: number, shape: ShapeDescription, field: string) => void;
   select: (index: number) => void;
   frame: (index: number) => void;
@@ -113,6 +118,7 @@ function useShapeList(owner: ColliderNode | TriggerNode, channel: CollisionChann
   const source = shapeFitSource(owner);
   const canHull = hasFitMesh(source, false);
   const canFit = hasFitMesh(source, true);
+  const hullTree = canHull ? hullSourceTree(source) : [];
 
   const write = (next: ShapeDescription[]) => { owner.shapes = next as any; changed(); };
   const select = (index: number | null) =>
@@ -156,12 +162,17 @@ function useShapeList(owner: ColliderNode | TriggerNode, channel: CollisionChann
   };
 
   // Hull vertices are baked into the descriptor (and so into the scene) rather than rebuilt on load.
-  // They come back centred on their own centroid, which becomes the shape's starting offset.
-  const buildHull = (quality: HullQuality): ShapeDescription | null => {
-    const positions = collectHullPositions(source, owner);
+  // They come back centred on their own centroid, which becomes the shape's starting offset. The meshes
+  // it is built from are kept with it (`sources`), so a new Definition rebuilds it from the same ones.
+  const buildHull = (quality: HullQuality, sources?: string[]): ShapeDescription | null => {
+    if (sources && sources.length === 0) return null;
+    const positions = collectHullPositions(source, owner, sources);
     const hull = positions ? hullFromPositions(positions, quality) : null;
     if (!hull) return null;
-    return { type: 'convex', quality, vertices: hull.vertices, faces: hull.faces, offset: hull.center, rotation: [0, 0, 0], v: 5 };
+    return {
+      type: 'convex', quality, vertices: hull.vertices, faces: hull.faces, offset: hull.center, rotation: [0, 0, 0], v: 5,
+      ...(sources ? { sources: [...sources] } : {}),
+    };
   };
 
   return {
@@ -169,16 +180,17 @@ function useShapeList(owner: ColliderNode | TriggerNode, channel: CollisionChann
     selected: selection && selection.nodeId === id && selection.channel === channel ? selection.index : -1,
     canHull,
     canFit,
+    hullTree,
     addShape,
-    addHull: (quality) => {
-      const shape = buildHull(quality);
+    addHull: (quality, sources) => {
+      const shape = buildHull(quality, sources);
       if (!shape) return false;
       write([...shapes, shape]);
       select(shapes.length);
       return true;
     },
-    regenerateHull: (index, quality) => {
-      const shape = buildHull(quality);
+    regenerateHull: (index, quality, sources) => {
+      const shape = buildHull(quality, sources);
       if (!shape) return false;
       const next = [...shapes];
       next[index] = { ...shape, rotation: shapes[index].rotation }; // a manual re-orientation survives
@@ -213,6 +225,11 @@ function useShapeList(owner: ColliderNode | TriggerNode, channel: CollisionChann
 const ShapeTools = (api: ShapeListApi) => {
   const [quality, setQuality] = useState<HullQuality>('medium');
   const [degenerate, setDegenerate] = useState(false);
+  // The meshes a new hull takes: all of them until some are unticked (so meshes added later are in too).
+  const [picked, setPicked] = useState<ReadonlySet<string> | null>(null);
+  const included = picked ?? includedMeshes(api.hullTree);
+  const hullSources = hullSourcesFor(api.hullTree, included);
+  const meshesEntry = useDocEntry('Meshes', undefined, 'field');
   const keysRef = useRef<string[]>([]);
   keysRef.current = reconcileRowKeys(keysRef.current, api.shapes.length);
   const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set());
@@ -246,7 +263,15 @@ const ShapeTools = (api: ShapeListApi) => {
         <Field label='Hull Definition' labelClassName='w-[100px]'>
           <SegmentedControl size='sm' grow options={HULL_QUALITIES} value={quality} onChange={(v) => setQuality(v as HullQuality)} />
         </Field>
-        <Button size='sm' className='mt-1.5' onClick={() => setDegenerate(!api.addHull(quality))}>Add Convex Hull</Button>
+        {/* Only when there is a choice: more than one mesh to build it from. */}
+        { hullMeshCount(api.hullTree) > 1 && <div className='my-1'>
+          <DocHover entry={meshesEntry} affordance='field' className={labelClass}>Meshes</DocHover>
+          <HullMeshPicker className='mt-1' tree={api.hullTree} included={included}
+            onChange={(next) => { setPicked(next); setDegenerate(false); }} />
+        </div> }
+        <Button size='sm' className='mt-1.5' disabled={hullSources !== undefined && hullSources.length === 0}
+          title={hullSources !== undefined && hullSources.length === 0 ? 'Tick at least one mesh to build the hull from' : undefined}
+          onClick={() => setDegenerate(!api.addHull(quality, hullSources))}>Add Convex Hull</Button>
         { degenerate && <Hint className='mt-1'>This mesh is flat or has too few vertices to form a hull.</Hint> }
       </div> }
 
@@ -271,7 +296,8 @@ const ShapeTools = (api: ShapeListApi) => {
             moveDown: i < api.shapes.length - 1 ? () => move(i, 1) : undefined,
             convert: (t) => api.convert(i, t),
             fit: api.canFit && shape.type !== 'plane' && shape.type !== 'convex' ? () => api.fit(i) : undefined,
-            regenerateHull: api.canHull ? (q) => api.regenerateHull(i, q) : undefined,
+            regenerateHull: api.canHull ? (q, sources) => api.regenerateHull(i, q, sources) : undefined,
+            hullTree: api.hullTree,
           }}
         />
       ))}

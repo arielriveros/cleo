@@ -1,4 +1,5 @@
-import { CharacterNode, Input } from 'cleo'
+import { CharacterNode, Input, MathUtils } from 'cleo'
+import type { Animator, CameraRigNode, ColliderNode, ControllerNode, Node, TriggerName } from 'cleo'
 import { attribute } from 'cleo/decorators'
 
 /**
@@ -31,12 +32,15 @@ import { attribute } from 'cleo/decorators'
  *     lower foot whenever it nears the ground, which a run's flight phase between strides must not do);
  *   - the LOOK-AT: where the camera faces off the body (`lookYaw`, `lookPitch`) and the Look layer's weight
  *     (`lookWeight`, up standing still), and the turn in place held back `turnDelay` seconds so the head turns first;
+ *   - the CAR: a car hands it its seat (`boardVehicle`) and takes it back (`leaveVehicle`): it lets go of its own
+ *     Controller, takes its body out of the physics world and rides in the seat, getting in and out by the animator's
+ *     root motion (`enterTrigger`, `exitTrigger`), and takes its Controller back once on its feet (SandboxCar);
  *   - the STAIRS: whether the body is on a flight (`onStairs`, the ramp under it on `stairsLayer`) and which way it
  *     goes along it (`stairs`, +1 up, -1 down, from the climb under its travel), the flight's pace (one tread a
  *     step, slowing down BEFORE the first riser, seen ahead), facing where it goes on the flight, and `stairRate`,
  *     how much faster the stair clips play while the body still slows onto it.
  *
- * It names no clip, no state and no key, and plays no animation.
+ * It names no clip, no state and no key, and plays no animation (a car is got into by firing a trigger by name).
  *
  * The attributes the CHARACTER decides are public (how fast its clips go backwards, where its foot placement eases
  * off, how long it takes to turn round to the camera), so every copy of the Player template can set its own; how the behavior feels (the stick, the lean, the
@@ -176,6 +180,34 @@ export default class SandboxPlayerNode extends CharacterNode {
     @attribute('Stairs', { min: 1, max: 4, step: 0.05 })
     private stairBrake: number = 1.5
 
+    /** The animator's trigger that plays getting into a car, and the one that plays getting out of it. */
+    @attribute('Car')
+    public enterTrigger: TriggerName = 'EnterCar'
+
+    @attribute('Car')
+    public exitTrigger: TriggerName = 'ExitCar'
+
+    /**
+     * Seconds a metre the body takes to step onto where getting in starts, from where it stood when the player
+     * pressed Interact (the clip reaches for the door meanwhile), and the most it may take.
+     */
+    @attribute('Car', { min: 0, max: 2, step: 0.05 })
+    private alignSeconds: number = 0.35
+
+    @attribute('Car', { min: 0, max: 2, step: 0.05 })
+    private alignMaxSeconds: number = 0.6
+
+    /** Seconds what is left of getting in (a few millimetres) eases out over once seated. */
+    @attribute('Car', { min: 0, max: 2, step: 0.05 })
+    private settleSeconds: number = 0.3
+
+    // ----- read by the car (SandboxCar) -----------------------------------------------------------------------
+
+    /** In a car: getting in, seated or getting out. */
+    public inVehicle: boolean = false
+    /** Seated: done getting in. The car may drive off. */
+    public seated: boolean = false
+
     // ----- read by the animator (Linked parameters) -----------------------------------------------------------
 
     /** MoveInput: the player is asking to move. */
@@ -231,7 +263,24 @@ export default class SandboxPlayerNode extends CharacterNode {
     private _offStairs: number = Infinity
     private _stairNormal: number[] = [0, 1, 0]
 
+    /** The car: what this character is doing in one, and what that needs. */
+    private _carPhase: 'none' | 'entering' | 'seated' | 'exiting' = 'none'
+    /** The seat it rides on, and its own Controller, given back once it is out. */
+    private _seat: Node | null = null
+    private _ownController: ControllerNode | null = null
+    /** Stepping onto where getting in starts: the body's pose when it sat down to it, the step, and how far along. */
+    private _alignFrom: MathUtils.YawPose = [0, 0, 0, 0]
+    private _alignStep: MathUtils.YawPose = [0, 0, 0, 0]
+    private _alignT: number = 1
+    private _alignTime: number = 0
+    /** Seconds since getting in started, and how long its clip plays. */
+    private _carTime: number = 0
+    private _enterSeconds: number = 0
+    /** Getting out: whether the animator has been seen playing it. */
+    private _exitSeen: boolean = false
+
     onUpdate(delta: number) {
+        if (this._carPhase !== 'none') { this._ride(delta); return }
         if (this._acceleration < 0) this._acceleration = this.acceleration
         const v = this.velocity
         this.groundSpeed = Math.hypot(v[0], v[2])
@@ -422,5 +471,167 @@ export default class SandboxPlayerNode extends CharacterNode {
     /** An angle into -180..180 degrees. */
     private _wrap(degrees: number): number {
         return ((degrees + 180) % 360 + 360) % 360 - 180
+    }
+
+    // ----- the car ------------------------------------------------------------------------------------------------
+
+    /** The Mannequin's animator (the model under this Character). */
+    private get _animator(): Animator | null {
+        for (const c of this.children) {
+            const animator = (c as unknown as { animator?: Animator | null }).animator
+            if (animator) return animator
+        }
+        return null
+    }
+
+    /** The camera rig this character is seen through: its Controller's aim. */
+    public cameraRig(): CameraRigNode | null {
+        return (this._ownController ?? this.controller)?.aimRig ?? null
+    }
+
+    /**
+     * A car hands this character its seat: it gets in. It lets go of its Controller, takes its body out of the
+     * physics world (`physicsEnabled`) and moves under `seat`, keeping where it stands; fires `enterTrigger`, and
+     * steps onto `enterPoint` (a child of the seat: where getting in starts) while the clip reaches for the door.
+     * The clip's root motion then carries it into the seat. False, and nothing done, when it cannot: in the air,
+     * already in a car, or with an animator that has no such trigger.
+     */
+    public boardVehicle(seat: Node, enterPoint: Node): boolean {
+        const body = this.collider as ColliderNode | null
+        const animator = this._animator
+        const info = animator?.triggerInfo(this.enterTrigger)
+        if (this._carPhase !== 'none' || !body || !animator || !info || !this.isGrounded || this.isJumping) return false
+        this._ownController = this.controller
+        this._ownController?.release()
+        body.physicsEnabled = false
+        // Where the character faces is its own turn (the Character turns itself, not its Collider), and the step
+        // and the clip's root motion turn the Collider: fold the one into the other first, so they turn all of it.
+        const facing = this.worldForward
+        const heading = Math.atan2(facing[0], facing[2]) * 180 / Math.PI
+        body.setWorldYaw(heading)
+        body.updateTransforms(body.parent ? body.parent.worldTransform : null)
+        // The same heading in the world: no turn of its own left under the Collider.
+        this.setWorldYaw(heading)
+        this.updateTransforms(body.worldTransform)
+        body.reparent(seat)
+        this._seat = seat
+        // The step: from where it stands to where the clip starts, both in the seat's frame, eased in over the
+        // first part of the clip (time by distance).
+        this._alignFrom = this._localPose(body)
+        // Onto the start along the ground, at the height it stands at: the car may sit lower or higher on its springs
+        // than modelled (the backends' springs differ), and once seated the body eases onto the Seat itself.
+        const to: MathUtils.YawPose = this._localPose(enterPoint)
+        to[1] = this._alignFrom[1]
+        this._alignStep = MathUtils.yawPoseMul(MathUtils.yawPoseInvert(this._alignFrom), to)
+        const distance = Math.hypot(this._alignStep[0], this._alignStep[2])
+        this._alignTime = Math.min(this.alignMaxSeconds, this.alignSeconds * distance + 0.1)
+        this._alignT = 0
+        animator.setTrigger(this.enterTrigger)
+        this._enterSeconds = info.clipLength / Math.max(0.01, info.speed)
+        this._carTime = 0
+        this._carPhase = 'entering'
+        this.inVehicle = true
+        this.seated = false
+        return true
+    }
+
+    /** The car lets this character out: it gets out (`exitTrigger`), carried by the clip to the car's side. False when not seated. */
+    public leaveVehicle(): boolean {
+        const animator = this._animator
+        if (this._carPhase !== 'seated' || !animator || !animator.triggerInfo(this.exitTrigger)) return false
+        animator.setTrigger(this.exitTrigger)
+        this._carPhase = 'exiting'
+        this._exitSeen = false
+        this.seated = false
+        return true
+    }
+
+    /** In a car: no walking (no intent asked for), nothing for the animator but the car's clips. */
+    private _ride(delta: number) {
+        const body = this.collider as ColliderNode | null
+        if (!body) return
+        this.hasMoveInput = false
+        this.running = false
+        this.sprinting = false
+        this.runTurn = 0
+        this.groundSpeed = 0
+        this.onStairs = false
+        this.stairs = 0
+        this.stairRate = 1
+        this.footPlacement = 0
+        this.facingMode = 'none'
+        const ease = delta > 0 ? 1 - Math.exp(-this.lookSpeed * delta) : 0
+        this.leanLeft = 0
+        this.leanRight = 0
+        this.leanForward = 0
+        this.lookWeight -= this.lookWeight * ease
+        this._carTime += delta
+
+        if (this._carPhase === 'entering') {
+            // The step onto the start, as a correction under the root motion that is already carrying the body:
+            // pose = start * step(t) * motion, applied by how much further along the step is this frame.
+            if (this._alignT < 1) {
+                const t0 = MathUtils.smoothstep(0, 1, this._alignT)
+                this._alignT = this._alignTime > 0 ? Math.min(1, this._alignT + delta / this._alignTime) : 1
+                const t1 = MathUtils.smoothstep(0, 1, this._alignT)
+                const none: MathUtils.YawPose = [0, 0, 0, 0]
+                const from = MathUtils.yawPoseLerp(none, this._alignStep, t0)
+                const to = MathUtils.yawPoseLerp(none, this._alignStep, t1)
+                const start = this._alignFrom
+                const shift = MathUtils.yawPoseMul(start, MathUtils.yawPoseMul(to, MathUtils.yawPoseMul(MathUtils.yawPoseInvert(from), MathUtils.yawPoseInvert(start))))
+                this._setLocalPose(body, MathUtils.yawPoseMul(shift, this._localPose(body)))
+            }
+            if (this._carTime >= this._enterSeconds) { this._carPhase = 'seated'; this.seated = true }
+            return
+        }
+        if (this._carPhase === 'seated') {
+            // On the seat: what the clip's travel left over (a few millimetres) eased out.
+            const k = this.settleSeconds > 0 && delta > 0 ? 1 - Math.exp(-3 * delta / this.settleSeconds) : 1
+            const pose = this._localPose(body)
+            if (Math.hypot(pose[0], pose[1], pose[2]) > 1e-4 || Math.abs(pose[3]) > 0.01)
+                this._setLocalPose(body, MathUtils.yawPoseLerp(pose, [0, 0, 0, 0], k))
+            return
+        }
+        // Getting out: done once the animator is back where it rests (it has left the trigger's states).
+        const playing = this._animator?.activeTrigger() === this.exitTrigger
+        if (playing) this._exitSeen = true
+        else if (this._exitSeen) this._standUp(body)
+    }
+
+    /** Out of the car: on its feet in the world again, upright, its body back in the physics world, its Controller back. */
+    private _standUp(body: ColliderNode) {
+        const scene = this.scene
+        if (!scene) return
+        const f = body.worldForward
+        const yaw = Math.atan2(f[0], f[2]) * 180 / Math.PI
+        body.reparent(scene.root)
+        body.setRotation([0, yaw, 0])
+        // On the ground under it: the clip stands it at the Seat's floor, which is the car's (on its springs).
+        const p = body.worldPosition, physics = scene.physics
+        const ground = physics?.raycast([p[0], p[1] + 1, p[2]], [p[0], p[1] - 1.5, p[2]], { collidingWith: body.body, groundOnly: true })
+        if (ground) body.setPosition([p[0], ground.point[1] + 0.02, p[2]])
+        body.updateTransforms(null)
+        body.physicsEnabled = true
+        this._ownController?.possess(this)
+        this._ownController = null
+        this._seat = null
+        this._carPhase = 'none'
+        this.inVehicle = false
+        this.seated = false
+    }
+
+    /** A node's upright pose in its parent's frame: `[x, y, z, yaw]`. */
+    private _localPose(node: Node): MathUtils.YawPose {
+        const p = node.position, q = node.quaternion
+        // +Z turned by the rotation: its heading is the yaw.
+        const fx = 2 * (q[0] * q[2] + q[3] * q[1]), fz = 1 - 2 * (q[0] * q[0] + q[1] * q[1])
+        return [p[0], p[1], p[2], Math.atan2(fx, fz) * 180 / Math.PI]
+    }
+
+    /** Places `node` at an upright pose in its parent's frame, its world transform brought up to date at once. */
+    private _setLocalPose(node: Node, pose: MathUtils.YawPose) {
+        node.setPosition([pose[0], pose[1], pose[2]])
+        node.setRotation([0, pose[3], 0])
+        node.updateTransforms(node.parent ? node.parent.worldTransform : null)
     }
 }

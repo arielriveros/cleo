@@ -171,6 +171,12 @@ own space. **Add** puts a box, sphere, capsule, cylinder or plane on the list, f
 under the node, and **Add Convex Hull** fits one to them at the chosen **Hull Definition**. A Trigger
 with no mesh under it fits the node it is under.
 
+**Meshes** — which of the meshes under the node a convex hull is built from, as a tree of their nodes with a
+checkbox each; shown when there is more than one. Ticking a node ticks everything under it, and a node with only
+some of it ticked shows part-way. All are ticked to start with. A hull keeps the meshes it was built from, by their
+nodes' names (so they hold in every placed copy of a template), and its own Meshes on its row rebuild it from
+others: a car's body and windows without its wheels, a door frame without the door.
+
 | Shape | Notes |
 |---|---|
 | **Box** | |
@@ -178,7 +184,7 @@ with no mesh under it fits the node it is under.
 | **Capsule** | The right shape for a character. Its **Total Height** spans the caps too, so the straight section is height − 2 × radius; at or below 2 × radius it is a sphere. |
 | **Cylinder** | |
 | **Plane** | An infinite half-space, facing its own +Z. Drawn as a 4 m grid with a short stub along that normal. |
-| **Convex hull** | Fitted to the mesh's vertices, at a **Definition** from Low (exactly the bounding box, 6 faces) to Very High (up to 50 faces). Every level encloses the whole mesh, so a lower one is looser, never tighter. Changing a hull's Definition rebuilds it in place and keeps the rotation you gave it. Not offered on skinned meshes. |
+| **Convex hull** | Fitted to the mesh's vertices, at a **Definition** from Low (exactly the bounding box, 6 faces) to Very High (up to 50 faces). Every level encloses the whole mesh, so a lower one is looser, never tighter. Changing a hull's Definition or its **Meshes** rebuilds it in place, from the meshes it was built from, and keeps the rotation you gave it. Not offered on skinned meshes. |
 
 **Shape** — one collider on the list, titled by its type and place ("Box 2"): its dimensions, an
 **Offset** and a **Rotation** in the node's own space. Clicking the title selects the shape for editing

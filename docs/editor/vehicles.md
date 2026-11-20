@@ -27,7 +27,10 @@ Or start from one of the [Presets](#presets) in the Vehicle panel's **Presets â–
 Kart, Truck, Bus, Off-road, Bike or Trailer. A preset lays the vehicle out for you, wheels and chassis
 included, and keeps the meshes you have already put under its wheels.
 
-Press Play: with **Player input** on, **Move** drives and steers and **Jump** holds the hand brake.
+Press Play: with **Player input** on, **Move** drives and steers and **Jump** holds the hand brake. Or let a
+[Controller](ai-agents.md#possession) **possess** the Vehicle, as it would a Character: its Move steers and drives,
+its jump button held holds the hand brake, and its Look turns its camera rig. The
+[Sandbox example](sandbox-example.md#the-car) has a car built this way, which a character gets into and drives.
 
 The scripting side is in [Motion and physics](../scripting/motion-and-physics.md#vehicles).
 
@@ -87,7 +90,8 @@ Who drives it, and how the throttle behaves.
 
 | Setting | Meaning |
 |---|---|
-| **Player input** | Drive it from the player's input. **Move** steers (x) and drives (y); **Jump** holds the hand brake. Off: a script sets `throttle`, `steer`, `brake` and `handBrake`. |
+| **Player input** | Drive it from the player's input. **Move** steers (x) and drives (y); **Jump** holds the hand brake. Off: a script sets `throttle`, `steer`, `brake` and `handBrake`. A Controller that possesses the vehicle takes over from both. |
+| **Parked** | The brakes and the hand brake on, the throttle and steering ignored, whoever is driving: an empty car, or one whose driver is still getting in. A script turns it off to drive away. |
 | **Auto reverse** | Holding the throttle against the way it rolls brakes first, then reverses once it has nearly stopped, like a road car's pedals. Off: a backward throttle selects reverse straight away. |
 
 ### Engine

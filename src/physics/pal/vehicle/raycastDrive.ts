@@ -100,6 +100,8 @@ const TWO_PI = Math.PI * 2;
 /** How far up toward the centre of mass both Bullet ports push a tyre's side force: Rapier's fixed 0.1, cannon's as set. */
 export const BULLET_ROLL_INFLUENCE = 0.1;
 const RPM_PER_RAD_S = 60 / TWO_PI;
+/** Passes holdBrakes makes over the wheels: each brake sees the chassis as the others left it. */
+const BRAKE_PASSES = 4;
 /** Below this ground speed (m/s) a wheel's slips read 0: they are ratios that blow up at rest. */
 const SLIP_SPEED = 0.5;
 
@@ -151,6 +153,10 @@ export class RaycastDrive {
     private _freeRpm: number;
     private readonly _mass: number;
     private readonly _inertia: [number, number, number];
+    /** Scratch: the angular velocity one held brake adds (holdBrakes). */
+    private readonly _dw: [number, number, number] = [0, 0, 0];
+    /** Scratch: each wheel's brake impulse held so far this substep (holdBrakes). */
+    private readonly _held: number[];
     // The lean controller (vehicle.lean), and what it reads of each wheel.
     private readonly _lean: LeanController | null;
     private readonly _leanWheels: LeanWheel[];
@@ -180,6 +186,7 @@ export class RaycastDrive {
         });
         const zeros = () => new Array<number>(n).fill(0);
         this.steering = zeros(); this.engineForce = zeros(); this.brakeImpulse = zeros(); this.antiRoll = zeros();
+        this._held = zeros();
         this._omega = zeros(); this._angle = zeros(); this._steer = zeros();
         this._longSlip = zeros(); this._latSlip = zeros(); this._driveTorque = zeros(); this._brakeTorque = zeros();
         this._spinning = new Array<boolean>(n).fill(false);
@@ -272,15 +279,23 @@ export class RaycastDrive {
     /**
      * Hold braked wheels where the native solve leaves them creeping: Rapier shares a wheel's rolling
      * friction among every wheel on the ground (each stops 1/n of its slide), so a car held by two wheels of
-     * four creeps down a slope. Given what of each wheel's forward impulse the native solve `spent`, this
-     * stops what is left of each braked wheel's forward slide at its contact, within the rest of its brake,
-     * through `apply` (an impulse and the world point it acts at). After the native update, before finish().
+     * four creeps down a slope; cannon brakes through here alone (see CannonVehicle). Given what of each wheel's
+     * forward impulse the native solve `spent`, this stops what is left of each braked wheel's forward slide at
+     * its contact, within the rest of its brake, through `apply` (an impulse and the world point it acts at).
+     * After the native update, before finish().
+     *
+     * One wheel after another, each seeing the chassis as the wheels before it left it (`chassis`'s velocities
+     * are updated as it goes): each stopping the whole slide on its own, four wheels stopped it four times over,
+     * and the chassis rocked back and forth on its brakes, creeping (a parked car slid 12 cm/s on flat ground).
      */
     public holdBrakes(readings: readonly RaycastWheelReading[], chassis: ChassisMotion, spent: ArrayLike<number>,
-                      apply: (ix: number, iy: number, iz: number, point: ArrayLike<number>) => void): void {
+                      apply: (ix: number, iy: number, iz: number, point: ArrayLike<number>) => void, gravityDt?: ArrayLike<number>): void {
         const q = chassis.rotation, inv = [-q[0], -q[1], -q[2], q[3]], f = this._f, r = this._r, vel = this._v;
-        const lr = [0, 0, 0], lf = [0, 0, 0];
-        for (let i = 0; i < readings.length; i++) {
+        const lr = [0, 0, 0], lf = [0, 0, 0], held = this._held;
+        held.fill(0);
+        // A few passes, each wheel's impulse kept within its brake in total (accumulated, as a constraint solver
+        // clamps): one pass leaves what the later wheels' impulses turned the chassis by.
+        for (let pass = 0; pass < BRAKE_PASSES; pass++) for (let i = 0; i < readings.length; i++) {
             const reading = readings[i], budget = this.brakeImpulse[i] - Math.abs(spent[i]);
             if (!reading.contact || !(budget > 0)) continue;
             const p = reading.point, c = chassis.com, a = chassis.angular;
@@ -289,11 +304,23 @@ export class RaycastDrive {
             vel[1] = chassis.linear[1] + a[2] * px - a[0] * pz;
             vel[2] = chassis.linear[2] + a[0] * py - a[1] * px;
             this._wheelAxes(i, q, f, r);
-            const long = vel[0] * f[0] + vel[1] * f[1] + vel[2] * f[2];
+            // With the gravity this substep is about to add (gravityDt, where the step integrates it after this):
+            // stopped as it will be, not as it was, or a car held on a slope creeps by a substep's fall every substep.
+            const long = vel[0] * f[0] + vel[1] * f[1] + vel[2] * f[2]
+                + (gravityDt ? gravityDt[0] * f[0] + gravityDt[1] * f[1] + gravityDt[2] * f[2] : 0);
             rotate(inv, px, py, pz, lr);
             rotate(inv, f[0], f[1], f[2], lf);
-            const j = clamp(-long * effectiveMass(this._mass, this._inertia, lr, lf), -budget, budget);
-            if (j !== 0) apply(f[0] * j, f[1] * j, f[2] * j, p);
+            const total = clamp(held[i] - long * effectiveMass(this._mass, this._inertia, lr, lf), -budget, budget);
+            const j = total - held[i];
+            held[i] = total;
+            if (j === 0) continue;
+            apply(f[0] * j, f[1] * j, f[2] * j, p);
+            // The chassis as this impulse leaves it, for the next wheel: v += j f / m, w += R I^-1 (r x j f) (local).
+            const m = this._mass, I = this._inertia;
+            chassis.linear[0] += f[0] * j / m; chassis.linear[1] += f[1] * j / m; chassis.linear[2] += f[2] * j / m;
+            const tx = (lr[1] * lf[2] - lr[2] * lf[1]) * j, ty = (lr[2] * lf[0] - lr[0] * lf[2]) * j, tz = (lr[0] * lf[1] - lr[1] * lf[0]) * j;
+            rotate(q, I[0] > 0 ? tx / I[0] : 0, I[1] > 0 ? ty / I[1] : 0, I[2] > 0 ? tz / I[2] : 0, this._dw);
+            chassis.angular[0] += this._dw[0]; chassis.angular[1] += this._dw[1]; chassis.angular[2] += this._dw[2];
         }
     }
 

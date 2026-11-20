@@ -87,6 +87,11 @@ export class Vehicle {
     public get rpm(): number { return this._state[VH_RPM]; }
     /** The gear engaged: 1, 2, … forward, -1 reverse, 0 neutral. */
     public get gear(): number { return this._state[VH_GEAR]; }
+    /**
+     * The brake as the world's vehicle was last handed it, 0 .. 1: {@link brake}, raised by a throttle held against
+     * the way it rolls ({@link autoReverse}). 0 before it is built.
+     */
+    public get brakeApplied(): number { return this._built ? this._input.brake : 0; }
     public get wheelCount(): number { return this._wheels.length; }
 
     /** Wheel `i` after the last step. The object is kept and rewritten: copy what you keep. */

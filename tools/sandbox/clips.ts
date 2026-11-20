@@ -15,6 +15,9 @@
 //   start       held in place by the travel the BODY makes as it accelerates into a sprint, and played at the rate
 //               that matches the clip's push-off to the Character's acceleration;
 //   run turn    a turn (yaw onto the Pivot, scaled to 180) whose travel is held in place;
+//   car         getting into the car (its walk in and its turn onto the Pivot, as root motion: the capsule is carried
+//               from the door into the seat), driving (a seated loop, in place) and getting out (root motion again,
+//               seat to door), each set so the next starts in the pose the last one ends in (`carClips`);
 //   stairs      a stair climb or descent, in place on the ground already, its RISE taken out of the hips (the
 //               capsule climbs the ramp over the flight) and the hips set so the planted feet stand at sole height
 //               on average; its foot-lock windows found against each stance's own height. Checked first: a clip
@@ -34,16 +37,17 @@ import { mat4, quat, vec3 } from 'gl-matrix'
 import type { Animation, Skin } from '../../src/animation/animatedModel'
 import { mirrorClip, timeScaleClip, trimClip } from '../../src/animation/clipEdit'
 import { detectFootLockWindows, shrinkFootLockSpans, type FootLockWindows } from '../../src/animation/footLockWindows'
-import { boneOf, clipSeconds, hipsYaw, measure, poser, travelAcceleration, type Measured } from './measure'
+import { boneOf, clipSeconds, hipsYaw, measure, poser, thighHeading, travelAcceleration, type Measured } from './measure'
+import { rotateByYaw, yawPoseInvert, yawPoseMul, type YawPose } from '../../src/core/math'
 import { repairDescent, type DescentRepair } from './descent'
 import { alignKnees, kneeSpacing } from './legs'
 
-export type ClipKind = 'loop' | 'locomotion' | 'turn' | 'air' | 'oneShot' | 'stop' | 'start' | 'runTurn' | 'stairs'
+export type ClipKind = 'loop' | 'locomotion' | 'turn' | 'air' | 'oneShot' | 'stop' | 'start' | 'runTurn' | 'stairs' | 'car'
 
 export interface ClipRole {
     /** The clip's name in the project (what states and blend-space samples name). */
     name: string
-    /** File stem in build/LocomotionPack. */
+    /** File stem in build/LocomotionPack (or build/car, for the car's clips). */
     file: string
     kind: ClipKind
     /** A turn: the angle it must turn by (positive = left), within 15 degrees. */
@@ -86,6 +90,10 @@ export const ROLES: ClipRole[] = [
     // The pack's descents keep their feet on the floor while the hips sink: their legs are rebuilt (descent.ts).
     { name: 'StairsDownWalk', file: 'Descending Stairs', kind: 'stairs', climb: -1, optional: true, repair: true },
     { name: 'StairsDownRun', file: 'Running Descending Stairs', kind: 'stairs', climb: -1, optional: true, repair: true },
+    // The car (build/car): getting in, driving, getting out. Conditioned together (carClips).
+    { name: 'CarEnter', file: 'Entering Car', kind: 'car' },
+    { name: 'CarDrive', file: 'Driving', kind: 'car' },
+    { name: 'CarExit', file: 'Exiting Car', kind: 'car' },
 ]
 
 /** What a stair clip was measured to be (`stairCheck`), on the clip as it plays. */
@@ -130,6 +138,19 @@ export interface MadeClip {
     stairs?: StairStats
     /** Stairs: its legs were rebuilt (descent.ts). */
     repaired?: boolean
+    /** The car's clips: see `CarMotion`. */
+    car?: CarMotion
+}
+
+/** Where a car clip leaves the Character, as upright poses (`[x, y, z, yaw]`, the clip's frame: it starts facing +Z). */
+export interface CarMotion {
+    /**
+     * The hips, seated, in the Character's frame (the Pivot at rest): where the seat must put them. Getting in ends
+     * in it; driving and getting out start in it.
+     */
+    seated: YawPose
+    /** The root motion the clip carries the Character by, from its start to its end (none while driving). */
+    motion: YawPose
 }
 
 /** What the build decides that the clips cannot measure. */
@@ -138,6 +159,11 @@ export interface ClipOptions {
     sprint: number
     /** The ankle's height over the sole at rest, m: where a planted foot's ankle stands over its ground. */
     footHeight: number
+    /**
+     * Where the car's seat puts the hips, m above its floor (car.ts CAR_FIT): the car clips sit them lower than they
+     * do by as much as they are higher (see carClips). Absent: as the clips sit them.
+     */
+    carSeatHips?: number
 }
 
 /** The lean at full weight, degrees: the whole body tilted about the ground under it (see `leanClip`). */
@@ -593,6 +619,7 @@ export function makeClips(skin: Skin, raw: Map<string, Animation>, warn: (s: str
     }
 
     for (const role of ROLES) {
+        if (role.kind === 'car') continue   // after the loop: the three are conditioned together
         const source = raw.get(role.file)
         if (!source) {
             if (role.optional) { warn(`no ${role.file}.fbx in build/LocomotionPack: ${role.name} falls back`); continue }
@@ -708,6 +735,9 @@ export function makeClips(skin: Skin, raw: Map<string, Animation>, warn: (s: str
         add(clip, startRole, { m, accel, rate })
     }
 
+    // The car: in, driving, out.
+    for (const made of carClips(skin, raw, note, options.carSeatHips)) add(made.clip, made.role, made)
+
     // Leans for the additive layers, one each way.
     add(leanClip(skin, 'LeanLeft', -LEAN_DEGREES), null, { m: emptyMeasure() })
     add(leanClip(skin, 'LeanRight', LEAN_DEGREES), null, { m: emptyMeasure() })
@@ -764,3 +794,176 @@ export const BACK_DIAGONAL_LOCK = 0.5
 const emptyMeasure = (): Measured => ({
     seconds: 2, travel: [0, 0], speed: 0, direction: 0, strikeL: null, strikeR: null, air: [], times: [], lowest: [], hipsY: [], hipsXZ: [],
 })
+
+// =====================================================================================================
+// The car
+// =====================================================================================================
+
+/** The clip with its Pivot channels taken off: posed with the Pivot at rest, as the root-motion pin shows it. */
+function withoutPivot(skin: Skin, clip: Animation): Animation {
+    const pivot = boneOf(skin, 'Pivot')
+    const out = plain(clip)
+    out.channels = out.channels.filter(c => c.targetNodeIndex !== pivot)
+    return out
+}
+
+/** Where the hips are at `t`, and which way the body faces (the line through the thighs), the Pivot at rest. */
+function restPose(skin: Skin, clip: Animation, t: number): YawPose {
+    const at = withoutPivot(skin, clip)
+    const p = poser(skin, at)(t).at(boneOf(skin, 'Hips'))
+    return [p[0], p[1], p[2], thighHeading(skin, at, [t])[0]]
+}
+
+/** The Pivot must be where the skin's root is, unturned: the clips below are written in its frame. */
+function assertPivotAtRest(skin: Skin): void {
+    const pivot = boneOf(skin, 'Pivot')
+    const parents = skin.nodeParents as Map<number, number>
+    const local = skin.nodeTransforms as Map<number, mat4>
+    let m = mat4.create()
+    for (let i: number | undefined = pivot; i !== undefined; i = parents.get(i) === i ? undefined : parents.get(i))
+        m = mat4.multiply(mat4.create(), local.get(i) ?? mat4.create(), m)
+    for (let k = 0; k < 16; k++) if (Math.abs(m[k] - (k % 5 === 0 ? 1 : 0)) > 1e-5)
+        throw new Error('the Pivot joint is not at the origin, unturned: the car clips assume it is')
+}
+
+/** Every hips key moved and turned by the upright pose `g` (in the Pivot's frame): the whole clip placed elsewhere. */
+function placed(skin: Skin, clip: Animation, g: YawPose): Animation {
+    const out = plain(clip)
+    const hips = boneOf(skin, 'Hips')
+    const turn = quat.setAxisAngle(quat.create(), [0, 1, 0], g[3] * Math.PI / 180)
+    for (const ch of out.channels) {
+        if (ch.targetNodeIndex !== hips) continue
+        const o = out.samplers[ch.samplerIndex].output as number[]
+        if (ch.targetPath === 'translation') for (let k = 0; k < o.length; k += 3) {
+            const [x, y, z] = rotateByYaw(o[k], o[k + 1], o[k + 2], g[3])
+            o[k] = x + g[0]; o[k + 1] = y + g[1]; o[k + 2] = z + g[2]
+        } else if (ch.targetPath === 'rotation') for (let k = 0; k < o.length; k += 4) {
+            const q = quat.normalize(quat.create(), quat.multiply(quat.create(), turn, o.slice(k, k + 4) as any))
+            for (let c = 0; c < 4; c++) o[k + c] = q[c]
+        }
+    }
+    return out
+}
+
+/**
+ * A clip that walks AND turns (into the car, out of it), as root motion: the hips' ground travel AND their yaw moved
+ * onto the Pivot (travelToPivot does the one, splitTurn the other), so the capsule is carried along the path and
+ * turned with it, and the hips keep their height, bend and tilt over a Character that faces where the body faces.
+ * Returns the root motion it carries, start to end, in its starting frame.
+ */
+function travelAndTurnToPivot(skin: Skin, clip: Animation): { clip: Animation; motion: YawPose } {
+    const hips = boneOf(skin, 'Hips'), pivot = boneOf(skin, 'Pivot')
+    const out = plain(clip)
+    const tCh = out.channels.find(c => c.targetNodeIndex === hips && c.targetPath === 'translation')
+    const rCh = out.channels.find(c => c.targetNodeIndex === hips && c.targetPath === 'rotation')
+    if (!tCh || !rCh) throw new Error(`${clip.name} does not move and turn the hips`)
+    const { times, yaw } = hipsYaw(skin, clip)
+    const yawAt = (t: number) => {
+        let i = 0
+        while (i < times.length - 2 && times[i + 1] < t) i++
+        const span = times[i + 1] - times[i]
+        const f = span > 0 ? Math.min(1, Math.max(0, (t - times[i]) / span)) : 0
+        return yaw[i] + (yaw[i + 1] - yaw[i]) * f
+    }
+    // The travel onto the Pivot (in the clip's frame); the hips held over its start, turned back by the yaw.
+    const ts = out.samplers[tCh.samplerIndex], to = ts.output as number[]
+    const [x0, , z0] = [to[0], to[1], to[2]]
+    const pivotT: number[] = []
+    for (let k = 0; k < ts.input.length; k++) {
+        pivotT.push(to[k * 3] - x0, 0, to[k * 3 + 2] - z0)
+        const [x, y, z] = rotateByYaw(x0, to[k * 3 + 1], z0, -yawAt(ts.input[k]))
+        to[k * 3] = x; to[k * 3 + 1] = y; to[k * 3 + 2] = z
+    }
+    const rs = out.samplers[rCh.samplerIndex], ro = rs.output as number[]
+    for (let k = 0; k < rs.input.length; k++) {
+        const inv = quat.setAxisAngle(quat.create(), [0, 1, 0], -yawAt(rs.input[k]) * Math.PI / 180)
+        const q = quat.normalize(quat.create(), quat.multiply(quat.create(), inv, ro.slice(k * 4, k * 4 + 4) as any))
+        for (let c = 0; c < 4; c++) ro[k * 4 + c] = q[c]
+    }
+    const pivotR: number[] = []
+    for (const t of times) pivotR.push(...quat.setAxisAngle(quat.create(), [0, 1, 0], yawAt(t) * Math.PI / 180))
+    out.samplers.push({ input: Array.from(ts.input), output: pivotT, interpolation: 'LINEAR' } as any)
+    out.channels.push({ samplerIndex: out.samplers.length - 1, targetNodeIndex: pivot, targetPath: 'translation' })
+    out.samplers.push({ input: times.slice(), output: pivotR, interpolation: 'LINEAR' } as any)
+    out.channels.push({ samplerIndex: out.samplers.length - 1, targetNodeIndex: pivot, targetPath: 'rotation' })
+    out.rootMotion = true
+    const n = ts.input.length - 1
+    return { clip: out, motion: [pivotT[n * 3], 0, pivotT[n * 3 + 2], yaw[yaw.length - 1]] }
+}
+
+/**
+ * The hips lowered by up to `drop`, as far as they have sat down: none standing, all of it seated. How far sat down
+ * is how far the hips have come down from standing (the clip's first key getting in, its last getting out) toward
+ * where they sit (its other end), and once down they stay down (getting in ducks lower than it sits, under the roof).
+ */
+function sitLower(skin: Skin, clip: Animation, drop: number, standing: 'start' | 'end'): Animation {
+    if (!(drop > 0)) return clip
+    const out = plain(clip)
+    const hips = boneOf(skin, 'Hips')
+    const ch = out.channels.find(c => c.targetNodeIndex === hips && c.targetPath === 'translation')
+    if (!ch) throw new Error(`${clip.name} does not move the hips`)
+    const o = out.samplers[ch.samplerIndex].output as number[]
+    const n = o.length / 3
+    const at = (k: number) => o[k * 3 + 1]
+    const up = standing === 'start' ? at(0) : at(n - 1), down = standing === 'start' ? at(n - 1) : at(0)
+    if (!(up - down > 0.05)) throw new Error(`${clip.name} does not sit down: its hips go from ${up.toFixed(3)} to ${down.toFixed(3)} m`)
+    let sat = 0
+    for (let i = 0; i < n; i++) {
+        const k = standing === 'start' ? i : n - 1 - i
+        sat = Math.max(sat, Math.min(1, Math.max(0, (up - at(k)) / (up - down))))
+        o[k * 3 + 1] -= drop * sat
+    }
+    return out
+}
+
+/**
+ * The car's three clips, made to chain. Getting in walks into the seat and turns to face ahead, as root motion; where
+ * its hips end, in the Character's frame, is the SEATED pose (the car's Seat is placed so the hips land on its
+ * cushion). Driving and getting out are each placed so their first frame is that pose: the Character sits still on
+ * the Seat from the end of getting in to the start of getting out, and the hand-overs blend poses, not places (the
+ * Mixamo driving loop sits 22 cm lower than the end of getting in, its hands 10 cm apart). Driving is held in place.
+ *
+ * `seatHips`: where the car's seat has the hips, m above the floor. Getting in sits them that low if the clip sits
+ * them higher, lowering them as they sit down; getting out raises them back as they stand up; driving is that low.
+ */
+export function carClips(skin: Skin, raw: Map<string, Animation>, note: (s: string) => void = () => {}, seatHips?: number): MadeClip[] {
+    const role = (name: string) => ROLES.find(r => r.name === name)!
+    const source = (name: string) => {
+        const r = role(name), clip = raw.get(r.file)
+        if (!clip) throw new Error(`no ${r.file}.fbx in build/car (the ${name} clip): run prepare.mjs`)
+        return named(clip, name)
+    }
+    assertPivotAtRest(skin)
+    const enterSource = source('CarEnter'), driveSource = source('CarDrive'), exitSource = source('CarExit')
+
+    const enterAsIs = travelAndTurnToPivot(skin, enterSource)
+    const seatedAsIs = restPose(skin, enterAsIs.clip, clipSeconds(enterAsIs.clip))
+    // Down onto the seat: by as much as the clip sits higher than it.
+    const drop = seatHips === undefined ? 0 : Math.max(0, seatedAsIs[1] - seatHips)
+    const enter = { clip: sitLower(skin, enterAsIs.clip, drop, 'start'), motion: enterAsIs.motion }
+    const seated = restPose(skin, enter.clip, clipSeconds(enter.clip))
+
+    const exitStart = restPose(skin, exitSource, 0)
+    const exitAsIs = travelAndTurnToPivot(skin, placed(skin, exitSource, yawPoseMul(seatedAsIs, yawPoseInvert(exitStart))))
+    const exit = { clip: sitLower(skin, exitAsIs.clip, drop, 'end'), motion: exitAsIs.motion }
+    const driveStart = restPose(skin, driveSource, 0)
+    const drive = holdInPlace(skin, placed(skin, driveSource, yawPoseMul(seated, yawPoseInvert(driveStart))))
+
+    // Each hand-over starts where the last one ended: checked, not assumed.
+    const gap = (a: YawPose, b: YawPose) => ({ m: Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]), deg: Math.abs(((a[3] - b[3] + 540) % 360) - 180) })
+    for (const [name, clip] of [['CarDrive', drive], ['CarExit', exit.clip]] as const) {
+        const g = gap(restPose(skin, clip, 0), seated)
+        if (g.m > 0.01 || g.deg > 1) throw new Error(`${name} does not start seated: ${(g.m * 100).toFixed(1)} cm, ${g.deg.toFixed(1)} deg off`)
+    }
+    const fmt = (p: YawPose) => `(${p.slice(0, 3).map(v => v.toFixed(3)).join(', ')}) at ${p[3].toFixed(1)} deg`
+    note(`car: seated hips ${fmt(seated)}; getting in carries the Character by ${fmt(enter.motion)} over ${clipSeconds(enter.clip).toFixed(2)} s, `
+        + `getting out by ${fmt(exit.motion)} over ${clipSeconds(exit.clip).toFixed(2)} s; driving placed ${((seated[1] - driveStart[1]) * 100).toFixed(1)} cm higher; `
+        + `sat ${(drop * 100).toFixed(1)} cm lower than the clips sit`)
+
+    const m = (clip: Animation) => measure(skin, clip)
+    return [
+        { clip: enter.clip, role: role('CarEnter'), m: m(enterSource), car: { seated, motion: enter.motion } },
+        { clip: drive, role: role('CarDrive'), m: m(driveSource), car: { seated, motion: [0, 0, 0, 0] } },
+        { clip: exit.clip, role: role('CarExit'), m: m(exitSource), car: { seated, motion: exit.motion } },
+    ]
+}

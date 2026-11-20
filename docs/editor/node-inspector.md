@@ -236,7 +236,7 @@ What a capture sees is the static geometry: models, the landscape, and the trees
 |---|---|
 | **Enabled** | Off leaves the volume in the scene without it lighting anything. |
 | **Size** | Full extents of the box in metres, before the node transform, which it follows, rotation included. The face handles in the viewport size it too. |
-| **Probes** | How many probes along each axis (at least 2). The spacing, shown below the fields, is what decides how fine the light is: about 1 m in a room, 4 to 8 m over a street. |
+| **Probes** | How many probes along each axis. The spacing, shown below the fields, is what decides how fine the light is: about 1 m in a room, 4 to 8 m over a street. One along an axis is a single layer in the middle of the box, whatever the inset, whose light holds through the box's whole depth on that axis: one up is a floor's layer of probes, lighting everything from the ground to the box's top. |
 | **Probe inset** | How far the outer probes stand in from the box's faces, as a share of the spacing: 0 puts them on the faces, 0.5 (a new volume's) at the centres of the cells the box divides into. Between the outer probes and the faces the light holds theirs. |
 | **Rays** | Rays per probe: 64, or 256 for small rooms, rooms lit by lamps and fine detail. |
 | **Ray reach** | How far, in metres, a probe sees; beyond that a ray sees the sky. |

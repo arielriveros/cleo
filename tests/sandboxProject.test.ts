@@ -4,7 +4,7 @@ import { join } from 'path';
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
 // The whole engine: it registers itself as the scripts' 'cleo' module, so the example's script runs headless.
-import { Scene, CleoEngine, PhysicsSystem, Animator, Logger, NODE_BUILTINS } from '../src/cleo';
+import { Scene, CleoEngine, PhysicsSystem, Animator, Logger, NODE_BUILTINS, MathUtils } from '../src/cleo';
 import type { CharacterNode, CameraRigNode, ControllerNode, Node } from '../src/cleo';
 import { loadSkin } from '../applications/editor/src/utils/animationAssets';
 import { detectFootLockWindows } from '../src/animation/footLockWindows';
@@ -94,8 +94,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     const layer = (name: string) => layerByName(read('libraries', 'projectSettings.json').collisionLayers, name);
 
     it('names its layers: the feet on the steps and the bumps, the capsule on a ramp over each flight, the camera through the pillars', () => {
-        const [character, detail, ramp] = ['Character', 'Foot Detail', 'Stair Ramp'].map(layer);
-        expect([character, detail, ramp]).toEqual([16, 32, 64]);
+        const [character, detail, ramp, vehicle] = ['Character', 'Foot Detail', 'Stair Ramp', 'Vehicle'].map(layer);
+        expect([character, detail, ramp, vehicle]).toEqual([16, 32, 64, 128]);
         const collider = named('Player Collider').collider;
         expect(collider.layer).toBe(character);
         // The capsule never meets the steps or the bumps: the ramp stands in for the steps, the ground for the bumps.
@@ -548,7 +548,11 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         }
         const script = library('scripts').find(s => s.name === 'SandboxPlayer');
         const scriptFields = new Set(script.variables.map((v: any) => v.name));
+        // The car's two triggers (fired by name: SandboxPlayer's enterTrigger and exitTrigger) are the only parameters
+        // nothing links: everything else the machine reads by itself.
+        expect(sm.parameters.filter((p: any) => p.type === 'trigger').map((p: any) => p.name)).toEqual(['EnterCar', 'ExitCar']);
         for (const p of sm.parameters) {
+            if (p.type === 'trigger') continue;
             expect(p.variable.nodeRef).toBe('parent');
             if (p.variable.source === 'builtin') expect(NODE_BUILTINS[p.variable.varName], p.variable.varName).toBeDefined();
             else expect(['moveDir', 'isJumping', 'turnRequest'].includes(p.variable.varName) || scriptFields.has(p.variable.varName), p.variable.varName).toBe(true);
@@ -556,20 +560,20 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const params = new Set(sm.parameters.map((p: any) => p.name));
         const conds = (c: any): any[] => !c ? [] : c.children ? c.children.flatMap(conds) : [c];
         for (const t of sm.transitions) for (const c of conds(t.condition)) expect(params.has(c.param), c.param).toBe(true);
-        // Only the turns, the stop (which plants sideways) and the hard landing (which crouches where it came down)
-        // drive the character with their root motion.
+        // Only the turns, the stop (which plants sideways), the hard landing (which crouches where it came down) and
+        // getting in and out of the car (from the door to the seat and back) drive the character with their root motion.
         const rootMotion = library('animations').filter(a => a.clips[0].rootMotion).map(a => a.name).sort();
-        expect(rootMotion).toEqual(['LandHard', 'RunTurnL', 'RunTurnR', 'Stop', 'StopMirror', 'Turn180L', 'Turn180R', 'Turn90L', 'Turn90R']);
+        expect(rootMotion).toEqual(['CarEnter', 'CarExit', 'LandHard', 'RunTurnL', 'RunTurnR', 'Stop', 'StopMirror', 'Turn180L', 'Turn180R', 'Turn90L', 'Turn90R']);
     });
 
     it('ships the current scripts and the actions they read', () => {
-        for (const [name, node] of [['SandboxPlayer', 'Player'], ['SandboxCamera', 'Camera Rig']]) {
+        for (const [name, node] of [['SandboxPlayer', 'Player'], ['SandboxCamera', 'Camera Rig'], ['SandboxCar', 'Car'], ['SandboxCarCamera', 'Car Camera Rig'], ['SandboxGameManager', 'Game Manager']]) {
             const script = library('scripts').find(s => s.name === name);
             expect(script.source).toBe(readFileSync(join(__dirname, '..', 'examples', 'scripts', `${name}.ts`), 'utf8'));
             expect(named(node).script, node).toBe(script.source);
         }
         const actions = read('libraries', 'inputMap.json').maps.find((m: any) => m.name === 'Gameplay').actions.map((a: any) => a.name);
-        for (const a of ['Move', 'Look', 'Jump', 'Sprint', 'Walk']) expect(actions).toContain(a);
+        for (const a of ['Move', 'Look', 'Jump', 'Sprint', 'Walk', 'Interact', 'Day', 'Sunset', 'Night']) expect(actions).toContain(a);
         // The camera's framing follows the sprint: no action switches it.
         expect(actions).not.toContain('Camera');
     });
@@ -613,6 +617,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         // A ModelNode's frame: its script, then the machine, then the pose.
         const base = model.update.bind(model);
         (model as any).update = (dt: number, t: number) => { base(dt, t); animator.checkTriggers(); animator.update(dt); };
+        // Where a ModelNode keeps it, for the scripts that fire its triggers (SandboxPlayer getting into the car).
+        (model as any).animator = animator;
         scene.start();
         const player = scene.findNode('Player') as CharacterNode & Record<string, any>;
         const collider = scene.findNode('Player Collider') as Node;
@@ -1294,7 +1300,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
 
     it('is a Player template, placed once, with the attributes each character sets public', () => {
         const templates = library('templates');
-        expect(templates.slice(0, 3).map((t: any) => t.name)).toEqual(['Player', 'Environment', 'Course']);
+        expect(templates.slice(0, 4).map((t: any) => t.name)).toEqual(['Player', 'Environment', 'Course', 'Car']);
         const [template] = templates;
         expect(read('manifest.json').sceneMetas[0].refs.templateIds).toEqual(templates.map((t: any) => t.id));
         const instance = named('Player Collider');
@@ -1308,7 +1314,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(ids.has(controller.possessedId) && ids.has(controller.aimSourceId)).toBe(true);
         const publics = (name: string) => library('scripts').find(s => s.name === name).variables
             .filter((v: any) => v.attribute && !v.hidden && v.access === 'public').map((v: any) => v.name).sort();
-        expect(publics('SandboxPlayer')).toEqual(['backDiagonalScale', 'backScale', 'runFootSpeed', 'runFootWeight', 'runTurnSpeed', 'sprintTakeoff',
+        expect(publics('SandboxPlayer')).toEqual(['backDiagonalScale', 'backScale', 'enterTrigger', 'exitTrigger', 'runFootSpeed', 'runFootWeight', 'runTurnSpeed', 'sprintTakeoff',
             'stairDownRunSpeed', 'stairDownWalkSpeed', 'stairUpRunSpeed', 'stairUpWalkSpeed', 'stairsLayer', 'turnDelay', 'walkBackDiagonalScale', 'walkFootSpeed', 'walkScale']);
         expect(publics('SandboxCamera')).toEqual(['pivotHeight', 'shoulderArm', 'shoulderOffset', 'thirdPersonArm']);
         expect(inside.find((n: any) => n.type === 'character').script).toBe(named('Player').script);
@@ -1320,16 +1326,74 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const env = named('Environment'), course = named('Static Collision');
         expect(env.variables.__templateId.value).toBe(templates.get('Environment').id);
         expect(course.variables.__templateId.value).toBe(templates.get('Course').id);
-        expect(env.children.map((c: any) => [c.type, c.name])).toEqual([['light', 'Sun'], ['skyAtmosphere', 'Sky Atmosphere'], ['skyLight', 'Sky Light']]);
+        expect(env.children.map((c: any) => [c.type, c.name])).toEqual([['light', 'Sun'], ['skyAtmosphere', 'Sky Atmosphere'], ['skyLight', 'Sky Light'], ['volumetricClouds', 'Volumetric Clouds']]);
         expect(course.type).toBe('collider');
         expect(allNodes(course).filter((n: any) => n.type === 'collider').reduce((k: number, n: any) => k + n.collider.shapes.length, 0)).toBeGreaterThan(40);
-        // The scene's top level is the three placements.
-        expect(sceneFile().scene.children.map((c: any) => c.name)).toEqual(['Environment', 'Player Collider', 'Props', 'Static Collision']);
+        // The scene's top level is the placements: the sky, the ocean, the GI over the floor and the light probe over it
+        // all, the Game Manager and its HUD, the player, the car, the props and the course.
+        expect(sceneFile().scene.children.map((c: any) => c.name)).toEqual(['Environment', 'Ocean', 'GI Volume', 'Light Probe', 'Game Manager', 'HUD', 'Player Collider', 'Car', 'Props', 'Static Collision']);
         // And the running scene still finds its sun, sky and sky light inside the Environment.
         const scene = new Scene();
         scene.parse({ ...sceneFile(), scene: withoutModels(sceneFile().scene) }, true);
         expect(scene.findNode('Sky Atmosphere')).toBeTruthy();
         expect([...(scene as any).lights].some((l: any) => l.name === 'Sun')).toBe(true);
+    });
+
+    it('is lit at dusk under sunset clouds, with a GI Volume of one layer over the whole floor and a light probe over it all', () => {
+        const env = named('Environment');
+        // The clouds: the Sunset preset, more of them and smaller, fading into the sky from 9 km.
+        const clouds = env.children.find((c: any) => c.type === 'volumetricClouds').clouds;
+        expect([clouds.coverage, clouds.baseScale, clouds.detailScale, clouds.hazeDistance]).toEqual([0.6, 0.0013, 0.007, 9000]);
+        expect(clouds.sunsetColor).toEqual([1.0, 0.32, 0.1]);
+        // The GI Volume: the floor's 120 m square, one probe up (2 m over the ground, mid-box), 20 by 20 across.
+        const gi = named('GI Volume');
+        expect([gi.type, gi.position, gi.giVolume.size, gi.giVolume.probeCounts, gi.giVolume.probeInset, gi.giVolume.bakeId])
+            .toEqual(['giVolume', [0, 2, 0], [120, 8, 120], [20, 1, 20], 0.5, null]);
+        const scene = new Scene();
+        scene.parse({ ...sceneFile(), scene: withoutModels(sceneFile().scene) }, true);
+        const volume = scene.findNode('GI Volume') as any;
+        volume.updateTransforms(null);
+        const at = (i: number, k: number) => [...volume.probeWorldPosition(vec3.create(), i, 0, k)].map((v: number) => +v.toFixed(3));
+        expect([at(0, 0), at(19, 19)]).toEqual([[-57, 2, -57], [57, 2, 57]]);
+        // The floor (at the barrier's foot too) inside the box, past its feather.
+        expect(volume.weightAt(vec3.fromValues(0, 0, 0))).toBe(1);
+        expect(volume.weightAt(vec3.fromValues(58.9, 0.01, -58.9))).toBe(1);
+        // The light probe: the whole scene, captured from the course's middle.
+        const probe = named('Light Probe');
+        expect([probe.type, probe.size, probe.mode, probe.affectsLighting, probe.affectsReflections, probe.relightDegrees]).toEqual(['lightProbe', [120, 40, 120], 'baked', true, true, 1]);
+        // The eye: set once for the day, the dusk and the night (a floor low enough for the night, a curve keeping the
+        // dark dark, never ramped by a script), the curve's darkening easing off toward the day.
+        const render = sceneFile().config.render;
+        expect(render.exposureMinEV).toBe(-3);
+        const curve = render.exposureCompensationCurve as number[][];
+        for (let i = 1; i < curve.length; i++) expect(curve[i][0] > curve[i - 1][0] && curve[i][1] >= curve[i - 1][1]).toBe(true);
+        expect(curve[curve.length - 1][1]).toBe(0);
+    });
+
+    it('stands on an open ocean, 2 m under the ground', () => {
+        const ocean = named('Ocean');
+        expect([ocean.type, ocean.position, ocean.waterVolume.waterType, ocean.waterVolume.followWind]).toEqual(['waterVolume', [0, -2, 0], 'ocean', false]);
+        const material = library('materials').find((m: any) => m.id === ocean.waterVolume.waterMaterialId);
+        expect(material.name).toBe('Ocean');
+    });
+
+    it('switches its three light setups from the Game Manager on 1, 2 and 3, and says which on the HUD', () => {
+        const p = play();
+        p.run(0.2);
+        const sun = p.scene.findNode('Sun') as Node;
+        const line = p.scene.findNode('Light Setup') as any;
+        const manager = p.scene.findNode('Game Manager') as any;
+        const sunAt = () => [...sun.rotation].map(v => +v.toFixed(3));
+        // As authored: the dusk.
+        expect([manager.setup, sunAt(), line.text]).toEqual([2, [-9, 35, 0], 'Light: Sunset']);
+        for (const [action, setup, elevation, name] of [['Day', 1, 52, 'Day'], ['Night', 3, -40, 'Night'], ['Sunset', 2, -9, 'Sunset']] as const) {
+            input.tap(action);
+            p.run(0.1);
+            expect([manager.setup, sunAt(), line.text], action).toEqual([setup, [elevation, 35, 0], `Light: ${name}`]);
+        }
+        // The HUD lists the keys.
+        expect((p.scene.findNode('Light Keys') as any).text).toContain('1 Day');
+        expect((p.scene.findNode('HUD') as any).nodeType).toBe('uiRoot');
     });
 
     it('rolls out of a far fall while it is still running, and runs on at speed', () => {
@@ -1445,7 +1509,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             expect(pr.collider.canSleep, pr.name).toBe(true);
             expect(pr.variables?.__templateId, `${pr.name} is a template instance`).toBeDefined();
         }
-        const kinds = library('templates').slice(3).map((t: any) => t.name).sort();
+        const kinds = library('templates').slice(4).map((t: any) => t.name).sort();
         expect(kinds).toEqual(['Ball', 'Barrel', 'Big Ball', 'Crate', 'Large Crate', 'Plank', 'Small Crate']);
         // Placed at rest: two seconds with nobody near them moves nothing more than a barrel lying on its side rolling
         // onto a flat of its many-sided collider (a centimetre or two). The crate pyramid among them sleeps as one: on
@@ -1472,10 +1536,10 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(vec3.distance(crate.worldPosition as vec3, at), 'shoved').toBeGreaterThan(0.3);
     });
 
-    it('groups its turns, stops, running turns, air and landings, each state in one group', () => {
+    it('groups its turns, stops, running turns, air, landings and the car, each state in one group', () => {
         const sm = machine();
         const states = new Set(sm.states.map((s: any) => s.name));
-        expect(sm.groups.map((g: any) => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing']);
+        expect(sm.groups.map((g: any) => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car']);
         const seen = new Set<string>();
         for (const g of sm.groups) {
             expect(states.has(g.name), `${g.name} is not also a state`).toBe(false);
@@ -1563,5 +1627,240 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             input.setMove(0, 0);
             input.release('Sprint');
         }
+    });
+
+    // ----- the car ----------------------------------------------------------------------------------
+
+    it('is a Car template: its body and windows, its lamps, four wheels each turning its mesh, a seat, a door, its own camera and Controller', () => {
+        const template = library('templates').find((t: any) => t.name === 'Car');
+        const instance = named('Car');
+        expect(instance.variables.__templateId.value).toBe(template.id);
+        const inside = allNodes(template.nodeJson);
+        expect(inside.map((n: any) => `${n.type} ${n.name}`)).toEqual([
+            'collider Car', 'node Car Body', 'model Body', 'model Glass',
+            'node Lights', 'light Headlight L', 'light Headlight R', 'light Tail Light L', 'light Tail Light R',
+            'light Reverse Light L', 'light Reverse Light R',
+            'vehicle Vehicle', 'node Wheels',
+            'wheel Wheel FL', 'model Wheel Mesh', 'wheel Wheel FR', 'model Wheel Mesh',
+            'wheel Wheel RL', 'model Wheel Mesh', 'wheel Wheel RR', 'model Wheel Mesh',
+            'node Seat', 'node Enter Point', 'node Exit Point', 'trigger Door Zone', 'node Camera Target',
+            'cameraRig Car Camera Rig', 'camera Car Camera', 'controller Car Controller',
+        ]);
+        // The body and its windows are the Car Body model (the windows blended: a node of their own), placed under its
+        // asset's name, as the editor names a placed model. Each wheel's mesh is right under its Wheel node (which
+        // turns it), turned round on the right so its hub faces out.
+        const models = new Map(library('models').map((m: any) => [m.name, m]));
+        expect([...models.keys()].filter(n => n.startsWith('Car'))).toEqual(['Car Body']);
+        expect(inside.find((n: any) => n.name === 'Car Body').variables.__modelId.value).toBe(models.get('Car Body').id);
+        for (const w of inside.filter((n: any) => n.type === 'wheel')) {
+            expect(w.children.map((c: any) => `${c.type} ${c.name}`)).toEqual(['model Wheel Mesh']);
+            expect(w.children[0].model.geometry.positions.length).toBeGreaterThan(300);
+            expect(w.children[0].rotation[1]).toBe(w.name.endsWith('R') ? 180 : 0);
+        }
+        // The lamps: the headlights spots ahead and a little down, casting shadows; the tail and reverse lights at the
+        // back, red and white. None baked into probes (they move with the car).
+        const lamps = inside.filter((n: any) => n.type === 'light');
+        for (const l of lamps) {
+            expect(l.bake).toBe(false);
+            expect(Math.sign(l.position[0])).toBe(l.name.endsWith('L') ? 1 : -1);
+            if (l.name.startsWith('Headlight')) {
+                expect([l.lightType, l.castShadows, l.position[2] > 2, l.rotation[0] > 0]).toEqual(['spotlight', true, true, true]);
+            } else {
+                expect([l.lightType, l.castShadows, l.position[2] < -2]).toEqual(['point', false, true]);
+                const [r, g, b] = l.light.color;
+                expect(l.name.startsWith('Tail') ? r > 0.9 && g < 0.1 && b < 0.1 : r > 0.9 && g > 0.9 && b > 0.8).toBe(true);
+            }
+        }
+        const glass = inside.find((n: any) => n.name === 'Glass');
+        expect(glass.model.material.config.transparent).toBe(true);
+        expect(inside.find((n: any) => n.type === 'model' && n.name === 'Body').model.material.config.transparent).toBe(false);
+        // The Car preset, on this car's wheels: the front ones steer, the rear ones drive and hold the hand brake.
+        const vehicle = inside.find((n: any) => n.type === 'vehicle');
+        expect([vehicle.drivetrain, vehicle.parked, vehicle.playerInput]).toEqual(['engine', true, false]);
+        const wheels = inside.filter((n: any) => n.type === 'wheel');
+        expect(wheels.map((w: any) => [w.steerAngle > 0, w.driven, w.handBrakeTorque > 0])).toEqual([
+            [true, false, false], [true, false, false], [false, true, true], [false, true, true],
+        ]);
+        // The model's own wheels, at the car's size (0.83 of the model's: as tight round the driver as it goes).
+        for (const w of wheels) expect(w.radius).toBeCloseTo(0.402 * 0.83, 2);
+        // A dynamic chassis on the Vehicle layer, at the preset's mass: one convex hull of the body and its windows
+        // (the Car Body model's meshes), not of the wheels.
+        const chassis = template.nodeJson.collider;
+        expect([chassis.mass, chassis.layer, chassis.shapes.map((s: any) => s.type)]).toEqual([1200, layer('Vehicle'), ['convex']]);
+        const hull = chassis.shapes[0];
+        expect([hull.sources, hull.quality, hull.v]).toEqual([['Car Body'], 'high', 5]);
+        // The wheels out of it: it clears the ground (the tyres stand on it) by the body's own clearance.
+        expect(Math.min(...hull.vertices.map((v: number[]) => v[1] + hull.offset[1]))).toBeGreaterThan(0.08);
+        // Its own Controller, possessing nothing until someone gets in, aiming its own camera rig; that camera off.
+        const controller = inside.find((n: any) => n.type === 'controller');
+        const rigNode = inside.find((n: any) => n.type === 'cameraRig');
+        expect([controller.possessedId, controller.aimSourceId, controller.controlSource]).toEqual([null, rigNode.id, 'player']);
+        expect(rigNode.followId).toBe(inside.find((n: any) => n.name === 'Camera Target').id);
+        expect(inside.find((n: any) => n.type === 'camera').active).toBe(false);
+        // The Door Zone looks for the characters.
+        expect(inside.find((n: any) => n.type === 'trigger').sensor.mask).toBe(layer('Character'));
+        expect(template.nodeJson.script).toBe(named('Car').script);
+    });
+
+    /** A node of the car's template instance, as parsed into the running scene. */
+    const carNodes = (p: ReturnType<typeof play>) => {
+        const find = (name: string) => p.scene.findNode(name) as Node & Record<string, any>;
+        return {
+            car: find('Car'), vehicle: find('Vehicle'), seat: find('Seat'), enter: find('Enter Point'), exit: find('Exit Point'),
+            controller: find('Car Controller') as unknown as ControllerNode, rig: find('Car Camera Rig') as unknown as CameraRigNode,
+            camera: find('Car Camera'), playerCamera: find('Camera'),
+        };
+    };
+    /** Where the car's Enter Point is in the world, from the bundle (the scene not yet playing). */
+    const enterPointWorld = () => {
+        const tree = sceneFile().scene;
+        const car = tree.children.find((c: any) => c.name === 'Car');
+        const seat = car.children.find((c: any) => c.name === 'Seat');
+        const enter = seat.children.find((c: any) => c.name === 'Enter Point');
+        const pose = (n: any): [number, number, number, number] => [n.position[0], n.position[1], n.position[2], n.rotation[1]];
+        return MathUtils.yawPoseMul(pose(car), MathUtils.yawPoseMul(pose(seat), pose(enter)));
+    };
+    /** The upright pose of `node` in its parent's frame. */
+    const localPose = (node: Node): [number, number, number, number] => {
+        const q = node.quaternion, p = node.position;
+        const fx = 2 * (q[0] * q[2] + q[3] * q[1]), fz = 1 - 2 * (q[0] * q[0] + q[1] * q[1]);
+        return [p[0], p[1], p[2], Math.atan2(fx, fz) * DEG];
+    };
+
+    it('parks on its wheels at its modelled height, and stays put', () => {
+        const p = play();
+        const { car } = carNodes(p);
+        const from = vec3.clone(car.worldPosition as vec3);
+        p.run(3);
+        const at = car.worldPosition;
+        // On its springs as modelled: the wheels authored lower by the sag their springs settle by (g / (2 pi f)^2, as
+        // Jolt springs them; Rapier's port of Bullet's springs sits about twice as low on the same frequency).
+        const sinks = TEST_PHYSICS === 'rapier' ? 0.1 : 0.04;
+        expect(Math.abs(at[1] - from[1]), `rests ${((at[1] - from[1]) * 100).toFixed(1)} cm off its height`).toBeLessThan(sinks);
+        expect(Math.hypot(at[0] - from[0], at[2] - from[2])).toBeLessThan(0.02);
+        const f = car.worldForward;
+        expect(Math.abs(f[1])).toBeLessThan(0.02);
+    });
+
+    it('gets in by the door, drives off with its own Controller and camera, and lets the driver out by its side', () => {
+        const start = enterPointWorld();
+        // Half a metre off where getting in starts, and turned 20 degrees: the step onto it is the script's.
+        const at = MathUtils.yawPoseMul(start, [0.3, 0, -0.4, 20]);
+        const p = play([at[0], 0.02, at[2]], {}, {}, at[3]);
+        const c = carNodes(p);
+        const body = p.collider;
+        const states = (from: number) => p.trace.slice(from);
+        p.run(1);
+        const ownController = p.controller();
+        expect(ownController.possessed).toBe(p.player);
+        expect(c.playerCamera.active && !c.camera.active).toBe(true);
+        // An empty car's lamps are off.
+        const lamp = (name: string) => ((p.scene.findNode(name) as any).light as { intensity: number }).intensity;
+        const lamps = () => ['Headlight L', 'Headlight R', 'Tail Light L', 'Tail Light R', 'Reverse Light L', 'Reverse Light R'].map(lamp);
+        const authored = Object.fromEntries(allNodes(library('templates').find((t: any) => t.name === 'Car').nodeJson)
+            .filter((n: any) => n.type === 'light').map((n: any) => [n.name, n.light.intensity]));
+        expect(lamps()).toEqual([0, 0, 0, 0, 0, 0]);
+        // And facing 45 degrees off the way its body (the Collider) faces: where a character faces is the
+        // Character's own turn, which getting in must take along.
+        p.player.setRotation([0, 45, 0]);
+        p.player.updateTransforms(body.worldTransform);
+
+        // In: Interact by the door.
+        let mark = p.trace.length;
+        input.tap('Interact');
+        p.run(0.1);
+        expect(body.parent?.name).toBe('Seat');
+        expect((p.physics as any).isSuspended(body.ownBody)).toBe(true);
+        expect(c.controller.possessed).toBe(c.vehicle);
+        expect(ownController.possessed).toBeNull();
+        expect(c.camera.active && !c.playerCamera.active).toBe(true);
+        p.run(6.5);
+        expect(p.player.seated).toBe(true);
+        expect(p.animator.currentStateName).toBe('CarDrive');
+        const seated = localPose(body);
+        expect(Math.hypot(seated[0], seated[1], seated[2]), `seated ${seated.map(v => v.toFixed(3))} off the seat`).toBeLessThan(0.03);
+        expect(Math.abs(wrap(seated[3]))).toBeLessThan(3);
+        // Facing ahead in the seat, however it stood when it got in.
+        expect(Math.abs(wrap(p.yawOf(p.player) - p.yawOf(c.seat))), 'faces the way the seat does').toBeLessThan(3);
+        // With a driver: the headlights on, the tail lights glowing (not braking), the reverse lights off.
+        const share = c.car.tailShare as number;
+        expect(lamps()).toEqual([authored['Headlight L'], authored['Headlight R'], authored['Tail Light L'] * share, authored['Tail Light R'] * share, 0, 0]);
+        expect(states(mark).filter(s => /Fall|Land|Jump/.test(s)), states(mark).join(' ')).toEqual([]);
+
+        // Drive: forward along the car's nose, then to the left (away from the platforms), the driver sitting still.
+        const nose = vec3.clone(c.car.worldForward as vec3);
+        const from = vec3.clone(c.car.worldPosition as vec3);
+        input.setMove(0, 1);
+        p.run(1);
+        const ahead = vec3.dot(vec3.sub(vec3.create(), c.car.worldPosition as vec3, from), nose);
+        // (On Jolt it sets off spinning its rear wheels: the Car preset's engine is stronger than its tyres there.)
+        expect(ahead, 'drives forward').toBeGreaterThan(1);
+        const heading = p.yawOf(c.car);
+        input.setMove(-1, 0.5);
+        p.run(1.5);
+        expect(wrap(p.yawOf(c.car) - heading), 'turns left (yaw climbs)').toBeGreaterThan(10);
+        expect(Math.hypot(...localPose(body).slice(0, 3))).toBeLessThan(0.03);
+        input.press('Jump');
+        p.run(0.1);
+        expect(c.vehicle.handBrake).toBe(1);
+        input.release('Jump');
+
+        // Back on S: it brakes first (the brake lights full), then reverses (the reverse lights on), then forward again.
+        input.setMove(0, -1);
+        p.run(0.3);
+        expect(c.vehicle.braking, 'S against its travel brakes').toBeGreaterThan(0.5);
+        // (Coming up over a bulb's warm-up: lampSeconds.)
+        expect(lamp('Tail Light L')).toBeGreaterThan(authored['Tail Light L'] * 0.95);
+        let backing = 0;
+        while (!c.vehicle.reversing && backing < 4) { p.run(0.1); backing += 0.1; }
+        p.run(0.6);
+        expect(c.vehicle.reversing, `in reverse after ${backing.toFixed(1)} s, at ${c.vehicle.speed.toFixed(2)} m/s`).toBe(true);
+        expect(c.vehicle.speed).toBeLessThan(0);
+        expect([lamp('Reverse Light L'), lamp('Reverse Light R')]).toEqual([authored['Reverse Light L'], authored['Reverse Light R']]);
+        expect(lamp('Tail Light L')).toBeCloseTo(authored['Tail Light L'] * share, 3);
+        input.setMove(0, 1);
+        let forward = 0;
+        while (c.vehicle.speed < 3 && forward < 5) { p.run(0.1); forward += 0.1; }
+        expect(Math.max(lamp('Reverse Light L'), lamp('Reverse Light R'))).toBeLessThan(1);
+
+        // Out, at speed: the car brakes to a stop, then the driver gets out by its side.
+        input.setMove(0, 0.5);
+        p.run(0.5);
+        expect(Math.abs(c.vehicle.speed)).toBeGreaterThan(2);
+        mark = p.trace.length;
+        input.setMove(0, 0);
+        input.tap('Interact');
+        p.run(0.6);
+        // Braking to a stop to let the driver out: the brake lights full.
+        expect(lamp('Tail Light L')).toBe(authored['Tail Light L']);
+        let waited = 0;
+        while (p.player.inVehicle && waited < 15) { p.run(0.5); waited += 0.5; }
+        expect(p.player.inVehicle, `still in the car after ${waited} s: ${states(mark).join(' ')}`).toBe(false);
+        expect(states(mark)).toContain('CarExit');
+        // On its feet, its body back in the world, at the Exit Point, upright; its Controller and its camera back,
+        // looking where the car's camera did.
+        expect(body.parent).toBe(p.scene.root);
+        expect((p.physics as any).isSuspended(body.ownBody)).toBe(false);
+        expect(Math.abs(body.worldForward[1])).toBeLessThan(1e-3);
+        const exit = c.exit.worldPosition;
+        expect(Math.hypot(body.worldPosition[0] - exit[0], body.worldPosition[2] - exit[2]), 'at the Exit Point').toBeLessThan(0.05);
+        expect(Math.abs(wrap(p.yawOf(p.player) - p.yawOf(c.exit))), 'faces the way the Exit Point does').toBeLessThan(5);
+        expect(ownController.possessed).toBe(p.player);
+        expect(c.controller.possessed).toBeNull();
+        expect(c.playerCamera.active && !c.camera.active).toBe(true);
+        expect(Math.abs(wrap(p.rigs[0].yaw - c.rig.yaw))).toBeLessThan(0.5);
+        // Empty again: its lamps off.
+        p.run(0.6);
+        expect(lamps()).toEqual([0, 0, 0, 0, 0, 0]);
+        mark = p.trace.length;
+        p.run(1);
+        expect(p.player.isGrounded).toBe(true);
+        expect(states(mark).filter(s => /Fall|Land|Jump/.test(s)), states(mark).join(' ')).toEqual([]);
+        // And walks off.
+        input.setMove(0, 1);
+        let fastest = 0;
+        p.run(1, () => { fastest = Math.max(fastest, p.player.planarSpeed); });
+        expect(fastest).toBeGreaterThan(1);
+        input.setMove(0, 0);
     });
 });

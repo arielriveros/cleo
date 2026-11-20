@@ -42,8 +42,9 @@ switching **Source**; the character does not change.
 
 ### Possession
 
-The Character this controller drives, picked from the scene. With a Character selected in the
-hierarchy, **Possess "…"** takes it in one click. One controller can move between pawns, and a second
+The Character this controller drives, picked from the scene: a Character, a Character Body 2D, or a
+[Vehicle](vehicles.md) (whose throttle, steering and hand brake the player's Move and jump button work). With one
+selected in the hierarchy, **Possess "…"** takes it in one click. One controller can move between pawns, and a second
 controller possessing the same pawn takes over: the last possess wins. Until it possesses something, the
 controller drives nothing, and the section says so.
 

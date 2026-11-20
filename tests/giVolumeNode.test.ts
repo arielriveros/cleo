@@ -50,8 +50,8 @@ describe('GIVolumeNode', () => {
     });
 
     it('holds its settings to their ranges', () => {
-        const v = new GIVolumeNode('v', { probeCounts: [1, 1000, 3.6], rays: 100, captureResolution: 30, size: [-1, 0, 5] });
-        expect(v.probeCounts).toEqual([2, MAX_GI_PROBES_PER_AXIS, 4]);
+        const v = new GIVolumeNode('v', { probeCounts: [0, 1000, 3.6], rays: 100, captureResolution: 30, size: [-1, 0, 5] });
+        expect(v.probeCounts).toEqual([1, MAX_GI_PROBES_PER_AXIS, 4]);
         expect(v.rays).toBe(64);
         expect(v.captureResolution).toBe(32);
         expect(v.size[0]).toBeGreaterThan(0);
@@ -132,6 +132,29 @@ describe('GIVolumeNode', () => {
         expect(v.localSpacing[0]).toBeCloseTo(10 / 4.5);
         v.probeWorldPosition(p, 0, 0, 0);
         expect(p[0]).toBeCloseTo(-5 + 0.25 * 10 / 4.5);
+    });
+
+    it('puts a lone probe on an axis at the box\'s middle, whatever the inset, and spans the axis with it', () => {
+        const v = new GIVolumeNode('v', { size: [10, 4, 6], probeCounts: [5, 1, 3] });
+        v.setPosition([0, 2, 0]);
+        v.updateTransforms();
+        // One cell along y: the box's height. Corner to corner along the others (inset 0).
+        expect(v.localSpacing).toEqual([2.5, 4, 3]);
+        expect(v.probeCount).toBe(15);
+        const p = vec3.create();
+        v.probeWorldPosition(p, 0, 0, 0);
+        expect([...p].map(x => +x.toFixed(5))).toEqual([-5, 2, -3]);
+        v.probeWorldPosition(p, 4, 0, 2);
+        expect([...p].map(x => +x.toFixed(5))).toEqual([5, 2, 3]);
+        // From the floor to the top of the box, the grid's y runs -0.5 .. 0.5 about the layer (the lookup clamps to it).
+        const toGrid = v.worldToGrid(mat4.create());
+        const gy = (y: number) => +vec3.transformMat4(vec3.create(), vec3.fromValues(0, y, 0), toGrid)[1].toFixed(5);
+        expect([gy(0), gy(2), gy(4)]).toEqual([-0.5, 0, 0.5]);
+        // An inset moves the outer probes along the others, not the lone one.
+        v.probeInset = 0.5;
+        v.probeWorldPosition(p, 0, 0, 0);
+        expect([...p].map(x => +x.toFixed(5))).toEqual([-4, 2, -2]);
+        expect(v.localSpacing[1]).toBe(4);
     });
 
     it('scales its spacing with the world scale', () => {

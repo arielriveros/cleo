@@ -166,7 +166,8 @@ export function gridCoords(index: number, counts: ArrayLike<number>): [number, n
  * The eight probes round a fractional grid point and their trilinear weights: the cage the lighting
  * blends. The point is clamped into the grid, so a point on the box's faces still has a whole cage.
  * `outIndex` receives local probe indices, `outWeight` the weights (summing to 1), in the order
- * (di, dj, dk) = bits 0, 1, 2 of the slot.
+ * (di, dj, dk) = bits 0, 1, 2 of the slot. Along an axis with a single probe the far corners name that
+ * probe again, with no weight: its layer takes the whole of that axis.
  */
 export function gridCage(g: ArrayLike<number>, counts: ArrayLike<number>,
                          outIndex: Int32Array | number[], outWeight: Float32Array | number[]): void {
@@ -174,13 +175,14 @@ export function gridCage(g: ArrayLike<number>, counts: ArrayLike<number>,
     for (let a = 0; a < 3; a++) {
         const n = counts[a];
         const c = Math.min(n - 1, Math.max(0, g[a]));
-        const b = Math.min(n - 2, Math.floor(c));
+        const b = Math.max(0, Math.min(n - 2, Math.floor(c)));
         base[a] = b;
         frac[a] = c - b;
     }
+    const step = (a: number, d: number) => (counts[a] > 1 ? d : 0);
     for (let s = 0; s < 8; s++) {
         const di = s & 1, dj = (s >> 1) & 1, dk = (s >> 2) & 1;
-        outIndex[s] = gridIndex(base[0] + di, base[1] + dj, base[2] + dk, counts);
+        outIndex[s] = gridIndex(base[0] + step(0, di), base[1] + step(1, dj), base[2] + step(2, dk), counts);
         outWeight[s] = (di ? frac[0] : 1 - frac[0]) * (dj ? frac[1] : 1 - frac[1]) * (dk ? frac[2] : 1 - frac[2]);
     }
 }

@@ -79,6 +79,10 @@ export class CannonVehicle {
     private static readonly _rel = new Vec3();
     private static readonly _up = new Vec3();
     private static readonly _lean = [0, 0, 0];
+    private static readonly _point = new Vec3();
+    private static readonly _gravityDt = [0, 0, 0];
+    /** Each wheel's forward impulse cannon's solve spent this substep (see holdBrakes). */
+    private readonly _spent: number[] = [];
 
     constructor(public readonly chassis: Body, public readonly vehicle: NormalizedVehicle, ray: WheelRay) {
         const com = chassis instanceof CannonBody ? chassis.centerOfMassOffset : new Vec3();
@@ -118,7 +122,9 @@ export class CannonVehicle {
         for (let i = 0; i < n; i++) {
             rv.setSteeringValue(drive.steering[i], i);
             rv.applyEngineForce(drive.engineForce[i] * this._axleSign, i);
-            rv.setBrake(drive.brakeImpulse[i], i);
+            // The brakes are the shared drive's (holdBrakes, after the update): cannon's own rolling friction stops the
+            // whole slide at each wheel, so four braked wheels stop it four times over and the car rocks and creeps.
+            rv.setBrake(0, i);
         }
         rv.updateVehicle(dt);
         for (let i = 0; i < n; i++) {
@@ -133,10 +139,18 @@ export class CannonVehicle {
         }
         this._antiRoll();
         const m = this._motion, b = this.chassis;
-        m.com[0] = b.position.x; m.com[1] = b.position.y; m.com[2] = b.position.z;
-        m.rotation[0] = b.quaternion.x; m.rotation[1] = b.quaternion.y; m.rotation[2] = b.quaternion.z; m.rotation[3] = b.quaternion.w;
-        m.linear[0] = b.velocity.x; m.linear[1] = b.velocity.y; m.linear[2] = b.velocity.z;
-        m.angular[0] = b.angularVelocity.x; m.angular[1] = b.angularVelocity.y; m.angular[2] = b.angularVelocity.z;
+        this._readMotion();
+        // The brakes, one wheel after another (see above).
+        const spent = this._spent;
+        for (let i = 0; i < n; i++) spent[i] = 0;
+        const point = CannonVehicle._point, impulse = CannonVehicle._impulse;
+        const g = b.world?.gravity, gravityDt = CannonVehicle._gravityDt;
+        if (g) { gravityDt[0] = g.x * dt; gravityDt[1] = g.y * dt; gravityDt[2] = g.z * dt; }
+        drive.holdBrakes(this._readings, m, spent, (x, y, z, at) => {
+            point.set(at[0] - b.position.x, at[1] - b.position.y, at[2] - b.position.z);
+            b.applyImpulse(impulse.set(x, y, z), point);
+        }, g ? gravityDt : undefined);
+        this._readMotion();
         // An angular impulse as a torque over this substep: preStep runs before cannon integrates it.
         const lean = CannonVehicle._lean;
         if (drive.uprightImpulse(dt, this._readings, m, lean)) b.torque.set(b.torque.x + lean[0] / dt, b.torque.y + lean[1] / dt, b.torque.z + lean[2] / dt);
@@ -144,6 +158,15 @@ export class CannonVehicle {
     }
 
     public read(out: Out): void { this.drive.write(this._readings, out); }
+
+    /** The chassis's centre of mass, rotation and velocities, as the shared drive reads them. */
+    private _readMotion(): void {
+        const m = this._motion, b = this.chassis;
+        m.com[0] = b.position.x; m.com[1] = b.position.y; m.com[2] = b.position.z;
+        m.rotation[0] = b.quaternion.x; m.rotation[1] = b.quaternion.y; m.rotation[2] = b.quaternion.z; m.rotation[3] = b.quaternion.w;
+        m.linear[0] = b.velocity.x; m.linear[1] = b.velocity.y; m.linear[2] = b.velocity.z;
+        m.angular[0] = b.angularVelocity.x; m.angular[1] = b.angularVelocity.y; m.angular[2] = b.angularVelocity.z;
+    }
 
     private _antiRoll(): void {
         const impulses = this.drive.antiRoll, b = this.chassis, u = this.vehicle.up;

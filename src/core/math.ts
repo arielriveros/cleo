@@ -243,6 +243,38 @@ export function rightFromYaw(out: vec3, yawDeg: number): vec3 {
 }
 
 /**
+ * An upright pose: a position and a yaw about +Y, `[x, y, z, yawDegrees]` (yaw as in {@link forwardFromYaw}). The
+ * frame a standing character, a seat or a door point is placed in.
+ */
+export type YawPose = [number, number, number, number];
+
+/** `v` turned by `yawDeg` about +Y (the engine's yaw: 0 faces +Z, 90 faces +X). */
+export function rotateByYaw(x: number, y: number, z: number, yawDeg: number): [number, number, number] {
+    const r = yawDeg * DEG2RAD, c = Math.cos(r), s = Math.sin(r);
+    return [x * c + z * s, y, -x * s + z * c];
+}
+
+/** `a` then `b`: the pose `b` (given in `a`'s frame) in `a`'s parent frame. */
+export function yawPoseMul(a: Readonly<YawPose>, b: Readonly<YawPose>): YawPose {
+    const [x, y, z] = rotateByYaw(b[0], b[1], b[2], a[3]);
+    return [a[0] + x, a[1] + y, a[2] + z, wrapDegrees(a[3] + b[3])];
+}
+
+/** The inverse pose: `yawPoseMul(a, yawPoseInvert(a))` is the identity. */
+export function yawPoseInvert(a: Readonly<YawPose>): YawPose {
+    const [x, y, z] = rotateByYaw(-a[0], -a[1], -a[2], -a[3]);
+    return [x, y, z, wrapDegrees(-a[3])];
+}
+
+/** Between two poses: the position straight, the yaw the short way round. */
+export function yawPoseLerp(a: Readonly<YawPose>, b: Readonly<YawPose>, t: number): YawPose {
+    return [
+        a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t,
+        wrapDegrees(a[3] + deltaAngleDeg(a[3], b[3]) * t),
+    ];
+}
+
+/**
  * The world yaw of a planar direction, in DEGREES -- the inverse of Cleo's
  * `forward = (sin θ, 0, cos θ)`, and therefore `atan2(x, z)`, not the `atan2(z, x)` reflex.
  *

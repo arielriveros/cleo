@@ -63,6 +63,11 @@ export interface ControlIntent {
     sprint: boolean;
     crouch: boolean;
     /**
+     * The jump button HELD, as opposed to the jump REQUEST (a press edge, in {@link requests}). A character
+     * ignores it; a vehicle holds its hand brake on it.
+     */
+    jumpHeld: boolean;
+    /**
      * Multiplier on the resolved speed, 0..1 in practice. Lets a driver ask for a gentle approach — an
      * `arrive` steer easing into its target — without touching the character's authored walk/run speeds.
      */
@@ -80,7 +85,7 @@ function emptyRequests(): Record<IntentRequest, number> {
 export function createIntent(): ControlIntent {
     return {
         move: [0, 0], basisYaw: 0, aimYaw: 0, aimPitch: 0, look: [0, 0],
-        sprint: false, crouch: false, speedScale: 1, requests: emptyRequests(),
+        sprint: false, crouch: false, jumpHeld: false, speedScale: 1, requests: emptyRequests(),
     };
 }
 
@@ -98,6 +103,7 @@ export function clearIntent(out: ControlIntent): ControlIntent {
     out.look[1] = 0;
     out.sprint = false;
     out.crouch = false;
+    out.jumpHeld = false;
     out.speedScale = 1;
     return out;
 }
@@ -203,6 +209,8 @@ export interface PlayerReading {
     jump: boolean;
     sprint: boolean;
     crouch: boolean;
+    /** The jump button's HELD state (`Input.pressed(...)`); absent reads as not held. */
+    jumpHeld?: boolean;
 }
 
 /**
@@ -224,6 +232,7 @@ export function applyPlayerReading(
     out.look[1] = reading.look[1];
     out.sprint = reading.sprint;
     out.crouch = reading.crouch;
+    out.jumpHeld = reading.jumpHeld === true;
     out.basisYaw = basisYaw;
     out.aimYaw = basisYaw;
     if (reading.jump) raiseRequest(out, 'jump', jumpBufferSeconds);

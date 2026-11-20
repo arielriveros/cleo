@@ -16,6 +16,45 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **A car in the Sandbox, and Controllers that drive vehicles.**
+  - *The car.* The Sandbox has a car to get into by its door (Interact, E), drive and get out of again: the vehicle
+    simulation with the Car preset, on a model's own wheels ("Dirty car" by 3D Error 404, CC-BY-4.0), with Mixamo
+    clips for getting in, driving and getting out. It is the **Car** template: its chassis, body and windows, four
+    wheels each turning its tyre, a seat with where getting in starts and getting out ends, a door zone, its own
+    camera rig and its own Controller. Getting in switches the Controller in possession: the character lets go of
+    its own, the car's possesses the Vehicle, and the car's camera takes the view from where the character's was.
+    A moving car brakes to a stop before the driver gets out. A low barrier now runs round the course's edge. The
+    car is scaled as tight round its seated driver as the cabin allows (5 m long), the driver sits back against the
+    seat, and gets in straight whichever way they stood when they pressed Interact.
+  - *Lamps.* The car has headlights (spot lights), tail lights that light up when it brakes, and reverse lights,
+    switched by its script; the Sandbox is set at dusk so they show. Each wheel's mesh is right under its Wheel node.
+    A Vehicle tells a script how hard it is `braking` (counting Parked and a throttle held against the way it rolls)
+    and whether it is `reversing`.
+  - *Controllers drive vehicles.* A Controller can possess a Vehicle as it does a Character: Move steers and drives,
+    the jump button held holds the hand brake (`ControlIntent.jumpHeld`), Look turns its camera rig. A Vehicle can
+    be **Parked** (brakes on, nothing drives it). The Vehicle's drive setting is now `drivetrain` (`drive` is still
+    read).
+  - *A body turned off for a while.* A Collider's `physicsEnabled` takes its body out of the physics world and puts
+    it back where the node is then, at rest: a character rides in a seat, carried by the car, neither walking nor
+    falling, and is still standing when it gets out. `Node.reparent` moves a node under another, keeping where it
+    is in the world.
+  - *Root motion that travels and turns.* A clip that both walks and turns (getting into a car) carries the character
+    along its own path: its travel used to be turned twice by the turn already applied, so a quarter turn and then a
+    step went sideways.
+  - *Brakes that hold.* A braked vehicle no longer creeps on cannon (a parked car slid 12 cm/s on flat ground: each
+    braked wheel stopped the whole car, four times over): the brakes are held one wheel after another, with the
+    gravity of the step. Player contract 47.
+- **A single layer of GI probes.** A GI Volume takes one probe along an axis: a layer in the middle of the box
+  whose light holds through the box's whole depth on that axis. One up is a floor's layer of probes, a probe's
+  height over the ground. The Sandbox has one over its whole floor, a light probe over the whole scene, and
+  sunset clouds over its dusk.
+- **Day, dusk and night in the Sandbox.** A Game Manager switches three light setups on 1, 2 and 3 by moving the
+  sun (everything else follows it), with a HUD that says which is on and lists the controls; the exposure is one
+  compensation curve set for all three. The course now stands on an open ocean.
+- **Convex hulls of the meshes you pick.** A Collider's (or a 3D Trigger's) **Add Convex Hull** has a **Meshes**
+  tree: tick which of the meshes under it the hull is built from, and a hull's own row rebuilds it from others. A
+  hull keeps them by their nodes' names (a shape's `sources`), so a new Definition rebuilds it from the same ones.
+  The Sandbox car's chassis is one hull of its body and windows, not of its wheels.
 - **Stairs in the Sandbox, and characters that stand on slopes.**
   - *Stair clips.* The Sandbox goes up and down its flights with the pack's stair clips, from one 2D blend space
     (Climb by speed): walking and running, at a stair pace (one step a tread), facing the way it goes, slowing
@@ -950,6 +989,8 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Fixes & refactors
 
+- **Fullscreen Play keeps the game UI.** Play's fullscreen took only the canvas, so a HUD (and the touch controls)
+  disappeared in it; it now takes the whole viewport panel, the canvas and what is drawn over it together.
 - **Shadows start at their casters.** Sun shadows began a few centimetres from what cast them, and spot and point
   shadows far more: a crate floated over its own shadow under a lamp. Thin casters (toes, a plank's edge) cast
   nothing at all.

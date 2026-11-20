@@ -49,6 +49,7 @@ simulationMode: 'project' | 'always' | 'custom' ; simulationRange: number ; canS
 layer: number ; mask: number     // layer: one bit; mask -1 = every layer
 shapes: ColliderShape[]          // in the node's own units, scaled by its world scale
 get body: RigidBody | null       // built when the scene runs, never while authoring
+physicsEnabled: boolean          // runtime only: false takes the body out of the world for now
 ```
 
 Two Colliders collide when each one's `mask` holds the other's `layer`. Camera rigs, foot IK and raycasts
@@ -80,7 +81,8 @@ A vehicle. It stands in its chassis Collider, and the WheelNodes under it are it
 Feature `vehicles`. See [Vehicles](../editor/vehicles.md).
 
 ```ts
-drive: 'none' | 'engine' | 'motors'
+drivetrain: 'none' | 'engine' | 'motors'           // 'drive' before 2026-11-19, still read
+parked: boolean                                      // brakes on, nothing drives it
 maxTorque: number ; minRpm: number ; maxRpm: number ; clutchStrength: number
 gearRatios: number[] ; reverseRatio: number ; finalDrive: number
 shiftUpRpm: number ; shiftDownRpm: number ; shiftTime: number
@@ -89,6 +91,8 @@ cast: 'ray' | 'sphere' | 'cylinder'
 autoReverse: boolean ; playerInput: boolean
 throttle: number ; steer: number ; brake: number ; handBrake: number   // the driver, each frame (not saved)
 get speed: number ; get rpm: number ; get gear: number
+get braking: number              // 0..1: the brake, Parked, or a throttle held against its travel
+get reversing: boolean           // in reverse gear
 get vehicle: Vehicle | null      // built when the scene runs
 get wheels: WheelNode[]
 rebuild(): void                  // after changing wheels or settings in Play

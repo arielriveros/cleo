@@ -4,7 +4,8 @@
 //
 //     node --max-old-space-size=8192 tools/sandbox/prepare.mjs
 //
-// Reads build/LocomotionPack (the mannequin and every clip) and writes build/sandbox_prepared/ (gitignored):
+// Reads build/LocomotionPack (the mannequin and every clip) and the car's clips in build/car (getting in, driving and
+// getting out), and writes build/sandbox_prepared/ (gitignored):
 //
 //   character.json    { skin, parts, height }: the mannequin's skeleton in METRES on unit-scale joints, its mesh
 //                     welded, and a `Pivot` joint above the hips (see below)
@@ -38,6 +39,8 @@ import { decodePng, encodePng } from '../exampleKit/png.mjs'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
 const PACK = path.join(ROOT, 'build', 'LocomotionPack')
+/** The car's folder: its model (build.ts reads it) and the Mixamo clips of getting in, driving and getting out. */
+const CAR = path.join(ROOT, 'build', 'car')
 const OUT = path.join(ROOT, 'build', 'sandbox_prepared')
 const CHARACTER = path.join(PACK, 'Mannequin.fbx')
 /** The file is in centimetres. */
@@ -240,11 +243,14 @@ async function main() {
   const { collapseFbxPivots, buildBoneMapping, retargetAnimation } = engineModules(ROOT)
   const ctx = { ajs, collapseFbxPivots, buildBoneMapping, retargetAnimation }
 
-  const files = fs.readdirSync(PACK).filter(f => /\.fbx$/i.test(f) && f !== 'Mannequin.fbx').sort()
-  for (const f of files) {
+  // Every clip file: the pack's, then the car's (a stem names its clip whichever folder it is in).
+  const fbx = (dir) => fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /\.fbx$/i.test(f) && f !== 'Mannequin.fbx').sort().map(f => [dir, f]) : []
+  const sources = [...fbx(PACK), ...fbx(CAR)]
+  const files = sources.map(([, f]) => f)
+  for (const [dir, f] of sources) {
     const stem = f.replace(/\.fbx$/i, '')
     const outFile = path.join(OUT, 'clips', `${stem}.json`)
-    const file = path.join(PACK, f)
+    const file = path.join(dir, f)
     if (stamps[f] === stampOf(file) && fs.existsSync(outFile)) continue
     // The pack's clips were downloaded on two Mixamo characters: this one (ratio ~1) and one ~6% smaller.
     // The retarget rescales the hips by the ratio, which in-place clips want; the file is in cm, the skin in m.

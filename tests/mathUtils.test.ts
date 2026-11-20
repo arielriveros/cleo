@@ -5,6 +5,7 @@ import {
     eulerFromQuatDeg, decomposeTRS, noise1, fbm1, wrapDegrees, wrapSpan, deltaWrapped, dampWrapped, closestOnTriangle,
     quadClipRect, boxClipRect, rectsOverlap, CLIP_RECT_BOUNDED, CLIP_RECT_UNBOUNDED, CLIP_RECT_CULLED,
 } from '../src/core/math';
+import * as M from '../src/core/math';
 
 describe('damp', () => {
     // The property the whole camera rig rests on. A naive `lerp(a, b, 0.1)` per frame fails this:
@@ -347,5 +348,26 @@ describe('clip rectangles', () => {
         expect(rectsOverlap(r, 0, r, 4)).toBe(true);    // touching edges
         expect(rectsOverlap(r, 0, r, 8)).toBe(false);
         expect(rectsOverlap(r, 4, r, 8)).toBe(false);
+    });
+});
+
+describe('upright poses (yawPoseMul / yawPoseInvert / yawPoseLerp)', () => {
+    it('places a pose given in another\'s frame, turned by its yaw (0 faces +Z, 90 faces +X)', () => {
+        const at = M.yawPoseMul([1, 0, 2, 90], [0, 0.5, 1, 30]);
+        // One metre ahead of a pose facing +X is one metre along +X.
+        [2, 0.5, 2, 120].forEach((v, i) => expect(at[i]).toBeCloseTo(v, 6));
+        expect(M.rotateByYaw(0, 0, 1, 90).map(v => +v.toFixed(6))).toEqual([1, 0, 0]);
+    });
+
+    it('undoes a pose with its inverse, either side', () => {
+        const a: M.YawPose = [3, -1, 0.5, -140];
+        for (const p of [M.yawPoseMul(a, M.yawPoseInvert(a)), M.yawPoseMul(M.yawPoseInvert(a), a)])
+            p.forEach(v => expect(Math.abs(v)).toBeLessThan(1e-9));
+    });
+
+    it('goes between two poses straight, turning the short way round', () => {
+        const mid = M.yawPoseLerp([0, 0, 0, 170], [2, 0, 4, -170], 0.5);
+        [1, 0, 2].forEach((v, i) => expect(mid[i]).toBeCloseTo(v, 6));
+        expect(Math.abs(mid[3])).toBeCloseTo(180, 6);
     });
 });
