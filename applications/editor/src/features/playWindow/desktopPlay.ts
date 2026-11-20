@@ -16,6 +16,22 @@ export interface PlayWindowOpenOptions {
    * Left out, the game runs with no debugger session.
    */
   debug?: { pauseOnExceptions: boolean }
+  /**
+   * Play › Multiplayer: the local dev host this window joins, and as whom (see player/netsyncJoin.ts). The shell
+   * checks every value (a host on this machine only) before it goes into the game page's address.
+   */
+  join?: PlayWindowJoin
+}
+
+export interface PlayWindowJoin {
+  wt?: string
+  hash?: string
+  ws?: string
+  name?: string
+  transport?: 'websocket' | 'webtransport'
+  lag?: number
+  jitter?: number
+  loss?: number
 }
 
 /** What the main process says about a play window. */

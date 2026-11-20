@@ -130,7 +130,7 @@ The game's hold on the mouse and keyboard in Play, in the viewport and in a Play
 ## Project
 
 What belongs to this game and travels with it in a project bundle: its name, the scene it starts in,
-how a published build presents itself, and the input map.
+how a published build presents itself, online play, and the input map.
 
 ### General
 
@@ -168,6 +168,26 @@ game must agree on these, or a player's saves would vanish with an update.
 - **Save folder** — where a published game keeps its saves: `<app data>/<folder>/saves` on the desktop
   (`%APPDATA%` on Windows), the storage namespace on the web. Empty = the title, or the project name.
   Set it before the first release and keep it: renaming it loses the saves players already have.
+
+### NetSync
+
+Online play: the game runs on a dedicated host its players join (see [NetSync](../design/netsync.md)).
+The host reads these from the published game; its own flags and environment variables win.
+
+- **Online play** — publish the game for online play: its NetSync settings go into the build, and its web page
+  asks the allocator for a host to join. Off, the game is played alone, as always.
+- **Tick rate** — the host's simulation steps per second. 30 suits most games; every step is sent to every
+  player, so more costs bandwidth.
+- **Players per session** — how many players one session (one host) takes. 16 at most is what NetSync is
+  measured for.
+- **Player template** — the template each joining player gets a copy of, once the level's own player
+  characters are taken. None: only those.
+- **Spawn point** — where those copies appear, spread out by player.
+- **Trust** — how far the host trusts what players say: carried props' positions and claimed hits. Co-op
+  checks loosely; Versus checks tightly and refuses claims it cannot confirm.
+- **Allocator** — the address of the game's allocator (`cleo-allocator`): the published page asks it for a host
+  to join. Empty: the page joins only a host named in its address (`?join=…`).
+- **Game mode** — the mode the page asks the allocator for, when its address names none (`?mode=`).
 
 ### Input
 

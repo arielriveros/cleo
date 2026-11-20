@@ -53,6 +53,8 @@ export interface StartHostOptions {
     lifecycle?: HostLifecycle;
     /** What "exit" means: the CLI exits the process; tests get told. */
     exit?: (code: number) => void;
+    /** The game itself, instead of settings.game's file (the dev host: the editor sends it). */
+    game?: { bin: Uint8Array; scripts?: string };
 }
 
 export interface HostStatus {
@@ -213,10 +215,13 @@ export class HostApp {
         let runtime: HostRuntime | null = null;
         let web: WebBuild | null = null;
         let contentHash = 'dev';
-        if (settings.game || settings.example) {
+        if (options.game || settings.game || settings.example) {
             let bin: Uint8Array;
             let scripts: string | undefined;
-            if (settings.game) {
+            if (options.game) {
+                bin = options.game.bin;
+                scripts = options.game.scripts;
+            } else if (settings.game) {
                 bin = new Uint8Array(readFileSync(settings.game));
                 const scriptsPath = settings.scripts ?? path.join(path.dirname(settings.game), 'game.scripts.js');
                 if (existsSync(scriptsPath)) scripts = readFileSync(scriptsPath, 'utf8');

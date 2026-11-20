@@ -5,12 +5,13 @@ import { Button, Field, NumberInput, Section, Select, TextInput, Toggle, cn } fr
 import { loadProjects, renameProject } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
 import { OptionsPageBody, OptionsShell, OPTION_LABEL, useMarkOptionPageShown, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
-import { DEFAULT_PROJECT_SETTINGS, cleanSaveFolder, resolveSaveFolder, type ProjectSaveSettings, type PublishWindowSettings } from './projectSettings'
+import { DEFAULT_PROJECT_SETTINGS, cleanSaveFolder, resolveSaveFolder, type ProjectNetSyncSettings, type ProjectSaveSettings, type PublishWindowSettings } from './projectSettings'
+import { useAssetLibrary } from '../AssetLibraryContext'
 
 // Options ▸ Project: what belongs to THIS game and travels with it — its name, the scene it starts in,
-// how a published build presents itself, and the input map. Carried in project bundles.
+// how a published build presents itself, online play, and the input map. Carried in project bundles.
 
-type Page = 'general' | 'input'
+type Page = 'general' | 'netsync' | 'input'
 
 /** The id the viewport watches to preview on-screen touch controls while the input map is open. */
 export const INPUT_PAGE_ID = 'project.input'
@@ -23,10 +24,12 @@ export default function ProjectOptionsPanel() {
       onPage={setPage}
       pages={[
         { value: 'general', label: 'General', doc: 'editor/options#general' },
+        { value: 'netsync', label: 'NetSync', doc: 'editor/options#netsync' },
         { value: 'input', label: 'Input', doc: 'editor/options#input' },
       ]}
     >
       {page === 'general' && <GeneralOptions />}
+      {page === 'netsync' && <NetSyncOptions />}
       {page === 'input' && <InputPage />}
     </OptionsShell>
   )
@@ -127,6 +130,65 @@ function GeneralOptions() {
             onChange={v => setSaves({ folder: v })}
             onBlur={() => setSaves({ folder: cleanSaveFolder(projectSettings.saves.folder) })} />
         </Field>
+      </Section>
+    </OptionsPageBody>
+  )
+}
+
+/** Options ▸ Project ▸ NetSync: online play (docs/design/netsync.md). The host reads these from the published game. */
+function NetSyncOptions() {
+  const { projectSettings, setProjectSettings } = useCleoEngine()
+  const { templates } = useAssetLibrary()
+  const n = projectSettings.netsync
+  const set = (patch: Partial<ProjectNetSyncSettings>) =>
+    setProjectSettings(prev => ({ ...prev, netsync: { ...prev.netsync, ...patch } }))
+  const setSpawn = (i: number, v: number) => set({ spawn: n.spawn.map((x, j) => (j === i ? v : x)) as [number, number, number] })
+  const off = !n.enabled
+  return (
+    <OptionsPageBody>
+      {/* The explanations live in docs/editor/options.md › Project › NetSync. */}
+      <Section title='Online play'>
+        <Field label='Online play' labelClassName={OPTION_LABEL}>
+          <span className='flex flex-1'><Toggle checked={n.enabled} onChange={v => set({ enabled: v })} /></span>
+        </Field>
+      </Section>
+      <Section title='Host'>
+        <div className={cn('flex flex-col gap-1', off && 'pointer-events-none opacity-60')}>
+          <Field label='Tick rate' labelClassName={OPTION_LABEL}>
+            <NumberInput value={n.tickRate} min={10} max={120} step={1} onChange={v => set({ tickRate: clampInt(v, 10, 120) })} />
+          </Field>
+          <Field label='Players per session' labelClassName={OPTION_LABEL}>
+            <NumberInput value={n.maxPeers} min={1} max={64} step={1} onChange={v => set({ maxPeers: clampInt(v, 1, 64) })} />
+          </Field>
+          <Field label='Player template' labelClassName={OPTION_LABEL}>
+            <Select className='flex-1' value={n.playerTemplate} onChange={e => set({ playerTemplate: e.target.value })}>
+              <option value=''>None (the level's player characters only)</option>
+              {n.playerTemplate && !templates.some(t => t.name === n.playerTemplate) && <option value={n.playerTemplate}>{n.playerTemplate} (missing)</option>}
+              {templates.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+            </Select>
+          </Field>
+          <Field label='Spawn point' labelClassName={OPTION_LABEL}>
+            <div className='flex flex-1 items-center gap-1.5'>
+              {n.spawn.map((v, i) => <NumberInput key={i} value={v} step={0.5} onChange={x => setSpawn(i, x)} />)}
+            </div>
+          </Field>
+          <Field label='Trust' labelClassName={OPTION_LABEL}>
+            <Select className='flex-1' value={n.trust} onChange={e => set({ trust: e.target.value === 'versus' ? 'versus' : 'coop' })}>
+              <option value='coop'>Co-op (loose)</option>
+              <option value='versus'>Versus (strict)</option>
+            </Select>
+          </Field>
+        </div>
+      </Section>
+      <Section title='Published game'>
+        <div className={cn('flex flex-col gap-1', off && 'pointer-events-none opacity-60')}>
+          <Field label='Allocator' labelClassName={OPTION_LABEL}>
+            <TextInput value={n.allocator} placeholder='https://play.example.com' maxLength={500} onChange={v => set({ allocator: v })} />
+          </Field>
+          <Field label='Game mode' labelClassName={OPTION_LABEL}>
+            <TextInput value={n.mode} placeholder='coop' maxLength={64} onChange={v => set({ mode: v })} />
+          </Field>
+        </div>
       </Section>
     </OptionsPageBody>
   )

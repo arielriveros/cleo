@@ -95,12 +95,13 @@ describe('NetSync over real sockets', () => {
                 expect(off).toBeLessThan(0.05);
             }
             // A real-time host on a busy machine (the suite runs files in parallel) may skip a few ticks rather than
-            // fall behind; that is the ticker's design. Not many.
+            // fall behind; that is the ticker's design. Not many: none alone, ~8 % with the whole host suite (several
+            // files run real hosts at once) beside it.
             const st = runtime.stats();
-            expect(st.skipped).toBeLessThan(Math.max(5, st.ticks * 0.05));
+            expect(st.skipped).toBeLessThan(Math.max(5, st.ticks * 0.15));
         } finally {
             clearInterval(frame);
             for (const p of peers) p.session.leave();
         }
-    });
+    }, 20_000); // 4.5 s of real time by design, plus the joins: past vitest's default 5 s on a busy machine
 });

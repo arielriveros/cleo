@@ -63,7 +63,21 @@ export type GameEvent =
   /** The game could not start. */
   | { type: 'failed'; message: string; stack?: string }
   /** The page is going away. `reloading` when the game reloads itself for a restart. */
-  | { type: 'bye'; reloading: boolean };
+  | { type: 'bye'; reloading: boolean }
+  /** Play › Multiplayer: this player's link and prediction, every second once joined (multiplayerPlay.ts). */
+  | { type: 'netsync'; report: NetSyncReport };
+
+/** What a game window joined to a NetSync host reports (see multiplayerPlay.PeerReport). */
+export interface NetSyncReport {
+  peerId: number;
+  link: string;
+  fallbackReason: string | null;
+  rttMs: number;
+  checked: number;
+  corrections: number;
+  maxErrorCm: number;
+  ticks: number;
+}
 
 export type PlayMessage =
   | ({ to: 'game'; session: string } & EditorCommand)

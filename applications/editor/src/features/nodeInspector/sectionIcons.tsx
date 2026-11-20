@@ -50,3 +50,4 @@ export const ClothIcon = () => (<S><path d='M5 21V3' /><path d='M5 4c3-1.5 5 1.5
 export const ForceFieldIcon = () => (<S><path d='M3 8h10.5a2.5 2.5 0 1 0-2.5-2.5' /><path d='M3 12h15a3 3 0 1 1-3 3' /><path d='M3 16h6' /></S>);
 // A floppy disk: what a save keeps (the Save card, the Saves panel).
 export const SaveIcon = () => (<S><path d='M5 4h11l3 3v13H5Z' /><path d='M8 4v5h7V4' /><rect x='8' y='13' width='8' height='5' rx='0.5' /></S>);
+export const NetSyncIcon = () => (<S><circle cx='6' cy='12' r='2.5' /><circle cx='18' cy='6' r='2.5' /><circle cx='18' cy='18' r='2.5' /><path d='M8.3 11l7.4-3.8M8.3 13l7.4 3.8' /></S>);

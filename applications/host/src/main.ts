@@ -5,17 +5,32 @@
 //   npm start -- --game path/to/game.bin [--scripts path/to/game.scripts.js]
 //   npm start -- --example ../editor/public/examples/sandbox --serve      (development: publish, host and serve it)
 //   npm start                                                              (no game: a session only)
+//   npm start -- --dev                                                     (the editor's Play › Multiplayer host)
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cachedCertificate, certificateFromPem, generateCertificate } from './devCertificate';
 import { HostApp, createLog } from './hostApp';
 import { HELP, readSettings } from './settings';
+import { DevHost } from './devHost';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 if (process.argv.includes('--help') || process.argv.includes('-h')) { console.log(HELP); process.exit(0); }
 const settings = readSettings(process.argv.slice(2), process.env);
 const log = createLog(settings.log);
+
+if (process.argv.includes('--dev')) {
+    // Play › Multiplayer's host: waits for the editor's game on localhost (devHost.ts).
+    const dev = await DevHost.start({
+        certificate: await cachedCertificate(path.join(here, '..', '.cache')), log,
+        port: settings.controlPort > 0 ? settings.controlPort : 4490, udpPort: settings.udpPort, tcpPort: settings.tcpPort,
+    });
+    console.log(`cleo-host --dev: waiting for the editor's Play › Multiplayer on http://127.0.0.1:${dev.port} (players join on udp/${dev.udpPort}, tcp/${dev.tcpPort})`);
+    const stop = async () => { await dev.close(); process.exit(0); };
+    process.on('SIGINT', () => void stop());
+    process.on('SIGTERM', () => void stop());
+    await new Promise(() => {});
+}
 
 // Development keeps one certificate for its 14 days (a browser tab can be reloaded against the same hash); a
 // deployed host makes its own each start (it lives for a session, and its hash goes out with the allocation).

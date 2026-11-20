@@ -17,6 +17,34 @@ const path = require('path');
 const fs = require('fs');
 const { attachDebugger } = require('./playDebugger');
 
+/**
+ * Play › Multiplayer's join parameters for a game window, checked one by one: only a host on THIS machine (the
+ * editor's dev host), a certificate hash, a short name and plain numbers reach the page's address; anything else
+ * is dropped. Returns the query to append ('' for none). Pure, for the tests.
+ */
+function joinQuery(join) {
+  if (!join || typeof join !== 'object') return '';
+  const checks = {
+    wt: v => /^https:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d{1,5}\/netsync$/.test(v),
+    ws: v => /^ws:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d{1,5}\/ws$/.test(v),
+    hash: v => /^[A-Za-z0-9+/]{43}=$/.test(v),
+    name: v => /^[\w .-]{1,32}$/.test(v),
+    transport: v => v === 'websocket' || v === 'webtransport',
+    lag: v => /^\d{1,4}$/.test(v),
+    jitter: v => /^\d{1,3}$/.test(v),
+    loss: v => /^\d{1,2}(\.\d+)?$/.test(v),
+  };
+  const q = new URLSearchParams();
+  for (const [key, ok] of Object.entries(checks)) {
+    const value = join[key];
+    if (value === undefined || value === null) continue;
+    const text = String(value);
+    if (ok(text)) q.set(key, text);
+  }
+  const s = q.toString();
+  return s ? `&${s}` : '';
+}
+
 /** What the editor's newSessionId() makes (hex), with room to spare. Anything else is refused. */
 const SESSION_ID = /^[0-9a-f]{8,64}$/i;
 
@@ -166,7 +194,7 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     });
 
     windows.set(sessionId, { sessionId, win, ownerId, owner, debug: null, debugOptions, navigated: false });
-    win.loadURL(`${page}?session=${sessionId}`);
+    win.loadURL(`${page}?session=${sessionId}${joinQuery(options && options.join)}`);
     return { ok: true };
   });
 
@@ -243,4 +271,4 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
   return { closeOwnedBy, debugTargets, setDebugPort: (port) => { debugPort = port; } };
 }
 
-module.exports = { registerIpc, fitSavedBounds, centredBounds, SESSION_ID };
+module.exports = { registerIpc, fitSavedBounds, centredBounds, joinQuery, SESSION_ID };

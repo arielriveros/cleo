@@ -44,6 +44,7 @@ If you are new, read [Core concepts](../concepts.md) first, then
 | [Scripting workflow](scripting-workflow.md) | Script assets, the code editor, editing in VS Code |
 | [Debugging scripts](debugging.md) | Script errors that link to their line; breakpoints, stepping and variables for a game playing in a window |
 | [AI agent link](ai-agent-link.md) | Letting an AI agent (Claude, over MCP) build, script and play-test in the editor |
+| [Multiplayer](multiplayer.md) | Online play: what syncs, Play › Multiplayer with a local host and a window per player, the NetSync readings |
 
 ### Look and ship
 

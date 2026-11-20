@@ -68,6 +68,8 @@ export interface PlayerNetSync {
   connectOptions?: import('cleo/netsync/index').ConnectOptions;
   name?: string;
   token?: string;
+  /** A worse network than the real one, simulated on this side (Play › Multiplayer's per-player conditions). */
+  conditions?: import('cleo/netsync/index').LinkConditions;
   /** Called once joined, with the client (the debugger reads it). */
   onJoined?: (client: import('cleo/netsync/index').NetSyncClient) => void;
 }
@@ -376,6 +378,7 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     const [client] = await Promise.all([
       NetSyncClient.join({
         endpoint: net.endpoint, connectOptions: net.connectOptions, name: net.name, token: net.token, contentHash,
+        conditions: net.conditions,
         physics: engine.physics,
         loadScene: async (name, prepare) => {
           await startScene((name && resolve(name)) || currentId, undefined, prepare);

@@ -10,7 +10,8 @@
 
 import type { Scene } from '../../core/scene/scene';
 import type { Node } from '../../core/scene/nodes/node';
-import type { ConnectOptions, HostEndpoint } from '../link/connect';
+import { connect, type ConnectOptions, type HostEndpoint } from '../link/connect';
+import { ConditionedLink, type LinkConditions } from '../link/conditionedLink';
 import { PeerSession } from '../session/peerSession';
 import { PeerCommands } from '../sync/commands';
 import { Predictor } from '../sync/predictor';
@@ -29,6 +30,11 @@ export interface NetSyncJoinOptions {
     /** From the allocator, when the host asks for one. */
     token?: string;
     connectOptions?: ConnectOptions;
+    /**
+     * A worse network than the real one, simulated on this player's side of the link (Play › Multiplayer's
+     * per-player lag, jitter and loss): its own messages are held and dropped as if the network did it.
+     */
+    conditions?: LinkConditions;
     /**
      * Build the game scene named `sceneName` (the entry scene when null), passing its JSON through `prepare` before
      * it is parsed, make it the engine's scene and start it. The client makes it a follower scene that way.
@@ -70,6 +76,12 @@ export class NetSyncClient {
         const session = await PeerSession.join({
             endpoint: options.endpoint, contentHash: options.contentHash, name: options.name, token: options.token,
             connectOptions: options.connectOptions,
+            ...(options.conditions ? {
+                connector: async (endpoint: HostEndpoint, connectOptions: ConnectOptions) => {
+                    const c = await connect(endpoint, connectOptions);
+                    return { ...c, link: new ConditionedLink(c.link, { ...options.conditions, tcp: c.link.kind === 'websocket' }) };
+                },
+            } : {}),
         });
         try {
             // Commands first: the host's word on which character is this player's must be read before that

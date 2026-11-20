@@ -1,7 +1,7 @@
 import { hideLoadingWhenSmooth, setLoadingText, showError } from './pageStatus';
 import { readGameHeader } from './unpack';
 import { openGameUrl } from './gameSource';
-import { netsyncFromUrl } from './netsyncJoin';
+import { netsyncFromAllocator, netsyncFromUrl } from './netsyncJoin';
 import { installShaderLibrary } from 'cleo/graphics/shaderLibrary';
 import { installFeatures } from 'cleo/core/features/registry';
 import { FEATURE_LOADERS } from 'cleo/modules/loaders';
@@ -50,7 +50,7 @@ async function boot(): Promise<void> {
     logging: false,
     physicsWorkerFactory: createPhysicsWorker,
     // Online when the address says which host to join (netsyncJoin.ts).
-    netsync: netsyncFromUrl() ?? undefined,
+    netsync: netsyncFromUrl() ?? await netsyncFromAllocator(header.manifest.config) ?? undefined,
   });
   hideLoadingWhenSmooth();
 }

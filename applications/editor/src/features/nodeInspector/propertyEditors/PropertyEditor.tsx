@@ -41,13 +41,14 @@ import SceneSettings from './SceneSettings'
 import UIEditor from './UIEditor'
 import { isRootNode } from '../useSelectedNode'
 import SaveEditor from './SaveEditor'
+import NetSyncEditor from './NetSyncEditor'
 import { TEMPLATE_ID_VAR } from '../../../utils/templates'
 import { useCleoEngine } from '../../EngineContext'
 import { DocScope } from '@cleo/app-kit/ui'
 import { useInspectorLock } from '../inspectorLock'
 
 export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) {
-  const { activeTab, editorMode, templateRootId } = useCleoEngine();
+  const { activeTab, editorMode, templateRootId, projectSettings } = useCleoEngine();
   const lock = useInspectorLock();
   const root = isRootNode(props.node);
   const ro = !!props.readOnly;
@@ -76,6 +77,9 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
             template's own root it makes every copy a script instantiates a Saved one. */}
         {!root && !isUI &&
           <SaveEditor node={props.node} readOnly={ro && !props.node.getVariable(TEMPLATE_ID_VAR)} />}
+        {/* Online play: whether the host sends this node to its players. Only while the project plays online. */}
+        {!root && !isUI && projectSettings.netsync.enabled &&
+          <NetSyncEditor node={props.node} readOnly={ro && !props.node.getVariable(TEMPLATE_ID_VAR)} />}
 
         {/* Which model asset this subtree came from. Outside the fieldset below on purpose: it is a label
             and a navigation button, not an edit, and jumping to the asset is exactly what you want from a
