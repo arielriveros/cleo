@@ -297,9 +297,12 @@ export class PeerCommands {
      * The host tick a command sent now should be for: the tick that will be due on the host when it arrives (half
      * a round trip from now), plus `leadTicks` of margin for jitter.
      */
-    public targetTick(): number {
+    public targetTick(): number { return Math.floor(this.targetTickExact()); }
+
+    /** {@link targetTick} with its fraction: how far into that tick the peer's (ahead-running) clock is now. */
+    public targetTickExact(): number {
         const tickMs = 1000 / this._session.tickRate;
-        return Math.floor((this._session.hostTimeNow() + this._session.clock.rttMs / 2) / tickMs) + this._leadTicks;
+        return (this._session.hostTimeNow() + this._session.clock.rttMs / 2) / tickMs + this._leadTicks;
     }
 
     /**

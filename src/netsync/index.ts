@@ -57,3 +57,5 @@ export type { ScriptHostOptions, ScriptHostStats, ScriptPeerOptions } from './sy
 // Phase 8: animation.
 export { AnimHost, AnimPeer, animatorsOf } from './sync/animSync';
 export type { AnimHostOptions, AnimHostStats, AnimPeerOptions, AnimPeerStats } from './sync/animSync';
+export { PeerFrames, type PeerFramesParts } from './client/peerFrames';
+export { NetSyncClient, type NetSyncJoinOptions } from './client/netsyncClient';

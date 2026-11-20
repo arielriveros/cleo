@@ -9,6 +9,8 @@
 //   [--wt-port 4433] [--ws-port 4480] [--tick-rate 30] [--max-peers 16] [--physics jolt|rapier|cannon]
 //   [--player-template Player] [--spawn x,y,z]   each joining peer gets a copy of that template to drive
 //   [--trust coop|versus]                         how far peers' carried props and shot claims are trusted
+//   [--serve]                                     with --example: publish it as a web game too, serve it on the
+//                                                 WebSocket port and print a link that opens it joined to this host
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -19,6 +21,7 @@ import { cachedCertificate } from './devCertificate';
 import { HostListener } from './hostListener';
 import { HostRuntime } from './hostRuntime';
 import { packExampleGame } from './exampleGame';
+import { buildExampleWeb, type WebBuild } from './webBuild';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -35,6 +38,7 @@ let runtime: HostRuntime | null = null;
 let contentHash = arg('--content', 'dev')!;
 const gamePath = arg('--game');
 const examplePath = arg('--example');
+let web: WebBuild | null = null;
 if (gamePath || examplePath) {
     let bin: Uint8Array;
     let scripts: string | undefined;
@@ -42,6 +46,11 @@ if (gamePath || examplePath) {
         bin = new Uint8Array(readFileSync(gamePath));
         const scriptsPath = arg('--scripts') ?? path.join(path.dirname(gamePath), 'game.scripts.js');
         if (existsSync(scriptsPath)) scripts = readFileSync(scriptsPath, 'utf8');
+    } else if (args.includes('--serve')) {
+        log(`publishing ${examplePath} as a web game`);
+        web = await buildExampleWeb(examplePath!);
+        bin = web.bin;
+        scripts = web.scripts;
     } else {
         log(`packing ${examplePath}`);
         bin = await packExampleGame(examplePath!);
@@ -70,6 +79,16 @@ const listener = await HostListener.start({
     webSocketPort: Number(arg('--ws-port', '4480')),
     onLink: (link) => session.accept(link),
     log,
+    // --serve: the published game, from memory, on this port.
+    onHttp: (_req, res, url) => {
+        if (!web) return false;
+        const file = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
+        const body = web.files.get(file);
+        if (!body) return false;
+        res.writeHead(200, { 'content-type': contentType(file), 'cache-control': 'no-store' });
+        res.end(body);
+        return true;
+    },
 });
 
 // Tick 0 of the game is tick 0 of the session clock, so a tick number means the same moment to both.
@@ -79,17 +98,26 @@ if (runtime) {
     const playerTemplate = arg('--player-template');
     const spawnAt = (arg('--spawn', '0,1,0') ?? '0,1,0').split(',').map(Number);
     const characters = new Map<number, Node>();
+    const spawnedControllers = new Set<ControllerNode>();
     const subtree = (root: Node): Node[] => [root, ...root.children.flatMap(subtree)];
     const remote = playerTemplate ? new RemoteControl(session, {
-        possess: (peer) => {
+        possess: (peer): ControllerNode | null => {
+            // A character the level placed for a player, while one is free; then a new copy of the template.
+            // (One a player already drives is 'remote', so 'player' means free.)
+            const placed = [...runtime!.scene.controllers].find((c: ControllerNode) => c.controlSource === 'player' && !!c.possessed && !spawnedControllers.has(c));
+            if (placed) { log(`peer ${peer.id} drives the level's "${placed.possessed!.name}"`); return placed; }
             const root = runtime!.scene.instantiate(playerTemplate, { position: [spawnAt[0] + peer.id * 2, spawnAt[1], spawnAt[2]] });
             const controller = root ? subtree(root).find((n) => n.nodeType === 'controller') as ControllerNode | undefined : undefined;
             if (!root || !controller) { log(`--player-template "${playerTemplate}" has no Controller in it; peer ${peer.id} spectates`); return null; }
             characters.set(peer.id, root);
+            spawnedControllers.add(controller);
             log(`peer ${peer.id} drives a new "${playerTemplate}"`);
             return controller;
         },
-        release: (peer) => {
+        release: (peer, controller) => {
+            // The level's own character goes back to waiting for a player; a spawned copy goes.
+            if (!spawnedControllers.has(controller)) { controller.controlSource = 'player'; return; }
+            spawnedControllers.delete(controller);
             const root = characters.get(peer.id);
             characters.delete(peer.id);
             if (root?.scene) runtime!.scene.removeNode(root);
@@ -141,6 +169,20 @@ console.log(`cleo-host (NetSync phase 8)
   Endpoint      http://localhost:${listener.webSocketPort}/endpoint  (a HostEndpoint for PeerSession.join)
   Session       ${session.tickRate} Hz, ${session.maxPeers} seats, content ${contentHash.slice(0, 16)}…
   Game          ${runtime ? `"${runtime.sceneName}" running headless` : 'none (session only)'}`);
+
+if (web) {
+    const q = new URLSearchParams({
+        wt: `https://localhost:${listener.webTransportPort}/netsync`, hash: certificate.hash, ws: `ws://localhost:${listener.webSocketPort}/ws`,
+    });
+    console.log(`  Play          http://localhost:${listener.webSocketPort}/?${q}
+                (add &transport=websocket to play over the fallback)`);
+}
+
+function contentType(file: string): string {
+    const ext = file.slice(file.lastIndexOf('.') + 1);
+    return ({ html: 'text/html', js: 'text/javascript', json: 'application/json', wasm: 'application/wasm', css: 'text/css' } as Record<string, string>)[ext]
+        ?? 'application/octet-stream';
+}
 
 const shutdown = async (signal: string) => {
     log(`${signal}: closing`);

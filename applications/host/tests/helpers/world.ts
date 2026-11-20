@@ -8,7 +8,7 @@ import { createIntent, type ControlIntent } from '../../../../src/core/control/i
 import {
     AnimHost, AnimPeer, CarryHost, CarryPeer, ConditionedLink, HostSession, LagCompensator, ManualScheduler, PeerCommands, PeerSession, Predictor,
     RemoteControl, ScriptHost, ScriptPeer, SyncHost, SyncPeer, WeaponHost, WeaponPeer, createLoopbackPair, followerSceneJson,
-    type FollowerOriginals, type LinkConditions, type RemoteControlOptions, type Trust, type WeaponHostOptions,
+    PeerFrames, type FollowerOriginals, type LinkConditions, type RemoteControlOptions, type Trust, type WeaponHostOptions,
 } from '../../../../src/netsync';
 import { HostRuntime } from '../../src/hostRuntime';
 import { bufferSource } from '../../../editor/src/player/gameSource';
@@ -64,6 +64,15 @@ export interface TestPeer {
     weapons?: WeaponPeer;
     script?: ScriptPeer;
     anim?: AnimPeer;
+    /**
+     * A predicting peer that simulates frame by frame (as a browser does, PeerFrames) instead of in host ticks:
+     * its frame times in ms, used in turn (e.g. [16.7] for 60 Hz, [7, 16, 25] for an uneven one).
+     */
+    frameMs?: number[];
+    frames?: PeerFrames;
+    /** When its next frame is due (scheduler ms), and which entry of frameMs comes next. */
+    nextFrameAt?: number;
+    frameIndex?: number;
     /** Where this peer holds its carried prop this tick (in its scene), or null. */
     hold?: ((tick: number) => { pos: ArrayLike<number>; rot: ArrayLike<number> } | null) | null;
 }
@@ -119,8 +128,21 @@ export async function world(bin: Uint8Array, options: WorldOptions = {}) {
             anim?.tick(tick);
             syncMs.push(performance.now() - t0);
             tick++;
-            await s.advance(TICK_MS);
+            // Frame-by-frame peers draw their frames as the clock reaches them, between the host's ticks.
+            const end = s.now() + TICK_MS;
+            for (;;) {
+                let next: TestPeer | null = null;
+                for (const p of peers) if (p.frames && p.nextFrameAt! <= end && (!next || p.nextFrameAt! < next.nextFrameAt!)) next = p;
+                if (!next) break;
+                await s.advance(next.nextFrameAt! - s.now());
+                const dt = next.frameMs![next.frameIndex! % next.frameMs!.length];
+                next.frameIndex!++;
+                next.nextFrameAt! += dt;
+                frame(next, dt / 1000);
+            }
+            await s.advance(end - s.now());
             for (const p of peers) {
+                if (p.frames) continue;
                 // Animation follows the frame (as a client applies it before drawing), and each tick simulated too.
                 if (p.predictor) { p.anim?.apply(); simulate(p); p.sync.apply(); p.weapons?.update(); continue; }
                 p.sync.apply();
@@ -158,8 +180,24 @@ export async function world(bin: Uint8Array, options: WorldOptions = {}) {
         }
     };
 
-    const join = async (conditions: LinkConditions, mode: 'follow' | 'predict' = 'follow'): Promise<TestPeer> => {
-        const simulated = mode === 'predict' ? await simulatedPeerScene(bin) : null;
+    /** One frame of a frame-by-frame peer: its player's intent, its physics and scene for `dt`, then PeerFrames. */
+    const frame = (p: TestPeer, dt: number) => {
+        const pred = p.predictor!;
+        const controller = pred.controller as ControllerNode | null;
+        if (controller) {
+            controller.controlSource = 'remote';
+            controller.remoteIntent = p.drive?.(Math.floor(pred.dueTickExact())) ?? null;
+        }
+        p.frames!.beforeFrame();
+        p.physics!.update(dt);
+        p.scene.update(dt, s.now(), false, dt);
+        p.physics!.endFrame(dt);
+        p.frames!.afterFrame(dt);
+        p.simulatedTicks = pred.lastTick;
+    };
+
+    const join = async (conditions: LinkConditions, mode: 'follow' | 'predict' | 'frames' = 'follow', frameMs: number[] = [1000 / 60]): Promise<TestPeer> => {
+        const simulated = mode !== 'follow' ? await simulatedPeerScene(bin) : null;
         const scene = simulated?.scene ?? await peerScene(bin);
         const joining = PeerSession.join({
             endpoint: {}, contentHash: 'test', scheduler: s, reconnect: false,
@@ -186,6 +224,15 @@ export async function world(bin: Uint8Array, options: WorldOptions = {}) {
             peer.weapons = new WeaponPeer(peerSession, peer.sync);
         }
         if (options.anim) peer.anim = new AnimPeer(peerSession, peer.sync);
+        if (mode === 'frames' && peer.predictor) {
+            peer.frameMs = frameMs;
+            peer.frameIndex = 0;
+            peer.nextFrameAt = s.now() + frameMs[0];
+            peer.frames = new PeerFrames({
+                predictor: peer.predictor, sync: peer.sync, anim: peer.anim, carry: peer.carry, weapons: peer.weapons,
+                hold: (t) => peer.hold?.(t) ?? null,
+            });
+        }
         if (options.scripts) {
             // This peer's own tree: the top-level node its controller sits in.
             const ownRoot = () => {

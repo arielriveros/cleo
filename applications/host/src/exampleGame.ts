@@ -23,6 +23,11 @@ export interface ExampleGameOptions {
 
 /** Pack the project folder at `dir` into game.bin bytes. */
 export async function packExampleGame(dir: string, options: ExampleGameOptions = {}): Promise<Uint8Array> {
+    return new Uint8Array(packGameBin(await exampleGameData(dir, options)).buffer);
+}
+
+/** The game data of the project folder at `dir`, as the editor's publish builds it, before packing. */
+export async function exampleGameData(dir: string, options: ExampleGameOptions = {}): Promise<Record<string, any>> {
     const { bundle } = await readExample(path.resolve(dir));
     const libs = bundle.libraries ?? {};
     const scenes: Record<string, { name: string; scene: unknown }> = {};
@@ -60,5 +65,5 @@ export async function packExampleGame(dir: string, options: ExampleGameOptions =
     if (options.physicsBackend) config.physics = { backend: options.physicsBackend };
     data.config = config;
     options.edit?.(data);
-    return new Uint8Array(packGameBin(data).buffer);
+    return data;
 }

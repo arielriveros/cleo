@@ -10,7 +10,7 @@
 
 import { Http3Server } from '@fails-components/webtransport';
 import { WebSocketServer } from 'ws';
-import { createServer, type Server } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { WebSocketLink, WebTransportLink, type HostEndpoint, type NetLink, type WebSocketLike, type WebTransportLike } from '../../../src/netsync';
@@ -29,6 +29,8 @@ export interface HostListenerOptions {
     bindAddress?: string;
     /** Every new link, already wrapped. */
     onLink: (link: NetLink) => void;
+    /** Other HTTP requests on the TCP port (after /healthz and /endpoint): true when answered. */
+    onHttp?: (req: IncomingMessage, res: ServerResponse, url: URL) => boolean;
     log?: (line: string) => void;
 }
 
@@ -81,6 +83,7 @@ export class HostListener {
             };
             if (url.pathname === '/healthz') return json(200, { ok: true });
             if (url.pathname === '/endpoint') return json(200, endpointFor(req.headers.host ?? 'localhost'));
+            if (options.onHttp?.(req, res, url)) return;
             res.writeHead(404);
             res.end();
         });

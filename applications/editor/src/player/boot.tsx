@@ -55,6 +55,21 @@ export interface PlayerBootOptions {
   startFromSave?: () => Promise<SaveDocument | null>;
   /** A failure past boot: a scene switch that threw. Defaults to {@link showError}. */
   onError?: (err: unknown) => void;
+  /**
+   * Join a NetSync host instead of playing alone (docs/design/netsync.md, phase 9): the game's scene is loaded as
+   * a follower of the host's, this player's character predicted here.
+   */
+  netsync?: PlayerNetSync;
+}
+
+/** Where a game's NetSync host is, and how to join it (a join ticket from the allocator, or Play › Multiplayer). */
+export interface PlayerNetSync {
+  endpoint: import('cleo/netsync/index').HostEndpoint;
+  connectOptions?: import('cleo/netsync/index').ConnectOptions;
+  name?: string;
+  token?: string;
+  /** Called once joined, with the client (the debugger reads it). */
+  onJoined?: (client: import('cleo/netsync/index').NetSyncClient) => void;
 }
 
 export interface PlayerHandle {
@@ -279,7 +294,7 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
 
   // Async because terrain splat/height payloads are DEFLATE-compressed and DecompressionStream
   // has no synchronous form.
-  const startScene = async (id: string, onProgress?: LoadProgressListener) => {
+  const startScene = async (id: string, onProgress?: LoadProgressListener, prepare?: (json: any) => void) => {
     const entry = table[id];
     if (!entry) { Logger.warn(`loadScene: no scene "${id}"`, 'Player'); return; }
     currentId = id;
@@ -292,7 +307,7 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     // Read when the scene loads, so an unvisited scene's meshes are never touched. Into a fresh copy of its
     // JSON, every visit: the manifest's stays refs only, and what this one is inflated with goes with it once
     // the engine has parsed it (and with the engine's objects, once the scene is disposed).
-    const built = await buildGameScene(content, id, stage);
+    const built = await buildGameScene(content, id, stage, prepare);
     if (!built) return;
     const { scene } = built;
     // The scene's own look (exposure, shadows, post), as the editor shows it. A game published before
@@ -350,6 +365,31 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
 
   // The entry scene is read while the textures are; the game starts once both are in, so it opens with every
   // texture on the GPU.
+  if (options.netsync) {
+    // Online: the scene is the host's, loaded as its follower once joined.
+    const net = options.netsync;
+    const contentHash = (data as any).contentHash;
+    if (typeof contentHash !== 'string')
+      throw new Error('This game.bin carries no content hash, which a NetSync host checks players against. Publish it again.');
+    setLoadingText('Joining…');
+    const { NetSyncClient } = await import('cleo/netsync/index');
+    const [client] = await Promise.all([
+      NetSyncClient.join({
+        endpoint: net.endpoint, connectOptions: net.connectOptions, name: net.name, token: net.token, contentHash,
+        physics: engine.physics,
+        loadScene: async (name, prepare) => {
+          await startScene((name && resolve(name)) || currentId, undefined, prepare);
+          return engine.scene;
+        },
+      }),
+      texturesLoaded,
+    ]);
+    Logger.info(`joined a NetSync host as peer ${client.session.peerId} over ${client.session.linkKind}`, 'Player');
+    // For the browser's console and automated checks (the NetSync debugger panel reads the same client).
+    (window as any).CLEO_NETSYNC = client;
+    net.onJoined?.(client);
+    return { engine, currentSceneName: () => table[currentId]?.name ?? '' };
+  }
   await Promise.all([texturesLoaded, startScene(currentId)]);
   return { engine, currentSceneName: () => table[currentId]?.name ?? '' };
 }

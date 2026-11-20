@@ -75,6 +75,7 @@ export class Predictor {
     private readonly _unpack = [0, 0, 0, 1];
     private readonly _historyTicks: number;
     private readonly _pending = vec3.create();
+    private readonly _bodyBefore = vec3.create();
     private _lastTick = -1;
     /** Whether the character has been put where the host has it at least once (it spawns at its template's origin). */
     private _placed = false;
@@ -115,13 +116,17 @@ export class Predictor {
      * Step the local simulation until {@link lastTick} reaches it, calling {@link afterTick} after each.
      */
     public dueTick(): number { return this._commands.targetTick(); }
+    /** {@link dueTick} with its fraction (a peer simulating frame by frame samples the character at each whole tick). */
+    public dueTickExact(): number { return this._commands.targetTickExact(); }
     public get lastTick(): number { return this._lastTick; }
 
     /**
      * After the peer stepped tick `tick` (its controller thought, its physics ran): remember where the character
      * got to, send the intent that got it there as the command for `tick`, and blend in any pending correction.
+     * `sample` is where the character was at that tick when the peer does not step in ticks (it simulates frame by
+     * frame, and the tick fell between two frames: see PeerFrames); by default, where its body is now.
      */
-    public afterTick(tick: number): void {
+    public afterTick(tick: number, sample?: { pos: ArrayLike<number>; vel: ArrayLike<number> }): void {
         this._lastTick = tick;
         this._adopt();
         const node = this._bodyNode;
@@ -130,6 +135,7 @@ export class Predictor {
         if (!node || !body || !controller) return;
         this._commands.send(tick, controller.publishedIntent);
 
+        vec3.copy(this._bodyBefore, body.position.toArray() as unknown as vec3);
         // Carry part of the pending correction into the body now.
         if (vec3.squaredLength(this._pending) > 1e-10) {
             const step = vec3.scale(vec3.create(), this._pending, this.blend);
@@ -137,8 +143,14 @@ export class Predictor {
             this._moveBody(body, step);
             vec3.subtract(this._pending, this._pending, step);
         }
-        const p = body.position.toArray();
-        const v = body.velocity.toArray();
+        let p: ArrayLike<number> = body.position.toArray();
+        let v: ArrayLike<number> = body.velocity.toArray();
+        if (sample) {
+            // The sample was taken before this tick's share of the correction moved the body: add it.
+            const moved = vec3.subtract(vec3.create(), p as vec3, this._bodyBefore);
+            p = vec3.add(vec3.create(), sample.pos as vec3, moved);
+            v = sample.vel;
+        }
         // Recorded where it will be once the rest of the pending correction is in: that is what the host will say.
         this._history.set(tick, {
             pos: vec3.fromValues(p[0] + this._pending[0], p[1] + this._pending[1], p[2] + this._pending[2]),

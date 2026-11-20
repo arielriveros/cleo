@@ -15,6 +15,7 @@ import { getPlaySession } from '../features/playWindow/sessionStore';
 import { playSaveStore, type PlaySavesConfig } from '../features/saves/playSaves';
 import { blobSource, bufferSource } from './gameSource';
 import { readGameHeader } from './unpack';
+import { netsyncFromUrl } from './netsyncJoin';
 
 const session = new URLSearchParams(location.search).get(SESSION_PARAM) ?? '';
 const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(PLAY_CHANNEL);
@@ -122,6 +123,8 @@ async function boot(stored: Blob | ArrayBuffer): Promise<void> {
       physicsWorkerFactory: createPhysicsWorker,
       onSceneStarted: name => setState({ phase: handle?.engine.isPaused ? 'paused' : 'running', scene: name }),
       onError: fail,
+      // Play › Multiplayer opens each player's window with the local host to join (netsyncJoin.ts).
+      netsync: netsyncFromUrl() ?? undefined,
     });
     setState({ phase: handle.engine.isPaused ? 'paused' : 'running', scene: handle.currentSceneName() });
     // The editor's release-mouse key (Options ▸ Editor ▸ Viewport ▸ Play), from its own storage: this window is
