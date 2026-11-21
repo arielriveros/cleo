@@ -200,12 +200,14 @@ export function toolDefinitions(bridge, opts = {}) {
         description: 'One node or several: path, id, type, transform (metres, Euler degrees), world position and world bounds '
             + '(center, size, min, max of it and its children), children, script and its field values, shapes, variables, '
             + 'material (type, properties, textures), linked assets, sprite clips, and `props`: its settable properties with '
-            + 'current values, by the names scene_edit `props` takes (dotted paths reach into objects, e.g. "light.intensity"). '
+            + 'current values, by the names scene_edit `props` takes (dotted paths reach into objects, e.g. "light.intensity"), '
+            + 'and `inspector`: the rows its inspector shows, by the same keys, each with its label there, its type (Color, Vec3, '
+            + 'Material, a node class, ...) and its value. '
             + '`fields` picks parts (cheaper for many nodes); `json: true` adds the serialized node.',
         inputSchema: {
             node: ref.optional(),
             nodes: z.array(ref).min(1).max(50).optional().describe('Several at once, instead of node.'),
-            fields: z.array(z.enum(['transform', 'bounds', 'children', 'script', 'material', 'shapes', 'variables', 'props', 'assets']))
+            fields: z.array(z.enum(['transform', 'bounds', 'children', 'script', 'material', 'shapes', 'variables', 'props', 'inspector', 'assets']))
                 .optional().describe('Only these parts (default all).'),
             json: z.boolean().optional(),
         },
@@ -227,7 +229,7 @@ export function toolDefinitions(bridge, opts = {}) {
         rotation: vec3.optional().describe('Local Euler DEGREES.'),
         scale: vec3.optional(),
         visible: z.boolean().optional(),
-        props: z.record(z.string(), z.any()).optional().describe('By node_get `props` names, e.g. {"light.intensity": 800}.'),
+        props: z.record(z.string(), z.any()).optional().describe('By node_get `props` names, e.g. {"light.intensity": 800}. An `inspector` row is written as the inspector writes it (its clamps hold); a Material, Texture, Sound or Tileset row takes the asset name or id, a node row a node ref.'),
         scriptFields: z.record(z.string(), z.any()).optional().describe('The attached script\'s public fields. A Material, Texture, Sound or Tileset field takes the asset\'s name or id; a node field (typed Node, LightNode, ...) takes a node ref; a Color takes [r, g, b] (0..1).'),
         material: z.union([z.string(), z.strictObject({ name: z.string().optional(), ...materialFields })]).optional()
             .describe('Asset name, or a spec as material_write takes (linear RGB) making one named after the node.'),

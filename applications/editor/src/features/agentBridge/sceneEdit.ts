@@ -19,7 +19,7 @@ import {
   type BridgeHost, type CommandResult, type GetHost,
 } from './bridgeHost'
 import { nodePath, resolveNodeRef, userChildren } from './nodeRefs'
-import { applyProp, nearestNames } from './inspect'
+import { applyProp, declaredRow, nearestNames } from './inspect'
 import { findMaterial, uniqueMaterialName, upsertMaterial, type MadeMaterials, type MaterialAsset, type MaterialSpec } from './materials'
 import { withCapture } from './shots'
 
@@ -95,7 +95,14 @@ function refOf(ctx: EditCtx, ref: string): Node { return resolveNodeRef(ctx.scen
  * `{ $asset, id }` and `{ $nodePath }` (src/core/properties/fieldRefs.ts). Anything else is stored as given.
  */
 function storedFieldValue(ctx: EditCtx, node: Node, v: ScriptVarSchema, value: unknown): unknown {
-  const type = upgradeScriptVar(v).type
+  return storedValue(ctx, node, v.name, upgradeScriptVar(v).type, value)
+}
+
+/**
+ * A value of `type` as a node stores it, from what an agent names: an asset by name or id, a node by ref (see
+ * storedFieldValue). For a script's field, and for a row of a node's inspector (its declared properties).
+ */
+function storedValue(ctx: EditCtx, node: Node, name: string, type: cleo.PropertyType, value: unknown): unknown {
   const item = type.kind === 'list' ? type.of : type
   const one = (x: unknown): unknown => {
     if (x === null || typeof x !== 'string') return x
@@ -109,12 +116,12 @@ function storedFieldValue(ctx: EditCtx, node: Node, v: ScriptVarSchema, value: u
       const found = list.find(a => a.id === x) ?? list.find(a => a.name === x)
       if (found) return cleo.assetRef(item.asset, found.id)
       if (item.asset === 'texture' && cleo.TextureManager.Instance.getTexture(x)) return cleo.assetRef('texture', x)
-      throw new Error(`"${v.name}" is a ${cleo.propertyTypeLabel(item)}: no ${item.asset} is called "${x}".${list.length ? ` Some: ${list.slice(0, 8).map(a => a.name).join(', ')}.` : ''}`)
+      throw new Error(`"${name}" is a ${cleo.propertyTypeLabel(item)}: no ${item.asset} is called "${x}".${list.length ? ` Some: ${list.slice(0, 8).map(a => a.name).join(', ')}.` : ''}`)
     }
     if (item.kind === 'node') {
       const target = refOf(ctx, x)
       const path = cleo.relativeNodePath(node, target)
-      if (!path) throw new Error(`"${v.name}": "${x}" is not in the same scene as "${node.name}".`)
+      if (!path) throw new Error(`"${name}": "${x}" is not in the same scene as "${node.name}".`)
       return cleo.nodePathRef(path)
     }
     return x
@@ -238,7 +245,14 @@ function opAssets(ctx: EditCtx, node: Node, links: AssetLinks): () => string[] {
  */
 async function applyFields(ctx: EditCtx, node: Node, op: any, fresh: boolean): Promise<string[]> {
   const { h } = ctx
-  for (const [k, v] of Object.entries(op.props ?? {})) applyProp(node, k, v, true)
+  // A row of the node's inspector names its asset or node as a script's field does: stored as the row stores it.
+  const props: Record<string, unknown> | undefined = op.props
+    ? Object.fromEntries(Object.entries(op.props as Record<string, unknown>).map(([k, v]) => {
+        const row = declaredRow(node, k)
+        return [k, row ? storedValue(ctx, node, k, row.type, v) : v]
+      }))
+    : undefined
+  for (const [k, v] of Object.entries(props ?? {})) applyProp(node, k, v, true)
   const sid = getScriptIdOf(node)
   const scriptAsset = sid ? h.engine.scriptAssets.find(a => a.id === sid) : undefined
   if (op.scriptFields) {
@@ -274,8 +288,8 @@ async function applyFields(ctx: EditCtx, node: Node, op: any, fresh: boolean): P
   if (op.rotation) { node.setRotation(op.rotation); did.push('rotation') }
   if (op.scale) { node.setScale(op.scale); did.push('scale') }
   if (op.visible !== undefined && op.visible !== null) { node.visible = op.visible; did.push('visible') }
-  if (op.props) {
-    for (const [k, v] of Object.entries(op.props)) applyProp(node, k, v)
+  if (props) {
+    for (const [k, v] of Object.entries(props)) applyProp(node, k, v)
     emitter.emit('SCENE_CHANGED', { kind: 'component', node })
     did.push(`props(${Object.keys(op.props).join(', ')})${instanceRoot && !fresh ? ' (a template change resets these on a placed copy: edit the template for lasting ones)' : ''}`)
   }

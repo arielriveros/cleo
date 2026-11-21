@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { Camera2DNode, CharacterBody2DNode, LightNode, Material, Node, PointLight, Scene, Sprite, SpriteNode } from 'cleo'
+import { AreaLight, Camera2DNode, CharacterBody2DNode, LightNode, Material, Node, PointLight, Scene, Spotlight, Sprite, SpriteNode } from 'cleo'
 import { NodeRefError, nodePath, resolveNodeRef, userChildren } from '../src/features/agentBridge/nodeRefs'
-import { applyProp, editDistance, elide, nearestNames, outline, settableProps, simpleValue } from '../src/features/agentBridge/inspect'
+import { applyProp, editDistance, elide, inspectorRows, nearestNames, outline, settableProps, simpleValue } from '../src/features/agentBridge/inspect'
 import { formatLogs, scopeMatches, type AgentLogEntry } from '../src/features/agentBridge/agentLogs'
 import { applySpec, buildChecked, materialKind, materialTextures } from '../src/features/agentBridge/materials'
 import { checkOpFields } from '../src/features/agentBridge/sceneEdit'
@@ -127,6 +127,29 @@ describe('properties', () => {
     expect(props['light.intensity']).toBe(800)
     expect(props).not.toHaveProperty('position') // transform has its own fields
     expect(Object.keys(props).some(k => k.startsWith('_'))).toBe(false)
+  })
+
+  it('reports the rows its inspector shows, with their labels and types', () => {
+    const light = new LightNode('Lamp', new PointLight({ intensity: 800 } as any))
+    const rows = inspectorRows(light)
+    expect(rows['light.color']).toMatchObject({ label: 'Light › Emission › Color', type: 'Color' })
+    expect(rows['light.intensity']).toMatchObject({ label: 'Light › Emission › Intensity (lm)', type: 'number', value: 800 })
+    // A spot light's cone is not a point light's row; the Transform has fields of its own.
+    expect(rows).not.toHaveProperty('light.cutOff')
+    expect(rows).not.toHaveProperty('position')
+  })
+
+  it('writes an inspector row as the inspector does: through its setter, with its type checked', () => {
+    const spot = new LightNode('Spot', new Spotlight({}))
+    applyProp(spot, 'light.cutOff', 40)
+    applyProp(spot, 'light.outerCutOff', 20)
+    // The engine keeps the outer cone wider than the inner one.
+    expect((spot.light as Spotlight).outerCutOff).toBeGreaterThan(40)
+    expect(() => applyProp(spot, 'light.color', [1, 0])).toThrow(/is a Color; got \[1,0\]/)
+    const area = new LightNode('Panel', new AreaLight({}))
+    expect(() => applyProp(area, 'light.shape', 'oval')).toThrow(/is one of 'rect' \| 'disk'/)
+    applyProp(area, 'light.shape', 'disk')
+    expect((area.light as AreaLight).shape).toBe('disk')
   })
 
   it('assigns through dotted paths and keeps value kinds', () => {

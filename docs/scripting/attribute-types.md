@@ -28,7 +28,8 @@ export default class Torch extends Node {
 ```
 
 The engine's own nodes use the same types for their properties: a light's colour is a `Color`, a fog's wind a
-`Vec3`. Every inspector therefore edits a colour, a vector or a material the same way.
+`Vec3`. Every inspector therefore edits a colour, a vector or a material the same way (see
+[The engine's nodes](#the-engines-nodes)).
 
 ## The types
 
@@ -62,6 +63,16 @@ value the script sets itself in `onConstruct` is kept.
 
 A field that changes type keeps its value only when the new type can hold it: a `weapon: string` that becomes
 `weapon: Material` starts over from its default.
+
+## The engine's nodes
+
+Each engine node declares its inspector properties with these types (`src/properties`), and the inspector draws
+its rows from them: a light's **Color** row is the `Color` editor a script's field gets, a vehicle's **Towed by** the
+node picker of a `Node` field. A row's tooltip is its row in the docs.
+
+The same declarations name what the rest of the editor shows of a node. The Sequencer calls a track by its row
+(`Light › Emission › Color`). The agent tools list a node's rows with their types (`node_get`, `inspector`) and
+write them as the inspector does (`scene_edit`, `props`).
 
 ## Saves and multiplayer
 

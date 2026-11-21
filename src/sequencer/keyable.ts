@@ -12,15 +12,26 @@
  *
  * The walk mirrors the editor agent bridge's `settableProps` (features/agentBridge/inspect.ts), which rounds
  * for display and caps its output; this one does neither.
+ *
+ * What the node's classes declare for the inspector (src/properties) names its rows: a declared row whose key
+ * is a property path is keyable (one a walk would miss, two levels down, included), and carries the row's
+ * label and type, so a colour is a colour and a track reads as the inspector names it. In a published game
+ * nothing is declared, and the walk alone answers.
  */
 
 import type { PropertyValueType } from './types';
+import type { PropertyType } from '../core/properties/types';
+import { declarationsOf, labelOfKey, resolveProperty, type ClassDeclaration } from '../properties/declare';
 
 export interface KeyableProperty {
     /** A property path `compilePropertyPath` resolves on the node. */
     path: string;
     valueType: PropertyValueType;
     value: number | number[] | boolean | string;
+    /** Its inspector row's name, when its class declares one: `Light › Intensity (lm)`. */
+    label?: string;
+    /** Its declared type: a colour, a vector, a choice, ... */
+    type?: PropertyType;
 }
 
 /** Identity, structure, the transform's other spellings, editor bookkeeping and per-frame readouts. */
@@ -109,6 +120,33 @@ function materialProperties(material: unknown, prefix: string, out: KeyablePrope
     }
 }
 
+/** The value at a dotted property path, or undefined. */
+function readPath(node: object, path: string): unknown {
+    let at: any = node;
+    for (const part of path.split('.')) at = at?.[part];
+    return at;
+}
+
+/** A row's name for a track: its card, its section and its label (`Light › Shadows › Cast Shadows`). */
+function rowLabel(decl: ClassDeclaration, section: string, label: string): string {
+    return [decl.title, section, label].filter(Boolean).join(' › ');
+}
+
+/**
+ * The declared rows of `node` that are property paths (not those read through a getter of their own), with
+ * their names and types. A row whose key would not resolve on the node is left out.
+ */
+function declaredPaths(node: object): Map<string, { label: string; type: PropertyType }> {
+    const out = new Map<string, { label: string; type: PropertyType }>();
+    for (const decl of declarationsOf(node)) for (const section of decl.sections) for (const p of section.props) {
+        if (p.get || p.readonly || out.has(p.key)) continue;
+        let resolved;
+        try { resolved = resolveProperty(p, node as any); } catch { continue; }
+        out.set(p.key, { label: rowLabel(decl, section.title, resolved.label || labelOfKey(p.key)), type: resolved.type });
+    }
+    return out;
+}
+
 /** Every property of `node` a sequence can key, with its current value. Stable order: transform first. */
 export function keyableProperties(node: object): KeyableProperty[] {
     const out: KeyableProperty[] = [];
@@ -121,6 +159,20 @@ export function keyableProperties(node: object): KeyableProperty[] {
     if (typeof n.authoredVisible === 'boolean') { out.push({ path: 'visible', valueType: 'bool', value: n.authoredVisible }); seenPaths.add('visible'); }
 
     walkObject(node, '', out, seenPaths, true, Number.POSITIVE_INFINITY);
+
+    // The declared rows: named and typed where the walk found them, and added where it did not.
+    const declared = declaredPaths(node);
+    for (const p of out) {
+        const d = declared.get(p.path);
+        if (d) { p.label = d.label; p.type = d.type; }
+    }
+    for (const [path, d] of declared) {
+        if (seenPaths.has(path) || SKIP.has(path)) continue;
+        const kv = keyValue(readPath(node, path));
+        if (!kv) continue;
+        seenPaths.add(path);
+        out.push({ path, ...kv, label: d.label, type: d.type });
+    }
 
     // A model's materials: the first as `model.material`, the path the Valley's pond key uses; the rest by slot.
     const materials: unknown[] | undefined = Array.isArray(n.model?.materials) ? n.model.materials : undefined;
