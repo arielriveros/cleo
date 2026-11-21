@@ -145,7 +145,7 @@ describe('an example written as the editor saves it once opened (editorNormalize
             materials: [{ id: 'm1', name: 'Grid', material: { type: 'pbr' } }],
             particleSystems: [{ id: 'p1', name: 'Dust', thumbnail: '' }],
             models: [{
-                id: 'mo1', name: 'Crate', thumbnail: '', materialIds: [],
+                id: 'mo1', name: 'Crate', thumbnail: '', materialIds: [], order: 4,
                 nodeJson: { id: 'h', name: 'Crate', type: 'node', position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 2, 2], children: [
                     { id: 'c', name: 'crate_mesh', type: 'model', position: [0, 1, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: [], model: {} },
                 ] },
@@ -161,11 +161,12 @@ describe('an example written as the editor saves it once opened (editorNormalize
     it('fills the settings, flattens a holder model, keeps a blank thumbnail key and stamps the reflection rules', async () => {
         const { normalizeForEditor } = await import('../tools/exampleKit/editorNormalize.mjs');
         const b: any = bundle();
-        expect(normalizeForEditor(b)).toEqual(['settings', '1 model(s) flattened', '1 thumbnail key(s)', '2 script(s) re-reflected']);
+        expect(normalizeForEditor(b)).toEqual(['settings', '1 model(s) flattened', '1 model order(s) dropped', '1 thumbnail key(s)', '2 script(s) re-reflected']);
         expect(b.libraries.projectSettings.engine.physicsBackend).toBe('jolt');
         expect(b.libraries.projectSettings.publish.width).toBe(1280);
         // The holder collapses into its ModelNode, under the asset's name, its scale folded in.
         expect(b.libraries.models[0].nodeJson).toMatchObject({ id: 'c', name: 'Crate', type: 'model', position: [0, 2, 0], scale: [2, 2, 2] });
+        expect('order' in b.libraries.models[0]).toBe(false);
         expect(Object.keys(b.libraries.materials[0]).at(-1)).toBe('thumbnail');
         expect(b.libraries.materials[0].thumbnail).toBe('');
         const [mover, maths] = b.libraries.scripts;
@@ -174,5 +175,20 @@ describe('an example written as the editor saves it once opened (editorNormalize
         expect(maths).toMatchObject({ variables: [], reflect: mover.reflect });
         // And it is a fixed point.
         expect(normalizeForEditor(b)).toEqual([]);
+    });
+});
+
+describe('script copies in a bundle installed into a folder (openFolder.ts installBundleToFolder)', () => {
+    it('drops the scene nodes\' copies and leaves the templates\' as the bundle brought them', () => {
+        const bundle: any = {
+            scenes: { s: { scene: { id: 'root', children: [{ id: 'n', variables: { __scriptId: { value: 'k' } }, script: 'old' }] } } },
+            libraries: {
+                scripts: [{ id: 'k', source: 'export default class K {}\n' }],
+                templates: [{ id: 't', nodeJson: { id: 'tn', variables: { __scriptId: { value: 'k' } }, script: 'export default class K { stale = 1 }\n' } }],
+            },
+        };
+        expect(settleScriptCopies(bundle, { fill: false, templates: false })).toBe(1);
+        expect('script' in bundle.scenes.s.scene.children[0]).toBe(false);
+        expect(bundle.libraries.templates[0].nodeJson.script).toBe('export default class K { stale = 1 }\n');
     });
 });

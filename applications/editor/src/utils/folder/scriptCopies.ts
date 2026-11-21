@@ -6,7 +6,8 @@
 // library is what Play runs), so a folder leaves those out and a reader puts them back from the library; the
 // others are stored as they are (a scene records each template's hash), refreshed to the library's source.
 //
-// Pure: no DOM, engine or Electron. Used by the tools that write the shipped examples and by cleo/testing.
+// Pure: no DOM, engine or Electron. Used by the tools that write the shipped examples, by cleo/testing and by a
+// bundle installed into a folder (features/projectFolder/openFolder.ts).
 
 const DEFAULT_CLASS = /export\s+default\s+(?:abstract\s+)?class\s+(\w+)/
 
@@ -26,9 +27,10 @@ function* treeNodes(root: any): Generator<any> {
 /**
  * Point every copy of a script's source at the library's. A scene node's inline `script` is put back (`fill`) or
  * taken away; a template node's inline `script`, a template's `scripts` map and a variant diff's copies are
- * refreshed where they exist, never added or removed. Returns how many changed.
+ * refreshed where they exist, never added or removed (`templates: false` leaves them as they are: a scene records
+ * each template's hash, so a bundle from elsewhere keeps its templates as it brought them). Returns how many changed.
  */
-export function settleScriptCopies(bundle: Copies, { fill }: { fill: boolean }): number {
+export function settleScriptCopies(bundle: Copies, { fill, templates = true }: { fill: boolean; templates?: boolean }): number {
   const byId = new Map((bundle.libraries?.scripts ?? []).map(s => [s.id, s]))
   const byClass = new Map<string, string>()
   for (const s of byId.values()) {
@@ -55,7 +57,7 @@ export function settleScriptCopies(bundle: Copies, { fill }: { fill: boolean }):
     if (value && typeof value === 'object') { for (const k of Object.keys(value)) value[k] = refresh(value[k]); return value }
     return value
   }
-  for (const t of bundle.libraries?.templates ?? []) {
+  for (const t of templates ? bundle.libraries?.templates ?? [] : []) {
     const linked = new Map<string, { source: string }>()
     for (const n of treeNodes(t?.nodeJson)) {
       const asset = byId.get(scriptIdOf(n) as string)

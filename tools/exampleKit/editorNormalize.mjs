@@ -5,7 +5,8 @@
 //   settings     every field of ProjectSettings/settings.json, defaults filled in (features/options/projectSettings.ts
 //                parseProjectSettings, which the editor reads the file through and saves back)
 //   models       a holder node with one ModelNode collapses into it (utils/modelClips.ts flattenModelAsset, run on
-//                the model library as it loads)
+//                the model library as it loads), and the model store's `order` is not the asset's (a file written
+//                through the cache before utils/modelStore.ts kept it to itself has one)
 //   thumbnails   the explorer renders a thumbnail for every material, terrain material, model and particle system
 //                and stores it on the record (assets/assetKinds.ts); the folder keeps that key, blank (folder/codec.ts)
 //   scripts      each script's fields re-reflected under the current reflection rules, and stamped with their
@@ -39,6 +40,9 @@ export function normalizeForEditor(bundle) {
     const flat = lib.models.map(m => flattenModelAsset(m))
     const n = flat.filter((m, i) => m !== lib.models[i]).length
     if (n) { lib.models = flat; changed.push(`${n} model(s) flattened`) }
+    let ordered = 0
+    for (const m of lib.models) if (m && 'order' in m) { delete m.order; ordered++ }
+    if (ordered) changed.push(`${ordered} model order(s) dropped`)
   }
 
   let blank = 0
