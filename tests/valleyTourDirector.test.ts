@@ -15,6 +15,8 @@ function setup() {
     const light = new LightNode('Lightning', new PointLight({ unit: 'photometric', intensity: 0, range: 2500 } as any), false);
     scene.addNode(director);
     scene.addNode(light);
+    // Its node field, which the tour's scene fills from the stored path to the light (`../Lightning`).
+    director.flash = light;
     const clouds = { ambientIntensity: 2 };
     Object.defineProperty(scene, 'volumetricClouds', { get: () => clouds });
     return { director, light, clouds };

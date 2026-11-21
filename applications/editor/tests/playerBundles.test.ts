@@ -86,6 +86,9 @@ describe.skipIf(!built)('the published player build', () => {
       'src/cleo.ts', 'src/graphics/loader.ts', 'src/graphics/utils/assimpjs.js', 'src/graphics/utils/gltfLoader.ts',
       'src/sequencer/movie/', 'src/core/scripting/sucraseTranspiler.ts', 'node_modules/sucrase/', 'node_modules/meshoptimizer/',
     ]) expect(all.filter(m => m.includes(tool)), tool).toEqual([]);
+    // Nor the inspector's declarations of the engine's nodes (src/properties): only their registry, which the
+    // Sequencer's keyable list reads, and which a game leaves empty.
+    expect(all.filter(m => m.includes('src/properties/') && !m.endsWith('src/properties/declare.ts'))).toEqual([]);
     // The runtime barrel is what the player's `cleo` resolves to.
     expect(all).toContain('src/cleoCore.ts');
   });
