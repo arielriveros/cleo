@@ -1,5 +1,5 @@
 import { CharacterNode, Logger, ModelNode, Node, Shape, moveWorldDirection, resolveSocketOwner, setMoveWorld } from 'cleo'
-import { find, attribute } from 'cleo/decorators'
+import { find, attribute, animTrigger } from 'cleo/decorators'
 import type { AnimationTriggerInfo, Animator, SocketName, TemplateName, TriggerName } from 'cleo'
 import { clamp } from '@/Core/Scripts/SoulsMath'
 import { bladeCapsule, disarmHitbox, ensureHurtbox, setHurtboxEnabled } from '@/Core/Scripts/SoulsHitbox'
@@ -307,17 +307,32 @@ export default class SoulsCharacterNode extends CharacterNode {
   protected _raise(trigger: TriggerName): void {
     const animator = this._animator
     if (!animator || !trigger) return
-    if (this._raised && this._raised !== trigger && animator.getParam(this._raised) === true) animator.resetTrigger(this._raised)
-    animator.setTrigger(trigger)
+    if (this._raised && this._raised !== trigger && animator.getParam(this._raised) === true) this._lower(this._raised)
+    this._fireTrigger(trigger)
     this._raised = trigger
   }
 
   /** Lower the last raised trigger if it has not fired (an action called off before it could start). */
   protected _lowerRaised(): void {
     const animator = this._animator
-    if (this._raised && animator?.getParam(this._raised) === true) animator.resetTrigger(this._raised)
+    if (this._raised && animator?.getParam(this._raised) === true) this._lower(this._raised)
     this._raised = ''
   }
+
+  /** Fire `trigger` on this character's animator: `animator:SetTrigger`, sent down to the model under it. */
+  @animTrigger()
+  protected _fireTrigger(trigger: TriggerName): TriggerName {
+    return trigger
+  }
+
+  /** Lower `trigger` if it is still raised: `animator:ResetTrigger`, sent down the same way. */
+  protected _lower(trigger: TriggerName): void {
+    if (trigger) this.dispatchDown('animator:ResetTrigger', trigger)
+  }
+
+  /** The fall: the base plays its death on Died, and the Actions layer leaves whatever it plays on it. */
+  @animTrigger('Died')
+  protected _fallDead(): void {}
 
   /**
    * Play the one-shot `trigger` starts: fire it and return what it plays (null — and a warning, once — when
@@ -360,7 +375,7 @@ export default class SoulsCharacterNode extends CharacterNode {
     const animator = this._animator
     const layer = this._triggerInfo(cut ? this.cutTrigger : this.stopTrigger)?.layer
     if (!animator || layer === undefined || !animator.activeTrigger(layer)) { this._lowerRaised(); return }
-    if (cut) { this._lowerRaised(); animator.setTrigger(this.cutTrigger) }
+    if (cut) { this._lowerRaised(); this._fireTrigger(this.cutTrigger) }
     else this._raise(this.stopTrigger)
   }
 

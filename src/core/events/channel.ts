@@ -17,7 +17,7 @@
 import { Emitter, type EventListenerFn, type EventWhere, type ListenOptions, type ListenerList } from './emitter';
 import { CleoEvent, type DispatchFrame, type EventPhase } from './event';
 import { deliver, deliverAsync, deliverList, eventOf, newFrame, popFrame, pushFrame, reportListenerError } from './dispatcher';
-import { countChannelListeners, parentOf, targetCountsFor, targetEmitter, type TargetCounts } from './eventTarget';
+import { childrenOf, countChannelListeners, parentOf, targetCountsFor, targetEmitter, type TargetCounts } from './eventTarget';
 import { ValueSubject } from './subject';
 
 /** How a channel behaves. */
@@ -40,6 +40,11 @@ export interface DispatchOptions {
     bubbles?: boolean;
     /** On to the channel's own listeners at the end (default true). False: the node path only. */
     broadcast?: boolean;
+    /**
+     * DOWN instead of up: the target, then every node beneath it, depth first (see {@link EventChannel.dispatchDown}).
+     * For commands to what a node holds: the animators under a character.
+     */
+    down?: boolean;
 }
 
 /** What a deferred event may say about its queueing. */
@@ -97,7 +102,7 @@ export class EventChannel {
     constructor(public readonly name: string, options: ChannelOptions = {}, counted = false) {
         this.pausable = options.pausable !== false;
         this.isolateErrors = options.isolateErrors !== false;
-        this.listeners = new Emitter(counted ? (_event, delta) => countChannelListeners(name, delta) : null);
+        this.listeners = new Emitter(counted ? (_event, delta, system) => countChannelListeners(name, delta, system) : null);
         this._targets = targetCountsFor(name);
     }
 
@@ -190,6 +195,7 @@ export class EventChannel {
      * that do not read the event back. Allocates no event unless a listener asks for `Events.current`.
      */
     public fire(name: string, args: readonly unknown[], target: object | null, options?: DispatchOptions): void {
+        if (options?.down && target !== null) { this.fireDown(target, name, args, options); return; }
         if (target === null || this._targetCount(name) === 0) {
             // The common case, a broadcast: straight to the channel's own listeners.
             if (options?.broadcast === false) return;
@@ -210,6 +216,7 @@ export class EventChannel {
 
     /** As {@link emit}, returning the event: its `results`, and whether a listener cancelled it. */
     public publish(name: string, args: unknown[] = [], target: object | null = null, options?: DispatchOptions): CleoEvent {
+        if (options?.down && target !== null) return this.dispatchDown(target, name, args, options);
         if (!this._reaches(name, target)) return new CleoEvent(this.name, name, args, target);
         const frame = pushFrame(this.name, name, args, target);
         if (frame === null) return new CleoEvent(this.name, name, args, target);
@@ -221,7 +228,33 @@ export class EventChannel {
 
     /** Dispatch at `target`: capture down to it, the target, bubble back up, then the broadcast. */
     public dispatchAt(target: object, name: string, args: unknown[] = [], options?: DispatchOptions): CleoEvent {
+        if (options?.down) return this.dispatchDown(target, name, args, options);
         return this.publish(name, args, target, options);
+    }
+
+    /**
+     * Send `name` DOWN from `target`: heard at the target, then at every node beneath it that listens, depth first
+     * (phase `'descend'`), then by the channel's own listeners unless `broadcast: false`. `stopPropagation` ends the
+     * walk. A character sends its animators a command this way: they sit on the model under it. When no node
+     * anywhere listens to `name`, nothing beneath is walked. Returns the event (its `results`).
+     */
+    public dispatchDown(target: object, name: string, args: unknown[] = [], options?: DispatchOptions): CleoEvent {
+        if (!this._reachesDown(name)) return new CleoEvent(this.name, name, args, target);
+        const frame = pushFrame(this.name, name, args, target);
+        if (frame === null) return new CleoEvent(this.name, name, args, target);
+        const event = eventOf(frame);
+        try { this._descend(frame, target, options); }
+        finally { popFrame(); }
+        return event;
+    }
+
+    /** As {@link dispatchDown}, keeping nothing: no event object unless a listener asks for `Events.current`. */
+    public fireDown(target: object, name: string, args: readonly unknown[], options?: DispatchOptions): void {
+        if (!this._reachesDown(name)) return;
+        const frame = pushFrame(this.name, name, args, target);
+        if (frame === null) return;
+        try { this._descend(frame, target, options); }
+        finally { popFrame(); }
     }
 
     /** The first result a listener of `name` returns for `args` (`undefined` results skipped), or undefined. */
@@ -250,6 +283,12 @@ export class EventChannel {
 
     /** The async form of {@link publish} / {@link dispatchAt}. */
     public async publishAsync(name: string, args: unknown[] = [], target: object | null = null, options: DispatchOptions & { parallel?: boolean } = {}): Promise<CleoEvent> {
+        if (options.down && target !== null) {
+            // Sent down, the listeners are called in turn; what they return that is a promise is then awaited.
+            const sent = this.dispatchDown(target, name, args, options);
+            await Promise.allSettled(sent.results.filter(r => !!r && typeof (r as PromiseLike<unknown>).then === 'function'));
+            return sent;
+        }
         if (!this._reaches(name, target)) return new CleoEvent(this.name, name, args, target);
         const frame = newFrame(this.name, name, args, target);
         const event = eventOf(frame);
@@ -321,7 +360,8 @@ export class EventChannel {
         }
         const entry: QueuedEvent = {
             name, args, target: options.target ?? null, key,
-            options: options.bubbles === undefined && options.broadcast === undefined ? undefined : { bubbles: options.bubbles, broadcast: options.broadcast },
+            options: options.bubbles === undefined && options.broadcast === undefined && !options.down
+                ? undefined : { bubbles: options.bubbles, broadcast: options.broadcast, down: options.down },
         };
         this._queue.push(entry);
         if (key !== undefined) this._coalesced.set(key, entry);
@@ -404,6 +444,38 @@ export class EventChannel {
     }
 
     // ---- internals --------------------------------------------------------------------------------------------------
+
+    /** Whether an event sent down can reach anyone: a node listening to it anywhere, or the channel itself. */
+    private _reachesDown(name: string): boolean {
+        return this._targetCount(name) > 0 || this.listeners.count(name) > 0;
+    }
+
+    /** The downward walk: the target and everything beneath it, depth first, then the broadcast. */
+    private _descend(frame: DispatchFrame, target: object, options?: DispatchOptions): void {
+        const name = frame.name;
+        if (this._targetCount(name) > 0) {
+            // Depth first, parents before children, without recursion: a stack of nodes still to visit.
+            const stack: object[] = [target];
+            let first = true;
+            while (stack.length > 0) {
+                const node = stack.pop()!;
+                const emitter = targetEmitter(node, this.name);
+                if (emitter !== undefined && emitter.count(name) > 0) {
+                    frame.phase = first ? 'target' : 'descend';
+                    frame.currentTarget = node;
+                    deliver(emitter, name, frame, this.isolateErrors);
+                    if (frame.stopped) return;
+                }
+                first = false;
+                const children = childrenOf(node);
+                for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
+            }
+        }
+        if (options?.broadcast === false || this.listeners.count(name) === 0) return;
+        frame.phase = 'broadcast';
+        frame.currentTarget = null;
+        deliver(this.listeners, name, frame, this.isolateErrors);
+    }
 
     /** Whether a dispatch of `name` (at `target`, if given) can reach anyone at all. */
     private _reaches(name: string, target: object | null): boolean {

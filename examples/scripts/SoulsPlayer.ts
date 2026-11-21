@@ -1,5 +1,5 @@
 import { Input, Logger, ModelNode, Node, moveWorldDirection, setMoveWorld } from 'cleo'
-import { save, onAction, attribute } from 'cleo/decorators'
+import { save, onAction, attribute, animParam, animTrigger } from 'cleo/decorators'
 import type { AnimationTriggerInfo, TemplateName, TriggerName } from 'cleo'
 import { clamp, num } from '@/Core/Scripts/SoulsMath'
 import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
@@ -284,6 +284,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public isSprinting: boolean = false
   public attackRatingNow: number = 0
   /** Locked on, an enemy engaged with us, or a blow given or taken within `combatLinger` seconds. */
+  @animParam('InCombat')
   public inCombat: boolean = false
   /** What pressing Interact would do right now, or '' — the HUD prompt. */
   public interactPrompt: string = ''
@@ -500,12 +501,11 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this.lastSafePosition = [at[0], at[1], at[2]]
     this._bufferAction = ''
     this._enter('free')
-    const animator = this._animator
-    animator?.resetTrigger?.('Died')
+    this._lower('Died')
     // Only the dead revive: raised on a living player (the pause menu's respawn), Revive would wait for the
     // next death and stand the body straight back up.
-    if (wasDead) animator?.setTrigger?.('Revive')
-    else animator?.resetTrigger?.('Revive')
+    if (wasDead) this._revive()
+    else this._lower('Revive')
     const rig = this._rig as any
     rig?.setOrbit?.(yaw, 12)
     rig?.snapToTarget?.()
@@ -634,11 +634,14 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this._setCombat(!resting && (!!this.lockTarget || this._enemyEngaged || this._sinceBlow < this.combatLinger))
   }
 
+  /** In combat or out: `inCombat` is an `@animParam`, so the animator's `InCombat` follows it. */
   private _setCombat(on: boolean): void {
-    if (on === this.inCombat) return
     this.inCombat = on
-    ;(this._model?.animator as any)?.setBool?.('InCombat', on)
   }
+
+  /** Back on its feet: Revive, sent down to the animator. */
+  @animTrigger('Revive')
+  private _revive(): void {}
 
   // ----- states ----------------------------------------------------------------------------------
 
@@ -890,10 +893,9 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
    * so the upper-body and guard layers follow too.
    */
   private _pinRunPose(speed: number | null): void {
-    const animator = this._model?.animator as any
-    if (!animator?.setParamOverride) return
-    animator.setParamOverride(this.runTurnSpeedParam, speed)
-    animator.setParamOverride(this.runTurnDirectionParam, speed === null ? null : 0)
+    // `animator:OverrideParam`, sent down to the animator under this character.
+    this.dispatchDown('animator:OverrideParam', this.runTurnSpeedParam, speed)
+    this.dispatchDown('animator:OverrideParam', this.runTurnDirectionParam, speed === null ? null : 0)
   }
 
   /**
@@ -1079,7 +1081,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this._lowerRaised()
     this._actTrigger = ''
     this._actInfo = null
-    this._animator?.setTrigger('Died')
+    this._fallDead()
     ;(this._gm as any)?.onPlayerDied?.(this)
   }
 

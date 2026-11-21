@@ -19,7 +19,7 @@ import { attachScriptFactory, fillScriptRefs, bindScriptLife, releaseScriptLife 
 import { parseChild } from "./childParser";
 import type { BVH } from "../../bvh";
 import type { ChangeKind, DirtyAspect, NodeDirty } from "../../eventBus";
-import { addTargetListener, dispatchAt, listenOwned, removeTargetListener, sendEvent, type SendOptions } from "../../events/hub";
+import { addTargetListener, dispatchAt, dispatchDownAt, listenOwned, removeTargetListener, sendEvent, type SendOptions } from "../../events/hub";
 import type { CleoEvent } from "../../events/event";
 import type { Emitter, EventListenerFn, ListenOptions } from "../../events/emitter";
 import { decomposeTRS, eulerFromQuatDeg } from "../../math";
@@ -992,6 +992,17 @@ export class Node {
    */
   public dispatchEvent(name: string, ...args: unknown[]): CleoEvent {
     return dispatchAt(this, name, args);
+  }
+
+  /**
+   * Send `name` DOWN from this node, now: heard here, then at every node beneath, depth first, then by the
+   * channel's own listeners. How a character commands what it holds; the animators under it obey `animator:*`:
+   *
+   *   this.dispatchDown('animator:SetTrigger', 'Jump')       // every animator under this node
+   *   this.dispatchDown('animator:PlayAction', 'Wave').results[0]   // the one-shot's handle
+   */
+  public dispatchDown(name: string, ...args: unknown[]): CleoEvent {
+    return dispatchDownAt(this, name, args);
   }
 
   /** As {@link dispatchEvent}, awaiting each listener's promise in turn. Resolves to the event. */

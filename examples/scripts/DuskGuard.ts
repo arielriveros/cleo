@@ -1,5 +1,5 @@
 import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node } from 'cleo'
-import { find, child, attribute } from 'cleo/decorators'
+import { find, child, attribute, animAction } from 'cleo/decorators'
 
 /**
  * Duskwell -- a Ruin Guard: the knight of the Pixel Platformer set, gone dark. Attach to a walking
@@ -91,13 +91,22 @@ export default class DuskGuard extends CharacterBody2DNode {
     this._attacking = true
     this._attackLeft = 0.75
     this._cooldownLeft = this.attackCooldown
-    this._sprite?.play('attack', true)
+    this._attackClip()
   }
+
+  // ----- the sprite: commands sent down to it (animator:*), never a call on it ------------------------
+
+  @animAction('attack', { restart: true })
+  private _attackClip(): void {}
+
+  @animAction('dead', { restart: true })
+  private _deadClip(): void {}
 
   onAnimationFinished(clip: string) {
     if (clip === 'attack') {
       this._attacking = false
-      this._sprite?.resumeMachine()
+      // Back on the sprite's state machine (idle, run).
+      this.dispatchDown('animator:Resume')
     }
   }
 
@@ -129,7 +138,7 @@ export default class DuskGuard extends CharacterBody2DNode {
     if (this.health > 0) return
     this._dead = true
     this._deadLeft = 1.6
-    this._sprite?.play('dead', true)
+    this._deadClip()
     const blade = this.getChildByName('Blade')[0] as any
     if (blade) blade.enabled = false
     ;(this._player as any)?.collect?.('diamond', this.reward)

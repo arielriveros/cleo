@@ -115,3 +115,5 @@ The scripts talk through events (docs/scripting/events.md):
 - SandboxGun dispatches `weapon:Shot` at its grip, and SandboxPlayer's `@eventListener` takes the recoil from it.
 - SandboxPlayer's `@observable` `weapon` sends `weapon:Equipped`, which shows the weapon in the hand.
 - SandboxGameManager's `@observable` `setup` sends `sandbox:LightSetup`, which the HUD line answers.
+- SandboxPlayer fires its car triggers through `@animTrigger` methods (sent down to the Mannequin's animator), and
+  stands up when the animator says `animation:TriggerEnded` for the exit trigger.

@@ -11,6 +11,8 @@ import { PhysicsSystem } from '../src/physics/physicsSystem';
 import { Shape } from '../src/physics/shape';
 import type { Trigger } from '../src/physics/body';
 import '../src/cleo';   // registers the 'cleo' module the example scripts import from
+import { bindAnimatorCommands } from '../src/animation/animatorCommands';
+import { installObservables } from '../src/core/scene/nodes/nodeScripting';
 
 import SoulsGameManagerNode from '../examples/scripts/SoulsGameManager';
 import SoulsPlayerNode from '../examples/scripts/SoulsPlayer';
@@ -827,6 +829,20 @@ function actionsAnimator(states: ActionStateSpec[]) {
     return a;
 }
 
+/**
+ * Give `character` the stub animator `a` the way a scene does: on a model node under it, obeying the animator
+ * commands the scripts send down (`animator:SetTrigger`, `ResetTrigger`, `SetParam`, `OverrideParam`).
+ */
+function useAnimator(character: any, a: ReturnType<typeof actionsAnimator>): void {
+    const model = new Node('Model') as any;
+    character.addChild(model);
+    model.animator = a;
+    bindAnimatorCommands(model, a);
+    character._model = model;
+    // What spawning does for a script's fields: its @animParam ones send their changes down from here on.
+    installObservables(character);
+}
+
 describe('one-shots are played by trigger name', () => {
     const intent = () => ({ move: [0, 0], basisYaw: 0, speedScale: 1, sprint: false, look: [0, 0] });
 
@@ -835,7 +851,7 @@ describe('one-shots are played by trigger name', () => {
         const player: any = new SoulsPlayerNode('Player');
         const a = actionsAnimator([{ name: 'Sheath', clip: 'Souls_Sheath', trigger: 'Swap', seconds: 1 }]);
         const equipped: number[] = [];
-        player._model = { animator: a };
+        useAnimator(player, a);
         player._findClip = (n: string) => (withEvent && n === 'Souls_Sheath' ? { events: [{ name: 'swap', time: 1 }] } : null);
         player._weapons = [{}, {}];
         player._weaponIndex = 0;
@@ -874,7 +890,7 @@ describe('one-shots are played by trigger name', () => {
     it('never lets a regular enemy taunt', () => {
         const hollow: any = new SoulsEnemyNode('Hollow');
         const a = actionsAnimator([{ name: 'Taunt', clip: 'Souls_Battlecry' }]);
-        hollow._model = { animator: a };
+        useAnimator(hollow, a);
         hollow._player = { isDead: false, worldPosition: [0, 0, 5] };
         hollow._brain = { behaviorState: 'Chase' };
         hollow._ai(intent(), 1 / 60);
@@ -886,7 +902,7 @@ describe('one-shots are played by trigger name', () => {
         const hollow: any = new SoulsEnemyNode('Warden');
         hollow.isBoss = true;
         const a = actionsAnimator([{ name: 'Taunt', clip: 'Souls_Battlecry', length: 2.8 }]);
-        hollow._model = { animator: a };
+        useAnimator(hollow, a);
         hollow._player = { isDead: false, worldPosition: [0, 0, 5] };
         hollow._brain = { behaviorState: 'Idle' };
         hollow._ai(intent(), 1 / 60);
@@ -904,7 +920,7 @@ describe('one-shots are played by trigger name', () => {
     it('plays a boss\'s attacks faster in its second phase through the AttackSpeed parameter', () => {
         const hollow: any = new SoulsEnemyNode('Warden');
         const a = actionsAnimator([{ name: 'Sweep', clip: 'Souls_Giant_Sweep', length: 1.8, speed: 0.9, speedScaleParam: 'AttackSpeed' }]);
-        hollow._model = { animator: a };
+        useAnimator(hollow, a);
         hollow._setSpeedMul(1.5);
         expect(a.floats.get('AttackSpeed')).toBe(1.5);
         hollow._startAttack({ name: 'Sweep', animTrigger: 'Sweep', hitTime: 0.7 });
@@ -916,7 +932,7 @@ describe('one-shots are played by trigger name', () => {
     it('lowers a queued trigger that never fired before raising the next one', () => {
         const player: any = new SoulsPlayerNode('Player');
         const a = actionsAnimator([{ name: 'HitLight', clip: 'Souls_HitLight' }]);
-        player._model = { animator: a };
+        useAnimator(player, a);
         player._raise('Longsword Light2');                 // a combo swing waiting for its segment's end
         player._onDamaged(10, 5, null);                   // ... cut short by a hit
         expect(a.raised.has('Longsword Light2')).toBe(false);
@@ -932,7 +948,7 @@ describe('one-shots are played by trigger name', () => {
         const light1 = { name: 'Light1', animTrigger: 'Longsword Light1', next: 'Light2', staminaCost: 10, trackSeconds: 0 };
         const light2 = { name: 'Light2', animTrigger: 'Longsword Light2', next: '', staminaCost: 10, trackSeconds: 0 };
         player.currentWeapon = () => ({ lightMove: 'Light1', findMove: (n: string) => (n === 'Light1' ? light1 : n === 'Light2' ? light2 : null) });
-        player._model = { animator: a };
+        useAnimator(player, a);
         player._startAttack('light', null);
         a.enter('Longsword Light1');
         player._comboOpen = true; player._windowOpened = true; player._usesEvents = true;
@@ -949,7 +965,7 @@ describe('one-shots are played by trigger name', () => {
 
     it('warns once, and still plays the gameplay, when the animator has no state for a trigger', () => {
         const player: any = new SoulsPlayerNode('Player');
-        player._model = { animator: actionsAnimator([]) };
+        useAnimator(player, actionsAnimator([]));
         const warn = vi.spyOn(Logger, 'warn').mockImplementation(() => {});
         try {
             player.playGesture('Pickup', 0.8);
@@ -973,7 +989,7 @@ describe('the running 180° turn', () => {
         Object.defineProperty(p, 'velocity', { get: () => v, set: (x: V3) => { v = x; }, configurable: true });
         Object.defineProperty(p, 'isGrounded', { get: () => grounded, configurable: true });
         Object.defineProperty(p, 'planarSpeed', { get: () => measured, configurable: true });
-        p._model = { animator: a };
+        useAnimator(p, a);
         p.setRotation([0, 180, 0]);
         /** The animator parameters pinned now (setParamOverride), by name. */
         return { p, a, pinned: a.pinned, measure: (s: number) => { measured = s; } };

@@ -109,6 +109,7 @@ one from there fails to load, with an error saying where it went.
 | `onEvent`, `every` | Call a method on an event sent anywhere on its channel, or every so many seconds of game time. |
 | `eventListener`, `onClipEvent` | Call a method on an event dispatched at this node or beneath it; on a clip's event marker. |
 | `eventDispatch`, `observable` | Send an event with a method's result each time it runs; when a field takes a new value. |
+| `animTrigger`, `animAction`, `animParam` | Command the animators under this node: fire a trigger, play a one-shot, keep a parameter set. |
 | `onEnter`, `onExit` | Call a method when a trigger overlap begins or ends. |
 | `attribute`, `save`, `options`, `pick` | Show a field in the inspector, keep it in saves, offer its values from a list or by kind. |
 | `ActionWhen` / `AttributeOptions` *(types)* | Which change of an action `@onAction` answers; how an `@attribute` row shows. |

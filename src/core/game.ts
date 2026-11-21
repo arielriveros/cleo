@@ -18,7 +18,7 @@ setEventTransportResolver((target) => {
   const net: SceneNet | null | undefined = (target as { scene?: { net?: SceneNet | null } | null } | null)?.scene?.net
     ?? CleoEngine.instance?.scene?.net;
   const send = net?.sendEvent;
-  return send ? (channel, name, args, to, at) => send.call(net, channel, name, args, to, at as never) : null;
+  return send ? (channel, name, args, to, at, down) => send.call(net, channel, name, args, to, at as never, down) : null;
 });
 
 /** Game.random's stream (see Game.seedRandom). Seeded from the clock until a game seeds it. */

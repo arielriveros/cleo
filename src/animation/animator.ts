@@ -15,6 +15,7 @@ import { ModelNode } from '../core/scene/nodes/modelNode';
 import { canAccessVariable } from '../core/scene/nodes/nodeVariables';
 import { actionsFor, runEventActions, type EventActionBinding } from './eventActions';
 import { ANIMATION_CHANNEL, getChannel, hasScriptListeners, resolveEvent } from '../core/events/hub';
+import { bindAnimatorCommands } from './animatorCommands';
 import { InputSystem } from '../input/inputSystem';
 import { Logger } from '../core/logger';
 import { LogTally, plural } from '../core/logTally';
@@ -343,9 +344,12 @@ export interface AnimationEventInfo {
     animator: Animator;
 }
 
-/** What `StateEnter`, `StateExit` and `ActionFinished` are heard with on the `animation` channel. */
+/**
+ * What `StateEnter`, `StateExit`, `ActionFinished`, `TriggerStarted` and `TriggerEnded` are heard with on the
+ * `animation` channel.
+ */
 export interface AnimationStateEventInfo {
-    /** The state entered (StateEnter) or left (StateExit); null for ActionFinished. */
+    /** The state entered (StateEnter) or left (StateExit); for TriggerStarted the state the trigger entered; null for ActionFinished. */
     state: string | null;
     /** The state left, or null (the first state, or an action). */
     from: string | null;
@@ -355,6 +359,11 @@ export interface AnimationStateEventInfo {
     layer: string | null;
     /** ActionFinished: the action's clip. */
     clip?: string;
+    /**
+     * TriggerStarted: the trigger whose state the layer now plays. TriggerEnded: the one it played, now over (the
+     * layer back in its entry state, or another trigger's state). See {@link Animator.activeTrigger}.
+     */
+    trigger?: string;
     node: Node | null;
     animator: Animator;
 }
@@ -1063,6 +1072,8 @@ export class Animator {
     private _paramValues: Map<string, number | boolean> = new Map();
     private _currentStateName: string | null = null;
     private _eventCallbacks: ((eventName: string, clipName: string) => void)[] = [];
+    /** Stops this animator obeying the `animator:*` commands sent to its node (animatorCommands.ts). */
+    private _unbindCommands: (() => void) | null = null;
     /** A layer's or slot's animator: the character's animator it plays for, and its layer's name. */
     private _overlayOwner: Animator | null = null;
     private _overlayName: string | null = null;
@@ -1211,6 +1222,8 @@ export class Animator {
         this._animatedModel = animatedModel;
         this._node = node || null;
         this._isOverlay = !!options?.overlay;
+        // Commands sent down to the model node reach this animator (a layer's or slot's has no node of its own).
+        if (this._node && !this._isOverlay) this._unbindCommands = bindAnimatorCommands(this._node, this);
         
         // Initialize last position if node is provided
         if (this._node) {
@@ -3795,7 +3808,9 @@ export class Animator {
         for (const p of this._stateMachine.parameters) {
             if (p.type === 'trigger') this._paramValues.set(p.name, false);
         }
+        const before = this._activeTrigger;
         this._activeTrigger = null;
+        this._noteTriggerChange(before);
         const entry = this._stateMachine.states.find(s => s.isEntry) ?? this._stateMachine.states[0];
         if (entry) this._enterState(entry.name);
         else if (this._isOverlay) { this._currentStateName = null; this._overlayEmpty = true; }
@@ -4224,10 +4239,23 @@ export class Animator {
         if (this._pendingTriggerConsumes) this._pendingTriggerConsumes.push(t);
         else consumeTriggers(this._conditionCtx, t.condition, t.conditions);
         // A trigger-less transition (a sheathe going on into the draw) carries the one that started it.
+        const before = this._activeTrigger;
         if (trigger) this._activeTrigger = trigger;
         const to = this._resolveTarget(t.to);
         this._enterState(to, blendTime);
         if (this._stateMachine?.states.find(s => s.name === to)?.isEntry) this._activeTrigger = null;
+        this._noteTriggerChange(before);
+    }
+
+    /**
+     * The active trigger went from `before` to what it is now: `TriggerEnded` for the one over, `TriggerStarted`
+     * for the one begun, posted for the frame's flush (and only built when someone listens).
+     */
+    private _noteTriggerChange(before: string | null): void {
+        const now = this._activeTrigger;
+        if (before === now) return;
+        if (before) this._postAnimationEvent('TriggerEnded', { state: this._currentStateName, from: null, to: null, layer: this._overlayName, trigger: before });
+        if (now) this._postAnimationEvent('TriggerStarted', { state: this._currentStateName, from: null, to: null, layer: this._overlayName, trigger: now });
     }
 
     /**
@@ -4334,7 +4362,7 @@ export class Animator {
      * character's node, and delivered at the frame's event flush -- never inside the state change itself, where a
      * listener that set a trigger or forced a state would re-enter the machine mid-transition.
      */
-    private _postAnimationEvent(name: 'StateEnter' | 'StateExit' | 'ActionFinished', info: Omit<AnimationStateEventInfo, 'node' | 'animator'>): void {
+    private _postAnimationEvent(name: 'StateEnter' | 'StateExit' | 'ActionFinished' | 'TriggerStarted' | 'TriggerEnded', info: Omit<AnimationStateEventInfo, 'node' | 'animator'>): void {
         const root = this._overlayOwner ?? this;
         if (!hasScriptListeners()) return;
         const channel = getChannel(ANIMATION_CHANNEL);
@@ -5051,7 +5079,10 @@ export class Animator {
     
     /** Set the node whose state triggers and variable bindings are read from. */
     public setNode(node: Node): void {
+        this._unbindCommands?.();
+        this._unbindCommands = null;
         this._node = node;
+        if (node && !this._isOverlay) this._unbindCommands = bindAnimatorCommands(node, this);
     }
     
     /** Evaluate the mapping triggers and start any animation they select. Call before {@link update}. */

@@ -14,9 +14,11 @@
  * - `'capture'`: on an ancestor, travelling down to the target (listeners added with `capture: true`);
  * - `'target'`: on the node it was dispatched at;
  * - `'bubble'`: on an ancestor, travelling back up;
+ * - `'descend'`: on a node beneath the target, for an event sent DOWN (`dispatchDown`: a command to the animators
+ *   under a character);
  * - `'broadcast'`: at the channel's own listeners (`@onEvent`, `Events.on`), which hear it last, from anywhere.
  */
-export type EventPhase = 'capture' | 'target' | 'bubble' | 'broadcast';
+export type EventPhase = 'capture' | 'target' | 'bubble' | 'descend' | 'broadcast';
 
 /** Where one dispatch is. Pooled: never keep one; keep the CleoEvent instead. */
 export interface DispatchFrame {

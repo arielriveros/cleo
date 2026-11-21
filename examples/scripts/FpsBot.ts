@@ -1,5 +1,5 @@
 import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
-import { attribute } from 'cleo/decorators'
+import { attribute, animParam, animTrigger } from 'cleo/decorators'
 import type { Animator } from 'cleo'
 import FpsCombatantNode from '@/FPS/Scripts/FpsCombatant'
 import { angleDiff, clamp, combatantOf, distance3, findByVariable, findDescendant, hostile, manager, planarDistance, yawTo } from '@/FPS/Scripts/FpsShared'
@@ -205,7 +205,21 @@ export default class FpsBotNode extends FpsCombatantNode {
     if (this.navMode === 1) { intent.speedScale = this._speedScale; intent.sprint = this._sprint }
 
     if (this._sinceCombat > 6 && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.regenPerSecond * delta)
-    this._animator?.setBool('Crouch', this.isCrouching)
+    this._crouchParam = this.isCrouching
+  }
+
+  /** The animator's `Crouch`: an `@animParam`, so only a change is sent down to the model. */
+  @animParam('Crouch')
+  private _crouchParam: boolean = false
+
+  /** The shot's clip: Fire, sent down to the bot's animator. */
+  @animTrigger('Fire')
+  private _fireClip(): void {}
+
+  /** The death clip `index` picked: `Die<index>`, sent down to the animator. */
+  @animTrigger()
+  private _deathClip(index: number): string {
+    return `Die${index}`
   }
 
   /** Stand still, facing as before. */
@@ -531,12 +545,15 @@ export default class FpsBotNode extends FpsCombatantNode {
     const cone = (spec.hipSpread * 0.55 + dist * 0.045) * (1.7 - this.skill * 1.3) * (this._crouching ? 0.7 : 1)
     this.fireHitscan(eye, dir, cone, this.damageScale)
     this._muzzleFlash()
-    this._animator?.setTrigger?.('Fire')
+    this._fireClip()
   }
 
-  /** A bot has no fire clip, so its shot is the same named event a clip marker would fire: the controller binds it to the flash and the sound. */
+  /**
+   * A bot has no fire clip, so its shot is the same named event a clip marker would fire (the machine's fireEvent,
+   * through `animator:FireEvent`): the controller binds it to the flash and the sound.
+   */
   private _muzzleFlash(): void {
-    this._animator?.fireEvent?.(`shot.${this.weapon}`)
+    this.dispatchDown('animator:FireEvent', `shot.${this.weapon}`)
   }
 
   private _startReload(): void {
@@ -616,7 +633,7 @@ export default class FpsBotNode extends FpsCombatantNode {
     // one, sometimes any of them - a random death - and a crouching bot always falls its own way.
     const clip = this._pickDeath(killer, zone, dir)
     const index = DEATHS.indexOf(clip)
-    this._animator?.setTrigger?.(`Die${index}`)
+    this._deathClip(index)
     const info = this._animator?.triggerInfo?.(`Die${index}`)
     const seconds = info?.seconds && info.seconds > 0 ? info.seconds : 3
     this.after(seconds * this.ragdollAt, () => this._ragdoll(dir))

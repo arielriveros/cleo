@@ -16,6 +16,23 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **The animator takes its commands from the event system.**
+  - *Commands sent down.* Events can travel DOWN a node's subtree now (`this.dispatchDown`, `{ down: true }`). A
+    script commands every animator under its node on the new `animator` channel: SetTrigger, ResetTrigger,
+    SetParam, OverrideParam, PlayAction (the handle comes back), StopAction, ForceState, FireEvent, and a sprite's
+    Resume. Skeletal animators and Animated Sprites obey them, as engine listeners that leave
+    `hasScriptListeners()` false.
+  - *Decorators.* `@animTrigger(name?)` fires a trigger each time its method runs; with no name, the method
+    returns the trigger. `@animAction(clip?)` plays a one-shot the same way. `@animParam(name?)` keeps a
+    parameter set from a field, sending only changes.
+  - *Trigger events.* `TriggerStarted` and `TriggerEnded` tell when a trigger's states begin and are over, so a
+    script stops polling `activeTrigger()`.
+  - *Every example script uses them.* No example script calls an animator to command it any more (Sandbox,
+    Hollow Keep and the Dungeon, Firing Line, Duskwell): getting out of the Sandbox car ends on `TriggerEnded`,
+    the Souls characters fire their one-shots through `@animTrigger`, `InCombat` and `AttackSpeed` are
+    `@animParam`s, Firing Line's viewmodels follow `@animParam`s, and Duskwell's sprites are played by
+    `@animAction`.
+
 - **One event system for scripts, animators and the engine.**
   - *Channels.* Every event travels on a named channel of one hub: `game` (scripts; what `GameEvents` always was),
     `animation` (what animators fire), `engine` (the engine's own traffic; `engineEventBus` is a view of it) and any

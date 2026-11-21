@@ -74,16 +74,17 @@ function eventMessage(name: string, payload: unknown, to: NetEventTarget): Uint8
 }
 
 /** An event-system send, as it travels: its arguments, and the node it was dispatched at. */
-interface HubEnvelope { $hub: unknown[]; $target?: Node | null }
+interface HubEnvelope { $hub: unknown[]; $target?: Node | null; $down?: true }
 
 function isHubEnvelope(payload: unknown): payload is HubEnvelope {
     return !!payload && typeof payload === 'object' && Array.isArray((payload as HubEnvelope).$hub);
 }
 
 /** The SCRIPT_EVENT message for an event-system send: its qualified name, and the envelope. */
-function hubMessage(channel: string, name: string, args: unknown[], to: RemoteEventTarget, target: object | null): Uint8Array {
+function hubMessage(channel: string, name: string, args: unknown[], to: RemoteEventTarget, target: object | null, down = false): Uint8Array {
     const envelope: HubEnvelope = { $hub: args };
     if (target && isNode(target)) envelope.$target = target;
+    if (down) envelope.$down = true;
     return eventMessage(`${channel}:${name}`, envelope, to);
 }
 
@@ -91,7 +92,7 @@ function hubMessage(channel: string, name: string, args: unknown[], to: RemoteEv
 function deliverNetEvent(name: string, payload: unknown): void {
     if (isHubEnvelope(payload)) {
         const [channel, plain] = splitEventName(name);
-        receiveRemoteEvent(channel, plain, payload.$hub, payload.$target ?? null);
+        receiveRemoteEvent(channel, plain, payload.$hub, payload.$target ?? null, payload.$down === true);
         return;
     }
     GameEvents.emit(name, payload);
@@ -143,9 +144,9 @@ export class ScriptHost {
             call: (node, method, original, args, options) => self._call(node, method, original, args, options),
             emit: (name, payload, to) => self._emit(name, payload, to, null),
             // The event system's sends with `to`: out to the peers as asked; this machine hears 'all' and 'host'.
-            sendEvent: (channel, name, args, to, target) => {
+            sendEvent: (channel, name, args, to, target, down) => {
                 if (to === 'all' || to === 'peers') {
-                    const msg = hubMessage(channel, name, args, 'peers', target);
+                    const msg = hubMessage(channel, name, args, 'peers', target, down);
                     for (const peer of self._session.peers.values()) if (peer.connected) peer.sendControl(msg);
                 }
                 return { local: to === 'all' || to === 'host' };
@@ -295,8 +296,8 @@ export class ScriptPeer {
             call: (node, method, _original, args, options) => self._call(node, method, args, options),
             emit: (name, payload, to) => self._session.sendControl(eventMessage(name, payload, to)),
             // The event system's sends with `to`: to the host, which passes them on; this machine is one of the 'peers'.
-            sendEvent: (channel, name, args, to, target) => {
-                self._session.sendControl(hubMessage(channel, name, args, to, target));
+            sendEvent: (channel, name, args, to, target, down) => {
+                self._session.sendControl(hubMessage(channel, name, args, to, target, down));
                 return { local: to === 'all' || to === 'peers' };
             },
         };

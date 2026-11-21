@@ -88,6 +88,9 @@ while the game is paused. They need no timer of your own: no `heldSeconds` copy 
 @eventDispatch('Shot') fire() { return hit }   // each call sends 'Shot' with what it returned
 @onClipEvent('footstep') step(info) { … }      // a marker on a clip this character's animator plays
 @observable hp = 100                           // setting it sends 'hpChanged' (value, previous)
+@animTrigger('Jump') jump() { … }              // each call fires the animator's Jump trigger
+@animAction('Wave') wave() { … }               // each call plays the Wave one-shot
+@animParam('Moving') moving = false            // each new value goes to the animator's Moving
 @every(0.5) think() { … }                      // every half second of unpaused game time
 ```
 

@@ -1,5 +1,5 @@
 import { AnimatedSpriteNode, CharacterBody2DNode, Game, Input, Node } from 'cleo'
-import { save, child, attribute } from 'cleo/decorators'
+import { save, child, attribute, animAction, animParam, animTrigger } from 'cleo/decorators'
 
 /**
  * Duskwell -- the player: the warrior of the Medieval Warrior pack. Attach to the `Player` Character Body 2D;
@@ -231,7 +231,7 @@ export default class DuskPlayer extends CharacterBody2DNode {
       this._dashCooldownLeft = this.dashCooldown
       this._rising = false
       this.gravityScale = 0
-      this._sprite?.fireTrigger('dashed')
+      this._dashed()
     }
     if (this._dashLeft > 0) {
       this._dashLeft = Math.max(0, this._dashLeft - dt)
@@ -239,7 +239,7 @@ export default class DuskPlayer extends CharacterBody2DNode {
       v[0] = this._dashLeft > 0 ? this._dashDir * this.dashSpeed : this._dashDir * this._baseWalk
       v[1] = 0
       if (this._dashLeft <= 0) this.gravityScale = 1
-      this._sprite?.setParam('dashing', this._dashLeft > 0)
+      this._dashing = this._dashLeft > 0
       return true
     }
 
@@ -250,7 +250,7 @@ export default class DuskPlayer extends CharacterBody2DNode {
     const pressing = (steer > 0.2 && this.contacts.wallRight) || (steer < -0.2 && this.contacts.wallLeft)
     this._wallSliding = this.hasWallJump && !grounded && pressing && v[1] <= 0
     this.maxFallSpeed = this._wallSliding ? this.wallSlideSpeed : this._baseMaxFall
-    this._sprite?.setParam('wallSliding', this._wallSliding)
+    this._slidingParam = this._wallSliding
 
     // --- the jumps the engine does not make: off a wall, and in the air --------------------------------
     if (this.jumpRequested && !this.canJump) {
@@ -266,13 +266,13 @@ export default class DuskPlayer extends CharacterBody2DNode {
         this._rising = true
         this._wallSliding = false
         this.drive().move[0] = 0
-        this._sprite?.fireTrigger('jumped')
+        this._jumped()
       } else if (this._airJumpsLeft > 0) {
         this.consumeJump()
         this._airJumpsLeft--
         v[1] = this.jumpSpeed * Math.sqrt(Math.max(0, this.airJumpHeight))
         this._rising = true
-        this._sprite?.fireTrigger('jumped')
+        this._jumped()
       }
     }
     // The engine's own jump, from the ground, is a rise too (seen once: the flag holds for the frame).
@@ -310,7 +310,40 @@ export default class DuskPlayer extends CharacterBody2DNode {
     this._swinging = true
     this._queued = false
     this._graceLeft = 0
-    this._sprite?.play('attack' + n, true)
+    this._swingClip(n)
+  }
+
+  // ----- the sprite: commands sent down to it (animator:*), never a call on it ------------------------
+
+  /** The sprite machine's `dashed` trigger. */
+  @animTrigger('dashed')
+  private _dashed(): void {}
+
+  /** The sprite machine's `jumped` trigger: a wall jump, an air jump. */
+  @animTrigger('jumped')
+  private _jumped(): void {}
+
+  /** The sprite machine's `dashing` and `wallSliding`: only a change is sent, however often they are set. */
+  @animParam('dashing')
+  private _dashing: boolean = false
+  @animParam('wallSliding')
+  private _slidingParam: boolean = false
+
+  /** Swing `n` of the combo: its clip, played from the start. */
+  @animAction()
+  private _swingClip(n: number) {
+    return { clip: 'attack' + n, restart: true }
+  }
+
+  @animAction('hurt', { restart: true })
+  private _hurtClip(): void {}
+
+  @animAction('death', { restart: true })
+  private _deathClip(): void {}
+
+  /** Back on its state machine after a clip it was told to play. */
+  private _resume(): void {
+    this.dispatchDown('animator:Resume')
   }
 
   private _endCombo() {
@@ -321,7 +354,7 @@ export default class DuskPlayer extends CharacterBody2DNode {
   }
 
   onAnimationFinished(clip: string) {
-    if (clip === 'hurt' && !this._dead) this._sprite?.resumeMachine()
+    if (clip === 'hurt' && !this._dead) this._resume()
     if (!clip.startsWith('attack') || !this._swinging) return
     this._swinging = false
     if (this._queued && this._combo < 3) this._swing(this._combo + 1)
@@ -354,13 +387,13 @@ export default class DuskPlayer extends CharacterBody2DNode {
     const away = from ? Math.sign(this.worldPosition[0] - from.worldPosition[0]) || -this.facing : -this.facing
     this.velocity2D[0] = away * this.knockback
     this.velocity2D[1] = this.knockup
-    this._sprite?.play('hurt', true)
+    this._hurtClip()
   }
 
   private _die() {
     this._dead = true
     this._deathLeft = this.deathSeconds
-    this._sprite?.play('death', true)
+    this._deathClip()
   }
 
   /** Back at the last checkpoint, whole. */
@@ -370,7 +403,7 @@ export default class DuskPlayer extends CharacterBody2DNode {
     this.health = this.maxHealth
     this._invulnLeft = this.invulnerableSeconds
     this.teleport(this._respawn[0], this._respawn[1])
-    this._sprite?.resumeMachine()
+    this._resume()
     const cam = this.findNode('Camera') as any
     cam?.snapToTarget?.()
   }

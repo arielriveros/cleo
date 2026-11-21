@@ -518,7 +518,7 @@ describe('@attribute', () => {
 });
 
 describe("the 'cleo/decorators' module", () => {
-    const NAMES = ['attribute', 'child', 'eventDispatch', 'eventListener', 'every', 'find', 'netcall', 'observable', 'onAction', 'onClipEvent', 'onEnter', 'onEvent', 'onExit', 'onHold', 'onTap', 'options', 'pick', 'save', 'synced'];
+    const NAMES = ['animAction', 'animParam', 'animTrigger', 'attribute', 'child', 'eventDispatch', 'eventListener', 'every', 'find', 'netcall', 'observable', 'onAction', 'onClipEvent', 'onEnter', 'onEvent', 'onExit', 'onHold', 'onTap', 'options', 'pick', 'save', 'synced'];
 
     it('is what scripts import the decorators from', () => {
         expect(Object.keys(resolveScriptModule('cleo/decorators')).sort()).toEqual(NAMES);

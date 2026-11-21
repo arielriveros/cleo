@@ -149,7 +149,7 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
         const player = source('FpsPlayer'), bot = source('FpsBot');
         for (const cue of ['ShotRifle', 'ShotPistol', 'ShotShotgun', "'Equip'", "'Reload'"]) expect(player, cue).not.toMatch(new RegExp('playCue\\([^)]*' + cue));
         expect(player).not.toContain('_flash()');
-        expect(bot).toContain('fireEvent');
+        expect(bot).toMatch(/fireEvent|animator:FireEvent/);
         expect(bot).not.toMatch(/playCue\(this, '(Shot|Death)'\)/);
         expect(bot).not.toContain("spawnFx('FPS Muzzle Flash'");
     });

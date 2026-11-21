@@ -134,6 +134,7 @@ function call(fn: EventListenerFn, args: readonly unknown[]): unknown {
  * ancestor, capture listeners hear the way down and the others the way up; at the broadcast, everyone.
  */
 function inPhase(record: ListenerRecord, phase: DispatchFrame['phase']): boolean {
+    // Sent down ('descend'), every listener at a node hears it, as at the target.
     return phase === 'capture' ? record.capture : phase === 'bubble' ? !record.capture : true;
 }
 

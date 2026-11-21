@@ -35,6 +35,12 @@ export interface ListenOptions {
     capture?: boolean;
     /** On a channel: called at once with the event's last sticky value, if it has one (see `EventChannel.emitSticky`). */
     replay?: boolean;
+    /**
+     * The engine's own listener, not a script's (an animator listening for the commands sent to it): found by a
+     * dispatch like any other, but left out of `hasScriptListeners()`, so the engine's per-frame "does any script
+     * listen" gates stay closed when only the engine does.
+     */
+    system?: boolean;
 }
 
 /**
@@ -50,6 +56,7 @@ export interface ListenerRecord {
     where: ((args: readonly unknown[]) => boolean) | null;
     owner: object | null;
     readonly capture: boolean;
+    readonly system: boolean;
     /** Set when it is taken out, so a delivery still walking the list skips it. */
     removed: boolean;
 }
@@ -92,7 +99,7 @@ export class Emitter {
     private _owned: Map<object, Set<ListenerRecord>> | null = null;
     private _total = 0;
 
-    constructor(private readonly _onCount: ((name: string, delta: number) => void) | null = null) {}
+    constructor(private readonly _onCount: ((name: string, delta: number, system: boolean) => void) | null = null) {}
 
     /** How many listeners `name` has, or all names together. */
     public count(name?: string): number {
@@ -157,6 +164,7 @@ export class Emitter {
             where: compileWhere(options.where),
             owner: options.owner ?? null,
             capture: !!options.capture,
+            system: !!options.system,
             removed: false,
         };
         let list = this._lists.get(name);
@@ -178,7 +186,7 @@ export class Emitter {
             if (!set) { set = new Set(); owned.set(record.owner, set); }
             set.add(record);
         }
-        this._onCount?.(name, 1);
+        this._onCount?.(name, 1, record.system);
         return record;
     }
 
@@ -209,7 +217,7 @@ export class Emitter {
         record.fn = REMOVED;
         record.where = null;
         record.owner = null;
-        this._onCount?.(record.name, -1);
+        this._onCount?.(record.name, -1, record.system);
         if (list.walking === 0) {
             if (list.live === 0) this._drop(list);
             else if (list.dead >= COMPACT_AT && list.dead > list.live) this._compact(list);

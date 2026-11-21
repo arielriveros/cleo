@@ -13,6 +13,7 @@ import {
 import type { SpriteAnimationSet, SpriteClip } from "../../../animation/spriteAnimation";
 import { isCharacterBody2D } from "./nodeType";
 import { ANIMATION_CHANNEL, getChannel, hasScriptListeners, resolveEvent } from "../../events/hub";
+import { bindAnimatorCommands } from "../../../animation/animatorCommands";
 
 /**
  * A sprite that plays a frame sequence.
@@ -85,6 +86,14 @@ export class AnimatedSpriteNode extends SpriteNode {
         this._accumulator = 0;
         this._elapsed = 0;
         if (this._randomStart) this._startRandomly();
+        // Commands sent down to this sprite (animator:SetTrigger, SetParam, PlayAction, Resume) drive its clips.
+        // Through its own names: a node's `setTrigger` is the PHYSICS trigger, never the animator's.
+        bindAnimatorCommands(this, {
+            fireTrigger: (name) => this.fireTrigger(name),
+            setParam: (name, value) => this.setParam(name, value),
+            play: (clip, restart) => this.play(clip, restart),
+            resumeMachine: () => this.resumeMachine(),
+        });
     }
 
     private _startRandomly(): void {
