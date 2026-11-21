@@ -31,6 +31,18 @@ const savesFolder = windowOptions().savesFolder;
 if (typeof savesFolder === 'string' && savesFolder && !app.commandLine.hasSwitch('user-data-dir'))
   app.setPath('userData', path.join(app.getPath('appData'), savesFolder));
 
+// Windows groups a taskbar button with its Start Menu shortcut by this id, which the installer gives the game's
+// app id (Options > Project > Published game > App id).
+const appId = windowOptions().appId;
+if (process.platform === 'win32' && typeof appId === 'string' && appId) app.setAppUserModelId(appId);
+
+// The game's icon (Options > Project > Published game > Icon), when it has one: Publish writes icon.ico and icon.png
+// beside this file. macOS ignores a window icon and uses the bundle's.
+function windowIcon() {
+  const file = path.join(__dirname, process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+  return fs.existsSync(file) ? file : undefined;
+}
+
 function createWindow() {
   const opts = windowOptions();
   const win = new BrowserWindow({
@@ -39,6 +51,7 @@ function createWindow() {
     fullscreen: !!opts.fullscreen,
     resizable: opts.resizable !== false,
     title: opts.title || undefined,
+    icon: windowIcon(),
     backgroundColor: '#000000',
     webPreferences: {
       // The page fetches everything over game:// and needs no Node; the preload only lends it the save files.
@@ -78,9 +91,10 @@ const GAME_PRELOAD_JS = fs.readFileSync(path.join(__dirname, 'gamePreload.js'), 
 /**
  * Write the Electron half of a desktop game into `dir`, beside its web files: main.js and the files it needs,
  * and window.json. Shared by Publish (main.js) and the player smoke test, so both run the same shell.
- *   window: { title, width, height, fullscreen, resizable }; savesFolder: the data folder's name.
+ *   window: { title, width, height, fullscreen, resizable }; savesFolder: the data folder's name;
+ *   appId: the game's application id (`gameAppId`, or the project's own); version: the game's version.
  */
-function writeDesktopShell(dir, { window: win = {}, savesFolder = '' } = {}) {
+function writeDesktopShell(dir, { window: win = {}, savesFolder = '', appId = '', version = '' } = {}) {
   fs.writeFileSync(path.join(dir, 'window.json'), JSON.stringify({
     title: typeof win.title === 'string' ? win.title : '',
     width: Number(win.width) || 1280,
@@ -88,6 +102,8 @@ function writeDesktopShell(dir, { window: win = {}, savesFolder = '' } = {}) {
     fullscreen: !!win.fullscreen,
     resizable: win.resizable !== false,
     ...(savesFolder ? { savesFolder } : {}),
+    ...(isAppId(appId) ? { appId } : {}),
+    ...(isGameVersion(version) ? { version } : {}),
   }, null, 2), 'utf-8');
   fs.writeFileSync(path.join(dir, 'main.js'), GAME_MAIN_JS, 'utf-8');
   fs.writeFileSync(path.join(dir, 'gameProtocol.js'), GAME_PROTOCOL_JS, 'utf-8');
@@ -106,11 +122,30 @@ function npmPackageName(name) {
   return slug || 'cleo-game';
 }
 
-function gamePackageJson(name, electronVersion) {
+// The app id a game had before projects kept their own (Options > Project > Published game > App id): made from
+// its name, so renaming the game made the next installer a different app. A project from before keeps it
+// (projectSettings.ts `legacyAppId`, which mirrors this; tests/desktopGameProtocol.test.ts holds them together).
+const GAME_APP_ID_PREFIX = 'com.cleo.game.';
+function gameAppId(name) {
+  return GAME_APP_ID_PREFIX + (String(name || '').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'cleogame');
+}
+
+/** A reverse-DNS application id (`com.studio.game`), as projectSettings.ts `cleanAppId` accepts. */
+function isAppId(id) {
+  return typeof id === 'string' && id.length <= 128 && /^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z0-9-]+)+$/.test(id);
+}
+
+/** A game version: semver with an optional pre-release, as projectSettings.ts `cleanGameVersion` accepts. */
+function isGameVersion(v) {
+  return typeof v === 'string' && v.length <= 64
+    && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/.test(v);
+}
+
+function gamePackageJson(name, electronVersion, version = '1.0.0') {
   return JSON.stringify({
     name: npmPackageName(name),
     productName: name || 'Cleo Game',
-    version: '1.0.0',
+    version: isGameVersion(version) ? version : '1.0.0',
     description: 'A game built with the Cleo engine',
     main: 'main.js',
     scripts: { start: 'electron .' },
@@ -207,5 +242,5 @@ const WEB_HEADERS = `/*
 
 module.exports = {
   GAME_MAIN_JS, GAME_PROTOCOL_JS, GAME_SAVES_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, WEB_HEADERS,
-  gamePackageJson, gameReadme, writeDesktopShell,
+  gamePackageJson, gameReadme, writeDesktopShell, gameAppId, isAppId, isGameVersion, GAME_APP_ID_PREFIX,
 };

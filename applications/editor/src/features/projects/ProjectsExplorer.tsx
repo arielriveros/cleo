@@ -6,7 +6,7 @@ import '@cleo/app-kit/assets/filemanager.css'
 import './projects.css'
 import { iconFor } from '../assets/assetKinds'
 
-import { ProjectRecord, loadProjects, nextProjectAfterDelete, renameProject } from '../../utils/projects'
+import { ProjectRecord, loadProjects, nextProjectAfterDelete, projectCardImage, renameProject } from '../../utils/projects'
 import { deleteProject, openProject } from './projectSwitch'
 import { unsavedWork } from '../unloadGuard'
 import { activeProjectId } from '../../utils/projectScope'
@@ -183,7 +183,8 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
 
   const previews = useCallback((file: Partial<IParsedEntity>): string | null => {
     const id = file?.id ? byPathRef.current.get(String(file.id)) : null
-    return projectsRef.current.find(p => p.id === id)?.thumbnail ?? null
+    const record = projectsRef.current.find(p => p.id === id)
+    return (record && projectCardImage(record)) ?? null
   }, [])
 
   const icons = useCallback(() => iconFor('scene'), [])

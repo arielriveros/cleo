@@ -123,6 +123,12 @@ export interface PackManifest {
    */
   shaders?: Record<string, { base: any; variants?: Record<string, any> }>;
   config?: any;
+  /**
+   * Who the game is (Options ▸ Project ▸ Published game): its name, its version and its application id, what an
+   * updater compares a download with what is installed by (docs/design/game-updates.md). Absent from packs before
+   * 2026-11-21 and from Play in window's. No player reads it yet, so no contract bump.
+   */
+  game?: { name: string; version: string; appId: string };
   geometries: Record<string, PackedGeometry>;
   textures: PackedTexture[];
   /** Absent on games published before audio existed, which read back as games with no sound. */
@@ -377,6 +383,7 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     ...(data?.assets ? { assets: data.assets } : {}),
     ...(data?.shaderLibrary ? { shaders: data.shaderLibrary } : {}),
     config: data?.config,
+    ...(data?.game ? { game: data.game } : {}),
     geometries,
     textures,
     sounds,

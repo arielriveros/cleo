@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Logger, isDefaultInputMap } from "cleo";
-import { isDefaultProjectSettings, resolveSaveFolder } from "./options/projectSettings";
+import { isDefaultProjectSettings, resolveAppId, resolveSaveFolder } from "./options/projectSettings";
+import { gameIconFiles, type GameIconFiles } from "./publish/gameIcons";
 import { useCleoEngine, KIND_LABEL } from "./EngineContext";
 import { useVfs } from "./assets/VfsContext";
 import { buildMultiSceneGameData, PublishCanceledError } from "./publish/buildMultiSceneGameData";
@@ -24,7 +25,10 @@ import Topbar from "@cleo/app-kit/ui/Topbar";
 import ModeSelector from "./ModeSelector";
 import { UndoGlyph, RedoGlyph } from "./UndoButtons";
 import { useHistory } from "./HistoryContext";
-import { AboutDialog, AppMenuBar, BookIcon, Button, LogoButton, MenuItem, ShortcutsDialog, WhatsThisIcon, cn, type MenuSpec } from "@cleo/app-kit/ui";
+import { AboutDialog, AppMenuBar, BookIcon, Button, LogoButton, MenuItem, ShortcutsDialog, UpdateButton, UpdateIcon, UpdateStatusLine, WhatsThisIcon, cn, type MenuSpec } from "@cleo/app-kit/ui";
+import { checkForUpdates, getUpdaterBridge, productVersion, setUpdatePanelOpen, useUpdaterState } from "@cleo/app-kit/platform/desktopUpdater";
+import { toast } from "@cleo/app-kit/feedback/toastStore";
+import { restartToUpdate } from "./updates/restartToUpdate";
 import { openDocumentation } from "@cleo/app-kit/docs/viewer/DocsViewerHost";
 import { startWhatsThis } from "@cleo/app-kit/docs/whatsThis";
 import {
@@ -39,7 +43,7 @@ import MultiplayerModal from "./playWindow/MultiplayerModal";
 import type { FeatureUsage } from "./publish/featureUsage";
 import { iconFor } from "./assets/assetKinds";
 import { useFrameSelected } from "./viewport/useFrameSelected";
-import { VERSION_LABEL } from "../version";
+import { APP_CHANGELOG, VERSION_LABEL } from "../version";
 import { useWindowPlay, windowPlay } from "./playWindow/windowPlay";
 import { scriptDebugger, useScriptDebugger } from "./scriptDebugger/debugSession";
 import { releaseVsCode, useVsCodeDebug } from "./scriptDebugger/vscodeAttach";
@@ -95,6 +99,18 @@ export default function MenuBar() {
   const { canFrame, frameSelected } = useFrameSelected(true);
   const importInput = useRef<HTMLInputElement>(null);
   const [helpDialog, setHelpDialog] = useState<'shortcuts' | 'about' | null>(null);
+  const updater = useUpdaterState();
+  // Help ▸ Check for Updates…: an update opens the Update button's panel; up to date or a failure says so.
+  const onCheckForUpdates = async () => {
+    try {
+      const s = await checkForUpdates();
+      if (s.status === 'available' || s.status === 'downloading' || s.status === 'ready') setUpdatePanelOpen(true);
+      else if (s.status === 'error') toast.error(`Could not check for updates${s.error ? `: ${s.error}` : ''}`);
+      else if (s.status === 'idle') toast.success(`Cleo Engine v${productVersion(s.current)} is up to date`);
+    } catch (e: any) {
+      toast.error(`Could not check for updates: ${e?.message ?? e}`);
+    }
+  };
   // Project ▸ Features, and Publish's question when the game uses one the project leaves out.
   const [showFeatures, setShowFeatures] = useState(false);
   const [showAddons, setShowAddons] = useState(false);
@@ -227,12 +243,19 @@ export default function MenuBar() {
   // (script obfuscation, asset packing, zipping), which runs in the project worker.
   const runPublish = async (
     title: string,
-    ship: (data: any) => Promise<string>,
+    ship: (data: any, icons: GameIconFiles | null) => Promise<string>,
   ) => {
     setPublishing(title);
     const task = startTask({ title, steps: ['Serializing scene', 'Building & writing files'] });
     try {
       if (!editorScene) throw new Error('No scene to publish');
+
+      // Who the game is (Options ▸ Project ▸ Published game). A project from before it had an app id of its own
+      // keeps the one its installers were always given, frozen now so that renaming the game later cannot change it.
+      const appId = resolveAppId(projectSettings, projectName);
+      if (!projectSettings.identity.appId)
+        setProjectSettings(prev => (prev.identity.appId ? prev : { ...prev, identity: { ...prev.identity, appId } }));
+      const game = { name: gameName || 'Cleo Game', version: projectSettings.identity.version, appId };
 
       task.setStep(0, { status: 'running', detail: 'Embedding textures' });
       let data: any;
@@ -264,6 +287,7 @@ export default function MenuBar() {
           // What this session drew, so the published game can build those pipelines up front. The more of
           // the game was played (Play or Simulate) before publishing, the more of them there are.
           pipelines: instance?.renderer.pipelineRecipes(),
+          game,
           // The game uses a feature the project leaves out (Project ▸ Features): ask. Turning one back on is
           // for good, as if done in Project ▸ Features.
           onDisabledFeatureUse: uses => new Promise<string[] | null>(resolve => {
@@ -283,7 +307,10 @@ export default function MenuBar() {
       task.setStep(1, { status: 'running', detail: 'Obfuscating scripts, packing assets' });
       let message: string;
       try {
-        message = await ship(data);
+        // The game's icon, made from its image (gameIcons.ts): none keeps the default one.
+        const icon = await gameIconFiles(projectSettings.identity.icon, textures);
+        for (const warning of icon.warnings) Logger.warn(warning, 'Publish');
+        message = await ship(data, icon.files);
       } catch (e: any) {
         task.setStep(1, { status: 'failed', error: String(e?.message ?? e) });
         throw e;
@@ -303,14 +330,15 @@ export default function MenuBar() {
   // saves into a folder of this name; the browser download is a slug of it.
   const gameName = projectSettings.publish.title.trim() || projectName.trim();
   const onPublishWeb = () => runPublish('Publishing web build',
-    data => publishWeb(data, gameName || undefined));
+    (data, icons) => publishWeb(data, gameName || undefined, { icons }));
 
   const onPublishDesktop = (installer: boolean) =>
     runPublish(installer ? 'Publishing desktop installer' : 'Publishing desktop build',
-      data => publishDesktop(data, {
+      (data, icons) => publishDesktop(data, {
         installer, name: gameName || undefined, window: projectSettings.publish,
         savesFolder: resolveSaveFolder(projectSettings, projectName),
-      }));
+        appId: data.game?.appId, version: data.game?.version,
+      }, { icons }));
 
   // Play in window. The window opens inside this click (a web popup needs its user activation) and the
   // build follows; pressed while a window game runs, Play resumes it or brings its window forward.
@@ -453,6 +481,11 @@ export default function MenuBar() {
           onSelect: startWhatsThis },
         { kind: 'separator' },
         { kind: 'item', label: 'Keyboard Shortcuts…', icon: <KeyboardIcon />, onSelect: () => setHelpDialog('shortcuts') },
+        // The desktop editor updates itself (app-kit/desktop/desktopUpdater.js); a check otherwise runs a little
+        // after launch and every few hours. Disabled in a build that does not update (unpackaged, a Linux non-AppImage).
+        ...(getUpdaterBridge() ? [{ kind: 'item' as const, label: 'Check for Updates…', icon: <span className='inline-block w-3.5 h-3.5'><UpdateIcon /></span>,
+          title: updater.status === 'disabled' ? 'This build does not update itself (a development build, or not an installed copy)' : 'Look for a newer Cleo Engine on GitHub now',
+          disabled: updater.status === 'disabled' || updater.status === 'checking', onSelect: () => void onCheckForUpdates() }] : []),
         { kind: 'item', label: 'About Cleo Engine…', icon: <InfoIcon />, onSelect: () => setHelpDialog('about') },
       ],
     },
@@ -515,7 +548,8 @@ export default function MenuBar() {
         )}
         {helpDialog === 'about' && (
           <AboutDialog appName='Cleo Engine' version={VERSION_LABEL} logo={LOGO}
-                       lines={['The Cleo editor, with Cleo Creator.']} onClose={() => setHelpDialog(null)} />
+                       lines={['The Cleo editor, with Cleo Creator.']} changelog={APP_CHANGELOG}
+                       footer={<UpdateStatusLine appName='Cleo Engine' />} onClose={() => setHelpDialog(null)} />
         )}
       </div>
       <div className='relative flex items-center h-full gap-1.5' ref={targetsRef}>
@@ -642,6 +676,8 @@ export default function MenuBar() {
       <div className='flex items-center h-full px-1.5 gap-1.5'>
         {/* The addons' toggles: the Claude Code addon's opens its panel, docked at the right edge. */}
         <AddonSlot name="topbarRight" />
+        {/* The last thing on the bar: a newer version found, downloading, or waiting for a restart (desktop). */}
+        <UpdateButton appName='Cleo Engine' onInstall={restartToUpdate} />
       </div>
     </Topbar>
   )

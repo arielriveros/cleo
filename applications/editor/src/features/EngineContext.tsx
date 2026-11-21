@@ -125,7 +125,8 @@ import { clearRuntimeErrors } from "./nodeInspector/scriptEditor/runtimeErrors";
 import { setScriptSourceProvider } from "./scriptDebugger/debugSession";
 import { isDesktop } from "./publish/publishClient";
 import { assetIdOfTab, loadTabState, saveTabState, MAIN_MODES, MainMode } from "../utils/tabState";
-import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects";
+import { activeProjectAllowsLegacyImport, loadProjects, setProjectCover, touchProject } from "../utils/projects";
+import { coverCardImage } from "./options/coverCapture";
 import { activeProjectId } from "../utils/projectScope";
 import { scheduleProjectWrite, trackProjectWrite, onProjectUnload } from "../utils/projectLifecycle";
 import { acquireEditorEngine, editorEngine, releaseEngineProject } from "./editorEngine";
@@ -151,7 +152,7 @@ import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
 import { useRigEditor } from './hooks/useRigEditor';
 import { useClipEditor } from './hooks/useClipEditor';
 import { getShellBridge } from '@cleo/app-kit/platform/desktopShell';
-import { confirmDiscard, setUnsavedWork, unloadGuardSuppressed } from './unloadGuard';
+import { confirmDiscard, setSaveInFlight, setUnsavedWork, unloadGuardSuppressed } from './unloadGuard';
 import {
   EDITOR_CLEAR_COLOR, LEGACY_CLEAR_COLOR, TAB_METERS_EXPOSURE, TAB_RUNS_POST_PROCESSING, SCENE_TAB_ID,
   KIND_LABEL, TAB_EDITOR_MODE, MODE_SHOWS_SCENE_HELPERS,
@@ -7192,6 +7193,31 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     setUnsavedWork(Object.keys(dirtyTabs).map(id => tabsRef.current.find(t => t.id === id)?.title ?? id));
   }, [dirtyTabs]);
+  // ...and whether a save is running, which restarting into an update waits for (features/updates/restartToUpdate.ts).
+  useEffect(() => { setSaveInFlight(savingState === 'saving'); }, [savingState]);
+
+  // The project browser's card shows the project's cover (Options ▸ Project ▸ Published game ▸ Cover) when it has
+  // one, instead of its main scene's thumbnail: a small copy kept on the project's record, made again when the
+  // cover changes and dropped when it is cleared. A fresh clone gets it the first time it is opened.
+  const coverId = projectSettings.identity.cover;
+  useEffect(() => {
+    if (!projectSettingsReady || !texturesPreloaded) return;
+    const id = activeProjectId();
+    if (!id) return;
+    let cancelled = false;
+    void (async () => {
+      const record = (await loadProjects()).find(p => p.id === id);
+      if (!record || cancelled) return;
+      if (!coverId) {
+        if (record.cover || record.coverId) await setProjectCover(id, null);
+        return;
+      }
+      if (record.coverId === coverId && record.cover) return;
+      const url = await coverCardImage(coverId, texturesRef.current);
+      if (!cancelled && url) await setProjectCover(id, { url, coverId });
+    })().catch(e => console.warn("Could not update the project card's cover:", e));
+    return () => { cancelled = true; };
+  }, [projectSettingsReady, texturesPreloaded, coverId, textures.length]);
 
   // The desktop shell's blocked close/reload, answered in the editor's own dialog. Registered once: the
   // shell only asks when `beforeunload` has already blocked something, so there is always work to lose.

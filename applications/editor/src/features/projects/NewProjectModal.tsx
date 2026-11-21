@@ -5,7 +5,7 @@ import { createProject, foldersOnly } from '../../utils/projects'
 import { LocationField, useLocation } from '../projectFolder/LocationField'
 import { createFolderProject } from '../projectFolder/openFolder'
 import { openProject } from './projectSwitch'
-import { DEFAULT_PROJECT_SETTINGS, parseProjectSettings, PROJECT_SETTINGS_VERSION } from '../options/projectSettings'
+import { DEFAULT_PROJECT_SETTINGS, newAppId, parseProjectSettings, PROJECT_SETTINGS_VERSION } from '../options/projectSettings'
 import FeaturePicker, { presetChoice, type FeatureChoice } from '../projectFeatures/FeaturePicker'
 import { useFeatureSizes } from '../projectFeatures/featureSizes'
 import { BUILT_IN_ADDONS } from '../addons/registry'
@@ -34,6 +34,8 @@ export default function NewProjectModal({ onClose, onCreated }: { onClose: () =>
         ...DEFAULT_PROJECT_SETTINGS,
         version: PROJECT_SETTINGS_VERSION,
         publish: { ...DEFAULT_PROJECT_SETTINGS.publish, webgl2Fallback: choice.webgl2 },
+        // Its own app id from the start, so renaming the game later never makes its installer a different app.
+        identity: { ...DEFAULT_PROJECT_SETTINGS.identity, appId: newAppId(trimmed) },
         features: { disabled: choice.disabled },
         addons: { enabled: addons, settings: {} },
       })

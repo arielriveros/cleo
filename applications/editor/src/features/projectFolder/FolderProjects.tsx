@@ -6,7 +6,7 @@ import { beginLoad } from '@cleo/app-kit/feedback/loadingStore'
 import { LauncherCard, LauncherGlyph, LauncherGrid } from '@cleo/app-kit/launcher/Launcher'
 import { iconFor } from '../assets/assetKinds'
 import { activeProjectId } from '../../utils/projectScope'
-import { loadProjects, relocateFolderRecord, type ProjectRecord } from '../../utils/projects'
+import { loadProjects, projectCardImage, relocateFolderRecord, type ProjectRecord } from '../../utils/projects'
 import { confirmDiscard } from '../unloadGuard'
 import NewProjectModal from '../projects/NewProjectModal'
 import { importBundleJob } from '../../workers/workerClient'
@@ -157,8 +157,8 @@ export default function FolderProjects({ projects, onChanged }: { projects: Proj
                   name={row.record.name}
                   title={row.record.folder!.root}
                   meta={row.missing ? 'Folder not found — click to locate it' : row.record.folder!.root}
-                  thumbnail={row.record.thumbnail
-                    ? <img src={row.record.thumbnail} alt='' className='w-full h-full object-cover' />
+                  thumbnail={projectCardImage(row.record)
+                    ? <img src={projectCardImage(row.record)} alt='' className='w-full h-full object-cover' />
                     : <LauncherGlyph><img src={iconFor('scene')} alt='' className='w-8 h-8 opacity-50' /></LauncherGlyph>}
                   active={row.record.id === activeProjectId()}
                   disabled={busy}

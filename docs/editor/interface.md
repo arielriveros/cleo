@@ -34,7 +34,7 @@ screen's pixel scan across it, and its tooltip names the open project.
 | **Edit** | **Undo** and **Redo** (named after what they undo), **Delete** the selected node. |
 | **View** | **Frame Selected** (F) and **Reset Layout**. |
 | **Project** | **Import Project…** (a project `.zip`), **Export Project** (the whole project to a `.zip`), **Features…** (the engine features the games ship, see [Project features](project-features.md)), **Addons…** (editor addons: the MCP server and Claude Code, see [Addons](addons.md)), and **Publish ▸** Web (HTML), Desktop (Electron) or Desktop installer. See [Projects](projects.md) and [Publishing](publishing.md). |
-| **Help** | **Documentation** (F1), **What's This?** (Shift+F1), **Keyboard Shortcuts…** (the table below) and **About Cleo Engine…** (the version). See [Help and the docs](#help-and-the-docs). |
+| **Help** | **Documentation** (F1), **What's This?** (Shift+F1), **Keyboard Shortcuts…** (the table below), **Check for Updates…** (desktop, see [Updates](#updates)) and **About Cleo Engine…** (the version and what changed in it). See [Help and the docs](#help-and-the-docs). |
 
 Click a menu to open it; while one is open, pointing at another opens that one instead. The arrow keys move
 through the menus and their items, Enter chooses, Esc closes.
@@ -67,7 +67,7 @@ Play, Simulate and Restart wait while a project, a scene or an import is still o
 editor's scene is not the project's yet. Their tooltips say what they are waiting for. A game that is
 already running is never held.
 
-**Right** — the [mode selector](modes.md), then **Claude** (the Claude mark), which opens the [Claude panel](ai-agent-link.md). It is there while the Claude Code addon is on.
+**Right** — the [mode selector](modes.md), then **Claude** (the Claude mark), which opens the [Claude panel](ai-agent-link.md). It is there while the Claude Code addon is on. Last, in the desktop app, the **Update** button, when there is a newer version (see [Updates](#updates)).
 
 In the desktop app on Windows and Linux the menu bar is also the window's title bar, and **Minimize**,
 **Maximize** (**Restore** while maximized) and **Close** come last.
@@ -77,6 +77,24 @@ In the desktop app on Windows and Linux the menu bar is also the window's title 
 - *Close* asks about unsaved work, as closing the window always has.
 
 On macOS the window keeps its own title bar.
+
+### Updates
+
+The desktop app updates itself from Cleo's releases on GitHub. A little after it starts, and every few hours
+while it runs, it looks for a newer version; when there is one it downloads it in the background, and the
+**Update** button appears at the right end of the menu bar.
+
+| Update button | Means |
+|---|---|
+| **Download arrow**, a line filling under it | A newer version is downloading. |
+| **Restart arrow** and the new version's number | It is downloaded. Click for its release notes and **Restart now**, which saves nothing for you: it asks about unsaved edits first, waits for a save that is running and for the project's files to be written, then restarts into the new version. **Later** leaves it; quitting the app installs it too. |
+| **Download arrow** (macOS) | A newer version is out. The macOS app cannot install updates itself, so **Download from GitHub** opens its release page. |
+| **Warning colour** | The download failed, or a check you asked for did. **Retry**, or open the release page. |
+
+**Help ▸ Check for Updates…** looks right away, and says so when you are up to date. **Help ▸ About Cleo
+Engine…** shows what changed in the version you are running. A development build does not update itself, and
+neither does a Linux build that is not the AppImage. The web editor needs none of this: it is always the
+latest.
 
 ## Help and the docs
 

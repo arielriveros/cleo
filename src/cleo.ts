@@ -49,6 +49,11 @@ export {
 } from "./sequencer/movie/renderMovie";
 export { beginMovieEngine, type MovieEngineHandle, type MovieEngineOptions } from "./sequencer/movie/movieEngine";
 export { movieRenderSettings, type MovieQuality } from "./sequencer/movie/movieSettings";
+// One frame captured the way a movie frame is: full detail, nothing of the editor in it (a project's cover).
+export {
+    renderStill, captureStill, StillCancelledError,
+    type StillEngine, type StillOptions, type StillProgress, type CaptureStillOptions,
+} from "./sequencer/movie/renderStill";
 export {
     frameRateOf, framesPerSecond, frameStart, frameTimestampUs, frameDurationUs, sampleTime, sampleJitter,
     shutterFromAngle, frameCountFor, type FrameRate, type SampleSettings,

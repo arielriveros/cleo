@@ -23,6 +23,7 @@ export { AppMenuBar, isSelectable, nextSelectable } from './AppMenuBar';
 export type { AppMenuBarProps, MenuEntry, MenuSpec } from './AppMenuBar';
 export { LogoButton } from './LogoButton';
 export { AboutDialog, ShortcutsDialog } from './HelpDialogs';
+export { UpdateButton, UpdateStatusLine } from './UpdateButton';
 export type { MenuItemProps } from './MenuItem';
 export { ContextMenu } from './ContextMenu';
 export type { ContextMenuProps } from './ContextMenu';
@@ -40,6 +41,7 @@ export {
   Glyph, DiceIcon, BoltIcon, LinkIcon, PlayIcon, PauseIcon, RestartIcon, StopIcon, LoopIcon, StepBackIcon,
   StepForwardIcon, ToStartIcon, ToEndIcon, PilotIcon, SnapIcon, FilmIcon, BookIcon, WhatsThisIcon,
   ChevronLeftIcon, ChevronRightIcon, SidebarIcon, HomeIcon, CloseIcon, CopyIcon, SearchIcon, ImageIcon, HashIcon,
+  UpdateIcon, RestartUpdateIcon,
 } from './icons';
 export type { SliderProps } from './Slider';
 

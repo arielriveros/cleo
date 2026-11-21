@@ -16,6 +16,38 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **The desktop editor updates itself.**
+  - *From GitHub Releases.* A little after it starts, and every four hours, the desktop app reads the latest
+    release's `latest.yml` (electron-updater, `applications/app-kit/desktop/desktopUpdater.js`) and downloads a newer
+    version in the background. The **Update** button at the right end of the menu bar shows the download, then
+    the new version, its release notes and **Restart now**. Restarting asks about unsaved edits, waits for a save
+    and the project folder's writes, then installs; quitting installs it too. **Help ▸ Check for Updates…** looks at
+    once. macOS builds are unsigned, so there an update is announced and the button opens its release page; a Linux
+    build updates as the AppImage.
+  - *Every release ships installers.* `release.yml` builds the Windows, macOS and Linux installers on every
+    release, not only breaking ones, with their `latest*.yml` and block maps, the SDK and the NetSync host, and marks
+    the release latest only once they are attached. Installer names have no spaces (`Cleo-Editor-Setup-1.2.5.exe`).
+    Versions up to v1.1.2.4 have no updater: the first release with one is installed by hand.
+  - *What changed, in About.* Help ▸ About shows the running version's CHANGELOG section (a development build:
+    what is unreleased and the release under it), in the editor and in Creator. The same section is the update's
+    release notes.
+  - *electron-builder is a dependency of the shell*, kept unpacked beside `app.asar`, so the packaged editor can
+    build a game's installer; it also no longer reads Electron's version from a package that is not shipped.
+- **A game's identity, icon and cover.**
+  - *Version and app id.* Options ▸ Project ▸ Published game gains **Version** (semver, into the game's package,
+    its installer and `game.bin`) and **App id** (what an installer upgrades by). A new project gets an app id of
+    its own; an older one keeps the id its installers were always given, made from its name, frozen at its next
+    publish, so renaming a game no longer makes its next installer a different app. Settings format 7.
+  - *Icon.* An image becomes `icon.png` and `icon.ico` beside the published game: the web page's favicon, the
+    desktop window's icon, and the executable's, installer's and uninstaller's. The page's `<title>` is the game's.
+  - *Cover, captured clean.* **Cover** is the project's card in the project browser. Pick an image, or press the
+    camera to capture the view being edited (the focused pane of a split viewport) at 1920×1080 and full detail,
+    with nothing of the editor in it: no grid, gizmos, collider wireframes, icons or selection outline. It is the
+    movie path (`captureStill` in `src/sequencer/movie/renderStill.ts`), averaged over 16 jittered samples. A capture
+    is an image in Assets ▸ Publishing; capturing again replaces it.
+  - *Ready for updates.* `game.bin`'s manifest carries `game: { name, version, appId }`, and a desktop installer is
+    written with its `latest.yml` and block map. The plan for distributing game updates (full updates and content
+    patches on the desktop, a version check on the web, itch.io and Steam) is `docs/design/game-updates.md`.
 - **The examples are project folders.**
   - *Edit an example as a project.* Each shipped example is a Cleo project folder in `examples/<slug>/` (Valley, Dungeon,
     Firing Line, Duskwell, Island, Sandbox). Open it in the desktop editor and what you save is the repository's

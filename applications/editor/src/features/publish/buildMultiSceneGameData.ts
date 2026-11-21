@@ -60,6 +60,11 @@ export interface MultiSceneSources {
    * build strips them without asking, as Play in window does to play what a publish would.
    */
   onDisabledFeatureUse?: (uses: FeatureUsage) => Promise<string[] | null>
+  /**
+   * Who the game is (Options ▸ Project ▸ Published game): written into game.bin's manifest (pack.ts `game`) for an
+   * updater to compare with what is installed. A publish passes it; Play in window has no use for it.
+   */
+  game?: { name: string; version: string; appId: string }
 }
 
 /** The build was stopped at the features question (MultiSceneSources.onDisabledFeatureUse). */
@@ -265,6 +270,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   // Published without its WebGL 2 shaders: the player asks for WebGPU and says so where there is none.
   if (src.projectSettings?.publish.webgl2Fallback === false) (config.graphics ??= {}).webgl2 = false
   if (Object.keys(config).length > 0) out.config = config
+  if (src.game) out.game = { name: src.game.name, version: src.game.version, appId: src.game.appId }
   return out
 }
 

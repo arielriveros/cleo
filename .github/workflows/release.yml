@@ -1,6 +1,7 @@
 # Cuts a release when a pull request from `development` is merged into `main`: runs the tests, bumps
 # the version, writes the PR's own description into the changelog, tags, builds, publishes and
-# deploys -- and on a breaking release, also builds and attaches the desktop installers.
+# deploys, then builds and attaches the desktop installers -- with the latest*.yml and block maps the
+# desktop editor's updater reads -- and only then marks the release the repository's latest.
 #
 # THE CHANGELOG IS THE PULL REQUEST DESCRIPTION. It used to be a list of commit subjects between two
 # tags, which is not what CHANGELOG.md reads like: its entries are prose, and prose is what a reviewer
@@ -183,6 +184,8 @@ jobs:
       - name: Push
         run: git push --atomic origin HEAD:main 'refs/tags/v${{ steps.bump.outputs.version }}'
 
+      # Not the latest release yet: desktop editors update from whatever GitHub calls latest, and this one has no
+      # installers until the job below attaches them. `publish-latest` marks it once they are there.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -190,6 +193,7 @@ jobs:
           gh release create 'v${{ steps.bump.outputs.version }}' \
             --title 'v${{ steps.bump.outputs.version }}' \
             --notes-file "$RUNNER_TEMP/notes.md" \
+            --latest=false \
             "$RUNNER_TEMP/cleo-editor-v${{ steps.bump.outputs.version }}.zip"
 
       - name: Summary
@@ -208,14 +212,15 @@ jobs:
           channelId: live
           projectId: cleo-editor
 
-  # Breaking releases only. Three runners each doing a full engine + editor + player build before
-  # electron-builder even starts is by far the most expensive thing in this repo, and an installer is
-  # worth handing out for "the shape of your project files changed" -- not for a fix digit. Everything
-  # else in the release is already published by the job above; this only adds assets to it.
+  # Every release. The desktop editor updates itself from these (app-kit/desktop/desktopUpdater.js): it reads
+  # the latest release's latest.yml / latest-mac.yml / latest-linux.yml and downloads the installer beside it,
+  # so a release without them is one no desktop editor ever reaches. That is why this is no longer kept for
+  # breaking releases, even though three runners each doing a full engine + editor + player build before
+  # electron-builder starts is the most expensive thing in this repo. Everything else in the release is
+  # already published by the job above; this only adds assets to it.
   installers:
     name: Desktop installer (${{ matrix.os }})
     needs: [gate, release]
-    if: needs.gate.outputs.bump == 'breaking'
     runs-on: ${{ matrix.os }}
     strategy:
       # One platform failing to package should not withhold the two that succeeded.
@@ -253,8 +258,24 @@ jobs:
           CLEO_EXAMPLES_REQUIRED: '1'
         run: npm ci && npm run build && npm run editor:install && npm run editor:build
 
+      # extraResources ships these too (the project SDK and the dedicated NetSync host): built here, or the
+      # installer carries whatever an earlier checkout left, or nothing.
+      - name: Build the SDK and the host
+        run: npm run build:sdk && npm run host:install && npm run build:host
+
+      # electron-builder puts build/release-notes.md into latest.yml as `releaseNotes`: what the Update
+      # button shows before the update, the same section Help > About shows after it (buildVersion.js).
+      - name: Release notes for the updater
+        shell: bash
+        run: |
+          mkdir -p applications/app-kit/desktop/build
+          node tools/changelogSection.mjs '${{ needs.release.outputs.version }}' > applications/app-kit/desktop/build/release-notes.md
+
       # Nothing here is signed. Without this, electron-builder hunts for a keychain identity on macOS and
-      # fails the job; unsigned is the honest outcome, not a silent one.
+      # fails the job; unsigned is the honest outcome, not a silent one. (Windows updates install unsigned;
+      # macOS ones cannot, so the editor there only announces them.) `npm run dist` builds with
+      # `--publish never`: the package.json `publish` block only tells electron-builder to write latest*.yml
+      # and app-update.yml, and the step below uploads.
       - name: Build installer
         working-directory: applications/app-kit/desktop
         env:
@@ -269,6 +290,9 @@ jobs:
       # dist/, so a bare *.exe also picks up whatever a previous build left there. A hosted runner starts
       # empty and would not hit that, but attaching a stale installer to a release is not a failure mode
       # worth leaving open. Note this is the package.json version (x.y.z), not the 1.x.y.z tag.
+      #
+      # With them go the updater's files: the latest*.yml this runner wrote (checked to name this version, since
+      # an updater trusts it) and the block maps a later update downloads only the changed parts with.
       - name: Attach to release
         shell: bash
         env:
@@ -276,11 +300,37 @@ jobs:
         run: |
           shopt -s nullglob
           pkg=$(node -p "require('./applications/app-kit/desktop/package.json').version")
-          installers=(applications/app-kit/desktop/dist/*"$pkg"*.exe applications/app-kit/desktop/dist/*"$pkg"*.dmg applications/app-kit/desktop/dist/*"$pkg"*.AppImage)
+          dist=applications/app-kit/desktop/dist
+          installers=("$dist"/*"$pkg"*.exe "$dist"/*"$pkg"*.dmg "$dist"/*"$pkg"*.AppImage)
           if [ ${#installers[@]} -eq 0 ]; then
             echo "::error title=No installer::electron-builder produced nothing matching $pkg"
-            ls -l applications/app-kit/desktop/dist || true
+            ls -l "$dist" || true
             exit 1
           fi
-          printf 'uploading: %s\n' "${installers[@]}"
-          gh release upload 'v${{ needs.release.outputs.version }}' --clobber "${installers[@]}"
+          feeds=("$dist"/latest*.yml)
+          if [ ${#feeds[@]} -eq 0 ]; then
+            echo "::error title=No update feed::electron-builder wrote no latest*.yml (is the publish block in package.json?)"
+            ls -l "$dist" || true
+            exit 1
+          fi
+          for feed in "${feeds[@]}"; do
+            grep -q "^version: $pkg\$" "$feed" || { echo "::error title=Stale update feed::$feed does not name $pkg"; cat "$feed"; exit 1; }
+          done
+          blockmaps=("$dist"/*"$pkg"*.blockmap)
+          printf 'uploading: %s\n' "${installers[@]}" "${feeds[@]}" "${blockmaps[@]}"
+          gh release upload 'v${{ needs.release.outputs.version }}' --clobber "${installers[@]}" "${feeds[@]}" "${blockmaps[@]}"
+
+  # Only now is the release the latest one, which is what every desktop editor's updater reads. After the
+  # installers rather than before, so no editor finds a release it cannot download. `always()` so one platform
+  # failing to package does not hold the other two back: that platform's editors see a missing latest*.yml,
+  # which they take as "nothing new" until the next release.
+  publish-latest:
+    name: Mark the release latest
+    needs: [release, installers]
+    if: always() && needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit 'v${{ needs.release.outputs.version }}' --latest --repo "$GITHUB_REPOSITORY"

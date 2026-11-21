@@ -16,10 +16,32 @@ import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
 
 let unsaved: string[] = []
 let suppressed = false
+let saving = false
+const savingListeners = new Set<() => void>()
 
 /** Publish the tabs with unsaved edits, by title. Called by EngineContext as dirty state changes. */
 export function setUnsavedWork(labels: string[]): void {
   unsaved = labels
+}
+
+/** Publish whether a save is running. Called by EngineContext as its saving state changes. */
+export function setSaveInFlight(inFlight: boolean): void {
+  saving = inFlight
+  if (!inFlight) for (const l of [...savingListeners]) l()
+}
+
+/**
+ * Resolves once no save is running (at once when none is), or after `timeoutMs` with `false`: what is about to
+ * take the page away (restarting into an update) waits for the save it would otherwise cut off.
+ */
+export function whenSaveSettled(timeoutMs = 30_000): Promise<boolean> {
+  if (!saving) return Promise.resolve(true)
+  return new Promise(resolve => {
+    const done = (ok: boolean) => { clearTimeout(timer); savingListeners.delete(listener); resolve(ok) }
+    const listener = () => done(true)
+    const timer = setTimeout(() => done(false), timeoutMs)
+    savingListeners.add(listener)
+  })
 }
 
 /** The tabs with unsaved edits, by title. Empty when everything is saved. */
@@ -30,8 +52,9 @@ export function unsavedWork(): string[] {
 /**
  * Whether the `beforeunload` guard should stand down for the navigation now happening.
  *
- * Set only by `reloadDiscarding`, and never cleared: the page is on its way out, and clearing it would
- * re-arm the guard in the window between the reload being requested and the document being replaced.
+ * Set by `reloadDiscarding`, and never cleared: the page is on its way out, and clearing it would
+ * re-arm the guard in the window between the reload being requested and the document being replaced. Also set
+ * by `standDownUnloadGuard`, whose caller re-arms it only when the unload it prepared for did not happen.
  */
 export function unloadGuardSuppressed(): boolean {
   return suppressed
@@ -68,4 +91,14 @@ export async function confirmDiscard(action: string): Promise<boolean> {
 export function reloadDiscarding(): void {
   suppressed = true
   window.location.reload()
+}
+
+/**
+ * Stand the `beforeunload` guard down for an unload the editor has already prepared for (restarting into an
+ * update: the work was saved, or the user chose to lose it). Returns the re-arm, for when the unload does not
+ * happen after all.
+ */
+export function standDownUnloadGuard(): () => void {
+  suppressed = true
+  return () => { suppressed = false }
 }

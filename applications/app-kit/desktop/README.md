@@ -63,8 +63,9 @@ else the project name) inside the location you pick.
   this downloads a `.zip` of the same files instead.
 - **Desktop (Electron)** — scaffolds a runnable Electron game folder (the web files plus `main.js`,
   `preload.js`, `package.json`). `cd` in, then `npm install && npm start`.
-- **Desktop installer** — saves only the native installer (e.g. `<Game> Setup 1.0.0.exe`), built by
-  electron-builder from a temporary copy of the runnable folder.
+- **Desktop installer** — saves the native installer (e.g. `<Game> Setup 1.0.0.exe`, its version from
+  Options ▸ Project ▸ Published game ▸ Version) and its update files (`latest.yml`, the `.blockmap`), built by
+  electron-builder from a temporary copy of the runnable folder, under the project's app id and with its icon.
   On Windows it is a wizard: the player picks the install folder and whether to create desktop and
   Start Menu shortcuts (`GAME_INSTALLER_NSH` in `gameTemplates.js`)
   (needs network access to download Electron).
@@ -80,3 +81,42 @@ npm run desktop:build
 
 Builds the engine, editor, and player, then runs electron-builder to produce an installer for the
 editor itself (`applications/app-kit/desktop/dist/`).
+
+`electron-builder` is a dependency of the shell, not only a build tool: the editor runs it to package a game's
+installer. So `npm run dist` sets `ALLOW_ELECTRON_BUILDER_AS_PRODUCTION_DEPENDENCY`, and the packaged app keeps its
+`node_modules` unpacked beside `app.asar` (`asarUnpack`), because the game's build runs with `process.noAsar` set and
+can read nothing inside the archive. Each platform ships only its own `app-builder-bin` and `7zip-bin` binaries.
+
+## Updates
+
+A packaged editor updates itself from this repository's GitHub Releases (`desktopUpdater.js`, electron-updater with
+the `github` provider in `package.json`). A little after launch, and every four hours, it reads the latest release's
+`latest.yml` (`latest-mac.yml`, `latest-linux.yml`); a newer version downloads in the background, and the Update
+button at the right end of the menu bar offers to restart into it. Quitting installs it too. macOS builds are not
+signed, which Squirrel.Mac requires, so there an update is only announced and the button opens its release page. A
+Linux build updates only as an AppImage.
+
+Every release attaches the installers, their `latest*.yml` and their `.blockmap` files (release.yml, `installers`
+job), and is marked the latest release only after that, so an editor never finds a release it cannot download.
+Installer names have no spaces (`Cleo-Editor-Setup-1.2.5.exe`): GitHub turns spaces in asset names into dots, which
+the names inside `latest.yml` would no longer match.
+
+Versions up to v1.1.2.4 have no updater: the first release with one is installed by hand, over the old one (same
+`appId`, same one-click per-user NSIS installer). After that, each release reaches every desktop editor.
+
+To try an update without publishing a release:
+
+```
+# build a "newer" installer and serve it (its notes come from build/release-notes.md, when present)
+npx electron-builder --win --publish never -c.extraMetadata.version=9.9.9
+npx http-server dist -p 8765
+# then start an installed (older) editor with
+CLEO_UPDATE_FEED=http://127.0.0.1:8765/
+```
+
+`CLEO_UPDATE_FEED` (https, or http to this machine) replaces GitHub as the feed; an unpackaged editor checks only
+with it set, reads `dev-app-update.yml`, and never installs. `CLEO_UPDATES=0` turns checking off.
+
+`npm run test:updates` (root; needs `npm run editor:build`) does the unpackaged half of that in the real app: a
+local feed's update found, downloaded, shown on the Update button and refused, Help ▸ About's changelog, and a
+project cover captured from a copy of the Sandbox (`tools/updatesE2E.mjs`).
