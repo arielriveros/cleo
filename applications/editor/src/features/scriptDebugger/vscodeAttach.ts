@@ -47,16 +47,29 @@ export function useVsCodeDebug(): VsCodeDebugStatus {
   return useSyncExternalStore(subscribeVsCodeDebug, getVsCodeDebugStatus, getVsCodeDebugStatus);
 }
 
+/**
+ * VS Code debugging asked for by `npm run debug` (the project's `cleo` CLI): on for this session whatever the
+ * preference says, which is left as the user set it.
+ */
+let sessionOverride = false
+
 /** Whether games playing in a window are VS Code's to debug now (and Cleo's own debugger stays off). */
 export function vscodeDebugging(): boolean {
-  return getEditorPrefs().scriptDebugWith === 'vscode' && !!desktopDebugPort();
+  return (getEditorPrefs().scriptDebugWith === 'vscode' || sessionOverride) && !!desktopDebugPort();
+}
+
+/** Turn VS Code debugging on (or back to the preference) for this session. Resolves with the port's state. */
+export async function setVsCodeDebugOverride(on: boolean): Promise<VsCodeDebugStatus> {
+  sessionOverride = on
+  await apply()
+  return getVsCodeDebugStatus()
 }
 
 /** Turn the port on, off or onto another port, as the preferences say. */
 async function apply(): Promise<void> {
   const bridge = desktopDebugPort();
   const prefs = getEditorPrefs();
-  const enabled = !!bridge && prefs.scriptDebugWith === 'vscode';
+  const enabled = !!bridge && (prefs.scriptDebugWith === 'vscode' || sessionOverride);
   if (!bridge) { set({ enabled: false, listening: false, port: 0, clients: 0, error: undefined }); return; }
   const r = await bridge.debugPort({ enabled, port: prefs.vscodeDebugPort }).catch(e => ({ ok: false, error: String(e?.message ?? e) } as { ok: boolean; port?: number; error?: string }));
   set({ enabled, listening: enabled && r.ok, port: enabled && r.ok ? r.port ?? prefs.vscodeDebugPort : 0, error: enabled && !r.ok ? r.error : undefined, ...(enabled ? {} : { clients: 0 }) });

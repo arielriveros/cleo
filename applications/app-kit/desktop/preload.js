@@ -119,6 +119,7 @@ contextBridge.exposeInMainWorld('cleoDesktop', {
     npmInstall: (root) => ipcRenderer.invoke('project:npm-install', root),
     trashFolder: (root) => ipcRenderer.invoke('project:trash-folder', root),
     takeLaunchRequest: () => ipcRenderer.invoke('project:take-launch-request'),
+    installSdk: (root, typesHash) => ipcRenderer.invoke('project:install-sdk', root, typesHash),
     onChange: (cb) => {
       const listener = (_event, payload) => cb(payload);
       ipcRenderer.on('project:changed', listener);
@@ -133,6 +134,18 @@ contextBridge.exposeInMainWorld('cleoDesktop', {
       const listener = (_event, payload) => cb(payload);
       ipcRenderer.on('project:npm-output', listener);
       return () => ipcRenderer.removeListener('project:npm-output', listener);
+    },
+  },
+
+  // Commands from the project's `cleo` CLI (controlPipe.js): play, open, ping. The editor says when it can take
+  // them (`ready`), answers each one by its id.
+  control: {
+    ready: () => ipcRenderer.invoke('control:ready'),
+    reply: (id, result) => ipcRenderer.invoke('control:reply', id, result),
+    onCommand: (cb) => {
+      const listener = (_event, command) => cb(command);
+      ipcRenderer.on('control:command', listener);
+      return () => ipcRenderer.removeListener('control:command', listener);
     },
   },
 });

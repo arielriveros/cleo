@@ -8,6 +8,13 @@ import { activeProjectId } from '../../utils/projectScope'
 import { folderSink } from './folderSink'
 import { folderSession, onFolderChange, scheduleStateSave, takeFolderChanges } from './folderSession'
 import { getProjectBridge, type FolderChange } from './desktopProject'
+import { installProjectSdk } from './sdkInstall'
+import { queuePlay, setPlayStarter } from './controlHost'
+import { takeLaunchPlayRequest } from './launchRequests'
+import { setVsCodeDebugOverride } from '../scriptDebugger/vscodeAttach'
+import { playBlockedReason } from '../playWindow/playGate'
+import { windowPlay } from '../playWindow/windowPlay'
+import { currentLoad } from '@cleo/app-kit/feedback/loadingStore'
 
 // A folder project's link between the mounted editor and its folder: what the editor holds goes to the
 // folder (folderSink), and what changed in the folder outside the editor is counted for the status chip,
@@ -130,6 +137,45 @@ function ProjectFolderLink({ children }: { children: ReactNode }) {
   // Armed once the project has finished loading: before that, libraries still empty would read as deletions.
   const loaded = ready && lib.assetsLoaded && engine.texturesPreloaded && engine.audioPreloaded && engine.isSceneReady
   useEffect(() => { if (loaded) folderSink.arm() }, [loaded])
+
+  // The project's `cleo` package (types, CLI, the headless runtime), in the background.
+  useEffect(() => {
+    const root = folderSession()?.root
+    if (root) void installProjectSdk(root)
+  }, [])
+
+  // `npm run play` / `npm run debug` (and a launch that asked to play): once loaded, this project can play.
+  const engineRef = useRef(engine)
+  engineRef.current = engine
+  useEffect(() => {
+    const s = folderSession()
+    if (!loaded || !s) return
+    const launch = takeLaunchPlayRequest(activeProjectId())
+    if (launch) queuePlay(s.root, launch.debug)
+    return setPlayStarter(s.root, async debug => {
+      let port: number | undefined
+      if (debug) {
+        const status = await setVsCodeDebugOverride(true)
+        if (!status.listening) return { ok: false, error: status.error ?? 'the VS Code debug port did not open' }
+        port = status.port
+      }
+      // The same gate Play has: a project still opening would play its empty boot scene.
+      const deadline = Date.now() + 60_000
+      for (;;) {
+        const e = engineRef.current
+        if (!playBlockedReason({ sceneReady: e.isSceneReady, openSceneId: e.openSceneId, load: currentLoad() })) break
+        if (Date.now() > deadline) return { ok: false, error: 'the project did not finish opening' }
+        await new Promise(r => setTimeout(r, 250))
+      }
+      const e = engineRef.current
+      const publish = e.projectSettings.publish
+      windowPlay().start(e.buildWindowPlayData, {
+        width: publish.width, height: publish.height,
+        title: publish.title.trim() || folderSession()?.project.name || 'Cleo Game',
+      })
+      return { ok: true, port }
+    })
+  }, [loaded])
 
   // An inspection handle for the desktop's end-to-end harness (app-kit/desktop/tools/projectFolderE2E.mjs) and
   // for the console: the session, the sink's status, and the library actions an edit would use.

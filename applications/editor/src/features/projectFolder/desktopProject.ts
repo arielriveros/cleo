@@ -71,6 +71,8 @@ export interface ProjectBridge {
   npmInstall(root: string): Ok
   trashFolder(root: string): Ok
   takeLaunchRequest(): Promise<LaunchRequest | null>
+  /** Write the project's `cleo` package (.cleo/sdk/cleo) and link node_modules/cleo to it. */
+  installSdk(root: string, typesHash?: string): Ok<{ installed: boolean; runtime: boolean; needTypes: boolean }>
   onChange(cb: (payload: { root: string; change: FolderChange }) => void): () => void
   onLaunchRequest(cb: (request: LaunchRequest) => void): () => void
   onNpmOutput(cb: (payload: { root: string; text: string }) => void): () => void
@@ -94,3 +96,16 @@ export function requireProjectBridge(): ProjectBridge {
 
 /** The largest batch one IPC call carries (projectFolder.js MAX_BATCH_BYTES); bigger ones are split. */
 export const MAX_BATCH_BYTES = 64 * 1024 * 1024
+
+/** A command from the project's `cleo` CLI, relayed by the desktop shell (controlPipe.js). */
+export interface ControlCommand { id: number; cmd: 'ping' | 'play' | 'open'; root?: string; debug?: boolean }
+
+export interface ControlBridge {
+  ready(): Promise<unknown>
+  reply(id: number, result: Record<string, unknown>): Promise<unknown>
+  onCommand(cb: (command: ControlCommand) => void): () => void
+}
+
+export function getControlBridge(): ControlBridge | undefined {
+  return (globalThis as any).cleoDesktop?.control as ControlBridge | undefined
+}

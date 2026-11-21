@@ -669,6 +669,84 @@ async function prepareNew(root) {
 }
 
 /* ------------------------------------------------------------------------- */
+/* The SDK: the `cleo` package a project's tooling resolves                   */
+/* ------------------------------------------------------------------------- */
+
+async function copyTree(from, to) {
+  const items = await fsp.readdir(from, { withFileTypes: true });
+  await fsp.mkdir(to, { recursive: true });
+  for (const item of items) {
+    const src = path.join(from, item.name);
+    const dst = path.join(to, item.name);
+    if (item.isDirectory()) await copyTree(src, dst);
+    else if (item.isFile()) await fsp.copyFile(src, dst);
+  }
+}
+
+/**
+ * Write the project's `cleo` package into `.cleo/sdk/cleo`: the headless runtime and `cleo/testing` (when this
+ * build ships them, `sdkDir`), the `cleo` CLI that `npm run play` runs, and its package.json. Then
+ * `node_modules/cleo` is pointed at it (a junction: no admin rights needed on Windows), so VS Code resolves the
+ * engine's types before anyone runs `npm install`, and npm keeps the same link afterwards (package.json depends
+ * on `file:.cleo/sdk/cleo`). The editor writes the declaration tree on top (it carries those itself).
+ * Skipped when the stamp says this version is already there.
+ */
+async function installSdk(rootIn, { version, sdkDir, cliFile, typesHash }) {
+  const root = requireAllowed(rootIn);
+  const pkgDir = path.join(root, '.cleo', 'sdk', 'cleo');
+  const stampFile = path.join(pkgDir, '.stamp');
+  const stamp = `${version}:${sdkDir && fs.existsSync(sdkDir) ? 'runtime' : 'types'}`;
+  let current = null;
+  try { current = await fsp.readFile(stampFile, 'utf-8'); } catch {}
+  if (current !== stamp) {
+    if (sdkDir && fs.existsSync(sdkDir)) await copyTree(sdkDir, pkgDir);
+    await fsp.mkdir(path.join(pkgDir, 'bin'), { recursive: true });
+    if (cliFile && fs.existsSync(cliFile)) await fsp.copyFile(cliFile, path.join(pkgDir, 'bin', 'cleo.mjs'));
+    const runtime = fs.existsSync(path.join(pkgDir, 'runtime', 'index.mjs'));
+    const exportsMap = {
+      '.': runtime ? { types: './cleo.d.ts', default: './runtime/index.mjs' } : { types: './cleo.d.ts' },
+      './decorators': runtime ? { types: './decorators.d.ts', default: './runtime/decorators.mjs' } : { types: './decorators.d.ts' },
+      ...(runtime ? {
+        './testing': { types: './runtime/testing.d.ts', default: './runtime/testing.mjs' },
+        './testing/vitest': { types: './runtime/vitest.d.ts', default: './runtime/vitest.mjs' },
+      } : {}),
+      './package.json': './package.json',
+    };
+    await writeAtomic(path.join(pkgDir, 'package.json'), JSON.stringify({
+      name: 'cleo', version, private: true, type: 'module', types: 'cleo.d.ts',
+      bin: { cleo: 'bin/cleo.mjs' }, exports: exportsMap,
+    }, null, 2) + '\n', path.join(root, TMP_DIR));
+    await fsp.writeFile(stampFile, stamp);
+  }
+  // node_modules/cleo -> .cleo/sdk/cleo. A real folder left by an older Cleo is replaced; a link npm made is kept.
+  const link = path.join(root, 'node_modules', 'cleo');
+  let st = null;
+  try { st = await fsp.lstat(link); } catch {}
+  let pointsHome = false;
+  if (st && st.isSymbolicLink()) {
+    try { pointsHome = keyOf(await fsp.realpath(link)) === keyOf(pkgDir); } catch {}
+  }
+  if (!pointsHome) {
+    if (st) await fsp.rm(link, { recursive: !st.isSymbolicLink(), force: true }).catch(() => {});
+    await fsp.mkdir(path.dirname(link), { recursive: true });
+    await fsp.symlink(pkgDir, link, process.platform === 'win32' ? 'junction' : 'dir');
+  }
+  // The editor writes the declaration tree itself, then `.types` with its hash: whether it must, is this.
+  let types = null;
+  try { types = await fsp.readFile(path.join(pkgDir, '.types'), 'utf-8'); } catch {}
+  return {
+    ok: true, installed: current !== stamp, runtime: fs.existsSync(path.join(pkgDir, 'runtime', 'index.mjs')),
+    needTypes: !typesHash || types !== typesHash || current !== stamp,
+  };
+}
+
+/** `.cleo/local/editor.json`: how the project's `cleo` CLI reaches the editor that has it open. */
+async function writeEditorRecord(rootIn, record) {
+  const root = canonical(rootIn);
+  await writeAtomic(path.join(root, LOCAL_DIR, 'editor.json'), JSON.stringify(record, null, 2), path.join(root, TMP_DIR));
+}
+
+/* ------------------------------------------------------------------------- */
 /* Launching tools                                                            */
 /* ------------------------------------------------------------------------- */
 
@@ -771,7 +849,7 @@ const safeFolderName = (name) => {
  * Register every `project:*` channel. `pickDirectory(win, title, defaultPath)` is injected so a harness can
  * drive the flow without a native dialog; `app` gives userData and the documents folder.
  */
-function registerIpc({ ipcMain, BrowserWindow, app, pickDirectory }) {
+function registerIpc({ ipcMain, BrowserWindow, app, pickDirectory, editorRecord, sdkDir, cliFile }) {
   setRegistryFile(path.join(app.getPath('userData'), 'projects.json'));
   const { shell } = require('electron');
   /** Folders the user picked as the place for a new project, this session. */
@@ -821,9 +899,14 @@ function registerIpc({ ipcMain, BrowserWindow, app, pickDirectory }) {
       if (sender.isDestroyed()) { closeFolder(root); return; }
       sender.send('project:changed', { root: canonical(root), change });
     }, { owner: sender.id, force: !!opts.force, allowNew: !!opts.allowNew, trash: (abs) => shell.trashItem(abs) });
-    if (res.ok) await remember(res.root, opts.name);
+    if (res.ok) {
+      await remember(res.root, opts.name);
+      // How `npm run play` in this folder finds this editor (machine-local; .cleo/ is never committed).
+      if (editorRecord) await writeEditorRecord(res.root, editorRecord()).catch(() => {});
+    }
     return res;
   }));
+  ipcMain.handle('project:install-sdk', guard(async (_e, root, typesHash) => installSdk(root, { version: app.getVersion(), sdkDir: sdkDir && sdkDir(), cliFile, typesHash })));
   ipcMain.handle('project:close', guard(async (event, root) => { if (open.has(keyOf(root))) owned(event, root); return closeFolder(root); }));
   ipcMain.handle('project:relist', guard(async (event, root) => { owned(event, root); return relist(root); }));
   ipcMain.handle('project:read', guard(async (event, root, rels) => { owned(event, root); return readFiles(root, rels); }));
@@ -856,7 +939,7 @@ module.exports = {
   // allowlist + registry
   allow, isAllowed, setRegistryFile, remember, forget, listRegistry,
   // tools
-  launch, reveal, gitInit, npmInstall, hasCommand,
+  launch, reveal, gitInit, npmInstall, hasCommand, installSdk, writeEditorRecord,
   registerIpc, MAX_BATCH_BYTES, instanceId,
 };
 

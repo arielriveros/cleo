@@ -13,6 +13,7 @@ import { registerProjectHost, takeSwitchFailure } from './features/projects/proj
 import { adoptRegisteredFolders, syncCacheFromFolder, takeLaunchProject } from './features/projectFolder/openFolder'
 import { ProjectFolderProvider } from './features/projectFolder/ProjectFolderProvider'
 import { setLaunchPlayRequest } from './features/projectFolder/launchRequests'
+import { installControlHost } from './features/projectFolder/controlHost'
 import { reloadDiscarding } from './features/unloadGuard'
 import { Button } from '@cleo/app-kit/ui'
 
@@ -47,6 +48,8 @@ export default function App() {
     // The startup load: begun here, before any project is open, and carried on by EngineContext. A
     // reload that ends another flow (installing an example, switching project) hands its title and
     // finished steps over, and they show first.
+    // The project's `cleo` CLI (npm run play / debug) can drive this editor from here on, the launcher included.
+    installControlHost()
     const load = beginBootLoad()
     const step = load.step('project').start()
     void (async () => {

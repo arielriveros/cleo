@@ -187,6 +187,31 @@ async function main() {
   const sceneRel = await until(() => walk(root).find(r => r.endsWith('.scene')), 20000)
   check('Ctrl+S writes the scene file', !!sceneRel, walk(root))
 
+  // 3b. The project's script tooling: the cleo package, and `npm run play` / `npm run debug` driving this editor.
+  check('the SDK holds the engine\'s declarations', await until(() => exists(root, '.cleo/sdk/cleo/cleo.d.ts'), 30000))
+  check('node_modules/cleo resolves to it', exists(root, 'node_modules/cleo/cleo.d.ts'))
+  check('this editor is reachable from the folder', exists(root, '.cleo/local/editor.json'))
+  const cliPath = path.join(root, '.cleo', 'sdk', 'cleo', 'bin', 'cleo.mjs')
+  const runCli = (...args) => new Promise(resolve => {
+    const env = { ...process.env }
+    delete env.ELECTRON_RUN_AS_NODE
+    const child = spawn(process.execPath, [cliPath, ...args], { cwd: root, env })
+    let out = ''
+    child.stdout.on('data', d => { out += d })
+    child.stderr.on('data', d => { out += d })
+    child.on('exit', code => resolve({ code, out }))
+  })
+  const played = await runCli('play')
+  check('npm run play starts Play in window', played.code === 0 && /Playing in a window/.test(played.out), played.out)
+  const gameWindow = await until(async () => {
+    const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()
+    return list.some(t => String(t.url).includes('play.html'))
+  }, 60000)
+  check('a game window opens', gameWindow)
+  const debugged = await runCli('play', '--debug')
+  check('npm run debug reports the VS Code debug port', debugged.code === 0 && /port \d+/.test(debugged.out), debugged.out)
+
+
   // 4. Changes on disk come back. A script edit (VS Code's everyday case) is taken in live; anything else
   // through Reload: a dropped image, a git-style move, a delete.
   fs.writeFileSync(path.join(root, playerRel), 'export default class Player { speed = 3 }\n')

@@ -6,6 +6,7 @@ const fsp = fs.promises;
 const { pathToFileURL } = require('url');
 const { GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme, writeDesktopShell } = require('./gameTemplates');
 const projectFolder = require('./projectFolder');
+const controlPipe = require('./controlPipe');
 const movieFiles = require('./movieFiles');
 const playWindow = require('./playWindow');
 const devHostProcess = require('./devHostProcess');
@@ -209,6 +210,8 @@ function createWindow() {
   win.setMenuBarVisibility(false);
   windowControls.track(win);
   openCreatorWindows(win);
+  // The project's `cleo` CLI (npm run play / debug) talks to this window through the control pipe.
+  controlPipe.attach(win.webContents);
 
   // Optional: forward renderer console + failed loads to the terminal (CLEO_LOG_CONSOLE=1).
   if (process.env.CLEO_LOG_CONSOLE === '1') {
@@ -541,7 +544,16 @@ const pickProjectDirectory = process.env.CLEO_PICK_DIRECTORY
       return next;
     }
   : pickDirectory;
-projectFolder.registerIpc({ ipcMain, BrowserWindow, app, pickDirectory: pickProjectDirectory });
+// The project's `cleo` package: the headless runtime this build ships (app-kit SDK build), and the CLI.
+const sdkDir = () => (app.isPackaged
+  ? path.join(process.resourcesPath, 'sdk', 'cleo')
+  : path.join(__dirname, '..', '..', 'sdk', 'dist', 'cleo'));
+if (gotSingleInstance) controlPipe.start(app.getPath('userData'));
+controlPipe.registerIpc({ ipcMain, allow: (root) => projectFolder.allow(root) });
+projectFolder.registerIpc({
+  ipcMain, BrowserWindow, app, pickDirectory: pickProjectDirectory,
+  editorRecord: () => controlPipe.editorRecord(app), sdkDir, cliFile: path.join(__dirname, 'sdk', 'cleo.mjs'),
+});
 
 // --- Movie output IPC --------------------------------------------------------------------------
 //
