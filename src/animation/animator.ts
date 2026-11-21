@@ -23,6 +23,7 @@ import { rootMotionNodeOf, rootParentRotation, rootParentScale } from './clipEdi
 import { humanoidSlotOf, normalizeBoneName } from './boneNames';
 import { socketModelMatrix } from './sockets';
 import { footLockAt, footLockKey } from './footLockWindows';
+import { FORK_DEPTH, forksFromAnywhere, isForkIn, pathsFrom, resolveIn, staticEnd, type MachinePath, type MachineView } from './machineForks';
 // The condition model and evaluator live in core/conditions.ts — they read a table of named values and
 // answer yes or no, which has nothing to do with animation, and the behavior state machine needs the
 // same latching. See that module for why the band is centred and why latches refresh machine-wide.
@@ -383,6 +384,8 @@ export interface AnimationStateMachine {
     transitions: AnimationTransition[];
     /** The base layer's state groups: see {@link AnimationStateGroup}. */
     groups?: AnimationStateGroup[];
+    /** The base layer's forks: see {@link AnimationFork}. */
+    forks?: AnimationFork[];
     events: AnimationEventMarker[];
     /**
      * What an event does: event name -> actions (a sound, a particle burst, a light flash, a spawned template), run by
@@ -413,16 +416,41 @@ export interface AnimationStateMachine {
  *   - A transition FROM the group fires from whichever of its states is playing, after that state's own
  *     transitions (a state's own way out wins over its group's): the way into the air, say, written once for every
  *     state in the group.
- *   - A transition TO the group enters its `entry` state (its first, when unset).
+ *   - A transition TO the group enters its `entry` state (its first, when unset), which may be a fork: then it goes
+ *     on through the fork.
  *
- * A state belongs to at most one group, and group names do not repeat state names.
+ * A group may hold forks as well as states. Its own ways out never apply to its forks: the machine never rests in
+ * one. A state or fork belongs to at most one group, and group names do not repeat state or fork names.
  */
 export interface AnimationStateGroup {
     name: string;
-    /** Member state names. */
+    /** Member names: states, and forks. */
     states: string[];
-    /** The state a transition into the group enters. Default: the first member. */
+    /** The state (or fork) a transition into the group enters. Default: the first member. */
     entry?: string;
+    /** Graph position (authoring only). */
+    x?: number;
+    y?: number;
+}
+
+/**
+ * A FORK on one layer: a junction transitions go through, never a state the machine rests in.
+ *
+ * Transitions go INTO it (from a state, a group, Any State or another fork) and OUT of it (to a state, a group or
+ * another fork): its ways out are the transitions whose `from` is its name, tried in their order. A transition into
+ * a fork fires only when one of its ways out can, and then goes straight on, in the same frame, to the first way out
+ * that holds. So N states that share M ways out are N + M transitions, not N x M.
+ *
+ *   - Every leg's gates (`minDwell`, exit time, conditions) are tested against the state being LEFT.
+ *   - The cross-fade is the last leg's that sets one (the one nearest the state entered), else the animator's.
+ *   - The triggers of every leg on the path taken are consumed; a way out that was only tried consumes nothing.
+ *   - A way out into the state the machine is already in is passed over (unless the path starts at Any State and
+ *     a leg can restart its state), and the next is tried.
+ *
+ * Names are shared with states and groups: a state or a group of the same name wins.
+ */
+export interface AnimationFork {
+    name: string;
     /** Graph position (authoring only). */
     x?: number;
     y?: number;
@@ -442,6 +470,8 @@ export interface AnimationLayer {
     transitions: AnimationTransition[];
     /** The layer's state groups: see {@link AnimationStateGroup}. */
     groups?: AnimationStateGroup[];
+    /** The layer's forks: see {@link AnimationFork}. */
+    forks?: AnimationFork[];
     /** 0..1, default 1. */
     weight?: number;
     /** Parameter to read the weight from each frame. Overrides `weight`. */
@@ -1020,6 +1050,9 @@ export class Animator {
      * (see checkTriggers), so a trigger two layers read fires both. Null outside that pass: consume at once.
      */
     private _pendingTriggerConsumes: AnimationTransition[] | null = null;
+    // Scratch for the walk through forks (`_wayOut`): the legs of the path being tried, and the forks it has expanded.
+    private _forkPath: AnimationTransition[] = [];
+    private _forksSeen: string[] = [];
     /** Event markers a slot's child fires — the parent machine's list, since a slot has no machine. */
     private _externalEvents: AnimationEventMarker[] | null = null;
     /** Layers and slots, in the order they apply over the base. */
@@ -3754,7 +3787,7 @@ export class Animator {
             o.weightParam = layer.weightParam;
             o.handIk = layer.handIk ?? null;
             const child = o.animator;
-            child._stateMachine = { parameters: [], states: layer.states, transitions: layer.transitions, groups: layer.groups, events: sm.events };
+            child._stateMachine = { parameters: [], states: layer.states, transitions: layer.transitions, groups: layer.groups, forks: layer.forks, events: sm.events };
             child._rebindCurrentState();
         }
         this._recomputePose();
@@ -3883,21 +3916,27 @@ export class Animator {
         if (!sm) return '';
         const lines: string[] = [];
         for (const [a, b] of [[from, to], [to, from]]) {
-            const groupA = this._groupOf(a)?.name, groupB = this._groupOf(b)?.name;
-            const into = (x: AnimationTransition) => x.to === b || (!!groupB && x.to === groupB && this._resolveTarget(groupB) === b);
-            const t = sm.transitions.find(x => x.from === a && into(x))
-                ?? (groupA ? sm.transitions.find(x => x.from === groupA && into(x)) : undefined)
-                ?? sm.transitions.find(x => x.from === '*' && into(x));
-            if (!t) { lines.push(`${a} -> ${b}: (no transition)`); continue; }
+            const groupA = this._groupOf(a)?.name;
+            // Its own way, then its group's, then Any State's; each straight to `b` (or to `b`'s group entering it), or
+            // through forks on to it.
+            const into = (p: MachinePath) => resolveIn(sm, p.to) === b;
+            const path = pathsFrom(sm, a).find(into)
+                ?? (groupA ? pathsFrom(sm, groupA).find(into) : undefined)
+                ?? pathsFrom(sm, '*').find(into);
+            if (!path) { lines.push(`${a} -> ${b}: (no transition)`); continue; }
             const parts: string[] = [];
-            forEachCondition(t.condition, t.conditions, c => parts.push(this._describeCondition(c)));
-            const gates = [
-                t.minDwell ? `minDwell ${t.minDwell}s` : null,
-                t.hasExitTime ? `exitTime ${t.exitTime ?? 1}` : null,
-            ].filter(Boolean).join(', ');
+            const gates: string[] = [];
+            path.legs.forEach((t, i) => {
+                const own: string[] = [];
+                forEachCondition(t.condition, t.conditions, c => own.push(this._describeCondition(c)));
+                if (own.length) parts.push((i > 0 ? `${t.from}: ` : '') + own.join(' AND '));
+                if (t.minDwell) gates.push(`minDwell ${t.minDwell}s`);
+                if (t.hasExitTime) gates.push(`exitTime ${t.exitTime ?? 1}`);
+            });
+            const via = path.legs.length > 1 ? ` (via ${path.legs.slice(1).map(t => t.from).join(', ')})` : '';
             lines.push(
-                `${a} -> ${b}: ${parts.length ? parts.join(' AND ') : '(NO CONDITIONS - fires unconditionally)'}`
-                + (gates ? ` | ${gates}` : ' | no dwell/exit-time gate'));
+                `${a} -> ${b}${via}: ${parts.length ? parts.join(' THEN ') : '(NO CONDITIONS - fires unconditionally)'}`
+                + (gates.length ? ` | ${gates.join(', ')}` : ' | no dwell/exit-time gate'));
         }
         return lines.join('\n  ');
     }
@@ -4048,7 +4087,7 @@ export class Animator {
     // Report a Speed parameter that has gone negative, once per state. There is no reverse playback, so
     // it clamps to 0 and the clip FREEZES — usually a signed built-in bound where a magnitude was meant.
     private _warnNegativeSpeed(state: AnimationState, value: number): void {
-        const key = `${state.name} ${state.speedParam}`;
+        const key = `${state.name}\u0000${state.speedParam}`;
         if (this._warnedNegativeSpeed.has(key)) return;
         this._warnedNegativeSpeed.add(key);
         Logger.warn(
@@ -4204,18 +4243,31 @@ export class Animator {
         return null;
     }
 
-    /** The state a transition's `to` enters: the name itself, or a group's entry state. */
+    /** The state a transition's `to` enters: the name itself, or a group's entry state (which may be a fork). */
     private _resolveTarget(name: string): string {
-        if (this._stateMachine?.states.some(s => s.name === name)) return name;
-        const group = this._stateMachine?.groups?.find(g => g.name === name);
-        if (!group) return name;
-        return group.entry && group.states.includes(group.entry) ? group.entry : (group.states[0] ?? name);
+        return this._stateMachine ? resolveIn(this._stateMachine, name) : name;
     }
 
-    // Fire `t` if it can: its source, its dwell, its exit time and its conditions all allow it.
-    private _tryTransition(t: AnimationTransition, duration: number): boolean {
-        if (this._resolveTarget(t.to) === this._currentStateName && !(t.from === '*' && t.canTransitionToSelf)) return false;
+    /** Whether `name` is one of this machine's forks: never a state, only a way through (see {@link AnimationFork}). */
+    private _isFork(name: string): boolean {
+        const sm = this._stateMachine;
+        return !!sm?.forks?.length && isForkIn(sm, name);
+    }
 
+    // Fire `t` if it can: its source, its dwell, its exit time and its conditions all allow it. One into a fork fires
+    // only on through one of the fork's ways out.
+    private _tryTransition(t: AnimationTransition, duration: number): boolean {
+        const to = this._resolveTarget(t.to);
+        if (this._isFork(to)) return this._tryThroughFork(t, to, duration);
+        if (to === this._currentStateName && !(t.from === '*' && t.canTransitionToSelf)) return false;
+        if (!this._legOpen(t, duration)) return false;
+        this._takeTransition(t, firstTriggerOf(t), t.blendTime);
+        return true;
+    }
+
+    // One leg's own gates, against the state being left: its dwell, its exit time, its conditions. It only reads:
+    // nothing is consumed until a whole path is taken.
+    private _legOpen(t: AnimationTransition, duration: number): boolean {
         // Before the conditions, so a trigger is not consumed by a transition that cannot fire yet.
         if (t.minDwell && this._stateTime < t.minDwell) return false;
 
@@ -4225,23 +4277,78 @@ export class Animator {
             if (this._currentTime < exit) return false;
         }
 
-        if (!this._transitionMet(t)) return false;
-        this._takeTransition(t, firstTriggerOf(t), t.blendTime);
+        return this._transitionMet(t);
+    }
+
+    // `first` goes into `fork`: fire it, and the fork's first way out that holds (through any forks after it), as one
+    // transition. The cross-fade is the last leg's that has one; the trigger, the first along the way.
+    private _tryThroughFork(first: AnimationTransition, fork: string, duration: number): boolean {
+        if (!this._legOpen(first, duration)) return false;
+        const path = this._forkPath;
+        path.length = 0;
+        this._forksSeen.length = 0;
+        path.push(first);
+        const to = this._wayOut(fork, duration, first.from === '*');
+        if (to === null) { path.length = 0; return false; }
+        let trigger: string | null = null;
+        for (const leg of path) if ((trigger = firstTriggerOf(leg)) !== null) break;
+        let blend: number | undefined;
+        for (let i = path.length - 1; i >= 0 && blend === undefined; i--) blend = path[i].blendTime;
+        for (const leg of path) this._consumeLeg(leg);
+        path.length = 0;
+        this._enterVia(to, trigger, blend);
         return true;
+    }
+
+    // The state `fork`'s first open way out reaches (in the transitions' order), its legs pushed onto `_forkPath`; null
+    // when none can go. A fork is expanded once per attempt, and a path stops at FORK_DEPTH legs, so a cycle of forks
+    // ends. Called on every frame a way into a fork is open (Any State into one: every frame), so it allocates nothing.
+    private _wayOut(fork: string, duration: number, fromAnywhere: boolean): string | null {
+        const path = this._forkPath, seen = this._forksSeen;
+        if (seen.includes(fork) || path.length >= FORK_DEPTH) return null;
+        seen.push(fork);
+        for (const t of this._stateMachine!.transitions) {
+            if (t.from !== fork) continue;
+            const to = this._resolveTarget(t.to);
+            const onward = this._isFork(to);
+            // Into the state already playing: passed over (the next way out is tried), unless the path started at Any
+            // State and a leg on it may restart its state.
+            if (!onward && to === this._currentStateName && !(fromAnywhere && (t.canTransitionToSelf || this._forkPathRestarts()))) continue;
+            if (!this._legOpen(t, duration)) continue;
+            const mark = path.length;
+            path.push(t);
+            if (!onward) return to;
+            const end = this._wayOut(to, duration, fromAnywhere);
+            if (end !== null) return end;
+            path.length = mark;
+        }
+        return null;
+    }
+
+    private _forkPathRestarts(): boolean {
+        for (const leg of this._forkPath) if (leg.canTransitionToSelf) return true;
+        return false;
     }
 
     // Take a transition (or a state's own trigger, as one): consume its triggers, note which trigger
     // started what plays now, and enter its state.
     private _takeTransition(t: AnimationTransition, trigger: string | null, blendTime: number | undefined): void {
+        this._consumeLeg(t);
+        this._enterVia(this._resolveTarget(t.to), trigger, blendTime);
+    }
+
+    private _consumeLeg(t: AnimationTransition): void {
         // EVERY trigger in the tree is consumed, including under an OR branch that did not contribute: one
         // left raised would fire some other transition next frame. Inside checkTriggers that waits until
         // every layer has evaluated, so they all see this frame's triggers.
         if (this._pendingTriggerConsumes) this._pendingTriggerConsumes.push(t);
         else consumeTriggers(this._conditionCtx, t.condition, t.conditions);
+    }
+
+    private _enterVia(to: string, trigger: string | null, blendTime: number | undefined): void {
         // A trigger-less transition (a sheathe going on into the draw) carries the one that started it.
         const before = this._activeTrigger;
         if (trigger) this._activeTrigger = trigger;
-        const to = this._resolveTarget(t.to);
         this._enterState(to, blendTime);
         if (this._stateMachine?.states.find(s => s.name === to)?.isEntry) this._activeTrigger = null;
         this._noteTriggerChange(before);
@@ -4388,7 +4495,7 @@ export class Animator {
         if (!this._animatedModel) return;
         (sm.layers ?? []).forEach((layer, i) => {
             const child = this._createOverlayAnimator(layer.name);
-            child.setStateMachine({ parameters: [], states: layer.states, transitions: layer.transitions, groups: layer.groups, events: sm.events });
+            child.setStateMachine({ parameters: [], states: layer.states, transitions: layer.transitions, groups: layer.groups, forks: layer.forks, events: sm.events });
             child._paramValues = this._paramValues;
             // A layer that starts on a clip is simply there from the first frame; fading it in would show
             // the base for a beat on every scene load.
@@ -4888,9 +4995,9 @@ export class Animator {
     public triggerInfo(trigger: string): AnimationTriggerInfo | null {
         const sm = this._stateMachine;
         if (!sm || !trigger) return null;
-        const machines: { layer: string | null; states: AnimationState[]; transitions: AnimationTransition[]; groups?: AnimationStateGroup[] }[] = [
-            ...[...(sm.layers ?? [])].reverse().map(l => ({ layer: l.name, states: l.states, transitions: l.transitions, groups: l.groups })),
-            { layer: null, states: sm.states, transitions: sm.transitions, groups: sm.groups },
+        const machines: (MachineView & { layer: string | null })[] = [
+            ...[...(sm.layers ?? [])].reverse().map(l => ({ layer: l.name, states: l.states, transitions: l.transitions, groups: l.groups, forks: l.forks })),
+            { layer: null, states: sm.states, transitions: sm.transitions, groups: sm.groups, forks: sm.forks },
         ];
         const reads = (t: AnimationTransition) => {
             let hit = false;
@@ -4901,20 +5008,21 @@ export class Animator {
             let to = m.states.find(s => s.triggers?.some(e => e.trigger === trigger))?.name;
             let fromAnywhere = !!to;
             if (!to) {
-                to = m.transitions.find(t => t.from === '*' && reads(t))?.to;
+                // A way out of a fork Any State goes into fires from anywhere as well.
+                const anywhere = forksFromAnywhere(m);
+                to = m.transitions.find(t => (t.from === '*' || anywhere.has(t.from)) && reads(t))?.to;
                 fromAnywhere = !!to;
             }
             if (!to) to = m.transitions.find(t => t.from !== '*' && reads(t))?.to;
-            // A transition into a group enters its entry state.
-            const group = to ? m.groups?.find(g => g.name === to) : undefined;
-            if (group) to = group.entry && group.states.includes(group.entry) ? group.entry : group.states[0];
-            const state = to ? m.states.find(s => s.name === to) : undefined;
+            // A transition into a group enters its entry state; into a fork, it goes on through the fork's first way out.
+            const end = to ? staticEnd(m, to) : null;
+            const state = end ? m.states.find(s => s.name === end) : undefined;
             if (!state) continue;
             const clip = state.clipName && !state.field && !state.pose ? state.clipName : '';
             return {
                 layer: m.layer, state: state.name, clip, clipLength: this._clipLengthOf(clip),
                 speed: this._rateOf(state), startTime: Math.max(0, state.startTime ?? 0),
-                seconds: this._secondsOf(state, m.states, m.transitions, new Set()),
+                seconds: this._secondsOf(state, m, new Set()),
                 extractsRootMotion: !!state.extractRootMotion, fromAnywhere,
             };
         }
@@ -4940,7 +5048,7 @@ export class Animator {
     }
 
     // Real seconds `state` plays before its layer rests or waits on another trigger (AnimationTriggerInfo.seconds).
-    private _secondsOf(state: AnimationState, states: AnimationState[], transitions: AnimationTransition[], seen: Set<string>): number {
+    private _secondsOf(state: AnimationState, m: MachineView, seen: Set<string>): number {
         if (seen.has(state.name)) return 0;
         seen.add(state.name);
         const clip = state.clipName && !state.field && !state.pose ? state.clipName : '';
@@ -4948,17 +5056,20 @@ export class Animator {
         if (!length || state.loop) return 0;
         const rate = Math.max(0.05, this._rateOf(state));
         const start = Math.max(0, state.startTime ?? 0);
-        const isEntry = (name: string) => !!states.find(s => s.name === name)?.isEntry;
-        const out = transitions.filter(t => t.from === state.name && t.to !== state.name && t.hasExitTime && !isEntry(t.to));
+        const isEntry = (name: string) => !!m.states.find(s => s.name === name)?.isEntry;
+        // Its ways out that wait for its clip: a transition, or one through forks with a leg that waits (all must
+        // hold, so the latest exit time is the one).
+        const exitOf = (p: MachinePath) => Math.max(...p.legs.filter(l => l.hasExitTime).map(l => l.exitTime ?? 1));
+        const out = pathsFrom(m, state.name).filter(p => p.to !== state.name && p.legs.some(l => l.hasExitTime) && !isEntry(p.to));
         // A hand-over on a trigger ends this state's own part there (a combo's next segment waits for a press).
-        const onTrigger = out.filter(t => firstTriggerOf(t)).map(t => (t.exitTime ?? 1) * length);
+        const onTrigger = out.filter(p => p.legs.some(l => firstTriggerOf(l))).map(p => exitOf(p) * length);
         const end = onTrigger.length ? Math.min(length, ...onTrigger) : length;
         const own = Math.max(0, end - start) / rate;
         if (onTrigger.length) return own;
         // One that goes on by itself (sheathe, then draw) lasts as long as what it goes on into, too.
-        const next = out.find(t => !firstTriggerOf(t) && !t.condition?.children?.length && !t.conditions?.length);
-        const after = next ? states.find(s => s.name === next.to) : undefined;
-        return own + (after ? this._secondsOf(after, states, transitions, seen) : 0);
+        const next = out.find(p => p.legs.every(l => !firstTriggerOf(l) && !l.condition?.children?.length && !l.conditions?.length));
+        const after = next ? m.states.find(s => s.name === next.to) : undefined;
+        return own + (after ? this._secondsOf(after, m, seen) : 0);
     }
 
     /** Names of the layers above the base, in order. */

@@ -185,19 +185,26 @@ plants.)
 
 ### The animator
 
-**Mannequin Locomotion** is a shared animator on the Mannequin skeleton. Its base layer has twenty-one states,
-fifteen of them in five **groups**, so the graph shows Idle, Locomotion, Start and Stairs and five group nodes:
+**Mannequin Locomotion** is a shared animator on the Mannequin skeleton. Its base layer has twenty-four states,
+twenty of them in six **groups**, so the graph shows Idle, Locomotion, Start and Stairs and six group nodes. Five
+[forks](animation.md#forks) untangle what is left: a choice several states make the same way is written once, as a
+fork's ways out, and each of those states has one line to it.
 
-| Group | States | Its own transitions (from any of its states) |
-|---|---|---|
-| **Turning** | Turn90L/R, Turn180L/R | into the jump, into the fall, and off into Locomotion when the stick moves |
-| **Stopping** | Stop, StopMirror | into the fall |
-| **Running Turn** | RunTurnL/R | into the fall, to Idle when let go, back into Locomotion when the script lets go of `RunTurn` |
-| **Air** | JumpStand, JumpRun, Fall, FallFar | |
-| **Landing** | JumpLand, LandRun, LandSoft, LandHard, LandRoll | back into the fall |
+| Group | Entered through | Its states | Its own transitions (from any of its states) |
+|---|---|---|---|
+| **Turning** | **Pick Turn**: the turn in place the script's `Turn` asks for | Turn90L/R, Turn180L/R | into the air, onto a flight, and off into Locomotion when the stick moves |
+| **Stopping** | **Pick Stop**: the stop that plants the foot that is swinging (by the run's phase) | Stop, StopMirror, and the **Settle** fork | into the air |
+| **Running Turn** | **Pick Run Turn**: left or right, by `RunTurn` | RunTurnL/R | into the air, to Idle when let go, back into Locomotion when the script lets go of `RunTurn` |
+| **Air** | **Take Off**: a running jump at a run's speed, else a standing jump, or off a ledge a fall | JumpStand, JumpRun, Fall, FallFar | |
+| **Landing** | its landings, from Air | JumpLand, LandRun, LandSoft, LandHard, LandRoll | into Idle once a landing has played out, and into the air |
+| **Car** | its triggers (no fork) | CarEnter, CarDrive, CarExit | |
 
-Each state keeps the transitions only it has (a turn's way back to Idle as it ends, a stop's settle). Double-click a
-group in the graph to see its states.
+So every grounded state has ONE way into the air, a line into Air, and Take Off picks the jump or the fall: 22
+transitions became 11. A stop settles through **Settle**: into Turning when a turn in place is asked for (Pick Turn
+picks which), else into Idle. In all the base layer has 68 transitions, where it had 86.
+
+Each state keeps the transitions only it has (a turn's way back to Idle as it ends, a landing's way into the run).
+Double-click a group in the graph to see its states and forks.
 
 The states:
 

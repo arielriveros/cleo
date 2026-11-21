@@ -6,7 +6,7 @@
 // gun script on each that shoots by raycast and pushes what it hits, with its effects as templates (weapons/fx.ts).
 //
 //   node --max-old-space-size=8192 tools/sandbox/prepare.mjs                      (the FBX files, once)
-//   npx vite-node --config vitest.config.ts tools/sandbox/build.ts [--report]
+//   npx vite-node --config vitest.config.ts tools/sandbox/build.ts [--report] [--out <folder>] [--inputs <checkout>]
 //   npm --prefix applications/editor run examples:list
 //
 // Writes applications/editor/public/examples/sandbox/ (bundle format 2). `--report` prints what was measured off
@@ -59,7 +59,11 @@ import { sandboxInputMap } from './inputMap'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
-const PREPARED = path.join(ROOT, 'build', 'sandbox_prepared')
+// `--inputs <checkout>`: read the gitignored inputs (build/sandbox_prepared, build/car, the weapons' .glb files) from
+// that checkout's build/ instead of this one's: a second worktree builds without a copy of them.
+const INPUTS_FLAG = process.argv.indexOf('--inputs')
+const INPUTS = INPUTS_FLAG >= 0 && process.argv[INPUTS_FLAG + 1] ? path.resolve(process.argv[INPUTS_FLAG + 1]) : ROOT
+const PREPARED = path.join(INPUTS, 'build', 'sandbox_prepared')
 // `--out <folder>`: write the bundle there instead (for building beside a dev server that watches the examples:
 // this removes the folder it writes and rebuilds it, which can crash Vite's watcher; copy the files that changed).
 const OUT_FLAG = process.argv.indexOf('--out')
@@ -206,7 +210,7 @@ console.log(`hand-overs (the field's phase 0 is a ${timing.phaseFoot === 'L' ? '
 // The weapons: their models, how the hands hold them, and the poses their layers hold (weapons/): each weapon's
 // Carry, Aim and Sprint, and the aim's directions as variants of Aim.
 const weaponBuild = weaponPoses(skin, new Map([...clips].map(([k, c]) => [k, c.clip])), 'Idle',
-    new Map([...raw].filter(([k]) => k.startsWith('Rifle '))), ROOT)
+    new Map([...raw].filter(([k]) => k.startsWith('Rifle '))), INPUTS)
 for (const line of weaponBuild.report) console.log('weapons: ' + line)
 if (REPORT) process.exit(0)
 
@@ -270,7 +274,7 @@ const materials = [
 ]
 // The car's, from its file: the body, the windows (blended: a fixed opacity, no shadow) and the wheels, each with the
 // maps it carries (glTF metal-roughness: G roughness, B metalness).
-const CAR_FILE = path.join(ROOT, 'build', 'car', 'dirty_car.glb')
+const CAR_FILE = path.join(INPUTS, 'build', 'car', 'dirty_car.glb')
 const car = readCar(CAR_FILE)
 const carImage = (texture: number | undefined) => {
     if (texture === undefined) return null

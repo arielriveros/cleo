@@ -37,6 +37,11 @@ import { MenuItem } from '@cleo/app-kit/ui'
  * one handle each way for a new connection. A link that names a `sourceHandle`/`targetHandle` is drawn
  * handle to handle instead of floating along the borders, so a group's lines leave from the row that says
  * where they go.
+ *
+ * ## Forks
+ *
+ * A node with `shape: 'fork'` is drawn as a small pill with a diamond: a junction, not a place the machine is
+ * in. It has the same two handles as a state, and the same floating lines.
  */
 
 const NODE_W = 156
@@ -76,6 +81,11 @@ export interface GraphNodeModel {
    * outputs on the right; each port's `id` is its handle's.
    */
   ports?: { inputs: GraphPort[]; outputs: GraphPort[] }
+  /**
+   * Draw this node as a FORK: a small diamond-marked pill, not a state box (a junction lines go through). Its
+   * subtitle is a one-line readout under the name.
+   */
+  shape?: 'fork'
   /** False: the right-click menu offers no "Set as entry" for this node (a group, a stand-in). */
   entryable?: boolean
   /** False keeps a drag from moving it for good: it springs back on the next render (a stand-in). */
@@ -297,6 +307,35 @@ function GroupNode({ data, selected }: NodeProps) {
 /** Height of one port row: the handle sits in the middle of it. */
 const PORT_ROW = 16
 
+/** Width of a fork's pill. */
+const FORK_W = 116
+
+/** A fork: a diamond and its name, a line under it saying how many come in and go out. */
+function ForkNode({ data, selected }: NodeProps) {
+  const d = data as NodeData
+  const border = selected ? 'border-selected' : d.isEntry ? 'border-success' : 'border-warning/70'
+  const handle = '!bg-primary !w-2 !h-2'
+  return (
+    <div className={`rounded-full border-2 ${border} bg-surface-raised text-fg shadow-panel`} style={{ width: FORK_W }}>
+      <Handle type='target' position={Position.Left} className={handle} />
+      <div className='px-2.5 py-0.5 flex items-center gap-1'>
+        {d.isEntry && <span className='text-ui-2xs text-success' title='Entry of its group'>▶</span>}
+        <ForkGlyph />
+        <span className='text-ui-xs font-semibold truncate flex-1' title={d.label}>{d.label}</span>
+      </div>
+      {d.subtitle && <div className='px-2.5 pb-0.5 -mt-0.5 text-ui-2xs text-dim truncate text-center' title={d.subtitle}>{d.subtitle}</div>}
+      <Handle type='source' position={Position.Right} className={handle} />
+    </div>
+  )
+}
+
+/** A diamond: a fork. */
+export const ForkGlyph = () => (
+  <svg viewBox='0 0 24 24' className='w-3 h-3 shrink-0 text-warning' fill='none' stroke='currentColor' strokeWidth='2.2' aria-hidden>
+    <path d='M12 4l8 8-8 8-8-8z' />
+  </svg>
+)
+
 /** Stacked boxes: a group of states. */
 export const GroupGlyph = () => (
   <svg viewBox='0 0 24 24' className='w-3.5 h-3.5 shrink-0 text-primary' fill='none' stroke='currentColor' strokeWidth='1.8' aria-hidden>
@@ -304,7 +343,7 @@ export const GroupGlyph = () => (
   </svg>
 )
 
-const nodeTypes = { state: GraphNode, group: GroupNode }
+const nodeTypes = { state: GraphNode, group: GroupNode, fork: ForkNode }
 const edgeTypes = { transition: FloatingEdge }
 
 function Flow(props: MachineGraphProps) {
@@ -342,7 +381,7 @@ function Flow(props: MachineGraphProps) {
       const keep = selectedNode !== null && was.has(selectedNode)
       return model.map(n => ({
       id: n.id,
-      type: n.ports ? 'group' : 'state',
+      type: n.ports ? 'group' : n.shape === 'fork' ? 'fork' : 'state',
       position: { x: n.x, y: n.y },
       selected: selectedNode === n.id || (keep && was.has(n.id)),
       deletable: n.deletable ?? true,
@@ -491,10 +530,11 @@ function Flow(props: MachineGraphProps) {
         <MiniMap pannable zoomable className='!bg-surface-sunken' maskColor={colors.minimapMask} nodeColor={colors.minimapNode} />
       </ReactFlow>
 
-      <div data-cleo-overlay className='absolute top-2 left-2 z-20 flex items-center gap-2'
+      {/* Bounded by the canvas: what does not fit gives way (the hint truncates, a caller's scroller scrolls). */}
+      <div data-cleo-overlay className='absolute top-2 left-2 right-2 z-20 flex items-center gap-2 pointer-events-none [&>*]:pointer-events-auto'
         onMouseDown={e => e.stopPropagation()}>
         {toolbar}
-        <span className='text-ui-xs text-dim ml-1'>
+        <span className='text-ui-xs text-dim ml-1 min-w-0 truncate' title={hint}>
           {hint ?? `drag handle → handle to connect · right-click a ${nodeNoun} · Del to remove`}
         </span>
       </div>

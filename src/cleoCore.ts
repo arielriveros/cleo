@@ -305,6 +305,8 @@ export { footLockKey, footLockAt, normalizeFootLockSpans, shrinkFootLockSpans, d
 export type { FootLockWindows, FootLockDetectOptions } from "./animation/footLockWindows";
 export type { FootLockStep, FootLockCurve } from "./animation/ik";
 export { Animator, isConditionGroup, NODE_BUILTINS } from "./animation/animator";
+export { FORK_DEPTH, forksFromAnywhere, isForkIn, pathsFrom, resolveIn as resolveMachineTarget, staticEnd as forkEnd } from "./animation/machineForks";
+export type { MachinePath, MachineView } from "./animation/machineForks";
 export type { NodeBuiltinName } from "./animation/animator";
 export { parseEventActions, runEventActions, resolveTarget, drawnWorldPosition } from "./animation/eventActions";
 export type { EventAction, EventActionBinding } from "./animation/eventActions";
@@ -341,6 +343,7 @@ export type {
     AnimationEventMarker,
     AnimationLayer,
     AnimationStateGroup,
+    AnimationFork,
     AnimationSlotDef,
     AnimationBlendMode,
     AnimationPose,

@@ -16,6 +16,18 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Forks in the animator graph.**
+  - *A junction, not a state.* A fork takes ways in and hands them on to its ways out. A transition into a fork fires
+    only when one of the fork's ways out holds, and goes straight on, in the same frame, to the first that does. A
+    choice several states share is then written once, as the fork's ways out, with one line to it from each state.
+  - *The rules.* Every gate is tested against the state being left. The way out's blend wins over the way in's. Only
+    the triggers on the path taken are consumed. A way out back into the playing state is passed over. Forks chain.
+  - *In groups.* A group whose entry is a fork is entered by one line from each place, and the fork inside picks the
+    state. `triggerInfo` follows triggers through forks.
+  - *In the editor.* A fork is a diamond pill on the graph; its ways out are labelled with their rank. Its inspector
+    lists the ways in and the ways out, which can be reordered. **Dissolve** takes a fork away and keeps what it did.
+  - *The Sandbox, untangled.* Take Off (Air), Pick Turn (Turning), Pick Stop and Settle (Stopping) and Pick Run Turn
+    (Running Turn): 86 transitions down to 68, and 22 ways into the air down to 11. Player contract 50.
 - **Attribute types: a script field's type decides what it is.**
   - *The type is the declaration.* `tint: Color` gets a colour picker, `offset: Vec3` X, Y and Z, `skin: Material`
     the material picker, `icon: Texture` a texture tile, `hit: Sound` the sound samples, `tiles: Tileset` the

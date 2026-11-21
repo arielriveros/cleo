@@ -3,7 +3,7 @@ import { useCleoEngine } from '../EngineContext'
 import type {
   AnimationStateMachine, AnimationParameter, AnimationState,
   AnimationTransition, AnimationCondition, AnimationConditionGroup, AnimationConditionNode,
-  AnimationParameterType, AnimationLayer, AnimationSlotDef, EventActionBinding, AnimationStateGroup,
+  AnimationParameterType, AnimationLayer, AnimationSlotDef, EventActionBinding, AnimationStateGroup, AnimationFork,
 } from 'cleo'
 import { isConditionGroup } from 'cleo'
 import { getAnimationTarget, accessibleNodeVariables, AccessibleVariable, AnimationTarget } from './skeleton'
@@ -19,8 +19,12 @@ import { toast } from '@cleo/app-kit/feedback/toastStore'
 import {
   layerView, writeLayer, groupsOf, groupOf as groupOfIn, createGroup as createGroupIn, setGroupFields,
   removeGroup as removeGroupIn, moveToGroup as moveToGroupIn, renameStateInGroups, dropStatesFromGroups,
-  isGroupName, nameTaken,
+  isGroupName, nameTaken, takenNames, forksOf, isForkName,
 } from './stateGroups'
+import {
+  addFork as addForkIn, setForkFields, removeFork as removeForkIn, dissolveFork as dissolveForkIn,
+  moveTransition as moveTransitionIn,
+} from './forks'
 
 export { layerView, writeLayer }
 
@@ -37,6 +41,8 @@ export type SMSelection =
   | { kind: 'transition'; a: string; b: string }
   /** A state group (its node in the graph). */
   | { kind: 'group'; name: string }
+  /** A fork: a junction transitions go through (forks.ts). */
+  | { kind: 'fork'; name: string }
   /**
    * A line in the graph that stands for several transitions: a group's states' ways out to one place, say.
    * `from`/`to` are the drawn ends (a group standing for its states); the inspector lists what it stands for.
@@ -140,6 +146,20 @@ interface StateMachineContextValue {
   /** The group the graph has opened, or null for the whole layer. */
   openGroup: string | null
   setOpenGroup: (name: string | null) => void
+
+  /** The active layer's forks. */
+  forks: AnimationFork[]
+  isFork: (name: string) => boolean
+  /** Add a fork (selected), into the open group if one is open. Returns its name. */
+  addFork: (pos?: { x: number; y: number }) => string
+  /** Rename a fork (followed into its transitions, its group and the selection), or move it. */
+  setFork: (name: string, patch: Partial<AnimationFork>) => void
+  /** Remove a fork with its transitions. */
+  removeFork: (name: string) => void
+  /** Remove a fork and keep what it did: each way in joined to each way out (forks.ts dissolveFork). */
+  dissolveFork: (name: string) => void
+  /** Move a transition one place earlier or later among those with the same `from` (a fork's priority). */
+  moveTransition: (from: string, to: string, dir: -1 | 1) => void
 
   /** Every link in the machine, each with whichever of its two directions exist. */
   links: SMLink[]
@@ -505,7 +525,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
 
   // ---- States ----
   const addState = (pos?: { x: number; y: number }) => {
-    const name = uniqueName('State', [...sm.states.map(s => s.name), ...groupsOf(sm).map(g => g.name)])
+    const name = uniqueName('State', takenNames(sm))
     // Added while a group is open, it is one of that group's.
     const into = openGroup
     updateLayer(prev => {
@@ -519,8 +539,8 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }
   const setState = (i: number, patch: Partial<AnimationState>) => {
     const oldName = sm.states[i]?.name
-    // A state may not take a group's name: a transition naming it would mean both.
-    if (patch.name && patch.name !== oldName && isGroupName(sm, patch.name)) {
+    // A state may not take a group's or a fork's name: a transition naming it would mean both.
+    if (patch.name && patch.name !== oldName && (isGroupName(sm, patch.name) || isForkName(sm, patch.name))) {
       const { name: _taken, ...rest } = patch
       if (!Object.keys(rest).length) return
       patch = rest
@@ -571,7 +591,8 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     updateLayer(prev => {
       const states = prev.states.map(s => coords[s.name] ? { ...s, x: coords[s.name].x, y: coords[s.name].y } : s)
       const groups = prev.groups?.map(g => coords[g.name] ? { ...g, x: coords[g.name].x, y: coords[g.name].y } : g)
-      return { ...prev, states, ...(groups ? { groups } : {}) }
+      const forks = prev.forks?.map(f => coords[f.name] ? { ...f, x: coords[f.name].x, y: coords[f.name].y } : f)
+      return { ...prev, states, ...(groups ? { groups } : {}), ...(forks ? { forks } : {}) }
     }, { silent: true })
   const deleteElements = (stateNames: string[], removedLinks: [string, string][], exact: [string, string][] = []) => {
     // The Any State node is not a state: selecting it with others and pressing Delete keeps it (and its
@@ -584,6 +605,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     const exactKeys = new Set(exact.map(([from, to]) => `${from}>${to}`))
     updateLayer(prev => {
       const groups = dropStatesFromGroups(prev.groups?.filter(g => !groupNames.has(g.name)), names)
+      const forks = prev.forks?.filter(f => !names.has(f.name))
       const next: AnimationStateMachine = {
         ...prev,
         states: prev.states.filter(s => !names.has(s.name)),
@@ -591,13 +613,16 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
           !keys.has(linkKey(t.from, t.to).join('|')) && !exactKeys.has(`${t.from}>${t.to}`)
           && !names.has(t.from) && !names.has(t.to)),
         groups,
+        forks,
       }
       if (!groups?.length) delete next.groups
+      if (!forks?.length) delete next.forks
       return next
     })
     const gone = (n: string) => names.has(n)
     if ((selection?.kind === 'state' && gone(selection.name)) ||
         (selection?.kind === 'group' && gone(selection.name)) ||
+        (selection?.kind === 'fork' && gone(selection.name)) ||
         (selection?.kind === 'summary' && (gone(selection.from) || gone(selection.to))) ||
         (selection?.kind === 'transition' &&
           (keys.has(linkKey(selection.a, selection.b).join('|')) || gone(selection.a) || gone(selection.b))))
@@ -647,6 +672,53 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     if (openGroup === name) setOpenGroup(null)
   }
   const moveToGroup = (state: string, group: string | null) => updateLayer(prev => moveToGroupIn(prev, state, group))
+
+  // ---- Forks ----
+  const forks = forksOf(sm)
+  const isFork = (name: string) => isForkName(sm, name)
+  const addFork = (pos?: { x: number; y: number }): string => {
+    const { name } = addForkIn(sm, pos, openGroup)
+    // Added while a group is open, it is one of that group's.
+    const into = openGroup
+    updateLayer(prev => addForkIn(prev, pos, into).view)
+    setSelection({ kind: 'fork', name })
+    return name
+  }
+  const setFork = (name: string, patch: Partial<AnimationFork>) => {
+    const rename = patch.name !== undefined && patch.name !== name
+    if (rename && (!patch.name || nameTaken(sm, patch.name, name))) {
+      // Typed into a clash (or emptied): keep everything else the patch says.
+      const { name: _taken, ...rest } = patch
+      if (Object.keys(rest).length) updateLayer(prev => setForkFields(prev, name, rest))
+      return
+    }
+    updateLayer(prev => setForkFields(prev, name, patch))
+    if (!rename) return
+    const to = patch.name!
+    const swap = (n: string) => (n === name ? to : n)
+    if (selection?.kind === 'fork' && selection.name === name) setSelection({ kind: 'fork', name: to })
+    else if (selection?.kind === 'summary' && (selection.from === name || selection.to === name))
+      setSelection({ kind: 'summary', from: swap(selection.from), to: swap(selection.to) })
+    else if (selection?.kind === 'transition' && (selection.a === name || selection.b === name)) {
+      const [a, b] = linkKey(swap(selection.a), swap(selection.b))
+      setSelection({ kind: 'transition', a, b })
+    }
+  }
+  const dropForkSelection = (name: string) => {
+    if ((selection?.kind === 'fork' && selection.name === name) ||
+        (selection?.kind === 'summary' && (selection.from === name || selection.to === name)) ||
+        (selection?.kind === 'transition' && (selection.a === name || selection.b === name)))
+      setSelection(null)
+  }
+  const removeFork = (name: string) => {
+    updateLayer(prev => removeForkIn(prev, name))
+    dropForkSelection(name)
+  }
+  const dissolveFork = (name: string) => {
+    updateLayer(prev => dissolveForkIn(prev, name))
+    dropForkSelection(name)
+  }
+  const moveTransition = (from: string, to: string, dir: -1 | 1) => updateLayer(prev => moveTransitionIn(prev, from, to, dir))
 
   // ---- Transitions (addressed by from/to; the array index never leaves this file) ----
   const findT = (list: AnimationTransition[], from: string, to: string) => list.findIndex(t => t.from === from && t.to === to)
@@ -818,6 +890,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     addParam, setParam, removeParam, setEventActions, addTriggerParam,
     addState, setState, removeState, stateIndex, commitLayout, deleteElements,
     groups, groupOf, createGroup, setGroup, removeGroup, moveToGroup, openGroup, setOpenGroup,
+    forks, isFork, addFork, setFork, removeFork, dissolveFork, moveTransition,
     links, linkOf, addTransition, setTransition, removeTransition, removeLink,
     addCondition, addGroup, setCondition, setGroupOp, removeNode, setTransitionCondition,
     renameClip, deleteClip,

@@ -91,7 +91,8 @@ transitions its states have in common:
 
 ```ts
 interface AnimationStateGroup { name: string; states: string[]; entry?: string; x?: number; y?: number }
-interface AnimationStateMachine { groups?: AnimationStateGroup[] /* ... */ }   // AnimationLayer has groups too
+interface AnimationFork { name: string; x?: number; y?: number }
+interface AnimationStateMachine { groups?: AnimationStateGroup[]; forks?: AnimationFork[] /* ... */ }   // AnimationLayer has both too
 ```
 
 - **Out of a group.** A transition whose `from` is a group's name fires from any of its states. A state's own
@@ -99,7 +100,16 @@ interface AnimationStateMachine { groups?: AnimationStateGroup[] /* ... */ }   /
 - **Into a group.** A transition whose `to` is a group enters its `entry` state (its first, if none).
 - **Names.** A state belongs to one group at most, and no group shares a name with a state.
 
-`currentStateName` is always a state, never a group.
+**Forks.** A fork is a junction: transitions whose `to` is its name go into it, and those whose `from` is its name
+are its ways out, tried in their order. A transition into a fork fires only when one of its ways out holds, and goes
+straight on, in the same frame, to that way out's state. Every leg's gates (conditions, `minDwell`, exit time) are
+tested against the state being left. The cross-fade is the last leg's that sets `blendTime`. Only the triggers of
+the legs taken are consumed. A way out into the state already playing is passed over. A group may hold forks
+(its `states` lists them), and a fork may be its `entry`. The editor's guide has the full rules
+([Forks](../editor/animation.md#forks)).
+
+`currentStateName` is always a state, never a group or a fork. `triggerInfo` follows a trigger through forks: on a way
+out it tells that way out's state, and on a way in it tells the state of the fork's first way out.
 
 **Holding the character still.** A state with `holdMovement: true` stops the character's own movement while it
 plays: the [Character](characters-and-controllers.md) above the model steers as if its input were zero, with no

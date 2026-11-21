@@ -193,6 +193,9 @@ describe('state groups: the graph', () => {
     const top = graphPlan(sm, null)
     expect(top.states.sort()).toEqual(['Idle', 'Locomotion', 'Stairs', 'Start'])
     expect(top.groups.map(g => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car'])
+    // Its forks are its groups': each drawn inside its group, the group standing for it outside.
+    expect(top.forks).toEqual([])
+    expect(top.groups.flatMap(g => g.forks)).toEqual(['Pick Turn', 'Pick Stop', 'Settle', 'Pick Run Turn', 'Take Off'])
     const drawn = new Set(top.links.flatMap(l => [...l.forward, ...l.backward]))
     const memberOf = new Map(sm.groups!.flatMap(g => g.states.map(s => [s, g.name] as const)))
     for (const t of sm.transitions) {

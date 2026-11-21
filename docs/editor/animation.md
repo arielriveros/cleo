@@ -150,7 +150,8 @@ layer is in, the moment its conditions hold. Nothing transitions into it, and it
 
 Each frame the first of these that holds wins: an Any State transition, then a state's own trigger
 (states higher in the list first), then a transition out of the current state, then one out of its
-[group](#state-groups).
+[group](#state-groups). A transition into a [fork](#forks) counts only when it can go on through one of the
+fork's ways out.
 
 The toolbar carries a tab strip — **Base | *layer* … | + Layer** — that picks which
 [layer](#layers-and-bone-masks) the canvas shows. The highlighted state is that layer's current one.
@@ -200,8 +201,51 @@ its states.
   state.
 - **Delete.** Delete on a group removes it with its states.
 
-Groups are per layer. Names are unique across states and groups: a transition that names one means only
-that.
+Groups are per layer. Names are unique across states, groups and [forks](#forks): a transition that names one
+means only that.
+
+### Forks
+
+A fork is a junction in the graph that transitions go through: one way in for each state, and one set of ways out
+they all share. The machine never stays in a fork. A transition into one goes straight on, in the same frame, to the
+first of its ways out that holds.
+
+Without forks, a choice several states make the same way is drawn once per state. With eight grounded states and
+three ways into the air (a running jump, a standing jump, a fall), that is 24 lines. With a fork, it is one line from
+each state into the fork and three out of it.
+
+It is drawn as a small pill with a diamond, its ways in and out under its name. Each way out's line starts with its
+**rank**, the order its ways out are tried in.
+
+- **A way in fires only on through a way out.** If none of the fork's ways out holds, the way in waits, and the state
+  it leaves tries its next transition. So a way in usually has no conditions of its own: the fork decides.
+- **First that holds.** The ways out are tried in their order, 1 first. Change the order in the inspector.
+- **Gates are the state being left's.** Every exit time, **stay at least** and condition, on the way in or a way out,
+  is tested against the state the machine is leaving. That is what lets a way out wait for a run's phase.
+- **Blend.** The cross-fade is the way out's when it sets one, else the way in's. Set it where it belongs: on a way
+  out when it goes with where the line leads (a fall blends in slower than a jump), on a way in when it goes with where
+  it leaves.
+- **Triggers.** The triggers on the path taken are used up; a way out that was only tried leaves its trigger raised.
+  Put a trigger on a way out, not on a way in: a way in that waits on its ways out keeps its trigger raised, and it
+  fires later.
+- **Into the state already playing.** A way out back into it is passed over, and the next is tried (from Any State,
+  **can restart itself** on a leg restarts the state instead).
+- **Chains.** A way out may lead into another fork. If that fork has no way out that holds, the first fork tries its
+  next one.
+
+**A fork in a group.** Make a fork a group's entry, and a transition into the group goes on through the fork. The
+group is then entered by one line from each place, and the fork inside picks the state. A group's own ways out
+never apply to its forks: the machine is never in one.
+
+**Making and changing forks:**
+
+- **Fork**, the first button of the group strip on the toolbar, adds one. Added while a group is open, it is one of
+  that group's.
+- **New transitions.** Drag onto a fork for a way in, and out of it for a way out.
+- **Dissolve** takes a fork away and keeps what it did. Each way in becomes one transition to each way out, in the
+  fork's order and where the way in was. Their gates are joined, the later exit time and the longer stay are kept, and
+  so is the way out's blend. A pair of states that already has a transition keeps that one.
+- **Delete** on a fork removes it with every transition into and out of it.
 
 ### Sync groups
 
@@ -266,6 +310,16 @@ between two states, with its conditions.
 | **Entry** | The state a transition into the group enters. |
 | **States** | Its states, each a click from its own settings. Each row has buttons to make that state the entry or take it out of the group. **+ state** adds one. |
 | **Its own transitions** | The transitions from and to the group itself, each a click from its settings. |
+
+**A selected fork:**
+
+| Field | Meaning |
+|---|---|
+| **Name** | No state, group or other fork may have it. A rename follows into every transition from or to the fork, and into its group. |
+| **Dissolve** | Take the fork away and keep what it did: each way in joined to each way out (see [forks](#forks)). Delete removes it with its transitions. |
+| **Group** | The [group](#state-groups) it is in. The entry button beside it makes it the group's entry, so a transition into the group goes on through it. |
+| **Ways in** | The transitions into the fork, each a click from its settings. A transition into a group whose entry is the fork is one too. |
+| **Ways out** | Its ways out, in the order they are tried: the first that holds is taken. The arrows move one earlier or later. **+ way out** adds one, tried after the rest. |
 
 **A selected line that stands for several transitions** (a group's ports) lists them; pick one to edit it.
 
