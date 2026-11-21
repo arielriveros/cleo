@@ -6,6 +6,7 @@ import { defaultMaskResolution } from '../src/terrain/terrainLayerStack';
 import { MAX_INSTANCES } from '../src/terrain/foliage';
 import { decodePng } from '../src/terrain/heightmapIO';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
+import { jsonNodeAtPath } from '../tools/exampleKit/nodeFields.mjs';
 
 /** Text with its line endings as LF. */
 const lf = (s: string) => s.replace(/\r\n/g, '\n');
@@ -566,8 +567,11 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(byId.get(day.bindings.sun).name).toBe('Sun');
         // The menu pauses it while the tour has the sun.
         const menu = library('scripts').find((s: any) => s.name === 'Start Menu');
-        expect(menu.source).toContain(`public dayName: string = '${day.name}'`);
-        expect(menu.source).toContain('this._day?.pause()');
+        expect(menu.source).toContain(`public day?: SequenceNode | null = null`);
+        const root = scene().scene;
+        const menuNode = allNodes(root).find(n => n.type === 'uiRoot' && n.name === 'Start Menu');
+        expect(jsonNodeAtPath(root, menuNode, menuNode.scriptVars.day.$nodePath)?.id).toBe(day.id);
+        expect(menu.source).toContain('this.day?.pause()');
         // Noon is high in the south, midnight under the horizon.
         const { sunElevation } = await import('../tools/valley/cinematic/dayPath');
         expect(sunElevation(12)).toBeGreaterThan(50);
@@ -732,7 +736,9 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(lf(script.source)).toBe(lf(readFileSync(join(__dirname, '..', 'examples', 'scripts', 'ValleyStartMenu.ts'), 'utf8')));
         expect(allNodes(menu).filter(n => n.type === 'uiButton').map(n => n.name)).toEqual(['Cinematic', 'Free']);
         // The tour it plays is in the scene, under the name the script looks for.
-        expect(tourNode().name).toBe(menu.scriptVars?.tourName ?? 'Valley Tour');
+        const root = scene().scene;
+        const menuNode = allNodes(root).find(n => n.id === menu.id);
+        expect(jsonNodeAtPath(root, menuNode, menuNode.scriptVars.tour.$nodePath)?.id).toBe(tourNode().id);
         // A map of its own, which still answers while the menu has the Gameplay map switched off.
         const ui = library('inputMap').maps.find((m: any) => m.name === 'UI');
         expect(ui?.enabled).toBe(true);
@@ -762,7 +768,10 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const light = nodes().find(n => n.name === 'Lightning');
         expect(light).toMatchObject({ type: 'light', lightType: 'point', castShadows: false, bake: false });
         expect(light.light.intensity).toBe(0);
-        expect(script.source).toContain(`lightningLight: string = '${light.name}'`);
+        expect(script.source).toContain(`public flash: LightNode | null = null`);
+        const root = scene().scene;
+        const director = allNodes(root).find(n => n.id === tour.id);
+        expect(jsonNodeAtPath(root, director, director.scriptVars.flash.$nodePath)?.id).toBe(light.id);
         // The pond's own splash effect, on its water, as the camera comes over it.
         const splashes = tour.sequence.tracks.find((t: any) => t.type === 'spawn');
         const pond = pondSurface();

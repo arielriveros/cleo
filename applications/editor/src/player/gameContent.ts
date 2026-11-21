@@ -5,7 +5,7 @@
 // the NetSync dedicated host (applications/host), which runs the same game headless. One implementation, so the
 // host simulates exactly the scene the players see.
 
-import { Scene, Logger, GiBakeRegistry, registerTemplates, addScriptModuleSources, parseRuntimeScene } from 'cleo';
+import { Scene, Logger, GiBakeRegistry, registerTemplates, addScriptModuleSources, parseRuntimeScene, registerAssetTable } from 'cleo';
 import type { PackManifest } from '../features/publish/pack';
 import type { GameSource } from './gameSource';
 import { inflateSceneGeometry, inflateTerrainData, inflateTilemapData, readChunkSet, collectSceneRefs, type GameHeader, type SceneRefs } from './unpack';
@@ -42,6 +42,8 @@ export async function installGameContent(at: GameContentSource): Promise<Set<str
   for (const b of templateChunks.giBakes) { GiBakeRegistry.set(b.id, b.bytes); permanentBakes.add(b.id); }
   attachTemplateAnimations(data.templates, data);
   registerTemplates(data.templates);
+  // The materials and tilesets script fields name (`skin: Material`), each once: parsed when a field asks.
+  registerAssetTable(data.assets);
   // A pack whose scripts were NOT extracted (Play in window) keeps each node's `script` source, which the
   // engine compiles at parse, and carries the module SOURCES here, which it compiles on first import.
   addScriptModuleSources(data.modules);

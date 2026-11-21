@@ -1,4 +1,5 @@
 import { AnimatedSpriteNode, Logger, Node, SaveGame, TriggerNode } from 'cleo'
+import type { Color } from 'cleo'
 import { save, child, attribute } from 'cleo/decorators'
 
 /**
@@ -11,9 +12,9 @@ import { save, child, attribute } from 'cleo/decorators'
  */
 export default class DuskCheckpoint extends TriggerNode {
   @attribute
-  public litTint: number[] = [1, 1, 1]
+  public litTint: Color = [1, 1, 1]
   @attribute
-  public unlitTint: number[] = [0.35, 0.35, 0.45]
+  public unlitTint: Color = [0.35, 0.35, 0.45]
   @attribute
   public healTo: number = 99
 

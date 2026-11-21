@@ -43,7 +43,7 @@ export function readJson(file) {
  *
  * The module imports `Node` from the engine barrel — a value import that would drag in the renderer and
  * a GL context we do not have — and `cryptoRandomId` from a sibling. Neither is used by the reflector,
- * so both are stubbed. Sucrase emits CommonJS, which a tiny `require` shim then satisfies.
+ * so both are stubbed; the property types it does use come from their own engine module. Sucrase emits CommonJS, which a tiny `require` shim then satisfies.
  */
 export function loadScriptReflector(root) {
   const file = path.join(root, 'applications', 'editor', 'src', 'utils', 'scripts.ts')
@@ -52,8 +52,14 @@ export function loadScriptReflector(root) {
     filePath: file,
   }).code
 
+  // The property types it reads annotations with are the engine's own (src/core/properties/types.ts), a module
+  // with no imports of its own: loaded the same way, so the tools reflect exactly as the editor does.
+  const typesFile = path.join(root, 'src', 'core', 'properties', 'types.ts')
+  const types = { exports: {} }
+  new Function('require', 'module', 'exports', transform(fs.readFileSync(typesFile, 'utf8'), { transforms: ['typescript', 'imports'], filePath: typesFile }).code)(
+    (name) => { throw new Error(`types.ts reached for a module: ${name}`) }, types, types.exports)
   const stubs = {
-    cleo: { Node: class {} },
+    cleo: { Node: class {}, ...types.exports, storedValueFits: () => true },
     './ids': { cryptoRandomId: () => 'stub' },
   }
   const module = { exports: {} }

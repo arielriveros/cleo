@@ -1,6 +1,6 @@
 import { Node } from 'cleo'
 import { find, attribute } from 'cleo/decorators'
-import type { NodeName, SoundName, TemplateName } from 'cleo'
+import type { NodeName, SoundName, TemplateName, Vec3 } from 'cleo'
 import { num, statBonus } from '@/Core/Scripts/SoulsMath'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
@@ -68,9 +68,9 @@ export default class SoulsWeaponNode extends Node {
   public heavyMove: NodeName = 'Heavy'
   /** The blade hitbox capsule, in the Mesh child's space. See "Hitbox" above. */
   @attribute
-  public bladeStart: number[] = [0, 0.12, 0]
+  public bladeStart: Vec3 = [0, 0.12, 0]
   @attribute
-  public bladeEnd: number[] = [0, 1, 0]
+  public bladeEnd: Vec3 = [0, 1, 0]
   @attribute
   public bladeRadius: number = 0.12
   /**

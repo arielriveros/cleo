@@ -89,12 +89,12 @@ export default class SoulsGameManagerNode extends Node {
   /** Damage that leaves a full-size splat; less shrinks it, more grows it (0.6x to 1.6x). */
   @attribute('Blood')
   public bloodReferenceDamage: number = 120
-  /** Name of the reward pickup revealed once the boss falls. */
+  /** The reward pickup revealed once the boss falls. */
   @attribute('Blood')
-  public bossRewardName: string = 'Boss Reward'
-  /** Name of the lore message revealed once the boss falls. */
+  public bossReward?: Node | null = null
+  /** The lore message revealed once the boss falls. */
   @attribute('Blood')
-  public bossEpilogueName: string = 'Epilogue Message'
+  public bossEpilogue?: Node | null = null
   // ----- hit-stop (see "Hit-stop") ------------------------------------------------------------------
   /** Off, every blow plays at full speed. */
   @attribute('Hit-stop')
@@ -370,8 +370,7 @@ export default class SoulsGameManagerNode extends Node {
 
   /** What the boss's fall leaves: the reward (unless taken) and the epilogue message. */
   private _revealBossRewards(): void {
-    for (const name of [this.bossRewardName, this.bossEpilogueName]) {
-      const node = this.findNode(name) as any
+    for (const node of [this.bossReward, this.bossEpilogue] as any[]) {
       if (node?.reveal) node.reveal()
     }
   }

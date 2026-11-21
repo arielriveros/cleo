@@ -5,14 +5,14 @@ import { attachScriptFactory, routeTrigger } from '../src/core/scene/nodes/nodeS
 import { GameEvents } from '../src/core/scripting/scriptEvents';
 import { buildFactoryBody, compileScript, listScriptImports, resolveScriptModule } from '../src/core/scripting/scriptRuntime';
 import { lowerScriptDecorators } from '../src/core/scripting/scriptDecoratorLowering';
-import { child, find, onAction, save, options, pick, attribute, scriptMembersOf, membersOfNode } from '../src/core/scripting/decorators';
+import { child, find, onAction, save, options, attribute, scriptMembersOf, membersOfNode } from '../src/core/scripting/decorators';
 import { Logger } from '../src/core/logger';
 import '../src/cleo';   // registers the 'cleo' module a script's `import ... from 'cleo'` resolves to
 import { InputSystem } from '../src/input/inputSystem';
 import { idleState } from '../src/input/actionMap';
 import type { ActionState } from '../src/input/actionMap';
 
-// Script decorators (`@child`, `@find`, `@onAction`, `@save`, `@options`, `@pick`) reach the engine two
+// Script decorators (`@child`, `@find`, `@onAction`, `@save`, `@options`, `@attribute`) reach the engine two
 // ways, and both must agree: Cleo's own script compile, which lowers them into a static block before Sucrase
 // (which cannot handle decorators) and V8 (which cannot parse them); and a compiler implementing the
 // standard — esbuild compiles THIS file's classes, as it does the example scripts the Souls tests import.
@@ -295,18 +295,25 @@ describe('@onAction through the script runtime', () => {
 });
 
 describe('decorators with standard semantics', () => {
-    it('records @save, @options and @pick for the engine to read', () => {
+    it('records @save, @options and @attribute for the engine to read', () => {
         const node = new Node('n');
         attachScriptFactory(node, compileScript(`
             import { Node } from 'cleo'
-            import { save, options, pick } from 'cleo/decorators'
+            import { save, options, attribute } from 'cleo/decorators'
             export default class A extends Node {
               list: string[] = ['a']
               @save @options('list') choice = 'a'
-              @pick('sound') cue = ''
+              @attribute cue = ''
             }`));
         const kinds = membersOfNode(node).map(m => `${m.kind}:${'field' in m ? m.field : ''}`);
-        expect(kinds.sort()).toEqual(['options:choice', 'pick:cue', 'save:choice']);
+        expect(kinds.sort()).toEqual(['attribute:cue', 'options:choice', 'save:choice']);
+    });
+
+    it('fails an old script that imports @pick as it loads, saying what replaced it', () => {
+        expect(() => attachScriptFactory(new Node('n'), compileScript(`
+            import { Node } from 'cleo'
+            import { pick } from 'cleo/decorators'
+            export default class A extends Node { @pick('clip') clip = '' }`))).toThrow(/a field's type says what it names/);
     });
 
     it('lets a method decorator replace the method', () => {
@@ -371,7 +378,6 @@ describe('decorators with standard semantics', () => {
             }
             return Wrong;
         }).toThrow(/goes on a method/);
-        expect(typeof pick).toBe('function');
         expect(typeof options).toBe('function');
     });
 });
@@ -518,7 +524,7 @@ describe('@attribute', () => {
 });
 
 describe("the 'cleo/decorators' module", () => {
-    const NAMES = ['animAction', 'animParam', 'animTrigger', 'attribute', 'child', 'eventDispatch', 'eventListener', 'every', 'find', 'netcall', 'observable', 'onAction', 'onClipEvent', 'onEnter', 'onEvent', 'onExit', 'onHold', 'onTap', 'options', 'pick', 'save', 'synced'];
+    const NAMES = ['animAction', 'animParam', 'animTrigger', 'attribute', 'child', 'eventDispatch', 'eventListener', 'every', 'find', 'netcall', 'observable', 'onAction', 'onClipEvent', 'onEnter', 'onEvent', 'onExit', 'onHold', 'onTap', 'options', 'save', 'synced'];
 
     it('is what scripts import the decorators from', () => {
         expect(Object.keys(resolveScriptModule('cleo/decorators')).sort()).toEqual(NAMES);

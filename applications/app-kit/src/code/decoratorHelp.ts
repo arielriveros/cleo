@@ -24,7 +24,6 @@ export const DECORATORS: readonly DecoratorEntry[] = [
   { name: 'save', target: 'field', snippet: 'save' },
   { name: 'child', target: 'field', snippet: "child('${1:Name}')" },
   { name: 'find', target: 'field', snippet: "find('${1:Name}')" },
-  { name: 'pick', target: 'field', snippet: "pick('$1')", suggestInside: true },
   { name: 'options', target: 'field', snippet: "options('${1:list}')" },
   { name: 'synced', target: 'field', snippet: 'synced' },
   { name: 'observable', target: 'field', snippet: 'observable' },

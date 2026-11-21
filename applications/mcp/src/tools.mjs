@@ -228,7 +228,7 @@ export function toolDefinitions(bridge, opts = {}) {
         scale: vec3.optional(),
         visible: z.boolean().optional(),
         props: z.record(z.string(), z.any()).optional().describe('By node_get `props` names, e.g. {"light.intensity": 800}.'),
-        scriptFields: z.record(z.string(), z.any()).optional().describe('The attached script\'s public fields.'),
+        scriptFields: z.record(z.string(), z.any()).optional().describe('The attached script\'s public fields. A Material, Texture, Sound or Tileset field takes the asset\'s name or id; a node field (typed Node, LightNode, ...) takes a node ref; a Color takes [r, g, b] (0..1).'),
         material: z.union([z.string(), z.strictObject({ name: z.string().optional(), ...materialFields })]).optional()
             .describe('Asset name, or a spec as material_write takes (linear RGB) making one named after the node.'),
         shapes: z.union([z.literal('fit'), z.array(z.record(z.string(), z.any()))]).optional().describe('collider/trigger '

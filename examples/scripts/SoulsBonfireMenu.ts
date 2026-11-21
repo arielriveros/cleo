@@ -1,4 +1,5 @@
 import { Input, Node, UIButtonNode, UIRootNode, UITextNode } from 'cleo'
+import type { ColorAlpha } from 'cleo'
 import { attribute } from 'cleo/decorators'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
@@ -28,8 +29,8 @@ export default class SoulsBonfireMenuNode extends UIRootNode {
   public repeatDelay: number = 0.35
   @attribute
   public repeatRate: number = 0.09
-  public selectedTint: [number, number, number, number] = [0.85, 0.65, 0.3, 0.35]
-  public rowTint: [number, number, number, number] = [1, 1, 1, 0.04]
+  public selectedTint: ColorAlpha = [0.85, 0.65, 0.3, 0.35]
+  public rowTint: ColorAlpha = [1, 1, 1, 0.04]
   @attribute
   public isOpen: boolean = false
 

@@ -26,14 +26,14 @@ describe('the @save tag', () => {
   it('works on the field’s own line, beside another tag, and on internal fields', () => {
     const src = `export default class P extends Node {
       /** @save */ public level = 1
-      /** @save @pick clip */ public lastClip: string = 'Idle'
+      /** @save */ public lastClip: ClipName = 'Idle'
       /** @save */ private _respawn: number[] = [0, 0, 0]
       /** @save */ public opened: string[] = []
       /** @saved is not the tag */ public other = 2
     }`
     const vars = parseScriptVariables(src)
     expect(saveFieldNames(vars)).toEqual(['level', 'lastClip', '_respawn', 'opened'])
-    expect(vars.find(v => v.name === 'lastClip')).toMatchObject({ pick: 'clip', save: true })
+    expect(vars.find(v => v.name === 'lastClip')).toMatchObject({ type: { kind: 'name', name: 'clip' }, save: true })
     expect(vars.find(v => v.name === '_respawn')).toMatchObject({ hidden: true, save: true })
     expect(vars.find(v => v.name === 'other')?.save).toBeUndefined()
   })

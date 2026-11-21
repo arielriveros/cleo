@@ -1,6 +1,6 @@
 import { Node } from 'cleo'
 import { attribute } from 'cleo/decorators'
-import type { TemplateName } from 'cleo'
+import type { SoundName, TemplateName } from 'cleo'
 import { playDetached } from '@/Core/Scripts/SoulsAudio'
 
 /**
@@ -27,7 +27,7 @@ export default class SoulsBreakableNode extends Node {
   @attribute
   public rollBreakSpeed: number = 2
   @attribute
-  public breakSound: string = 'Break'
+  public breakSound: SoundName = 'Break'
   @attribute
   public team: string = 'enemy'
   @attribute

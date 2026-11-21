@@ -131,16 +131,20 @@ node, not overridden by templates.
 @attribute maxHp = 100                                   // the Attributes section
 @attribute('Combat') damage = 10                         // a "Combat" section
 @attribute('Combat', { min: 0, max: 1, step: 0.05 }) crit = 0.1
-@attribute({ label: 'Tint', color: true }) private _tint: [number, number, number] = [1, 1, 1]
+@attribute({ label: 'Tint' }) private _tint: Color = [1, 1, 1]
+@attribute skin: Material = null                         // the material picker; the Material at runtime
 @attribute({ showIf: ['mode', 'ranged'] }) range = 8
 @attribute({ readonly: true }) kills = 0
 @attribute({ multiline: true }) bark = ''
 ```
 
+- What a field IS is its **type**: `Color` gets a colour picker, `Material` the material picker, `LightNode` a
+  node in the scene, `ClipName` the clips of the character. See [Attribute types](attribute-types.md) for every
+  one, and what each holds at runtime.
 - A **group** (the first argument, a string) gives the field a collapsible section of its own, titled with
   it; without one it goes in **Attributes**. Groups appear in the order their first field is declared.
 - **Options**: `label`, `min` / `max` / `step` (a slider, values clamped), `readonly`, `showIf` (`'flag'`
-  or `['field', value]`), `color` (an `[r, g, b]` colour picker), `multiline` (a text area).
+  or `['field', value]`), `multiline` (a text area).
 - The field's **doc comment** is the row's tooltip.
 - Arguments must be literals: the editor reads them without running the script, and ignores one it can't.
 
@@ -150,18 +154,17 @@ node, not overridden by templates.
 |---|---|---|
 | `@save` | `/** @save */` | The field is kept by saves (see [Saving and loading](save-game.md)). |
 | `@options('list')` | `/** @options list */` | A string field picked from the entries of the public `string[]` field `list`. |
-| `@pick('clip')` | `/** @pick clip */` | A string (or `string[]`) field picked from the names of that kind a node can reach: `clip`, `sound`, `socket`, `template`, `node`, `trigger`, `spriteClip`. |
 
 ```ts
-@save @pick('sound') cue: string = 'Hit'
+@save @attribute cue: SoundName = 'Hit'
 
 weapons: string[] = ['Sword', 'Axe']
 @options('weapons') weapon = 'Sword'
 ```
 
-`@options('wepons')`, naming a field that is not a list, is a type error. The doc-comment tags still
-work, so older scripts need no change; the typed name fields (`ClipName`, `SoundName`, …) are often the
-simplest way to say the same thing as `@pick`.
+`@options('wepons')`, naming a field that is not a list, is a type error. A field that names something the node
+can reach is TYPED with it instead (`cue: SoundName`, `clip: ClipName`): see [Attribute types](attribute-types.md).
+`@pick` is gone for that reason; a script that still imports it stops as it loads and says what to write.
 
 ## Good to know
 

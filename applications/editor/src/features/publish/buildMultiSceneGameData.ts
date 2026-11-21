@@ -21,6 +21,8 @@ import { migrateLegacyUI } from '../../utils/uiMigration'
 import type { ScriptAsset } from '../../utils/scripts'
 import { deepClone } from '@cleo/app-kit/utils/deepClone'
 import { sharedAnimationData } from './sharedAnimations'
+import { buildFieldAssetTable, collectAssetTableTextureIds } from '../../utils/fieldAssets'
+import { collectTextureIds } from '../../utils/nodeSubtree'
 
 // game.json v2: a multi-scene published game. The entry (main) scene runs first; scripts call
 // Game.loadScene(name|id) to switch at runtime. Textures are serialized ONCE at the top level (they are
@@ -178,6 +180,11 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   const wanted = new Set<string>()
   for (const entry of Object.values(scenes)) collectPublishedTextureIds(entry.scene, wanted)
   for (const t of templates) collectPublishedTextureIds((t as any).node, wanted)
+  // The game's one asset table: the materials and tilesets script fields name, each once, and so the
+  // textures they draw.
+  const assets = buildFieldAssetTable([...Object.values(scenes).map(e => e.scene), ...templates.map((t: any) => t.node)],
+    { materials: src.libs.materials, tilesets: (src.libs as any).tilesets })
+  collectAssetTableTextureIds(assets, wanted, collectTextureIds)
   // The colour-grading LUT is referenced by RenderSettings, not by any node, so the walks above
   // cannot see it. Without this the build ships a LUT id with no bytes behind it and the published
   // game runs ungraded, with nothing to say why.
@@ -217,6 +224,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     textureBytes,
   }
   if (modules) out.modules = modules
+  if (assets) out.assets = assets
   const { animations, modelAnimations, retargets } = sharedAnimationData(src.libs)
   if (retargets) out.retargets = retargets
 

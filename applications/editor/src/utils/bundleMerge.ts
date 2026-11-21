@@ -205,6 +205,14 @@ export function remapDeep(obj: any, r: Remaps): void {
       remapVariables(val, r)
       continue
     }
+    // A script's asset fields (`skin: Material`), each `{ $asset, id }` or a list of them: the id moves with
+    // its asset. Nothing else in a node's field values names an asset.
+    if (key === 'scriptVars' && val && typeof val === 'object') {
+      const table: Record<string, Map<string, string>> = { material: r.mat, texture: r.tex, sound: r.sound, tileset: r.tileset }
+      const one = (v: any) => { if (v && typeof v === 'object' && typeof v.$asset === 'string' && table[v.$asset]) v.id = sub(table[v.$asset], v.id) }
+      for (const name of Object.keys(val)) Array.isArray(val[name]) ? val[name].forEach(one) : one(val[name])
+      continue
+    }
     remapDeep(val, r)
   }
 }

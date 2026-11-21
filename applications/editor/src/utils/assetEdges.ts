@@ -1,9 +1,10 @@
-import { isBuiltinTextureId, isDerivedTextureId, isInlineTilesetId, particleSystemReferences } from 'cleo'
+import { isBuiltinTextureId, isDerivedTextureId, isInlineTilesetId, isAssetRef, particleSystemReferences } from 'cleo'
 import type { AssetRef } from 'cleo'
 import { isBinaryPayload } from './binaryPayload'
 import type { AssetKind } from './vfs'
 import type { SceneRefs } from './sceneStorage'
 import { SCENE_REFS_VERSION } from './references'
+import { FIELD_ASSET_LIBRARY } from './fieldAssets'
 
 // The editor half of the asset reference graph: what each asset kind REFERENCES, with attribution.
 //
@@ -147,6 +148,16 @@ export function walkRefs(obj: any, out: EdgeSpec[]): void {
       continue
     }
     if (key === 'variables' && val && typeof val === 'object') { walkVariables(val, out); continue }
+    // A script's asset fields (`skin: Material`), each `{ $asset, id }` or a list of them, attributed to
+    // the field: `scriptVars.skin`, `scriptVars.decals[1]`.
+    if (key === 'scriptVars' && val && typeof val === 'object') {
+      for (const name of Object.keys(val)) {
+        const v = val[name]
+        if (isAssetRef(v)) push(out, FIELD_ASSET_LIBRARY[v.$asset], v.id, `scriptVars.${name}`)
+        else if (Array.isArray(v)) v.forEach((x, i) => { if (isAssetRef(x)) push(out, FIELD_ASSET_LIBRARY[x.$asset], x.id, `scriptVars.${name}[${i}]`) })
+      }
+      continue
+    }
 
     walkRefs(val, out)
   }

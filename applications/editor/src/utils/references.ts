@@ -1,4 +1,5 @@
-import { Scene, CameraNode, isDerivedTextureId, isInlineTilesetId, isBuiltinTextureId, particleSystemReferences, allTerrainFoliageRules } from 'cleo'
+import { Scene, CameraNode, isDerivedTextureId, isInlineTilesetId, isBuiltinTextureId, particleSystemReferences, allTerrainFoliageRules, isAssetRef } from 'cleo'
+import type { AssetFieldKind } from 'cleo'
 import { getNodeMaterial, getMaterialIdsOf, MaterialAsset } from './materials'
 import { getScreenMaterialIds } from './screenMaterials'
 import { collectTextureIds } from './nodeSubtree'
@@ -11,6 +12,7 @@ import {
 } from './terrainMaterials'
 import type { TilesetAsset } from './tilesets'
 import { serializedTerrainLayers } from './terrainJson'
+import { forEachFieldAssetRef } from './fieldAssets'
 
 // Which texture / material asset ids are actually used anywhere — the main scene plus the asset libraries.
 // Used by the Textures and Materials explorers to flag orphaned (unreferenced) assets with a warning badge,
@@ -112,6 +114,8 @@ export function collectSceneTextureIds(
       if (pn.isEditorOwned) continue
       for (const id of particleSystemReferences(pn.system).textures) set.add(id)
     }
+    // A script field's texture (`icon: Texture`).
+    collectFieldAssetIds(scene, 'texture', set)
   }
   return set
 }
@@ -131,6 +135,8 @@ export function collectPublishedTextureIds(node: any, set: Set<string>): void {
   if (!node || typeof node !== 'object') return
 
   collectTextureIds(node, set)
+  // A script field's texture (`icon: Texture`), stored as `{ $asset: 'texture', id }` in its `scriptVars`.
+  forEachFieldAssetRef(node, ref => { if (ref.$asset === 'texture') set.add(ref.id) })
 
   // A serialized tilemap's atlas ids sit on its embedded tilesets, NOT inside a `textures` map, so the
   // generic walk cannot see them. A sprite embeds a single tileset under `sprite.tileset` rather than a
@@ -218,6 +224,8 @@ export function collectSceneMaterialIds(scene: Scene | null | undefined): Set<st
           if (typeof slot?.surfaceMaterialId === 'string' && slot.surfaceMaterialId) set.add(slot.surfaceMaterialId)
       }
     }
+    // A script field's material (`skin: Material`).
+    collectFieldAssetIds(scene, 'material', set)
   }
   return set
 }
@@ -427,6 +435,8 @@ export function collectReferencedTilesetIds(scene: Scene | null | undefined): Se
       const id = w.precipitationSprite?.tilesetId
       if (id) set.add(id)
     }
+    // A script field's tileset (`tiles: Tileset`).
+    collectFieldAssetIds(scene, 'tileset', set)
   }
   return set
 }
@@ -440,9 +450,14 @@ export function collectReferencedTilesetIds(scene: Scene | null | undefined): Se
  */
 export function collectPublishedSoundIds(node: any, set: Set<string>): void {
   if (!node || typeof node !== 'object') return
-  const id = node.sound?.sampleId
-  if (typeof id === 'string' && id) set.add(id)
-  for (const child of (node.children ?? [])) collectPublishedSoundIds(child, set)
+  // A script field's sound (`hit: Sound`) as well as a Sound node's sample, the whole tree's at once.
+  forEachFieldAssetRef(node, ref => { if (ref.$asset === 'sound') set.add(ref.id) })
+  const walk = (n: any) => {
+    const id = n?.sound?.sampleId
+    if (typeof id === 'string' && id) set.add(id)
+    for (const child of (n?.children ?? [])) walk(child)
+  }
+  walk(node)
 }
 
 /**
@@ -469,6 +484,8 @@ export function collectReferencedSoundIds(scene: Scene | null | undefined): Set<
     for (const sn of scene.sounds) {
       if (sn.sampleId) set.add(sn.sampleId)
     }
+    // A script field's sound (`hit: Sound`).
+    collectFieldAssetIds(scene, 'sound', set)
   }
   return set
 }
@@ -506,6 +523,26 @@ export function collectReferencedTerrainMaterialIds(scene: Scene | null | undefi
   return set
 }
 
+/**
+ * The ids of `kind` the script fields of a LIVE scene's nodes hold (`skin: Material` stores `{ $asset, id }` as
+ * the node's own property, a list of them too). Added to each kind's scene collector, so a material that only
+ * a script field names is used, not orphaned, and the scene's reference list says so.
+ */
+export function collectFieldAssetIds(scene: Scene | null | undefined, kind: AssetFieldKind, set: Set<string> = new Set()): Set<string> {
+  if (!scene) return set
+  const add = (v: unknown) => { if (isAssetRef(v) && v.$asset === kind) set.add(v.id) }
+  for (const node of scene.nodes) {
+    const n = node as any
+    for (const key of Object.keys(n)) {
+      const v = n[key]
+      if (!v || typeof v !== 'object') continue
+      if (Array.isArray(v)) { if (v.length && isAssetRef(v[0])) v.forEach(add) }
+      else add(v)
+    }
+  }
+  return set
+}
+
 // ---------------------------------------------------------------------------------------------------
 // A scene's own reference list.
 // ---------------------------------------------------------------------------------------------------
@@ -518,7 +555,8 @@ export function collectReferencedTerrainMaterialIds(scene: Scene | null | undefi
 // 2: particle system links (`particleSystemIds`).
 // 3: a weather volume's rain or snow sprite sheet (its texture, and the tileset it was cut from).
 // 4: sequence links (`sequenceIds`).
-export const SCENE_REFS_VERSION = 4
+// 5: the assets script fields hold (`skin: Material`, `icon: Texture`, `hit: Sound`, `tiles: Tileset`).
+export const SCENE_REFS_VERSION = 5
 
 /**
  * Everything a scene DIRECTLY references: what its placed nodes, terrain layers, tilemaps, sounds and

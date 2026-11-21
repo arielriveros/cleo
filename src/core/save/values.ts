@@ -2,9 +2,11 @@
 // booleans, null, arrays and plain objects pass through; two shapes are encoded on the way —
 //   { $ta: 'Float32Array', v: [...] }   a typed array (a gl-matrix vec3 is one)
 //   { $node: id, path }                 another node, found again by id, else by its name path
+//   { $asset: kind, id }                an asset a field holds (a Material, a Texture), found again by id
 // Anything else (a function, a Map, a class instance, NaN) is left out with one warning naming where it was.
 
 import { Node } from '../scene/nodes/node';
+import { assetRefOf, isAssetRef, resolveAsset } from '../properties/fieldRefs';
 
 /** What {@link encodeSaveValue} returns for a value a save cannot hold. */
 export const UNSAVEABLE: unique symbol = Symbol('unsaveable');
@@ -69,6 +71,9 @@ export function encodeSaveValue(value: unknown, where: string, ctx: EncodeContex
         seen.delete(obj);
         return out;
     }
+    // An asset an `@attribute skin: Material` field was given: kept as the id it came from.
+    const asset = assetRefOf(obj);
+    if (asset) return { $asset: asset.$asset, id: asset.id };
     if (!isPlainObject(obj)) {
         ctx.warn(where, `a ${obj.constructor?.name ?? 'class instance'} cannot be saved (use plain objects and arrays)`);
         return UNSAVEABLE;
@@ -101,6 +106,7 @@ export function decodeSaveValue(value: unknown, findNode?: (id: string, path: st
     const obj = value as Record<string, any>;
     if (typeof obj.$node === 'string')
         return findNode ? findNode(obj.$node, typeof obj.path === 'string' ? obj.path : null) : obj;
+    if (isAssetRef(obj)) return resolveAsset(obj.$asset, obj.id);
     if (typeof obj.$ta === 'string' && Array.isArray(obj.v)) {
         const Ctor = TYPED_ARRAYS[obj.$ta];
         if (Ctor) return new Ctor(obj.v);

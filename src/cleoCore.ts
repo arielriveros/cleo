@@ -444,9 +444,27 @@ export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime
 export { scriptSourceUrl, inlineScriptUrl, isScriptUrl, moduleIdOfScriptUrl, scriptLocationOf, scriptLocationLabel } from "./core/scripting/scriptUrls";
 export type { ScriptSourceLocation } from "./core/scripting/scriptUrls";
 export { logScriptError } from "./core/scripting/scriptErrors";
-// Typed name fields (clip/sound/socket/template/child): plain strings the inspector offers a picker for.
-export { SOUNDS_GROUP, ownedSoundsGroup } from "./core/scripting/fieldTypes";
-export type { ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, ProjectTriggers, SpriteClipName, ActionName, ProjectActions, ScriptPickKind } from "./core/scripting/fieldTypes";
+// The native attribute types (docs/scripting/attribute-types.md): each is a type for a script's field and a token
+// of the same name for an engine declaration. Colours and vectors, names the inspector lists, and -- through
+// the engine classes themselves (Material, Texture, Sound, Tileset, every Node) -- assets and nodes.
+export {
+    SOUNDS_GROUP, ownedSoundsGroup,
+    Color, ColorAlpha, Vec2, Vec3, Vec4,
+    ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, SpriteClipName, ActionName, SceneName, LayerName, ParamName,
+} from "./core/scripting/fieldTypes";
+export type { ProjectTriggers, ProjectActions } from "./core/scripting/fieldTypes";
+export {
+    NAME_KINDS, ASSET_FIELD_KINDS, propertyToken, Choice, ListOf, Integer, typeOfToken, typeFromAnnotation, literalUnionOf,
+    propertyTypeLabel, defaultOf, isTextType, samePropertyType, upgradePropertyType, registerClassType,
+} from "./core/properties/types";
+export type { PropertyType, PropertyToken, PropertyTokenLike, NameKind, AssetFieldKind, AnnotationContext } from "./core/properties/types";
+export {
+    isAssetRef, isNodePathRef, assetRef, nodePathRef, registerAssetResolver, resolveAsset, assetRefOf, rememberAssetRef,
+    registerAssetTable, clearAssetTable, registerAssetParser, holdsFieldRef, storedValueFits,
+} from "./core/properties/fieldRefs";
+export type { AssetFieldRef, NodePathRef, AssetTable, AssetResolver } from "./core/properties/fieldRefs";
+export { relativeNodePath, nodeAtRelativePath } from "./core/save/nodePaths";
+import "./core/properties/assetKinds";
 // What the script compile calls for decorators, and what reads them back. The decorators themselves (@child,
 // @onAction, @attribute, @save, …) are 'cleo/decorators' (./decorators.ts), registered at the end of this file.
 export { applyScriptDecorators, scriptMembersOf, membersOfNode, SCRIPT_METADATA } from "./core/scripting/decorators";
@@ -510,4 +528,10 @@ registerCore('cleo', CleoCoreAPI);
 // `import { attribute, onAction } from 'cleo/decorators'`: the script decorators, kept out of the barrel. Here
 // rather than in cleo.ts so the published player has them too; the full engine adds nothing to them.
 import * as CleoDecoratorsAPI from "./decorators";
-registerCore('cleo/decorators', CleoDecoratorsAPI);
+// `@pick` is gone: a field's type says what it names. An old script importing it fails as it loads, saying so.
+const CleoDecoratorsModule: Record<string, unknown> = { ...CleoDecoratorsAPI };
+Object.defineProperty(CleoDecoratorsModule, 'pick', {
+    enumerable: false, configurable: true,
+    get() { throw new Error("'@pick' is gone: a field's type says what it names now -- `clip: ClipName`, `cue: SoundName`, `next: NodeName` (docs/scripting/attribute-types.md)"); },
+});
+registerCore('cleo/decorators', CleoDecoratorsModule);

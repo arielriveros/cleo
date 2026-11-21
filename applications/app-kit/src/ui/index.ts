@@ -71,7 +71,7 @@ export type { AccessSelectProps } from './AccessSelect';
 export { Field, Hint } from './Field';
 export type { FieldProps } from './Field';
 
-export { ColorInput } from './ColorInput';
+export { ColorInput, colorToHex, hexToColor } from './ColorInput';
 export type { ColorInputProps } from './ColorInput';
 
 export { CurveInput, CurveGraph, graphRange, snapGraphValue } from './CurveInput';

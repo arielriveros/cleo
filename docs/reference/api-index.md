@@ -87,7 +87,11 @@ Layout helpers: `uiSetRect`, `uiSolveRect`, `uiRootScale`, `uiProjectToScreen`, 
 | `observableOf` | The `ValueSubject` behind a node's `@observable` field. |
 | `applyScriptDecorators`, `scriptMembersOf`, `membersOfNode` | What the script compile calls, and how the engine reads a class's decorators back. |
 | `lowerScriptDecorators`, `decoratorSiteAt` | How the compile rewrites decorators, and where the script editor's `@` completion applies. |
-| `ActionName` / `ProjectActions` / `ScriptPickKind` *(types)* | An input action's name, checked against the project's input map. |
+| `ActionName` / `ProjectActions` *(types)* | An input action's name, checked against the project's input map. |
+| `Color`, `ColorAlpha`, `Vec2`, `Vec3`, `Vec4` | The value attribute types: each a type for a script field and a token of the same name for an engine declaration. See [Attribute types](../scripting/attribute-types.md). |
+| `ClipName`, `SoundName`, `SocketName`, `TemplateName`, `NodeName`, `TriggerName`, `SpriteClipName`, `ActionName`, `SceneName`, `LayerName`, `ParamName` | The name attribute types: a name the inspector lists, a string at runtime. |
+| `PropertyType`, `typeFromAnnotation`, `typeOfToken`, `propertyTypeLabel`, `defaultOf`, `Choice`, `ListOf`, `Integer` | The one type table: what a script annotation or a declaration token means. |
+| `registerAssetTable`, `resolveAsset`, `assetRefOf`, `isAssetRef`, `isNodePathRef`, `relativeNodePath`, `nodeAtRelativePath` | How an asset or node field's stored reference becomes the object (hosts: the player, the editor's Play). |
 | `SaveGame` | Save slots, globals, loading and migrations. See [Saving and loading](../scripting/save-game.md). |
 | `setSaveStore`, `getSaveStore` | Install where saves go (hosts: the player, the editor's Play). |
 | `createIndexedDbSaveStore`, `createBridgeSaveStore`, `createMemorySaveStore`, `createTextSaveStore` | The stores: browser storage, a desktop game's files, memory, any text backend. |
@@ -111,7 +115,7 @@ one from there fails to load, with an error saying where it went.
 | `eventDispatch`, `observable` | Send an event with a method's result each time it runs; when a field takes a new value. |
 | `animTrigger`, `animAction`, `animParam` | Command the animators under this node: fire a trigger, play a one-shot, keep a parameter set. |
 | `onEnter`, `onExit` | Call a method when a trigger overlap begins or ends. |
-| `attribute`, `save`, `options`, `pick` | Show a field in the inspector, keep it in saves, offer its values from a list or by kind. |
+| `attribute`, `save`, `options` | Show a field in the inspector, keep it in saves, offer its values from a list. |
 | `ActionWhen` / `AttributeOptions` *(types)* | Which change of an action `@onAction` answers; how an `@attribute` row shows. |
 | `FieldDecorator` / `MethodDecorator` / `AttributeDecorator` *(types)* | What the decorators are, as types. |
 

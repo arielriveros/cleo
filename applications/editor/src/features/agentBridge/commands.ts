@@ -306,7 +306,7 @@ const commands: Record<string, Command> = {
     const scene = h.engine.mainScene
     const users: string[] = []
     walkUserNodes(scene.root, n => { if (getScriptIdOf(n) === asset.id) users.push(nodePath(n, scene.root)) })
-    const fields = asset.variables.filter(v => !v.hidden).map(v => `${v.name}: ${v.type} = ${JSON.stringify(v.default)}`)
+    const fields = asset.variables.filter(v => !v.hidden).map(v => `${v.name}: ${typeof v.type === 'string' ? v.type : cleo.propertyTypeLabel(v.type)} = ${JSON.stringify(v.default)}`)
     return {
       text: `Script "${asset.name}" (${asset.kind === 'module' ? 'module' : `extends ${BASE_CLASS[asset.baseType] ?? asset.baseType}`}), path ${h.engine.scriptPaths.get(asset.id) ?? '(not in a folder)'}\n`
         + `Fields: ${fields.join('; ') || 'none'}\nUsed by (open scene): ${users.join(', ') || 'none'}\n\n${asset.source}`,

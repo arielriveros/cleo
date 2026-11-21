@@ -1,5 +1,5 @@
 import { Input, Node } from 'cleo'
-import type { ActionName, LightProbeNode, UITextNode } from 'cleo'
+import type { ActionName, LightNode, LightProbeNode, UITextNode } from 'cleo'
 import { attribute, eventListener, observable } from 'cleo/decorators'
 
 /** One of the light setups: what it is called on the HUD, and where it puts the sun. */
@@ -41,11 +41,11 @@ export default class SandboxGameManagerNode extends Node {
 
     /** The directional light that is the sun, the HUD text that names the setup, and the light probe to relight. */
     @attribute('Scene')
-    public sunName: string = 'Sun'
+    public sun: LightNode | null = null
     @attribute('Scene')
-    public hudLineName: string = 'Light Setup'
+    public hudLine?: UITextNode | null = null
     @attribute('Scene')
-    public probeName: string = 'Light Probe'
+    public probe?: LightProbeNode | null = null
     /**
      * Seconds after a switch the light probe is lit again. It relights itself as soon as the sun turns, but the sky
      * it reflects is baked again over the next frames: lit at once, it keeps the last setup's sky.
@@ -68,23 +68,17 @@ export default class SandboxGameManagerNode extends Node {
     @observable('sandbox:LightSetup')
     public setup: number = 0
 
-    private _sun: Node | null = null
-    private _hudLine: UITextNode | null = null
-    private _probe: LightProbeNode | null = null
     /** Seconds until the light probe is lit again (negative: nothing pending). */
     private _relightIn: number = -1
 
     onStart() {
-        this._sun = this.findNode(this.sunName) ?? null
-        this._hudLine = (this.findNode(this.hudLineName) as UITextNode | null) ?? null
-        this._probe = (this.findNode(this.probeName) as LightProbeNode | null) ?? null
         this.applySetup(this.startSetup)
     }
 
     onUpdate(delta: number) {
         if (this._relightIn >= 0) {
             this._relightIn -= delta
-            if (this._relightIn < 0) this._probe?.relight()
+            if (this._relightIn < 0) this.probe?.relight()
         }
         if (this.dayAction && Input.started(this.dayAction)) this.applySetup(1)
         else if (this.sunsetAction && Input.started(this.sunsetAction)) this.applySetup(2)
@@ -105,7 +99,7 @@ export default class SandboxGameManagerNode extends Node {
         const i = Math.min(3, Math.max(1, Math.round(index)))
         const s = this.setups[i - 1]
         // A directional light shines along its +Z: pitched down by the elevation, turned to the heading.
-        this._sun?.setRotation([s.elevation, this.sunHeading, 0])
+        this.sun?.setRotation([s.elevation, this.sunHeading, 0])
         this._relightIn = this.probeRelightDelay
         this.setup = i
     }
@@ -114,6 +108,6 @@ export default class SandboxGameManagerNode extends Node {
     @eventListener('sandbox:LightSetup')
     private _setupShown(setup: number) {
         const s = this.setups[setup - 1]
-        if (this._hudLine && s) this._hudLine.text = `Light: ${s.name}`
+        if (this.hudLine && s) this.hudLine.text = `Light: ${s.name}`
     }
 }

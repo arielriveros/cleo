@@ -9,6 +9,7 @@ import { ENGINE_CHANNEL, addTargetListener, getChannel, releaseTarget, removeCha
 import { setEventErrorReporter } from "../../events/dispatcher";
 import { ValueSubject } from "../../events/subject";
 import { ANIMATOR_CHANNEL } from "../../../animation/animatorCommands";
+import { resolveAssetFields, resolveNodeFields } from "../../properties/fieldRefs";
 
 // A listener that throws, anywhere in the event system, is reported as a script error with its event's name. The
 // engine channel's own listeners propagate instead (it does not isolate); a throw from its frame flush lands here.
@@ -300,6 +301,8 @@ function attachClassScript(node: Node, Ctor: new (...args: any[]) => any): void 
     // its methods are already on the node, and copying them as own properties would freeze them there.
     const levels = scriptPrototypeChain(node, proto);
     applyFieldDefaults(node, levels);
+    // `skin: Material` was stored as the material's id: it is the Material from here on.
+    resolveAssetFields(node);
 
     // `__`-prefixed names are Sucrase's field-initializer helpers rather than author methods. The
     // most-derived definition of a name wins; `super.x()` inside it still reaches the base's version,
@@ -374,6 +377,8 @@ const reportedMissing = new Set<string>();
  */
 export function fillScriptRefs(node: Node, final: boolean): void {
     const members = membersOfNode(node);
+    // `door: LightNode` was stored as a path from this node: the node it leads to, found the same way.
+    resolveNodeFields(node, final, field => members.some(m => m.kind === 'attribute' && m.field === field && m.optional));
     if (!members.length) return;
     const n = node as any;
     for (const m of members) {

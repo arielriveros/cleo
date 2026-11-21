@@ -31,6 +31,7 @@ import { assetHashKey, hashAsset, ASSET_HASH_VERSION } from '../../applications/
 import { KIND_EXT } from '../../applications/editor/src/utils/vfs'
 import { SCENE_REFS_VERSION } from '../../applications/editor/src/utils/references'
 import { TextureSet, stableId, writeJson, vars } from '../exampleKit/bundle.mjs'
+import { applyNodeFields } from '../exampleKit/nodeFields.mjs'
 import { packFormat2 } from '../exampleKit/packFormat2.mjs'
 import { templatizeScene, templatizeSubtree } from '../exampleKit/templatize'
 import { mergeStaticColliders } from '../exampleKit/mergeColliders'
@@ -1279,6 +1280,8 @@ async function main() {
     fs.mkdirSync(path.join(OUT, 'libraries'), { recursive: true })
     fs.mkdirSync(path.join(OUT, 'scenes'), { recursive: true })
     const { scene, config, templates } = await buildScene()
+    // The node fields (the Game Manager's sun, HUD line and probe), pointed at their nodes (nodeFields.mjs).
+    console.log(`node fields: ${applyNodeFields(scene, scriptAssets, (m: string) => console.log(m))} set`)
 
     const libraries: Record<string, unknown[]> = {
         models: [modelAsset, carBodyAsset, weaponAssets.pistol, weaponAssets.rifle], materials: [...materials, ...carMaterials, ...weaponMaterials, ...Object.values(FX_MATERIALS), OCEAN_MATERIAL], terrainMaterials: [],

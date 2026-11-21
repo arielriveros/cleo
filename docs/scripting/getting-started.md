@@ -113,19 +113,20 @@ export default class SpawnerNode extends Node {
 ```
 
 Only fields marked `@attribute` reach the inspector (the **Behaviors** panel), whatever their access.
-`@attribute('Timing')` puts a field in a section of its own; options add a range, a label, a colour
-picker and more — see [Decorators](decorators.md#inspector-attributes-attribute). Each field's doc comment
-is its tooltip.
+`@attribute('Timing')` puts a field in a section of its own; options add a range, a label and more — see
+[Decorators](decorators.md#inspector-attributes-attribute). Each field's doc comment is its tooltip.
 
 The defaults you write are harvested once and used as the starting value; a per-node value edited
 in the inspector overrides it and is saved with the scene. Changing a default in code changes only
 the nodes that have never had that field edited.
 
-Decorators (`@save`, `@options`, `@pick`) mark fields for saves and pickers, and `@child` / `@find` fill a field
-with a node: see [Decorators](decorators.md).
+Decorators (`@save`, `@options`) mark fields for saves and lists, and `@child` / `@find` fill a field with a
+node: see [Decorators](decorators.md).
 
-Supported attribute types are `number`, `string`, `boolean`, `vec3` and `string[]`. Anything else is fine as
-the script's own state, but cannot be an attribute.
+An attribute's TYPE decides how it is edited and what it holds: `tint: Color` gets a colour picker, `skin:
+Material` the material picker and the Material itself, `lamp: LightNode` a node in the scene. See
+[Attribute types](attribute-types.md) for every one. Anything else is fine as the script's own state, but
+cannot be an attribute.
 
 ## Node variables versus script fields
 

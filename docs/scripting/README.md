@@ -11,7 +11,8 @@ Read [Getting started](getting-started.md) first — it is short and everything 
 | Page | Covers |
 |---|---|
 | [Getting started](getting-started.md) | What a script is, how it attaches, what you may and may not write |
-| [Decorators](decorators.md) | `@child`, `@find`, `@onAction`, `@save`, `@options`, `@pick`: finding nodes, routing input and marking fields |
+| [Decorators](decorators.md) | `@child`, `@find`, `@onAction`, `@save`, `@options`: finding nodes, routing input and marking fields |
+| [Attribute types](attribute-types.md) | `Color`, `Vec3`, `Material`, `Texture`, `Sound`, `LightNode`, `ClipName`, …: what an attribute's type edits and holds |
 | [Events](events.md) | Channels, events at nodes, sync / async / deferred, `@onEvent`, `@eventListener`, `@eventDispatch`, `@observable`, `@onClipEvent` |
 | [Lifecycle](lifecycle.md) | Every hook, when it runs, timers, spawning and despawning |
 | [Node API](node-api.md) | Transforms, hierarchy, finding nodes, variables, visibility |

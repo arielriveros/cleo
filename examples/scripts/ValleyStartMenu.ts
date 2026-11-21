@@ -29,21 +29,19 @@ import { attribute } from 'cleo/decorators'
 export default class ValleyStartMenuNode extends UIRootNode {
   /** The Sequence node the Cinematic button plays. */
   @attribute
-  public tourName: string = 'Valley Tour'
+  public tour: SequenceNode | null = null
   /** The Sequence node that runs the valley's day (paused while the tour has the sun). */
   @attribute
-  public dayName: string = 'Day Cycle'
+  public day?: SequenceNode | null = null
   /** Real seconds after the menu opens during which a confirm is ignored (the press that opened it). */
   @attribute
   public openGuard: number = 0.25
   @attribute
   public isOpen: boolean = false
-  /** 'menu', 'cinematic' or 'free'. */
+  /** Where the player is: the menu, the tour, the free camera, or a movie being rendered. */
   @attribute
-  public mode: string = 'menu'
+  public mode: 'menu' | 'cinematic' | 'free' | 'movie' = 'menu'
 
-  private _tour: SequenceNode = null
-  private _day: SequenceNode = null
   private _buttons: UIButtonNode[] = []
   private _selected: number = 0
   private _navLast: number = 0
@@ -53,18 +51,16 @@ export default class ValleyStartMenuNode extends UIRootNode {
   private _stopFinished: (() => void) | null = null
 
   onStart() {
-    this._tour = this.findNode(this.tourName) as SequenceNode
-    this._day = this.findNode(this.dayName) as SequenceNode
     const cinematic = this._find('Cinematic') as UIButtonNode
     const free = this._find('Free') as UIButtonNode
     this._buttons = [cinematic, free].filter(b => !!b)
     if (cinematic) cinematic.onPress = () => this.playCinematic()
     if (free) free.onPress = () => this.playFree()
-    this._stopFinished = this._tour?.onFinished(reason => { if (reason === 'finished') this._tourEnded() }) ?? null
+    this._stopFinished = this.tour?.onFinished(reason => { if (reason === 'finished') this._tourEnded() }) ?? null
     this._stopListening = this.scene?.addLateUpdate((_delta, unscaled) => this._listen(unscaled)) ?? null
     this.open()
     const movie = Game.movieRender
-    if (movie && this._tour && movie.sequenceNodeId === this._tour.id) this.playCinematic()
+    if (movie && this.tour && movie.sequenceNodeId === this.tour.id) this.playCinematic()
     else if (movie) this._close('movie')
   }
 
@@ -88,16 +84,16 @@ export default class ValleyStartMenuNode extends UIRootNode {
 
   /** Play the tour from the start. */
   public playCinematic(): void {
-    if (!this._tour) return
+    if (!this.tour) return
     this._close('cinematic')
-    this._day?.pause()
-    this._tour.play()
+    this.day?.pause()
+    this.tour.play()
   }
 
   /** The tour is over (or left): its sun goes back to the day's, and the day goes on. */
   private _stopTour(): void {
-    this._tour?.stop()
-    if (this._day?.isPaused) this._day.resume()
+    this.tour?.stop()
+    if (this.day?.isPaused) this.day.resume()
   }
 
   /** Fly the free camera. */
@@ -107,7 +103,7 @@ export default class ValleyStartMenuNode extends UIRootNode {
     InputSystem.instance.pointerLockOnClick = true
   }
 
-  private _close(mode: string): void {
+  private _close(mode: ValleyStartMenuNode['mode']): void {
     this.isOpen = false
     this.mode = mode
     this.visible = false

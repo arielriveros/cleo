@@ -1,4 +1,5 @@
 import { Node } from 'cleo'
+import type { Vec3 } from 'cleo'
 import { save, find, attribute } from 'cleo/decorators'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
@@ -17,7 +18,7 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
 export default class SoulsDoorNode extends Node {
   /** Offset from the closed position when fully open, in world metres. */
   @attribute
-  public openOffset: [number, number, number] = [0, 4.2, 0]
+  public openOffset: Vec3 = [0, 4.2, 0]
   @attribute
   public openSeconds: number = 1.6
   @save

@@ -1,5 +1,6 @@
 // Re-derive every shipped example's script fields (`variables`) from examples/scripts, under the editor's
-// current reflection rules, inherited fields included. Run after the rules change (what makes a field an
+// current reflection rules, inherited fields included, and point the node fields of each scene at their nodes
+// (nodeFields.mjs). Run after the rules change (what makes a field an
 // inspector attribute, what a decorator means); a source refresh (convertPhysics.ts, applySaves.ts) keeps the
 // old `variables` on purpose.
 //
@@ -10,6 +11,7 @@
 import fs from 'fs'
 import path from 'path'
 import { EXAMPLES, SCRIPTS, log, read, resolveVariables, write } from '../valley/bundleOps'
+import { applyNodeFields } from './nodeFields.mjs'
 
 const DEFAULT_CLASS = /export\s+default\s+(?:abstract\s+)?class\s+(\w+)/
 const only = process.argv.slice(2)
@@ -54,6 +56,9 @@ for (const name of fs.readdirSync(EXAMPLES)) {
     return value
   }
   for (const t of bundle.libraries.templates ?? []) if (t.variant?.diff) refreshDiff(t.variant.diff)
+  // The node fields (`sun: LightNode`), pointed at the node each used to look up by name (nodeFields.mjs).
+  for (const scene of Object.values(bundle.scenes ?? {}) as any[])
+    changed += applyNodeFields(scene.scene ?? scene, bundle.libraries.scripts, (m: string) => log(`${name}:${m}`))
 
   if (!changed) { log(`${name}: fields up to date`); continue }
   log(`${name}: ${changed} script(s) re-reflected`)

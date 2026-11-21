@@ -1,4 +1,5 @@
 import { Node, UIRootNode, UITextNode } from 'cleo'
+import type { Color } from 'cleo'
 import { child, attribute } from 'cleo/decorators'
 
 /**
@@ -19,9 +20,9 @@ export default class SoulsBannerNode extends UIRootNode {
   @attribute
   public fadeOut: number = 1
   @attribute
-  public redColor: [number, number, number] = [0.72, 0.08, 0.06]
+  public redColor: Color = [0.72, 0.08, 0.06]
   @attribute
-  public goldColor: [number, number, number] = [0.96, 0.82, 0.46]
+  public goldColor: Color = [0.96, 0.82, 0.46]
 
   @child('BannerText')
   private _text: UITextNode = null

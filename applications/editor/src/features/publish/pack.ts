@@ -111,6 +111,11 @@ export interface PackManifest {
    */
   modules?: Record<string, string>;
   /**
+   * The game's one asset table (src/core/properties/fieldRefs.ts): each material and tileset a script field
+   * names, once, as the JSON the engine parses when a field asks for it. Absent when no field names one.
+   */
+  assets?: { materials?: Record<string, unknown>; tilesets?: Record<string, unknown> };
+  /**
    * The game's shader library: each shipped shader module's text and reflection, by module id, as the
    * published player's own shaders.json has them (publish/shaderSelection.ts picks the part this game uses).
    * The player's shader imports are handles onto it (src/graphics/shaderLibrary.ts). Absent from a Play in
@@ -369,6 +374,7 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     modelAnimations: data?.modelAnimations,
     ...(data?.retargets ? { retargets: data.retargets } : {}),
     ...(data?.modules ? { modules: data.modules } : {}),
+    ...(data?.assets ? { assets: data.assets } : {}),
     ...(data?.shaderLibrary ? { shaders: data.shaderLibrary } : {}),
     config: data?.config,
     geometries,

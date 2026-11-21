@@ -29,8 +29,8 @@ describe('the import a decorator needs', () => {
   it("goes into the braces of the script's 'cleo/decorators' import", () => {
     expect(apply(`import { Node } from 'cleo'\nimport { save } from 'cleo/decorators'\n`, 'child'))
       .toBe(`import { Node } from 'cleo'\nimport { save, child } from 'cleo/decorators'\n`);
-    expect(apply(`import {\n  save,\n  pick,\n} from "cleo/decorators"\n`, 'every'))
-      .toBe(`import {\n  save,\n  pick, every,\n} from "cleo/decorators"\n`);
+    expect(apply(`import {\n  save,\n  options,\n} from "cleo/decorators"\n`, 'every'))
+      .toBe(`import {\n  save,\n  options, every,\n} from "cleo/decorators"\n`);
     expect(apply(`import {} from 'cleo/decorators'`, 'save')).toBe(`import { save } from 'cleo/decorators'`);
   });
 

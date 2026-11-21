@@ -11,6 +11,8 @@ import { MODEL_ID_VAR, LEGACY_MODEL_ID_VAR } from '../../utils/models';
 import { resolveModelAnimations } from '../../utils/animationResolve';
 import type { AnimationAsset } from '../../utils/animationAssets';
 import { reembedMachine, type AnimControllerAsset, type MachineLibs } from '../../utils/animationControllers';
+import { buildFieldAssetTable } from '../../utils/fieldAssets';
+import type { TilesetAsset } from '../../utils/tilesets';
 
 // Sources needed to assemble a complete, self-contained game JSON.
 export interface GameDataSources {
@@ -29,8 +31,11 @@ export interface GameDataSources {
   // RUNTIME builders (play + publish); saving a scene leaves it out.
   templates?: Template[];
   // Re-resolves each template's __materialId links so an instance created at runtime gets the CURRENT
-  // material, not the copy frozen in when the template was saved.
+  // material, not the copy frozen in when the template was saved. With `tilesets`, also what the game's
+  // asset table is built from: the materials and tilesets script fields name (`skin: Material`), each once.
+  // Passed by the RUNTIME builders only, so a saved scene never carries a table.
   materials?: MaterialAsset[];
+  tilesets?: TilesetAsset[];
   // The model and animation libraries, for baking each character's SHARED clips into the JSON — see
   // `attachSharedClips`. Passed by editor PLAY only. The publish path deliberately leaves them out: it
   // ships the clips once at the top level and the player retargets them at load, so baking them here
@@ -306,6 +311,13 @@ export async function buildGameData(sources: GameDataSources): Promise<any> {
   }
   if (sources.scriptPaths && sources.scriptAssets)
     attachScriptModules(json, sources.scriptAssets, sources.scriptPaths);
+  // The game's one asset table: each material or tileset a script field names, stored once for every
+  // field and node naming it (src/core/properties/fieldRefs.ts), not inside each node's data.
+  if (sources.materials || sources.tilesets) {
+    const assets = buildFieldAssetTable([json.scene, ...(json.templates ?? []).map((t: any) => t.node)],
+      { materials: sources.materials, tilesets: sources.tilesets });
+    if (assets) json.assets = assets;
+  }
   // What a save keeps of each script: its `@save` fields, scene and templates alike (a spawned copy saves
   // too). Runtime builds only, like the script paths: a saved scene file never carries them.
   if (sources.scriptPaths && sources.scriptAssets) {

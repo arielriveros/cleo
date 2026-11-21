@@ -1,27 +1,23 @@
-import { Node } from 'cleo'
+import { Node, propertyTypeLabel } from 'cleo'
 import { useState, useEffect } from 'react'
 import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { NumberInput, TextInput, Toggle, VectorInput, Select, StringListInput, ComboSelect, Slider, ColorInput, controlClass, cn, labelClass, ACCESS_META } from '@cleo/app-kit/ui'
+import { cn, labelClass, ACCESS_META } from '@cleo/app-kit/ui'
 import { SaveIcon, AttributesIcon, AttributeGroupIcon } from '../sectionIcons'
-import type { ScriptVarSchema } from '../../../utils/scripts'
+import { upgradeScriptVar, type ScriptVarSchema } from '../../../utils/scripts'
 import { isOverridden, setFieldOverride } from '../../../utils/templateOverrides'
 import { INSTANCE_LOCKED_TIP, setInstanceAttribute, settableOnInstance } from '../../../utils/instanceAttributes'
 import OverrideMark from '../OverrideMark'
 import { useVariantBase } from '../useVariantBase'
 import { deepClone } from '@cleo/app-kit/utils/deepClone'
-import { pickChoices, PICK_LABEL, type PickContext } from './pickSources'
+import PropertyField from '../../properties/PropertyField'
 
 // The reflection view for a class-based script asset: its `@attribute` fields, in the Attributes section and
 // one section per group (`@attribute('Combat')`). Fields are declared in the script, so name, type and access
 // are read-only; only each node's own VALUE is editable, and it lives as a native own-property on the node.
-// A field without `@attribute` is the script's own and is not shown.
-
-const vecToHex = (v: unknown): string => {
-  const a = Array.isArray(v) ? v : [0, 0, 0]
-  const h = (x: unknown) => Math.round(Math.min(1, Math.max(0, Number(x) || 0)) * 255).toString(16).padStart(2, '0')
-  return `#${h(a[0])}${h(a[1])}${h(a[2])}`
-}
+// A field without `@attribute` is the script's own and is not shown. Each value is edited by its type
+// (PropertyField): a `Color` with a colour picker, a `Material` with the material picker, a `LightNode` with
+// a scene node, and so on.
 
 /**
  * `overridable`: the node is inside a placed template instance, so an edited value is recorded as that
@@ -41,18 +37,19 @@ export default function ScriptAttributesEditor(props: {
   section?: string
   persistScope?: string
 }) {
-  const { eventEmitter, scriptAssetOf, revertTemplateOverride, editorScene, rigs, animations, templates, animControllers } = useCleoEngine()
+  const { eventEmitter, scriptAssetOf, revertTemplateOverride } = useCleoEngine()
   const asset = scriptAssetOf(props.node)
   const [values, setValues] = useState<Record<string, any>>({})
   // In a variant's tab: an inherited node's value differs from what its base holds = this variant's override.
   const origin = useVariantBase(props.node)
   const inherited = origin && origin.baseNode !== 'added' ? origin.baseNode : null
 
-  const visible: ScriptVarSchema[] = (asset?.variables ?? []).filter(v => !v.hidden && (!props.section || settableOnInstance(v)))
+  const fields: ScriptVarSchema[] = (asset?.variables ?? []).map(upgradeScriptVar)
+  const visible: ScriptVarSchema[] = fields.filter(v => !v.hidden && (!props.section || settableOnInstance(v)))
   // A field that is not an attribute is never shown, but one tagged @save is still part of what a save keeps: named.
-  const hiddenSaved = (asset?.variables ?? []).filter(v => v.hidden && v.save && !v.ref).map(v => v.name)
+  const hiddenSaved = fields.filter(v => v.hidden && v.save && !v.ref).map(v => v.name)
   // @child / @find fields: filled with a node by the engine, so shown as what they look for, not as values.
-  const refs = (asset?.variables ?? []).filter(v => v.ref)
+  const refs = fields.filter(v => v.ref)
 
   const sync = () => {
     const n = props.node as any
@@ -71,7 +68,7 @@ export default function ScriptAttributesEditor(props: {
   const setValue = (name: string, value: any) => {
     if (props.lockPrivate) {
       // Only what the placement may set: a disabled row cannot get here, but nothing else may either.
-      const v = asset.variables.find(f => f.name === name)
+      const v = fields.find(f => f.name === name)
       if (!v || !setInstanceAttribute(props.node, v, value)) return
     } else {
       (props.node as any)[name] = value
@@ -95,77 +92,17 @@ export default function ScriptAttributesEditor(props: {
   const choicesFor = (v: ScriptVarSchema): string[] => {
     const own = values[v.options!]
     if (Array.isArray(own)) return own.map(String)
-    const def = asset.variables.find(f => f.name === v.options)?.default
+    const def = fields.find(f => f.name === v.options)?.default
     return Array.isArray(def) ? def.map(String) : []
   }
 
-  // A typed name field (`clip: ClipName`): the names valid where this node sits. See pickSources.ts. A
-  // trigger is only ever one the animators declare, so it is picked, never typed (a stored unknown one is
-  // flagged rather than dropped).
-  const pickCtx: PickContext = { sceneRoot: editorScene?.root, rigs, animations, templates, animControllers }
-  const namePicker = (v: ScriptVarSchema, current: string, onChange: (value: string) => void) => {
-    const noun = PICK_LABEL[v.pick!]
-    return (
-      <ComboSelect value={current} onChange={onChange} noun={noun}
-        choices={pickChoices(v.pick!, props.node, pickCtx)} title={`A ${noun} name`}
-        allowCustom={v.pick !== 'trigger'} />
-    )
-  }
-
   const renderValue = (v: ScriptVarSchema) => {
-    const value = values[v.name]
-    if (v.choices) {
-      const current = typeof value === 'string' ? value : ''
-      return (
-        <Select className='w-full' value={current} onChange={e => setValue(v.name, e.target.value)}>
-          {!v.choices.includes(current) && <option value={current}>{current || '(none)'} (not in list)</option>}
-          {v.choices.map(c => <option key={c} value={c}>{c}</option>)}
-        </Select>
-      )
-    }
-    if (v.pick && v.type === 'string') {
-      return namePicker(v, typeof value === 'string' ? value : '', s => setValue(v.name, s))
-    }
-    if (v.options) {
-      const choices = choicesFor(v)
-      const current = typeof value === 'string' ? value : ''
-      return (
-        <Select className='w-full' value={current} onChange={e => setValue(v.name, e.target.value)}
-          title={`Picked from ${v.options}`}>
-          {!choices.includes(current) && <option value={current}>{current || '(none)'} (not in list)</option>}
-          {choices.map((c, i) => <option key={`${i}:${c}`} value={c}>{c}</option>)}
-        </Select>
-      )
-    }
-    if (v.type === 'stringList') {
-      return <StringListInput value={Array.isArray(value) ? value.map(String) : []} onChange={next => setValue(v.name, next)}
-        renderItem={v.pick ? (item, set) => namePicker(v, item, set) : undefined} />
-    }
     const a = v.attribute ?? {}
-    if (v.type === 'number') {
-      const n = typeof value === 'number' ? value : 0
-      const clamp = (x: number) => Math.min(a.max ?? Infinity, Math.max(a.min ?? -Infinity, x))
-      if (a.min !== undefined && a.max !== undefined && a.max > a.min)
-        return <Slider value={n} min={a.min} max={a.max} step={a.step ?? (a.max - a.min) / 100} readout doc={false}
-          title={a.tooltip} onChange={x => setValue(v.name, clamp(x))} />
-      return <NumberInput value={n} min={a.min} max={a.max} step={a.step} onChange={x => setValue(v.name, clamp(x))} />
-    }
-    if (v.type === 'string') {
-      if (a.multiline)
-        return <textarea className={cn(controlClass, 'w-full min-h-[3.5rem] resize-y')} value={value ?? ''}
-          onChange={e => setValue(v.name, e.target.value)} />
-      return <TextInput value={value ?? ''} onChange={s => setValue(v.name, s)} />
-    }
-    if (v.type === 'boolean') return <Toggle checked={!!value} onChange={b => setValue(v.name, b)} />
-    const arr = Array.isArray(value) ? value : [0, 0, 0]
-    if (a.color)
-      return (
-        <div className='flex items-center gap-1.5'>
-          <ColorInput color={vecToHex(arr)} onChange={rgb => setValue(v.name, rgb)} />
-          <VectorInput value={arr} onChange={next => setValue(v.name, next)} />
-        </div>
-      )
-    return <VectorInput value={arr} onChange={next => setValue(v.name, next)} />
+    return (
+      <PropertyField type={v.type} value={values[v.name]} node={props.node} onChange={x => setValue(v.name, x)}
+        min={a.min} max={a.max} step={a.step} multiline={a.multiline} title={a.tooltip}
+        options={v.options ? choicesFor(v) : undefined} />
+    )
   }
 
   // `showIf`: a row appears only while another attribute says so. It keeps its value while hidden.
@@ -180,7 +117,7 @@ export default function ScriptAttributesEditor(props: {
     // Read-only: the access level is declared in the script, not chosen in the inspector.
     const access = ACCESS_META[v.access]
     const a = v.attribute ?? {}
-    const kind = `${v.pick ? `${v.pick} name` : v.type}${v.type === 'stringList' && v.pick ? ' list' : ''}`
+    const kind = propertyTypeLabel(v.type)
     const tip = a.tooltip ? `${a.tooltip}\n\n${v.name}: ${kind} (${v.access})` : `${v.name}: ${kind} (${v.access})`
     return (
       <div key={v.name} className='flex items-center gap-1.5 mb-2'>

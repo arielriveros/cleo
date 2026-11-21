@@ -84,23 +84,28 @@ One spawner script can drive an easy spawner and a hard one with no code duplica
 | `min`, `max`, `step` | A number within a range: a slider, and values clamped to it. |
 | `readonly: true` | Shown, not editable. |
 | `showIf: 'flag'` / `showIf: ['mode', 'ranged']` | Shown only while another attribute is truthy, or equals that value. |
-| `color: true` | An `[r, g, b]` field picked with a colour picker. |
 | `multiline: true` | A string edited in a text area. |
 
 Arguments must be written out (`'Combat'`, `{ min: 0 }`): the editor reads them from the source without
 running it, and ignores one it cannot read.
 
-Supported types are `number`, `string`, `boolean`, `vec3` and `string[]` (an editable list). A string
-attribute can be picked rather than typed:
+The field's **type** decides how it is edited ([Attribute types](../scripting/attribute-types.md)):
 
-- typed `ClipName`, `SoundName`, `SocketName`, `TemplateName` or `NodeName`, it offers the names this
-  node can reach;
-- typed `TriggerName`, it offers the triggers of the character's animator — and only those: a trigger is
-  picked, never typed. The script and VS Code editors check every `TriggerName` (and `setTrigger`'s
-  argument) against the triggers the project's animators declare, so a misspelt one is an error;
-- typed as a literal union (`'a' | 'b'`), it offers those choices;
-- decorated `@options('listField')` (or tagged `/** @options listField */`), it offers the entries of that list field;
-- decorated `@pick('clip')` (or tagged `/** @pick clip */`), it offers the names of that kind.
+- `number`, `boolean`, `string`, and `Vec2` / `Vec3` / `Vec4` as numbers;
+- `Color` and `ColorAlpha` with a colour picker;
+- `Material`, `Texture`, `Sound` and `Tileset` with that asset's picker, which also takes a drop from the
+  Assets panel. The script gets the asset itself;
+- `Node`, or a node class such as `LightNode`, with the scene's nodes of that class, or a drag from the scene
+  tree. The script gets the node;
+- `ClipName`, `SoundName`, `SocketName`, `TemplateName`, `NodeName`, `SpriteClipName` and `ParamName` with the
+  names this node can reach, and `ActionName`, `SceneName` and `LayerName` with the project's;
+- `TriggerName` with the triggers of the character's animator, and only those: a trigger is picked, never typed.
+  The script and VS Code editors check every `TriggerName` (and `setTrigger`'s argument) against the triggers
+  the project's animators declare, so a misspelt one is an error;
+- a literal union (`'a' | 'b'`) with those choices, and a list (`X[]`) of any of these, one row per entry.
+
+A string decorated `@options('listField')` (or tagged `/** @options listField */`) offers the entries of that
+list field.
 
 See [Decorators](../scripting/decorators.md). Fields decorated `@child` or `@find` are filled with a node by the
 engine and shown as `Finds: field → Name`, not as values; fields kept by `@save` without being attributes

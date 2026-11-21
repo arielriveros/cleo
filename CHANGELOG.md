@@ -16,6 +16,20 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Attribute types: a script field's type decides what it is.**
+  - *The type is the declaration.* `tint: Color` gets a colour picker, `offset: Vec3` X, Y and Z, `skin: Material`
+    the material picker, `icon: Texture` a texture tile, `hit: Sound` the sound samples, `tiles: Tileset` the
+    tilesets, and `lamp: LightNode` (or `Node`, or another script's class) a node in the scene. `@attribute({
+    color: true })` and `@pick` are gone; a script that still imports `@pick` stops as it loads and says what to
+    write.
+  - *The engine object at runtime.* An asset field holds the Material, Texture, Sound or Tileset itself, looked up
+    by id as the script attaches. Each material and tileset is stored once in the game's asset table, however
+    many fields name it. A node field holds the node, found by its path from the script's node before
+    `onConstruct`, and a field declared `x?:` may be missing.
+  - *More names.* `SceneName`, `LayerName` and `ParamName` join the name types, and `ActionName` gets the
+    project's input actions as its list.
+  - *References.* The asset graph, publish and bundle merges follow the assets script fields name, and saves keep
+    an asset field as its id. The player contract is 49.
 - **The animator takes its commands from the event system.**
   - *Commands sent down.* Events can travel DOWN a node's subtree now (`this.dispatchDown`, `{ down: true }`). A
     script commands every animator under its node on the new `animator` channel: SetTrigger, ResetTrigger,

@@ -29,7 +29,7 @@ describe('decoratorSiteAt', () => {
 
     it('looks past the rest of the name, its arguments and other decorators to the member', () => {
         expect(at(`class A {\n  @onA|ction('Jump') jump() {}\n}`)?.member).toBe('method');
-        expect(at(`class A {\n  @|\n  @save\n  @pick('sound') cue = 'Hit'\n}`)?.member).toBe('field');
+        expect(at(`class A {\n  @|\n  @save\n  @attribute cue: SoundName = 'Hit'\n}`)?.member).toBe('field');
         expect(at(`class A {\n  @| @onAction('Fire', 'released') fire() {}\n}`)?.member).toBe('method');
     });
 
