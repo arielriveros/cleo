@@ -25,6 +25,9 @@ export * from "./modules/vehicles/api";
 // the engine's own name is the renderer's.
 export type { RenderSettings } from "./cleoCore";
 
+// The engine nodes' declared inspector properties (src/properties): the editor generates their rows from them.
+export * from "./properties";
+
 export { Loader } from "./graphics/loader";
 export type { TextureLoadReport, UnresolvedTexture } from "./graphics/loader";
 // The pure (no DOM, no GL) half of model import, so the editor can run it inside a Web Worker.

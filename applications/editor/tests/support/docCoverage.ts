@@ -32,6 +32,9 @@ export function loadDocIndex(): DocIndex {
 /** Components whose `title` gets a docs card. */
 export const TITLED = ['Collapsable', 'Section', 'SectionTitle', 'ModalHeader'] as const;
 
+/** Where titles come from the engine's property declarations (src/properties), checked by declaredProperties.test.ts. */
+const DECLARED_TITLES = /features[\\/]properties[\\/]DeclaredSections\.tsx$/;
+
 export interface TitleSite {
   file: string;
   line: number;
@@ -104,6 +107,9 @@ export function scanSource(files = [
       if (m[1] === 'ModalHeader' && !/(?:^|\s)(?:title|doc)=/.test(attrs)) continue;
       const title = literalAttribute(attrs, 'title');
       const doc = literalAttribute(attrs, 'doc');
+      // The generated sections' titles are the engine's declarations: declaredProperties.test.ts checks each
+      // one against its card's docs, which a source scan cannot.
+      if (DECLARED_TITLES.test(file) && typeof title !== 'string' && doc === undefined) continue;
       scan.titles.push({ file, line, component: m[1], title: typeof title === 'string' ? title : undefined, doc });
     }
     // `doc` keys on anything else (Field, PropertyRow, segmented options written as object literals).
