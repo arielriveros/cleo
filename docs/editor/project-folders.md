@@ -94,6 +94,36 @@ The folder is also a TypeScript project for the scripts under `Assets/`. Its `pa
 
 See [Debugging](debugging.md#debugging-in-vs-code).
 
+### Script tests
+
+`npm test` runs `tests/**/*.test.ts` with [Vitest](https://vitest.dev), in Node, against the engine without a
+window or a GPU (`cleo/testing`). A test builds a small world, puts nodes with your scripts in it, plays it for a
+while and checks what happened:
+
+```ts
+import { describe, it, expect } from 'vitest'
+import { createTestWorld } from 'cleo/testing'
+
+describe('Mover', () => {
+  it('moves right while Move is held', () => {
+    const world = createTestWorld()
+    const mover = world.spawn({ name: 'Mover', script: '@/Characters/Mover', vars: { speed: 3 } })
+    world.start()
+    world.input.setMove(1)   // also press('Jump'), release(…), tap(…)
+    world.step(1)            // one second at 60 frames a second
+    expect(mover.position[0]).toBeGreaterThan(0)
+    world.dispose()
+  })
+})
+```
+
+`script` is the script's path in the Assets panel. Scripts run through the engine's own script compiler, as in the
+game, so their imports of other scripts and their decorators behave exactly as they do when you press Play.
+`spawn` takes the node's scene JSON for anything else (`type: 'characterBody2D'`, `characterBody2D: { size }`, …).
+
+The engine for `npm test` and the declarations for `npm run typecheck` are in `.cleo/sdk/cleo`, which Cleo writes
+when it opens the project; `node_modules/cleo` points at it.
+
 ## Projects from before folders
 
 Projects kept in the desktop app's own storage before projects became folders are listed under

@@ -22,3 +22,13 @@ if (installed) {
     const res = spawnSync(npm, ['install'], { cwd: shell, stdio: 'inherit', shell: process.platform === 'win32' });
     if (res.status !== 0) process.exit(res.status ?? 1);
 }
+
+// The project SDK every folder project gets (.cleo/sdk/cleo: the headless engine and cleo/testing for
+// `npm test`). Built once; `npm run build:sdk` rebuilds it after engine changes.
+if (existsSync(path.join(root, 'applications', 'sdk', 'dist', 'cleo', 'runtime', 'testing.mjs'))) {
+    console.log('cleo: the project SDK is built');
+} else {
+    console.log('cleo: building the project SDK (applications/sdk, first run only)');
+    const res = spawnSync(process.execPath, [path.join(root, 'tools', 'buildSdk.mjs')], { cwd: root, stdio: 'inherit' });
+    if (res.status !== 0) process.exit(res.status ?? 1);
+}
