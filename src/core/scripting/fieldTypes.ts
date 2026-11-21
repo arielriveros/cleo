@@ -45,6 +45,15 @@ export const Color: PropertyToken = propertyToken({ kind: 'color' });
 /** A linear RGBA colour (the declaration token for {@link ColorAlpha}). */
 export const ColorAlpha: PropertyToken = propertyToken({ kind: 'color', alpha: true });
 
+/** One collision layer, as its bit (`1 << index`): the project's named layers, picked from their list. */
+export type CollisionLayer = number & { readonly __type?: "collisionLayer" };
+/** A set of collision layers, as a bit mask (-1 is every layer): what a ray hits, what blocks a camera. */
+export type CollisionMask = number & { readonly __type?: "collisionMask" };
+/** One collision layer (the declaration token for {@link CollisionLayer}). */
+export const CollisionLayer: PropertyToken = propertyToken({ kind: 'layers' });
+/** A set of collision layers (the declaration token for {@link CollisionMask}). */
+export const CollisionMask: PropertyToken = propertyToken({ kind: 'layers', mask: true });
+
 /* -------------------------------------------------------------------------- */
 /* Names                                                                       */
 /* -------------------------------------------------------------------------- */

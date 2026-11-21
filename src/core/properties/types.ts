@@ -44,6 +44,8 @@ export type PropertyType =
      * class of a project script, whose nodes are the ones running it.
      */
     | { kind: 'node'; className: string; script?: true }
+    /** A collision layer (one bit), or a set of them (`mask`): the project's named layers. */
+    | { kind: 'layers'; mask?: true }
     | { kind: 'list'; of: PropertyType };
 
 /** A runtime stand-in for a type, for declarations written in code: `{ key: 'albedo', type: Color }`. */
@@ -135,6 +137,7 @@ const NAMED: Record<string, PropertyType> = {
     spriteclipname: { kind: 'name', name: 'spriteClip' }, actionname: { kind: 'name', name: 'action' },
     scenename: { kind: 'name', name: 'scene' }, layername: { kind: 'name', name: 'layer' },
     paramname: { kind: 'name', name: 'param' },
+    collisionlayer: { kind: 'layers' }, collisionmask: { kind: 'layers', mask: true },
     material: { kind: 'asset', asset: 'material' }, texture: { kind: 'asset', asset: 'texture' },
     sound: { kind: 'asset', asset: 'sound' }, tileset: { kind: 'asset', asset: 'tileset' },
 };
@@ -235,6 +238,7 @@ export function propertyTypeLabel(type: PropertyType): string {
         case 'name': return NAME_LABEL[type.name];
         case 'asset': return ASSET_LABEL[type.asset];
         case 'node': return type.className;
+        case 'layers': return type.mask ? 'CollisionMask' : 'CollisionLayer';
         case 'list': {
             const item = propertyTypeLabel(type.of);
             return type.of.kind === 'choice' ? `(${item})[]` : `${item}[]`;
@@ -254,6 +258,7 @@ export function defaultOf(type: PropertyType): unknown {
         case 'color': return type.alpha ? [1, 1, 1, 1] : [1, 1, 1];
         case 'asset': return null;
         case 'node': return null;
+        case 'layers': return type.mask ? -1 : 1;
         case 'list': return [];
     }
 }

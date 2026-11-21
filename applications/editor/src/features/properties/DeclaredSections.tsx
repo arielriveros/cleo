@@ -45,6 +45,7 @@ function Rows(props: { node: Node; props: PropertyDeclaration[]; kind: string; b
             <fieldset disabled={!!p.readonly} className='min-w-0 border-0 m-0 p-0'>
               <PropertyField type={p.type} node={props.node} value={fieldValue(readProperty(props.node, decl))}
                 min={p.min} max={p.max} step={p.step} multiline={p.multiline} readout={p.readout}
+                nodeFilter={p.accepts ? (n => p.accepts!(props.node, n)) : undefined}
                 onChange={value => {
                   writeProperty(props.node, decl, value)
                   eventEmitter.emit('SCENE_CHANGED', { kind: props.kind, node: props.node })
@@ -65,9 +66,11 @@ function Rows(props: { node: Node; props: PropertyDeclaration[]; kind: string; b
  */
 export function DeclaredSection(props: {
   node: Node; title: string; children?: React.ReactNode; keys?: readonly string[]; skip?: readonly string[]; bare?: boolean
+  /** Whose declaration: a class the node extends, for its card (a parallax layer's Sprite card). */
+  of?: Function
 }) {
   const bump = useNodeTick(props.node)
-  const decl = declarationOf(props.node)
+  const decl = declarationOf(props.node, props.of)
   const section = decl?.sections.find(s => s.title === props.title)
   if (!decl || !section || (section.when && !section.when(props.node))) return null
   const own = section.props.filter(p => (!props.keys || props.keys.includes(p.key)) && !props.skip?.includes(p.key))
@@ -76,9 +79,9 @@ export function DeclaredSection(props: {
 }
 
 /** Every declared section of `node`, in order, but those in `except` (shown by the card itself). */
-export default function DeclaredSections(props: { node: Node; except?: readonly string[] }) {
+export default function DeclaredSections(props: { node: Node; except?: readonly string[]; of?: Function }) {
   const bump = useNodeTick(props.node)
-  const decl = declarationOf(props.node)
+  const decl = declarationOf(props.node, props.of)
   if (!decl) return null
   const sections = decl.sections.filter((s: SectionDeclaration) => !props.except?.includes(s.title) && (!s.when || s.when(props.node)))
   return (

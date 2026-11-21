@@ -18,7 +18,8 @@
 // Part of the full engine only (src/cleo.ts): a published game never reads a declaration, and ships none.
 
 import { typeOfToken, type AssetFieldKind, type PropertyTokenLike, type PropertyType } from '../core/properties/types';
-import { isAssetRef } from '../core/properties/fieldRefs';
+import { isAssetRef, isNodePathRef } from '../core/properties/fieldRefs';
+import { nodeAtRelativePath, relativeNodePath } from '../core/save/nodePaths';
 
 /** One property of a node class, as the inspector shows it. */
 export interface PropertyDeclaration<N = any> {
@@ -44,6 +45,8 @@ export interface PropertyDeclaration<N = any> {
     set?: (node: N, value: unknown) => void;
     /** A thin rule under the row, ending a group of rows. */
     divider?: boolean;
+    /** For a node property: which nodes it may name (not the node itself, nor what is under it, for a rig). */
+    accepts?: (node: N, candidate: any) => boolean;
 }
 
 /** A titled group of rows (an empty title: rows straight in the card). */
@@ -58,7 +61,15 @@ export interface ClassDeclaration<N = any> {
     title: string;
     /** What a change of these properties is to the scene (`SCENE_CHANGED` kind): 'light', 'environment', … */
     kind: string;
+    /** The docs page whose section titled like the card holds its rows (editor/node-inspector by default). */
+    docs: string;
     sections: SectionDeclaration<N>[];
+}
+
+/** How a class's declaration is filed: what a change is to the scene, and where its rows are documented. */
+export interface DeclarationOptions {
+    kind?: string;
+    docs?: string;
 }
 
 /** A declared property with its type read, and its label and range settled for one node. */
@@ -68,15 +79,24 @@ export type DeclaredProperty<N = any> = Omit<PropertyDeclaration<N>, 'type' | 'l
 
 const declared = new Map<Function, ClassDeclaration>();
 
-/** Declare the inspector properties of the nodes of `Class` (and of its subclasses that declare none). */
-export function declareProperties<N>(Class: abstract new (...args: any[]) => N, title: string, sections: SectionDeclaration<N>[], kind = 'component'): void {
+/**
+ * Declare the inspector properties of the nodes of `Class` (and of its subclasses that declare none). `options` is
+ * the change's kind ('component' by default) or `{ kind, docs }`.
+ */
+export function declareProperties<N>(Class: abstract new (...args: any[]) => N, title: string, sections: SectionDeclaration<N>[],
+                                     options: string | DeclarationOptions = {}): void {
     for (const s of sections) for (const p of s.props)
         if (!typeOfToken(p.type)) throw new TypeError(`${Class.name}.${p.key}: not a property type`);
-    declared.set(Class, { title, kind, sections });
+    const o = typeof options === 'string' ? { kind: options } : options;
+    declared.set(Class, { title, kind: o.kind ?? 'component', docs: o.docs ?? 'editor/node-inspector', sections });
 }
 
-/** What the nearest class of `node` that declares its properties declares, or null. */
-export function declarationOf(node: object | null | undefined): ClassDeclaration | null {
+/**
+ * What the nearest class of `node` that declares its properties declares, or null. With `Class`, that class's own
+ * declaration: a node can show the card of a class it extends too (a parallax layer is a sprite).
+ */
+export function declarationOf(node: object | null | undefined, Class?: Function): ClassDeclaration | null {
+    if (Class) return declared.get(Class) ?? null;
     for (let proto = node ? Object.getPrototypeOf(node) : null; proto; proto = Object.getPrototypeOf(proto)) {
         const found = declared.get(proto.constructor);
         if (found) return found;
@@ -110,6 +130,24 @@ export function assetIdAccess<N>(kind: AssetFieldKind, key: string): Pick<Proper
     return {
         get: (n: any) => (typeof n[key] === 'string' && n[key] ? { $asset: kind, id: n[key] } : null),
         set: (n: any, v: unknown) => { n[key] = isAssetRef(v) ? v.id : null; },
+    };
+}
+
+/**
+ * How a property that keeps another node's ID (a camera's focus target, `focusTargetId`) is edited as that node:
+ * the editors hand nodes as the path to them from `node` (`{ $nodePath }`), as a script's node field stores them.
+ */
+export function nodeIdAccess<N>(key: string): Pick<PropertyDeclaration<N>, 'get' | 'set'> {
+    return {
+        get: (n: any) => {
+            const target = typeof n[key] === 'string' && n[key] ? n.scene?.getNodeById?.(n[key]) : null;
+            const path = target ? relativeNodePath(n, target) : null;
+            return path ? { $nodePath: path } : null;
+        },
+        set: (n: any, v: unknown) => {
+            const target = isNodePathRef(v) ? nodeAtRelativePath(n, v.$nodePath) : null;
+            n[key] = target ? target.id : null;
+        },
     };
 }
 

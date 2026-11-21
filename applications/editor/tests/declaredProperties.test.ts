@@ -1,26 +1,17 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
+import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
-import { declaredClasses, resolveProperty, typeOfToken, readProperty, writeProperty, LightNode, DirectionalLight, PointLight, Spotlight, AreaLight } from 'cleo'
+import { declaredClasses, resolveProperty, typeOfToken, readProperty, writeProperty } from 'cleo'
+import { declaredSamples as instancesOf } from './support/declaredSamples'
 import { parseDocs, resolveTerm, slugify } from '@cleo/app-kit/docs/parseDocs'
 
 // The engine nodes' declared properties (src/properties): what the inspector generates its rows from. A row
 // carries no prose of its own, so every declared label must have its docs row in its card's section of the
 // node inspector's page; and every key must be a property the node really has.
 
-const PAGE = 'editor/node-inspector'
-const md = readFileSync(join(__dirname, '..', '..', '..', 'docs', 'editor', 'node-inspector.md'), 'utf-8')
-const index = parseDocs({ [PAGE]: md })
-
-/** Nodes of the class to read the properties from: one of each kind where a node comes in kinds. */
-const SAMPLES = new Map<Function, () => any[]>([
-  [LightNode, () => [DirectionalLight, PointLight, Spotlight, AreaLight].map(L => new LightNode('probe', new (L as any)({})))],
-])
-function instancesOf(Class: any): any[] {
-  const make = SAMPLES.get(Class)
-  if (make) return make()
-  try { return [new Class('probe')] } catch { return [] }
-}
+const DOCS = join(__dirname, '..', '..', '..', 'docs', 'editor')
+const index = parseDocs(Object.fromEntries(readdirSync(DOCS).filter(f => f.endsWith('.md'))
+  .map(f => [`editor/${f.replace(/\.md$/, '')}`, readFileSync(join(DOCS, f), 'utf-8')])))
 
 const classes = [...declaredClasses()]
 
@@ -57,17 +48,19 @@ describe('declared properties', () => {
     const missing = new Set<string>()
     for (const s of decl.sections) for (const p of s.props) {
       const labels = nodes.length ? nodes.map(node => resolveProperty(p, node).label) : [typeof p.label === 'string' ? p.label : p.key]
+      // As the inspector looks a row up: in its section's own docs region when the docs give it one, else the card's.
+      const regions = [...(s.title ? [slugify(s.title)] : []), section]
       for (const label of labels)
-        if (!resolveTerm(index, [{ page: PAGE, section, fields: true }], label, 'field')) missing.add(label)
+        if (!regions.some(r => resolveTerm(index, [{ page: decl.docs, section: r, fields: true }], label, 'field'))) missing.add(label)
     }
-    expect([...missing], `no docs row under "${decl.title}" in docs/editor/node-inspector.md`).toEqual([])
+    expect([...missing], `no docs row under "${decl.title}" in docs/${decl.docs}.md`).toEqual([])
   })
 
   it.each(classes.map(([Class, decl]) => [decl.title, Class, decl] as const))('%s: the card and each titled section resolve in the docs', (_title, _Class, decl) => {
-    expect(resolveTerm(index, [{ page: PAGE }], decl.title), `no "${decl.title}" in the node inspector's docs`).not.toBeNull()
+    expect(resolveTerm(index, [{ page: decl.docs }], decl.title), `no "${decl.title}" in docs/${decl.docs}.md`).not.toBeNull()
     const section = slugify(decl.title)
     const missing = decl.sections.filter(s => s.title)
-      .filter(s => !resolveTerm(index, [{ page: PAGE, section, fields: true }, { page: PAGE }], s.title)).map(s => s.title)
+      .filter(s => !resolveTerm(index, [{ page: decl.docs, section, fields: true }, { page: decl.docs }], s.title)).map(s => s.title)
     expect(missing, `section titles with no docs entry under "${decl.title}"`).toEqual([])
   })
 })

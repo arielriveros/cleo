@@ -8,10 +8,15 @@ import './sky';
 import './clouds';
 import './probes';
 import './weather';
+import './twoD';
+import './cameras';
+import './decals';
+import './water';
 
 export {
     declareProperties, declarationOf, declaredClasses, labelOfKey, resolveProperty, readProperty, writeProperty,
-    assetIdAccess, numberChoiceAccess,
+    assetIdAccess, numberChoiceAccess, nodeIdAccess,
 } from './declare';
-export type { PropertyDeclaration, SectionDeclaration, ClassDeclaration, DeclaredProperty } from './declare';
+export type { PropertyDeclaration, SectionDeclaration, ClassDeclaration, DeclaredProperty, DeclarationOptions } from './declare';
 export { sceneSunLux } from './sky';
+export { rigOfCamera } from './cameras';

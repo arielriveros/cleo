@@ -267,6 +267,7 @@ export function storedValueFits(type: PropertyType, value: unknown): boolean {
                 && value.every(v => typeof v === 'number');
         case 'asset': return value === null || (isAssetRef(value) && value.$asset === type.asset);
         case 'node': return value === null || isNodePathRef(value);
+        case 'layers': return typeof value === 'number' && Number.isInteger(value);
         case 'list': return Array.isArray(value) && value.every(v => storedValueFits(type.of, v));
     }
 }

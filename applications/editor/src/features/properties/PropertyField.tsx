@@ -13,6 +13,7 @@ import MaterialPicker from '../terrainMaterials/MaterialPicker'
 import TextureSlotPicker from '../texture/TextureSlotPicker'
 import NodeRefInput from '../nodeInspector/NodeRefInput'
 import { pickChoices, PICK_LABEL, PICK_ONLY, type PickContext } from '../nodeInspector/scriptEditor/pickSources'
+import { LayerDropdown, LayerMaskDropdown } from '../nodeInspector/physicsEditors/layerPickers'
 import { useAssetDrop } from '../../utils/useAssetDrop'
 import type { ScriptAsset } from '../../utils/scripts'
 
@@ -37,6 +38,8 @@ export interface PropertyFieldProps {
   options?: readonly string[]
   /** How a slider shows its number. */
   readout?: (value: number) => string
+  /** Which nodes a node field may name, beyond its type (an engine node's declaration narrows it). */
+  nodeFilter?: (node: Node) => boolean
   title?: string
 }
 
@@ -76,7 +79,7 @@ function runsScript(node: Node, className: string, scriptAssetOf: (n: Node) => S
 }
 
 /** A node field: a scene node of the declared class, stored as the path to it from `node`. */
-function NodeField(props: { type: Extract<PropertyType, { kind: 'node' }>; value: unknown; onChange: (v: unknown) => void; node: Node | null }) {
+function NodeField(props: { type: Extract<PropertyType, { kind: 'node' }>; value: unknown; onChange: (v: unknown) => void; node: Node | null; accepts?: (n: Node) => boolean }) {
   const { scriptAssetOf, scriptAssets } = useCleoEngine()
   const from = props.node
   const scene = from?.scene
@@ -84,7 +87,7 @@ function NodeField(props: { type: Extract<PropertyType, { kind: 'node' }>; value
   const path = isNodePathRef(props.value) ? props.value.$nodePath : null
   const target = path !== null ? nodeAtRelativePath(from, path) : null
   const ctor = props.type.script ? null : (Cleo as any)[props.type.className]
-  const filter = (n: Node) => n !== from && (props.type.script
+  const filter = (n: Node) => n !== from && (!props.accepts || props.accepts(n)) && (props.type.script
     ? runsScript(n, props.type.className, scriptAssetOf, scriptAssets)
     : typeof ctor === 'function' ? n instanceof ctor : true)
   return (
@@ -224,7 +227,13 @@ export default function PropertyField(props: PropertyFieldProps) {
     case 'asset':
       return <AssetField kind={type.asset} value={value} onChange={onChange} node={node} />
     case 'node':
-      return <NodeField type={type} value={value} onChange={onChange} node={node} />
+      return <NodeField type={type} value={value} onChange={onChange} node={node} accepts={props.nodeFilter} />
+    case 'layers': {
+      const bits = typeof value === 'number' ? value : (defaultOf(type) as number)
+      return type.mask
+        ? <LayerMaskDropdown value={bits} onChange={onChange} />
+        : <LayerDropdown value={bits} onChange={onChange} />
+    }
     case 'list': {
       const of = type.of
       if (of.kind === 'string' || of.kind === 'name') {

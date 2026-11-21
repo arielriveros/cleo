@@ -449,7 +449,7 @@ export { logScriptError } from "./core/scripting/scriptErrors";
 // the engine classes themselves (Material, Texture, Sound, Tileset, every Node) -- assets and nodes.
 export {
     SOUNDS_GROUP, ownedSoundsGroup,
-    Color, ColorAlpha, Vec2, Vec3, Vec4,
+    Color, ColorAlpha, Vec2, Vec3, Vec4, CollisionLayer, CollisionMask,
     ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, SpriteClipName, ActionName, SceneName, LayerName, ParamName,
 } from "./core/scripting/fieldTypes";
 export type { ProjectTriggers, ProjectActions } from "./core/scripting/fieldTypes";

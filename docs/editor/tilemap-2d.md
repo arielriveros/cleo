@@ -398,6 +398,16 @@ orthographic and sized in art pixels:
 
 Its frame (the reference resolution at its zoom) is drawn in the editor where it stands.
 
+| Field | Meaning |
+|---|---|
+| **Active** | The camera the game sees through in Play. |
+| **Zoom** | How far in the view is: 2 shows half the reference resolution's world, twice as big. |
+| **Follow offset** | Where the camera looks from the followed node, in world units. |
+| **Dead zone** | The box round the view's centre the target moves in before the camera does, in world units. |
+| **Damping** | About how long the camera takes to catch up, in seconds. 0 locks it on. |
+| **Look ahead** | How far ahead of a moving target the camera looks, in world units. |
+| **Room transition** | How long the slide into the next room takes, in seconds. 0 cuts. |
+
 ### Room
 
 A **Room** (**Sprites ▸ Room**) is one screen of a 2D world: a rectangle, **size** wide and high, centred
@@ -408,6 +418,11 @@ slides the camera into the next, and scripts on the followed node and on the roo
 last one; only a jump far away (a teleport) frees it. **Zone** is a free label (an area of the world) for a
 map or a script.
 
+| Field | Meaning |
+|---|---|
+| **Size** | Width and height, in world units, centred on the node. |
+| **Zone** | A free label for the area the room belongs to: for a map, an ambience or a script. |
+
 ### Parallax Layer
 
 A **Parallax Layer** (**Sprites ▸ Parallax Layer**) is a backdrop sprite that moves with only part of the
@@ -416,6 +431,13 @@ camera's travel: **parallax** 1 moves with the world, 0 stays on screen (a sky),
 whose one tile is the whole image, as a background imported on its own is. **Scroll** drifts it by itself
 (clouds). It sorts like any sprite (negative sorting orders behind the tilemap's layers) and is selected
 from the scene tree, never by a viewport click.
+
+| Field | Meaning |
+|---|---|
+| **Parallax** | How much of the camera's travel the layer moves with, across and up: 1 with the world, 0 not at all (a sky). |
+| **Repeat X** | Fill the view across, however far the camera goes. |
+| **Repeat Y** | Fill the view up and down. |
+| **Scroll** | A drift of its own, in world units a second (clouds). |
 
 ## The 2D frame
 
