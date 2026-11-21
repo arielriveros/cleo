@@ -10,6 +10,7 @@
 import { GiBakeRegistry } from 'cleo'
 import { openDB, GI_BAKE_STORE } from '@cleo/app-kit/utils/idb'
 import { projectPrefix } from './projectScope'
+import { folderStoreListener } from './folderStoreEvents'
 
 export type StoredGiBake = {
   id: string
@@ -45,6 +46,7 @@ export async function putGiBake(id: string, bytes: Uint8Array, projectId?: strin
   const prefix = projectPrefix(projectId)
   const owner = projectId ?? prefix.slice(2, -1)
   await writeTx(store => { store.put({ id, bytes, projectId: owner } satisfies StoredGiBake, prefix + id) })
+  if (projectId === undefined) folderStoreListener()?.bakePut?.(id, bytes)
 }
 
 export async function getAllGiBakes(projectId?: string): Promise<StoredGiBake[]> {
@@ -62,6 +64,7 @@ export async function deleteGiBakes(ids: string[], projectId?: string): Promise<
   if (!ids.length) return
   const prefix = projectPrefix(projectId)
   await writeTx(store => { for (const id of ids) store.delete(prefix + id) })
+  if (projectId === undefined) folderStoreListener()?.bakesDeleted?.(ids)
 }
 
 /** Drop every bake a project owns — the GI half of deleting a project. */

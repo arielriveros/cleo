@@ -8,6 +8,7 @@
 import { TextureManager, parseBase64DataUri } from 'cleo'
 import { openDB, TEXTURE_STORE, idbGet } from '@cleo/app-kit/utils/idb'
 import { projectPrefix } from './projectScope'
+import { folderStoreListener } from './folderStoreEvents'
 import { libKey } from './storageKeys'
 import { toTextureConfig } from './textureAssets'
 import type { TextureAsset } from './textureAssets'
@@ -91,6 +92,16 @@ export async function putTextures(records: StoredTexture[], projectId?: string):
   const prefix = projectPrefix(projectId)
   const owner = projectId ?? prefix.slice(2, -1)
   await writeTx(store => { for (const r of records) store.put({ ...r, projectId: owner }, prefix + r.id) })
+  if (projectId === undefined) folderStoreListener()?.texturesPut?.(records)
+}
+
+/** One payload of the open project, or null. */
+export async function getStoredTexture(id: string): Promise<StoredTexture | null> {
+  try {
+    return ((await request((await tx('readonly')).get(projectPrefix() + id))) as StoredTexture | undefined) ?? null
+  } catch {
+    return null
+  }
 }
 
 export async function getAllTextures(projectId?: string): Promise<StoredTexture[]> {
@@ -106,6 +117,7 @@ export async function deleteTextures(ids: string[], projectId?: string): Promise
   if (!ids.length) return
   const prefix = projectPrefix(projectId)
   await writeTx(store => { for (const id of ids) store.delete(prefix + id) })
+  if (projectId === undefined) folderStoreListener()?.texturesDeleted?.(ids)
 }
 
 /** Drop every payload a project owns — the texture half of deleting a project. */

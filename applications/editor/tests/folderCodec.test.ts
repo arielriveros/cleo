@@ -337,7 +337,9 @@ describe('a project folder', () => {
     };
     const { snapshot } = await bundleToFolder(bundle, { uid: 'u' });
     const read = await folderToBundle(asRead(snapshot));
-    expect(read.bundle.libraries.images).toEqual([image]);
+    // The sizes the editor measures are not committed (they would churn every meta on first decode); the
+    // byte size comes back from the file itself.
+    expect(read.bundle.libraries.images).toEqual([{ ...image, width: 0, height: 0, byteSize: 4 }]);
     expect(read.bundle.libraries.textures).toEqual([{ ...texture, thumbnail: '' }]);
     expect(read.fixes.size).toBe(0);
   });

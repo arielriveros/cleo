@@ -63,14 +63,17 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     // Absent in a bundle written before audio existed, which reads back as a project with no sounds.
     audioSources: (await src.json(`${BUNDLE_PATHS.librariesDir}audioSources.json`)) ?? [],
     soundSamples: (await src.json(`${BUNDLE_PATHS.librariesDir}soundSamples.json`)) ?? [],
-    // Absent in a bundle written before project folders; the importer then derives them from the payloads.
-    images: (await src.json(`${BUNDLE_PATHS.librariesDir}images.json`)) ?? undefined,
-    textures: (await src.json(`${BUNDLE_PATHS.librariesDir}textures.json`)) ?? undefined,
     // Absent when the project runs on the default bindings — see BundleLibraries.inputMap.
     inputMap: (await src.json(`${BUNDLE_PATHS.librariesDir}inputMap.json`)) ?? null,
     // Absent when the project runs on the default engine/publish options.
     projectSettings: (await src.json(`${BUNDLE_PATHS.librariesDir}projectSettings.json`)) ?? null,
-  };
+  } as BundleData['libraries'];
+  // Absent in a bundle written before project folders (the importer then derives them from the payloads):
+  // left out of the object rather than set to undefined, so the libraries look exactly as they always did.
+  const imageRecords = await src.json(`${BUNDLE_PATHS.librariesDir}images.json`);
+  const textureRecords = await src.json(`${BUNDLE_PATHS.librariesDir}textures.json`);
+  if (imageRecords) libraries.images = imageRecords;
+  if (textureRecords) libraries.textures = textureRecords;
   const vfs = (await src.json(BUNDLE_PATHS.vfs)) ?? { version: 1, folders: [], entries: [] };
 
   const scenePaths = await src.scenePaths(manifest);

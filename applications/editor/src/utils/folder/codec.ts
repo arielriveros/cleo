@@ -117,6 +117,23 @@ export interface AssetInput {
 /** The slot of a record a file provides, for the kinds whose file is not the JSON record. */
 const FILE_SLOTS: Partial<Record<AssetKind, string>> = { script: 'source' }
 
+/**
+ * Fields of a byte asset's record that its FILE determines (the decoder fills `byteSize` from it) or that the
+ * editor measures lazily the first time it decodes the bytes (the record documents 0 as "not known yet").
+ * A meta stores them as 0: otherwise every machine that opened a project would rewrite every image's meta
+ * the moment it learned its size.
+ */
+const MEASURED: Partial<Record<AssetKind, string[]>> = {
+  image: ['width', 'height', 'byteSize'],
+  audioSource: ['duration', 'sampleRate', 'channels', 'byteSize'],
+}
+
+export function withoutMeasured(kind: AssetKind, record: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...record }
+  for (const key of MEASURED[kind] ?? []) if (key in out) out[key] = 0
+  return out
+}
+
 export async function encodeAsset(input: AssetInput, minBytes = BLOB_MIN_BYTES): Promise<EncodedAsset> {
   const meta: AssetMeta = { cleo: META_VERSION, guid: input.guid, kind: input.kind }
   if (input.created !== undefined) meta.created = input.created
@@ -124,7 +141,7 @@ export async function encodeAsset(input: AssetInput, minBytes = BLOB_MIN_BYTES):
 
   if (input.kind === 'image' || input.kind === 'audioSource') {
     if (!input.bytes) throw new Error(`${input.kind} ${input.guid} has no bytes`)
-    if (input.record) meta.record = { ...input.record }
+    if (input.record) meta.record = withoutMeasured(input.kind, input.record)
     meta.importer = input.kind === 'image'
       ? { mime: input.bytes.mime, config: input.bytes.config }
       : { mime: input.bytes.mime }
@@ -198,7 +215,11 @@ export async function decodeAsset(
     if (isLfsPointerBytes(bytes)) return { ok: false, reason: 'lfs-pointer', message: 'a Git LFS pointer, not the file (run git lfs pull)' }
     const mime = meta.importer?.mime ?? (meta.record?.mime as string | undefined) ?? ''
     const record = meta.record ? { ...meta.record } : undefined
-    if (record) setInPlace(record, 'id', meta.guid)
+    if (record) {
+      setInPlace(record, 'id', meta.guid)
+      // The one measured field the file itself answers.
+      if ('byteSize' in record) record.byteSize = bytes.byteLength
+    }
     return { ok: true, record, bytes: { mime, config: meta.importer?.config, bytes }, refs: [] }
   }
 

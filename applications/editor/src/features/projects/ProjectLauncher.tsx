@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import ProjectsBrowser from './ProjectsBrowser'
-import { ProjectRecord } from '../../utils/projects'
+import { ProjectRecord, foldersOnly } from '../../utils/projects'
 import { VERSION_LABEL } from '../../version'
 import { LauncherPage } from '@cleo/app-kit/launcher/Launcher'
 
@@ -9,15 +9,16 @@ import { LauncherPage } from '@cleo/app-kit/launcher/Launcher'
  * nothing openable. Nothing here may touch scoped storage — no project is open yet, and `scoped()` throws
  * by design until one is.
  */
-export default function ProjectLauncher({ projects }: { projects: ProjectRecord[] }) {
+export default function ProjectLauncher({ projects, message }: { projects: ProjectRecord[]; message?: string }) {
   const [list, setList] = useState(projects)
+  const openable = list.filter(p => !foldersOnly() || p.folder)
 
   return (
     <LauncherPage title='CLEO ENGINE' subtitle='Editor' version={VERSION_LABEL} className='h-screen w-screen'
       frameClassName='h-[380px]'
-      prompt={list.length
+      prompt={message ?? (openable.length
         ? 'Open a project to continue.'
-        : 'Create your first project, or start from one of the examples.'}>
+        : 'Create your first project, or start from one of the examples.')}>
       <ProjectsBrowser projects={list} onChanged={setList} />
     </LauncherPage>
   )

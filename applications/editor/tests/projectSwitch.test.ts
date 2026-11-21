@@ -13,6 +13,7 @@ let unsaved: string[] = [];
 vi.mock('cleo', () => ({ Logger: { info: () => {}, warn: () => {}, error: (m: string) => log.push(`error ${m}`) } }));
 vi.mock('../src/utils/projects', () => ({
   loadProjects: async () => projects,
+  foldersOnly: () => false,
   createProject: async (name: string) => { const p = { id: `new-${name}`, name, updatedAt: 0 }; projects.push(p); log.push(`create ${name}`); return p; },
   activateProject: async (id: string) => { active = id; log.push(`activate ${id}`); },
   nextProjectAfterDelete: async (id: string) => [...projects].filter(p => p.id !== id).sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null,

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import ProjectsExplorer from './ProjectsExplorer'
 import ExamplesGallery, { useExampleIndex } from './ExamplesGallery'
-import { ProjectRecord } from '../../utils/projects'
+import { ProjectRecord, foldersOnly } from '../../utils/projects'
+import FolderProjects from '../projectFolder/FolderProjects'
 import { DocScope, useDocEntry, useDocTooltip } from '@cleo/app-kit/ui'
 
 // Hosts the two ways to arrive at a project: existing ones and the examples this build ships with.
@@ -37,7 +38,9 @@ export default function ProjectsBrowser({ projects, onChanged, className = '' }:
       <div className='flex-1 min-h-0'>
         {tab === 'examples' && examples
           ? <ExamplesGallery examples={examples} />
-          : <ProjectsExplorer projects={projects} onChanged={onChanged} />}
+          : foldersOnly()
+            ? <FolderProjects projects={projects} onChanged={onChanged} />
+            : <ProjectsExplorer projects={projects} onChanged={onChanged} />}
       </div>
     </div>
     </DocScope>

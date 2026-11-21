@@ -6,6 +6,11 @@ import { useVfs } from "./assets/VfsContext";
 import { buildMultiSceneGameData, PublishCanceledError } from "./publish/buildMultiSceneGameData";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
 import WorkspaceStatusChip from "./scriptWorkspace/WorkspaceStatusChip";
+import FolderStatusChip from "./projectFolder/FolderStatusChip";
+import { openFolderDialog, openProjectInCodeEditor, showProjectFolder } from "./projectFolder/folderActions";
+import { folderSession } from "./projectFolder/folderSession";
+import { LocationModal } from "./projectFolder/LocationField";
+import { installBundleToFolder } from "./projectFolder/openFolder";
 import { AddonSlot } from "./addons/AddonHost";
 import AddonsModal from "./addons/AddonsModal";
 import { importBundleJob } from "../workers/workerClient";
@@ -85,7 +90,7 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, pair
 const LOGO = `${import.meta.env.BASE_URL}brand/logo.png`;
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, startPlay, startSimulate, stopPlay, pausePlay, buildWindowPlayData, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings, setProjectSettings, createScene, selectedNode, isPlayMode, isSceneReady } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, startPlay, startSimulate, stopPlay, pausePlay, buildWindowPlayData, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, images, textures, sceneDimension, inputMap, scriptPaths, projectSettings, setProjectSettings, createScene, selectedNode, isPlayMode, isSceneReady } = useCleoEngine();
   const history = useHistory();
   // View ▸ Frame Selected, and the F key (installed here, once).
   const { canFrame, frameSelected } = useFrameSelected(true);
@@ -145,7 +150,8 @@ export default function MenuBar() {
   // The two project-I/O buttons both operate on the whole workspace as one portable .zip.
   const projectMeta = () => ({ version: 2 as const, mainSceneId, openSceneId, scenes: sceneList });
   // The input map travels only when it differs from the default — see BundleLibraries.inputMap.
-  const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples,
+  // The image and texture records travel too, so names, settings and pack specs survive (bundle.ts).
+  const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, images, textures,
     inputMap: isDefaultInputMap(inputMap) ? null : inputMap,
     projectSettings: isDefaultProjectSettings(projectSettings) ? null : projectSettings });
 
@@ -203,6 +209,9 @@ export default function MenuBar() {
     }
   };
   const bundleName = (b: NonNullable<typeof pendingBundle>) => b.manifest.projectName || 'project';
+  // The desktop: an imported project becomes a folder, so "New project" first asks where it goes.
+  const folderProject = !!folderSession();
+  const [zipTarget, setZipTarget] = useState<BundleData | null>(null);
 
   // Close the Play target menu when clicking outside it.
   useEffect(() => {
@@ -404,6 +413,16 @@ export default function MenuBar() {
     },
     {
       id: 'project', label: 'Project', items: [
+        // A folder project: the folder is the project; these reach it from here.
+        ...(folderProject ? [
+          { kind: 'item' as const, label: 'Open Folder…', icon: <ImportIcon />, title: 'Open a project folder (one holding project.cleo): a clone, a copy from another machine',
+            disabled: !stopped, onSelect: () => void openFolderDialog() },
+          { kind: 'item' as const, label: 'Show Project Folder', icon: <ExportIcon />, title: 'Show this project\'s folder in the file manager',
+            onSelect: () => void showProjectFolder() },
+          { kind: 'item' as const, label: 'Open in Code Editor', icon: <ExportIcon />, title: 'Open this project\'s folder in VS Code (or the editor chosen in Options ▸ Editor ▸ Scripts)',
+            onSelect: () => void openProjectInCodeEditor() },
+          { kind: 'separator' as const },
+        ] : []),
         { kind: 'item', label: 'Import Project…', icon: <ImportIcon />, title: 'Import a project .zip: a new project, or replace or merge this one',
           disabled: libEdit, onSelect: () => importInput.current?.click() },
         { kind: 'item', label: 'Export Project', icon: <ExportIcon />, title: 'Export the whole project (scenes, assets, textures) to a .zip',
@@ -459,6 +478,8 @@ export default function MenuBar() {
         {/* The script workspace appears here only when it needs attention (paused sync, error, conflict);
             setting it up and its everyday status live in Options ▸ Editor ▸ Scripts. */}
         <WorkspaceStatusChip />
+        {/* A folder project's folder, only when it needs attention (changed on disk, unreadable files, a refused write). */}
+        <FolderStatusChip />
         {/* The addons' status chips: the Claude Code addon's agent link, shown while its panel is open and started. */}
         <AddonSlot name="topbarChips" />
         {/* The bundle is dropped only once the import commits. New project and Merge ask about
@@ -469,7 +490,8 @@ export default function MenuBar() {
           <ImportBundleModal
             bundle={pendingBundle}
             onCancel={() => setPendingBundle(null)}
-            onNewProject={() => { void applyImport(`Importing ${bundleName(pendingBundle)}`,
+            newProjectOnly={folderProject}
+            onNewProject={() => { if (folderProject) { setZipTarget(pendingBundle); setPendingBundle(null); return; } void applyImport(`Importing ${bundleName(pendingBundle)}`,
               [{ id: 'project', label: 'Creating project', weight: 1 }, ...IMPORT_WRITE_STEPS],
               'Switching to the imported project', () => applyBundleAsNewProject(pendingBundle, undefined, true)); }}
             onReplace={() => { void applyImport(`Importing ${bundleName(pendingBundle)}`, IMPORT_WRITE_STEPS,
@@ -477,6 +499,16 @@ export default function MenuBar() {
             onMerge={() => { void applyImport(`Merging ${bundleName(pendingBundle)}`, IMPORT_WRITE_STEPS,
               'Merging into this project', () => applyBundleMerge(pendingBundle, true)); }}
           />
+        )}
+        {zipTarget && (
+          <LocationModal title={`Import ${bundleName(zipTarget)}`} name={bundleName(zipTarget)} confirmLabel='Import'
+            onDone={result => {
+              const bundle = zipTarget;
+              setZipTarget(null);
+              if (!result || !bundle) return;
+              void applyImport(`Importing ${result.name}`, [], 'Switching to the imported project',
+                () => installBundleToFolder(bundle, result.root, result.name, { gitInit: result.gitInit, npmInstall: result.npmInstall }));
+            }} />
         )}
         {showFeatures && <ProjectFeaturesModal onClose={() => setShowFeatures(false)} />}
         {showAddons && <AddonsModal onClose={() => setShowAddons(false)} />}

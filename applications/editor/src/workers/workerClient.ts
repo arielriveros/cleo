@@ -5,6 +5,8 @@
 import { runJob, ProjectJob, ProjectJobResult, PublishFiles, PlayerTemplates } from './projectJobs';
 import type { BundleData } from '../utils/bundle';
 import type { SimplifyBuffers } from '../utils/simplify';
+import type { EncodedFolderAsset } from './projectJobs';
+import type { AssetInput } from '../utils/folder/codec';
 import { trackProjectWrite } from '../utils/projectLifecycle';
 
 interface Response {
@@ -171,6 +173,16 @@ export async function exportBundleJob(bundle: BundleData): Promise<ArrayBuffer> 
   const result = await dispatch({ kind: 'exportBundle', bundle });
   if (result.kind !== 'exportBundle') throw new Error('Unexpected job result');
   return result.zip;
+}
+
+/**
+ * Encode assets as folder files off the main thread (utils/folder/codec.ts). Inputs are cloned, never
+ * transferred: they are live library records.
+ */
+export async function encodeFolderJob(inputs: AssetInput[]): Promise<EncodedFolderAsset[]> {
+  const result = await dispatch({ kind: 'encodeFolder', inputs });
+  if (result.kind !== 'encodeFolder') throw new Error('Unexpected job result');
+  return result.outputs;
 }
 
 /** Unzip + parse a bundle file off the main thread into its structured contents. */

@@ -18,7 +18,7 @@ import {
   baseOf, dirOf, joinPath, reconcileVfs, repairVfs, stemOf, stemRepresents, isRawByteKind, SOURCE_FOLDER,
   type AssetKind, type LibSnapshot, type VfsEntry, type VfsIndex,
 } from '../vfs'
-import { BLOB_MIN_BYTES, decodeAsset, encodeAsset, readAssetJson, type AssetInput } from './codec'
+import { BLOB_MIN_BYTES, decodeAsset, encodeAsset, readAssetJson, withoutMeasured, type AssetInput } from './codec'
 import {
   ASSETS_DIR, DERIVED_DIR, INPUT_REL, PROJECT_FILE, SETTINGS_REL, bakeIdOfRel, bakeRel, collisionKey, derivedRel,
   dirOfRel, kindOfFileName, metaRelOf, nameOfRel, relOfVfsFolder, relOfVfsPath, roleOfRel, vfsFolderOfRel, vfsPathOfRel,
@@ -399,7 +399,7 @@ export async function folderToBundle(snapshot: FolderSnapshot, opts: ReadFolderO
     if (file.writeMeta || file.rewriteId) {
       const meta: AssetMeta = { ...file.meta }
       if ((file.kind === 'image' || file.kind === 'audioSource') && decoded.bytes) {
-        meta.record = { ...record }
+        meta.record = withoutMeasured(file.kind, record)
         meta.importer = file.kind === 'image' ? { mime: decoded.bytes.mime, config: decoded.bytes.config } : { mime: decoded.bytes.mime }
       }
       if (file.kind === 'script' && record) meta.record = recordWithFileSlot(record, 'source')
@@ -482,7 +482,7 @@ export async function folderToBundle(snapshot: FolderSnapshot, opts: ReadFolderO
 }
 
 /** A raw file with no record anywhere (dropped in from outside): the record the explorer would make. */
-function mintRecord(kind: AssetKind, id: string, fileName: string, bytes?: { mime: string; bytes: Uint8Array }): any {
+export function mintRecord(kind: AssetKind, id: string, fileName: string, bytes?: { mime: string; bytes: Uint8Array }): any {
   const created = Date.now()
   if (kind === 'image') return { id, name: fileName, mime: bytes?.mime || mimeOf(fileName), width: 0, height: 0, byteSize: bytes?.bytes.byteLength ?? 0, origin: 'upload', created }
   if (kind === 'audioSource') return { id, name: fileName, mime: bytes?.mime || mimeOf(fileName), duration: 0, sampleRate: 0, channels: 0, byteSize: bytes?.bytes.byteLength ?? 0, origin: 'upload', created }
@@ -494,7 +494,7 @@ function mintRecord(kind: AssetKind, id: string, fileName: string, bytes?: { mim
  * A byte kind's name IS its file name; any other kind's name is the stem, unless the stem is the name with
  * the explorer's ' (2)' suffix (vfs.ts `stemRepresents`). Overwrites in place, never adds a key.
  */
-function applyName(kind: AssetKind, record: any, fileName: string): void {
+export function applyName(kind: AssetKind, record: any, fileName: string): void {
   if (!record || typeof record !== 'object') return
   if (isRawByteKind(kind)) { if (record.name !== fileName) record.name = fileName; return }
   const stem = stemOf(fileName)

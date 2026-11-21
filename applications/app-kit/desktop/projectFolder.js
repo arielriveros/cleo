@@ -774,7 +774,10 @@ const safeFolderName = (name) => {
 function registerIpc({ ipcMain, BrowserWindow, app, pickDirectory }) {
   setRegistryFile(path.join(app.getPath('userData'), 'projects.json'));
   const { shell } = require('electron');
-  const defaultParent = () => path.join(app.getPath('documents'), 'Cleo Projects');
+  /** Folders the user picked as the place for a new project, this session. */
+  const pickedParents = new Set();
+  // `CLEO_PROJECTS_DIR`: where a harness puts its projects, so a test never writes into the user's Documents.
+  const defaultParent = () => process.env.CLEO_PROJECTS_DIR || path.join(app.getPath('documents'), 'Cleo Projects');
 
   ipcMain.handle('project:registry', guard(async () => ({ ok: true, projects: await listRegistry() })));
   ipcMain.handle('project:forget', guard(async (_e, root) => { await forget(root); return { ok: true }; }));
@@ -786,8 +789,10 @@ function registerIpc({ ipcMain, BrowserWindow, app, pickDirectory }) {
     const win = BrowserWindow.fromWebContents(event.sender);
     const parent = await pickDirectory(win, opts.title || 'Choose where to create the project folder', opts.parent || defaultParent());
     if (!parent) return { ok: false, canceled: true };
-    // The user chose this place: the project folder inside it becomes reachable.
-    return { ok: true, parent, root: allow(path.join(parent, safeFolderName(opts.name))) };
+    // The user chose this place: a new project folder directly inside it may be made (under any name the
+    // dialog then settles on).
+    pickedParents.add(keyOf(parent));
+    return { ok: true, parent, root: path.join(parent, safeFolderName(opts.name)) };
   }));
 
   // An existing project: a folder holding project.cleo.
@@ -805,7 +810,8 @@ function registerIpc({ ipcMain, BrowserWindow, app, pickDirectory }) {
     // Only a location the user picked, or a folder directly inside the default Cleo Projects folder (the
     // location a dialog offers before anything is picked).
     if (typeof root !== 'string' || !path.isAbsolute(root)) throw new Error('Not a project folder path');
-    if (!isAllowed(root) && keyOf(path.dirname(root)) !== keyOf(defaultParent())) throw new Error('That folder was not chosen in Cleo');
+    const parentKey = keyOf(path.dirname(root));
+    if (!isAllowed(root) && !pickedParents.has(parentKey) && parentKey !== keyOf(defaultParent())) throw new Error('That folder was not chosen in Cleo');
     return prepareNew(root);
   }));
   ipcMain.handle('project:open', guard(async (event, root, opts = {}) => {

@@ -65,6 +65,11 @@ export interface IdentityResult {
 export interface ResolveOptions {
   /** rel -> what the cache index remembers. */
   known?: Map<string, KnownEntry>
+  /**
+   * Files unchanged on disk since the cache last agreed with it (a warm open): their identity is the one the
+   * cache knows, without their meta being read again. They still count when looking for duplicates, and win.
+   */
+  fixed?: Map<string, KnownEntry>
   /** Ids already taken by assets outside this read, per kind (a partial read of a project). */
   takenIds?: Map<AssetKind, Set<string>>
 }
@@ -144,8 +149,16 @@ export function resolveIdentities(
   const resolved: ResolvedFile[] = []
   const pendingMint: { facts: FileFacts; kind: AssetKind }[] = []
 
+  const fixed = opts.fixed ?? new Map<string, KnownEntry>()
+  for (const entry of fixed.values()) takenOf(entry.kind).add(entry.guid)
+
   for (const facts of files) {
     const metaRel = metaRelOf(facts.rel)
+    const stays = fixed.get(facts.rel)
+    if (stays) {
+      resolved.push({ rel: facts.rel, kind: stays.kind, guid: stays.guid, meta: { cleo: META_VERSION, guid: stays.guid, kind: stays.kind }, source: 'index', writeMeta: false, rewriteId: false })
+      continue
+    }
     if (brokenMetas.has(metaRel)) continue
     const meta = parsedMetas.get(metaRel)
     if (meta) {
@@ -186,7 +199,8 @@ export function resolveIdentities(
   const remint: ResolvedFile[] = []
   for (const list of byKey.values()) {
     if (list.length < 2) continue
-    const keeper = list.find(r => { const k = known.get(r.rel); return k && k.kind === r.kind && k.guid === r.guid })
+    const keeper = list.find(r => fixed.has(r.rel))
+      ?? list.find(r => { const k = known.get(r.rel); return k && k.kind === r.kind && k.guid === r.guid })
       ?? [...list].sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))[0]
     for (const r of list) if (r !== keeper) remint.push(r)
   }

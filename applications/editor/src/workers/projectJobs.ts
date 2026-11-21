@@ -12,6 +12,7 @@ import { BundleSource, bundleEntries, readBundle } from '../utils/bundleRead';
 // Dependency-free by construction — it works over typed arrays rather than `Geometry`, which is exactly
 // what lets it run here under the no-DOM/no-WebGL/no-`cleo` rule above.
 import { simplify, type SimplifyBuffers } from '../utils/simplify';
+import { encodeAsset, sha256Hex, type AssetInput } from '../utils/folder/codec';
 
 // The files that make up a published game: index.html + the player's modules (game.js, physics-worker.js and
 // the chunks/ the game needs) + game.scripts.js + game.bin. All game DATA lives in the single binary; scripts
@@ -52,7 +53,12 @@ export type ProjectJob =
    */
   | { kind: 'playPack'; data: any; sessionId: string }
   /** LOD generation: decimate one model's geometry to `ratio` of its triangles. */
-  | { kind: 'decimate'; buffers: SimplifyBuffers; ratio: number };
+  | { kind: 'decimate'; buffers: SimplifyBuffers; ratio: number }
+  /**
+   * A folder project's writes: each asset as its file, meta and blobs (utils/folder/codec.ts), with the
+   * sha256 of the file and of the meta, which is what the editor compares with what the folder holds.
+   */
+  | { kind: 'encodeFolder'; inputs: AssetInput[] };
 
 // Byte payloads cross back as raw ArrayBuffers: they transfer instead of copying, and a Uint8Array
 // view is not a valid BlobPart under current lib.dom typings.
@@ -65,7 +71,43 @@ export type ProjectJobResult =
   | { kind: 'exportBundle'; zip: ArrayBuffer }
   | { kind: 'importBundle'; bundle: BundleData }
   | { kind: 'decimate'; buffers: SimplifyBuffers }
-  | { kind: 'playPack'; bytes: number };
+  | { kind: 'playPack'; bytes: number }
+  | { kind: 'encodeFolder'; outputs: EncodedFolderAsset[] };
+
+/** One asset as a folder file, ready for the main process, and the digests to compare it by. */
+export interface EncodedFolderAsset {
+  content: string | Uint8Array
+  contentSha: string
+  meta: string
+  metaSha: string
+  blobs: [string, Uint8Array][]
+  refs: string[]
+  /** Set when the asset could not be encoded; the rest of the batch still is. */
+  error?: string
+}
+
+async function runEncodeFolder(job: Extract<ProjectJob, { kind: 'encodeFolder' }>): Promise<JobOutcome> {
+  const outputs: EncodedFolderAsset[] = [];
+  const transfer: Transferable[] = [];
+  const utf8 = new TextEncoder();
+  for (const input of job.inputs) {
+    try {
+      const encoded = await encodeAsset(input);
+      const contentBytes = typeof encoded.content === 'string' ? utf8.encode(encoded.content) : encoded.content;
+      outputs.push({
+        content: encoded.content,
+        contentSha: await sha256Hex(contentBytes),
+        meta: encoded.meta,
+        metaSha: await sha256Hex(utf8.encode(encoded.meta)),
+        blobs: [...encoded.blobs],
+        refs: encoded.refs,
+      });
+    } catch (e) {
+      outputs.push({ content: '', contentSha: '', meta: '', metaSha: '', blobs: [], refs: [], error: String((e as Error)?.message ?? e) });
+    }
+  }
+  return { result: { kind: 'encodeFolder', outputs }, transfer };
+}
 
 /** Result plus anything in it that should be transferred rather than cloned. */
 export interface JobOutcome {
@@ -152,6 +194,9 @@ export async function runJob(job: ProjectJob): Promise<JobOutcome> {
       const bytes = encoded.buffer as ArrayBuffer;
       return { result: { kind: 'stringify', bytes }, transfer: [bytes] };
     }
+
+    case 'encodeFolder':
+      return runEncodeFolder(job);
 
     case 'parse': {
       const text = new TextDecoder().decode(new Uint8Array(job.buffer));
