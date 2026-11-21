@@ -40,6 +40,20 @@ Selecting the scene **root** shows [Scene settings](scene-authoring.md#scene-set
 > root of a placed model instance. They no longer appear on cameras, spatial sounds or any ancestor
 > above a mesh — those were showing because a debug helper counted as a child.
 
+### Transform
+
+Where the node is, relative to its parent, and the world pose that gives it. **Reset** puts it back at the
+origin, unrotated, at scale 1.
+
+| Field | Meaning |
+|---|---|
+| **Position** | From the parent, in metres. |
+| **Rotation** | Euler angles, in degrees, about X, Y and Z. A positive Y turns it left: counter-clockwise, seen from above. |
+| **Scale** | Per axis, before its rotation. |
+| **World Position** | Read-only: where it is in the world. |
+| **Quaternion** | Read-only: its rotation from the parent, as a quaternion (x, y, z, w). |
+| **World Quaternion** | Read-only: its rotation in the world. |
+
 ### This character
 
 A skinned model's clips, animators, blend spaces, foot placement and ragdoll belong to its skeleton, and are
@@ -61,9 +75,21 @@ what each character decides for itself:
 
 ### Cameras
 
-**Camera** — projection (perspective / orthographic), FOV or orthographic size, near and far clip
-planes, and a **Focus Target**: the node depth of field focuses on, in place of the renderer's focus
-distance. While a camera rig controls the FOV, the field shows the rig's value instead.
+#### Camera
+
+Projection (perspective / orthographic), FOV or orthographic size, near and far clip planes, and a **Focus
+Target**: the node depth of field focuses on, in place of the renderer's focus distance. While a camera rig
+controls the FOV, the field shows the rig's value instead.
+
+| Field | Meaning |
+|---|---|
+| **Type** | **Perspective**, with a field of view, or **Orthographic**, with a box. |
+| **Field of View** | The vertical angle the camera sees, in degrees. |
+| **Viewmodel FOV** | The lens nodes marked Viewmodel are drawn at, in degrees. 0 draws them as the world. |
+| **Near** | The nearest the camera draws, in metres. |
+| **Far** | The farthest it draws. |
+| **Focus Target** | The node depth of field focuses on, measured along the view axis, in place of the renderer's focus distance. A target that despawns holds the last focus distance. |
+| **Left** / **Right** / **Bottom** / **Top** | An orthographic camera's box, in world units from its centre. |
 
 **Post-Processing** — the camera's post chain: the built-in effects and its screen materials, run top
 to bottom. Each pass switches on or off and moves up or down; a built-in can only be switched off,
@@ -72,8 +98,10 @@ screen material dropped from Assets) appends a [Screen-mode material](models-and
 and **Reset to default order** returns to the renderer's order. Motion blur, auto-exposure and the
 final tonemap are fixed: they run before and after this list.
 
-**Camera Rig** — drives its child camera's position and rotation every frame, so edit the boom here
-rather than moving the camera itself. Its groups:
+#### Camera Rig
+
+Drives its child camera's position and rotation every frame, so edit the boom here rather than moving the
+camera itself. Its groups:
 
 - **Follow** — what drives position: the **Follow Target** (with none, the rig's own position is the
   pivot), an offset in world space or the target's heading or full rotation, and per-axis damping in
@@ -108,6 +136,44 @@ rather than moving the camera itself. Its groups:
 
 > Put a shoulder offset on **Socket Offset**, not on the camera child — the rig rewrites the child's
 > whole local position every frame.
+
+| Field | Meaning |
+|---|---|
+| **Follow Target** | The node the rig follows. With none, the rig's own position is the pivot. |
+| **Offset** | Where the pivot sits from the target (Y is the height), in the **Offset Space**. |
+| **Offset Space** | **World**, the **target's heading**, or the **target's full rotation**. |
+| **Damping** | Seconds of lag per axis. 0 is rigid; higher values lag further behind. |
+| **Damping Axes** | Whether that lag is along the world's axes or the rig's (behind, side, up). |
+| **Aim Mode** | **Orbit** is script-driven (`rig.addYaw(dx)`, `rig.addPitch(dy)`, or a controller's look input); **Look At** turns to a target; **None** keeps the authored rotation. |
+| **Look At Target** | The node a Look At rig turns to. |
+| **Look At Offset** | Where on it the rig looks, from its origin. |
+| **Aim Damping** | Seconds a Look At rig takes to turn to its target. |
+| **Yaw** | The rig's heading, in degrees. |
+| **Pitch** | How far it looks up or down, in degrees. |
+| **Yaw Sensitivity** | How much orbit input turns it. |
+| **Pitch Sensitivity** | How much orbit input tilts it. |
+| **Invert Pitch** | Up looks down. |
+| **Pitch Min** / **Pitch Max** | The pitch's limits. One value locks it. |
+| **Limit Yaw** | Keep the yaw between **Yaw Min** and **Yaw Max** (one value locks it). |
+| **Yaw Min** / **Yaw Max** | The yaw's limits, when it is limited. |
+| **Arm Length** | How far back along the boom the camera sits. 0 is a first-person camera at the pivot. |
+| **Socket Offset** | Where the camera sits at the end of the arm. The rig's local +X is its left: a negative X puts it over the right shoulder. |
+| **Rig Controls FOV** | The rig owns the camera's FOV and eases it. Off gives the camera back the FOV it had. |
+| **FOV** | The FOV the rig holds, in degrees. |
+| **FOV Damping** | Seconds the FOV takes to ease to a new value. |
+| **Handle Obstruction** | React when something comes between the camera and the pivot. |
+| **Blocked by** | The collision layers that pull the camera in along the arm. |
+| **See through** | The collision layers it looks through, dithering their meshes away where they block the view. |
+| **Probe Radius** | The thickness of the arm's test for what blocks it, in metres. |
+| **Min Arm Ratio** | The shortest share of its length the arm is pulled in to. |
+| **Pull In Time** | Seconds to pull in when blocked. |
+| **Return Time** | Seconds to ease back out once clear. |
+| **Hole Radius** | The see-through hole's size, in metres. |
+| **Hole Strength** | How much of the surface goes at the hole's centre. |
+| **Position Amplitude** | How far a shake moves the camera, per axis, in metres. |
+| **Rotation Amplitude** | How far a shake turns it, per axis, in degrees. |
+| **Frequency** | How fast it shakes, in hertz. |
+| **Decay** | How fast a shake dies away, per second. |
 
 ### Lights and environment
 
@@ -155,11 +221,42 @@ starts at 1500 lm, brightened the same way.
   real sun is 0.00465). It sets how broad the sun's reflection is on smooth surfaces, and softens
   shadow edges in proportion.
 
+| Field | Meaning |
+|---|---|
+| **Color** | The light's tint. Brightness lives in the intensity, not here. |
+| **Intensity** | Lux for a directional light (a clear midday sun is about 100,000, an overcast one 10,000); lumens for the others, out of the whole light (a 100 W-equivalent bulb is about 1500, a candle 12, a 60 x 60 cm office panel 3600). |
+| **Range** | Where the falloff reaches zero, in metres, and the light's culling radius. |
+| **Source Radius** | How big the bulb is, in metres. It spreads the highlight into an image of the source, dimming its peak as much as it widens it: dramatic on polished surfaces, invisible on rough ones. |
+| **Flicker** | How far the intensity wanders, as a share of it: a torch about 0.15 to 0.25, a candle 0.1, a lamp 0. |
+| **Flicker Speed** | Roughly how many swells a second the slowest layer of the flicker makes; faster layers ride on top. |
+| **Cast Shadows** | The first directional light with it on is the scene's sun, whose cascades follow the camera. Spot and point lights get shadow maps of their own (a few at a time, Options ▸ Engine ▸ Renderer). A one-sided area light casts through a spot light's map facing its emitting side, a two-sided one through a point light's cube. |
+| **Bake** | Captured into the light probes. Off, the light still lights the scene live, but no probe sees it: a flashlight, a muzzle flash, a light that moves or switches. |
+| **Inner Angle** | The spot light's full-brightness half-angle, in degrees. |
+| **Outer Angle** | The half-angle where it reaches nothing, in degrees; always a little wider than the inner one. Narrowing the cone does not brighten the light. |
+| **Shape** | A rectangle (a ceiling panel, a window, a screen) or a disk (a round downlight), across the light's local X and Y. |
+| **Width** | Along the light's local X, in metres. A disk's **Diameter**. |
+| **Height** | Along the light's local Y, in metres. |
+| **Two-sided** | Both faces glow, half the lumens each: a hanging tube or a lantern pane. Off, only the front face (the light's forward) does. |
+| **Angular Radius** | The sun's apparent radius in radians (the real sun is 0.00465): how broad its reflection is, and how soft its shadow edges. |
+
 #### Light Probe
 
 Influence volume, blend distance, intensity, what it affects (lighting, reflections, or both),
 capture mode and bake controls. A reflections-only probe gives a room or a pond its local reflections
 without changing how the sky and ambient light it.
+
+| Field | Meaning |
+|---|---|
+| **Resolution** | The captured cube's face size. |
+| **Mode** | **Baked** captures when asked (Bake Probe, a relight); **Real-time** captures again every few seconds. |
+| **Update every** | Seconds between a real-time probe's captures. |
+| **Intensity** | Scales the probe's lighting and reflections. |
+| **Follow the sun** | Relight the probe each time the sun has turned this many degrees (0: only when baked). |
+| **Affects Lighting** | The light the probe bounces onto the surfaces inside its box. Off keeps the area lit by the sky light and ambient (or another probe). No re-bake needed. |
+| **Affects Reflections** | What the surfaces inside its box mirror. |
+| **Box Projection** | Parallax-correct the reflections against the box. Bounded probes only. |
+| **Size** | The box the probe lights, in metres, moving and rotating with the node. Any size at 0 leaves the probe unbounded: it affects the whole scene. |
+| **Blend Distance** | How far a bounded probe's light feathers out at the edge of its box, in metres. |
 
 **Cubemap Preview** — what the probe last captured, unwrapped into a 2 : 1 panorama. **Bake Probe**
 captures again.
@@ -294,9 +391,14 @@ rays are separate. Size it with the face handles in the viewport; the *Fog* pres
 | **Albedo** | The share of the light the fog takes that it scatters rather than absorbs: near white for mist, darker and warmer for smoke. |
 | **Anisotropy** | 0 scatters evenly; toward 1 the fog glows round a light seen through it, as mist does round a lamp. |
 | **Height Falloff** | Per metre: the fog thins from the bottom face up. 0 is even through the box. |
-| **Noise** | How much a drifting noise breaks the fog into wisps, with **Noise Scale** (metres per wisp) and **Wind** (metres per second). |
-| **Emissive** | Light the fog gives off itself, colour and nits: a glowing haze, smoke over a fire. |
-| **Sun Scattering** | Multipliers on what the fog scatters: the sun or moon (its shafts), the point and spot lights (**Light Scattering**, the halos round torches) and the sky's fill (**Ambient Scattering**). |
+| **Noise** | How much a drifting noise breaks the fog into wisps. |
+| **Noise Scale** | Metres per wisp. |
+| **Wind** | World metres per second the wisps drift. |
+| **Emissive Color** | Light the fog gives off itself: a glowing haze, smoke over a fire. |
+| **Emissive (nits)** | How bright that glow is, in cd/m² per metre of fog. |
+| **Sun Scattering** | Multiplier on the sun or moon light the fog scatters (its shafts). |
+| **Light Scattering** | Multiplier on the point and spot lights it scatters (the halos round torches). |
+| **Ambient Scattering** | Multiplier on the sky's fill it scatters. |
 
 A line above the fields says when the volume is not drawn and why: Volumetric Fog switched off in the
 Renderer settings, the box out of view or past the fog distance, or over the volume cap.
@@ -339,6 +441,59 @@ A physically based sky, baked to a cubemap whenever the sun moves, with air and 
 - **God Rays** — volumetric light shafts: intensity, density, anisotropy, maximum distance, march
   steps and tint.
 
+| Field | Meaning |
+|---|---|
+| **Use Scene Directional Light** | The sun follows the scene's first directional light. Off, you point it with **Sun Direction**. |
+| **Sun Direction** | The direction toward the sun, when it does not follow the scene's light. |
+| **Sun Color** | The sun's colour in the sky. |
+| **Physical Units** | Light the sky with the scene light's own lux, so the sky, the sun disc and their reflections share one scale with what the sun lights. |
+| **Sun Intensity** | The sky's sun, on the artistic scale (without Physical Units). |
+| **Sun Disk Size** | The sun disc's apparent size, in degrees. |
+| **Rayleigh Scatter** | How strongly the air scatters: the blue of the sky. |
+| **Rayleigh Height** | The height, in metres, over which the air thins by about two-thirds. |
+| **Mie Scatter** | How strongly the haze scatters: the glow round the sun. |
+| **Mie Height** | The height, in metres, over which the haze thins. |
+| **Mie Anisotropy** | How forward the haze scatters: toward 1, a tighter glow round the sun. |
+| **Exposure** | Trims the sky's brightness. |
+| **Ground Color** | The colour of the ground below the horizon, and what it reflects into the sky. |
+| **Planet Radius** | The planet's radius, in metres. |
+| **Atmosphere Radius** | The top of the atmosphere, in metres from the planet's centre. |
+| **Enable Night Sky** | Stars, airglow and the moon once the sun is down. |
+| **Night Sky Texture** | A night-sky image instead of the procedural stars. |
+| **Texture Intensity** | How bright the night-sky image is. |
+| **Texture Rotation** | Turns the night-sky image round the up axis, in degrees. |
+| **Star Brightness** | How bright the procedural stars are. |
+| **Star Density** | How many stars there are. |
+| **Star Colour Variance** | How much the stars' colours vary, from all white to blue and red giants. |
+| **Airglow Color** | The faint glow of the night air itself. |
+| **Airglow** | How bright that glow is. |
+| **Enable Moon** | A moon in the night sky, rising opposite the sun. |
+| **Moon Texture** | An image of the moon's face instead of the procedural one. |
+| **Phase** | From new (0) through half to full (1). |
+| **Size** | The moon disc's apparent size, in degrees. |
+| **Offset Azimuth** | Moves the moon round the sky from opposite the sun, in degrees. |
+| **Offset Elevation** | Raises or lowers the moon from opposite the sun, in degrees. |
+| **Moon Color** | The moon disc's colour. |
+| **Moon Brightness** | How bright the moon disc is drawn. |
+| **Moonlight** | What the scene's directional light shines with from the moon, in lux, shadows included: a real full moon gives about 0.25 lux, the default 1 a storybook one. |
+| **Resolution** | The baked sky's cubemap size, per face. |
+| **View Steps** | Samples along each view ray through the atmosphere. |
+| **Light Steps** | Samples toward the sun from each of those. |
+| **Enable Fog** | Height fog, measured along each line of sight. |
+| **Density** | How thick the fog is (and, for God Rays, how thick the shafts are). |
+| **Start Distance** | Where the fog begins, in metres from the camera. |
+| **Max Opacity** | The most the fog ever hides, however far. |
+| **Height** | Below this the fog is uniform, in metres. |
+| **Height Falloff** | How fast the fog thins above that height. |
+| **Custom Color** | A colour the fog leans toward instead of the sky's horizon colour. |
+| **Custom Color Blend** | How far it leans: 0 the sky's colour, 1 the custom one. |
+| **Enable God Rays** | Volumetric light shafts. |
+| **Intensity** | How bright the shafts are. |
+| **Anisotropy** | How forward the shafts scatter: toward 1, they glow round the sun. |
+| **Max Distance** | How far the shafts reach, in metres. |
+| **March Steps** | Samples along each ray: more steps, smoother shafts. |
+| **Tint** | A colour the shafts are multiplied by. |
+
 #### Sky Light
 
 Lights the scene with the sky itself: a surface facing up receives the zenith, one facing a sunset
@@ -358,6 +513,16 @@ not landed yet" from "the sky really is that dim". **Ambient** scales the scene'
 without a moon can go almost pitch black while the day is unchanged. A new sky light keeps 0.0001 of
 it, the same share a scene with a sky but no sky light keeps, so adding or deleting a sky light does
 not change the night.
+
+| Field | Meaning |
+|---|---|
+| **Intensity** | How strongly the sky lights the scene and is reflected. |
+| **Tint** | A colour the sky's light is multiplied by. |
+| **Ambient** | Scales the scene's flat ambient fill (Scene settings → Ambient) while this sky light is in the scene. That fill lights every shadow evenly and does not darken with the sky. At 0 only the sky light and any light probes light the shade. |
+| **Night Ambient** | How much of that fill is kept once the sun is down. It fades with the sky over dusk. At 0 a moonless night goes almost pitch black; the moon, torches and the sky light still light it. |
+| **Cloud Response** | How much the scene's clouds change the lighting. At 1 an overcast sky takes the sun's strength and warm cast and hands both to the sky, which goes flat: the scene reads white and shadowless. At 0 the clouds are drawn but light nothing. |
+| **Cloud Shadows** | The volumetric clouds shade the ground: the sun is dimmed under each cloud, and the shadows drift with the cloud wind. Shown while the scene has enabled Volumetric Clouds. |
+| **Shadow Strength** | How dark the cloud shadows are. |
 
 #### Volumetric Clouds
 
@@ -386,6 +551,56 @@ Raymarched clouds: on or off, their opacity, and the groups below, with cloud **
   jitter (hides banding) and temporal upscale (traces 1/16 of the pixels each frame and rebuilds the
   rest from history).
 
+| Field | Meaning |
+|---|---|
+| **Enabled** | Off, the clouds are not drawn. |
+| **Opacity** | How much of the clouds shows: 0 none. |
+| **Coverage** | How much of the sky is cloud. |
+| **Density** | How thick the cloud is inside. |
+| **Cloud Type** | From flat stratus through stratocumulus and cumulus to towering cumulonimbus. |
+| **Base Altitude** | The cloud layer's bottom, in metres. |
+| **Thickness** | The cloud layer's depth, in metres. |
+| **Base Noise Scale** | The size of the cloud shapes: smaller is bigger clouds. |
+| **Detail Noise Scale** | The size of the detail eroding their edges. |
+| **Detail Strength** | How much that detail eats into the shapes. |
+| **Curl / Turbulence** | How much the detail swirls. |
+| **Anvil Bias** | How much the tops of tall clouds spread out into anvils. |
+| **Haze Distance** | Metres over which far clouds fade into the sky. |
+| **Use Scene Directional Light** | The clouds are lit by the scene's sun. Off, by a direction and colour of their own. |
+| **Sun Direction** | The direction toward the clouds' own sun. |
+| **Sun Color** | The colour of the clouds' own sun. |
+| **Sun Intensity** | How strongly the sun lights the clouds. |
+| **Ambient from Sky Light** | The clouds take their ambient light from the sky light. Off, from the colour below. |
+| **Ambient (Sky) Color** | The ambient light's colour. |
+| **Ambient Intensity** | How strong the ambient light is. |
+| **Ground Albedo** | The ground's colour, lighting the clouds' undersides. |
+| **Sunset/Sunrise Color** | The colour the clouds take from a low sun. |
+| **Extinction** | How much light the cloud swallows per metre (the first **Extinction**); the **Extinction (b)** of multiple scattering is how much each octave keeps of it. |
+| **Albedo** | The share of the light the cloud scatters rather than absorbs. |
+| **Forward Scatter** | How strongly the cloud glows round the sun behind it (the phase g). |
+| **Back Scatter g** | The anisotropy of the light scattered back toward the sun. |
+| **Back Scatter Weight** | How much back scattering there is. |
+| **Silver Lining** | How bright the edges are with the sun behind the cloud. |
+| **Silver Spread** | How far round the sun that lining reaches. |
+| **Powder** | Dark edges where the cloud is thin, as on a sunlit cumulus. |
+| **Octaves** | How many bounces inside the cloud are approximated: 1 is single scattering only. |
+| **Scatter (a)** | How much each octave keeps of the scattering. |
+| **Eccentricity (c)** | How much each octave keeps of the phase eccentricity. |
+| **Follow Scene Wind** | The clouds blow the way the scene's Wind node does, with **Wind Speed** as the altitude wind at its Strength 1. |
+| **Wind Direction** | Which way the clouds drift without a Wind node to follow. |
+| **Wind Speed** | How fast the clouds drift, in metres per second. |
+| **Detail Wind Factor** | How much faster the detail noise drifts than the shapes. |
+| **Bake into Sky in Play** | Play and published games bake the clouds into the sky at load and draw that instead of marching them every frame. Wind and cloud shadows freeze at the bake. |
+| **Preview Baked in Editor** | Show the bake while authoring. |
+| **Re-bake When the Sun Moves** | Bake again during play once the sun has moved about 2°. |
+| **Bake Resolution** | The baked sky's face size. |
+| **Resolution Scale** | Rays per screen axis, as a share of the screen's. |
+| **March Steps** | Samples along each view ray through the clouds. |
+| **Light Steps** | Samples toward the sun from each of those. |
+| **Max Distance** | How far the clouds are marched, in metres. |
+| **Jitter** | Hides banding by offsetting each ray a little. |
+| **Temporal Upscale** | Traces 1/16 of the pixels each frame and rebuilds the rest from history. |
+
 #### Decal
 
 Size, opacity, sort order, angle and depth fade, which attributes it affects, receivers (every
@@ -404,6 +619,35 @@ and runs on game time, and outside Play the last frame shows. With **Loop** off,
 
 **Albedo opacity** — the albedo's share of the coverage. Below 1, with a dark base colour, the decal
 darkens what it lands on while its roughness and normal still land whole: wet ground rather than paint.
+
+| Field | Meaning |
+|---|---|
+| **Size** | The projection box at scale 1, in metres. The decal projects straight down the box's local −Y onto what lies inside it; the node's scale multiplies this. |
+| **Opacity** | How much of the decal lands. |
+| **Sort order** | Where decals overlap, the higher number lands on top. Ties go by id, never by distance. |
+| **Angle fade** | How the decal fades on surfaces turned away from the projector. 0 turns the test off, so it lands on walls and back faces in the box too. |
+| **Depth fade** | Feathers it toward the box's top and bottom faces, as a share of its half-height. 0 is a hard cut. |
+| **Affects Albedo** | The decal writes the surface's colour. |
+| **Affects Normal** | It writes the surface's normal (only when its material has a normal map). |
+| **Affects Roughness / Metal / AO** | It writes the surface's roughness, metallic and ambient occlusion, which share one coverage. |
+| **Affects Emissive** | It adds its emissive light. |
+| **Receivers** | **All surfaces**, or **Terrain only**, which keeps rocks, props and foliage standing in the box clean (one extra depth pass over the terrain while such a decal is on screen). |
+| **Pattern** | The linked **Material**, or the **Radial** gradient. |
+| **Animated** | Play the material's maps as a flipbook. |
+| **Columns** / **Rows** | The flipbook's grid of cells. |
+| **Frames** | Cells used, left to right and then down from the top row; at most columns × rows. |
+| **Frame rate** | Frames per second of game time, so slow motion and hit-stop slow it too. |
+| **Loop** | Off, the last frame holds, as a pool that has settled. |
+| **Blend frames** | Cross-fade each frame into the next. |
+| **Inner colour** | The radial pattern's colour at the centre, its alpha the coverage. |
+| **Outer colour** | Its colour at the rim. |
+| **Shape** | A circle or a square. |
+| **Curve** | How the gradient falls from the centre to the rim. Power follows the exponent; the others hold the inner colour over the inner part and fall over the falloff band, like the terrain brush curves of the same names. |
+| **Exponent** | The power curve from rim to centre. 0 is a flat, uniform disc. |
+| **Falloff** | The share of the radius the gradient falls over. 0 is a hard edge. |
+| **Ring colour** | The outline on the rim. Alpha 0 turns it off. |
+| **Ring width** | The ring's width in screen pixels, so it stays crisp at any distance. |
+| **Emissive** | Multiplies the pattern's colour into light added to the image. 0 is not emissive. |
 
 #### Wind
 
@@ -428,6 +672,18 @@ going, as hard as it is blowing there.
 **Presets** set the strength, gusts and veer and leave the direction alone. Local wind — a whirlwind, a
 blast, a gap the wind funnels through, a sheltered courtyard — is a [Force Field](#effects) set to
 **Affects wind**. Volumetric clouds can follow the wind too, and scripts read it with `windAt`.
+
+| Field | Meaning |
+|---|---|
+| **Direction** | The way the wind blows, in degrees around the up axis (0 = +X, 90 = −Z). |
+| **Strength** | Scales the air and every plant's lean at once: 0 is calm, 1 is what the materials were authored for (about 7 m/s in a full gust), 2 is a storm. |
+| **Gust size** | Metres between gust crests. Small values make neighbouring plants move differently; large values make whole fields lean together. |
+| **Gust speed** | How fast gusts roll across the ground, in metres per second. |
+| **Gustiness** | How much of the air the gusts carry. 0 is a steady stream; 1 is still air between the gusts. |
+| **Veer** | The most the wind turns away from its direction, either way, from one meadow to the next and as the gusts pass. 0 blows the same way everywhere. |
+| **Fade start** | Where plants begin to stop moving with distance from the camera. |
+| **Fade end** | Past this, plants stand still, and distant foliage uses the cheaper still shaders, which is where most of the performance comes from. |
+| **Show field** | Draw the wind field in the viewport: arrows of the air round the camera, streaks carried by it, and the Force Fields that move it. Selecting this node shows it anyway; this keeps it up when you select something else. |
 
 #### Weather
 
@@ -457,7 +713,7 @@ bounded** gives it a box.
 | **Falling** | Nothing, Rain, Snow, or Rain and snow together, drawn as particles round the camera. It falls in from the sky above the box and stops under anything solid where **Shelter** is on. Overlapping volumes never double it; a higher-priority dry box carves it out. |
 | **Rate** | How hard it falls: 0 nothing, 1 a downpour or a blizzard. Rain also sets how many drops stir the wet ground. |
 | **Snow Share** | Rain and snow only: how much of what falls is snow, 0 all rain to 1 all snow, the rest rain. A sequence sweeping it from 0 to 1 turns the rain into snow, the two falling together on the way. |
-| **Drop Size** / **Flake Size** | Times the realistic size. |
+| **Drop Size** / **Flake Size** / **Drop & Flake Size** | Times the realistic size: a few millimetres across a drop's streak, a centimetre or two a flake. |
 | **Fall Speed** | Times the realistic terminal velocity: 8.5 m/s for rain, 1 m/s for snow. |
 | **Trail Min** / **Trail Max** | Rain only. The length of each drop's streak as a multiple of the realistic default (1); every drop draws its own length at random between the two. Equal values give streaks all one length. |
 | **Wind** | How much the scene's Wind node slants the rain and drifts the snow: 0 straight down, 1 with all of it. |
@@ -496,6 +752,11 @@ and other forward-shaded or transparent surfaces are seen through. The line unde
 last frame. It acts only with **Occlusion** at **+ Volumes** in
 [Renderer settings › Optimizations](rendering.md#optimizations).
 
+| Field | Meaning |
+|---|---|
+| **Enabled** | Off, the box hides nothing. |
+| **Size** | Full extents of the box in metres, before the node transform. Drag its faces in the viewport to fit it. |
+
 **Occlude** picks what it hides:
 
 | Kind | What is skipped while the box is out of sight |
@@ -513,8 +774,9 @@ last frame. It acts only with **Occlusion** at **+ Volumes** in
 **Particle System** — the effect asset it plays and how this instance plays it. See
 [Particles](particles.md#in-a-scene).
 
-**Force Field** — pushes the particles of emitters that have the **Force Fields** module, and up to 16
-fields act at once. **Force** picks what it does — **Wind** along the node's local +Y, **Radial**,
+#### Force Field
+
+Pushes the particles of emitters that have the **Force Fields** module, and up to 16 fields act at once. **Force** picks what it does — **Wind** along the node's local +Y, **Radial**,
 **Vortex** around local +Y, **Turbulence** or **Drag** — and **Shape** where: everywhere, a sphere or a
 box (axis-aligned in the world), fading in over **Falloff** from its edge. Direction and axis come from
 rotating the node, so there is no vector to type. See [Particles](particles.md#force-fields).
@@ -526,7 +788,21 @@ of its eddies — and a **Drag** field becomes a shelter, its strength the share
 Selecting it shows the wind field with its glyph: arrows, spokes in or out, a turning ring, eddies, or a
 cross. The **Wind:** presets set it up; the first 8 such fields count.
 
-**Cloth** — a rectangular panel that hangs, swings and blows in the wind: a cape, a banner, a flag.
+| Field | Meaning |
+|---|---|
+| **Enabled** | Off, the field pushes nothing. |
+| **Affects wind** | Also move the scene's air: foliage bends to it, Scene-wind particles ride it, and scripts read it with `windAt`. |
+| **Force** | **Wind** along local +Y, **Radial** toward the centre, **Vortex** round local +Y, **Turbulence** (curl-noise swirl) or **Drag**. |
+| **Strength** | m/s² (drag: per second), or the wind's speed. Moving the air: an air speed in m/s, or for a Drag field the share of the wind it blocks, 0 to 1. |
+| **Frequency** | Turbulence's noise features per metre: lower is broader swirls. |
+| **Shape** | **Global**, everywhere; a **Sphere**; or a **Box**, axis-aligned in the world. |
+| **Radius** | The sphere's, in metres before the node scale. |
+| **Half extents** | The box's, in metres before the node scale. |
+| **Falloff** | The share of the shape, from its edge inward, over which the force fades in. |
+
+#### Cloth
+
+A rectangular panel that hangs, swings and blows in the wind: a cape, a banner, a flag.
 It simulates while the scene plays (Play and Simulate) and shows its rest shape while you edit. The
 panel hangs in the node's local XY plane, down its −Y, so placing and turning the node places it.
 - **Width** and **Height** size it in metres; **Columns** and **Rows** set how finely it folds.
@@ -542,6 +818,21 @@ panel hangs in the node's local XY plane, down its −Y, so placing and turning 
 
 Its material is any PBR material, double-sided so both faces draw. The simulation costs a little CPU
 time per cloth each frame; the Performance panel lists it under **Scene** as **cloth**.
+
+| Field | Meaning |
+|---|---|
+| **Enabled** | Off, the cloth hangs at rest and does not simulate. |
+| **Width** / **Height** | The panel's size, in metres. |
+| **Columns** / **Rows** | How finely it folds. |
+| **Held Edge** | **Top** for a cape or a banner, **Left** for a flag on its pole, **None** to let it fall. |
+| **Ride On** | **This node** holds the edge where the node is; **Chest**, **Spine**, **Neck** or **Hips** carries it on that bone of the character above. |
+| **Stiffness** | How much it resists stretching. |
+| **Bend** | How much it resists folding: silk at 0, canvas at 1. |
+| **Damping** | Calms the swing. |
+| **Mass** | The whole panel's, in kilograms. |
+| **Thickness** | How far it stays off the character's limbs. |
+| **Wind Response** | How hard the scene's wind pushes it; 0 ignores it. |
+| **Collide With Character** | Keep it outside the limbs of the character it hangs from, using its ragdoll's capsules. |
 
 ### Gameplay
 

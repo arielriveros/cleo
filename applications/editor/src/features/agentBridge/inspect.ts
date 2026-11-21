@@ -1,4 +1,8 @@
-import { Camera2DNode, type Node, type Scene } from 'cleo'
+import {
+  Camera2DNode, Node, declarationOf, declarationsOf, isAssetRef, isNodePathRef, propertyTypeLabel, readProperty,
+  resolveProperty, shownProperties, storedValueFits, writeProperty,
+  type PropertyDeclaration, type PropertyType, type Scene,
+} from 'cleo'
 import { nodePath, userChildren, walkUserNodes } from './nodeRefs'
 
 // Turning live engine objects into text an agent can read cheaply, and agent input back into assignments.
@@ -55,7 +59,7 @@ const NESTED_LIMIT = 24
 function settableOwn(target: object, prefix: string, out: Record<string, unknown>, limit: number, nested: boolean) {
   const seen = new Set<string>()
   const add = (key: string, value: unknown) => {
-    if (Object.keys(out).length >= limit) return
+    if (Object.keys(out).length >= limit || prefix + key in out) return
     const s = simpleValue(value)
     if (s !== undefined) out[prefix + key] = s
   }
@@ -84,9 +88,64 @@ function settableOwn(target: object, prefix: string, out: Record<string, unknown
   }
 }
 
-/** The node's settable properties and their current values: what scene_edit `props` accepts. */
+// ----- Declared rows (src/properties): what the node's inspector shows, with its labels and types --------------
+
+/** A declared row's value as an agent reads it: plain, or the stored `{ $asset, id }` / `{ $nodePath }` of a link. */
+function rowValue(v: unknown): unknown {
+  const s = simpleValue(v)
+  if (s !== undefined) return s
+  if (isAssetRef(v) || isNodePathRef(v)) return v
+  if (Array.isArray(v)) return v.map(x => simpleValue(x) ?? (isAssetRef(x) || isNodePathRef(x) ? x : null))
+  return undefined
+}
+
+/** The declared rows of the node's own cards: every node's Transform has op fields of its own. */
+function ownRows(node: Node) {
+  const transform = declarationOf(null, Node)
+  return shownProperties(node).filter(r => r.decl !== transform)
+}
+
+/** One row of a node's inspector: what it is called there, its type, its value. */
+export interface InspectorRow { label: string; type: string; value: unknown; readonly?: true }
+
+/**
+ * The rows the node's inspector shows now, by the key scene_edit `props` takes: each with its label there (`Light ›
+ * Emission › Color`), its type (Color, Vec3, Material, a node class, ...) and its value.
+ */
+export function inspectorRows(node: Node): Record<string, InspectorRow> {
+  const out: Record<string, InspectorRow> = {}
+  for (const { decl, section, prop } of ownRows(node)) {
+    if (prop.key in out) continue
+    const p = resolveProperty(prop, node)
+    const value = rowValue(readProperty(node, prop))
+    if (value === undefined) continue
+    out[prop.key] = {
+      label: [decl.title, section.title, p.label].filter(Boolean).join(' › '), type: propertyTypeLabel(p.type), value,
+      ...(p.readonly ? { readonly: true as const } : {}),
+    }
+  }
+  return out
+}
+
+/** The declared row of `node` at `key` (shown or not), with its type, or null. */
+export function declaredRow(node: Node, key: string): { prop: PropertyDeclaration; type: PropertyType } | null {
+  const transform = declarationOf(null, Node)
+  for (const decl of declarationsOf(node)) {
+    if (decl === transform) continue
+    for (const s of decl.sections) for (const prop of s.props)
+      if (prop.key === key) return { prop, type: resolveProperty(prop, node).type }
+  }
+  return null
+}
+
+/** The node's settable properties and their current values: what scene_edit `props` accepts. Its inspector's rows first. */
 export function settableProps(node: Node, limit = 120): Record<string, unknown> {
   const out: Record<string, unknown> = {}
+  for (const { prop } of ownRows(node)) {
+    if (Object.keys(out).length >= limit || prop.readonly || prop.key in out) continue
+    const value = rowValue(readProperty(node, prop))
+    if (value !== undefined) out[prop.key] = value
+  }
   settableOwn(node, '', out, limit, true)
   return out
 }
@@ -144,6 +203,21 @@ const LINK_HINTS: Record<string, string> = {
  * of it is applied.
  */
 export function applyProp(node: Node, path: string, value: unknown, dryRun = false): void {
+  // A row of its inspector is written as the inspector writes it: through the row's setter, which keeps the
+  // node's invariants (a clamp, a cone wider than another, a vehicle rebuilt).
+  const row = declaredRow(node, path)
+  if (row) {
+    const { prop, type } = row
+    const what = `"${path}" on ${node.nodeType} "${node.name}"`
+    if (prop.readonly) throw new Error(`${what} is read-only.`)
+    const fits = storedValueFits(type, value)
+      && (type.kind !== 'number' || Number.isFinite(value as number))
+      && (type.kind !== 'choice' || type.values.includes(value as string))
+    // A choice's type lists its values: 'rect' | 'disk'.
+    if (!fits) throw new Error(`${what} is ${type.kind === 'choice' ? 'one of' : 'a'} ${propertyTypeLabel(type)}; got ${JSON.stringify(value)}.`)
+    if (!dryRun) writeProperty(node, prop, value)
+    return
+  }
   const parts = path.split('.')
   let target: any = node
   for (const part of parts.slice(0, -1)) {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { parseScriptVariables, saveFieldNames } from '../src/utils/scripts'
 
-// The decorators a script may carry (`@save`, `@options`, `@pick`, `@child`, `@find`, `@onAction`) are
+// The decorators a script may carry (`@save`, `@options`, `@attribute`, `@child`, `@find`, `@onAction`) are
 // read from the source text, to the same schema the doc-comment tags produce.
 
 const parse = (body: string) => parseScriptVariables(`import { Node } from 'cleo'\nexport default class A extends Node {\n${body}\n}`)
@@ -21,7 +21,7 @@ describe('@attribute', () => {
       `  @attribute('Combat') damage = 10`,
       `  @attribute('Combat', { min: 0, max: 1, step: 0.05, label: 'Crit chance' }) crit = 0.1`,
       `  @attribute({ readonly: true }) hp = 100`,
-      `  @attribute({ color: true }) tint: [number, number, number] = [1, 0.5, 0]`,
+      `  @attribute({ color: true }) tint: Color = [1, 0.5, 0]`,
       `  @attribute({ multiline: true, showIf: 'talks' }) line = ''`,
       `  @attribute({ showIf: ['mode', 'ranged'] }) range = 8`,
       `  @attribute talks = false`,
@@ -29,7 +29,9 @@ describe('@attribute', () => {
     expect(v.damage.attribute).toEqual({ group: 'Combat' })
     expect(v.crit.attribute).toEqual({ group: 'Combat', min: 0, max: 1, step: 0.05, label: 'Crit chance' })
     expect(v.hp.attribute).toEqual({ readonly: true })
-    expect(v.tint).toMatchObject({ type: 'vec3', attribute: { color: true } })
+    // The type is what makes a colour now; an old `color` option is not an option any more.
+    expect(v.tint).toMatchObject({ type: { kind: 'color' }, attribute: {} })
+    expect(v.tint.attribute).not.toHaveProperty('color')
     expect(v.line.attribute).toEqual({ multiline: true, showIf: 'talks' })
     expect(v.range.attribute).toEqual({ showIf: ['mode', 'ranged'] })
   })
@@ -50,13 +52,13 @@ describe('decorated script fields', () => {
   it('reads @save, in front of the field or on its own line', () => {
     const v = parse(`  @attribute @save hp = 100\n  @save\n  private _gold: number = 5\n  other = 1`)
     expect(saveFieldNames(v)).toEqual(['hp', '_gold'])
-    expect(byName(v).hp).toMatchObject({ type: 'number', default: 100, hidden: false })
+    expect(byName(v).hp).toMatchObject({ type: { kind: 'number' }, default: 100, hidden: false })
   })
 
-  it('reads @options and @pick like their doc tags', () => {
-    const v = byName(parse(`  list: string[] = ['a', 'b']\n  @options('list') choice = 'a'\n  @pick('sound') cue: string = ''`))
+  it('reads @options like its doc tag', () => {
+    const v = byName(parse(`  list: string[] = ['a', 'b']\n  @options('list') choice = 'a'\n  cue: SoundName = ''`))
     expect(v.choice.options).toBe('list')
-    expect(v.cue.pick).toBe('sound')
+    expect(v.cue.type).toEqual({ kind: 'name', name: 'sound' })
   })
 
   it('hides @child / @find fields and keeps the name they look for', () => {
@@ -67,9 +69,9 @@ describe('decorated script fields', () => {
   })
 
   it('stacks decorators and ignores @onAction methods', () => {
-    const v = parse(`  @save @pick('clip') clip: string = 'Idle'\n  @onAction('Jump') jump(state) { return 1 }\n  after = 2`)
+    const v = parse(`  @save @attribute clip: ClipName = 'Idle'\n  @onAction('Jump') jump(state) { return 1 }\n  after = 2`)
     expect(v.map(x => x.name)).toEqual(['clip', 'after'])
-    expect(v[0]).toMatchObject({ save: true, pick: 'clip' })
+    expect(v[0]).toMatchObject({ save: true, hidden: false, type: { kind: 'name', name: 'clip' } })
   })
 
   it('skips behaviour decorators, whatever their arguments, without disturbing the fields around them', () => {

@@ -1,4 +1,5 @@
 import { attribute } from 'cleo/decorators'
+import type { Vec3 } from 'cleo'
 import SoulsWeaponNode from '@/Weapons/Base Weapon/Scripts/SoulsWeapon'
 
 /**
@@ -17,9 +18,9 @@ export default class SoulsClubNode extends SoulsWeaponNode {
   @attribute
   public poiseDamage: number = 20
   @attribute
-  public bladeStart: number[] = [0, 0.05, 0]
+  public bladeStart: Vec3 = [0, 0.05, 0]
   @attribute
-  public bladeEnd: number[] = [0, 0.72, 0]
+  public bladeEnd: Vec3 = [0, 0.72, 0]
   @attribute
   public bladeRadius: number = 0.13
 }

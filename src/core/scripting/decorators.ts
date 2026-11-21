@@ -31,7 +31,7 @@ import { ANIMATION_CHANNEL, CANCEL_EVENT, DEFAULT_CHANNEL, fireEvent, splitEvent
 import type { EventDestination } from '../events/broker';
 import type { Node } from '../scene/nodes/node';
 import type { ActionState } from '../../input/actionMap';
-import type { ActionName, ScriptPickKind, TriggerName } from './fieldTypes';
+import type { ActionName, TriggerName } from './fieldTypes';
 import { ANIMATOR_CHANNEL } from '../../animation/animatorCommands';
 
 /**
@@ -69,10 +69,9 @@ export type ScriptMember =
     | { kind: 'enter' | 'exit'; method: string; filter: string }
     | { kind: 'hold'; method: string; action: string; seconds: number }
     | { kind: 'tap'; method: string; action: string; maxSeconds: number }
-    | { kind: 'attribute'; field: string; group?: string; options: AttributeOptions }
+    | { kind: 'attribute'; field: string; group?: string; options: AttributeOptions; optional: boolean }
     | { kind: 'save'; field: string }
     | { kind: 'options'; field: string; list: string }
-    | { kind: 'pick'; field: string; pick: ScriptPickKind }
     | { kind: 'synced'; field: string; onChange?: string }
     | { kind: 'netcall'; method: string; to: NetCallTarget; reliable: boolean; anyone: boolean };
 
@@ -620,7 +619,11 @@ export function onTap(action: ActionName, maxSeconds: number = 0.25): MethodDeco
   };
 }
 
-/** How an `@attribute` field shows in the inspector. Every option is editor-only: the game never reads them. */
+/**
+ * How an `@attribute` field shows in the inspector. Every option is editor-only: the game never reads them.
+ * What the field IS -- a colour, a material, a node -- is its type, not an option (`tint: Color`, `skin:
+ * Material`): docs/scripting/attribute-types.md.
+ */
 export interface AttributeOptions {
     /** The row's name, instead of the field's. */
     label?: string;
@@ -635,8 +638,6 @@ export interface AttributeOptions {
      * it equals that value.
      */
     showIf?: string | [field: string, value: unknown];
-    /** A `[r, g, b]` field picked with a colour picker (components 0..1). */
-    color?: boolean;
     /** A string field edited in a text area. */
     multiline?: boolean;
 }
@@ -657,16 +658,16 @@ export interface AttributeDecorator {
      *
      * @param group The section's title; sections appear in the order their first field is declared. Without
      * one, the Attributes section.
-     * @param options How the row shows: label, range, read-only, showIf, colour, multiline.
+     * @param options How the row shows: label, range, read-only, showIf, multiline.
      */
     (group?: string, options?: AttributeOptions): FieldDecorator;
     /**
      * Shows the field in the inspector's Behaviors panel, in its Attributes section, the way `options` say.
      *
      * - `@attribute({ readonly: true }) kills = 0`
-     * - `@attribute({ label: 'Tint', color: true }) private _tint = [1, 1, 1]`
+     * - `@attribute({ label: 'Tint' }) private _tint: Color = [1, 1, 1]`
      *
-     * @param options How the row shows: label, range, read-only, showIf, colour, multiline.
+     * @param options How the row shows: label, range, read-only, showIf, multiline.
      */
     (options: AttributeOptions): FieldDecorator;
 }
@@ -800,7 +801,7 @@ export const NETCALL_ORIGINAL: unique symbol = Symbol('cleo.netcall.original');
  * Keeps the field in saves: `SaveGame` files, and a scene's memory between visits.
  *
  * - `@save kills = 0`
- * - `@save` and `@pick('sound')` on one field: a picked sound that is kept by saves
+ * - `@save` and `@attribute` on one field, `cue: SoundName = 'Hit'`: a picked cue that saves keep
  */
 export const save: FieldDecorator = function save<This, V>(_value: undefined, context: ClassFieldDecoratorContext<This, V>): void {
     record('@save', context, { kind: 'save', field: memberName('@save', context, 'field') });
@@ -817,22 +818,6 @@ export function options<K extends string>(list: K): FieldDecorator<string | null
     const field = needName('@options', list);
     return function <This extends { [P in K]: readonly string[] }, V extends string | null | undefined>(_value: undefined, context: ClassFieldDecoratorContext<This, V>): void {
         record('@options', context, { kind: 'options', field: memberName('@options', context, 'field'), list: field });
-    };
-}
-
-/**
- * Has the inspector offer the names of one kind this node can reach, for a string or string-list field.
- *
- * - `@pick('clip') attackClip = 'Attack'` — the clips of this node's character
- * - `@pick('sound') hitSounds: string[] = []`
- *
- * @param kind What the field names: `'clip'`, `'sound'`, `'socket'`, `'template'`, `'node'`, `'trigger'` or
- * `'spriteClip'`.
- */
-export function pick(kind: ScriptPickKind): FieldDecorator<string | readonly string[] | null | undefined> {
-    const what = needName('@pick', kind) as ScriptPickKind;
-    return function <This, V extends string | readonly string[] | null | undefined>(_value: undefined, context: ClassFieldDecoratorContext<This, V>): void {
-        record('@pick', context, { kind: 'pick', field: memberName('@pick', context, 'field'), pick: what });
     };
 }
 
@@ -913,7 +898,7 @@ export function scriptMembersOf(Class: Function | null | undefined): readonly Sc
         if (!hasOwn(md, MEMBERS)) continue;
         const optional = new Set<string>(hasOwn(md, OPTIONAL) ? md[OPTIONAL] : []);
         for (const entry of md[MEMBERS] as Recorded[]) {
-            const member = (entry.kind === 'child' || entry.kind === 'find'
+            const member = (entry.kind === 'child' || entry.kind === 'find' || entry.kind === 'attribute'
                 ? { ...entry, optional: optional.has(entry.field) }
                 : entry) as ScriptMember;
             const key = overrideKey(member);

@@ -1,48 +1,22 @@
-import { useEffect, useState } from 'react'
-import { ParticleSystemNode, type ParticleCullingMode } from 'cleo'
+import { useState } from 'react'
+import { ParticleSystemNode } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { Button, ColorInput, DocScope, Hint, NumberInput, PropertyRow, PropertyTable, Select, Slider, Toggle } from '@cleo/app-kit/ui'
+import { Button, DocScope, Hint, NumberInput, PropertyTable } from '@cleo/app-kit/ui'
 import { ParticlesIcon } from '../sectionIcons'
 import FollowLightRows from './FollowLightRows'
+import { DeclaredSection } from '../../properties/DeclaredSections'
 import { useEventBus } from '../../EventBusContext'
-import { vec3ToHex } from '../../../utils/UtilFunctions'
 import ParticleSystemSlot from './ParticleSystemSlot'
 
 // The Particle System node inspector: how THIS instance plays an effect. What the effect is — its
 // emitters and modules — belongs to the .vfx asset and is edited in the particle editor, reachable
 // through the slot above.
 //
-// Same write-then-read-back pattern as SoundEditor: the node's setters clamp.
+// Its rows are the node's declared properties (src/properties/effects.ts); the card adds the effect's slot,
+// Follow Light and the transport.
 
 export default function ParticleSystemEditor(props: { node: ParticleSystemNode }) {
   const eventEmitter = useEventBus()
-
-  const read = () => ({
-    playOnStart: props.node.playOnStart,
-    simulationSpeed: props.node.simulationSpeed,
-    spawnRateScale: props.node.spawnRateScale,
-    tint: [...props.node.tint] as [number, number, number, number],
-    exposureWeight: props.node.exposureWeight,
-    fogGlow: props.node.fogGlow,
-    cullingMode: props.node.cullingMode,
-    lodEnabled: props.node.lodEnabled,
-  })
-  const [values, setValues] = useState(read)
-  useEffect(() => { setValues(read()) }, [props.node])
-
-  const set = (patch: Partial<ReturnType<typeof read>>) => {
-    const n = props.node
-    if (patch.playOnStart !== undefined) n.playOnStart = patch.playOnStart
-    if (patch.simulationSpeed !== undefined) n.simulationSpeed = patch.simulationSpeed
-    if (patch.spawnRateScale !== undefined) n.spawnRateScale = patch.spawnRateScale
-    if (patch.tint !== undefined) n.tint = patch.tint
-    if (patch.exposureWeight !== undefined) n.exposureWeight = patch.exposureWeight
-    if (patch.fogGlow !== undefined) n.fogGlow = patch.fogGlow
-    if (patch.cullingMode !== undefined) n.cullingMode = patch.cullingMode
-    if (patch.lodEnabled !== undefined) n.lodEnabled = patch.lodEnabled
-    setValues(read())
-    eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
-  }
 
   // Play state lives on the node, which React cannot observe.
   const [, force] = useState(0)
@@ -58,54 +32,12 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
       <div className='p-2 flex flex-col gap-2'>
         <ParticleSystemSlot node={props.node} onChange={() => force(x => x + 1)} />
 
+        <DeclaredSection node={props.node} title='' skip={['tint']} />
         <PropertyTable columns={['45%', '55%']}>
-          <PropertyRow label='Play on start' hint='Start emitting as soon as the scene starts.' divider>
-            <Toggle checked={values.playOnStart} onChange={playOnStart => set({ playOnStart })} />
-          </PropertyRow>
-          <PropertyRow label='Simulation speed' hint='Multiplies simulation time: 0.5 is slow motion.' divider>
-            <Slider min={0} max={3} step={0.05} value={values.simulationSpeed} onChange={simulationSpeed => set({ simulationSpeed })} />
-          </PropertyRow>
-          <PropertyRow label='Spawn rate' hint="Multiplies every emitter's continuous spawn rate. Bursts are not scaled." divider>
-            <Slider min={0} max={4} step={0.05} value={values.spawnRateScale} onChange={spawnRateScale => set({ spawnRateScale })} />
-          </PropertyRow>
-          <PropertyRow label='Off screen' hint={'What the system does while its bounds are out of view. Auto pauses a system '
-            + 'whose emitters all loop and keeps simulating a one-shot, so an effect fired just off screen has '
-            + 'still played out when the camera turns to it.'} divider>
-            <Select value={values.cullingMode} onChange={e => set({ cullingMode: e.target.value as ParticleCullingMode })}>
-              <option value='auto'>Auto</option>
-              <option value='pause'>Pause</option>
-              <option value='simulate'>Keep simulating</option>
-            </Select>
-          </PropertyRow>
-          <PropertyRow label='Distance LOD' divider
-            hint={'Follow the effect\'s LOD (set in the particle editor): spawn less and simulate less often with '
-              + 'distance, and stop drawing past its cull distance. Off: full detail at any distance — for a hero '
-              + 'effect the camera looks at from afar.'
-              + ((props.node.system.lod?.levels.length || props.node.system.lod?.cullDistance) ? '' : ' This effect has no LOD levels yet.')}>
-            <Toggle checked={values.lodEnabled} onChange={lodEnabled => set({ lodEnabled })} />
-          </PropertyRow>
-          <PropertyRow label='Exposure weight' divider
-            hint={"How much the camera's exposure brightens the particles. 1 follows it like everything lit; 0 keeps "
-              + 'them the same brightness under any exposure. Fire, sparks and glows tuned in daylight want a little '
-              + '(0.1), or they blaze white at night and in a dark interior.'}>
-            <Slider min={0} max={1} step={0.05} value={values.exposureWeight} readout onChange={exposureWeight => set({ exposureWeight })} />
-          </PropertyRow>
-          <PropertyRow label='Fog Glow (lm)'
-            hint={'Lumens the effect lights VOLUMETRIC FOG with, and only the fog: a fire lighting its own smoke and the mist round it, '
-              + 'without a light every surface pays for. In the colour of the light it follows, on its flicker. 0: none.'}>
-            <NumberInput value={values.fogGlow} min={0} step={50} onChange={fogGlow => set({ fogGlow })} />
-          </PropertyRow>
           <FollowLightRows node={props.node} target={props.node}
             onChange={() => eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })} />
-          <PropertyRow label='Tint' hint="Multiplies every particle's colour, alpha included.">
-            <div className='flex items-center gap-2'>
-              <ColorInput color={vec3ToHex(values.tint.slice(0, 3) as [number, number, number])}
-                          onChange={c => set({ tint: [c[0], c[1], c[2], values.tint[3]] })} />
-              <Slider min={0} max={1} step={0.01} value={values.tint[3]} readout
-                      onChange={a => set({ tint: [values.tint[0], values.tint[1], values.tint[2], a] })} />
-            </div>
-          </PropertyRow>
         </PropertyTable>
+        <DeclaredSection node={props.node} title='' keys={['tint']} />
 
         <div className='flex items-center gap-1 flex-wrap'>
           <Button size='sm' variant='subtle' onClick={() => transport(() => props.node.restart())} title='Clear and play from the start'>⟲ Restart</Button>

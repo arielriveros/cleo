@@ -73,7 +73,7 @@ back, then each further axle behind the last. The front axle steers. A new wheel
 
 ### Drive
 
-What powers the vehicle:
+**Power** — what powers the vehicle:
 
 | Drive | Meaning |
 |---|---|
@@ -125,7 +125,7 @@ How it leans and what its wheels feel the ground with.
 |---|---|
 | **Anti-roll** | How hard each axle resists the body rolling in a turn, in N/m. `0` for none. |
 | **Max pitch / roll** | Most the chassis may tip from upright, in degrees. `180` lets it roll over. |
-| **Ray** / **Sphere** / **Cylinder** | What each wheel finds the ground with: a ray down its centre, a sphere, or its own cylinder, which follows kerbs and bumps by the tyre's real shape. Only Jolt casts a sphere or a cylinder; the Cannon and Rapier backends always cast a ray. |
+| **Wheel cast** | What each wheel finds the ground with: a **Ray** down its centre, a **Sphere**, or its own **Cylinder**, which follows kerbs and bumps by the tyre's real shape. Only Jolt casts a sphere or a cylinder; the Cannon and Rapier backends always cast a ray. |
 
 ### Lean
 
@@ -134,6 +134,13 @@ turns. The lean it aims for balances the turn its steering asks for at its speed
 spring** and **Lean damping** set how firmly it gets there. It also narrows the steering as speed rises, to
 what that lean can hold. Without it, a vehicle on two wheels in line falls over.
 
+| Setting | Meaning |
+|---|---|
+| **Lean into turns** | Hold it upright and lean it into turns, narrowing the steering at speed to what the lean can hold. |
+| **Max lean** | The most it leans, in degrees. |
+| **Lean spring** | How firmly it is pushed to the lean it aims for. |
+| **Lean damping** | How much that push is calmed, so it does not rock. |
+
 ### Hitch
 
 What tows it, for a trailer. **Towed by** names the vehicle that pulls it: pick it, or drop its chassis from
@@ -141,6 +148,11 @@ the scene tree. **Hitch point** is where it is coupled, in the Vehicle's frame (
 chassis). In Play a ball joint joins the two chassis at that point, where it is when the scene starts, so place
 the trailer with its hitch point at the towing vehicle's tow ball. With the colliders overlay on, a red cross
 marks the hitch point.
+
+| Setting | Meaning |
+|---|---|
+| **Towed by** | The vehicle that pulls it, or a chassis with mass; never its own. Empty: not hitched. |
+| **Hitch point** | Where it is coupled, in the Vehicle's frame. |
 
 ### Live
 

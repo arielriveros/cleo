@@ -1,4 +1,5 @@
 import { SequenceNode } from 'cleo'
+import type { LightNode } from 'cleo'
 import { attribute } from 'cleo/decorators'
 import type { SequenceScriptContext } from 'cleo'
 
@@ -16,9 +17,9 @@ import type { SequenceScriptContext } from 'cleo'
  * nor the probes see it.
  */
 export default class ValleyTourDirectorNode extends SequenceNode {
-  /** The light the strikes flash, by name. */
+  /** The light the strikes flash. */
   @attribute
-  public lightningLight: string = 'Lightning'
+  public flash: LightNode | null = null
   /** Lumens at a pulse's peak (written out in full: the editor's field reader takes no exponents). */
   @attribute
   public lightningLumens: number = 600000000000
@@ -26,20 +27,18 @@ export default class ValleyTourDirectorNode extends SequenceNode {
   @attribute
   public lightningClouds: number = 5
 
-  private _light: any = null
   private _clouds: any = null
   private _ambient: number = 1
   private _strikes: { t: number, x: number, z: number, y: number }[] = []
 
   lightning(ctx: SequenceScriptContext) {
     if (ctx.phase === 'enter') {
-      this._light = this.findNode(this.lightningLight)
       this._clouds = (this.scene as any)?.volumetricClouds ?? null
       this._ambient = this._clouds ? this._clouds.ambientIntensity : 1
       const [seed, strikes] = ctx.args as number[]
       this._strikes = this._schedule(Number(seed) || 1, Math.max(1, Number(strikes) || 6), ctx.duration)
     }
-    const light = this._light
+    const light: any = this.flash
     if (ctx.phase === 'exit') {
       if (light?.light) light.light.intensity = 0
       if (this._clouds) this._clouds.ambientIntensity = this._ambient

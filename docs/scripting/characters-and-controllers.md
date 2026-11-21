@@ -107,27 +107,23 @@ script name and default.
 The **Turn in place** group is [below](#turn-in-place), and **Animator outputs** shows the
 [three outputs](#animator-outputs) live while the scene runs.
 
-| Field | Default | |
-|---|---|---|
-| `walkSpeed` | `1.5` | |
-| `runSpeed` | `4` | |
-| `jumpSpeed` | `4` | |
-| `turnSpeed` | `540` | Degrees/s the body swings to the aim **while moving**. |
-| `turnThreshold` | `90` | Aim-vs-body angle that triggers a turn-in-place. |
-| `turnReleaseAngle` | `10` | Deadzone at which the turn is considered done. |
-| `turnSettleSeconds` | `0.12` | **Settle** in the inspector. How long the aim must stay past the threshold before a 90° turn engages, up to 5 s. See below. |
-| `turnSettleFarSeconds` | `0` | **Settle past 135** in the inspector. How long the aim must stay past 135° before the 180° turn engages; `0` engages it at once. |
-| `directionSmoothing` | `0.12` | Seconds the blend-space direction axis takes to glide. |
-| `acceleration` | `0` | Units/s^2, measured **along the ground**. `0` reaches commanded speed immediately. See below. |
-| `turnFriction` | `0` | **Turn Friction**. Per second: how fast a moving body's velocity turns toward a new direction, keeping its speed. See [Turning](#turning). |
-| `moveDirSource` | `'input'` | **Direction From**: `'input' \| 'velocity'`. What `moveDir` reads. See [Turning](#turning). |
-| `airControl` | `1` | Steering while airborne, as the share of the gap to the steered velocity closed per **second**: `1` steers freely, `0` keeps the launch velocity, `0.5` halves the gap in a second at any frame rate. |
-| `slopeLimit` | `45` | **Slope Limit**. Degrees: the steepest ground the character stands on without sliding down it. On ground up to this steep, gravity only presses it into the ground, so it stands still, sets off, brakes and climbs as on the flat. Steeper ground it slides down. `0` turns it off. See [on slopes](#acceleration-on-slopes). |
-| `coyoteSeconds` | `0.12` | |
-| `jumpBufferSeconds` | `0.15` | |
-| `jumpLockoutSeconds` | `0.15` | |
-| `facingMode` | `'aim'` | `'aim' \| 'velocity' \| 'none'`. |
-| `driveWhenUnpossessed` | `false` | |
+| Field | Script name | Default | Meaning |
+|---|---|---|---|
+| **Walk** | `walkSpeed` | `1.5` | Units per second at a walk. |
+| **Run** | `runSpeed` | `4` | Units per second while the controller sprints. |
+| **Acceleration** | `acceleration` | `0` | Units/s^2, measured **along the ground**. `0` snaps to full speed, which is what a keyboard character usually wants; above `0` makes the `isAccelerating` / `isDecelerating` animation built-ins meaningful. See [on slopes](#acceleration-on-slopes). |
+| **Turn Friction** | `turnFriction` | `0` | Per second: how fast a moving body's velocity turns toward a new direction, keeping its speed (Unreal's ground friction; 8 there). `0` leaves turning to Acceleration, which is slower and loses speed through the turn. A reversal is braked through, never turned. Needs an Acceleration. See [Turning](#turning). |
+| **Air Control** | `airControl` | `1` | Steering while airborne, as the share of the gap to the steered velocity closed per **second**: `1` steers freely, `0` keeps the launch velocity, `0.5` halves the gap in a second at any frame rate. |
+| **Slope Limit** | `slopeLimit` | `45` | Degrees: the steepest ground the character stands on without sliding down it. On ground up to this steep, gravity only presses it into the ground, so it stands still, sets off, brakes and climbs as on the flat. Steeper ground it slides down. `0` turns it off. See [on slopes](#acceleration-on-slopes). |
+| **Face** | `facingMode` | `'aim'` | What the body turns toward: **Aim** (`'aim'`, a strafe character), **Velocity** (`'velocity'`, a face-your-movement character) or **None** (`'none'`, rotation left alone). |
+| **Turn Speed** | `turnSpeed` | `540` | Degrees/s the body swings to the aim **while moving**. |
+| **Direction Smooth** | `directionSmoothing` | `0.12` | Seconds the blend-space direction axis takes to glide. |
+| **Direction From** | `moveDirSource` | `'input'` | What `moveDir`, the blend-space direction, reads: **Input**, the way the player pushes, or **Velocity**, the way the body really travels. See [Turning](#turning). |
+| **Speed** | `jumpSpeed` | `4` | The jump's take-off speed, upward. |
+| **Coyote** | `coyoteSeconds` | `0.12` | Seconds after walking off an edge that a jump still counts as from the ground. |
+| **Buffer** | `jumpBufferSeconds` | `0.15` | Seconds a jump pressed just before landing is remembered for. |
+| **Lockout** | `jumpLockoutSeconds` | `0.15` | Seconds after take-off the ground projection is suppressed, so it cannot flatten the jump. |
+| **Drive without a Controller** | `driveWhenUnpossessed` | `false` | Run locomotion with nothing possessing this character. Off, an unpossessed character is inert and cannot fight physics for its own velocity. |
 
 ### Turning
 
@@ -153,6 +149,13 @@ A standing character with `facingMode: 'aim'` does not rotate itself. When the a
 **root motion** rotates the body. The turn holds until the body is back within `turnReleaseAngle`
 (**Release**): two angles rather than one, so a camera hovering on the threshold does not make the
 turn chatter.
+
+| Field | Script name | Default | Meaning |
+|---|---|---|---|
+| **Threshold** | `turnThreshold` | `90` | Aim-vs-body angle, in degrees, that triggers a turn in place. |
+| **Release** | `turnReleaseAngle` | `10` | The deadzone, inside the threshold, at which the turn is done. |
+| **Settle** | `turnSettleSeconds` | `0.12` | Seconds the aim must stay past the threshold before a 90° turn engages, up to 5 s, so a camera swept round to the back plays the 180 instead. Longer lets a look-at layer turn the head before the body follows. |
+| **Settle past 135** | `turnSettleFarSeconds` | `0` | Seconds the aim must stay past 135° before the 180° turn engages; `0` engages it at once. |
 
 - **The choice of clip waits for the aim to settle.** A camera swept round to the back crosses 90°
   long before it reaches 180°; picking the clip at that crossing would always play the 90. So a turn

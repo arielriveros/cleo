@@ -1,5 +1,5 @@
 import { CharacterNode, Input, MathUtils } from 'cleo'
-import type { Animator, CameraRigNode, ColliderNode, ControllerNode, Node, TriggerName } from 'cleo'
+import type { Animator, CameraRigNode, ColliderNode, ControllerNode, LayerName, Node, TriggerName } from 'cleo'
 import { animTrigger, attribute, eventListener, observable } from 'cleo/decorators'
 
 /**
@@ -163,7 +163,7 @@ export default class SandboxPlayerNode extends CharacterNode {
 
     /** The collision layer of the ramps laid over flights of stairs: what the capsule climbs, and how a flight is known. */
     @attribute('Stairs')
-    public stairsLayer: string = 'Stair Ramp'
+    public stairsLayer: LayerName = 'Stair Ramp'
 
     /**
      * A flight's pace, horizontal m/s, walking and running, up and down: one tread a step at the stair clips'

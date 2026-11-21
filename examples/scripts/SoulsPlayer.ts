@@ -1,6 +1,6 @@
 import { Input, Logger, ModelNode, Node, moveWorldDirection, setMoveWorld } from 'cleo'
 import { save, onAction, attribute, animParam, animTrigger } from 'cleo/decorators'
-import type { AnimationTriggerInfo, TemplateName, TriggerName } from 'cleo'
+import type { AnimationTriggerInfo, ParamName, TemplateName, TriggerName } from 'cleo'
 import { clamp, num } from '@/Core/Scripts/SoulsMath'
 import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
 import SoulsCharacterNode from '@/Core/Scripts/SoulsCharacter'
@@ -184,9 +184,9 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
    * the character's measured speed and direction, which would otherwise drop to Idle at the plant.
    */
   @attribute('Running turn')
-  public runTurnSpeedParam: string = 'Speed'
+  public runTurnSpeedParam: ParamName = 'Speed'
   @attribute('Running turn')
-  public runTurnDirectionParam: string = 'Direction'
+  public runTurnDirectionParam: ParamName = 'Direction'
   /** After the turn, the longest the speed parameter keeps following the body while the measured speed catches up. */
   @attribute('Running turn')
   public runTurnReleaseSeconds: number = 0.3

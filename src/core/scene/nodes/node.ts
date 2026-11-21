@@ -16,6 +16,7 @@ import { compileScript, resolveNodeScript } from "../../scripting/scriptRuntime"
 import { NodeType } from "./nodeType";
 import type { NodeVariable, NodeVariableType, NodeVariableAccess } from "./nodeVariables";
 import { attachScriptFactory, fillScriptRefs, bindScriptLife, releaseScriptLife } from "./nodeScripting";
+import { noteFieldRefs } from "../../properties/fieldRefs";
 import { parseChild } from "./childParser";
 import type { BVH } from "../../bvh";
 import type { ChangeKind, DirtyAspect, NodeDirty } from "../../eventBus";
@@ -1479,6 +1480,9 @@ export class Node {
   protected static _parseScriptVars(node: Node, json: any): void {
     if (!json || typeof json !== 'object') return;
     for (const name of Object.keys(json)) (node as any)[name] = json[name];
+    // An asset or node field is stored as a reference ({ $asset }, { $nodePath }): set aside, to become the
+    // asset when the script attaches and the node before it starts (src/core/properties/fieldRefs.ts).
+    noteFieldRefs(node, json);
   }
 
   public get scene(): Scene | null { return this._scene; }

@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { compilePropertyPath, keyableProperties } from 'cleo'
-import type { Node, PropertyTrack, SequenceData } from 'cleo'
+import type { KeyableProperty, Node, PropertyTrack, SequenceData } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { Button, Hint, Select, cn } from '@cleo/app-kit/ui'
+import { Button, Hint, Select, cn, colorToHex } from '@cleo/app-kit/ui'
 import { formatTimecode } from '@cleo/app-kit/timeline'
 import PropertyEditor from '../nodeInspector/propertyEditors/PropertyEditor'
 import ScriptAttributesEditor from '../nodeInspector/scriptEditor/ScriptAttributesEditor'
@@ -42,6 +42,21 @@ const show = (v: unknown): string => {
   return String(v)
 }
 
+/** A keyable property by its inspector row's name when its class declares one, else by its path. */
+const nameOf = (p: KeyableProperty | undefined, path: string): string => p?.label ?? path
+
+/** A track's current value: a colour as its swatch, anything else as numbers or text. */
+function KeyValue({ value, keyable }: { value: unknown; keyable: KeyableProperty | undefined }) {
+  const color = keyable?.type?.kind === 'color' && (Array.isArray(value) || ArrayBuffer.isView(value))
+  return (
+    <span className='max-w-[40%] flex items-center gap-1 truncate text-ui-xs text-muted tabular-nums' title={show(value)}>
+      {color && <span className='inline-block h-2.5 w-2.5 shrink-0 rounded-sm border border-control'
+        style={{ background: colorToHex(value as ArrayLike<number>) }} />}
+      <span className='truncate'>{show(value)}</span>
+    </span>
+  )
+}
+
 function KeysCard({ node }: { node: Node }) {
   const ed = useSequenceEditor()
   const seq = ed.seq!
@@ -50,6 +65,7 @@ function KeysCard({ node }: { node: Node }) {
   const tracks = tracksOf(seq, slotId)
   const pathTrack = slotId ? seq.tracks.find(tr => tr.type === 'path' && tr.slot === slotId) : undefined
   const keyable = useMemo(() => keyableProperties(node), [node, ed.preview.time]) // eslint-disable-line react-hooks/exhaustive-deps
+  const keyableByPath = useMemo(() => new Map(keyable.map(p => [p.path, p])), [keyable])
   const animated = new Set(tracks.map(tr => tr.path))
 
   const seekTo = (to: number) => { ed.settleEdits(); ed.preview.pause(); ed.preview.seek(to) }
@@ -91,12 +107,13 @@ function KeysCard({ node }: { node: Node }) {
           const prev = [...times].reverse().find(k => k < t - KEY_EPS)
           const next = times.find(k => k > t + KEY_EPS)
           const value = compilePropertyPath(node, track.path).get()
+          const keyed = keyableByPath.get(track.path)
           return (
             <div key={track.id} className='flex items-center gap-1 text-ui-sm'>
               <span title={here ? 'A key at the playhead' : 'Animated: no key at the playhead'}
                 className={cn('inline-block h-2.5 w-2.5 shrink-0 rotate-45 border border-sequence', here ? 'bg-sequence' : 'bg-transparent')} />
-              <span className='min-w-0 flex-1 truncate text-fg' title={track.path}>{track.path}</span>
-              <span className='max-w-[40%] truncate text-ui-xs text-muted tabular-nums' title={show(value)}>{show(value)}</span>
+              <span className='min-w-0 flex-1 truncate text-fg' title={track.path}>{nameOf(keyed, track.path)}</span>
+              <KeyValue value={value} keyable={keyed} />
               <Button size='sm' variant='ghost' disabled={prev === undefined} title={prev !== undefined ? `Previous key (${formatTimecode(prev, seq.fps)})` : 'No earlier key'}
                 onClick={() => prev !== undefined && seekTo(prev)}>‹</Button>
               <Button size='sm' variant='ghost' disabled={next === undefined} title={next !== undefined ? `Next key (${formatTimecode(next, seq.fps)})` : 'No later key'}
@@ -110,7 +127,7 @@ function KeysCard({ node }: { node: Node }) {
           onChange={e => { if (e.target.value) keyHere(e.target.value) }}>
           <option value=''>Key property…</option>
           {keyable.map(p => (
-            <option key={p.path} value={p.path}>{animated.has(p.path) ? `${p.path} (animated)` : p.path}</option>
+            <option key={p.path} value={p.path} title={p.path}>{animated.has(p.path) ? `${nameOf(p, p.path)} (animated)` : nameOf(p, p.path)}</option>
           ))}
         </Select>
       </div>

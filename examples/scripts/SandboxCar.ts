@@ -1,5 +1,5 @@
 import { ColliderNode, Input } from 'cleo'
-import type { ActionName, CameraRigNode, ControllerNode, LightNode, Node, PointLight, Spotlight, VehicleNode } from 'cleo'
+import type { ActionName, CameraRigNode, ControllerNode, LayerName, LightNode, Node, PointLight, Spotlight, VehicleNode } from 'cleo'
 import { attribute, child } from 'cleo/decorators'
 
 /** What the car asks of the character who drives it (SandboxPlayer). */
@@ -50,7 +50,7 @@ export default class SandboxCarNode extends ColliderNode {
 
     /** The collision layer of the characters that may drive it (who the Door Zone looks for). */
     @attribute('Driving')
-    public driverLayer: string = 'Character'
+    public driverLayer: LayerName = 'Character'
 
     /** Slower than this (m/s), the driver may get out; faster, Interact brakes the car first. */
     @attribute('Driving', { min: 0, max: 5, step: 0.05 })

@@ -11,7 +11,7 @@ import {
   type BridgeHost, type CommandResult, type GetHost,
 } from './bridgeHost'
 import { NodeRefError, isHiddenNode, nodePath, userChildren, walkUserNodes } from './nodeRefs'
-import { elide, outline, round, settableProps, simpleValue } from './inspect'
+import { elide, inspectorRows, outline, round, settableProps, simpleValue } from './inspect'
 import { subtreeBounds } from './capture'
 import { formatLogs, logCursor, readLogs } from './agentLogs'
 import { typecheckScript, warmTypecheck } from './scriptCheck'
@@ -91,7 +91,7 @@ function toSafe(v: unknown, root: Node | null, depth = 0, seen = new WeakSet<obj
   return out
 }
 
-const NODE_FIELDS = ['transform', 'bounds', 'children', 'script', 'material', 'shapes', 'variables', 'props', 'assets'] as const
+const NODE_FIELDS = ['transform', 'bounds', 'children', 'script', 'material', 'shapes', 'variables', 'props', 'inspector', 'assets'] as const
 
 /** What a node links and plays from the libraries: tileset, clips, sequence, effect, tilemap layers. */
 function nodeAssets(h: BridgeHost, node: Node): Record<string, unknown> | null {
@@ -148,6 +148,7 @@ async function describeNode(h: BridgeHost, node: Node, fields: ReadonlySet<strin
     data.variables = Object.fromEntries([...node.variables].filter(([k]) => !k.startsWith('__')).map(([k, v]) => [k, simpleValue(v?.value) ?? toSafe(v?.value, scene.root)]))
   }
   if (fields.has('props')) data.props = settableProps(node)
+  if (fields.has('inspector')) { const rows = inspectorRows(node); if (Object.keys(rows).length) data.inspector = rows }
   if (json) {
     const j = await node.serialize()
     data.json = elide({ ...j, children: (j.children ?? []).map((c: any) => `${c.name} [${c.type}]`) })
@@ -306,7 +307,7 @@ const commands: Record<string, Command> = {
     const scene = h.engine.mainScene
     const users: string[] = []
     walkUserNodes(scene.root, n => { if (getScriptIdOf(n) === asset.id) users.push(nodePath(n, scene.root)) })
-    const fields = asset.variables.filter(v => !v.hidden).map(v => `${v.name}: ${v.type} = ${JSON.stringify(v.default)}`)
+    const fields = asset.variables.filter(v => !v.hidden).map(v => `${v.name}: ${typeof v.type === 'string' ? v.type : cleo.propertyTypeLabel(v.type)} = ${JSON.stringify(v.default)}`)
     return {
       text: `Script "${asset.name}" (${asset.kind === 'module' ? 'module' : `extends ${BASE_CLASS[asset.baseType] ?? asset.baseType}`}), path ${h.engine.scriptPaths.get(asset.id) ?? '(not in a folder)'}\n`
         + `Fields: ${fields.join('; ') || 'none'}\nUsed by (open scene): ${users.join(', ') || 'none'}\n\n${asset.source}`,

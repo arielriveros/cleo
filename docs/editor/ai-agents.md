@@ -48,11 +48,19 @@ selected in the hierarchy, **Possess "…"** takes it in one click. One controll
 controller possessing the same pawn takes over: the last possess wins. Until it possesses something, the
 controller drives nothing, and the section says so.
 
+| Field | Meaning |
+|---|---|
+| **Pawn** | The Character, Character Body 2D or Vehicle this controller drives. Empty: it drives nothing. |
+
 ### Source
 
 Where the intent comes from. **Player** reads the actions below; **AI** steers itself from its goal and
 brain; **None** writes no intent and holds the character still, which is what a cutscene wants. A
 script's `onThink(delta)` runs last whatever the source, so it can patch the intent.
+
+| Field | Meaning |
+|---|---|
+| **Driven by** | **Player**, **AI**, **None**, or **Remote**: a peer of a networked session, whose intent the host hands over each tick. |
 
 Everything below Aim is shown only when the source is AI.
 
@@ -63,6 +71,14 @@ and **Crouch**. These are **action names**, not keys. What drives them is author
 [Input panel](input.md), so a player can rebind anything and the controller keeps working. Leave one
 empty to leave it unbound.
 
+| Field | Meaning |
+|---|---|
+| **Move** | The action that moves the pawn, a 2-axis stick or keys. |
+| **Look** | The action that turns the aim. |
+| **Jump** | The action that jumps (a vehicle's hand brake). |
+| **Sprint** | The action held to run. |
+| **Crouch** | The action held to crouch. |
+
 ### Aim
 
 Where movement's "forward" points: the character's move direction is expressed relative to the aim
@@ -71,6 +87,7 @@ yaw, which is what makes movement camera-relative.
 | Field | Meaning |
 |---|---|
 | **Basis** | **Camera rig under the pawn** (the first Camera Rig found walking the pawn's children — the usual third-person setup), **A specific node** (picked below it), or **World** (yaw 0, so movement is world-relative — what a top-down game wants). |
+| **Node** | With **A specific node**: the node whose yaw is the aim. |
 | **Drive the camera rig** | Push the look input into that rig. On by default; leave it on unless something else already drives the rig, or the camera turns at double speed. Not shown for World. |
 
 ### Goal
@@ -93,6 +110,16 @@ How the agent moves toward its goal, shown for every goal but **script**, and on
 goal reads: `maxSpeed` (3), `arriveRadius` (0.4), `slowRadius` (2.5), `standoff` (2), `wanderRadius`
 (1.2), `wanderDistance` (2.5), `wanderJitter` (90°/s).
 
+| Field | Meaning |
+|---|---|
+| **Max speed** | The fastest it steers, in units per second. |
+| **Arrive radius** | For `arrive` and `follow`: how close counts as there. |
+| **Slow radius** | For `arrive` and `follow`: how far out it starts slowing down. |
+| **Standoff** | For `follow`: the distance it keeps from its target. |
+| **Wander radius** | For `wander`: the size of the circle ahead it picks its heading on. |
+| **Wander distance** | For `wander`: how far ahead that circle is. |
+| **Wander jitter** | For `wander`: how fast its heading drifts, in degrees per second. |
+
 > **A wandering agent that spins on the spot is turning too fast.** `wander` aims at a point offset
 > from current forward, so turning moves the target, which provokes more turning. Measured over 30
 > seconds of drift: 220°/s covers 0.9 m, 120°/s covers 0.9 m, 60°/s covers 2.7 m, **30°/s covers
@@ -105,6 +132,13 @@ Fans **Whiskers** rays ahead and steers around what they hit. A **Look ahead** o
 entirely and fires no rays at all; the physics engine has no sphere cast, so a fan of rays is the
 approximation available. `avoidDistance` (the look ahead, **0 — off by default**), `avoidStrength`
 (1.5), `whiskerCount` (3), `whiskerSpread` (60°, the total fan).
+
+| Field | Meaning |
+|---|---|
+| **Look ahead** | How far ahead the rays reach. `0` is off. |
+| **Strength** | How hard it steers away from what they hit. |
+| **Whiskers** | How many rays it fans. |
+| **Spread** | The whole fan's width, in degrees. |
 
 ### Perception
 
@@ -143,6 +177,13 @@ Separation, alignment and cohesion over the other Characters nearby. Only the `f
 these, so set **Behaviour** (or a brain's state or goal) to `flock` for them to do anything.
 `flockRadius` (the **Neighbour radius**, 6 — **0 disables flocking entirely** and skips the neighbour
 scan), `separationWeight` (1.5), `alignmentWeight` (1), `cohesionWeight` (0.8).
+
+| Field | Meaning |
+|---|---|
+| **Neighbour radius** | How far it looks for flock-mates. `0` switches flocking off and skips the neighbour scan, so a non-flocking agent pays nothing. |
+| **Separation** | Push away from crowding, weighted by closeness. Usually the strongest of the three: too weak and the flock merges into a point. |
+| **Alignment** | Match the group's average heading, measured from velocity, so an agent standing still gets no vote. |
+| **Cohesion** | Steer toward the group's centre. Usually the weakest: too much and the flock collapses inward against its own separation. |
 
 ### Brain
 

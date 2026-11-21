@@ -138,6 +138,23 @@ with an orientation, offset and side length for hexagons — the cell width and 
 Tilemaps are chunked and effectively infinite: you can paint outward as far as you like without
 declaring a size up front.
 
+### Tilemap
+
+The Tilemap node's own section: its grid, how its sprites sort, and the colliders it builds.
+
+| Field | Meaning |
+|---|---|
+| **Grid** | How a cell coordinate is laid out: **orthogonal**, **isometric** (a screen-space diamond on the XY plane, not a 3D projection) or **hexagonal**. |
+| **Cell size** | The world size of one cell's bounding box, width and height. |
+| **Orientation** | A hexagon's **pointy top** or **flat top**. |
+| **Offset** | Which line of hexagons gets the half-cell shove: odd or even rows (pointy), columns (flat). |
+| **Side length** | The length of the hexagon's two axis-aligned sides. |
+| **Sprite order** | **By Y** for a top-down map, **Side view** for a platformer (above). |
+| **3D colliders** | Build 3D physics boxes from the solid tiles, for 3D bodies on the XY plane. Off for a map only 2D character bodies walk on: they read its tiles directly. |
+| **Collision depth** | The half-depth along Z of the generated colliders. Square grids merge their solid cells into large boxes; isometric and hexagonal maps emit one prism per solid cell. |
+| **Entity layer** | The layer sprites join the draw band of when they depth-sort. |
+| **Layers** | How many layers the map has; they are edited in Tilemap mode. |
+
 ## Painting
 
 Switch to **Tilemap mode** (2D scenes only). A floating tool card gives you eight tools:
@@ -217,6 +234,28 @@ whatever velocity a script gives it.
   landing jumps on landing. Down and jump on a one-way platform drops through it.
 - **Advanced** — **gravity scale**, which scripts change at run time, and **drive without a controller**.
 
+| Field | Meaning |
+|---|---|
+| **Size** | The box's width and height, standing on the node's position (its feet). |
+| **Layer** | The collision layer it is on. |
+| **Step height** | The most it climbs walking, in world units: a step, the rise of a slope. |
+| **Flip sprites** | Mirror its sprite children to face the way it faces. |
+| **One-way platforms** | One-way platforms hold it up. Off: it passes through them both ways. |
+| **Movement** | **Walk**, on the ground under gravity, or **Fly**, on both axes with no gravity. |
+| **Walk speed** | Units per second with the stick fully over. |
+| **Run speed** | While the controller sprints. |
+| **Acceleration** | Getting up to speed, in units per second squared. |
+| **Deceleration** | Slowing to a stop on the ground. |
+| **Air control** | The share of acceleration steering has in the air: low commits a jump. |
+| **Jump height** | The apex of a jump, in units above the take-off. |
+| **Time to apex** | Seconds to the apex: gravity and the launch speed follow from the two. |
+| **Fall gravity** | Gravity on the way down, times the rise's: above 1 reads as weight. |
+| **Max fall speed** | The fastest it falls. |
+| **Coyote time** | Seconds after walking off a ledge a jump still counts as from the ground. |
+| **Jump buffer** | Seconds a press before landing is remembered for. |
+| **Gravity scale** | A multiplier on gravity, which scripts change at run time: 0 holds the height through a dash. |
+| **Drive without a controller** | Run its locomotion every frame even with no controller or script driving it. |
+
 ### Driving a 2D body
 
 The body owns walking and jumping; a game's own moves are its script's, the way the 3D examples add a roll
@@ -246,6 +285,16 @@ opened). Everything under it moves with it.
   on. Two Collider 2Ds collide when each one's **Collides with** holds the other's **Layer**. Tilemaps are on
   **Default**: leave it out and the collider falls through the tiles.
 
+| Field | Meaning |
+|---|---|
+| **Size** | Width and height, in world units, centred on the node. |
+| **Kind** | **Solid**, a block; or a **One-way platform**, stood on from above and passed from below. |
+| **Mass** | 0: it stays where it is put, or where a script moves it. Above 0 it falls onto the tilemaps and other colliders. |
+| **Gravity scale** | How strongly gravity pulls it, times the 2D world's. |
+| **Layer** | The collision layer it is on. |
+| **Collides with** | The layers it lands on and stops at. Tilemaps are on Default. |
+| **Enabled** | Off, nothing collides with it (a door that opened). |
+
 ### Trigger 2D
 
 A **Trigger** (**Simulation ▸ Trigger**) in a 2D scene is a trigger box, centred on the node and moved by its
@@ -267,9 +316,17 @@ or **Animated Sprite**), and **Appearance**.
 imports an image and slices it into a new tileset; **Use existing…** picks one, or drag a tileset from
 the Assets panel onto the slot. Unlinked, the sprite draws nothing.
 
-**Sprite** — a static sprite: a tileset plus one tile index, picked on the tile grid.
+### Sprite
 
-**Animated Sprite** — an ordered list of tiles with fps and loop. **Frames from** chooses where the
+A static sprite: a tileset plus one tile index, picked on the tile grid.
+
+| Field | Meaning |
+|---|---|
+| **Constraints** | How the sprite turns to the camera (below): **Free**, **Spherical** or **Cylindrical**. |
+
+### Animated Sprite
+
+An ordered list of tiles with fps and loop. **Frames from** chooses where the
 list comes from: the node itself, or the tile's own animation metadata in the tileset, which is the
 better choice when the same animation is used in several places.
 
@@ -284,7 +341,15 @@ better choice when the same animation is used in several places.
 - **Random start** — each copy starts on a random frame of its own list, so a row of the same sprite
   (torches along a wall) does not flicker in step. It applies when the sprite spawns.
 
-**Appearance** — tint, opacity, blending, sorting order, pivot, flip, lit, exposure weight, follow light, soft fade, transparency, which sides draw, and wireframe. A tileset with
+| Field | Meaning |
+|---|---|
+| **Frames per second** | How fast its own frame list plays. |
+| **Loop** | Start the list over at its end; off, the last frame holds. |
+| **Random start** | Each copy starts on a random frame of its own list. |
+
+### Appearance
+
+Tint, opacity, blending, sorting order, pivot, flip, lit, exposure weight, follow light, soft fade, transparency, which sides draw, and wireframe. A tileset with
 **overdrive** makes its sprites glow through bloom; the value belongs to the tileset, and the section
 only reports it.
 
@@ -321,6 +386,14 @@ only reports it.
   flame set into its torch shows a straight edge at the torch head. Above 0 the edge melts away. The sprite
   is still hidden by whatever stands in front of it, so the torch head seen from below hides the flame. A
   flame wants a few centimetres to a little over a decimetre.
+
+| Field | Meaning |
+|---|---|
+| **Tint** | A colour the image is multiplied by; a lit sprite's is the colour of what scatters the light. |
+| **Opacity** | How much of the sprite shows. |
+| **Transparent** | Draw it blended over what is behind it, in the transparent pass. |
+| **Sides** | Which faces draw: **Double**, **Front** or **Back**. |
+| **Wireframe** | Draw its quad's edges only. |
 
 Both support **billboarding** (**Constraints**: `free`, `spherical`, `cylindrical`), which matters in
 3D scenes where sprites are used for effects.
@@ -398,6 +471,16 @@ orthographic and sized in art pixels:
 
 Its frame (the reference resolution at its zoom) is drawn in the editor where it stands.
 
+| Field | Meaning |
+|---|---|
+| **Active** | The camera the game sees through in Play. |
+| **Zoom** | How far in the view is: 2 shows half the reference resolution's world, twice as big. |
+| **Follow offset** | Where the camera looks from the followed node, in world units. |
+| **Dead zone** | The box round the view's centre the target moves in before the camera does, in world units. |
+| **Damping** | About how long the camera takes to catch up, in seconds. 0 locks it on. |
+| **Look ahead** | How far ahead of a moving target the camera looks, in world units. |
+| **Room transition** | How long the slide into the next room takes, in seconds. 0 cuts. |
+
 ### Room
 
 A **Room** (**Sprites ▸ Room**) is one screen of a 2D world: a rectangle, **size** wide and high, centred
@@ -408,6 +491,11 @@ slides the camera into the next, and scripts on the followed node and on the roo
 last one; only a jump far away (a teleport) frees it. **Zone** is a free label (an area of the world) for a
 map or a script.
 
+| Field | Meaning |
+|---|---|
+| **Size** | Width and height, in world units, centred on the node. |
+| **Zone** | A free label for the area the room belongs to: for a map, an ambience or a script. |
+
 ### Parallax Layer
 
 A **Parallax Layer** (**Sprites ▸ Parallax Layer**) is a backdrop sprite that moves with only part of the
@@ -416,6 +504,13 @@ camera's travel: **parallax** 1 moves with the world, 0 stays on screen (a sky),
 whose one tile is the whole image, as a background imported on its own is. **Scroll** drifts it by itself
 (clouds). It sorts like any sprite (negative sorting orders behind the tilemap's layers) and is selected
 from the scene tree, never by a viewport click.
+
+| Field | Meaning |
+|---|---|
+| **Parallax** | How much of the camera's travel the layer moves with, across and up: 1 with the world, 0 not at all (a sky). |
+| **Repeat X** | Fill the view across, however far the camera goes. |
+| **Repeat Y** | Fill the view up and down. |
+| **Scroll** | A drift of its own, in world units a second (clouds). |
 
 ## The 2D frame
 

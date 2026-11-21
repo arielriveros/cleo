@@ -2,14 +2,11 @@ import { useEffect, useState } from 'react'
 import { CharacterBody2DNode, Body2DNode, ControllerNode, LOCOMOTION_2D_DEFAULTS, jumpPhysics } from 'cleo'
 import type { Body2DMovement } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import {
-  Button, DocScope, NumberInput, PropertyRow, PropertyTable, SectionTitle, SegmentedControl, Select, Toggle, Hint,
-} from '@cleo/app-kit/ui'
+import { Button, DocScope, SectionTitle, Hint } from '@cleo/app-kit/ui'
 import { useEventBus } from '../../EventBusContext'
 import { usePlayback } from '../../PlaybackContext'
 import { CharacterIcon, PhysicsIcon } from '../sectionIcons'
-import { PairInput } from './ui2D'
-import { LayerDropdown, LayerMaskDropdown } from '../physicsEditors/layerPickers'
+import DeclaredSections, { DeclaredSection, useNodeTick } from '../../properties/DeclaredSections'
 
 // The inspectors of the 2D physics nodes (src/physics2d): a character body (its generic walking, flying and
 // jumping, and who drives it) and a box collider. A 2D trigger is a Trigger node in a 2D scene (TriggerEditor).
@@ -25,84 +22,25 @@ function useNodeEdit(node: unknown): () => void {
   }
 }
 
-type NumberKey = 'walkSpeed' | 'runSpeed' | 'acceleration' | 'deceleration' | 'airControl' | 'jumpHeight' | 'jumpTimeToApex'
-  | 'fallGravityMultiplier' | 'maxFallSpeed' | 'coyoteSeconds' | 'jumpBufferSeconds' | 'gravityScale' | 'stepHeight'
-
-/** One number of the body's tuning, never negative. */
-function Tune(props: { n: CharacterBody2DNode, k: NumberKey, label: string, step: number, max?: number, hint?: string, changed: () => void }) {
-  return (
-    <PropertyRow label={props.label} hint={props.hint}>
-      <NumberInput step={props.step} value={props.n[props.k]} onChange={(x) => {
-        props.n[props.k] = Math.min(props.max ?? Infinity, Math.max(0, x)); props.changed()
-      }} />
-    </PropertyRow>
-  )
-}
-
-const MOVEMENTS: { value: Body2DMovement, label: string }[] = [{ value: 'walk', label: 'Walk' }, { value: 'fly', label: 'Fly' }]
-
 export function CharacterBody2DEditor(props: { node: CharacterBody2DNode }) {
   const n = props.node
   const changed = useNodeEdit(n)
+  useNodeTick(n)   // the lines under the rows follow them
   const { gravity, jumpSpeed } = jumpPhysics(n)
-  const walker = n.movement === 'walk'
   return (
     <DocScope page='editor/tilemap-2d'>
       <Collapsable title='Character Body 2D' icon={<CharacterIcon />} persistKey='node.characterBody2D' defaultOpen>
         <div className='w-full p-2'>
-          <PropertyTable columns={['45%', '55%']}>
-            <PropertyRow label='Size' hint='The box, width and height, standing on the node’s position (its feet).'>
-              <PairInput min={0.01} value={n.size} onChange={(v) => { n.size = v; changed() }} />
-            </PropertyRow>
-            <PropertyRow label='Layer' hint='The collision layer it is on: a trigger sees it when it looks for that layer, an AI when it looks for it. The project names its layers, for 2D and 3D alike.'>
-              <LayerDropdown value={n.layer} onChange={(v) => { n.layer = v; changed() }} />
-            </PropertyRow>
-            <Tune n={n} k='stepHeight' label='Step height' step={0.05} hint='The most it climbs walking: a step, the rise of a slope. World units.' changed={changed} />
-            <PropertyRow label='Flip sprites' hint='Mirror its sprite children to face the way it faces.'>
-              <Toggle checked={n.flipSprites} onChange={(c) => { n.flipSprites = c; changed() }} />
-            </PropertyRow>
-            <PropertyRow label='One-way platforms' hint='One-way platforms hold it up. Off: it passes through them both ways, as a flier does.'>
-              <Toggle checked={n.oneWayPlatforms} onChange={(c) => { n.oneWayPlatforms = c; changed() }} />
-            </PropertyRow>
-          </PropertyTable>
-
+          <DeclaredSection node={n} title='' />
           <SectionTitle title='Driven by' className='mt-3 mb-1' />
           <DrivenBy body={n} changed={changed} />
-
-          <SectionTitle title='Movement' className='mt-3 mb-1' />
-          <div className='mb-2'>
-            <SegmentedControl value={n.movement} options={MOVEMENTS} onChange={(v) => { n.movement = v; changed() }} />
-          </div>
-          <PropertyTable columns={['45%', '55%']}>
-            <Tune n={n} k='walkSpeed' label='Walk speed' step={0.5} hint='Units per second with the stick fully over.' changed={changed} />
-            <Tune n={n} k='runSpeed' label='Run speed' step={0.5} hint='While the intent sprints (a Sprint action on the controller).' changed={changed} />
-            <Tune n={n} k='acceleration' label='Acceleration' step={5} hint='Getting up to speed, units per second squared.' changed={changed} />
-            {walker && <Tune n={n} k='deceleration' label='Deceleration' step={5} hint='Slowing to a stop on the ground.' changed={changed} />}
-            {walker && <Tune n={n} k='airControl' label='Air control' step={0.05} max={1} hint='The share of acceleration steering has in the air: low commits a jump.' changed={changed} />}
-          </PropertyTable>
-
-          {walker && <>
-            <SectionTitle title='Jump' className='mt-3 mb-1' />
-            <PropertyTable columns={['45%', '55%']}>
-              <Tune n={n} k='jumpHeight' label='Jump height' step={0.1} hint='The apex of a jump, units above the take-off.' changed={changed} />
-              <Tune n={n} k='jumpTimeToApex' label='Time to apex' step={0.02} hint='Seconds to the apex: gravity and the launch speed follow from the two.' changed={changed} />
-              <Tune n={n} k='fallGravityMultiplier' label='Fall gravity' step={0.1} hint='Gravity on the way down, times the rise’s: above 1 reads as weight.' changed={changed} />
-              <Tune n={n} k='maxFallSpeed' label='Max fall speed' step={1} changed={changed} />
-              <Tune n={n} k='coyoteSeconds' label='Coyote time' step={0.01} hint='Seconds after walking off a ledge a jump still counts as from the ground.' changed={changed} />
-              <Tune n={n} k='jumpBufferSeconds' label='Jump buffer' step={0.01} hint='Seconds a press before landing is remembered for.' changed={changed} />
-            </PropertyTable>
+          <DeclaredSection node={n} title='Movement' />
+          <DeclaredSection node={n} title='Jump'>
             <Hint className='mt-1'>
               Gravity {gravity.toFixed(1)} u/s², launch {jumpSpeed.toFixed(1)} u/s. Defaults: a {LOCOMOTION_2D_DEFAULTS.jumpHeight}-unit jump in {LOCOMOTION_2D_DEFAULTS.jumpTimeToApex} s.
             </Hint>
-          </>}
-
-          <SectionTitle title='Advanced' className='mt-3 mb-1' />
-          <PropertyTable columns={['45%', '55%']}>
-            <Tune n={n} k='gravityScale' label='Gravity scale' step={0.1} hint='A multiplier on gravity, which scripts change at run time: 0 holds the height through a dash.' changed={changed} />
-            <PropertyRow label='Drive without a controller' hint='Run its locomotion every frame even with no controller or script driving it.'>
-              <Toggle checked={n.driveWhenUnpossessed} onChange={(c) => { n.driveWhenUnpossessed = c; changed() }} />
-            </PropertyRow>
-          </PropertyTable>
+          </DeclaredSection>
+          <DeclaredSection node={n} title='Advanced' />
           <Hint className='mt-1'>
             A dash, a double jump or a wall jump is the game’s own: write it in the body’s script, in onMove2D.
           </Hint>
@@ -174,37 +112,12 @@ function LiveReadout({ body }: { body: CharacterBody2DNode }) {
 export function Body2DEditor(props: { node: Body2DNode }) {
   const n = props.node
   const changed = useNodeEdit(n)
+  useNodeTick(n)   // the lines under the rows follow them
   return (
     <DocScope page='editor/tilemap-2d'>
       <Collapsable title='Collider 2D' icon={<PhysicsIcon />} persistKey='node.body2D' defaultOpen>
         <div className='w-full p-2'>
-          <PropertyTable columns={['45%', '55%']}>
-            <PropertyRow label='Size' hint='Width and height, world units, centred on the node.'>
-              <PairInput min={0} value={n.size} onChange={(v) => { n.size = v; changed() }} />
-            </PropertyRow>
-            <PropertyRow label='Kind' hint='Solid: a block. One-way: a platform stood on from above, passed from below.'>
-              <Select value={n.kind} onChange={(e) => { n.kind = e.target.value === 'oneWay' ? 'oneWay' : 'solid'; changed() }}>
-                <option value='solid'>Solid</option>
-                <option value='oneWay'>One-way platform</option>
-              </Select>
-            </PropertyRow>
-            <PropertyRow label='Mass' hint='0: it stays where it is put, or where a script moves it. Above 0 it falls onto the tilemaps and other colliders.'>
-              <NumberInput step={0.1} min={0} value={n.mass} onChange={(v) => { n.mass = Math.max(0, v); changed() }} />
-            </PropertyRow>
-            {n.mass > 0 &&
-              <PropertyRow label='Gravity scale' hint='How strongly gravity pulls it, times the 2D world’s.'>
-                <NumberInput step={0.1} value={n.gravityScale} onChange={(v) => { n.gravityScale = v; changed() }} />
-              </PropertyRow>}
-            <PropertyRow label='Layer' hint='The collision layer it is on. A trigger sees it when it looks for that layer.'>
-              <LayerDropdown value={n.layer} onChange={(v) => { n.layer = v; changed() }} />
-            </PropertyRow>
-            <PropertyRow label='Collides with' hint='The layers it lands on and stops at. Tilemaps are on Default.'>
-              <LayerMaskDropdown value={n.mask} onChange={(v) => { n.mask = v; changed() }} />
-            </PropertyRow>
-            <PropertyRow label='Enabled'>
-              <Toggle checked={n.enabled} onChange={(c) => { n.enabled = c; changed() }} />
-            </PropertyRow>
-          </PropertyTable>
+          <DeclaredSections node={n} />
           <Hint className='mt-1'>
             {n.mass > 0
               ? 'It falls, and what is under it falls with it.'

@@ -1,5 +1,5 @@
 import { Logger, Node } from 'cleo'
-import type { TemplateName } from 'cleo'
+import type { LayerName, TemplateName } from 'cleo'
 import { attribute, eventDispatch } from 'cleo/decorators'
 
 /** What one shot was, as the gun tells it (`weapon:Shot`). */
@@ -91,7 +91,7 @@ export default class SandboxGunNode extends Node {
 
     /** Collision layers a shot passes through, by name, comma separated. */
     @attribute('Hits')
-    public passThroughLayers: string = 'Stair Ramp'
+    public passThroughLayers: LayerName[] = ['Stair Ramp']
 
     /**
      * A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon
@@ -221,7 +221,7 @@ export default class SandboxGunNode extends Node {
     private _layerMask(physics: any): number {
         if (this._mask === null) {
             let mask = -1
-            for (const name of this.passThroughLayers.split(',').map(s => s.trim()).filter(Boolean)) mask &= ~(physics.layer?.(name) ?? 0)
+            for (const name of this.passThroughLayers ?? []) if (name) mask &= ~(physics.layer?.(name) ?? 0)
             this._mask = mask
         }
         return this._mask

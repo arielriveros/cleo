@@ -278,7 +278,7 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         for (const name of list) expect(names.has(name), name).toBe(true);
         // The script reflects the list as a string list, and templateName as picked from it.
         const asset = scriptOf(spawnTemplate.nodeJson);
-        expect(asset.variables.find((v: any) => v.name === 'spawnables')?.type).toBe('stringList');
+        expect(asset.variables.find((v: any) => v.name === 'spawnables')?.type).toEqual({ kind: 'list', of: { kind: 'name', name: 'template' } });
         expect(asset.variables.find((v: any) => v.name === 'templateName')?.options).toBe('spawnables');
         const placed = allNodes(scene().scene).filter(n => scriptOf(n) === asset);
         // Hollows through the three levels, the sorcerer, the elite knight and the Warden.

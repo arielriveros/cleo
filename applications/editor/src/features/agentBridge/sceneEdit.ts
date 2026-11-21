@@ -10,7 +10,7 @@ import { cloneJson, variantFromContent } from '../../utils/templateVariants'
 import { cryptoRandomId } from '../../utils/ids'
 import { instantiateModelAsset } from '../../utils/models'
 import { applyMaterialAsset } from '../../utils/materials'
-import { applyScriptAsset, getScriptIdOf, unlinkScript } from '../../utils/scripts'
+import { applyScriptAsset, getScriptIdOf, unlinkScript, upgradeScriptVar, type ScriptVarSchema } from '../../utils/scripts'
 import { toRuntimeTileset } from '../../utils/tilesets'
 import { meshPositions, shapeFitSource } from '../../utils/editorHelpers'
 import { fitShapeToPoints } from '../nodeInspector/physicsEditors/shapeListOps'
@@ -19,7 +19,7 @@ import {
   type BridgeHost, type CommandResult, type GetHost,
 } from './bridgeHost'
 import { nodePath, resolveNodeRef, userChildren } from './nodeRefs'
-import { applyProp, nearestNames } from './inspect'
+import { applyProp, declaredRow, nearestNames } from './inspect'
 import { findMaterial, uniqueMaterialName, upsertMaterial, type MadeMaterials, type MaterialAsset, type MaterialSpec } from './materials'
 import { withCapture } from './shots'
 
@@ -88,6 +88,46 @@ export interface EditCtx {
 }
 
 function refOf(ctx: EditCtx, ref: string): Node { return resolveNodeRef(ctx.scene, ref, ctx.aliases, ctx.selectedId) }
+
+/**
+ * A script field's value as the node stores it. An agent names an asset field's asset (`"skin": "Red Brick"`,
+ * by name or id) and a node field's node (`"lamp": "Hall/Lamp"`, as any node ref): those become the stored
+ * `{ $asset, id }` and `{ $nodePath }` (src/core/properties/fieldRefs.ts). Anything else is stored as given.
+ */
+function storedFieldValue(ctx: EditCtx, node: Node, v: ScriptVarSchema, value: unknown): unknown {
+  return storedValue(ctx, node, v.name, upgradeScriptVar(v).type, value)
+}
+
+/**
+ * A value of `type` as a node stores it, from what an agent names: an asset by name or id, a node by ref (see
+ * storedFieldValue). For a script's field, and for a row of a node's inspector (its declared properties).
+ */
+function storedValue(ctx: EditCtx, node: Node, name: string, type: cleo.PropertyType, value: unknown): unknown {
+  const item = type.kind === 'list' ? type.of : type
+  const one = (x: unknown): unknown => {
+    if (x === null || typeof x !== 'string') return x
+    if (item.kind === 'asset') {
+      const engine = ctx.h.engine as any
+      const lists: Record<string, { id: string; name: string }[]> = {
+        material: engine.materials ?? [], sound: engine.soundSamples ?? [], tileset: engine.tilesets ?? [],
+        texture: engine.textures ?? [],
+      }
+      const list = lists[item.asset] ?? []
+      const found = list.find(a => a.id === x) ?? list.find(a => a.name === x)
+      if (found) return cleo.assetRef(item.asset, found.id)
+      if (item.asset === 'texture' && cleo.TextureManager.Instance.getTexture(x)) return cleo.assetRef('texture', x)
+      throw new Error(`"${name}" is a ${cleo.propertyTypeLabel(item)}: no ${item.asset} is called "${x}".${list.length ? ` Some: ${list.slice(0, 8).map(a => a.name).join(', ')}.` : ''}`)
+    }
+    if (item.kind === 'node') {
+      const target = refOf(ctx, x)
+      const path = cleo.relativeNodePath(node, target)
+      if (!path) throw new Error(`"${name}": "${x}" is not in the same scene as "${node.name}".`)
+      return cleo.nodePathRef(path)
+    }
+    return x
+  }
+  return type.kind === 'list' && Array.isArray(value) ? value.map(one) : one(value)
+}
 
 /**
  * Undo for the per-node `scripts` map (resolved source by node id), which lives outside node.serialize. Call
@@ -205,7 +245,14 @@ function opAssets(ctx: EditCtx, node: Node, links: AssetLinks): () => string[] {
  */
 async function applyFields(ctx: EditCtx, node: Node, op: any, fresh: boolean): Promise<string[]> {
   const { h } = ctx
-  for (const [k, v] of Object.entries(op.props ?? {})) applyProp(node, k, v, true)
+  // A row of the node's inspector names its asset or node as a script's field does: stored as the row stores it.
+  const props: Record<string, unknown> | undefined = op.props
+    ? Object.fromEntries(Object.entries(op.props as Record<string, unknown>).map(([k, v]) => {
+        const row = declaredRow(node, k)
+        return [k, row ? storedValue(ctx, node, k, row.type, v) : v]
+      }))
+    : undefined
+  for (const [k, v] of Object.entries(props ?? {})) applyProp(node, k, v, true)
   const sid = getScriptIdOf(node)
   const scriptAsset = sid ? h.engine.scriptAssets.find(a => a.id === sid) : undefined
   if (op.scriptFields) {
@@ -214,6 +261,12 @@ async function applyFields(ctx: EditCtx, node: Node, op: any, fresh: boolean): P
     for (const k of Object.keys(op.scriptFields))
       if (!fields.has(k)) throw new Error(`Script "${scriptAsset.name}" has no public field "${k}". Fields: ${[...fields].join(', ') || 'none'}.`)
   }
+  // Asset and node fields named by the agent, as the node stores them: checked here, before anything changes.
+  const schema = new Map((scriptAsset?.variables ?? []).map(v => [v.name, v]))
+  const scriptNext: Record<string, unknown> | undefined = op.scriptFields
+    ? Object.fromEntries(Object.entries(op.scriptFields as Record<string, unknown>)
+        .map(([k, v]) => [k, schema.has(k) ? storedFieldValue(ctx, node, schema.get(k)!, v) : v]))
+    : undefined
   const material = op.material ? opMaterial(ctx, node, op.material, op.name) : undefined
   const shapes = op.shapes !== undefined && op.shapes !== null ? opShapes(h, node, op.shapes) : undefined
   const assets = op.assets ? opAssets(ctx, node, op.assets) : undefined
@@ -235,8 +288,8 @@ async function applyFields(ctx: EditCtx, node: Node, op: any, fresh: boolean): P
   if (op.rotation) { node.setRotation(op.rotation); did.push('rotation') }
   if (op.scale) { node.setScale(op.scale); did.push('scale') }
   if (op.visible !== undefined && op.visible !== null) { node.visible = op.visible; did.push('visible') }
-  if (op.props) {
-    for (const [k, v] of Object.entries(op.props)) applyProp(node, k, v)
+  if (props) {
+    for (const [k, v] of Object.entries(props)) applyProp(node, k, v)
     emitter.emit('SCENE_CHANGED', { kind: 'component', node })
     did.push(`props(${Object.keys(op.props).join(', ')})${instanceRoot && !fresh ? ' (a template change resets these on a placed copy: edit the template for lasting ones)' : ''}`)
   }
@@ -244,12 +297,12 @@ async function applyFields(ctx: EditCtx, node: Node, op: any, fresh: boolean): P
     // Script fields are native properties that Node.serialize leaves out (the editor injects them as
     // scriptVars at save time), so the node snapshot cannot see them: an undo entry of their own.
     const id = node.id
-    const next = { ...op.scriptFields }
+    const next = scriptNext!
     const before = Object.fromEntries(Object.keys(next).map(k => [k, (node as any)[k]]))
     const write = (values: Record<string, unknown>) => {
       const n = ctx.scene.getNodeById(id)
       if (!n) return
-      for (const [k, v] of Object.entries(values)) (n as any)[k] = Array.isArray(v) ? [...v] : v
+      for (const [k, v] of Object.entries(values)) (n as any)[k] = v && typeof v === 'object' ? JSON.parse(JSON.stringify(v)) : v
       emitter.emit('SCENE_CHANGED', { kind: 'variable', node: n })
     }
     write(next)

@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { CameraNode, CameraRigNode, Node, resolvePostChain, materialIndexOf } from 'cleo';
-import NodeRefInput from '../NodeRefInput';
-import { useCleoEngine } from '../../EngineContext';
+import React, { useState } from 'react';
+import { CameraNode, resolvePostChain, materialIndexOf, rigOfCamera } from 'cleo';
 import type { PostChainEntry, PostEffectId } from 'cleo';
 import Collapsable from '@cleo/app-kit/ui/Collapsable';
-import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Toggle, Hint, cn, valueClass } from '@cleo/app-kit/ui';
+import { PropertyTable, PropertyRow, Select, Button, Toggle, Hint, cn, valueClass } from '@cleo/app-kit/ui';
+import DeclaredSections, { useNodeTick } from '../../properties/DeclaredSections';
 import { CameraIcon, MaterialIcon } from '../sectionIcons';
 import {
   BloomIcon, ChromaticIcon, DepthOfFieldIcon, FilmGrainIcon, GodRaysIcon, LensFlareIcon, PostEffectIcon, VignetteIcon,
@@ -36,135 +35,23 @@ const BUILTIN_ICONS: Record<string, (props: React.SVGProps<SVGSVGElement>) => Re
   filmGrain: FilmGrainIcon,
 };
 
-/** The nearest CameraRigNode above this camera, if any — the rig drives its transform. */
-function findRig(node: CameraNode): CameraRigNode | null {
-  let current: Node | null = node.parent;
-  while (current) {
-    if (current instanceof CameraRigNode) return current;
-    current = current.parent;
-  }
-  return null;
-}
-
 export default function CameraEditor(props: { node: CameraNode }) {
-  const rig = findRig(props.node);
-  // The rig writes camera.fov every frame while it owns FOV, so the slider has to be disabled.
-  const fovDrivenByRig = !!rig?.fovEnabled;
-  const eventEmitter = useEventBus();
-  const { editorScene } = useCleoEngine();
-  const [, forceCamera] = useState(0); // the focus target is node state, not React state
-
-  // Focusing on itself or on something under it is not circular the way a rig's follow target is, but
-  // it is never what anyone means — a camera cannot usefully focus on its own position.
-  const notSelfOrDescendant = (node: Node) => node !== props.node && !node.isDescendantOf(props.node);
-
-  const setFocusTarget = (id: string | null) => {
-    props.node.focusTargetId = id;
-    eventEmitter.emit('SCENE_CHANGED', { kind: 'camera', node: props.node });
-    forceCamera((x) => x + 1);
-  };
-
-  const [cameraState, setCameraState] = useState({
-    type: props.node.camera.type,
-    fov: props.node.camera.fov,
-    near: props.node.camera.near,
-    far: props.node.camera.far,
-    left: props.node.camera.left,
-    right: props.node.camera.right,
-    bottom: props.node.camera.bottom,
-    top: props.node.camera.top,
-    viewmodelFov: props.node.camera.viewmodelFov,
-  });
-
-  useEffect(() => {
-    setCameraState({
-      type: props.node.camera.type,
-      fov: props.node.camera.fov,
-      near: props.node.camera.near,
-      far: props.node.camera.far,
-      left: props.node.camera.left,
-      right: props.node.camera.right,
-      bottom: props.node.camera.bottom,
-      top: props.node.camera.top,
-      viewmodelFov: props.node.camera.viewmodelFov,
-    });
-  }, [props.node]);
-
-  useEffect(() => {
-    props.node.camera.type = cameraState.type;
-    if (!fovDrivenByRig) props.node.camera.fov = cameraState.fov;
-    props.node.camera.near = cameraState.near;
-    props.node.camera.far = cameraState.far;
-    props.node.camera.left = cameraState.left;
-    props.node.camera.right = cameraState.right;
-    props.node.camera.bottom = cameraState.bottom;
-    props.node.camera.top = cameraState.top;
-    props.node.camera.viewmodelFov = cameraState.viewmodelFov;
-  }, [cameraState, props.node]);
-
-  const set = (patch: Partial<typeof cameraState>) => {
-    setCameraState((prev) => ({ ...prev, ...patch }));
-    eventEmitter.emit('SCENE_CHANGED', { kind: 'camera', node: props.node });
-  };
-
+  useNodeTick(props.node);
+  // A rig that controls the FOV owns it: the field shows the rig's value instead (a slider that did nothing would
+  // read as a bug).
+  const rig = rigOfCamera(props.node);
+  const fovDrivenByRig = props.node.camera.type === 'perspective' && !!rig?.fovEnabled;
   return (
     <>
       <Collapsable title='Camera' icon={<CameraIcon />} persistKey='camera'>
         <div className='w-full p-2'>
-          <PropertyTable columns={['45%', '55%']}>
-            <PropertyRow label='Type'>
-              <Select value={cameraState.type} onChange={(e) => set({ type: e.target.value as 'perspective' | 'orthographic' })}>
-                <option value='perspective'>Perspective</option>
-                <option value='orthographic'>Orthographic</option>
-              </Select>
+          {fovDrivenByRig && <PropertyTable columns={['45%', '55%']}>
+            <PropertyRow label='Field of View'>
+              <span className={cn(valueClass, 'tabular-nums')}>{rig!.fov.toFixed(1)}</span>
+              <Hint>Driven by the Camera Rig.</Hint>
             </PropertyRow>
-            {cameraState.type === 'perspective' && (
-              <PropertyRow label='Field of View'>
-                {/* A disabled-looking-but-draggable slider that silently did nothing would read as a
-                    bug, and Slider has no disabled state — so show the rig's value as plain text. */}
-                {fovDrivenByRig ? (
-                  <>
-                    <span className={cn(valueClass, 'tabular-nums')}>{rig!.fov.toFixed(1)}</span>
-                    <Hint>Driven by the Camera Rig.</Hint>
-                  </>
-                ) : (
-                  <Slider min={1} max={179} step={1} value={cameraState.fov} onChange={(v) => set({ fov: v })} />
-                )}
-              </PropertyRow>
-            )}
-            {cameraState.type === 'perspective' && (
-              <PropertyRow label='Viewmodel FOV'>
-                <NumberInput value={cameraState.viewmodelFov} min={0} max={120} step={1} onChange={(v) => set({ viewmodelFov: v })} />
-                <Hint>The lens nodes marked Viewmodel are drawn at, degrees. 0 draws them as the world.</Hint>
-              </PropertyRow>
-            )}
-            <PropertyRow label='Near'>
-              <NumberInput value={cameraState.near} onChange={(v) => set({ near: v })} />
-            </PropertyRow>
-            <PropertyRow label='Far' divider={true}>
-              <NumberInput value={cameraState.far} onChange={(v) => set({ far: v })} />
-            </PropertyRow>
-            <PropertyRow label='Focus Target' divider={cameraState.type === 'orthographic'}>
-              {/* Depth of field focuses HERE when a node is named, overriding the renderer's authored
-                  focus distance. Measured along the view axis rather than as a straight-line distance,
-                  so a subject off to one side stays sharp. A target that despawns holds the last focus
-                  distance rather than racking the whole frame to the camera. */}
-              <NodeRefInput
-                value={props.node.focusTargetId}
-                scene={editorScene}
-                filter={notSelfOrDescendant}
-                placeholder='(use focus distance)'
-                onChange={(id) => setFocusTarget(id)} />
-            </PropertyRow>
-            {cameraState.type === 'orthographic' && (
-              <>
-                <PropertyRow label='Left'><NumberInput value={cameraState.left} onChange={(v) => set({ left: v })} /></PropertyRow>
-                <PropertyRow label='Right'><NumberInput value={cameraState.right} onChange={(v) => set({ right: v })} /></PropertyRow>
-                <PropertyRow label='Bottom'><NumberInput value={cameraState.bottom} onChange={(v) => set({ bottom: v })} /></PropertyRow>
-                <PropertyRow label='Top' divider={false}><NumberInput value={cameraState.top} onChange={(v) => set({ top: v })} /></PropertyRow>
-              </>
-            )}
-          </PropertyTable>
+          </PropertyTable>}
+          <DeclaredSections node={props.node} of={CameraNode} />
         </div>
       </Collapsable>
       <PostChainList node={props.node} />
@@ -172,9 +59,6 @@ export default function CameraEditor(props: { node: CameraNode }) {
   );
 }
 
-// The camera's post-process chain: the built-in effects and its screen-space custom-material passes,
-// in the order they run. Rows reference a material asset by id; the live materials are rebuilt from the
-// assets on every edit, exactly as they were when this list held materials alone.
 function PostChainList(props: { node: CameraNode }) {
   const { materials } = useAssetLibrary();
   const { enterMaterialEditor } = useEditorSessions();

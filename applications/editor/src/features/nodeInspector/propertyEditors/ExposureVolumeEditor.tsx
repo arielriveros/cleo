@@ -1,44 +1,22 @@
 import { useEffect, useState } from 'react'
-import { AUTO_EXPOSURE_PRESETS, ExposureVolumeNode, MIN_EXPOSURE_VOLUME_SIZE, type ExposureOverrides, type Preset } from 'cleo'
+import { AUTO_EXPOSURE_PRESETS, ExposureVolumeNode, type ExposureOverrides, type Preset } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { DocScope, Hint, NumberInput, PresetMenu, PropertyRow, PropertyTable, SectionTitle, Toggle, VectorInput } from '@cleo/app-kit/ui'
+import { DocScope, Hint, PresetMenu, SectionTitle } from '@cleo/app-kit/ui'
 import { useCleoEngine } from '../../EngineContext'
 import { ExposureVolumeIcon } from '../sectionIcons'
-import { BOX_VOLUME_EDITED } from '../../gizmo/BoxVolumeGizmo'
+import DeclaredSections, { useNodeTick } from '../../properties/DeclaredSections'
 import ExposureSettingsFields, { type ExposureFieldKey, type ExposureFieldValues } from '@cleo/app-kit/renderer/ExposureSettingsFields'
 
 // The Exposure Volume inspector. The volume is an oriented box (the node's full transform) inside which
-// its overrides replace the scene's exposure settings; every field left unticked inherits the scene's.
+// its overrides replace the scene's exposure settings; every field left unticked inherits the scene's. The
+// box's rows are its declared properties (src/properties/clouds.ts); the overrides are the Rendering panel's
+// exposure fields, each with a tick box.
 
 export default function ExposureVolumeEditor(props: { node: ExposureVolumeNode }) {
   const { eventEmitter, instance } = useCleoEngine()
   const renderer = instance?.renderer
-  const read = () => ({
-    size: [...props.node.size] as [number, number, number], blendDistance: props.node.blendDistance,
-    priority: props.node.priority, enabled: props.node.enabled, overrides: props.node.overrides,
-  })
-  const [v, setV] = useState(read)
-  useEffect(() => { setV(read()) }, [props.node])
-
-  // The viewport's face handles resize the box (and move the node) behind this panel's back.
-  useEffect(() => {
-    const onEdited = (e: { nodeId: string }) => { if (e?.nodeId === props.node.id) setV(read()) }
-    eventEmitter.on(BOX_VOLUME_EDITED, onEdited)
-    return () => { eventEmitter.off(BOX_VOLUME_EDITED, onEdited) }
-  }, [eventEmitter, props.node])
-
-  const changed = () => {
-    setV(read())
-    eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node })
-  }
-  const set = (patch: Partial<Omit<ReturnType<typeof read>, 'overrides'>>) => {
-    const n = props.node
-    if (patch.size !== undefined) n.size = patch.size
-    if (patch.blendDistance !== undefined) n.blendDistance = patch.blendDistance
-    if (patch.priority !== undefined) n.priority = patch.priority
-    if (patch.enabled !== undefined) n.enabled = patch.enabled
-    changed()
-  }
+  useNodeTick(props.node)
+  const changed = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node })
   const applyPreset = (p: Preset<ExposureOverrides>) => { props.node.applyPreset(p); changed() }
 
   // What the scene would give each field: what an unticked row shows, and what ticking one starts from.
@@ -53,7 +31,7 @@ export default function ExposureVolumeEditor(props: { node: ExposureVolumeNode }
     exposureSpeedDown: renderer?.exposureSpeedDown ?? 1,
   })
   const scene = inherited()
-  const values = { ...scene, ...v.overrides } as ExposureFieldValues
+  const values = { ...scene, ...props.node.overrides } as ExposureFieldValues
 
   // Whether the camera is inside, and how far: polled, since the camera moves without telling anyone.
   const [inside, setInside] = useState<{ weight: number, ev: number } | null>(null)
@@ -72,20 +50,7 @@ export default function ExposureVolumeEditor(props: { node: ExposureVolumeNode }
     <Collapsable title='Exposure Volume' icon={<ExposureVolumeIcon />} persistKey='exposureVolumeEditor'
       right={<PresetMenu presets={AUTO_EXPOSURE_PRESETS} onApply={applyPreset} title='Exposure presets — override every field they set' />}>
       <div className='w-full p-2 flex flex-col gap-2'>
-        <PropertyTable columns={['45%', '55%']}>
-          <PropertyRow label='Enabled' divider>
-            <Toggle checked={v.enabled} onChange={enabled => set({ enabled })} />
-          </PropertyRow>
-          <PropertyRow label='Size' divider>
-            <VectorInput value={v.size} min={MIN_EXPOSURE_VOLUME_SIZE} step={0.5} onChange={size => set({ size: size as [number, number, number] })} />
-          </PropertyRow>
-          <PropertyRow label='Blend distance' divider>
-            <NumberInput value={v.blendDistance} min={0} step={0.1} onChange={blendDistance => set({ blendDistance })} />
-          </PropertyRow>
-          <PropertyRow label='Priority' divider={false}>
-            <NumberInput value={v.priority} step={1} onChange={priority => set({ priority })} />
-          </PropertyRow>
-        </PropertyTable>
+        <DeclaredSections node={props.node} />
         <Hint>{inside
           ? `Camera inside · weight ${inside.weight.toFixed(2)} · EV ${inside.ev.toFixed(2)}`
           : 'Camera outside: the scene\'s exposure applies.'}</Hint>

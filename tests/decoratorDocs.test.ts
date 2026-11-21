@@ -11,7 +11,7 @@ import * as Decorators from '../src/decorators';
 //   - every decorator has a summary, and every overload of one has its own;
 //   - every parameter has an `@param`;
 //   - no other tag. TypeScript starts a tag at an `@` that begins a doc line or follows a space, inside
-//     backticks too, so an example written `@save @pick(…)` turns into a tag called `pick` in the hover.
+//     backticks too, so an example written `@save @options(…)` turns into a tag called `options` in the hover.
 
 const SOURCE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'core', 'scripting', 'decorators.ts');
 
@@ -30,8 +30,8 @@ function text(parts: ts.SymbolDisplayPart[]): string {
 }
 
 describe('the script decorators', () => {
-    it('are the 22 that cleo/decorators exports', () => {
-        expect(NAMES).toEqual(['animAction', 'animParam', 'animTrigger', 'attribute', 'child', 'eventDispatch', 'eventListener', 'every', 'find', 'netcall', 'observable', 'onAction', 'onClipEvent', 'onEnter', 'onEvent', 'onExit', 'onHold', 'onTap', 'options', 'pick', 'save', 'synced']);
+    it('are the 21 that cleo/decorators exports', () => {
+        expect(NAMES).toEqual(['animAction', 'animParam', 'animTrigger', 'attribute', 'child', 'eventDispatch', 'eventListener', 'every', 'find', 'netcall', 'observable', 'onAction', 'onClipEvent', 'onEnter', 'onEvent', 'onExit', 'onHold', 'onTap', 'options', 'save', 'synced']);
         for (const name of NAMES) expect(exports.has(name), name).toBe(true);
     });
 

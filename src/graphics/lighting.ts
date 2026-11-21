@@ -405,10 +405,15 @@ export class Spotlight extends PunctualLight {
         this._outerCutOff = properties.outerCutOff ?? 35.5;
     }
 
+    /** Inner half-angle, degrees. The outer cone moves out with it: there must be room for the falloff. */
     public get cutOff(): number { return this._cutOff; }
-    public set cutOff(value: number) { this._cutOff = value; }
+    public set cutOff(value: number) {
+        this._cutOff = value;
+        if (this._outerCutOff <= value) this._outerCutOff = value + 0.01;
+    }
+    /** Outer half-angle, degrees: always a little wider than the inner one. */
     public get outerCutOff(): number { return this._outerCutOff; }
-    public set outerCutOff(value: number) { this._outerCutOff = value; }
+    public set outerCutOff(value: number) { this._outerCutOff = Math.max(value, this._cutOff + 0.01); }
 
     /**
      * The cone falloff, pre-solved into the `saturate(cosAngle * scale + offset)` the shader wants.

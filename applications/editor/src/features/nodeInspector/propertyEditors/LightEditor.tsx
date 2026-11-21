@@ -1,104 +1,40 @@
-import { useState, useEffect } from 'react'
-import { AreaLight, DirectionalLight, LightNode, PointLight, Spotlight, SpriteNode, applyPreset, lightPresetsFor, type AreaLightShape, type LightPreset } from 'cleo'
-import { vec3ToHex } from '../../../utils/UtilFunctions';
+import { useEffect } from 'react'
+import { LightNode, SpriteNode, applyPreset, lightPresetsFor, type LightPreset } from 'cleo'
 import { useEventBus } from '../../EventBusContext';
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { Button, ColorInput, PresetMenu, PropertyTable, PropertyRow, NumberInput, Select, Slider, Section, Toggle, Hint } from '@cleo/app-kit/ui'
+import { Button, ColorInput, PresetMenu, Hint } from '@cleo/app-kit/ui'
 import { LightIcon } from '../sectionIcons'
 import { cloudBakeWarning, useCloudBakeStatus } from '../../../utils/cloudBake'
 import { lightBakeWarning, rebakeStale, useProbeBakeStatus } from '../../../utils/probeBake'
+import { DeclaredSection } from '../../properties/DeclaredSections'
 
 // Re-exported so SkyAtmosphereEditor and VolumetricCloudsEditor keep resolving ColorInput from here.
 export { ColorInput };
 
-/** A punctual light is any of these kinds; all carry the same three photometric properties. */
-type Punctual = PointLight | Spotlight | AreaLight;
-
-const CONE_HINT = 'Half-angles in degrees. Full brightness inside the inner cone, falling to nothing at the outer one. Narrowing the cone does not brighten the light — intensity is in lumens either way, so beam shape and brightness are independent.';
-
-/** The light's sliders share one label width, wide enough for "Angular Radius": the Slider's own 70 px cut it to "Angular R...". */
-const SLIDER_LABEL = 'w-[112px]'
+// The Light inspector. Its rows are the light's declared properties (src/properties/environment.ts): which of
+// them show follows the light's kind. The card adds what no type says: the presets, the bake warnings, and the
+// way back to physical units for a light converted from the old falloff.
 
 export default function LightEditor(props: {node: LightNode}) {
   const eventEmitter = useEventBus();
-  const light = props.node.light;
   const markLightDirty = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'light', node: props.node });
 
-  const [castShadows, setCastShadows] = useState(props.node.castShadows);
-  const [bake, setBake] = useState(props.node.bake);
-  const [color, setColor] = useState(vec3ToHex(light.color));
-  // One state bag for every numeric property; which of them are shown depends on the light type.
-  const [values, setValues] = useState<{
-    intensity: number, angularRadius: number,
-    range: number, sourceRadius: number,
-    cutOff: number, outerCutOff: number,
-    flickerAmount: number, flickerSpeed: number,
-    shape: AreaLightShape, width: number, height: number, twoSided: boolean,
-  }>({ intensity: 0, angularRadius: 0, range: 0, sourceRadius: 0, cutOff: 0, outerCutOff: 0, flickerAmount: 0, flickerSpeed: 7,
-       shape: 'rect', width: 1, height: 0.5, twoSided: false });
-  const [legacy, setLegacy] = useState(false);
-
-  const read = () => {
-    const l = props.node.light;
-    setValues({
-      intensity: (l as DirectionalLight | Punctual).intensity,
-      angularRadius: l instanceof DirectionalLight ? l.angularRadius : 0,
-      range: l instanceof DirectionalLight ? 0 : (l as Punctual).range,
-      sourceRadius: l instanceof DirectionalLight ? 0 : (l as Punctual).sourceRadius,
-      cutOff: l instanceof Spotlight ? l.cutOff : 0,
-      outerCutOff: l instanceof Spotlight ? l.outerCutOff : 0,
-      flickerAmount: l instanceof DirectionalLight ? 0 : (l as Punctual).flickerAmount,
-      flickerSpeed: l instanceof DirectionalLight ? 7 : (l as Punctual).flickerSpeed,
-      shape: l instanceof AreaLight ? l.shape : 'rect',
-      width: l instanceof AreaLight ? l.width : 1,
-      height: l instanceof AreaLight ? l.height : 0.5,
-      twoSided: l instanceof AreaLight ? l.twoSided : false,
-    });
-    setLegacy(l.legacyFalloff);
-  };
-
+  // The viewport's light sprite takes the light's colour, whatever changed it.
   useEffect(() => {
-    setCastShadows(props.node.castShadows);
-    setBake(props.node.bake);
-    setColor(vec3ToHex(props.node.light.color));
-    read();
-  }, [props.node])
+    const tint = () => {
+      const sprite = props.node.getChildByName('__editor__LightSprite')[0] as SpriteNode | undefined;
+      const c = props.node.light.color;
+      if (sprite) sprite.tint = [c[0], c[1], c[2]];
+    };
+    tint();
+    const onChange = (e: { node?: unknown }) => { if (!e?.node || e.node === props.node) tint(); };
+    eventEmitter.on('SCENE_CHANGED', onChange);
+    return () => { eventEmitter.off('SCENE_CHANGED', onChange); };
+  }, [props.node, eventEmitter]);
 
-  useEffect(() => {
-    const editorSprite = props.node.getChildByName('__editor__LightSprite');
-    if (editorSprite[0])
-      (editorSprite[0] as SpriteNode).tint = [light.color[0], light.color[1], light.color[2]];
-  }, [props.node, color])
-
-  /** Write one property through to the light, then re-read: setters clamp, so the UI must follow. */
-  const set = (patch: Partial<typeof values>) => {
-    const l = props.node.light;
-    if (patch.intensity !== undefined) (l as DirectionalLight | Punctual).intensity = Math.max(0, patch.intensity);
-    if (patch.angularRadius !== undefined && l instanceof DirectionalLight) l.angularRadius = Math.max(0, patch.angularRadius);
-    if (patch.range !== undefined && !(l instanceof DirectionalLight)) (l as Punctual).range = patch.range;
-    if (patch.sourceRadius !== undefined && !(l instanceof DirectionalLight)) (l as Punctual).sourceRadius = patch.sourceRadius;
-    if (patch.flickerAmount !== undefined && !(l instanceof DirectionalLight)) (l as Punctual).flickerAmount = Math.min(1, Math.max(0, patch.flickerAmount));
-    if (patch.flickerSpeed !== undefined && !(l instanceof DirectionalLight)) (l as Punctual).flickerSpeed = Math.max(0, patch.flickerSpeed);
-    if (l instanceof AreaLight) {
-      if (patch.shape !== undefined) l.shape = patch.shape;
-      if (patch.width !== undefined) l.width = patch.width;
-      if (patch.height !== undefined) l.height = patch.height;
-      if (patch.twoSided !== undefined) l.twoSided = patch.twoSided;
-    }
-    if (l instanceof Spotlight) {
-      if (patch.cutOff !== undefined) l.cutOff = patch.cutOff;
-      if (patch.outerCutOff !== undefined) l.outerCutOff = patch.outerCutOff;
-      // The outer cone must stay outside the inner one, or the falloff has nowhere to happen.
-      if (l.outerCutOff <= l.cutOff) l.outerCutOff = l.cutOff + 0.01;
-    }
-    setValues(v => ({ ...v, ...patch }));
-    read();
-    markLightDirty();
-  };
-
+  const light = props.node.light;
   const resetPhysical = () => {
-    (props.node.light as Punctual).resetToPhysicalDefaults();
-    read();
+    (props.node.light as any).resetToPhysicalDefaults();
     markLightDirty();
   };
 
@@ -107,17 +43,12 @@ export default function LightEditor(props: {node: LightNode}) {
   const presets = lightPresetsFor(light);
   const applyLightPreset = (p: LightPreset) => {
     applyPreset(props.node.light, presets, p);
-    setColor(vec3ToHex(props.node.light.color));
-    read();
     markLightDirty();
   };
 
-  const isDirectional = light instanceof DirectionalLight;
-  const isSpot = light instanceof Spotlight;
-  const isArea = light instanceof AreaLight;
   // Rotating the sun invalidates clouds baked into the sky (see VolumetricCloudsEditor › Sky Bake).
   const cloudBake = useCloudBakeStatus(props.node.scene);
-  const cloudBakeStale = isDirectional && cloudBake.clouds && cloudBake.staleness === 'sun'
+  const cloudBakeStale = props.node.type === 'directional' && cloudBake.clouds && cloudBake.staleness === 'sun'
     ? cloudBakeWarning('sun') : null;
   // A light set to bake that changed since the light probes captured it.
   const probeBake = useProbeBakeStatus(props.node.scene);
@@ -136,39 +67,8 @@ export default function LightEditor(props: {node: LightNode}) {
         <span className='text-warning text-ui flex-1'>Volumetric clouds are baked into the sky: this sun direction needs a new bake.</span>
         <Button size='sm' onClick={() => { cloudBake.clouds!.requestBake(); eventEmitter.emit('SCENE_CHANGED'); }}>Regenerate</Button>
       </div>}
-      <Section title='Emission'>
-        <PropertyTable columns={['40%', '60%']}>
-          <PropertyRow label='Color'>
-            <ColorInput color={color} onChange={(c) => { light.color = c; setColor(vec3ToHex(c)); markLightDirty(); }} />
-          </PropertyRow>
-          <PropertyRow label={isDirectional ? 'Intensity (lx)' : 'Intensity (lm)'} divider={!isDirectional}
-            hint={isDirectional
-              ? 'Illuminance in LUX. A clear midday sun is around 100,000; an overcast one 10,000. Brightness lives here, not in the colour — keep the colour as the light’s tint.'
-              : isArea
-                ? 'Luminous power in LUMENS, out of the whole panel. A 60 x 60 cm office panel is about 3600; a fluorescent tube 2600. Resizing the light keeps its lumens, so a bigger panel glows less brightly per square metre.'
-                : 'Luminous power in LUMENS. A 100 W-equivalent bulb is about 1500; a candle about 12.'}>
-            <NumberInput value={values.intensity} min={0} step={isDirectional ? 1000 : 100}
-              onChange={(v) => set({ intensity: v })} />
-          </PropertyRow>
-          {!isDirectional && <PropertyRow label='Range (m)'
-            hint='Where the falloff reaches zero, and also the light’s culling radius.'>
-            <NumberInput value={values.range} min={0.01} step={0.5} onChange={(v) => set({ range: v })} />
-          </PropertyRow>}
-          {!isDirectional && !isArea && <PropertyRow label='Source Radius (m)'
-            hint='How big the bulb is. It spreads the highlight into an image of the source rather than a point, dimming its peak by the same amount it widens. Dramatic on polished surfaces, invisible on rough ones.'>
-            <NumberInput value={values.sourceRadius} min={0} step={0.01} onChange={(v) => set({ sourceRadius: v })} />
-          </PropertyRow>}
-          {!isDirectional && <PropertyRow label='Flicker'
-            hint='How far the intensity wanders, as a fraction of it: a torch about 0.15–0.25, a candle 0.1, a lamp 0. Intensity only, so the shadow map stays cached. Flames and particle systems that follow this light (Follow Light) burn on the same beat.'>
-            <NumberInput value={values.flickerAmount} min={0} max={1} step={0.01} onChange={(v) => set({ flickerAmount: v })} />
-          </PropertyRow>}
-          {!isDirectional && values.flickerAmount > 0 && <PropertyRow label='Flicker Speed' divider={false}
-            hint='Roughly how many swells a second its slowest layer makes; the faster layers ride on top.'>
-            <NumberInput value={values.flickerSpeed} min={0} step={0.5} onChange={(v) => set({ flickerSpeed: v })} />
-          </PropertyRow>}
-        </PropertyTable>
-
-        {legacy && <>
+      <DeclaredSection node={props.node} title='Emission'>
+        {light.legacyFalloff && <>
           <Hint>This light&apos;s numbers were converted from the old constant/linear/quadratic falloff,
             which had no physical scale — a lamp and the sun were both authored as colour 1. The
             conversion preserves how the light LOOKS, which is why the number is enormous. Reset it to
@@ -177,66 +77,12 @@ export default function LightEditor(props: {node: LightNode}) {
             Reset to physical defaults
           </Button>
         </>}
-      </Section>
-
-      <Section title='Shadows'>
-        <Toggle label='Cast Shadows' checked={castShadows} className='my-1'
-          title={props.node.type === 'directional'
-            ? 'The FIRST directional light with this on is the scene’s sun: the renderer fits its shadow cascades around the camera for it. Tune them in Options › Engine › Renderer.'
-            : props.node.type === 'area'
-              ? 'A one-sided area light takes a spot light’s shadow map, facing its emitting side (75° each way: light grazing past that is unshadowed); a two-sided one takes a point light’s cube. They share those lights’ caps (Spot Shadows / Point Shadows in Options › Engine › Renderer). The panel’s own fixture should not cast, or it shadows the light.'
-            : props.node.type === 'spotlight'
-              ? 'Spot lights get their own shadow map, sized to the outer cone and reaching as far as the light’s range. A few can cast at once (see Spot Shadows in Options › Engine › Renderer); any beyond that cap go unshadowed.'
-              : 'Point lights cast in every direction, through a cube map rendered as six depth maps — one per face — reaching as far as the light’s range. A few can cast at once (see Point Shadows in Options › Engine › Renderer); the nearest to the camera get the maps, and any beyond that cap go unshadowed.'}
-          onChange={(c) => { props.node.castShadows = c; setCastShadows(c); markLightDirty(); }} />
-      </Section>
-
-      <Section title='Baking'>
-        <Toggle label='Bake' checked={bake} className='my-1'
-          title='Captured into the light probes (and, later, baked lighting). Off, the light still lights the scene live but no probe sees it: a flashlight, a muzzle flash, a light that moves or switches with gameplay.'
-          onChange={(c) => { props.node.bake = c; setBake(c); markLightDirty(); }} />
-      </Section>
-
-      { isSpot &&
-        <Section title='Cone'>
-          <Slider label='Inner Angle' labelClassName={SLIDER_LABEL} min={0} max={80} step={0.5} value={values.cutOff}
-            title={CONE_HINT} onChange={(v) => set({ cutOff: v })} />
-          <Slider label='Outer Angle' labelClassName={SLIDER_LABEL} min={0} max={80} step={0.5} value={values.outerCutOff}
-            title={CONE_HINT} onChange={(v) => set({ outerCutOff: v })} />
-        </Section>
-      }
-
-      { isArea &&
-        <Section title='Emitter'>
-          <PropertyTable columns={['40%', '60%']}>
-            <PropertyRow label='Shape'
-              hint='A rectangle (a ceiling panel, a window, a screen) or a disk (a round downlight). It lies across the light’s local X and Y and emits along its forward, the way a spot light points.'>
-              <Select value={values.shape} onChange={e => set({ shape: e.target.value as AreaLightShape })}>
-                <option value='rect'>Rectangle</option>
-                <option value='disk'>Disk</option>
-              </Select>
-            </PropertyRow>
-            <PropertyRow label={values.shape === 'disk' ? 'Diameter (m)' : 'Width (m)'}
-              hint='Along the light’s local X.'>
-              <NumberInput value={values.width} min={0.01} step={0.05} onChange={(v) => set({ width: v })} />
-            </PropertyRow>
-            {values.shape === 'rect' && <PropertyRow label='Height (m)' hint='Along the light’s local Y.'>
-              <NumberInput value={values.height} min={0.01} step={0.05} onChange={(v) => set({ height: v })} />
-            </PropertyRow>}
-          </PropertyTable>
-          <Toggle label='Two-sided' checked={values.twoSided} className='my-1'
-            title='Emits from both faces, half its lumens each: a hanging tube or a lantern pane. Off, only the front face (the light’s forward) glows.'
-            onChange={(c) => set({ twoSided: c })} />
-        </Section>
-      }
-
-      { isDirectional &&
-        <Section title='Source'>
-          <Slider label='Angular Radius' labelClassName={SLIDER_LABEL} min={0} max={0.1} step={0.001} value={values.angularRadius}
-            title={'Apparent radius in radians; the real sun is 0.00465. It sets how broad the sun’s reflection is — most visible on smooth, polished surfaces, barely at all on rough ones. It also softens shadow edges, but only proportionally.'}
-            onChange={(v) => set({ angularRadius: v })} />
-        </Section>
-      }
+      </DeclaredSection>
+      <DeclaredSection node={props.node} title='Shadows' />
+      <DeclaredSection node={props.node} title='Baking' />
+      <DeclaredSection node={props.node} title='Cone' />
+      <DeclaredSection node={props.node} title='Emitter' />
+      <DeclaredSection node={props.node} title='Source' />
     </div>
     </Collapsable>
   )

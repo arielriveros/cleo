@@ -1,5 +1,5 @@
-import { Node } from 'cleo'
-import type { NodeVariableType, NodeVariableAccess } from 'cleo'
+import { Node, typeFromAnnotation, defaultOf, isTextType, upgradePropertyType, storedValueFits } from 'cleo'
+import type { NodeVariableAccess, PropertyType } from 'cleo'
 import { cryptoRandomId } from './ids'
 
 // A reusable Script asset. Two kinds:
@@ -82,15 +82,16 @@ export const BASE_TYPE_LABEL: Record<ScriptBaseType, string> = {
 }
 
 /**
- * A reflected field's type: a node variable type, or `stringList` (a `string[]` field). Editor-only: the
- * engine restores `scriptVars` as plain own properties and never needs to know a field's type.
+ * A reflected field's type: one of the engine's property types (src/core/properties/types.ts), read from the
+ * field's annotation -- `Color`, `Material`, `LightNode`, `ClipName[]`, `'a' | 'b'` -- or its literal default.
+ * It decides the inspector's widget. The engine needs none of it: what a field stores says what it is.
  */
-export type ScriptVarType = NodeVariableType | 'stringList'
+export type ScriptVarType = PropertyType
 
 /** One reflected script variable, parsed from a class field declaration. */
 export type ScriptVarSchema = {
   name: string
-  type: ScriptVarType             // 'number' | 'string' | 'boolean' | 'vec3' | 'stringList'
+  type: PropertyType
   access: NodeVariableAccess      // 'public' | 'private' | 'protected'
   default: any
   hidden: boolean                 // not an @attribute: the script's own state, not shown, seeded or saved per node
@@ -98,17 +99,9 @@ export type ScriptVarSchema = {
   attribute?: ScriptAttribute
   /**
    * A string field whose value is picked from another field's list: the name of that sibling `string[]`
-   * field. Declared with a `@options <field>` tag in the field's doc comment; the inspector shows a dropdown.
+   * field. Declared with `@options('field')` (or a `@options <field>` doc tag); the inspector shows a dropdown.
    */
   options?: string
-  /**
-   * What a string (or `stringList`) field NAMES, so the inspector offers that node's valid names instead of
-   * a text box. Declared by typing the field with an engine name type (`clip: ClipName`, see
-   * src/core/scripting/fieldTypes.ts) or by a `@pick <kind>` doc tag on a plain `string`.
-   */
-  pick?: ScriptPickKind
-  /** A fixed set of values, from a string-literal union type (`mode: 'melee' | 'ranged'`). */
-  choices?: string[]
   /**
    * Kept by saves (`SaveGame`, and a scene's memory between visits): declared with a `@save` tag in the
    * field's doc comment. The build lists these per node as `saveFields`.
@@ -136,13 +129,25 @@ export type ScriptAttribute = {
   step?: number
   readonly?: boolean
   showIf?: string | [string, unknown]
-  color?: boolean
   multiline?: boolean
 }
 
-/** The kinds of name a `pick` field can hold. Mirrors the engine's ClipName / SoundName / ... types. */
-export type ScriptPickKind = 'clip' | 'sound' | 'socket' | 'template' | 'node' | 'trigger' | 'spriteClip'
-export const SCRIPT_PICK_KINDS: readonly ScriptPickKind[] = ['clip', 'sound', 'socket', 'template', 'node', 'trigger', 'spriteClip']
+/**
+ * A schema as it is now. One reflected before the property types (`type: 'vec3'`, `pick: 'clip'`, an
+ * attribute's `color`) reads as the type it meant, until the project re-derives it (SCRIPT_REFLECT_VERSION).
+ */
+export function upgradeScriptVar(v: ScriptVarSchema): ScriptVarSchema {
+  if (v.type && typeof v.type === 'object') return v
+  const legacy = v as any
+  const { pick: _pick, choices: _choices, ...rest } = legacy
+  let attribute = legacy.attribute
+  if (attribute && 'color' in attribute) { attribute = { ...attribute }; delete attribute.color }
+  return {
+    ...rest,
+    ...(attribute ? { attribute } : {}),
+    type: upgradePropertyType(legacy.type, { pick: legacy.pick, choices: legacy.choices, color: legacy.attribute?.color }),
+  }
+}
 
 export type ScriptKind = 'class' | 'module'
 
@@ -220,14 +225,14 @@ function stripComments(src: string): string {
 }
 
 /**
- * Turn a block comment carrying field tags (`@options <field>`, `@pick <kind>`, `@save`) into bare tokens
- * (`@options:<field>`, `@pick:<kind>`, `@save:`), so the tags survive stripComments and reach the field
- * declared after them. Every other comment is left as is.
+ * Turn a block comment carrying field tags (`@options <field>`, `@save`) into bare tokens (`@options:<field>`,
+ * `@save:`), so the tags survive stripComments and reach the field declared after them. Every other comment
+ * is left as is.
  */
 function keepFieldTags(src: string, docs: string[]): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, c => {
     const tags: string[] = []
-    for (const m of c.matchAll(/@(options|pick)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)) tags.push(`@${m[1]}:${m[2]}`)
+    for (const m of c.matchAll(/@(options)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)) tags.push(`@${m[1]}:${m[2]}`)
     if (/(^|[\s*])@save(?![\w$])/.test(c)) tags.push('@save:')
     // A doc comment's prose is the tooltip of the attribute declared after it.
     if (c.startsWith('/**')) {
@@ -336,7 +341,7 @@ function attributeOf(args: unknown[]): ScriptAttribute {
   if (group) out.group = group
   if (typeof raw.label === 'string') out.label = raw.label
   for (const k of ['min', 'max', 'step'] as const) if (typeof raw[k] === 'number' && Number.isFinite(raw[k])) out[k] = raw[k] as number
-  for (const k of ['readonly', 'color', 'multiline'] as const) if (raw[k] === true) out[k] = true
+  for (const k of ['readonly', 'multiline'] as const) if (raw[k] === true) out[k] = true
   if (typeof raw.showIf === 'string') out.showIf = raw.showIf
   else if (Array.isArray(raw.showIf) && typeof raw.showIf[0] === 'string') out.showIf = [raw.showIf[0], raw.showIf[1]]
   return out
@@ -344,7 +349,7 @@ function attributeOf(args: unknown[]): ScriptAttribute {
 
 type FieldRef = { kind: 'child' | 'find'; name: string }
 
-// `@name`, optionally with a call whose first argument is a string literal: `@pick('clip')`, `@options("list")`.
+// `@name`, optionally with a call whose first argument is a string literal: `@child('Muzzle')`, `@options("list")`.
 const DECORATOR = /(?<![\w$'"`])@([A-Za-z_$][\w$]*)(?![\w$:])/g
 
 /** Index just past the `(...)` group opening at `open`, stepping over string literals; -1 if it never closes. */
@@ -363,7 +368,7 @@ function endOfCall(src: string, open: number): number {
 }
 
 /**
- * Turn the member decorators (`@save`, `@options('list')`, `@pick('clip')`, `@child('Muzzle')`, `@find('GM')`)
+ * Turn the member decorators (`@save`, `@options('list')`, `@child('Muzzle')`, `@find('GM')`, `@attribute(…)`)
  * into the same bare tokens keepFieldTags writes, so the field they decorate is reflected like one carrying
  * the doc-comment tags. Run on comment-stripped source. `@child` / `@find` names go in `refs`, the token
  * holding an index (a name may hold spaces). Any other decorator (`@onAction`, a user one) is dropped.
@@ -388,7 +393,7 @@ function keepDecorators(src: string, refs: FieldRef[], attrs: ScriptAttribute[])
     const arg = /^\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/.exec(args)?.[2]
     let token = ' '
     if (name === 'save') token = '@save: '
-    else if ((name === 'options' || name === 'pick') && arg && /^[A-Za-z_$][\w$]*$/.test(arg)) token = `@${name}:${arg} `
+    else if (name === 'options' && arg && /^[A-Za-z_$][\w$]*$/.test(arg)) token = `@${name}:${arg} `
     else if ((name === 'child' || name === 'find') && arg) { refs.push({ kind: name, name: arg }); token = `@ref:r${refs.length - 1} ` }
     else if (name === 'attribute') { attrs.push(attributeOf(parseLiteralArgs(args))); token = `@attr:a${attrs.length - 1} ` }
     out += src.slice(last, m.index) + token
@@ -414,22 +419,6 @@ function classBody(src: string): string {
     else if (c === '}') depth--
   }
   return src.slice(start, i - 1)
-}
-
-const TS_TO_VAR_TYPE: Record<string, ScriptVarType> = {
-  number: 'number', string: 'string', boolean: 'boolean', bool: 'boolean',
-  vec3: 'vec3', 'number[]': 'vec3', '[number,number,number]': 'vec3',
-  'string[]': 'stringList', 'array<string>': 'stringList', 'readonlystring[]': 'stringList',
-}
-
-function typeDefault(type: ScriptVarType): any {
-  switch (type) {
-    case 'number': return 0
-    case 'string': return ''
-    case 'boolean': return false
-    case 'vec3': return [0, 0, 0]
-    case 'stringList': return []
-  }
 }
 
 /** The quoted entries of an array literal body (`'a', "b c"`), or undefined unless it is ONLY string literals. */
@@ -484,55 +473,26 @@ function parseDefault(raw: string): any {
   return undefined
 }
 
-/** Engine name types (lower-cased) -> the kind of name they hold. */
-const TS_TO_PICK: Record<string, ScriptPickKind> = {
-  clipname: 'clip', soundname: 'sound', socketname: 'socket', templatename: 'template', nodename: 'node',
-  triggername: 'trigger', spriteclipname: 'spriteClip',
-}
-
 /**
- * Normalize a type annotation for lookup: whitespace removed, lower-cased, `| undefined` / `| null` dropped,
- * a namespace qualifier (`Cleo.ClipName`) dropped, `readonly` dropped and `Array<X>` spelled `X[]`.
+ * The names a script imports from other project scripts (`import Door from './SoulsDoor'`, `import { Base }
+ * from '@/Shared/Base'`): a field typed with one of them holds a node running that script.
  */
-function normalizeAnnotation(annotation: string): string {
-  let key = annotation.replace(/\s+/g, '')
-  key = key.replace(/\|(undefined|null)\b/g, '').replace(/^(undefined|null)\|/, '')
-  key = key.replace(/^readonly/, '')
-  key = key.replace(/^(?:Readonly)?Array<(.+)>$/i, '$1[]').replace(/^\((.+)\)\[\]$/, '$1[]')
-  key = key.replace(/^[A-Za-z_$][A-Za-z0-9_$]*\.(?=[A-Za-z_$])/, '')
-  return key.toLowerCase()
-}
-
-/** A union of string literals (`'a' | "b"`), as its values; undefined for any other annotation. */
-function parseLiteralUnion(annotation: string): string[] | undefined {
-  const parts = annotation.split('|').map(p => p.trim()).filter(p => p && p !== 'undefined' && p !== 'null')
-  if (!parts.length) return undefined
-  const out: string[] = []
-  for (const p of parts) {
-    const m = /^(['"`])((?:\\.|(?!\1)[^\\])*)\1$/.exec(p)
-    if (!m) return undefined
-    out.push(m[2].replace(/\\(.)/g, '$1'))
+function projectImports(src: string): Set<string> {
+  const out = new Set<string>()
+  const re = /\bimport\s+(?:type\s+)?([^'";]*?)\s+from\s+(['"])([^'"]+)\2/g
+  for (let m: RegExpExecArray | null; (m = re.exec(src));) {
+    const from = m[3]
+    if (!(from.startsWith('.') || from.startsWith('@/'))) continue
+    const clause = m[1]
+    const def = /^([A-Za-z_$][\w$]*)/.exec(clause)
+    if (def) out.add(def[1])
+    const named = /\{([^}]*)\}/.exec(clause)
+    if (named) for (const part of named[1].split(',')) {
+      const name = /([A-Za-z_$][\w$]*)\s*$/.exec(part.trim())?.[1]
+      if (name) out.add(name)
+    }
   }
   return out
-}
-
-/** The name kind an annotation (`ClipName`, `ClipName[]`, `Cleo.SoundName`) declares, if any. */
-function pickOf(annotation: string): ScriptPickKind | undefined {
-  return TS_TO_PICK[normalizeAnnotation(annotation).replace(/\[\]$/, '')]
-}
-
-/** Infer the variable type from a TS annotation and/or a default value. */
-function inferType(annotation: string, def: any): ScriptVarType {
-  const key = normalizeAnnotation(annotation)
-  if (key && TS_TO_VAR_TYPE[key]) return TS_TO_VAR_TYPE[key]
-  const pickKey = key.replace(/\[\]$/, '')
-  if (TS_TO_PICK[pickKey]) return key.endsWith('[]') ? 'stringList' : 'string'
-  if (parseLiteralUnion(annotation)) return 'string'
-  if (typeof def === 'number') return 'number'
-  if (typeof def === 'boolean') return 'boolean'
-  if (Array.isArray(def)) return def.length && def.every(v => typeof v === 'string') ? 'stringList' : 'vec3'
-  if (typeof def === 'string') return 'string'
-  return 'number'
 }
 
 // A class field declaration at the top of the class body:
@@ -552,12 +512,13 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
   const docs: string[] = []
   const body = classBody(keepDecorators(stripComments(keepFieldTags(source, docs)), refs, attrs))
   if (!body) return []
+  const imported = projectImports(stripComments(source))
+  const ctx = { scriptClass: (name: string) => imported.has(name) }
 
   const out: ScriptVarSchema[] = []
   const seen = new Set<string>()
   // Tags read from the doc comment above the next field (see keepFieldTags).
   let pendingOptions: string | undefined
-  let pendingPick: string | undefined
   let pendingSave = false
   let pendingRef: FieldRef | undefined
   let pendingAttr: ScriptAttribute | undefined
@@ -572,24 +533,22 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
     let stmt = body.slice(stmtStart, end).trim()
     stmtStart = end + 1
     // A comment ending on the field's own line leaves its tags in front of the declaration.
-    for (let tag; (tag = /^@(options|pick|save|ref|attr|doc):([A-Za-z_$][A-Za-z0-9_$]*)?\s*/.exec(stmt));) {
+    for (let tag; (tag = /^@(options|save|ref|attr|doc):([A-Za-z_$][A-Za-z0-9_$]*)?\s*/.exec(stmt));) {
       if (tag[1] === 'attr' && tag[2]) pendingAttr = attrs[Number(tag[2].slice(1))]
       else if (tag[1] === 'doc' && tag[2]) pendingDoc = docs[Number(tag[2].slice(1))]
       else if (tag[1] === 'options' && tag[2]) pendingOptions = tag[2]
-      else if (tag[1] === 'pick' && tag[2]) pendingPick = tag[2]
       else if (tag[1] === 'save') pendingSave = true
       else if (tag[1] === 'ref' && tag[2]) pendingRef = refs[Number(tag[2].slice(1))]
       stmt = stmt.slice(tag[0].length)
     }
     if (!stmt) return
     const options = pendingOptions
-    const tagPick = pendingPick
     const save = pendingSave
     const ref = pendingRef
     const attr = pendingAttr
     const doc = pendingDoc
     pendingRef = pendingAttr = pendingDoc = undefined
-    pendingOptions = pendingPick = undefined
+    pendingOptions = undefined
     pendingSave = false
 
     // A call/parameter list before '=' means a method or getter/setter, not a field.
@@ -615,24 +574,19 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
     const annotation = (nameMatch[2] ?? '').trim()
 
     const def = eq >= 0 ? parseDefault(stripCast(stmt.slice(eq + 1))) : undefined
-    const type = inferType(annotation, def)
-    const isText = type === 'string' || type === 'stringList'
-    const pick = pickOf(annotation)
-      ?? (tagPick && (SCRIPT_PICK_KINDS as readonly string[]).includes(tagPick) ? tagPick as ScriptPickKind : undefined)
-    const choices = type === 'string' ? parseLiteralUnion(annotation) : undefined
+    const type = typeFromAnnotation(annotation, def, ctx)
     seen.add(name)
     out.push({
       name,
       type,
       access,
-      default: def ?? (choices?.length ? choices[0] : typeDefault(type)),
+      // An asset or a node starts empty: `= null` is its only sensible literal.
+      default: def === undefined || type.kind === 'asset' || type.kind === 'node' ? defaultOf(type) : def,
       // Only an @attribute is an inspector value; a @child / @find field holds a node, never one.
       hidden: !attr || !!ref,
       ...(attr && !ref ? { attribute: { ...attr, ...(doc ? { tooltip: doc } : {}) } } : {}),
       // Only a string can be picked from a list.
-      ...(options && type === 'string' ? { options } : {}),
-      ...(pick && isText ? { pick } : {}),
-      ...(choices ? { choices } : {}),
+      ...(options && isTextType(type) ? { options } : {}),
       ...(save ? { save: true as const } : {}),
       ...(ref ? { ref } : {}),
     })
@@ -919,8 +873,11 @@ export function logOnce(message: string): void {
  * `variables` overrides the reflection — scriptGraph.resolveScriptVariables passes the merged schema of a
  * class that inherits from another script.
  */
-/** Bumped when reflection changes what `variables` holds, so assets derived before re-derive (2: @attribute). */
-export const SCRIPT_REFLECT_VERSION = 2
+/**
+ * Bumped when reflection changes what `variables` holds, so assets derived before re-derive (2: @attribute;
+ * 3: property types -- `type` is a PropertyType, and `pick` / `choices` / `color` went into it).
+ */
+export const SCRIPT_REFLECT_VERSION = 3
 
 export function buildScriptAsset(
   name: string, baseType: ScriptBaseType, source: string, id?: string, variables?: ScriptVarSchema[],
@@ -958,7 +915,9 @@ export function seedScriptFields(node: Node, asset: ScriptAsset, overwrite: bool
     // attaches. Their reflected default is only a guess (`_w: any = {}` reflects as the number 0), and a
     // seeded guess would be saved as `scriptVars` and override the real initial value.
     if (v.hidden) continue
-    if (overwrite || !(v.name in n) || n[v.name] === undefined) n[v.name] = cloneDefault(v.default)
+    // A value the field's type cannot hold (it was a `string`, it is a `Material` now) starts over too.
+    const keep = !overwrite && v.name in n && n[v.name] !== undefined && storedValueFits(upgradeScriptVar(v).type, n[v.name])
+    if (!keep) n[v.name] = cloneDefault(v.default)
   }
   // Prune native fields the schema no longer declares.
   for (const name of scriptFieldNames(node, asset)) {
@@ -967,7 +926,7 @@ export function seedScriptFields(node: Node, asset: ScriptAsset, overwrite: bool
 }
 
 function cloneDefault(v: any): any {
-  return Array.isArray(v) ? [...v] : v
+  return v && typeof v === 'object' ? JSON.parse(JSON.stringify(v)) : v
 }
 
 /** The names a node currently carries as own properties that are declared by the schema. */

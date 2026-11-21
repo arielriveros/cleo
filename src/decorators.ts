@@ -10,5 +10,5 @@
 // A top-level file on purpose: dist then has decorators.d.ts beside cleo.d.ts, so 'cleo/decorators' resolves
 // by plain node resolution in Monaco and in the VS Code script workspace, and the engine's `cleo/*` alias
 // (vite.config.ts) finds it for the tests.
-export { child, find, onAction, onHold, onTap, onEnter, onExit, onEvent, eventListener, eventDispatch, onClipEvent, observable, animTrigger, animAction, animParam, every, attribute, save, options, pick, synced, netcall } from "./core/scripting/decorators";
+export { child, find, onAction, onHold, onTap, onEnter, onExit, onEvent, eventListener, eventDispatch, onClipEvent, observable, animTrigger, animAction, animParam, every, attribute, save, options, synced, netcall } from "./core/scripting/decorators";
 export type { ActionWhen, AttributeOptions, AttributeDecorator, FieldDecorator, MethodDecorator, SyncedDecorator, SyncedOptions, NetCallDecoratorOptions, EventListenerOptions, TargetListenerOptions, EventDispatchOptions, EventWhereLiteral, ObservableDecorator, AnimParamDecorator, AnimActionOptions } from "./core/scripting/decorators";

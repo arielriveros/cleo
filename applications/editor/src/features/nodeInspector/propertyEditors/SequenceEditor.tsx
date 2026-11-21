@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react'
 import type { SequenceNode } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { PropertyTable, PropertyRow, Toggle } from '@cleo/app-kit/ui'
+import { PropertyTable, PropertyRow } from '@cleo/app-kit/ui'
 import { useEventBus } from '../../EventBusContext'
 import { useCleoEngine } from '../../EngineContext'
 import NodeRefInput from '../NodeRefInput'
 import { SequenceIcon } from '../../sceneInspector/nodeIcons'
 import SequenceSlot from './SequenceSlot'
 import { useInspectorLock } from '../inspectorLock'
+import { DeclaredSection } from '../../properties/DeclaredSections'
 
 /**
  * A Sequence node's card: which `.sequence` asset it plays, whether it starts by itself, and which scene node
  * fills each of the sequence's slots here (overriding the node the sequence was authored against). The
- * timeline itself is edited in Sequencer mode, which the slot's Edit button opens.
+ * timeline itself is edited in Sequencer mode, which the slot's Edit button opens. Autoplay is its declared
+ * property (src/properties/gameplay.ts); the slot rows, one per slot of the sequence, are the card's own.
  */
 export default function SequenceEditor(props: { node: SequenceNode }) {
   const eventEmitter = useEventBus()
@@ -39,10 +41,8 @@ export default function SequenceEditor(props: { node: SequenceNode }) {
     <Collapsable title='Sequence' icon={<SequenceIcon />} persistKey='sequence'>
       <div className='w-full p-2 flex flex-col gap-2'>
         <SequenceSlot node={node} onChange={bump} />
-        <PropertyTable columns={['45%', '55%']}>
-          <PropertyRow label='Autoplay' divider={seq.slots.length > 0}>
-            <Toggle checked={node.autoplay} disabled={lock.locked} onChange={on => { node.autoplay = on; changed() }} />
-          </PropertyRow>
+        <DeclaredSection node={node} title='' disabled={lock.locked} />
+        {seq.slots.length > 0 && <PropertyTable columns={['45%', '55%']}>
           {seq.slots.map((slot, i) => {
             const authored = slotNode(slot.nodeId)
             const fallback = authored ? `(${authored.name})` : slot.path ? `(finds "${slot.path}")` : '(unbound)'
@@ -58,7 +58,7 @@ export default function SequenceEditor(props: { node: SequenceNode }) {
               </PropertyRow>
             )
           })}
-        </PropertyTable>
+        </PropertyTable>}
       </div>
     </Collapsable>
   )

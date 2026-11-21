@@ -23,6 +23,7 @@ import {
   WATER_SHAPES_EDITED, setWaterShapeSelection, useWaterShapeSelection,
 } from '../../gizmo/waterSelection'
 import { onProjectClose } from '../../../utils/projectLifecycle'
+import { DeclaredSection } from '../../properties/DeclaredSections'
 
 // The Water inspector. A Water node is ONE body of water — a river, a lake, an ocean or a pool — that buoys
 // what floats in it, carries it downstream and draws its surface. A river joins other Water nodes by naming
@@ -470,11 +471,7 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
     <Collapsable title='Water Volume' icon={<WaterVolumeIcon />} persistKey='waterVolumeEditor' badge={TYPE_LABEL[node.waterType]}
       right={<PresetMenu presets={WATER_VOLUME_PRESETS} onApply={applyPreset} title='Liquid presets' />}>
       <div className='w-full p-2 flex flex-col gap-2'>
-        <PropertyTable columns={['45%', '55%']}>
-          <PropertyRow label='Enabled'>
-            <Toggle checked={node.enabled} onChange={enabled => set('enabled', enabled)} />
-          </PropertyRow>
-        </PropertyTable>
+        <DeclaredSection node={node} title='' />
 
         <WaterBodyCard node={node} changed={changed} />
 
@@ -482,84 +479,11 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
 
         <WaterBake node={node} changed={changed} />
 
-        <Section title='Waves'>
-          {river && <Hint className='mb-1'>A river's waves are raised by its own current: taller and longer where it runs fast, calm where it is slow.</Hint>}
-          <PropertyTable columns={['45%', '55%']}>
-            {!river && <>
-              <PropertyRow label='Wind speed' hint='m/s the waves are shaped for: longer, taller, faster waves as it rises, limited by how much open water the body gives it. 0: no waves.' divider>
-                <NumberInput value={node.windSpeed} min={0} step={0.5} onChange={v => set('windSpeed', v)} />
-              </PropertyRow>
-              <PropertyRow label='Fetch' hint='Metres of open water the wind has crossed: short fetch raises a young sea of short, steep, choppy waves; long, the long swell of the open sea. 0: what the body gives (an endless ocean is the open sea).' divider>
-                <NumberInput value={node.fetch} min={0} step={500} onChange={v => set('fetch', v)} />
-              </PropertyRow>
-              <PropertyRow label='Direction' hint='Degrees the waves travel toward: 0 is +Z, 90 is +X.' divider>
-                <NumberInput value={node.waveDirection} step={5} onChange={v => set('waveDirection', v)} />
-              </PropertyRow>
-            </>}
-            <PropertyRow label='Height' hint={river ? 'Multiplies the wave height the current gives.' : 'Multiplies the wave height the wind gives.'} divider>
-              <Slider value={node.waveScale} min={0} max={3} step={0.05} onChange={v => set('waveScale', v)} />
-            </PropertyRow>
-            {!river && <PropertyRow label='Choppiness' hint='How hard the long waves crowd the short ones onto their crests: 0 an even chop, 1 the small waves bunched on every crest.' divider>
-              <Slider value={node.choppiness} min={0} max={1} step={0.05} onChange={v => set('choppiness', v)} />
-            </PropertyRow>}
-            <PropertyRow label='Wave speed' hint='How fast the waves and ripples run against their natural pace: 1 is real. Floating bodies follow it.' divider>
-              <Slider value={node.waveSpeed} min={0} max={2} step={0.05} readout onChange={v => set('waveSpeed', v)} />
-            </PropertyRow>
-            {!river && <PropertyRow label='Follow wind' hint='The scene’s Wind node raises and calms the waves: their height follows its speed against Wind speed.' divider>
-              <Toggle checked={node.followWind} onChange={v => set('followWind', v)} />
-            </PropertyRow>}
-            <PropertyRow label='Shore fade' hint={river ? 'Metres from a bank over which the waves die down (a river’s banks calm them within 1.5 m at most).' : 'Metres from a shore over which the waves die down.'} divider>
-              <NumberInput value={node.shoreFade} min={0} step={0.5} onChange={v => set('shoreFade', v)} />
-            </PropertyRow>
-            <PropertyRow label='Swell' hint='Metres the whole surface rises and falls, so floating bodies bob. 0 = none.' divider>
-              <NumberInput value={node.waveAmplitude} min={0} step={0.01} onChange={v => set('waveAmplitude', v)} />
-            </PropertyRow>
-            <PropertyRow label='Swell rate' hint='Hz.'>
-              <NumberInput value={node.waveFrequency} min={0} step={0.05} onChange={v => set('waveFrequency', v)} />
-            </PropertyRow>
-          </PropertyTable>
-        </Section>
-
-        <Section title='Buoyancy'>
-          <PropertyTable columns={['45%', '55%']}>
-            <PropertyRow label='Density' hint='kg/m³ (fresh water 1000). A body denser than this sinks; lighter ones float, riding higher the lighter they are.' divider>
-              <NumberInput value={node.density} min={1} step={25} onChange={v => set('density', v)} />
-            </PropertyRow>
-            <PropertyRow label='Drag' hint='Per second: how quickly a body takes on the water’s speed, for the water it displaces. Dense bodies sink through it; fast ones are slowed harder.' divider>
-              <NumberInput value={node.linearDrag} min={0} step={0.1} onChange={v => set('linearDrag', v)} />
-            </PropertyRow>
-            <PropertyRow label='Spin drag' hint='Per second, at full submersion: extra damping on tumbling, over the water’s own drag.' divider>
-              <NumberInput value={node.angularDrag} min={0} step={0.1} onChange={v => set('angularDrag', v)} />
-            </PropertyRow>
-            <PropertyRow label='Currents' hint='Flowing water (rivers) carries what floats in it downstream.' divider>
-              <Toggle checked={node.currents} onChange={v => set('currents', v)} />
-            </PropertyRow>
-            <PropertyRow label='Buoy characters' hint='Off: character capsules are mostly air and would be launched out of the water.'>
-              <Toggle checked={node.affectCharacters} onChange={v => set('affectCharacters', v)} />
-            </PropertyRow>
-          </PropertyTable>
-        </Section>
-
-        <Section title='Splashes'>
-          <PropertyTable columns={['45%', '55%']}>
-            <PropertyRow label='Splash' hint='Template spawned at the surface where something enters the water or wades through it.' divider>
-              <Select value={node.splashTemplate} onChange={e => set('splashTemplate', e.target.value)}>
-                <option value=''>None</option>
-                {(templates ?? []).map((t: any) => <option key={t.id} value={t.name}>{t.name}</option>)}
-              </Select>
-            </PropertyRow>
-            <PropertyRow label='Wading splash' hint='Template for the footsteps of a character wading through. Same as Splash when not set.' divider>
-              <Select value={node.wadeSplashTemplate} onChange={e => set('wadeSplashTemplate', e.target.value)}>
-                <option value=''>Same as Splash</option>
-                {(templates ?? []).map((t: any) => <option key={t.id} value={t.name}>{t.name}</option>)}
-              </Select>
-            </PropertyRow>
-            <PropertyRow label='Surface model' hint='Legacy: a model drawing the water whose custom material declares vec4 uniforms ripple0..ripple11, filled with ripples from what moves through. While one is set, the node draws no surface of its own.'>
-              <NodeRefInput value={node.surfaceNodeId} scene={editorScene} filter={n => n instanceof ModelNode}
-                onChange={v => set('surfaceNodeId', v)} />
-            </PropertyRow>
-          </PropertyTable>
-        </Section>
+        <DeclaredSection node={node} title='Waves'>
+          {river && <Hint className='mt-1'>A river's waves are raised by its own current: taller and longer where it runs fast, calm where it is slow.</Hint>}
+        </DeclaredSection>
+        <DeclaredSection node={node} title='Buoyancy' />
+        <DeclaredSection node={node} title='Splashes' />
       </div>
     </Collapsable>
     </DocScope>

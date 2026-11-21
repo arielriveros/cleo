@@ -1,0 +1,111 @@
+import React, { useEffect, useReducer } from 'react'
+import {
+  Node, declarationOf, readProperty, resolveProperty, writeProperty,
+  type PropertyDeclaration, type Scene, type SectionDeclaration,
+} from 'cleo'
+import { PropertyRow, PropertyTable, Section } from '@cleo/app-kit/ui'
+import { useCleoEngine } from '../EngineContext'
+import { BOX_VOLUME_EDITED } from '../gizmo/BoxVolumeGizmo'
+import PropertyField from './PropertyField'
+
+// A node's inspector rows, generated from what its class declares (src/properties): one row per property, each
+// edited by its type through PropertyField, the editor a script's attribute of that type has too. A row's
+// tooltip is its label's docs row. The card around the rows, and anything a type cannot say (presets, bake
+// buttons, previews), stays the card's own.
+
+/** What an editor reads a vector or colour as: a plain array (a node may hold a Float32Array). */
+function fieldValue(value: unknown): unknown {
+  return ArrayBuffer.isView(value) && !(value instanceof DataView) ? Array.from(value as unknown as ArrayLike<number>) : value
+}
+
+/** What declares rows: a node, or the scene itself (its Environment). */
+export type DeclaredOwner = Node | Scene
+
+/** Re-render when the node may have changed behind the panel's back: an undo, a gizmo, a script. */
+export function useNodeTick(node: DeclaredOwner): () => void {
+  const { eventEmitter } = useCleoEngine()
+  const [, bump] = useReducer((x: number) => x + 1, 0)
+  useEffect(() => {
+    const onScene = () => bump()
+    const onBox = (e: { nodeId?: string }) => { if (node instanceof Node && e?.nodeId === node.id) bump() }
+    eventEmitter.on('SCENE_CHANGED', onScene)
+    eventEmitter.on(BOX_VOLUME_EDITED, onBox)
+    return () => { eventEmitter.off('SCENE_CHANGED', onScene); eventEmitter.off(BOX_VOLUME_EDITED, onBox) }
+  }, [eventEmitter, node])
+  return bump
+}
+
+/** What a card adds to its declared rows: a note of its own after each write, or every row shown and not edited. */
+interface RowOptions {
+  /** After each write, past the SCENE_CHANGED every row emits (a physics card's PHYSICS_CHANGED). */
+  onChange?: () => void
+  /** Every row shown, none edited (the inspector locked while the Sequencer edits the node). */
+  disabled?: boolean
+  /** The label and value columns' widths, to line up with a card's own table around them. */
+  columns?: [string, string]
+}
+
+function Rows(props: { node: DeclaredOwner; props: PropertyDeclaration[]; kind: string; bump: () => void } & RowOptions) {
+  const { eventEmitter } = useCleoEngine()
+  const shown = props.props.filter(p => !p.when || p.when(props.node))
+  if (!shown.length) return null
+  return (
+    <PropertyTable columns={props.columns ?? ['45%', '55%']}>
+      {shown.map(decl => {
+        const p = resolveProperty(decl, props.node)
+        return (
+          <PropertyRow key={p.key} label={p.label} divider={!!p.divider}>
+            <fieldset disabled={!!p.readonly || !!props.disabled} className='min-w-0 border-0 m-0 p-0'>
+              <PropertyField type={p.type} node={props.node instanceof Node ? props.node : null} value={fieldValue(readProperty(props.node, decl))}
+                min={p.min} max={p.max} step={p.step} multiline={p.multiline} readout={p.readout}
+                nodeFilter={p.accepts ? (n => p.accepts!(props.node, n)) : undefined}
+                onChange={value => {
+                  writeProperty(props.node, decl, value)
+                  eventEmitter.emit('SCENE_CHANGED', { kind: props.kind, node: props.node })
+                  props.onChange?.()
+                  props.bump()
+                }} />
+            </fieldset>
+          </PropertyRow>
+        )
+      })}
+    </PropertyTable>
+  )
+}
+
+/**
+ * One declared section of `node` by its title (`''`: the rows straight in the card), or nothing; `children`
+ * follow its rows inside it (a card's own rows or buttons for that section). `keys` / `skip` show only some of its
+ * rows, so a card can put a row of its own between them; `bare` leaves out the title (a section's second part).
+ * `right` goes at the right end of the title row (a section's presets).
+ */
+export function DeclaredSection(props: {
+  node: DeclaredOwner; title: string; children?: React.ReactNode; keys?: readonly string[]; skip?: readonly string[]; bare?: boolean
+  /** Whose declaration: a class the node extends, for its card (a parallax layer's Sprite card). */
+  of?: Function
+  right?: React.ReactNode
+} & RowOptions) {
+  const bump = useNodeTick(props.node)
+  const decl = declarationOf(props.node, props.of)
+  const section = decl?.sections.find(s => s.title === props.title)
+  if (!decl || !section || (section.when && !section.when(props.node))) return null
+  const own = section.props.filter(p => (!props.keys || props.keys.includes(p.key)) && !props.skip?.includes(p.key))
+  const rows = <><Rows node={props.node} props={own} kind={decl.kind} bump={bump} onChange={props.onChange} disabled={props.disabled} columns={props.columns} />{props.children}</>
+  return section.title && !props.bare ? <Section title={section.title} right={props.right}>{rows}</Section> : rows
+}
+
+/** Every declared section of `node`, in order, but those in `except` (shown by the card itself). */
+export default function DeclaredSections(props: { node: DeclaredOwner; except?: readonly string[]; of?: Function } & RowOptions) {
+  const bump = useNodeTick(props.node)
+  const decl = declarationOf(props.node, props.of)
+  if (!decl) return null
+  const sections = decl.sections.filter((s: SectionDeclaration) => !props.except?.includes(s.title) && (!s.when || s.when(props.node)))
+  return (
+    <>
+      {sections.map(s => {
+        const rows = <Rows key={s.title} node={props.node} props={s.props} kind={decl.kind} bump={bump} onChange={props.onChange} disabled={props.disabled} columns={props.columns} />
+        return s.title ? <Section key={s.title} title={s.title}>{rows}</Section> : rows
+      })}
+    </>
+  )
+}

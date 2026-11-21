@@ -21,7 +21,7 @@ import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, 
 import type { SaveDocument } from "cleo";
 import { playSaveStore, type PlaySavesConfig } from "./saves/playSaves";
 import { dimensionLookPatch, overlayDimensionOf } from "../utils/sceneDimension";
-import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, FOLIAGE_STARTER, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
+import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, FOLIAGE_STARTER, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, registerAssetTable, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener, RenderSettings } from "cleo";
 import EventEmitter from "@cleo/app-kit/utils/eventEmitter";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
@@ -6782,6 +6782,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       scriptPaths: scriptPathsRef.current,
       templates: templatesRef.current,
       materials: materialsRef.current,
+      tilesets: tilesetsRef.current,
       // Play mode has no top-level animation table for a player to resolve, so the shared clips are
       // baked straight into the JSON — into the templates too, or a spawned enemy T-poses.
       models: modelsRef.current,
@@ -6792,6 +6793,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Templates are global and shared by every scene in the session, so they are registered here rather
     // than per-parse — a runtime Game.loadScene must not drop what a script can still instantiate.
     registerTemplates(json.templates);
+    // The materials and tilesets script fields name, once each: what a `skin: Material` field becomes.
+    registerAssetTable(json.assets);
     // Before parse: a node's script imports its modules while it is being attached.
     addScriptModuleSources(json.modules);
     // Through the save session, keyed by the scene's id: coming back to it (or loading a save made in it)
@@ -6827,13 +6830,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     tmp.parse({ scene: clone.scene, textures: [] }, true);
     resyncScene(tmp, maps, currentLibs(), data.assetHashes, data.assetHashVersion);
     await stage(0.5, 'Preparing scripts and models');
-    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, scriptAssets: scriptAssetsRef.current, scriptPaths: scriptPathsRef.current, templates: templatesRef.current, materials: materialsRef.current, models: modelsRef.current, animations: animationsRef.current, useCache: true });
+    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, scriptAssets: scriptAssetsRef.current, scriptPaths: scriptPathsRef.current, templates: templatesRef.current, materials: materialsRef.current, tilesets: tilesetsRef.current, models: modelsRef.current, animations: animationsRef.current, useCache: true });
     // `tmp` existed only to be resynced and serialized; `gd` is plain JSON, so its GPU meshes and bus
     // subscription can go now.
     tmp.dispose();
     await stage(0.7, 'Building the scene');
     const scene = new Scene();
     registerTemplates(gd.templates);
+    registerAssetTable(gd.assets);
     addScriptModuleSources(gd.modules); // adds what is new; an already-evaluated module keeps its state
     parseRuntimeScene(scene, gd, id, true); // gd injects scripts into nodes → compiled here
     // From the project's record: a scene saved before the engine knew its dimension does not carry it.

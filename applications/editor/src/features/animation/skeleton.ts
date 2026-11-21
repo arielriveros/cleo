@@ -3,7 +3,7 @@ import {
   skeletonTopology, humanoidSlotOf,
 } from 'cleo'
 import type { Skin } from 'cleo'
-import { getScriptIdOf, type ScriptAsset } from '../../utils/scripts'
+import { getScriptIdOf, upgradeScriptVar, type ScriptAsset } from '../../utils/scripts'
 
 // Shared helpers for the Animation Editor: resolving the target skinned model, building the joint
 // hierarchy from a Skin, and computing per-joint world transforms for the viewport overlay.
@@ -210,13 +210,14 @@ export function accessibleNodeVariables(
   const collect = (owner: Node, requester: Node, nodeRef: string, group: AccessGroup, label: string) => {
     const seen = new Set<string>()
     // Class-script fields.
-    for (const v of assetOf(owner)?.variables ?? []) {
+    for (const raw of assetOf(owner)?.variables ?? []) {
       // Any non-internal field, @attribute or not: an animator reads a script's runtime state (speed, isDead),
       // which is rarely something to tune per node.
-      if (v.name.startsWith('_') || v.ref || !usable(v.type)) continue
+      const v = upgradeScriptVar(raw)
+      if (v.name.startsWith('_') || v.ref || !usable(v.type.kind)) continue
       if (owner !== requester && !canAccessScriptField(v.access, owner, requester)) continue
       seen.add(v.name)
-      out.push({ nodeRef, group, nodeLabel: label, varName: v.name, varType: v.type as 'number' | 'boolean', source: 'variable' })
+      out.push({ nodeRef, group, nodeLabel: label, varName: v.name, varType: v.type.kind as 'number' | 'boolean', source: 'variable' })
     }
     // Legacy inline-script variables.
     for (const [name, v] of owner.variables) {

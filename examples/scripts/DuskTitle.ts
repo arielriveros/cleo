@@ -1,4 +1,5 @@
 import { Game, Input, Logger, Node, SaveGame, UIButtonNode, UIRootNode } from 'cleo'
+import type { ActionName } from 'cleo'
 import { attribute } from 'cleo/decorators'
 
 /**
@@ -22,9 +23,9 @@ export default class DuskTitle extends UIRootNode {
   @attribute
   public slot: string = 'auto'
   @attribute
-  public continueAction: string = 'Jump'
+  public continueAction: ActionName = 'Jump'
   @attribute
-  public newGameAction: string = 'Dash'
+  public newGameAction: ActionName = 'Dash'
   @attribute
   public isOpen: boolean = false
 

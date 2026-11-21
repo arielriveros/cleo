@@ -12,8 +12,8 @@ describe('string list fields', () => {
       public a: string[] = ['Hollow', "Elite Knight", 'it\\'s']
       public b = ['x', 'y']
     }`
-    expect(field(src, 'a')).toMatchObject({ type: 'stringList', default: ['Hollow', 'Elite Knight', "it's"] })
-    expect(field(src, 'b')).toMatchObject({ type: 'stringList', default: ['x', 'y'] })
+    expect(field(src, 'a')).toMatchObject({ type: { kind: 'list', of: { kind: 'string' } }, default: ['Hollow', 'Elite Knight', "it's"] })
+    expect(field(src, 'b')).toMatchObject({ type: { kind: 'list', of: { kind: 'string' } }, default: ['x', 'y'] })
   })
 
   it('reflects an empty and a multi-line initializer', () => {
@@ -25,15 +25,15 @@ describe('string list fields', () => {
       ]
       public after: number = 2
     }`
-    expect(field(src, 'empty')).toMatchObject({ type: 'stringList', default: [] })
-    expect(field(src, 'multi')).toMatchObject({ type: 'stringList', default: ['one', 'two, three'] })
-    expect(field(src, 'after')).toMatchObject({ type: 'number', default: 2 })
+    expect(field(src, 'empty')).toMatchObject({ type: { kind: 'list', of: { kind: 'string' } }, default: [] })
+    expect(field(src, 'multi')).toMatchObject({ type: { kind: 'list', of: { kind: 'string' } }, default: ['one', 'two, three'] })
+    expect(field(src, 'after')).toMatchObject({ type: { kind: 'number' }, default: 2 })
   })
 
-  it('keeps number arrays as vec3', () => {
+  it('reads a 2-4 number array as a vector, and an empty number[] as a list of numbers', () => {
     const src = `export default class S extends Node { public p = [1, 2, 3]; public q: number[] = [] }`
-    expect(field(src, 'p')).toMatchObject({ type: 'vec3', default: [1, 2, 3] })
-    expect(field(src, 'q')?.type).toBe('vec3')
+    expect(field(src, 'p')).toMatchObject({ type: { kind: 'vector', size: 3 }, default: [1, 2, 3] })
+    expect(field(src, 'q')?.type).toEqual({ kind: 'list', of: { kind: 'number' } })
   })
 })
 
@@ -49,7 +49,7 @@ describe('@options', () => {
       public other: string = 'x'
       /** @options spawnables */ public inline: string = 'Elite Knight'
     }`
-    expect(field(src, 'templateName')).toMatchObject({ type: 'string', options: 'spawnables', default: 'Hollow' })
+    expect(field(src, 'templateName')).toMatchObject({ type: { kind: 'string' }, options: 'spawnables', default: 'Hollow' })
     expect(field(src, 'other')?.options).toBeUndefined()
     expect(field(src, 'inline')).toMatchObject({ options: 'spawnables', default: 'Elite Knight' })
     expect(field(src, 'spawnables')?.options).toBeUndefined()

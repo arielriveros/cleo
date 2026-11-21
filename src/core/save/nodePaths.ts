@@ -82,3 +82,46 @@ export function liveNodeAtPath(root: Node, path: string): Node | null {
     }
     return n;
 }
+
+/**
+ * The path from `from` to `to` through their nearest common ancestor: `..` for each step up, then the name
+ * path down (the same segments as {@link livePathOf}). `.` when they are the same node; null when they are not
+ * in one tree. What an authored node reference stores (src/core/properties/fieldRefs.ts), so it keeps
+ * pointing at the same node in a copy of the tree: a template instance, a play scene.
+ */
+export function relativeNodePath(from: Node, to: Node): string | null {
+    if (from === to) return '.';
+    const ancestors = new Map<Node, number>();
+    let up = 0;
+    for (let n: Node | null = from; n; n = n.parent) ancestors.set(n, up++);
+    for (let n: Node | null = to; n; n = n.parent) {
+        const steps = ancestors.get(n);
+        if (steps === undefined) continue;
+        const down = livePathOf(n, to);
+        if (down === null) return null;
+        const parts = new Array<string>(steps).fill('..');
+        if (down) parts.push(down);
+        return parts.join('/') || '.';
+    }
+    return null;
+}
+
+/** The live node `path` ({@link relativeNodePath}'s form) leads to from `from`, or null. */
+export function nodeAtRelativePath(from: Node, path: string): Node | null {
+    let n: Node | null = from;
+    for (const part of path.split('/')) {
+        if (!n) return null;
+        if (part === '' || part === '.') continue;
+        if (part === '..') { n = n.parent; continue; }
+        const { name, index } = parseSegment(part);
+        let k = 0;
+        let found: Node | null = null;
+        for (const child of n.children) {
+            if (child.name !== name) continue;
+            if (k === index) { found = child; break; }
+            k++;
+        }
+        n = found;
+    }
+    return n;
+}

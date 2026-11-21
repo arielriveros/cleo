@@ -6,8 +6,9 @@ import SpriteAppearance from './SpriteAppearance';
 import TileGrid from '../../tileset/TileGrid';
 import { useCleoEngine } from '../../EngineContext';
 import { useEventBus } from '../../EventBusContext';
-import { Field, Select, Hint, DocScope } from '@cleo/app-kit/ui';
+import { Hint, DocScope } from '@cleo/app-kit/ui';
 import { SpriteIcon } from '../sectionIcons';
+import { DeclaredSection } from '../../properties/DeclaredSections';
 
 // A static sprite is a tileset plus one tile. TileGrid is the same picker the tilemap palette uses, with
 // rectangle selection turned off.
@@ -15,7 +16,6 @@ import { SpriteIcon } from '../sectionIcons';
 export default function SpriteEditor(props: {node: SpriteNode}) {
   const eventEmitter = useEventBus();
   const { tilesets } = useCleoEngine();
-  const [constraints, setConstraints] = useState(props.node.constraints);
   const [tileIndex, setTileIndex] = useState(props.node.tileIndex);
   const [zoom, setZoom] = useState(2);
   const [, force] = useState(0); // node mutations don't trigger React; bump to re-read the tileset
@@ -23,7 +23,6 @@ export default function SpriteEditor(props: {node: SpriteNode}) {
   useEffect(() => { eventEmitter.emit('TEXTURES_CHANGED') }, [])
 
   useEffect(() => {
-    setConstraints(props.node.constraints);
     setTileIndex(props.node.tileIndex);
   }, [props.node])
 
@@ -58,18 +57,7 @@ export default function SpriteEditor(props: {node: SpriteNode}) {
             <Hint>Assign a tileset above to choose which tile this sprite shows.</Hint>
           )}
 
-          <Field label='Constraints' className='mt-2'>
-            <Select value={constraints} onChange={(e) => {
-              const v = e.target.value as typeof constraints;
-              props.node.constraints = v;
-              setConstraints(v);
-              eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node });
-            }}>
-              <option value='free'>Free</option>
-              <option value='spherical'>Spherical</option>
-              <option value='cylindrical'>Cylindrical</option>
-            </Select>
-          </Field>
+          <div className='mt-2'><DeclaredSection node={props.node} of={SpriteNode} title='' /></div>
         </div>
       </Collapsable>
 

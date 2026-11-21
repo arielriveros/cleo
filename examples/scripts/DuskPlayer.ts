@@ -1,4 +1,5 @@
 import { AnimatedSpriteNode, CharacterBody2DNode, Game, Input, Node } from 'cleo'
+import type { ActionName } from 'cleo'
 import { save, child, attribute, animAction, animParam, animTrigger } from 'cleo/decorators'
 
 /**
@@ -45,11 +46,11 @@ export default class DuskPlayer extends CharacterBody2DNode {
   @attribute
   public comboWindow: number = 0.35
   @attribute
-  public attackAction: string = 'Attack'
+  public attackAction: ActionName = 'Attack'
   @attribute
-  public jumpAction: string = 'Jump'
+  public jumpAction: ActionName = 'Jump'
   @attribute
-  public dashAction: string = 'Dash'
+  public dashAction: ActionName = 'Dash'
   /** Below this the player has fallen out of the world (the map's bottom edge is y = 0). */
   @attribute
   public killY: number = -4

@@ -39,6 +39,7 @@ import { buildTour } from './cinematic/tour'
 import { buildDayCycle, daySlots, type DayAuthored } from './cinematic/dayPath'
 import { terrainHeightSampler } from './cinematic/terrainHeight'
 import { ROOT, VALLEY_SCENE, id, log, child, nodes, refreshValleyScripts, attach } from './bundleOps'
+import { applyNodeFields } from '../exampleKit/nodeFields.mjs'
 
 export const TOUR_FILE = path.join(ROOT, 'tools', 'valley', 'cinematic', 'valley-tour.sequence.json')
 
@@ -292,7 +293,8 @@ export function applyCinematic(bundle: any, options: { regenerate?: boolean } = 
 
   const over = overlay()
   const menu = startMenu()
-  attach(menu, menuScript, { tourName: 'Valley Tour', dayName: 'Day Cycle' })
+  // Its `tour` and `day` fields point at the two Sequence nodes once they are in the scene (applyNodeFields below).
+  attach(menu, menuScript, {})
   const ui = (n: any, name: string): any => n.name === name ? n : (n.children ?? []).map((c: any) => ui(c, name)).find(Boolean)
 
   const sequence = {
@@ -339,6 +341,9 @@ export function applyCinematic(bundle: any, options: { regenerate?: boolean } = 
   const dayAt = root.children.findIndex((c: any) => c.id === dayNode.id)
   if (dayAt >= 0) root.children[dayAt] = dayNode
   else root.children.splice(Math.max(0, root.children.indexOf(weather) + 1), 0, dayNode)
+
+  // The node fields: the menu's tour and day, the director's lightning (exampleKit/nodeFields.mjs).
+  applyNodeFields(root, bundle.libraries.scripts, (m: string) => log(`cinematic:${m}`))
 
   // The menu's own map beside the fly camera's (flyInputMap.mjs).
   bundle.libraries.inputMap = parseInputMap(FLY_INPUT_MAP)

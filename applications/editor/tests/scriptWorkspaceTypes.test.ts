@@ -336,9 +336,10 @@ export default class Hero extends Node { ${wrong} }
     await writeFile(typesFile, projectTypesDeclaration([], ['Jump', 'Gameplay/Jump']), 'utf-8');
     try {
       const head = `
-import { Node } from 'cleo'
-import { child, find, onAction, onHold, onTap, onEvent, every, onEnter, onExit, attribute, save, options, pick, eventListener, eventDispatch, observable, onClipEvent, animTrigger, animAction, animParam } from 'cleo/decorators'
-import type { ActionState } from 'cleo'
+import { Node, LightNode, Material, Texture, Sound, Tileset } from 'cleo'
+import { vec3 } from 'gl-matrix'
+import { child, find, onAction, onHold, onTap, onEvent, every, onEnter, onExit, attribute, save, options, eventListener, eventDispatch, observable, onClipEvent, animTrigger, animAction, animParam } from 'cleo/decorators'
+import type { ActionState, Color, ColorAlpha, Vec2, Vec3, Vec4, SoundName, SceneName, LayerName, ParamName } from 'cleo'
 export default class Hero extends Node {
 `;
       await writeScript('Player/Hero.ts', `${head}
@@ -347,7 +348,10 @@ export default class Hero extends Node {
   @save hp = 100
   names: string[] = ['a']
   @options('names') choice = 'a'
-  @pick('sound') cue: string = ''
+  @attribute cue: SoundName = ''
+  @attribute nextScene: SceneName = 'Dungeon'
+  @attribute layer: LayerName = 'Character'
+  @attribute param: ParamName = 'Speed'
   @onAction('Jump') jump(state: ActionState) {}
   @onAction('Gameplay/Jump', 'released') land() {}
   @onHold('Jump', 0.5) charge(state: ActionState) {}
@@ -360,7 +364,19 @@ export default class Hero extends Node {
   @attribute('Combat') damage = 10
   @attribute('Combat', { min: 0, max: 1, step: 0.05, label: 'Crit' }) crit = 0.1
   @attribute({ readonly: true, showIf: ['mode', 'ranged'] }) private hidden2 = 2
-  @attribute({ color: true }) tint: [number, number, number] = [1, 1, 1]
+  @attribute tint: Color = [1, 1, 1]
+  @attribute glow: Color = vec3.fromValues(1, 0.5, 0)
+  @attribute fade: ColorAlpha = [1, 1, 1, 0.5]
+  @attribute size: Vec2 = [1, 2]
+  @attribute offset: Vec3 = [0, 1, 0]
+  @attribute plane: Vec4 = [0, 1, 0, 0]
+  @attribute skin: Material | null = null
+  @attribute icon: Texture | null = null
+  @attribute hitSound: Sound | null = null
+  @attribute tiles: Tileset | null = null
+  @attribute lamp: LightNode | null = null
+  @attribute doors: Node[] = []
+  onStart() { const c: Vec3 = this.tint; void c; this.hitSound?.play(); const m: Material | null = this.skin; void m; void this.lamp?.light }
   @onEvent('combat:Hit', { once: true, priority: 2, where: { team: 'red' } }) hitBy(target: Node, damage: number) {}
   @eventListener('Shot', { capture: true }) shot(result: { damage: number }, kind: string) {}
   @eventDispatch('Shot', 'pistol') fire() { return { damage: 10 } }
@@ -395,6 +411,9 @@ export default class Hero extends Node {
         `@observable(3) lives = 3`,
         `@animParam('Moving') moving = 'yes'`,
         `@animAction(3) wave() {}`,
+        `@attribute({ color: true }) tint: Color = [1, 1, 1]`,
+        `@attribute tint: Color = 'red'`,
+        `@attribute skin: Material = 'Brick'`,
       ]) {
         await writeScript('Player/Hero.ts', `${head}  ${wrong}\n}`);
         expect((await typecheck()).ok, wrong).toBe(false);

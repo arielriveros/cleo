@@ -74,10 +74,11 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
         expect(library('templates').filter((t: any) => /Game Manager/.test(t.name)).length).toBe(1);
         const field = manager.variables.find((v: any) => v.name === 'gameType');
         expect(field, 'gameType field').toBeTruthy();
-        expect([...field.choices].sort()).toEqual(['coop', 'ffa', 'oneVsAll', 'teamDeathmatch']);
+        expect(field.type.kind).toBe('choice');
+        expect([...field.type.values].sort()).toEqual(['coop', 'ffa', 'oneVsAll', 'teamDeathmatch']);
         expect(manager.variables.find((v: any) => v.name === 'mode')).toBeUndefined();
         const shared = library('scripts').find((a: any) => a.name === 'FpsShared').source;
-        for (const type of field.choices) expect(shared, type).toMatch(new RegExp(type + ':\\s*\\{ label'));
+        for (const type of field.type.values) expect(shared, type).toMatch(new RegExp(type + ':\\s*\\{ label'));
     });
 
     it('sets the manager to a valid game type and lists bot templates that exist', () => {

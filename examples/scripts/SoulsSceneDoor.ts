@@ -1,4 +1,5 @@
 import { Game, Logger, Node, SaveGame } from 'cleo'
+import type { SceneName } from 'cleo'
 import { attribute } from 'cleo/decorators'
 
 /**
@@ -17,7 +18,7 @@ import { attribute } from 'cleo/decorators'
 export default class SoulsSceneDoorNode extends Node {
   /** The scene to load, by name or id. */
   @attribute
-  public targetScene: string = 'Dungeon'
+  public targetScene: SceneName = 'Dungeon'
   @attribute
   public prompt: string = 'Enter'
   @attribute

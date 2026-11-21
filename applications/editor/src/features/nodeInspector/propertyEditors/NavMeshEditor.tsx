@@ -1,45 +1,22 @@
 import { useEffect, useState } from 'react'
-import { NavMeshNode, bakeNavMesh, navBakeSettings } from 'cleo'
+import { NavMeshNode, bakeNavMesh } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { useCleoEngine } from '../../EngineContext'
 import {
-  Button, DocScope, NumberInput, PropertyRow, PropertyTable, Slider, Toggle, cn,
+  Button, DocScope, PropertyRow, PropertyTable, Slider, Toggle, cn,
 } from '@cleo/app-kit/ui'
 import { gatherNavSoup } from '../../../utils/navBakeSources'
 import { navPreviewSkippedFor } from '../../../utils/editorHelpers'
 import { NavMeshIcon } from '../../sceneInspector/nodeIcons'
+import { DeclaredSection, useNodeTick } from '../../properties/DeclaredSections'
 
 // Every row's explanation is its row in docs/editor/ai-agents.md › Navigation meshes, shown as the
 // label's hover card; only the live status lines below carry their own tooltips.
 
-interface NavState {
-  sizeX: number
-  sizeY: number
-  sizeZ: number
-  maxSlope: number
-  weldTolerance: number
-  simplifyTolerance: number
-  agentRadius: number
-  carve: boolean
-  agentHeight: number
+/** How the bake samples terrain: the card's own, not saved with the node. */
+interface TerrainSampling {
   includeTerrain: boolean
   terrainStep: number
-}
-
-function readNode(node: NavMeshNode): NavState {
-  return {
-    sizeX: node.size[0],
-    sizeY: node.size[1],
-    sizeZ: node.size[2],
-    maxSlope: node.bake.maxSlope,
-    weldTolerance: node.bake.weldTolerance,
-    simplifyTolerance: node.bake.simplifyTolerance,
-    agentRadius: node.agentRadius,
-    carve: node.bake.carve,
-    agentHeight: node.bake.agentHeight,
-    includeTerrain: true,
-    terrainStep: 2,
-  }
 }
 
 /** What the last bake produced, so an author can see whether it found anything at all. */
@@ -57,30 +34,12 @@ interface BakeReport {
 
 export default function NavMeshEditor(props: { node: NavMeshNode }) {
   const { eventEmitter, editorScene } = useCleoEngine()
-  const [state, setState] = useState<NavState>(() => readNode(props.node))
+  useNodeTick(props.node)
+  const [state, setState] = useState<TerrainSampling>({ includeTerrain: true, terrainStep: 2 })
   const [report, setReport] = useState<BakeReport | null>(null)
   const [baking, setBaking] = useState(false)
 
-  useEffect(() => { setState(readNode(props.node)); setReport(null) }, [props.node])
-
-  const apply = (patch: Partial<NavState>) => {
-    const next = { ...state, ...patch }
-    // The bake block is nested on the node; the two terrain fields are not stored at all, because they
-    // describe how to GATHER rather than what was baked.
-    // Spread first: fields this panel has no row for (mergeRegions, stepHeight) must survive an edit.
-    props.node.bake = navBakeSettings({
-      ...props.node.bake,
-      maxSlope: next.maxSlope,
-      weldTolerance: next.weldTolerance,
-      simplifyTolerance: next.simplifyTolerance,
-      carve: next.carve,
-      agentHeight: next.agentHeight,
-    })
-    props.node.agentRadius = next.agentRadius
-    props.node.size = [next.sizeX, next.sizeY, next.sizeZ]
-    setState(next)
-    eventEmitter.emit('SCENE_CHANGED')
-  }
+  useEffect(() => { setReport(null) }, [props.node])
 
   const bake = () => {
     setBaking(true)
@@ -157,21 +116,12 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
     props.node.setPosition([
       (min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2,
     ])
-    apply({ sizeX: size[0], sizeY: size[1], sizeZ: size[2] })
+    props.node.size = [size[0], size[1], size[2]]
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
   }
 
   // Label-less: each slider sits in a PropertyRow, so it lines up with every other row in the card.
-  const slider = (k: keyof NavState, min: number, max: number, step: number, fixed = 2,
-                  readout?: (v: number) => string) => (
-    <Slider min={min} max={max} step={step} value={state[k] as number} className='my-0'
-      readout={readout ?? ((v) => v.toFixed(fixed))}
-      onChange={(v) => apply({ [k]: v } as Partial<NavState>)} />
-  )
-
-  const bounded = state.sizeX > 0 && state.sizeY > 0 && state.sizeZ > 0
-  // What the viewport preview declined to draw, if anything. Read from the reconciler rather than
-  // recomputed: it already worked this out this frame, and a preview that is silently absent on
-  // exactly the biggest levels is the failure this whole panel exists to make visible.
+  const bounded = props.node.bounded
   const skipped = navPreviewSkippedFor(props.node.id)
 
   // One status line instead of a stack of paragraphs; the full explanation rides on its tooltip.
@@ -203,16 +153,8 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
     <DocScope page='editor/ai-agents'>
     <Collapsable title='Nav Mesh' doc='editor/ai-agents#navigation-meshes' icon={<NavMeshIcon />} persistKey='navMesh'>
       <div className='w-full p-2'>
+        <DeclaredSection node={props.node} title='' keys={['size']} columns={['32%', '68%']} />
         <PropertyTable columns={['32%', '68%']}>
-          <PropertyRow label='Size'>
-            <span className='flex gap-1'>
-              {(['sizeX', 'sizeY', 'sizeZ'] as const).map((k, i) => (
-                <NumberInput key={k} className='min-w-0 flex-1' min={0} step={0.5} value={state[k]}
-                  title={['Size X', 'Size Y', 'Size Z'][i] + ' — 0 bakes the whole scene'}
-                  onChange={(v) => apply({ [k]: Math.max(0, v) } as Partial<NavState>)} />
-              ))}
-            </span>
-          </PropertyRow>
           <PropertyRow label='Bake'>
             <span className='flex items-center gap-1'>
               <Button size='sm' onClick={bake} disabled={baking}>{baking ? 'Baking…' : 'Bake'}</Button>
@@ -221,16 +163,9 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
                 title='Resize the box around everything walkable'>Fit</Button>
             </span>
           </PropertyRow>
-          <PropertyRow label='Max slope'>{slider('maxSlope', 0, 89, 1, 0, (v) => v.toFixed(0) + '°')}</PropertyRow>
-          <PropertyRow label='Weld'>{slider('weldTolerance', 0.001, 0.5, 0.001, 3)}</PropertyRow>
-          <PropertyRow label='Simplify'>{slider('simplifyTolerance', 0, 0.5, 0.001, 3)}</PropertyRow>
-          <PropertyRow label='Agent radius'>{slider('agentRadius', 0, 5, 0.05)}</PropertyRow>
-          <PropertyRow label='Carve obstacles'>
-            <Toggle checked={state.carve} onChange={(c) => apply({ carve: c })} />
-          </PropertyRow>
-          {state.carve && (
-            <PropertyRow label='Agent height'>{slider('agentHeight', 0.5, 5, 0.05)}</PropertyRow>
-          )}
+        </PropertyTable>
+        <DeclaredSection node={props.node} title='' skip={['size']} columns={['32%', '68%']} />
+        <PropertyTable columns={['32%', '68%']}>
           <PropertyRow label='Terrain'>
             <span className='flex items-center gap-2'>
               <Toggle checked={state.includeTerrain} onChange={(c) => setState({ ...state, includeTerrain: c })} />

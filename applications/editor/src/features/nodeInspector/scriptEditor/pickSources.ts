@@ -1,12 +1,11 @@
-import { ModelNode, AnimatedModel, AnimatedSpriteNode, ownedSoundsGroup, isEditorOwnedName, type Node, type AnimationStateMachine } from 'cleo'
+import { ModelNode, AnimatedModel, AnimatedSpriteNode, ownedSoundsGroup, isEditorOwnedName, type Node, type AnimationStateMachine, type NameKind } from 'cleo'
 import { skinnedModelNodeOf } from '../../../utils/models'
-import type { ScriptPickKind } from '../../../utils/scripts'
 import type { AnimationAsset } from '../../../utils/animationAssets'
 import type { RigAsset } from '../../../utils/rigAssets'
 import type { Template } from '../../../utils/templates'
 
 // Where a typed name field's choices come from (`clip: ClipName`, `sound: SoundName`, ... — see
-// src/core/scripting/fieldTypes.ts). Every source reads the node's SURROUNDINGS the way the script will at
+// src/core/scripting/fieldTypes.ts), for a script's field and an engine node's declared property alike. Every source reads the node's SURROUNDINGS the way the script will at
 // runtime: the clips of the character the node belongs to, the cues of its nearest `Sounds` group, the
 // sockets on its skeleton. The value stays a plain string, so a choice the list cannot see is still kept
 // (the inspector flags it rather than dropping it).
@@ -22,6 +21,12 @@ export type PickContext = {
   templates: Template[]
   /** Shared animators, for a trigger field with no character above it (a weapon's move). */
   animControllers?: { name: string; machine: AnimationStateMachine }[]
+  /** The project's input actions, bare names (an `ActionName`). */
+  actions?: readonly string[]
+  /** The project's scenes, by name (a `SceneName`). */
+  scenes?: readonly string[]
+  /** The project's collision layer names, index 0 being layer 1 (a `LayerName`); unnamed ones are skipped. */
+  layers?: readonly string[]
 }
 
 const isHelper = (n: Node) => isEditorOwnedName(n.name)
@@ -97,6 +102,17 @@ function modelOwnerName(model: ModelNode): string {
 const triggersOf = (sm: AnimationStateMachine | null | undefined): string[] =>
   (sm?.parameters ?? []).filter(p => p.type === 'trigger').map(p => p.name)
 
+const paramsOf = (sm: AnimationStateMachine | null | undefined): string[] =>
+  (sm?.parameters ?? []).filter(p => p.type !== 'trigger').map(p => p.name)
+
+/** The parameters (not triggers) of the animator of the character `node` belongs to; else every shared animator's. */
+function paramChoices(node: Node, ctx: PickContext): PickChoice[] {
+  const model = ownerSkinnedModel(node, ctx)
+  const own = paramsOf(model?.animator?.getStateMachine())
+  if (own.length) return own.map(value => ({ value, group: modelOwnerName(model!) }))
+  return (ctx.animControllers ?? []).flatMap(c => paramsOf(c.machine).map(value => ({ value, group: c.name })))
+}
+
 /**
  * The triggers of the animator of the character `node` belongs to — what its script fires to play an
  * Actions-layer state. A weapon's move has no character above it: every shared animator's, by animator.
@@ -163,8 +179,8 @@ function spriteClipChoices(node: Node): PickChoice[] {
   return out
 }
 
-/** The values a `pick` field of `kind` can take on `node`. Empty when there is nothing to offer. */
-export function pickChoices(kind: ScriptPickKind, node: Node, ctx: PickContext): PickChoice[] {
+/** The values a name field of `kind` can take on `node`. Empty when there is nothing to offer. */
+export function pickChoices(kind: NameKind, node: Node, ctx: PickContext): PickChoice[] {
   switch (kind) {
     case 'clip': return unique(clipChoices(node, ctx))
     case 'sound': return unique(soundChoices(node))
@@ -173,11 +189,18 @@ export function pickChoices(kind: ScriptPickKind, node: Node, ctx: PickContext):
     case 'node': return unique(nodeChoices(node))
     case 'trigger': return unique(triggerChoices(node, ctx))
     case 'spriteClip': return unique(spriteClipChoices(node))
+    case 'param': return unique(paramChoices(node, ctx))
+    case 'action': return unique((ctx.actions ?? []).map(value => ({ value })))
+    case 'scene': return unique((ctx.scenes ?? []).map(value => ({ value })))
+    case 'layer': return unique((ctx.layers ?? []).filter(Boolean).map(value => ({ value })))
   }
 }
 
 /** Header text for a field's picker, e.g. "Clips of Player". */
-export const PICK_LABEL: Record<ScriptPickKind, string> = {
+export const PICK_LABEL: Record<NameKind, string> = {
   clip: 'clip', sound: 'sound cue', socket: 'socket', template: 'template', node: 'node', trigger: 'animator trigger',
-  spriteClip: 'sprite clip',
+  spriteClip: 'sprite clip', param: 'animator parameter', action: 'input action', scene: 'scene', layer: 'collision layer',
 }
+
+/** Names only those the project declares can be: picked from the list, never typed. */
+export const PICK_ONLY: ReadonlySet<NameKind> = new Set<NameKind>(['trigger', 'action', 'scene', 'layer'])

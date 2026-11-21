@@ -136,6 +136,14 @@ describe('parsing the docs', () => {
     expect(resolveTerm(index, [frameOf(index, find('Model')!)!], 'Strength', 'field')).toBeNull();
   });
 
+  it('passes a field lookup out of a term\'s frame to the heading region around it', () => {
+    // A card's Section titled by a term of the card's own region: its rows are still the card's.
+    const region = { page: 'editor/sample', section: 'common-sections', fields: true }
+    const term = frameOf(index, find('Model', [region])!)!
+    expect(term.fields).toBe(false)
+    expect(resolveTerm(index, [term, region], 'Strength', 'field')?.label).toBe('Softness / Strength')
+  });
+
   it('numbers a repeated heading like GitHub, so each region narrows to its own section', () => {
     const md = '# P\n\n## Sky\n\nThe sky.\n\n### Quality\n\nSky quality.\n\n**Steps** — sky steps.\n\n## Clouds\n\nThe clouds.\n\n### Quality\n\nCloud quality.\n\n**Steps** — cloud steps.\n';
     const dup = parseDocs({ 'editor/dup': md });
