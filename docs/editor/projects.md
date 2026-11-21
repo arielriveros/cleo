@@ -29,8 +29,11 @@ examples:
 >
 > **Deleting the open project** closes it, deletes it, and opens the project you used most recently, or a new
 > empty one if it was the last. The one dialog that asks about deleting also lists unsaved edits that would be
-> lost. **Deleting a project takes its dock layouts, sounds, GI bakes and Play saves with it.** The folder a
-> script workspace mirrors its scripts into is yours, and stays.
+> lost. **Deleting a project takes its dock layouts, sounds, GI bakes and Play saves with it.**
+>
+> In the desktop app projects are [folders](project-folders.md): **My Projects** lists the folders you have
+> opened, with **Open Folder…** and **Import .zip…**, and **Remove** takes a project off the list (its cache with
+> it) while its folder stays where it is.
 
 ## Examples
 
@@ -95,9 +98,9 @@ them and carries on, **Discard** drops them and carries on, **Cancel** stays whe
 
 ## Storage
 
-Everything lives in the browser's (or the desktop app's) own storage, namespaced by project — not as
-files on disk. To get things out, Export. To work on scripts as real files, use the
-[VS Code workspace](scripting-workflow.md#editing-in-vs-code).
+In the desktop app a project is a folder on disk, and the app's own storage is only a cache of it: see
+[Project folders](project-folders.md). In the browser everything lives in the browser's storage, namespaced by
+project; to get things out, Export.
 
 ## See also
 

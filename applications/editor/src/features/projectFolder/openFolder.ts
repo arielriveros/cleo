@@ -10,7 +10,7 @@ import { cryptoRandomId } from '../../utils/ids'
 import { ensureFolderRecord, recordOfFolder, renameProject, type NewProjectOptions } from '../../utils/projects'
 import type { BundleData } from '../../utils/bundle'
 import { readAssetJson } from '../../utils/folder/codec'
-import { filesToRead, readFolderDelta, type CachedFile } from '../../utils/folder/folderDelta'
+import { filesToRead, readFolderDelta, type CachedFile, type FolderDelta } from '../../utils/folder/folderDelta'
 import { bundleToFolder, FOLDER_FORMAT, parseProjectFile, projectFileText, type FolderSnapshot } from '../../utils/folder/projectCodec'
 import { ASSETS_DIR, PROJECT_FILE, SETTINGS_REL, kindOfFileName, metaRelOf, nameOfRel, roleOfRel } from '../../utils/folder/layout'
 import { parseMeta } from '../../utils/folder/meta'
@@ -18,7 +18,9 @@ import { isRawByteKind } from '../../utils/vfs'
 import { toJsonText } from '../../utils/folder/jsonText'
 import { registerFolderSync, switchProject } from '../projects/projectSwitch'
 import { getProjectBridge, requireProjectBridge, MAX_BATCH_BYTES, type FileStat, type FolderBatch } from './desktopProject'
-import { beginFolderSession, loadFolderState, saveFolderState } from './folderSession'
+import { beginFolderSession, loadFolderState, loadJournal, saveFolderState, saveJournal } from './folderSession'
+import { idbGet } from '@cleo/app-kit/utils/idb'
+import { sceneKey } from '../../utils/storageKeys'
 import { writeDeltaIntoCache } from './ingest'
 import { writeProjectScaffold } from './scaffold'
 
@@ -122,6 +124,7 @@ export async function syncCacheFromFolder(pid: string, root: string, load?: Load
 
   step?.progress(1, 1, 'Updating the cache')
   const delta = await readFolderDelta({ listing, dirs: opened.dirs, previous, read, getBlob: h => blobs.get(h) })
+  await keepUnflushedScenes(pid, opened.root, delta, previous)
   const ingested = delta.unchanged && !cold ? null : await writeDeltaIntoCache(pid, delta, { cold })
 
   // Write back what the read found missing or wrong (metas, re-minted ids, textures minted for dropped images).
@@ -160,6 +163,32 @@ export async function syncCacheFromFolder(pid: string, root: string, load?: Load
   }
   step?.done(cold ? `${report.upserts} assets` : report.unchanged ? 'up to date' : `${report.upserts} changed, ${report.removed} removed`)
   return report
+}
+
+/**
+ * The journal's other half. A scene saved into the cache whose file the folder never confirmed (the editor
+ * stopped between the two writes) is pushed by the next session, when its file is still what it was. When
+ * the file changed on disk meanwhile too, the disk wins — and the cache's version, about to be replaced, is
+ * kept in `.cleo/recovered/<time>/` rather than lost, with a line in the log saying where.
+ */
+async function keepUnflushedScenes(pid: string, root: string, delta: FolderDelta, previous: Map<string, CachedFile>): Promise<void> {
+  const journal = await loadJournal(pid)
+  if (!journal.size) return
+  const replaced = new Set([...delta.upserts.filter(u => u.kind === 'scene').map(u => u.guid), ...delta.removed.filter(r => r.kind === 'scene').map(r => r.guid)])
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  let kept = 0
+  for (const key of [...journal]) {
+    const [kind, guid] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]
+    if (kind !== 'scene' || !replaced.has(guid)) continue
+    const data = await idbGet(sceneKey(guid, pid))
+    const rel = [...previous].find(([, f]) => f.kind === 'scene' && f.guid === guid)?.[0] ?? `${guid}.scene`
+    if (data) {
+      const res = await requireProjectBridge().writeScaffold(root, [{ rel: `.cleo/recovered/${stamp}/${nameOfRel(rel)}.json`, content: JSON.stringify(data) }])
+      if (res.ok) { kept++; Logger.warn(`${rel} changed on disk while the editor's last save of it had not reached the folder; that save is kept in .cleo/recovered/${stamp}/`, 'Editor') }
+    }
+    journal.delete(key)
+  }
+  if (kept || journal.size) await saveJournal(pid, journal)
 }
 
 /** What a folder's project.cleo says, or an error to show. */

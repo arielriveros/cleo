@@ -34,13 +34,6 @@ export type ProjectRecord = {
   /** Set while the one-time migration of an existing install is in flight; cleared when it completes. */
   migrating?: boolean;
   /**
-   * Absolute path of the folder this project's scripts are mirrored into for editing in an external IDE.
-   * Machine-local, so it lives on the project record and never in exportable scoped storage.
-   */
-  scriptWorkspacePath?: string;
-  /** Command used to open that folder ('code', 'cursor', 'codium', …). Defaults to 'code'. */
-  scriptEditorCommand?: string;
-  /**
    * The project's folder, in the desktop app, where every project is one: the folder is the project and
    * everything under `p:<id>:` is only a cache of it. `uid` is the project file's own id, which lets
    * "Locate…" confirm that a folder moved elsewhere is the same project. Machine-local, like the record.
@@ -205,7 +198,7 @@ async function migrateWorkspace(existing?: ProjectRecord): Promise<ProjectRecord
 
 /**
  * Erase every trace of a project: kv keys, texture, audio and GI bake payloads, its Play saves, localStorage,
- * and its registry entry. The folder its scripts are mirrored into (a script workspace) is the user's, and stays.
+ * and its registry entry. A folder project's folder is the user's, and stays.
  */
 export async function wipeProject(id: string): Promise<void> {
   for (const key of await idbKeysByPrefix(projectPrefix(id))) await idbDelete(key);
@@ -332,21 +325,6 @@ export async function renameProject(id: string, name: string): Promise<void> {
   if (!trimmed) return;
   // Metadata only; nothing in storage is keyed by name.
   await saveProjects((await loadProjects()).map(p => (p.id === id ? { ...p, name: trimmed } : p)));
-}
-
-/** The script-workspace settings for a project, or empty defaults when it has never been set up. */
-export async function scriptWorkspaceOf(id: string): Promise<{ path?: string; command?: string }> {
-  const record = (await loadProjects()).find(p => p.id === id);
-  return { path: record?.scriptWorkspacePath, command: record?.scriptEditorCommand };
-}
-
-/** Point a project at a script workspace folder, or pass `undefined` to disconnect it. */
-export async function setScriptWorkspace(id: string, path: string | undefined, command?: string): Promise<void> {
-  const list = await loadProjects();
-  if (!list.some(p => p.id === id)) return;
-  await saveProjects(list.map(p => (p.id === id
-    ? { ...p, scriptWorkspacePath: path, scriptEditorCommand: command ?? p.scriptEditorCommand }
-    : p)));
 }
 
 /** Record a project's latest activity (and its cover image) for the browser's ordering and cards. */

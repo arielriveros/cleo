@@ -189,9 +189,9 @@ project that uses it keeps it, in `/Creator/Removed`; otherwise it is removed.
 
 ## Storage
 
-Assets live in the project's own storage, namespaced per project, not as files on disk. To get them
-out, export the project (**Project ▸ Export Project**); to work on scripts in a real editor, use the
-[VS Code workspace](scripting-workflow.md#editing-in-vs-code).
+In the desktop app the Assets panel is the project folder's `Assets/` folder: every asset is a file there,
+with a `.meta` beside it ([Project folders](project-folders.md)). In the browser assets live in the browser's
+storage; export the project (**Project ▸ Export Project**) to get them out.
 
 ## See also
 

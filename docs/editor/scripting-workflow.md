@@ -131,37 +131,27 @@ blocked read returns nothing.
 
 ## Editing in VS Code
 
-Desktop only. In **Options ▸ Editor ▸ Scripts**, set *Open scripts with* to **VSCode** (or choose the
-workspace folder there): the project's scripts are mirrored to a real folder, kept in step, and opening
-a script opens its file in your editor. In the browser the option is greyed out.
+Desktop only. A desktop project is a [folder](project-folders.md), and its scripts are files in it: each script is
+`Assets/<its path in the Assets panel>.ts`, beside a `.meta` holding its id. Open the folder in VS Code
+(**Project ▸ Open in Code Editor**), or set *Open scripts with* to **VSCode** in **Options ▸ Editor ▸ Scripts** to open a
+script's file whenever you open the script. In the browser the option is greyed out.
 
-What it sets up:
+The folder is a TypeScript project of its own:
 
-- a **real TypeScript project**, with a `tsconfig.json` mirroring the in-editor compiler options
-  exactly, and the engine's declaration files, so your IDE and the editor agree about types;
-- a hidden manifest mapping each script asset to its file;
-- a `.vscode/launch.json` with **Attach to the Cleo game**, when the folder has none, for debugging the
-  game from VS Code: see [Debugging in VS Code](debugging.md#debugging-in-vs-code).
+- `tsconfig.json` mirrors the in-editor compiler options, `@/` is mapped onto `Assets/`, and the engine's declarations
+  are written for it, so your IDE and the editor agree about types;
+- `package.json` has `npm run typecheck`, `npm run watch`, `npm run play`, `npm run debug` and `npm test`
+  (see [Project folders](project-folders.md#scripts-and-npm));
+- `.vscode/launch.json` has **Debug Cleo game** and **Attach to the Cleo game**: see
+  [Debugging in VS Code](debugging.md#debugging-in-vs-code).
 
-**Two-way sync.** Editor changes are written out; changes on disk are pulled back in as renames,
-updates, creates and deletes.
+**Saving a script in VS Code** updates it in Cleo at once, its open tab included. If the tab had unsaved edits of its
+own, they are replaced, and the Console says so.
 
-**Identity comes from the manifest, not the filename** — so renaming a file in your IDE is
-understood as a rename, not as a delete plus an unrelated create.
-
-**Status** is shown in Options ▸ Editor ▸ Scripts: `off`, `connecting`, `live`, `paused`, `error`.
-The top bar shows a chip only while the sync is `paused` or in `error`. From either you can:
-
-| Action | Does |
-|---|---|
-| **Disconnect** | Stop mirroring. |
-| **Open in editor** | Jump to a script, optionally selecting its file. |
-| **Resync** | Rewrite everything on disk from the library. |
-| **Apply pending deletions** | Confirm deletions detected on disk. |
-| **Resolve conflict** | *Keep external* or *keep mine*, when an outside edit lands on a script that has unsaved editor changes. |
-
-Deletions are held rather than applied silently, because a delete is the one operation you cannot
-undo by re-syncing.
+**Renaming, moving or deleting** a script file outside Cleo — and anything else changed outside it, such as a
+`git pull` — shows **Changed on disk** in the menu bar; **Reload from disk** takes it in. Rename or move a script
+together with its `.meta`, and every node using it keeps it. A rename that leaves the `.meta` behind (as VS Code's
+does) is recognised by the file's content.
 
 ## Scripts in a published build
 

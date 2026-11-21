@@ -5,7 +5,6 @@ import { useCleoEngine, KIND_LABEL } from "./EngineContext";
 import { useVfs } from "./assets/VfsContext";
 import { buildMultiSceneGameData, PublishCanceledError } from "./publish/buildMultiSceneGameData";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
-import WorkspaceStatusChip from "./scriptWorkspace/WorkspaceStatusChip";
 import FolderStatusChip from "./projectFolder/FolderStatusChip";
 import { openFolderDialog, openProjectInCodeEditor, showProjectFolder } from "./projectFolder/folderActions";
 import { folderSession } from "./projectFolder/folderSession";
@@ -475,9 +474,6 @@ export default function MenuBar() {
             {status.icon}{status.text}
           </span>
         )}
-        {/* The script workspace appears here only when it needs attention (paused sync, error, conflict);
-            setting it up and its everyday status live in Options ▸ Editor ▸ Scripts. */}
-        <WorkspaceStatusChip />
         {/* A folder project's folder, only when it needs attention (changed on disk, unreadable files, a refused write). */}
         <FolderStatusChip />
         {/* The addons' status chips: the Claude Code addon's agent link, shown while its panel is open and started. */}

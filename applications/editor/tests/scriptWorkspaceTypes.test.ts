@@ -6,14 +6,14 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
-import { staticScaffold } from '../src/features/scriptWorkspace/scaffold';
+import { scaffoldFiles } from '../src/features/projectFolder/scaffold';
 import { projectTypesDeclaration } from '../src/utils/projectTriggers';
 import { PROJECT_TYPES_REL } from '@cleo/app-kit/code/projectTypes';
 
 const exec = promisify(execFile);
 const repo = fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]applications[\\/]editor[\\/]tests[\\/]?$/, '');
 
-// The point of the script workspace is that a folder on disk types a script exactly the way the in-editor
+// The point of a project folder being a TypeScript project is that it types a script exactly the way the in-editor
 // Monaco does: `import { Node } from 'cleo'` resolves, F12 walks into the engine's declaration tree, and
 // `Vec.vec3` is real rather than `any`.
 //
@@ -60,7 +60,7 @@ beforeAll(async () => {
 
   root = await mkdtemp(path.join(tmpdir(), 'cleo-ws-types-'));
 
-  for (const file of staticScaffold()) {
+  for (const file of scaffoldFiles('Types Test')) {
     const abs = path.join(root, file.rel);
     await mkdir(path.dirname(abs), { recursive: true });
     await writeFile(abs, file.content, 'utf-8');
@@ -94,8 +94,9 @@ async function typecheck(): Promise<{ ok: boolean; out: string }> {
   }
 }
 
+/** A script, at its explorer path under the project folder's Assets/ (where the project keeps them). */
 async function writeScript(rel: string, source: string) {
-  const abs = path.join(root, rel);
+  const abs = path.join(root, 'Assets', rel);
   await mkdir(path.dirname(abs), { recursive: true });
   await writeFile(abs, source, 'utf-8');
 }

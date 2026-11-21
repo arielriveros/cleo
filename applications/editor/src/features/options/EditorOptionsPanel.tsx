@@ -8,7 +8,8 @@ import { codeThemeStore, useCodeTheme, type CodeThemeName } from '@cleo/app-kit/
 import { DEFAULT_EDITOR_PREFS, editorPrefsStore, useEditorPrefs, type ScriptDebugger, type ScriptOpener } from './editorPrefs'
 import { desktopDebugPort } from '../playWindow/desktopPlay'
 import { useVsCodeDebug } from '../scriptDebugger/vscodeAttach'
-import { launchConfiguration } from '../scriptWorkspace/scaffold'
+import { launchConfiguration } from '../projectFolder/scaffold'
+import { showProjectFolder } from '../projectFolder/folderActions'
 import { OptionsPageBody, OptionsShell, OPTION_LABEL, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
 
 // Options ▸ Editor: how the editor behaves for YOU, on this machine, in every project. Nothing here
@@ -108,70 +109,24 @@ function ScriptOptions() {
   )
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  off: 'Not set up',
-  connecting: 'Connecting…',
-  live: 'Synced',
-  paused: 'Sync paused',
-  error: 'Sync error',
-}
-const STATUS_DOT: Record<string, string> = {
-  off: 'bg-muted',
-  connecting: 'bg-muted animate-pulse',
-  live: 'bg-success',
-  paused: 'bg-warning',
-  error: 'bg-danger',
-}
-
-/** The project's script folder on disk: the mirror VSCode edits. Replaces the old menu-bar button. */
+/** The project's folder (desktop): where its scripts are files an external editor opens. */
 function WorkspaceSection({ desktop }: { desktop: boolean }) {
   const ws = useScriptWorkspace()
   const { externalEditorCommand: cmd } = useEditorPrefs()
-  const attention = ws.status === 'paused' || ws.status === 'error'
 
   return (
-    <Section title='Script workspace folder'>
-      {!desktop ? (
-        <Hint>Available in the Cleo desktop app.</Hint>
+    <Section title='Project folder'>
+      {!desktop || !ws.rootPath ? (
+        <Hint>In the Cleo desktop app a project is a folder, and its scripts are files under its Assets folder.</Hint>
       ) : (
         <>
-          <Field label='Status' labelClassName={OPTION_LABEL}>
-            <span className='flex flex-1 items-center gap-1.5 text-ui text-fg'>
-              <span className={cn('h-1.5 w-1.5 rounded-full', STATUS_DOT[ws.status] ?? 'bg-muted')} />
-              {STATUS_LABEL[ws.status] ?? ws.status}
-            </span>
+          <Field label='Folder' labelClassName={OPTION_LABEL}>
+            <span className='flex-1 break-all text-ui-sm text-dim' title={ws.rootPath}>{ws.rootPath}</span>
           </Field>
-          {ws.rootPath && (
-            <Field label='Folder' labelClassName={OPTION_LABEL}>
-              <span className='flex-1 break-all text-ui-sm text-dim' title={ws.rootPath}>{ws.rootPath}</span>
-            </Field>
-          )}
-          {ws.message && <Hint className={cn('ml-[158px]', attention && 'text-warning')}>{ws.message}</Hint>}
-
+          <Hint className='ml-[158px]'>Scripts are the .ts files under Assets. An edit saved in another editor is taken in at once.</Hint>
           <div className='mt-2 flex flex-wrap gap-1.5'>
-            {!ws.rootPath ? (
-              <Button size='sm' variant='primary' onClick={() => void ws.setup()}>Choose folder…</Button>
-            ) : (
-              <>
-                <Button size='sm' onClick={() => void ws.openInEditor()}>Open in {cmd === 'code' ? 'VSCode' : cmd}</Button>
-                {attention && (
-                  <>
-                    <Button size='sm' variant='primary' title='Restores the folder from the script library.'
-                      onClick={() => void ws.resync()}>
-                      Rewrite from editor
-                    </Button>
-                    <Button size='sm' variant='danger' title='Removes the scripts pending deletion from every node that uses them.'
-                      onClick={() => void ws.applyPendingDeletions()}>
-                      Apply deletions
-                    </Button>
-                  </>
-                )}
-                <Button size='sm' variant='ghost' title='Stop syncing. The files on disk are left alone.'
-                  onClick={() => void ws.disconnect()}>
-                  Disconnect
-                </Button>
-              </>
-            )}
+            <Button size='sm' onClick={() => void ws.openInEditor()}>Open in {cmd === 'code' ? 'VS Code' : cmd}</Button>
+            <Button size='sm' variant='ghost' onClick={() => void showProjectFolder()}>Show folder</Button>
           </div>
         </>
       )}
