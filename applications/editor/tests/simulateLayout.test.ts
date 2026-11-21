@@ -39,6 +39,7 @@ describe('Simulate keeps the editor', () => {
     const hook = read('features', 'nodeInspector', 'useSelectedNode.ts')
     expect(hook).toMatch(/inspectedScene\.getNodeById\(selectedNode\)/)
     expect(hook).toMatch(/const readOnly = isSimulating \|\|/)
-    expect(read('features', 'nodeInspector', 'propertyEditors', 'TransformEditor.tsx')).toMatch(/\[props\.node, live\]/)
+    // The Transform re-reads the node on the live tick: the running game moves it without an event.
+    expect(read('features', 'nodeInspector', 'propertyEditors', 'TransformEditor.tsx')).toMatch(/useLiveTick\(\)/)
   })
 })

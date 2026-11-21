@@ -27,6 +27,7 @@ one Collider holding its wall boxes.
 | **Ground probe** | Distance a downward probe reaches, which is what makes `groundDistance` and `slopeAngle` readable. |
 | **Motion smoothing** | Filters the measured speed that feeds animation blends. |
 | **Simulation** | How far from the camera the body keeps simulating before it freezes in place: **Project range** (the range in Options ▸ Engine ▸ Runtime), **Always** (never frozen) or **Custom range** (its own, in metres). See [Simulation range](#simulation-range). |
+| **Range** | With **Custom range**: metres from the camera past which this body freezes. `0` is unlimited. |
 | **Sleep when resting** | Sleeps once the body stops moving, until it is hit, pushed or a script sets its velocity. Off by default. A body sleeps together with every moving body it touches, so a stack of crates goes to sleep as one once the whole stack has settled. |
 | **Layer** | The collision layer it is on, one of the project's 16. Default: **Default**. A camera rig decides by it whether the body blocks its boom or is seen through, and foot IK which layers its feet land on. See [Layers](#layers). |
 | **Collides with** | The layers it collides with. Default: all. |
@@ -151,6 +152,8 @@ detects other triggers: a weapon's hitbox entering a character's hurtbox, both t
 | Setting | What it does |
 |---|---|
 | **Enabled** | Whether the trigger detects anything. A disabled trigger keeps its shapes but physics, overlap queries and the overlay ignore it; switching it on costs nothing. Scripts switch it with `trigger.enabled`. |
+| **Size** | In a 2D scene: the box's width and height, in world units, centred on the node. |
+| **Offset** | In a 2D scene: the box's offset from the node, mirrored when the character it rides on faces left. |
 | **Detect triggers** | Also detect other trigger volumes. Only one side of a pair has to have it on. Plain zones leave it off. |
 | **Continuous** | Test the volume along its path from last frame to this one against other triggers, so a fast mover (a blade) cannot skip past a thin target between two frames. Needs **Detect triggers** on one side. |
 | **Layer** | The collision layer this trigger is on. In a 2D scene, the 2D world's layer bits. |

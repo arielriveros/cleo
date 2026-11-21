@@ -17,6 +17,18 @@ camera:
 | **Canvas** | Layout ▸ Canvas | Screen space. A HUD. Ignores the node transform entirely. |
 | **World UI** | Layout ▸ World UI | World space. A panel over a machine or an enemy's head. Uses the node transform. |
 
+| Field | Meaning |
+|---|---|
+| **Space** | **Screen**, drawn over the view, or **World**, a panel placed in the scene. |
+| **Reference size** | The resolution the layout is authored at, width and height (default `1920 × 1080`). |
+| **Scale mode** | How a screen canvas scales: see [Canvas scaling](#canvas-scaling). |
+| **Match** | With **Scale with screen**: `0` scales by the width, `1` by the height, between blends the two. |
+| **Follow** | A world canvas: the node it floats over. Empty: this node. |
+| **Reference distance** | A world canvas: the camera distance at which it shows at its reference size. |
+| **Min scale** / **Max scale** | A world canvas: the limits of its scale with distance. |
+| **Clamp to screen** | A world canvas: keep it inside the screen's edges when what it follows is off screen. |
+| **Hide behind camera** | A world canvas: hide it while what it follows is behind the camera. |
+
 A UI element dropped outside a root is automatically retargeted into the scene's first root,
 creating one if there is none.
 
@@ -47,6 +59,16 @@ from each edge. The stored data is the same either way.
 | min `[0,0]`, max `[1,1]` | Stretches with the parent. |
 | Both `[0.5, 0.5]` | Centred, fixed size. |
 | min `[0,0]`, max `[1,0]` | Full width, fixed height — a top or bottom bar. |
+
+| Field | Meaning |
+|---|---|
+| **Pos X** / **Pos Y** | On a pinned axis: the position, from the anchor. |
+| **Width** / **Height** | On a pinned axis: the size. |
+| **Left** / **Right** | On a stretched horizontal axis: the insets from each edge. |
+| **Top** / **Bottom** | On a stretched vertical axis: the insets from each edge. |
+| **Pivot** | The point it rotates and scales about, `0` to `1` across its width and height. |
+| **Rotation** | Degrees, about the pivot. |
+| **Scale** | Width and height multipliers, about the pivot. |
 
 **Sizing: content** makes an element size itself to what it contains.
 
@@ -80,6 +102,109 @@ font, an image's texture, a button's label, a widget's range and value. The type
 
 Full properties: [Node types → UI](../reference/node-types.md#ui).
 
+### Text
+
+A line or a block of text.
+
+| Field | Meaning |
+|---|---|
+| **Text** | What it says. |
+| **Font size** | In UI units. |
+| **Font family** | A CSS font family. Empty: the canvas's. |
+| **Weight** | The font weight, 100 (thin) to 900 (black); 400 is regular. |
+| **Align** | **Left**, **Center** or **Right**. |
+| **Vertical** | **Top**, **Middle** or **Bottom** of its rect. |
+| **Wrap** | Break lines at its rect's width. |
+| **Line height** | Times the font size. |
+| **Letter spacing** | Extra space between letters, in ems. |
+
+### Image
+
+A texture drawn in its rectangle.
+
+| Field | Meaning |
+|---|---|
+| **Texture** | The image it shows, from the Assets panel. |
+| **Fit** | How the image fills its rect: **Fill** stretches, **Contain** fits inside, **Cover** fills and crops, **Tile** repeats. |
+
+### Button
+
+A pressable label. Pressing it calls `onPress()` on its script.
+
+| Field | Meaning |
+|---|---|
+| **Label** | Its text. |
+| **Disabled** | Shown dimmed, and not pressed. |
+| **Disabled color** | Its tint while disabled. |
+
+### Column and Row
+
+A stack: it lays its children out one after another, down or across.
+
+| Field | Meaning |
+|---|---|
+| **Direction** | **Column** stacks its children down, **Row** across. |
+| **Gap** | The space between children. |
+| **Justify** | Where the children sit along the stack: **Start**, **Center**, **End**, **Space between** or **Space around**. |
+| **Align** | Where each child sits across the stack: **Stretch** to fill, **Start**, **Center** or **End**. |
+| **Reverse** | Lay the children out last first. |
+
+### Spacer
+
+Empty space in a stack, taking a share of what is left over.
+
+| Field | Meaning |
+|---|---|
+| **Flex** | Its share of the stack's free space. |
+
+### Progress
+
+A bar filled from its minimum to its maximum.
+
+| Field | Meaning |
+|---|---|
+| **Min** / **Max** | The range of its value. |
+| **Value** | How full it is, in that range. |
+| **Fill color** | The fill's tint. |
+| **Direction** | Which way it fills: **Left to right**, **Right to left**, **Bottom to top** or **Top to bottom**. |
+| **Smoothing** | Seconds the shown fill takes to catch up with the value. `0` snaps. |
+
+### Slider
+
+A handle dragged along a track. Moving it calls `onValueChanged(value)` on its script.
+
+| Field | Meaning |
+|---|---|
+| **Min** / **Max** | The range of its value. |
+| **Step** | The increment it moves in. `0`: any value. |
+| **Value** | Where the handle is, in that range. |
+| **Vertical** | Slide up and down, not across. |
+| **Fill color** | The filled part's tint. |
+| **Handle color** | The handle's tint. |
+
+### Toggle
+
+A switch with a label.
+
+| Field | Meaning |
+|---|---|
+| **Label** | Its text. |
+| **Checked** | Whether it is on. |
+| **On color** / **Off color** | Its tint when on and when off. |
+
+### Text Input
+
+A field the player types into.
+
+| Field | Meaning |
+|---|---|
+| **Value** | The text in it. |
+| **Placeholder** | Shown while it is empty. |
+| **Max length** | The most characters it takes. `0`: no limit. |
+| **Font size** | In UI units. |
+| **Password** | Show dots for what is typed. |
+| **Read only** | Shown, not edited. |
+
 ### Containers do the work
 
 A **Column** or **Row** lays its children out with a gap, a justify and an align; a **Spacer** with
@@ -90,6 +215,18 @@ a HUD out of stacks and it survives resizing without further thought.
 
 Every UI node has a colour (its tint, with alpha), opacity, z-order, whether it is interactive,
 clipping of its children, corner radius, a border width and colour, and padding.
+
+| Field | Meaning |
+|---|---|
+| **Color** | Its tint, with alpha, multiplying what it draws. |
+| **Opacity** | How much of it, and of its children, shows. |
+| **Z order** | Sorts it among its siblings: higher draws on top. |
+| **Interactive** | Takes the pointer: presses, hovers and drags. Off, the pointer goes through it. |
+| **Clip children** | Cut its children off at its rect. |
+| **Corner radius** | Rounds its corners, in UI units. |
+| **Border width** | Its outline's thickness. `0`: none. |
+| **Border color** | Its outline's colour, with alpha. |
+| **Padding** | The space kept inside its edges for its children: left, top, right and bottom. |
 
 > **Tints are sRGB `0..1` RGBA**, not linear. `[1, 0, 0, 1]` is red at full alpha.
 

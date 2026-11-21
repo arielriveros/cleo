@@ -40,6 +40,20 @@ Selecting the scene **root** shows [Scene settings](scene-authoring.md#scene-set
 > root of a placed model instance. They no longer appear on cameras, spatial sounds or any ancestor
 > above a mesh — those were showing because a debug helper counted as a child.
 
+### Transform
+
+Where the node is, relative to its parent, and the world pose that gives it. **Reset** puts it back at the
+origin, unrotated, at scale 1.
+
+| Field | Meaning |
+|---|---|
+| **Position** | From the parent, in metres. |
+| **Rotation** | Euler angles, in degrees, about X, Y and Z. A positive Y turns it left: counter-clockwise, seen from above. |
+| **Scale** | Per axis, before its rotation. |
+| **World Position** | Read-only: where it is in the world. |
+| **Quaternion** | Read-only: its rotation from the parent, as a quaternion (x, y, z, w). |
+| **World Quaternion** | Read-only: its rotation in the world. |
+
 ### This character
 
 A skinned model's clips, animators, blend spaces, foot placement and ragdoll belong to its skeleton, and are

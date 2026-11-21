@@ -3,6 +3,7 @@
 
 import { Vec2 } from '../core/scripting/fieldTypes';
 import { Camera2DNode } from '../core/scene/nodes/camera2DNode';
+import { CameraNode } from '../core/scene/nodes/cameraNode';
 import { Room2DNode } from '../core/scene/nodes/room2DNode';
 import { ParallaxLayerNode } from '../core/scene/nodes/parallaxLayerNode';
 import { declareProperties } from './declare';
@@ -24,7 +25,7 @@ declareProperties(Camera2DNode, 'Camera 2D', [
         { key: 'confineToRooms', label: 'Confine to rooms', type: Boolean },
         { key: 'roomTransitionSeconds', label: 'Room transition', type: Number, min: 0, step: 0.05 },
     ] },
-], { docs: DOCS });
+], { docs: DOCS, replaces: [CameraNode] });
 
 declareProperties(Room2DNode, 'Room', [
     { title: '', props: [

@@ -1,6 +1,6 @@
 import {
   LightNode, DirectionalLight, PointLight, Spotlight, AreaLight, CameraNode, Camera, Sprite, SpriteNode, AnimatedSpriteNode,
-  ParallaxLayerNode, TilemapNode, Tilemap,
+  ParallaxLayerNode, TilemapNode, Tilemap, ControllerNode, VehicleNode, WheelNode, UIRootNode,
 } from 'cleo'
 
 // Nodes of each class that declares its inspector properties (src/properties), for the tests that read, write
@@ -17,6 +17,22 @@ const SAMPLES = new Map<Function, () => any[]>([
     { kind: 'hexagonal', hexOrientation: 'pointy' },
     { kind: 'hexagonal', hexOrientation: 'flat' },
   ].map(grid => new TilemapNode('probe', new Tilemap(grid as any)))],
+  // Its sections follow the source and the goal: a player's, and AI ones that follow, wander and avoid.
+  [ControllerNode, () => [{}, { controlSource: 'ai', goal: 'follow' }, { controlSource: 'ai', goal: 'wander', flockRadius: 4 }]
+    .map(patch => {
+      const node = Object.assign(new ControllerNode('probe'), patch)
+      if (patch.controlSource) node.steering.avoidDistance = 2
+      return node
+    })],
+  [VehicleNode, () => [new VehicleNode('probe'), Object.assign(new VehicleNode('probe'), { drivetrain: 'engine', lean: true })]],
+  // A wheel's rows follow its vehicle's drive.
+  [WheelNode, () => (['none', 'engine', 'motors'] as const).map(drivetrain => {
+    const vehicle = Object.assign(new VehicleNode('car'), { drivetrain })
+    const wheel = new WheelNode('probe')
+    vehicle.addChild(wheel)
+    return wheel
+  })],
+  [UIRootNode, () => [new UIRootNode('probe', 'screen'), new UIRootNode('probe', 'world')]],
 ])
 
 export function declaredSamples(Class: any): any[] {

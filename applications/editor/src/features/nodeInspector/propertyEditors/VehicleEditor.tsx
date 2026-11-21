@@ -2,45 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import { VehicleNode, WheelNode, VEHICLE_PRESETS, applyVehiclePreset, type Node, type VehiclePreset } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { useCleoEngine } from '../../EngineContext'
-import { Button, CloseIcon, DocScope, PresetMenu, SectionTitle, SegmentedControl, Slider, TextInput, Toggle, VectorInput, cn, labelClass } from '@cleo/app-kit/ui'
+import { Button, CloseIcon, DocScope, PresetMenu, SectionTitle, cn, labelClass } from '@cleo/app-kit/ui'
 import { JOINED_DIVIDER_CLASS, JOINED_GROUP_CLASS } from '@cleo/app-kit/ui/SegmentedControl'
-import { hintAffordance } from '@cleo/app-kit/ui/Field'
 import { AxleIcon, VehicleIcon, WheelIcon } from '../sectionIcons'
 import { useHistory } from '../../HistoryContext'
-import NodeRefInput from '../NodeRefInput'
+import { DeclaredSection } from '../../properties/DeclaredSections'
 
-// The Vehicle and Wheel nodes' panels (docs/editor/vehicles.md). A vehicle is built here step by step: its
-// wheels are added from the Wheels list, its power chosen under Drive, and its meshes are the developer's own.
-// Fields write the node and mark the scene changed; a vehicle already driving in Play is built again from them
-// (VehicleNode.rebuild).
+// The Vehicle and Wheel nodes' panels (docs/editor/vehicles.md): their declared properties (src/properties/
+// physics.ts), whose every write builds a vehicle already driving in Play again (VehicleNode.rebuild). A vehicle
+// is built here step by step: its wheels are added from the Wheels list, its power chosen under Drive, and its
+// meshes are the developer's own. The wheel list, the presets and the live readout are the card's own.
 
-const PLAYER_HINT = "Drive it from the player's input: Move steers and drives, Jump holds the hand brake. Off: a Controller that possesses it drives it, or a script sets throttle, steer, brake and handBrake."
-const PARKED_HINT = 'Brakes and hand brake on, throttle and steering ignored, whoever drives: an empty car, or one whose driver is still getting in. A script turns it off to drive away.'
-const REVERSE_HINT = "The throttle held against the way it rolls brakes first, then reverses once nearly stopped, like a road car's pedals."
-const LSD_HINT = 'Limited-slip differentials send torque to the wheel that grips. Off: open differentials, a spinning wheel takes it all.'
-const CAST_HINT = "What each wheel finds the ground with. Cylinder follows kerbs and bumps by the tyre's real shape (Jolt); the Cannon and Rapier backends cast a ray whatever is chosen."
-const DRIVEN_HINT = 'The engine turns this wheel. Wheels side by side share an axle and its differential.'
-const LEAN_HINT = 'Hold it upright and lean it into turns, for a vehicle on two wheels in line (a motorcycle). It also narrows the steering at speed to what the lean can hold.'
-const CLUTCH_HINT = 'How hard the clutch couples the engine to the wheels. A heavy vehicle needs a strong one: a weak clutch slips under the load and the engine barely moves it. Jolt only: on Rapier and Cannon the clutch couples at once.'
 const ITEM = 'flex items-center justify-center w-[30px] h-[24px] text-muted hover:text-fg hover:bg-control'
-const DRIVES = [
-  { value: 'none', label: 'None', title: 'Nothing drives it: it rolls, steers and brakes, pushed or towed (a trailer, a cart)' },
-  { value: 'engine', label: 'Engine', title: 'An engine and an automatic gearbox, through differentials to the wheels marked Driven' },
-  { value: 'motors', label: 'Motors', title: 'An electric motor in each wheel: its own torque and top speed, set on the wheel' },
-]
-
-/** Edits a node's plain fields, rebuilding its vehicle while Play runs. */
-function useFields(node: VehicleNode | WheelNode, rebuild: () => void) {
-  const { eventEmitter } = useCleoEngine()
-  const [, setVersion] = useState(0)
-  useEffect(() => { setVersion(v => v + 1) }, [node])
-  return (patch: Record<string, unknown>) => {
-    for (const key in patch) (node as any)[key] = patch[key]
-    setVersion(v => v + 1)
-    rebuild()
-    eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node })
-  }
-}
 
 /** Re-render on any scene change: the wheel list follows wheels added, renamed or deleted elsewhere. */
 function useSceneVersion() {
@@ -61,8 +34,8 @@ const vehicleOf = (node: WheelNode): VehicleNode | null => {
 export function VehicleEditor(props: { node: VehicleNode }) {
   const n = props.node
   const { isPlayMode, eventEmitter, editorScene } = useCleoEngine()
+  useSceneVersion()
   const history = useHistory()
-  const apply = useFields(n, () => n.rebuild())
   const [kept, setKept] = useState<string[]>([])
   useEffect(() => { setKept([]) }, [n])
 
@@ -79,14 +52,6 @@ export function VehicleEditor(props: { node: VehicleNode }) {
       eventEmitter.emit('PHYSICS_CHANGED')
     }).catch(err => console.error(err))
   }
-  const slider = (label: string, k: keyof VehicleNode & string, min: number, max: number, step: number, fixed = 0, hint?: string) => (
-    <Slider label={label} min={min} max={max} step={step} value={(n as any)[k] as number} title={hint}
-      labelClassName='w-[112px]' readout={v => v.toFixed(fixed)} onChange={v => apply({ [k]: v })} />
-  )
-  const toggle = (label: string, k: keyof VehicleNode & string, hint: string) => (
-    <Toggle className='mb-2' checked={(n as any)[k] as boolean} onChange={checked => apply({ [k]: checked })}
-      label={<span className={cn(labelClass, hintAffordance(hint))} title={hint}>{label}</span>} />
-  )
   return (
     <Collapsable title='Vehicle' icon={<VehicleIcon />} persistKey='vehicle'
       right={<PresetMenu presets={VEHICLE_PRESETS} onApply={applyPreset} title='Vehicle presets: settings, wheel layout and chassis (your meshes are kept)' />}>
@@ -98,87 +63,25 @@ export function VehicleEditor(props: { node: VehicleNode }) {
           <SectionTitle title='Wheels' className='mt-1 mb-1' />
           <WheelList vehicle={n} />
 
-          <SectionTitle title='Drive' className='mt-3 mb-1' />
-          <div className='mb-2'>
-            <SegmentedControl joined value={n.drivetrain} options={DRIVES} onChange={v => apply({ drivetrain: v })} />
-          </div>
-          {n.drivetrain === 'none' && <p className='text-ui-sm text-muted mb-2'>Nothing drives it: it rolls, steers and brakes.</p>}
-          {n.drivetrain === 'motors' && <p className='text-ui-sm text-muted mb-2'>Each wheel's motor (torque, top speed) is set on the wheel. A wheel with no torque only rolls.</p>}
-          {n.drivetrain === 'engine' && n.wheels.every(w => !w.driven) && <p className='text-ui-sm text-warning mb-2'>Mark the wheels the engine turns as Driven, on each wheel.</p>}
-
-          <SectionTitle title='Driving' className='mt-3 mb-1' />
-          {toggle('Player input', 'playerInput', PLAYER_HINT)}
-          {toggle('Parked', 'parked', PARKED_HINT)}
-          {toggle('Auto reverse', 'autoReverse', REVERSE_HINT)}
-
-          {n.drivetrain === 'engine' && <>
-            <SectionTitle title='Engine' className='mt-3 mb-1' />
-            {slider('Torque', 'maxTorque', 0, 3000, 10)}
-            {slider('Idle RPM', 'minRpm', 300, 3000, 50)}
-            {slider('Redline RPM', 'maxRpm', 2000, 12000, 100)}
-
-            <SectionTitle title='Gearbox' className='mt-3 mb-1' />
-            {slider('Shift up', 'shiftUpRpm', 1000, 12000, 100)}
-            {slider('Shift down', 'shiftDownRpm', 500, 8000, 100)}
-            {slider('Shift time', 'shiftTime', 0, 2, 0.05, 2)}
-            {slider('Final drive', 'finalDrive', 1, 10, 0.01, 2)}
-            {slider('Reverse ratio', 'reverseRatio', 0.5, 8, 0.01, 2)}
-            {slider('Clutch', 'clutchStrength', 1, 500, 1, 0, CLUTCH_HINT)}
-            <GearRatios node={n} onChange={gears => apply({ gearRatios: gears })} />
-            {toggle('Limited slip', 'limitedSlip', LSD_HINT)}
-          </>}
-
-          <SectionTitle title='Handling' className='mt-3 mb-1' />
-          {slider('Anti-roll', 'antiRoll', 0, 20000, 100)}
-          {slider('Max pitch / roll', 'maxPitchRoll', 5, 180, 1)}
-          <div className='mb-2' title={CAST_HINT}>
-            <SegmentedControl joined value={n.cast}
-              options={[{ value: 'ray', label: 'Ray' }, { value: 'sphere', label: 'Sphere' }, { value: 'cylinder', label: 'Cylinder' }]}
-              onChange={v => apply({ cast: v })} />
-          </div>
-
-          <SectionTitle title='Lean' className='mt-3 mb-1' />
-          {toggle('Lean into turns', 'lean', LEAN_HINT)}
-          {n.lean && <>
-            {slider('Max lean', 'maxLean', 5, 80, 1)}
-            {slider('Lean spring', 'leanSpring', 0, 20000, 100)}
-            {slider('Lean damping', 'leanDamping', 0, 5000, 50)}
-          </>}
-
-          <SectionTitle title='Hitch' className='mt-3 mb-1' />
-          <HitchFields vehicle={n} onChange={patch => apply(patch)} />
+          <DeclaredSection node={n} title='Drive'>
+            {n.drivetrain === 'none' && <p className='text-ui-sm text-muted mb-2'>Nothing drives it: it rolls, steers and brakes.</p>}
+            {n.drivetrain === 'motors' && <p className='text-ui-sm text-muted mb-2'>Each wheel's motor (torque, top speed) is set on the wheel. A wheel with no torque only rolls.</p>}
+            {n.drivetrain === 'engine' && n.wheels.every(w => !w.driven) && <p className='text-ui-sm text-warning mb-2'>Mark the wheels the engine turns as Driven, on each wheel.</p>}
+          </DeclaredSection>
+          <DeclaredSection node={n} title='Driving' />
+          <DeclaredSection node={n} title='Engine' />
+          <DeclaredSection node={n} title='Gearbox' />
+          <DeclaredSection node={n} title='Handling' />
+          <DeclaredSection node={n} title='Lean' />
+          <DeclaredSection node={n} title='Hitch'>
+            {n.hitchTarget && <p className='text-ui-sm text-muted'>In Play a ball joint joins the two chassis where the hitch point is when the scene starts: place it at the towing vehicle's tow ball.</p>}
+          </DeclaredSection>
 
           <SectionTitle title='Live' className='mt-3 mb-1' />
           <LiveReadout node={n} live={isPlayMode} />
         </div>
       </DocScope>
     </Collapsable>
-  )
-}
-
-/** What tows it: a vehicle's chassis (or its Vehicle node), never its own; and where it is hitched. */
-function HitchFields({ vehicle, onChange }: { vehicle: VehicleNode; onChange: (patch: Record<string, unknown>) => void }) {
-  const { editorScene } = useCleoEngine()
-  const own = vehicle.collider
-  const towable = (node: Node) => {
-    if (node === vehicle || node === own) return false
-    for (let p: Node | null = node; p; p = p.parent) if (p === own) return false
-    return node.nodeType === 'vehicle' || (node.nodeType === 'collider' && ((node as unknown as { mass: number }).mass ?? 0) > 0)
-  }
-  return (
-    <div className='mb-2 flex flex-col gap-1'>
-      <label className='flex items-center gap-2'>
-        <span className={cn(labelClass, 'w-[112px]')}>Towed by</span>
-        {editorScene && <NodeRefInput className='flex-1 min-w-0' value={vehicle.hitchTarget} scene={editorScene} filter={towable}
-          placeholder='Not hitched' onChange={id => onChange({ hitchTarget: id })} />}
-      </label>
-      <label className='flex items-center gap-2'>
-        <span className={cn(labelClass, 'w-[112px]')}>Hitch point</span>
-        <VectorInput className='flex-1' value={[...vehicle.hitchPoint]} step={0.05}
-          onChange={v => onChange({ hitchPoint: [v[0], v[1], v[2]] })} />
-      </label>
-      {vehicle.hitchTarget && <p className='text-ui-sm text-muted'>In Play a ball joint joins the two chassis where the hitch point is when the scene starts: place it at the towing vehicle's tow ball.</p>}
-    </div>
   )
 }
 
@@ -230,24 +133,6 @@ function WheelList({ vehicle }: { vehicle: VehicleNode }) {
   )
 }
 
-/** The forward gears' ratios, first first, as one comma list. */
-function GearRatios(props: { node: VehicleNode; onChange: (gears: number[]) => void }) {
-  const [text, setText] = useState(() => props.node.gearRatios.join(', '))
-  useEffect(() => { setText(props.node.gearRatios.join(', ')) }, [props.node])
-  const commit = () => {
-    const gears = text.split(/[\s,]+/).map(Number).filter(g => Number.isFinite(g) && g > 0)
-    if (gears.length > 0) props.onChange(gears)
-    setText((gears.length > 0 ? gears : props.node.gearRatios).join(', '))
-  }
-  return (
-    <label className='flex items-center gap-2 mb-2'>
-      <span className={cn(labelClass, 'w-[112px]')}>Gears</span>
-      <TextInput className='flex-1 min-w-0 font-mono' value={text}
-        onChange={setText} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') commit() }} />
-    </label>
-  )
-}
-
 /** Speed, RPM and gear while Play runs, polled each frame. */
 function LiveReadout({ node, live }: { node: VehicleNode; live: boolean }) {
   const [values, setValues] = useState({ speed: 0, rpm: 0, gear: 0, grounded: 0 })
@@ -285,42 +170,16 @@ export function WheelEditor(props: { node: WheelNode }) {
   const n = props.node
   const vehicle = vehicleOf(n)
   useSceneVersion()
-  const apply = useFields(n, () => vehicle?.rebuild())
-  const slider = (label: string, k: keyof WheelNode & string, min: number, max: number, step: number, fixed = 2, hint?: string) => (
-    <Slider label={label} min={min} max={max} step={step} value={(n as any)[k] as number} title={hint}
-      labelClassName='w-[112px]' readout={v => v.toFixed(fixed)} onChange={v => apply({ [k]: v })} />
-  )
   return (
     <Collapsable title='Wheel' icon={<WheelIcon />} persistKey='wheel'>
       <DocScope page='editor/vehicles' section='wheel'>
         <div className='w-full p-2'>
           {!vehicle && <p className='text-ui-sm text-muted mb-2'>Put it under a Vehicle node.</p>}
           {n.children.length === 0 && <p className='text-ui-sm text-muted mb-2'>No mesh: put the wheel's model under it, and it turns and steers with the wheel.</p>}
-          <SectionTitle title='Tyre' className='mt-1 mb-1' />
-          {slider('Radius', 'radius', 0.05, 2, 0.01)}
-          {slider('Width', 'width', 0.02, 1, 0.01)}
-          {slider('Grip', 'grip', 0.1, 2, 0.01)}
-
-          <SectionTitle title='Suspension' className='mt-3 mb-1' />
-          {slider('Travel', 'suspensionTravel', 0, 1, 0.01)}
-          {slider('Length', 'suspensionLength', Math.max(0.05, n.suspensionTravel), 2, 0.01)}
-          {slider('Frequency', 'suspensionFrequency', 0.3, 6, 0.05)}
-          {slider('Damping', 'suspensionDamping', 0, 1.5, 0.01)}
-
-          <SectionTitle title='Steering and brakes' className='mt-3 mb-1' />
-          {slider('Steer angle', 'steerAngle', 0, 60, 1, 0)}
-          {slider('Brake', 'brakeTorque', 0, 10000, 50, 0)}
-          {slider('Hand brake', 'handBrakeTorque', 0, 10000, 50, 0)}
-
-          {vehicle?.drivetrain === 'engine' && <Toggle className='mb-2 mt-2' checked={n.driven} onChange={checked => apply({ driven: checked })}
-            label={<span className={cn(labelClass, hintAffordance(DRIVEN_HINT))} title={DRIVEN_HINT}>Driven</span>} />}
-
-          {vehicle?.drivetrain === 'motors' && <>
-            <SectionTitle title='Motor' className='mt-3 mb-1' />
-            {slider('Torque', 'motorTorque', 0, 3000, 10, 0)}
-            <Slider label='Top speed' min={1} max={300} step={1} value={Math.round(n.motorTopSpeed * 3.6)}
-              labelClassName='w-[112px]' readout={v => `${v.toFixed(0)} km/h`} onChange={v => apply({ motorTopSpeed: v / 3.6 })} />
-          </>}
+          <DeclaredSection node={n} title='Tyre' />
+          <DeclaredSection node={n} title='Suspension' />
+          <DeclaredSection node={n} title='Steering and brakes' />
+          <DeclaredSection node={n} title='Motor' />
         </div>
       </DocScope>
     </Collapsable>

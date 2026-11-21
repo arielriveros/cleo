@@ -140,6 +140,8 @@ declaring a size up front.
 
 ### Tilemap
 
+The Tilemap node's own section: its grid, how its sprites sort, and the colliders it builds.
+
 | Field | Meaning |
 |---|---|
 | **Grid** | How a cell coordinate is laid out: **orthogonal**, **isometric** (a screen-space diamond on the XY plane, not a 3D projection) or **hexagonal**. |

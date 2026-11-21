@@ -1,65 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
-import { CharacterNode, CHARACTER_PRESETS, FACING_MODES, MOVE_DIR_SOURCES, type CharacterPreset } from 'cleo'
+import { CharacterNode, CHARACTER_PRESETS, type CharacterPreset } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { useCleoEngine } from '../../EngineContext'
-import { DocScope, PresetMenu, SectionTitle, SegmentedControl, Slider, Toggle, cn, labelClass } from '@cleo/app-kit/ui'
-import { hintAffordance } from '@cleo/app-kit/ui/Field'
+import { DocScope, PresetMenu, SectionTitle, cn, labelClass } from '@cleo/app-kit/ui'
 import { CharacterIcon } from '../sectionIcons'
+import DeclaredSections from '../../properties/DeclaredSections'
 
-const SETTLE_HINT = 'Seconds the aim must stay past the threshold before a 90-degree turn engages, so a camera swept round to the back plays the 180 instead of a 90. Longer lets a look-at layer turn the head before the body follows.'
-const FAR_SETTLE_HINT = 'Seconds the aim must stay past 135 degrees before the 180 turn engages. 0 turns at once.'
-const ACCEL_HINT = 'Units per second squared. 0 snaps to full speed, which is what a keyboard character usually wants; above 0 makes the engine’s isAccelerating / isDecelerating animation builtins meaningful.'
-const FRICTION_HINT = 'Per second: how fast a moving character turns its velocity toward a new direction, keeping its speed (Unreal calls it ground friction; 8 there). 0 leaves turning to Acceleration, which is slower and loses speed through the turn: the character coasts on its old heading, as if on ice. A reversal is braked through, never turned. Needs an Acceleration.'
-const DIRECTION_HINT = 'What moveDir, the blend-space direction, reads. Input: the way the player pushes. Velocity: the way the body really travels, which an Acceleration makes lag the input; reading the input then plays the new direction while the body still goes the old way, and the feet slide.'
-const SLOPE_HINT = 'Degrees: the steepest ground the character stands on without sliding down it. Up to this steep, gravity only presses it into the ground, so it stands still, sets off, brakes and climbs as on the flat; steeper ground it slides down. 0 turns it off.'
-const DRIVE_HINT = 'Run locomotion with nothing possessing this character. Off by default, so an unpossessed character is inert and cannot fight physics for its own velocity.'
-
-interface CharacterState {
-  walkSpeed: number; runSpeed: number; jumpSpeed: number
-  turnSpeed: number; turnThreshold: number; turnReleaseAngle: number; turnSettleSeconds: number; turnSettleFarSeconds: number
-  directionSmoothing: number; acceleration: number; turnFriction: number; moveDirSource: string; airControl: number
-  slopeLimit: number
-  coyoteSeconds: number; jumpBufferSeconds: number; jumpLockoutSeconds: number
-  facingMode: string; driveWhenUnpossessed: boolean
-}
-
-function readNode(node: CharacterNode): CharacterState {
-  return {
-    walkSpeed: node.walkSpeed, runSpeed: node.runSpeed, jumpSpeed: node.jumpSpeed,
-    turnSpeed: node.turnSpeed, turnThreshold: node.turnThreshold, turnReleaseAngle: node.turnReleaseAngle,
-    turnSettleSeconds: node.turnSettleSeconds, turnSettleFarSeconds: node.turnSettleFarSeconds,
-    directionSmoothing: node.directionSmoothing, acceleration: node.acceleration, turnFriction: node.turnFriction,
-    moveDirSource: node.moveDirSource, airControl: node.airControl, slopeLimit: node.slopeLimit,
-    coyoteSeconds: node.coyoteSeconds, jumpBufferSeconds: node.jumpBufferSeconds,
-    jumpLockoutSeconds: node.jumpLockoutSeconds,
-    facingMode: node.facingMode, driveWhenUnpossessed: node.driveWhenUnpossessed,
-  }
-}
+// The Character inspector: its declared tuning (src/properties/gameplay.ts), documented with the tuning it sets
+// (docs/scripting/characters-and-controllers.md, Character tuning). The presets and the live Animator outputs
+// are the card's own.
 
 export default function CharacterEditor(props: { node: CharacterNode }) {
   const { eventEmitter, isPlayMode } = useCleoEngine()
-  const [state, setState] = useState<CharacterState>(() => readNode(props.node))
-
-  useEffect(() => { setState(readNode(props.node)) }, [props.node])
-
-  const apply = (patch: Partial<CharacterState>) => {
-    for (const key in patch) (props.node as any)[key] = (patch as any)[key]
-    setState({ ...state, ...patch })
-    eventEmitter.emit('SCENE_CHANGED')
-  }
 
   const applyPreset = (p: CharacterPreset) => {
     props.node.applyPreset(p)
-    setState(readNode(props.node))
     eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
   }
-
-  // Invoked as functions, not components, so the inputs keep identity across re-renders.
-  const slider = (label: string, k: keyof CharacterState, min: number, max: number, step: number, fixed = 2, hint?: string) => (
-    <Slider label={label} min={min} max={max} step={step} value={state[k] as number} title={hint}
-      labelClassName='w-[112px]' readout={(v) => v.toFixed(fixed)}
-      onChange={(v) => apply({ [k]: v } as Partial<CharacterState>)} />
-  )
 
   return (
     <Collapsable title='Character' icon={<CharacterIcon />} persistKey='character'
@@ -67,51 +24,7 @@ export default function CharacterEditor(props: { node: CharacterNode }) {
       {/* The title is a node-inspector entry; its groups are described with the tuning they set. */}
       <DocScope page='scripting/characters-and-controllers' section='character-tuning'>
         <div className='w-full p-2'>
-          <SectionTitle title='Speed' className='mt-3 mb-1' />
-          {slider('Walk', 'walkSpeed', 0, 20, 0.1)}
-          {slider('Run', 'runSpeed', 0, 30, 0.1)}
-          {slider('Acceleration', 'acceleration', 0, 100, 0.5, 1, ACCEL_HINT)}
-          {slider('Turn Friction', 'turnFriction', 0, 30, 0.5, 1, FRICTION_HINT)}
-          {slider('Air Control', 'airControl', 0, 1, 0.01)}
-          {slider('Slope Limit', 'slopeLimit', 0, 89, 1, 0, SLOPE_HINT)}
-
-          <SectionTitle title='Facing' className='mt-3 mb-1' />
-          <div className='mb-2'>
-            <SegmentedControl
-              value={state.facingMode}
-              options={FACING_MODES.map(m => ({ value: m, label: m[0].toUpperCase() + m.slice(1) }))}
-              onChange={(v) => apply({ facingMode: v })}
-            />
-          </div>
-          {slider('Turn Speed', 'turnSpeed', 0, 1440, 10, 0)}
-          {slider('Direction Smooth', 'directionSmoothing', 0, 1, 0.01)}
-          <div className='mb-2 flex items-center gap-2'>
-            <span className={cn(labelClass, 'w-[112px] shrink-0', hintAffordance(DIRECTION_HINT))} title={DIRECTION_HINT}>Direction From</span>
-            <SegmentedControl
-              value={state.moveDirSource}
-              options={MOVE_DIR_SOURCES.map(m => ({ value: m, label: m[0].toUpperCase() + m.slice(1) }))}
-              onChange={(v) => apply({ moveDirSource: v })}
-            />
-          </div>
-
-          <SectionTitle title='Turn in place' className='mt-3 mb-1' />
-          {slider('Threshold', 'turnThreshold', 1, 180, 1, 0)}
-          {slider('Release', 'turnReleaseAngle', 0, Math.max(1, state.turnThreshold - 1), 1, 0)}
-          {slider('Settle', 'turnSettleSeconds', 0, 3, 0.01, 2, SETTLE_HINT)}
-          {slider('Settle past 135', 'turnSettleFarSeconds', 0, 3, 0.01, 2, FAR_SETTLE_HINT)}
-
-          <SectionTitle title='Jump' className='mt-3 mb-1' />
-          {slider('Speed', 'jumpSpeed', 0, 20, 0.1)}
-          {slider('Coyote', 'coyoteSeconds', 0, 0.5, 0.01)}
-          {slider('Buffer', 'jumpBufferSeconds', 0, 0.5, 0.01)}
-          {slider('Lockout', 'jumpLockoutSeconds', 0, 1, 0.01)}
-
-          <SectionTitle title='Advanced' className='mt-3 mb-1' />
-          <Toggle className='mb-2' checked={state.driveWhenUnpossessed}
-            onChange={checked => apply({ driveWhenUnpossessed: checked })}
-            label={<span className={cn(labelClass, hintAffordance(DRIVE_HINT))} title={DRIVE_HINT}>
-              Drive without a Controller
-            </span>} />
+          <DeclaredSections node={props.node} />
 
           <SectionTitle title='Animator outputs' className='mt-3 mb-1' />
           <AnimatorOutputs node={props.node} live={isPlayMode} />

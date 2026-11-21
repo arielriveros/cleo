@@ -441,7 +441,9 @@ export function sectionRows(index: DocIndex, pageId: string, anchor: string): Do
  *
  * - `title`: each frame's section, then that frame's whole page, then the next frame out.
  * - `field`: rows and term definitions only, and only inside the innermost heading region that allows
- *   fields, so a label like "Intensity" never borrows an unrelated row from elsewhere on the page.
+ *   fields, so a label like "Intensity" never borrows an unrelated row from elsewhere on the page. A
+ *   frame that came from a term (a Section titled by a card's `**Emission** — …` line) passes the lookup
+ *   out to the region around it: the card's own rows, never its term's.
  */
 export function resolveTerm(index: DocIndex, frames: DocFrame[], text: string, mode: 'title' | 'field' = 'title'): DocEntry | null {
   const key = normalizeKey(text);
@@ -449,8 +451,8 @@ export function resolveTerm(index: DocIndex, frames: DocFrame[], text: string, m
   if (!key) return null;
 
   if (mode === 'field') {
-    const frame = frames.find(f => f.section !== undefined);
-    if (!frame?.fields) return null;
+    const frame = frames.find(f => f.section !== undefined && f.fields);
+    if (!frame) return null;
     const page = index.pages.get(frame.page);
     const entries = page && entriesUnder(page, frame.section);
     return entries ? best(entries, key, loose, FIELD_KINDS) : null;

@@ -30,6 +30,18 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     project's input actions as its list.
   - *References.* The asset graph, publish and bundle merges follow the assets script fields name, and saves keep
     an asset field as its id. The player contract is 49.
+  - *Every built-in inspector on the same types.* The engine's nodes declare their inspector properties with these
+    types, and the inspector draws their rows from the declarations: lights, sky, fog, clouds, probes, weather,
+    cameras, decals, water, sprites, tilemaps, 2D bodies, sound, particles, force fields, cloth, the character
+    and its controller, vehicles and wheels, the navmesh, colliders and triggers, sequences, every UI element,
+    the transform and the scene's ambient fill. A colour, a vector, a node or an asset is edited the same way on
+    a light, a vehicle and a script. A UI canvas follows a node picked in the scene, not a typed id.
+  - *Read by the Sequencer and agents.* The Sequencer names a track by its inspector row (`Light › Emission ›
+    Color`), shows a colour's swatch, and can key a declared row two levels down (`steering.maxSpeed`).
+    `node_get` lists a node's rows with their types under `inspector`, and `scene_edit` writes them as the
+    inspector does, its clamps included, taking an asset by name and a node by ref.
+  - *Tooltips.* A row under a section titled by a term of its card's docs (Light › Emission, Sky Atmosphere ›
+    Sun, Camera Rig › Spring Arm, …) shows its docs row; the lookup used to stop at the term.
 - **The animator takes its commands from the event system.**
   - *Commands sent down.* Events can travel DOWN a node's subtree now (`this.dispatchDown`, `{ down: true }`). A
     script commands every animator under its node on the new `animator` channel: SetTrigger, ResetTrigger,

@@ -110,6 +110,9 @@ export function scanSource(files = [
       // The generated sections' titles are the engine's declarations: declaredProperties.test.ts checks each
       // one against its card's docs, which a source scan cannot.
       if (DECLARED_TITLES.test(file) && typeof title !== 'string' && doc === undefined) continue;
+      // A doc key worked out at run time (a UI element's card, by its type's declaration) is that code's to
+      // resolve: declaredProperties.test.ts checks every declaration's docs section.
+      if (doc === undefined && /(?:^|\s)doc=\{/.test(attrs)) continue;
       scan.titles.push({ file, line, component: m[1], title: typeof title === 'string' ? title : undefined, doc });
     }
     // `doc` keys on anything else (Field, PropertyRow, segmented options written as object literals).

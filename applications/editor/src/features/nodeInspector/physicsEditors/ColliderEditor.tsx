@@ -17,31 +17,21 @@ import {
   COLLISION_SHAPE_FRAME, COLLISION_SHAPES_EDITED, remapCollisionShapeSelection, selectedCollisionShape,
   setCollisionShapeSelection, useCollisionShapeSelection, type CollisionChannel,
 } from '../../gizmo/collisionSelection';
-import { Field, Slider, Toggle, Select, NumberInput, Button, PresetMenu, Section, Hint, SegmentedControl, DocScope, DocHover, useDocEntry, cn, labelClass } from '@cleo/app-kit/ui'
+import { Field, Toggle, Button, PresetMenu, PropertyRow, PropertyTable, Section, Hint, SegmentedControl, DocScope, DocHover, useDocEntry, cn, labelClass } from '@cleo/app-kit/ui'
 import { PhysicsIcon, ShapeIcon } from '../sectionIcons'
-import { PairInput } from '../propertyEditors/ui2D'
-import { LayerMaskSelect, LayerSelect } from './layerPickers'
+import DeclaredSections from '../../properties/DeclaredSections'
 
 // The inspectors of the physics nodes: a Collider (a rigid body, and what is under it moves with it) and a
 // Trigger (a sensor: shapes in a 3D scene, a box in a 2D one). Each edits its own node, so an edit is an
 // ordinary node change -- dirty, and one undo step of the history's snapshot diff -- and the viewport's
-// collision handles (CollisionGizmo) write the same `shapes`.
-
-const LABEL = 'w-[130px]';
-
-const SIMULATE_HINT = 'Whether this body takes part in the physics solver. Off makes it a ghost — nothing collides with it, but it can still block a camera rig.';
-const FRICTION_HINT = 'Contact friction. At 0 the body is frictionless — nothing will slow it down but damping. What a character wants, since its script sets its own speed.';
-const GROUND_PROBE_HINT = 'Counts as grounded while the collider’s feet are within this distance of solid ground, probed every frame. Removes isGrounded flicker (and false falling animations) for a character resting on terrain. Also what makes the groundDistance animation built-in answer. At 0 it is off and grounding comes from solver contacts only — raise it (~0.1–0.2) if a resting character flickers to airborne.';
-const CAN_SLEEP_HINT = 'Put the body to sleep once it has stopped moving, until something hits it, pushes it or a script sets its velocity. Saves the cost of props lying still. Off for anything a script steers by writing body.velocity directly.';
-const MOTION_SMOOTHING_HINT = 'Time constant for this body’s measured motion — currentSpeed, planarSpeed, acceleration, turn rate. Higher is steadier but slower to react. At 0 the default (~0.09s) applies. Raise it if an animation blend driven by this body’s speed vibrates or jitters; lower it if a script needs a faster answer than it gets.';
-const LAYER_HINT = 'The collision layer it is on. Two colliders collide only when each one collides with the other’s layer; camera rigs, foot IK and raycasts pick what they react to by layer too.';
-const MASK_HINT = 'The layers it collides with. All on by default.';
+// collision handles (CollisionGizmo) write the same `shapes`. The body's and the trigger's settings are their
+// declared properties (src/properties/physics.ts); the shape list and the axis locks are the cards' own.
 
 // 3 axis toggles (used for linear/angular constraints; value is a [x,y,z] of 0|1).
 // Must stay at module scope: a component declared inside a render body is a new type every render, which
 // remounts its subtree and wipes the drag state of the vector inputs.
 const AxisToggles = ({ label, value, onChange }: { label: string; value: readonly number[]; onChange: (v: [number, number, number]) => void }) => (
-  <Field label={label} labelClassName={LABEL}>
+  <PropertyRow label={label}>
     <div className='flex items-center gap-3'>
       {(['X', 'Y', 'Z'] as const).map((ax, i) => (
         <span key={ax} className='inline-flex items-center gap-1'>
@@ -50,7 +40,7 @@ const AxisToggles = ({ label, value, onChange }: { label: string; value: readonl
         </span>
       ))}
     </div>
-  </Field>
+  </PropertyRow>
 );
 
 /**
@@ -307,12 +297,11 @@ const ShapeTools = (api: ShapeListApi) => {
 
 /** A Collider: the rigid body, its layers, and its shapes. */
 export function ColliderEditor({ node }: { node: ColliderNode }) {
-  const { projectSettings } = useCleoEngine();
+  const { eventEmitter } = useCleoEngine();
   const changed = usePhysicsNode(node);
   const list = useShapeList(node, 'body', changed);
   const set = <K extends keyof ColliderNode>(key: K, value: ColliderNode[K]) => { node[key] = value; changed(); };
   const character = node.children.some(c => c.nodeType === 'character');
-  const range = projectSettings.engine.simulationRange;
 
   return (
     <DocScope page='editor/physics'>
@@ -324,40 +313,12 @@ export function ColliderEditor({ node }: { node: ColliderNode }) {
           {character
             ? <Hint className='mb-2'>The Character under it walks this body: give it a capsule, and freeze its rotation.</Hint>
             : <Hint className='mb-2'>Everything under it moves with it: with mass it falls, and they fall too.</Hint>}
-          {/* Whether the solver sees it. What a camera rig does with it is the rig's choice, by this body's Layer. */}
-          <Toggle label='Simulate Physics' className='my-1' title={SIMULATE_HINT}
-            checked={node.simulatePhysics} onChange={(c) => set('simulatePhysics', c)} />
-          <Field label='Mass' labelClassName={LABEL} hint='0: static, or moved by hand. Above 0 it falls and is pushed.'>
-            <NumberInput value={node.mass} min={0} onChange={(v) => set('mass', Math.max(0, v))} />
-          </Field>
-          <Slider label='Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={node.linearDamping} onChange={(v) => set('linearDamping', v)} />
-          <Slider label='Angular Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={node.angularDamping} onChange={(v) => set('angularDamping', v)} />
-          <Slider label='Friction' labelClassName={LABEL} title={FRICTION_HINT} min={0} max={1} step={0.01} value={node.friction} onChange={(v) => set('friction', v)} />
-          <Slider label='Restitution' labelClassName={LABEL} min={0} max={1} step={0.01} value={node.restitution} onChange={(v) => set('restitution', v)} />
-          <Slider label='Ground probe' labelClassName={LABEL} title={GROUND_PROBE_HINT} min={0} max={0.5} step={0.01} value={node.groundProbeDistance} onChange={(v) => set('groundProbeDistance', v)} />
-          {/* Filters the MEASURED motion this body reports — currentSpeed, planarSpeed, planarAcceleration,
-              turnRate. Those are what an animation field's axes and a machine's speed thresholds read, so
-              this slider is the first thing to reach for when a blend vibrates. */}
-          <Slider label='Motion smoothing' labelClassName={LABEL} title={MOTION_SMOOTHING_HINT} min={0} max={0.5} step={0.01} value={node.motionSmoothing} onChange={(v) => set('motionSmoothing', v)} />
-          <LayerSelect label='Layer' labelClassName={LABEL} hint={LAYER_HINT} value={node.layer} onChange={(v) => set('layer', v)} />
-          <LayerMaskSelect label='Collides with' labelClassName={LABEL} hint={MASK_HINT} value={node.mask} onChange={(v) => set('mask', v)} />
-          {/* Freeze-in-place out of range, and sleep at rest: what keeps a large level's far props free. */}
-          <Field label='Simulation' labelClassName={LABEL}>
-            <Select value={node.simulationMode}
-              onChange={(e) => set('simulationMode', e.target.value as ColliderNode['simulationMode'])}>
-              <option value='project'>{`Project range (${range > 0 ? `${range} m` : 'unlimited'})`}</option>
-              <option value='always'>Always</option>
-              <option value='custom'>Custom range</option>
-            </Select>
-          </Field>
-          {node.simulationMode === 'custom' &&
-            <Field label='Range (m)' labelClassName={LABEL} hint='Metres from the camera past which this body freezes. 0 = unlimited.'>
-              <NumberInput value={node.simulationRange} min={0} step={5} onChange={(v) => set('simulationRange', Math.max(0, v))} />
-            </Field>}
-          <Toggle label='Sleep when resting' className='my-1' title={CAN_SLEEP_HINT}
-            checked={node.canSleep} onChange={(c) => set('canSleep', c)} />
-          <AxisToggles label='Linear Constraints' value={node.linearConstraints} onChange={(v) => set('linearConstraints', v)} />
-          <AxisToggles label='Angular Constraints' value={node.angularConstraints} onChange={(v) => set('angularConstraints', v)} />
+          {/* Whether the solver sees it: what a camera rig does with it is the rig's choice, by this body's Layer. */}
+          <DeclaredSections node={node} onChange={() => eventEmitter.emit('PHYSICS_CHANGED')} />
+          <PropertyTable columns={['45%', '55%']}>
+            <AxisToggles label='Linear Constraints' value={node.linearConstraints} onChange={(v) => set('linearConstraints', v)} />
+            <AxisToggles label='Angular Constraints' value={node.angularConstraints} onChange={(v) => set('angularConstraints', v)} />
+          </PropertyTable>
           <div className='mt-2'>
             <ShapeTools {...list} />
           </div>
@@ -372,33 +333,17 @@ export function ColliderEditor({ node }: { node: ColliderNode }) {
  * bodies, colliders and other triggers are seen in. Its events fire on it, and on what came in.
  */
 export function TriggerEditor({ node }: { node: TriggerNode }) {
-  const { sceneDimension } = useCleoEngine();
+  const { sceneDimension, eventEmitter } = useCleoEngine();
   const changed = usePhysicsNode(node);
   const is2D = node.scene ? node.is2D : sceneDimension === '2D';
   const list = useShapeList(node, 'trigger', changed);
-  const set = <K extends keyof TriggerNode>(key: K, value: TriggerNode[K]) => { (node as any)[key] = value; changed(); };
 
+  // Documented as one node in both dimensions, on the physics page (a 2D trigger's box there too).
   return (
-    <DocScope page={is2D ? 'editor/tilemap-2d' : 'editor/physics'}>
+    <DocScope page='editor/physics'>
       <Collapsable title='Trigger' icon={<ShapeIcon />} badge={!is2D && node.shapes.length || undefined} persistKey='node.trigger' defaultOpen>
         <div className='w-full p-2'>
-          <Toggle label='Enabled' className='my-1' checked={node.enabled} onChange={(c) => set('enabled', c)} />
-          {is2D && <>
-            <Field label='Size' labelClassName={LABEL} hint='Width and height, world units, centred on the node.'>
-              <PairInput min={0} value={node.size} onChange={(v) => set('size', v)} />
-            </Field>
-            <Field label='Offset' labelClassName={LABEL} hint='From the node, mirrored when the character it rides on faces left.'>
-              <PairInput value={node.offset} onChange={(v) => set('offset', v)} />
-            </Field>
-          </>}
-          {/* The project's collision layers, one set for 2D and 3D. */}
-          <LayerSelect label='Layer' labelClassName={LABEL} hint='The layer it is on, which another trigger must look for to see it.' value={node.layer} onChange={(v) => set('layer', v)} />
-          <LayerMaskSelect label='Detects' labelClassName={LABEL} hint='The layers it sees bodies and colliders on.' value={node.mask} onChange={(v) => set('mask', v)} />
-          <Toggle label='Detect triggers' className='my-1' title='Also see other triggers: a sword’s hitbox seeing a hurtbox.'
-            checked={node.detectTriggers} onChange={(c) => set('detectTriggers', c)} />
-          {!is2D && node.detectTriggers &&
-            <Toggle label='Continuous' className='my-1' title='Test its path between frames against other triggers: a fast blade.'
-              checked={node.continuous} onChange={(c) => set('continuous', c)} />}
+          <DeclaredSections node={node} onChange={() => eventEmitter.emit('PHYSICS_CHANGED')} />
           {!is2D && <div className='mt-2'><ShapeTools {...list} /></div>}
           <Hint className='mt-2'>Scripts hear onTriggerEnter / onTriggerExit on the trigger, and on what came in.</Hint>
         </div>

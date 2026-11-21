@@ -14,9 +14,13 @@ import './decals';
 import './water';
 import './sprites';
 import './effects';
+import './gameplay';
+import './physics';
+import './ui';
+import './transform';
 
 export {
-    declareProperties, declarationOf, declaredClasses, labelOfKey, resolveProperty, readProperty, writeProperty,
+    declareProperties, declarationOf, declarationsOf, shownProperties, declaredClasses, labelOfKey, resolveProperty, readProperty, writeProperty,
     assetIdAccess, numberChoiceAccess, nodeIdAccess,
 } from './declare';
 export type { PropertyDeclaration, SectionDeclaration, ClassDeclaration, DeclaredProperty, DeclarationOptions } from './declare';

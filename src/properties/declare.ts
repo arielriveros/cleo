@@ -65,6 +65,8 @@ export interface ClassDeclaration<N = any> {
     docs: string;
     /** The heading of that page the card's rows are under, when it is not titled like the card. */
     docsSection?: string;
+    /** The classes it extends whose cards its nodes do not show: a Camera 2D is no Camera's card. */
+    replaces?: Function[];
     sections: SectionDeclaration<N>[];
 }
 
@@ -74,6 +76,8 @@ export interface DeclarationOptions {
     docs?: string;
     /** The heading of the docs page the card's rows are under (its anchor), when it is not titled like the card. */
     section?: string;
+    /** The classes it extends whose cards its nodes do not show (by default a node shows every class's it has). */
+    replaces?: Function[];
 }
 
 /** A declared property with its type read, and its label and range settled for one node. */
@@ -92,7 +96,10 @@ export function declareProperties<N>(Class: abstract new (...args: any[]) => N, 
     for (const s of sections) for (const p of s.props)
         if (!typeOfToken(p.type)) throw new TypeError(`${Class.name}.${p.key}: not a property type`);
     const o = typeof options === 'string' ? { kind: options } : options;
-    declared.set(Class, { title, kind: o.kind ?? 'component', docs: o.docs ?? 'editor/node-inspector', docsSection: o.section, sections });
+    declared.set(Class, {
+        title, kind: o.kind ?? 'component', docs: o.docs ?? 'editor/node-inspector', docsSection: o.section,
+        ...(o.replaces ? { replaces: o.replaces } : {}), sections,
+    });
 }
 
 /**
@@ -106,6 +113,32 @@ export function declarationOf(node: object | null | undefined, Class?: Function)
         if (found) return found;
     }
     return null;
+}
+
+/**
+ * Every declaration `node` has, nearest class first: a light's Light card, then every node's Transform. What the
+ * agent bridge and the Sequencer read a node's declared rows from, where the inspector shows each card by itself.
+ */
+export function declarationsOf(node: object | null | undefined): ClassDeclaration[] {
+    const out: ClassDeclaration[] = [];
+    const replaced = new Set<Function>();
+    for (let proto = node ? Object.getPrototypeOf(node) : null; proto; proto = Object.getPrototypeOf(proto)) {
+        const found = declared.get(proto.constructor);
+        if (!found || out.includes(found) || replaced.has(proto.constructor)) continue;
+        out.push(found);
+        for (const c of found.replaces ?? []) replaced.add(c);
+    }
+    return out;
+}
+
+/** The declared rows `node` shows now (its sections' and rows' `when` hold), in every declaration it has. */
+export function shownProperties<N extends object>(node: N): { decl: ClassDeclaration<N>; section: SectionDeclaration<N>; prop: PropertyDeclaration<N> }[] {
+    const out: { decl: ClassDeclaration<N>; section: SectionDeclaration<N>; prop: PropertyDeclaration<N> }[] = [];
+    for (const decl of declarationsOf(node)) for (const section of decl.sections) {
+        if (section.when && !section.when(node)) continue;
+        for (const prop of section.props) if (!prop.when || prop.when(node)) out.push({ decl, section, prop });
+    }
+    return out;
 }
 
 /** Every class that declares its properties, with its declaration. */
