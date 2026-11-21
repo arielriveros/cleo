@@ -82,6 +82,8 @@ class FolderSink {
   private bakeDeletes = new Set<string>()
   private journal: Set<string> | null = null
   private conflicted = new Set<string>()
+  /** Blobs an edit of this session stopped referencing: collected once nothing in the folder does. */
+  private dropped = new Set<string>()
   private allowDeletes: number | undefined
   private cancelTimer: (() => void) | null = null
   private running: Promise<void> | null = null
@@ -116,6 +118,7 @@ class FolderSink {
     this.dirtyBytes.clear(); this.dirtyAudio.clear(); this.savedScenes.clear(); this.bakePuts.clear(); this.bakeDeletes.clear()
     this.journal = null
     this.conflicted.clear()
+    this.dropped.clear()
     this.allowDeletes = undefined
     this.setStatus({ state: 'idle', conflicts: [], heldDeletes: 0 })
   }
@@ -293,7 +296,10 @@ class FolderSink {
       for (const r of first.renames!) {
         if (res.stats[r.to]) { const prev = s.state.get(r.from); s.state.delete(r.from); if (prev) s.state.set(r.to, { ...prev, sha: res.stats[r.to]!.sha }) }
       }
-      for (const d of first.deletes!) if (res.stats[d.rel] === null) s.state.delete(d.rel)
+      for (const d of first.deletes!) if (res.stats[d.rel] === null) {
+        for (const h of s.state.get(d.rel)?.refs ?? []) this.dropped.add(h)
+        s.state.delete(d.rel)
+      }
       for (const d of first.mkdirs) s.dirs.add(d)
       for (const d of first.rmdirs) if (!res.errors.some(e => e.rel === d)) s.dirs.delete(d)
       for (const id of this.bakeDeletes) if (res.stats[bakeRel(id)] === null || !s.state.has(bakeRel(id))) this.bakeDeletes.delete(id)
@@ -374,6 +380,26 @@ class FolderSink {
       for (const id of [...this.bakePuts.keys()]) if (res.stats[bakeRel(id)]) this.bakePuts.delete(id)
       scheduleStateSave()
     }
+
+    await this.collectBlobs(s)
+  }
+
+  /**
+   * Delete the blobs this session's edits let go of, once no file the folder holds references them — the
+   * cache state knows every file's references, a blocked file's last known ones included. Only what an edit
+   * dropped is considered: a blob nothing references because of a checkout is another branch's, and git
+   * brings it back. The main process refuses while a merge is in progress.
+   */
+  private async collectBlobs(s: FolderSession): Promise<void> {
+    if (!this.dropped.size) return
+    const live = new Set<string>()
+    for (const f of s.state.values()) for (const h of f.refs ?? []) live.add(h)
+    const garbage = [...this.dropped].filter(h => !live.has(h) && s.blobs.has(h))
+    this.dropped.clear()
+    if (!garbage.length) return
+    const res = await getProjectBridge()!.gc(s.root, garbage)
+    if (res.ok) for (const h of garbage) s.blobs.delete(h)
+    else for (const h of garbage) this.dropped.add(h)
   }
 
   /** What the encoder needs for one asset, or null when there is nothing to write yet. */
@@ -441,6 +467,7 @@ class FolderSink {
       const metaOk = !wroteMeta || !!res?.stats[metaRelOf(item.rel)]
       if (contentOk) {
         const prev = s.state.get(item.rel)
+        if (wroteContent) for (const h of prev?.refs ?? []) if (!out.refs.includes(h)) this.dropped.add(h)
         s.state.set(item.rel, {
           sha: wroteContent ? res!.stats[item.rel]!.sha : prev!.sha,
           kind: item.kind, guid: item.guid, created: item.created, refs: out.refs,

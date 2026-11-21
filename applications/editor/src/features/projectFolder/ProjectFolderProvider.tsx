@@ -9,6 +9,8 @@ import { folderSink } from './folderSink'
 import { folderSession, onFolderChange, scheduleStateSave, takeFolderChanges } from './folderSession'
 import { getProjectBridge, type FolderChange } from './desktopProject'
 import { installProjectSdk } from './sdkInstall'
+import { regenerateThumbnail } from '../assets/assetKinds'
+import type { AssetKind } from '../../utils/vfs'
 import { queuePlay, setPlayStarter } from './controlHost'
 import { takeLaunchPlayRequest } from './launchRequests'
 import { setVsCodeDebugOverride } from '../scriptDebugger/vscodeAttach'
@@ -143,6 +145,34 @@ function ProjectFolderLink({ children }: { children: ReactNode }) {
     const root = folderSession()?.root
     if (root) void installProjectSdk(root)
   }, [])
+
+  // Thumbnails are not in the folder (they are rendered, and a render differs between machines), so a project
+  // read from a folder this cache never saw shows kind icons until they are drawn again — here, one at a time,
+  // once the project has loaded, for the kinds whose card is a render.
+  const { depsRef } = useVfs()
+  useEffect(() => {
+    if (!loaded) return
+    let cancelled = false
+    void (async () => {
+      const e = engineRef.current
+      const deps = depsRef.current
+      if (!e.instance || !deps) return
+      const todo: [AssetKind, string][] = [
+        ...lib.materials.filter(a => !a.thumbnail).map(a => ['material', a.id] as [AssetKind, string]),
+        ...lib.terrainMaterials.filter(a => !(a as any).thumbnail).map(a => ['terrainMaterial', a.id] as [AssetKind, string]),
+        ...lib.models.filter(a => !a.thumbnail).map(a => ['model', a.id] as [AssetKind, string]),
+        ...lib.particleSystems.filter(a => !(a as any).thumbnail).map(a => ['particleSystem', a.id] as [AssetKind, string]),
+      ]
+      for (const [kind, id] of todo) {
+        if (cancelled) return
+        try { await regenerateThumbnail(kind, id, e.instance, depsRef.current) } catch { /* the icon stays */ }
+        await new Promise(r => setTimeout(r, 60))
+      }
+    })()
+    return () => { cancelled = true }
+    // Once per load: a record saved later renders its own thumbnail.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded])
 
   // `npm run play` / `npm run debug` (and a launch that asked to play): once loaded, this project can play.
   const engineRef = useRef(engine)
