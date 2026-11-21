@@ -1,0 +1,13 @@
+{
+  "name": "cleo-example-valley",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "watch": "tsc --noEmit -p . --watch --preserveWatchOutput",
+    "play": "node .cleo/sdk/cleo/bin/cleo.mjs play",
+    "debug": "node .cleo/sdk/cleo/bin/cleo.mjs play --debug",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  }
+}

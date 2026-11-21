@@ -1,0 +1,226 @@
+{
+  "cleo": 1,
+  "guid": "9df85359807001e6fb6058c9112e9792",
+  "kind": "script",
+  "created": 1795000000000,
+  "record": {
+    "id": "9df85359807001e6fb6058c9112e9792",
+    "name": "DuskBat",
+    "baseType": "characterBody2D",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "health",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "contactDamage",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "swoopSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 7.5,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "swoopCooldown",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds between swoops."
+        }
+      },
+      {
+        "name": "knockback",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 8,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "artFacesLeft",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The bat's art faces left: its sprite is mirrored to face right."
+        }
+      },
+      {
+        "name": "_sprite",
+        "type": {
+          "kind": "node",
+          "className": "AnimatedSpriteNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Sprite"
+        }
+      },
+      {
+        "name": "_bite",
+        "type": {
+          "kind": "node",
+          "className": "TriggerNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Bite"
+        }
+      },
+      {
+        "name": "_brain",
+        "type": {
+          "kind": "node",
+          "className": "ControllerNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_player",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "Player"
+        }
+      },
+      {
+        "name": "_home",
+        "type": {
+          "kind": "vector",
+          "size": 2
+        },
+        "access": "private",
+        "default": [0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_awake",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_waking",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_swoopLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_swoopDir",
+        "type": {
+          "kind": "vector",
+          "size": 2
+        },
+        "access": "private",
+        "default": [1, 0],
+        "hidden": true
+      },
+      {
+        "name": "_cooldownLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_hurtLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_dead",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_deadLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_bob",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

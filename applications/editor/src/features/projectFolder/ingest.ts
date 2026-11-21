@@ -104,7 +104,8 @@ export async function writeDeltaIntoCache(pid: string, delta: FolderDelta, opts:
       const at = next.findIndex(m => m.id === e.guid)
       if (at >= 0) next[at] = e.record; else next.push(e.record)
     }
-    // A record that carries the cache's own `order` (every one that went through the cache does) keeps it.
+    // A record that carries the model store's `order` keeps it: .model files written before the store kept `order`
+    // to itself (utils/modelStore.ts) have one. The rest keep the folder's order.
     if (opts.cold) next = next.map((m, i) => [m, i] as const)
       .sort(([a, i], [b, j]) => ((a as any).order ?? 1e9) - ((b as any).order ?? 1e9) || i - j).map(([m]) => m)
     await writeModelLibrary(next, prev, pid)

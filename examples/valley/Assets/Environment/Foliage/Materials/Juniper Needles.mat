@@ -1,0 +1,48 @@
+{
+  "id": "b1e9fcbd8080aa910a791712a5a5fef7",
+  "name": "Juniper Needles",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.75,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.08,
+    "windStiffness": 1.2,
+    "windRole": "leaves",
+    "windFlutter": 0.2,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "b2b55f0e0fc854ebbbb7b976585cc36e",
+      "normalMap": "c0a7350472bed961e80a114bd466c369"
+    },
+    "alphaCutoff": 0.5,
+    "translucency": 0.25,
+    "translucencyTint": [0.66, 0.72, 0.14, 0.2],
+    "interactBend": 0.6,
+    "interactRecovery": 1,
+    "variationHue": 0.03,
+    "variationValue": 0.12,
+    "variationDry": 0.08,
+    "wetResponse": 0.5,
+    "snowCover": 0.6,
+    "weightDroop": 0.3,
+    "rippleSheen": 0.2,
+    "leafFlip": 0,
+    "undersideColor": [0.62, 0.7, 0.5],
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "b2b55f0e0fc854ebbbb7b976585cc36e",
+    "c0a7350472bed961e80a114bd466c369"
+  ],
+  "thumbnail": ""
+}

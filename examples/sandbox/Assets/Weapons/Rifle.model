@@ -1,0 +1,246 @@
+{
+  "id": "ca06ff713b185345b51a97b6acc92ff9",
+  "name": "Rifle",
+  "thumbnail": "",
+  "textureIds": [],
+  "materialIds": [
+    "5150803f984efa0889b1e2b26d3a68a0",
+    "09a43341fd9dfbe699d123ba8364db7c",
+    "00fb734f8ee7813cb3f793cdb2fda103",
+    "7c910b4c4ef62e3f702870fa72536469",
+    "7bcf3260a0fa444c7771e8ef482b37de",
+    "7fcbb70d1b9ddb2952786abf24450a52",
+    "087af2e6cda3a9ed8e7e6df65a4befe7",
+    "03a98a4ed87e114d64274471a02bbdfb"
+  ],
+  "nodeJson": {
+    "id": "6b1137ec4b88289822dcac075cd1cc8b",
+    "name": "Rifle",
+    "type": "model",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [],
+    "spawnOnStart": true,
+    "variables": {
+      "__materialId": {
+        "type": "string",
+        "value": "5150803f984efa0889b1e2b26d3a68a0",
+        "access": "public"
+      },
+      "__materialIds": {
+        "type": "string",
+        "value": "[\"5150803f984efa0889b1e2b26d3a68a0\",\"09a43341fd9dfbe699d123ba8364db7c\",\"00fb734f8ee7813cb3f793cdb2fda103\",\"7c910b4c4ef62e3f702870fa72536469\",\"7bcf3260a0fa444c7771e8ef482b37de\",\"7fcbb70d1b9ddb2952786abf24450a52\",\"087af2e6cda3a9ed8e7e6df65a4befe7\",\"03a98a4ed87e114d64274471a02bbdfb\"]",
+        "access": "public"
+      }
+    },
+    "model": {
+      "geometry": {
+        "$geo": {
+          "positions": {
+            "h": "ec458d8af687f90ee989c30ba58d531394e4ea0ff07302854e1ed04f0f0954fe",
+            "l": 348528
+          },
+          "normals": {
+            "h": "c566beb91bda5be9a66d84113ccf4543e64c9ffa2a814aa905ac6f0280a42dff",
+            "l": 348528
+          },
+          "empty": [
+            "tangents",
+            "bitangents"
+          ],
+          "texCoords": {
+            "h": "e160a65f182f8bf31ac5fa5dc46593525855155ae8710f01bd10c06bc99604cc",
+            "l": 232352
+          },
+          "indices": {
+            "h": "9c8bbd1b5c65dde8b5559135ef0d4f5484d6941b0c8ab633b6c8fa70bd3b5e36",
+            "l": 64056,
+            "bits": 16
+          },
+          "typed": true
+        }
+      },
+      "material": {
+        "type": "pbr",
+        "baseColor": [0.03, 0.03, 0.03],
+        "metallic": 0,
+        "roughness": 0.85,
+        "opacity": 1,
+        "emissiveFactor": [0, 0, 0],
+        "textures": {},
+        "config": {
+          "side": "front",
+          "wireframe": false,
+          "transparent": false,
+          "castShadow": true,
+          "probeable": true
+        }
+      },
+      "materials": [
+        {
+          "type": "pbr",
+          "baseColor": [0.03, 0.03, 0.03],
+          "metallic": 0,
+          "roughness": 0.85,
+          "opacity": 1,
+          "emissiveFactor": [0, 0, 0],
+          "textures": {},
+          "config": {
+            "side": "front",
+            "wireframe": false,
+            "transparent": false,
+            "castShadow": true,
+            "probeable": true
+          }
+        },
+        {
+          "type": "pbr",
+          "baseColor": [0.02, 0.02, 0.02],
+          "metallic": 0,
+          "roughness": 0.85,
+          "opacity": 1,
+          "emissiveFactor": [0, 0, 0],
+          "textures": {},
+          "config": {
+            "side": "front",
+            "wireframe": false,
+            "transparent": false,
+            "castShadow": true,
+            "probeable": true
+          }
+        },
+        {
+          "type": "pbr",
+          "baseColor": [0.01, 0.01, 0.01],
+          "metallic": 0,
+          "roughness": 0.85,
+          "opacity": 1,
+          "emissiveFactor": [0, 0, 0],
+          "textures": {},
+          "config": {
+            "side": "front",
+            "wireframe": false,
+            "transparent": false,
+            "castShadow": true,
+            "probeable": true
+          }
+        },
+        {
+          "type": "pbr",
+          "baseColor": [0.21, 0.19, 0.18],
+          "metallic": 0,
+          "roughness": 0.85,
+          "opacity": 1,
+          "emissiveFactor": [0, 0, 0],
+          "textures": {},
+          "config": {
+            "side": "front",
+            "wireframe": false,
+            "transparent": false,
+            "castShadow": true,
+            "probeable": true
+          }
+        },
+        {
+          "type": "pbr",
+          "baseColor": [0.8, 0.8, 0.8],
+          "metallic": 0,
+          "roughness": 0.82,
+          "opacity": 1,
+          "emissiveFactor": [0, 0, 0],
+          "textures": {},
+          "config": {
+            "side": "front",
+            "wireframe": false,
+            "transparent": false,
+            "castShadow": true,
+            "probeable": true
+          }
+        },
+        {
+          "type": "pbr",
+          "baseColor": [0.06, 0.06, 0.06],
+          "metallic": 0,
+          "roughness": 0.82,
+          "opacity": 1,
+          "emissiveFactor": [0, 0, 0],
+          "textures": {},
+          "config": {
+            "side": "front",
+            "wireframe": false,
+            "transparent": false,
+            "castShadow": true,
+            "probeable": true
+          }
+        },
+        {
+          "type": "pbr",
+          "baseColor": [0.03, 0.03, 0.03],
+          "metallic": 0,
+          "roughness": 0.82,
+          "opacity": 1,
+          "emissiveFactor": [0, 0, 0],
+          "textures": {},
+          "config": {
+            "side": "front",
+            "wireframe": false,
+            "transparent": false,
+            "castShadow": true,
+            "probeable": true
+          }
+        },
+        {
+          "type": "pbr",
+          "baseColor": [0.06, 0.06, 0.06],
+          "metallic": 0,
+          "roughness": 0.85,
+          "opacity": 1,
+          "emissiveFactor": [0, 0, 0],
+          "textures": {},
+          "config": {
+            "side": "front",
+            "wireframe": false,
+            "transparent": false,
+            "castShadow": true,
+            "probeable": true
+          }
+        }
+      ],
+      "submeshes": [
+        {
+          "start": 0,
+          "count": 14025
+        },
+        {
+          "start": 14025,
+          "count": 6885
+        },
+        {
+          "start": 20910,
+          "count": 6426
+        },
+        {
+          "start": 27336,
+          "count": 660
+        },
+        {
+          "start": 27996,
+          "count": 138
+        },
+        {
+          "start": 28134,
+          "count": 1194
+        },
+        {
+          "start": 29328,
+          "count": 360
+        },
+        {
+          "start": 29688,
+          "count": 2340
+        }
+      ]
+    }
+  }
+}

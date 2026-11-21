@@ -155,7 +155,7 @@ headings.
   members of `Node` in 2.6k) when signatures would not fit. A docs section replaces reading a 10–43k file.
 - When the engine source is newer than its declarations, answers say to run `npm run build`.
 
-Resources: `cleo://docs/...` (all of `docs/`) and `cleo://examples/scripts/...`.
+Resources: `cleo://docs/...` (all of `docs/`) and `cleo://examples/...` (each example project folder's scripts and docs).
 
 ## Testing
 

@@ -1,0 +1,22 @@
+{
+  "id": "dcd06ab4b7372dcd1a5573caa50581c4",
+  "name": "Pistol 9",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.27, 0.17, 0.08],
+    "metallic": 0,
+    "roughness": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

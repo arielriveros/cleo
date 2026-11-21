@@ -1,0 +1,36 @@
+{
+  "id": "b77e7781df07534bd457c6f0f50cc4b4",
+  "name": "Knight Cloth",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0.5,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "d6a2fdab8069567256010f2a96f06a72",
+      "metallicRoughnessTexture": "4b80c0941c19d68a7ea1968f3098d1dd",
+      "occlusionMap": "4b80c0941c19d68a7ea1968f3098d1dd",
+      "normalMap": "1227b61993cfe3b97568f136968a5136",
+      "mask": "de486eca8338ddeceb24178d258e0903"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "d6a2fdab8069567256010f2a96f06a72",
+    "4b80c0941c19d68a7ea1968f3098d1dd",
+    "1227b61993cfe3b97568f136968a5136",
+    "de486eca8338ddeceb24178d258e0903"
+  ],
+  "thumbnail": ""
+}

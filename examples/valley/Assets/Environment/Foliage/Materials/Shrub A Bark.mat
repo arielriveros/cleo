@@ -1,0 +1,46 @@
+{
+  "id": "a14e6ddc617c9dae1edee371643e3f00",
+  "name": "Shrub A Bark",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.9,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.18,
+    "windStiffness": 1.2,
+    "windRole": "plant",
+    "windFlutter": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "bc0fc5ce7e1c45fdefe22d2ee960894d",
+      "metallicRoughnessTexture": "c5a553e5eeab2ec1df019ad756f0a050",
+      "occlusionMap": "c5a553e5eeab2ec1df019ad756f0a050",
+      "normalMap": "a2e55694b66cb5b6729bb1ece6fb27f7"
+    },
+    "interactBend": 0.6,
+    "interactRecovery": 1,
+    "variationHue": 0.03,
+    "variationValue": 0.12,
+    "variationDry": 0.08,
+    "wetResponse": 0.5,
+    "snowCover": 0.6,
+    "weightDroop": 0.3,
+    "rippleSheen": 0.2,
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "bc0fc5ce7e1c45fdefe22d2ee960894d",
+    "c5a553e5eeab2ec1df019ad756f0a050",
+    "a2e55694b66cb5b6729bb1ece6fb27f7"
+  ],
+  "thumbnail": ""
+}

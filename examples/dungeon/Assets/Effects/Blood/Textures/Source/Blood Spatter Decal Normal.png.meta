@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "abb1275c521aca6df2499615e2c3d791",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "abb1275c521aca6df2499615e2c3d791",
+    "name": "Blood Spatter Decal Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

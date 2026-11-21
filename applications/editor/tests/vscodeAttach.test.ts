@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   getVsCodeDebugStatus, onVsCodeEvent, onVsCodeResumed, stoppedInVsCode, waitForVsCode, forgetVsCodeSession,
 } from '../src/features/scriptDebugger/vscodeAttach';
-import { launchConfiguration, launchJson, scaffoldFiles, DEFAULT_DEBUG_PORT } from '../src/features/projectFolder/scaffold';
+import { launchConfiguration, launchJson, scaffoldFiles, DEFAULT_DEBUG_PORT } from '../src/features/projectFolder/scaffoldText';
 import { parseEditorPrefs, DEFAULT_VSCODE_DEBUG_PORT } from '../src/features/options/editorPrefs';
 
 // Debugging from VS Code: what the editor keeps of the desktop app's debug port (vscodeAttach.ts), and the

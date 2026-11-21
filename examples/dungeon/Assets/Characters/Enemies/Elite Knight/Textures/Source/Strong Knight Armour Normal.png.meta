@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "8aecb071629eaa880b427bc2c01bf3ae",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "8aecb071629eaa880b427bc2c01bf3ae",
+    "name": "Strong Knight Armour Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

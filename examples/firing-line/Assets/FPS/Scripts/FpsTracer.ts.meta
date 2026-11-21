@@ -1,0 +1,83 @@
+{
+  "cleo": 1,
+  "guid": "8189ecbc5a9879aca34624a05770177a",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "8189ecbc5a9879aca34624a05770177a",
+    "name": "FpsTracer",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "tracerLength",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Set by the shooter: distance from the muzzle to the end of the shot."
+        }
+      },
+      {
+        "name": "speed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 420,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "trail",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 6,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Length of the streak, metres."
+        }
+      },
+      {
+        "name": "_flown",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_start",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_dir",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 1],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "0fbd703df098431d4727fce5a138b0ef",
+  "name": "Prop Accent Grid",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.35, 0.5, 0.85],
+    "metallic": 0,
+    "roughness": 0.9,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {
+      "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    },
+    "uvProjection": "box",
+    "uvSpace": "object",
+    "uvWorldSize": 0.25
+  },
+  "textureIds": [
+    "d4a96a210b1af85c70925ceced937cb7"
+  ],
+  "thumbnail": ""
+}

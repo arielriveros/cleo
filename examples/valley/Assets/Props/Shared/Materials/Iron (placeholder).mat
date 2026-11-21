@@ -1,0 +1,23 @@
+{
+  "id": "28e1bde794894d847c34f0170fe579e1",
+  "name": "Iron (placeholder)",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.38, 0.38, 0.4],
+    "metallic": 0.9,
+    "roughness": 0.45,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

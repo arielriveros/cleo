@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "d41ce5bf-28e5-4a58-969a-40cd73a6f44f",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "d41ce5bf-28e5-4a58-969a-40cd73a6f44f",
+    "name": "mannequin Metallic Roughness.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": false,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

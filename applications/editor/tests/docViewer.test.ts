@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readFileSync } from 'fs';
+import { join, posix } from 'path';
 import type { Token, Tokens } from 'marked';
 import { parsePage, plainText, resolveDocLink, type DocIndex } from '@cleo/app-kit/docs/parseDocs';
 import { getDocSource, pageOrder, registerDocSources } from '@cleo/app-kit/docs/docIndex';
@@ -125,7 +125,13 @@ describe('links between pages', () => {
         const link = resolveDocLink(page, href);
         if (link.kind === 'external') continue;
         if (link.kind === 'outside') {
-          // The few links out of docs/: the example scripts, the changelog, the media tooling.
+          // A file in docs/ that is not a page (a sample script beside the page that shows it) must exist.
+          const inDocs = posix.normalize(posix.join(posix.dirname(page), href.split('#')[0]));
+          if (!inDocs.startsWith('..')) {
+            if (!existsSync(join(DOCS_DIR, inDocs))) broken.push(`${page}: ${href} (no file docs/${inDocs})`);
+            continue;
+          }
+          // The few links out of docs/: the example projects, the changelog, the media tooling.
           if (!/^(\.\.\/)+(examples|CHANGELOG\.md|tools)\b/.test(href)) broken.push(`${page}: ${href} (outside docs/)`);
           continue;
         }

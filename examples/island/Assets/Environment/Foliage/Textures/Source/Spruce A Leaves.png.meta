@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "88925c3edabef8760e1a364241216519",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "88925c3edabef8760e1a364241216519",
+    "name": "Spruce A Leaves.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

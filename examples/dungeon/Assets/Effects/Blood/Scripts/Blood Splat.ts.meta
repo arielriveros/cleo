@@ -1,0 +1,172 @@
+{
+  "cleo": 1,
+  "guid": "db0e6f860cce40a79b8f0da69731607b",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "db0e6f860cce40a79b8f0da69731607b",
+    "name": "Blood Splat",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "lifetime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 12,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds before the splat is gone, its fade included."
+        }
+      },
+      {
+        "name": "fadeSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The last part of `lifetime`, over which the decals fade out."
+        }
+      },
+      {
+        "name": "minSize",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.65,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Random size range, as a multiple of each decal's authored size."
+        }
+      },
+      {
+        "name": "maxSize",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.25,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "snapDown",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.5,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "How far below the spawn point the floor may be."
+        }
+      },
+      {
+        "name": "alignToSurface",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Tilt onto sloped ground. Off, the splat lies flat and the decal's angle fade handles the slope."
+        }
+      },
+      {
+        "name": "yaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Set by the spawner. Which way the decal's +Z points, in degrees; NaN for a random turn."
+        }
+      },
+      {
+        "name": "sizeScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Set by the spawner: a bigger hit leaves a bigger splat."
+        }
+      },
+      {
+        "name": "flipbookStart",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds into a decal's flipbook it starts from: skip the frames before the liquid reaches the floor when nothing else (a spray of droplets) covers that gap. 0 plays it from its first frame."
+        }
+      },
+      {
+        "name": "_age",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_placed",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_decals",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_sizes",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_offsets",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

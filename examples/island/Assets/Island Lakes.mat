@@ -1,0 +1,51 @@
+{
+  "id": "a16bcc286cecf5aac86d7c13fa421e56",
+  "name": "Island Lakes",
+  "material": {
+    "type": "basic",
+    "color": [0.1, 0.32, 0.3],
+    "opacity": 0.75,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": true,
+      "castShadow": false,
+      "probeable": true
+    },
+    "waterMaterial": true,
+    "look": {
+      "shallowColor": [0.1, 0.32, 0.3],
+      "deepColor": [0.01, 0.06, 0.09],
+      "absorption": [0.45, 0.09, 0.06],
+      "turbidity": 0.2,
+      "clarity": 6,
+      "roughness": 0.06,
+      "reflectivity": 0.02,
+      "screenReflections": 1,
+      "refraction": 0.25,
+      "detailStrength": 0.45,
+      "detailScale": 1.5,
+      "flowStrength": 1,
+      "flowScatter": 1,
+      "liveWaves": 1,
+      "foamColor": [0.9, 0.93, 0.95],
+      "shoreFoam": 0.6,
+      "crestFoam": 0.5,
+      "flowFoam": 0.4,
+      "caustics": 1,
+      "causticsScale": 1.4,
+      "rainRipples": 1,
+      "snowCover": 1,
+      "windResponse": 1,
+      "scatterColor": [0.1, 0.55, 0.45],
+      "subsurface": 0.7,
+      "subsurfaceSharpness": 5,
+      "subsurfaceDistortion": 0.4,
+      "underwaterColor": [0.03, 0.14, 0.16],
+      "underwaterFog": 0.12
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

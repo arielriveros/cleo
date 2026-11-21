@@ -1,0 +1,24 @@
+{
+  "id": "677b6d44742b2f86b28737934b7750bf",
+  "name": "Candle Wax",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.86, 0.8, 0.62],
+    "metallic": 0,
+    "roughness": 0.55,
+    "opacity": 1,
+    "emissiveFactor": [1, 0.6, 0.25],
+    "emissiveIntensity": 0.15,
+    "emissiveExposureWeight": 0.1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

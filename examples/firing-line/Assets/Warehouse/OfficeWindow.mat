@@ -1,0 +1,36 @@
+{
+  "id": "918e8201cbae5282a79627339a72e373",
+  "name": "OfficeWindow",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "157ec17a378a09e157babff88e48db98",
+      "metallicMap": "dbbc7fff51014b13621cd2a37a29efcf",
+      "roughnessMap": "dbbc7fff51014b13621cd2a37a29efcf"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": true,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "157ec17a378a09e157babff88e48db98",
+    "dbbc7fff51014b13621cd2a37a29efcf"
+  ],
+  "thumbnail": ""
+}

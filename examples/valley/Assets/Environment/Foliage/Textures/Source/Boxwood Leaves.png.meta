@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "d6e02643f7e1fb174e92a9bea3e34045",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "d6e02643f7e1fb174e92a9bea3e34045",
+    "name": "Boxwood Leaves.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

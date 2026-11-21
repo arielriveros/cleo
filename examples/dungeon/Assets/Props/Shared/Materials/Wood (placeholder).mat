@@ -1,0 +1,23 @@
+{
+  "id": "76add4739f28406a8cf54fe03fd803fb",
+  "name": "Wood (placeholder)",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.36, 0.24, 0.14],
+    "metallic": 0,
+    "roughness": 0.9,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

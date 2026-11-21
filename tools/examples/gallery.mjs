@@ -1,0 +1,102 @@
+// Build the example gallery from the example folders: each examples/<slug>/ becomes the bundle the editor's
+// Examples tab installs, in applications/editor/public/examples/<slug>/ (gitignored build output), and the
+// catalogue index.json is regenerated. The editor and desktop builds ship that folder as before.
+//
+//   node tools/examples/gallery.mjs [slug…] [--force]
+//
+// An example whose data is not all on disk (npm run examples:fetch) is left out of the gallery, with a hint;
+// with CLEO_EXAMPLES_REQUIRED=1 (release builds) that is an error instead. An example whose folder has not
+// changed since its bundle was built is skipped: a stamp of the tools that build it and of every file it reads.
+// Each example builds in a child process of its own, with a large heap (the biggest are several hundred MB).
+
+import fs from 'fs'
+import path from 'path'
+import crypto from 'crypto'
+import { spawnSync } from 'child_process'
+import { fileURLToPath } from 'url'
+import { ROOT, EXAMPLES_DIR, listExamples, missingData, projectFiles, readExampleFolder } from '../exampleKit/folder.mjs'
+import { GALLERY_DIR, regenerateIndex } from '../exampleKit/galleryIndex.mjs'
+
+const SELF = fileURLToPath(import.meta.url)
+const STAMP = '.build.json'
+
+/** The sources whose change rebuilds every example's bundle. */
+const TOOL_SOURCES = [
+  'tools/examples/gallery.mjs', 'tools/exampleKit/folder.mjs', 'tools/exampleKit/editorModules.mjs',
+  'tools/exampleKit/packFormat2.mjs', 'tools/exampleKit/tsLoader.mjs',
+  'applications/editor/src/utils/folder/projectCodec.ts', 'applications/editor/src/utils/folder/codec.ts',
+  'applications/editor/src/utils/folder/layout.ts', 'applications/editor/src/utils/payloads.ts',
+  'applications/editor/src/utils/bundle.ts', 'applications/editor/src/utils/bundleRead.ts',
+  'applications/editor/src/utils/bundleAssets.ts',
+]
+
+/** What an example's bundle was built from: the tools, and every file of the folder (path, size, time). */
+export function stampOf(dir) {
+  const h = crypto.createHash('sha256')
+  for (const rel of TOOL_SOURCES) { const f = path.join(ROOT, rel); if (fs.existsSync(f)) h.update(rel).update(fs.readFileSync(f)) }
+  for (const rel of [...projectFiles(dir), 'example.json', 'data.lock.json']) {
+    const f = path.join(dir, ...rel.split('/'))
+    if (!fs.existsSync(f)) continue
+    const st = fs.statSync(f)
+    h.update(`${rel}\0${st.size}\0${Math.round(st.mtimeMs)}\n`)
+  }
+  return h.digest('hex')
+}
+
+const readJson = (f) => (fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : null)
+
+/** Build one example's bundle (in this process). */
+async function buildOne(slug) {
+  const dir = path.join(EXAMPLES_DIR, slug)
+  const out = path.join(GALLERY_DIR, slug)
+  const example = readJson(path.join(dir, 'example.json')) ?? {}
+  const { bundle } = await readExampleFolder(dir)
+  // A folder implies no dates (they are not committed); the gallery's are the example's.
+  bundle.manifest.createdAt = example.createdAt ?? 0
+  const { writeBundleFolder } = await import('../exampleKit/packFormat2.mjs')
+  fs.rmSync(out, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  await writeBundleFolder(out, bundle)
+  const meta = { name: example.name ?? bundle.manifest.projectName ?? slug, description: example.description ?? '', order: example.order ?? 0, createdAt: example.createdAt ?? 0 }
+  fs.writeFileSync(path.join(out, 'example.json'), JSON.stringify(meta, null, 2) + '\n')
+  if (fs.existsSync(path.join(dir, 'thumbnail.png'))) fs.copyFileSync(path.join(dir, 'thumbnail.png'), path.join(out, 'thumbnail.png'))
+  fs.writeFileSync(path.join(out, STAMP), JSON.stringify({ stamp: stampOf(dir) }) + '\n')
+}
+
+/**
+ * Bring the gallery up to date: build what is stale, drop what has no data. Returns {built, skipped, missing}.
+ * `required`: an example without its data is an error (CLEO_EXAMPLES_REQUIRED=1).
+ */
+export async function buildGallery({ slugs, force = false, required = process.env.CLEO_EXAMPLES_REQUIRED === '1', log = console.log } = {}) {
+  const examples = listExamples().filter(e => !slugs?.length || slugs.includes(e.slug))
+  const result = { built: [], skipped: [], missing: [] }
+  for (const { slug, dir } of examples) {
+    const out = path.join(GALLERY_DIR, slug)
+    const missing = missingData(dir)
+    if (missing.length) {
+      if (required) throw new Error(`${slug}: ${missing.length} data file(s) missing; run npm run examples:fetch`)
+      result.missing.push(slug)
+      fs.rmSync(out, { recursive: true, force: true })
+      continue
+    }
+    if (!force && readJson(path.join(out, STAMP))?.stamp === stampOf(dir) && fs.existsSync(path.join(out, 'manifest.json'))) {
+      result.skipped.push(slug)
+      continue
+    }
+    log(`  building the ${slug} example's gallery bundle…`)
+    const r = spawnSync(process.execPath, ['--max-old-space-size=12288', SELF, '--one', slug], { stdio: 'inherit' })
+    if (r.status !== 0) throw new Error(`building the ${slug} example failed`)
+    result.built.push(slug)
+  }
+  await regenerateIndex()
+  return result
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === SELF) {
+  const args = process.argv.slice(2)
+  const run = async () => {
+    if (args[0] === '--one') return buildOne(args[1])
+    const r = await buildGallery({ slugs: args.filter(a => !a.startsWith('--')), force: args.includes('--force') })
+    console.log(`examples: ${r.built.length} built, ${r.skipped.length} up to date${r.missing.length ? `, ${r.missing.length} without data (${r.missing.join(', ')}): npm run examples:fetch` : ''}`)
+  }
+  run().catch(e => { console.error(e.message); process.exitCode = 1 })
+}

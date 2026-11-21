@@ -1,0 +1,105 @@
+{
+  "id": "37a71f62d9a7e76fcce12e132a1dfefc",
+  "name": "Bed",
+  "nodeJson": {
+    "id": "121025a1eeeda8be0011dbab714eee30",
+    "name": "Bed",
+    "type": "node",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [
+      {
+        "id": "b1af209d1c97e210013c5da3f7a019d6",
+        "name": "Old Bed",
+        "type": "model",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [],
+        "variables": {
+          "__materialId": {
+            "type": "string",
+            "value": "13e028527d9295dafb66d3d748310a80",
+            "access": "public"
+          }
+        },
+        "spawnOnStart": true,
+        "model": {
+          "geometry": {
+            "$geo": {
+              "positions": {
+                "h": "44c7308d7d3334bf50d11042528ad4beebe5e3d40facdf0d7004dd18b29e6ac2",
+                "l": 42360
+              },
+              "normals": {
+                "h": "a55ae85227e0b5f2cff49555222075cf59b299e573e7451de5c6dc90b2106add",
+                "l": 42360
+              },
+              "empty": [
+                "tangents",
+                "bitangents"
+              ],
+              "texCoords": {
+                "h": "e9105251edb7e0d4b6b27cd8a42298e8a2c2be2e23c1e04e554b25bb1df72577",
+                "l": 28240
+              },
+              "indices": {
+                "h": "27fdf0357f4055731507f6e03da40873bc73e52ead5a3f2ba8aba8202a03f536",
+                "l": 29400,
+                "bits": 16
+              },
+              "typed": true
+            }
+          },
+          "material": {
+            "type": "pbr",
+            "baseColor": [1, 1, 1],
+            "metallic": 0,
+            "roughness": 1,
+            "reflectance": 0.5,
+            "opacity": 1,
+            "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "textures": {
+              "baseColorTexture": "7f1125773985642d29e5a384e3cf9390",
+              "metallicRoughnessTexture": "765042cfe722d7a11258be64932766b0",
+              "occlusionMap": "765042cfe722d7a11258be64932766b0",
+              "normalMap": "253cfaad2276b25b6d4ec66d4f5a1c5a"
+            },
+            "config": {
+              "side": "double",
+              "wireframe": false,
+              "transparent": false,
+              "castShadow": true,
+              "probeable": true
+            }
+          }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
+      }
+    ],
+    "variables": {
+      "__modelId": {
+        "type": "string",
+        "value": "9ed73f4c278ae5b3d77d71e90f817bdc",
+        "access": "public"
+      },
+      "__modelBaseTRS": {
+        "type": "string",
+        "value": "[0,0,0,0,0,0,1,1,1]",
+        "access": "public"
+      }
+    },
+    "spawnOnStart": true,
+    "drawDistance": 40
+  },
+  "scripts": {},
+  "textureIds": [
+    "7f1125773985642d29e5a384e3cf9390",
+    "765042cfe722d7a11258be64932766b0",
+    "253cfaad2276b25b6d4ec66d4f5a1c5a"
+  ]
+}

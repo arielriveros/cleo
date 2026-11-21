@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "eaccb9818c21086a28754372465a9b0f",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "eaccb9818c21086a28754372465a9b0f",
+    "name": "Shrub A leavesNormal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

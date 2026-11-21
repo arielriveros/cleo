@@ -1,0 +1,43 @@
+{
+  "id": "400b81060ed045a88ed3d756378da55a",
+  "name": "Deck Pillar Material",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.141657167299671,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "rebar_reinforced_concrete_diff_1k.png",
+      "metallicMap": "rebar_reinforced_concrete_arm_1k.png",
+      "roughnessMap": "rebar_reinforced_concrete_rough_1k.png",
+      "normalMap": "rebar_reinforced_concrete_nor_gl_1k.png",
+      "occlusionMap": "rebar_reinforced_concrete_ao_1k.png",
+      "displacementMap": "rebar_reinforced_concrete_disp_1k.png"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "rebar_reinforced_concrete_diff_1k.png",
+    "rebar_reinforced_concrete_arm_1k.png",
+    "rebar_reinforced_concrete_rough_1k.png",
+    "rebar_reinforced_concrete_nor_gl_1k.png",
+    "rebar_reinforced_concrete_ao_1k.png",
+    "rebar_reinforced_concrete_disp_1k.png"
+  ],
+  "thumbnail": ""
+}

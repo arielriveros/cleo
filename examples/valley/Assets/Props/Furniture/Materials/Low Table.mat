@@ -1,0 +1,33 @@
+{
+  "id": "bd4df5661508762c2df98c11e50eb632",
+  "name": "Low Table",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "58f4e43171bf1ed2830df91090a4523b",
+      "metallicRoughnessTexture": "cd7adc180bfb3810168457b31ae83e4e",
+      "occlusionMap": "cd7adc180bfb3810168457b31ae83e4e",
+      "normalMap": "b01a9cf6b7546e7b5b64b4be081492a3"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "58f4e43171bf1ed2830df91090a4523b",
+    "cd7adc180bfb3810168457b31ae83e4e",
+    "b01a9cf6b7546e7b5b64b4be081492a3"
+  ],
+  "thumbnail": ""
+}

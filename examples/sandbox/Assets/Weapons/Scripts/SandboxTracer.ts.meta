@@ -1,0 +1,88 @@
+{
+  "cleo": 1,
+  "guid": "1c1a06406a9d09a09b5f2e3970ad897f",
+  "kind": "script",
+  "created": 1795100000000,
+  "record": {
+    "id": "1c1a06406a9d09a09b5f2e3970ad897f",
+    "name": "SandboxTracer",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "tracerLength",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "speed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 380,
+        "hidden": false,
+        "attribute": {
+          "min": 10,
+          "max": 2000,
+          "step": 10,
+          "tooltip": "How fast the streak flies, m/s."
+        }
+      },
+      {
+        "name": "trail",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 5,
+        "hidden": false,
+        "attribute": {
+          "min": 0.1,
+          "max": 20,
+          "step": 0.1,
+          "tooltip": "The streak's length, m (its mesh's)."
+        }
+      },
+      {
+        "name": "_flown",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_start",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_dir",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 1],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

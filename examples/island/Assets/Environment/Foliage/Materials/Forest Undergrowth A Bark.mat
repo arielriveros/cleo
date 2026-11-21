@@ -1,0 +1,46 @@
+{
+  "id": "a04570dd70df9a30992059e8ab62d085",
+  "name": "Forest Undergrowth A Bark",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.9,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.22,
+    "windStiffness": 1.2,
+    "windRole": "plant",
+    "windFlutter": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "02b5a09f349274176e9c9102fa729656",
+      "metallicRoughnessTexture": "be1170182266eebb528557e93b9eeb30",
+      "occlusionMap": "be1170182266eebb528557e93b9eeb30",
+      "normalMap": "641cd04ed93c745786280c5fa2884a9c"
+    },
+    "interactBend": 0.6,
+    "interactRecovery": 1,
+    "variationHue": 0.03,
+    "variationValue": 0.12,
+    "variationDry": 0.08,
+    "wetResponse": 0.5,
+    "snowCover": 0.6,
+    "weightDroop": 0.3,
+    "rippleSheen": 0.2,
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "02b5a09f349274176e9c9102fa729656",
+    "be1170182266eebb528557e93b9eeb30",
+    "641cd04ed93c745786280c5fa2884a9c"
+  ],
+  "thumbnail": ""
+}

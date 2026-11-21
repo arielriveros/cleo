@@ -1,0 +1,847 @@
+{
+  "cleo": 1,
+  "guid": "af11c8ccbe8f2e2bc4ce591548589bb4",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "af11c8ccbe8f2e2bc4ce591548589bb4",
+    "name": "FpsPlayer",
+    "baseType": "character",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "displayName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Player",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "team",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "blue",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "maxHp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 100,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 100,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "weapon",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "ak47",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Which WEAPONS entry this fighter uses."
+        }
+      },
+      {
+        "name": "respawnTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The template the Game Manager respawns this fighter from (blank: this node itself is reset instead)."
+        }
+      },
+      {
+        "name": "headMultiplier",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.2,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Damage multiplier for a head shot."
+        }
+      },
+      {
+        "name": "standHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.78,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Height of the body standing and crouching, metres (hit zones, the eye, the target)."
+        }
+      },
+      {
+        "name": "crouchHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "headLine",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.84,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "A hit above this share of the body's height is the head."
+        }
+      },
+      {
+        "name": "impactTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "FPS Impact",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "bloodTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "FPS Blood Hit",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "holeTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "FPS Bullet Hole",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "tracerTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "FPS Tracer",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "isDead",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "isCrouching",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "kills",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "deaths",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "lastHitFrom",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "public",
+        "default": [0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "lastHitAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "ammo",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 30,
+        "hidden": true
+      },
+      {
+        "name": "reserve",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 150,
+        "hidden": true
+      },
+      {
+        "name": "_time",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_missing",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "loadout",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "string"
+          }
+        },
+        "access": "public",
+        "default": [
+          "ak47",
+          "pistol",
+          "shotgun"
+        ],
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The weapons carried, in slot order (WEAPONS keys)."
+        }
+      },
+      {
+        "name": "crouchSpeedScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Movement"
+        }
+      },
+      {
+        "name": "crouchSmoothing",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.09,
+        "hidden": false,
+        "attribute": {
+          "group": "Movement",
+          "tooltip": "Seconds the eye takes to drop or rise."
+        }
+      },
+      {
+        "name": "eyeStand",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.66,
+        "hidden": false,
+        "attribute": {
+          "group": "Movement"
+        }
+      },
+      {
+        "name": "eyeCrouch",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.05,
+        "hidden": false,
+        "attribute": {
+          "group": "Movement"
+        }
+      },
+      {
+        "name": "hipFov",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 78,
+        "hidden": false,
+        "attribute": {
+          "group": "View"
+        }
+      },
+      {
+        "name": "sprintFovBoost",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 5,
+        "hidden": false,
+        "attribute": {
+          "group": "View"
+        }
+      },
+      {
+        "name": "adsSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.14,
+        "hidden": false,
+        "attribute": {
+          "group": "View"
+        }
+      },
+      {
+        "name": "adsSensitivity",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.55,
+        "hidden": false,
+        "attribute": {
+          "group": "View",
+          "tooltip": "Mouse sensitivity share while aimed (1: the same)."
+        }
+      },
+      {
+        "name": "regenDelay",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 5,
+        "hidden": false,
+        "attribute": {
+          "group": "Health"
+        }
+      },
+      {
+        "name": "regenPerSecond",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 16,
+        "hidden": false,
+        "attribute": {
+          "group": "Health"
+        }
+      },
+      {
+        "name": "ads",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "aimClipRaise",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.028,
+        "hidden": false,
+        "attribute": {
+          "group": "Aiming",
+          "tooltip": "Metres the viewmodel group rises while aimed with an aim clip: the clip's sights sit below the crosshair, where the shots go."
+        }
+      },
+      {
+        "name": "dofAperture",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "group": "Aiming",
+          "tooltip": "Depth of field while aiming: the aperture f-stop, the blur cap (px), the metres nearer than which nothing blurs, and the focus reach."
+        }
+      },
+      {
+        "name": "dofMaxBlur",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 14,
+        "hidden": false,
+        "attribute": {
+          "group": "Aiming"
+        }
+      },
+      {
+        "name": "dofNearCutoff",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Aiming"
+        }
+      },
+      {
+        "name": "dofFarFocus",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 60,
+        "hidden": false,
+        "attribute": {
+          "group": "Aiming"
+        }
+      },
+      {
+        "name": "_dofOn",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_dofKey",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_dofFocus",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 30,
+        "hidden": true
+      },
+      {
+        "name": "reloading",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "sprinting",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "spreadNow",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "respawnIn",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "weaponIndex",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "hitMarkerAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "hitMarkerHead",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "hitMarkerKill",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_rig",
+        "type": {
+          "kind": "node",
+          "className": "CameraRigNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_slots",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_viewmodels",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_anim",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_clip",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_busyUntil",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_fireUntil",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_nextShot",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_reloadToken",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_bloom",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_pending",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_eye",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1.66,
+        "hidden": true
+      },
+      {
+        "name": "_fov",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 78,
+        "hidden": true
+      },
+      {
+        "name": "_lastHurt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "_baseYawSens",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_basePitchSens",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_vmBase",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_sentStance",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_remoteAds",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_remoteFiring",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_remoteReloading",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_hostNextShot",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "viewmodelFov",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 58,
+        "hidden": false,
+        "attribute": {
+          "group": "Health",
+          "tooltip": "The lens the viewmodels are drawn at (the camera's `viewmodelFov`), degrees."
+        }
+      },
+      {
+        "name": "viewmodelReach",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.95,
+        "hidden": false,
+        "attribute": {
+          "group": "Health",
+          "tooltip": "How far in front of the camera the viewmodel reaches (its muzzle), metres: what a wall must leave room for."
+        }
+      },
+      {
+        "name": "_vmDepth",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_vmMoving",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_vmSprinting",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_vmAim",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

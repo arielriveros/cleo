@@ -1,0 +1,33 @@
+{
+  "id": "2935f44ddf4dc98306e1a54755e600c4",
+  "name": "Strong Knight Armour",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "04858d8043de783ed1d53d5321f94ff7",
+      "metallicRoughnessTexture": "461d1cccca952474afe5bd57efdc454b",
+      "occlusionMap": "461d1cccca952474afe5bd57efdc454b",
+      "normalMap": "8aecb071629eaa880b427bc2c01bf3ae"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "04858d8043de783ed1d53d5321f94ff7",
+    "461d1cccca952474afe5bd57efdc454b",
+    "8aecb071629eaa880b427bc2c01bf3ae"
+  ],
+  "thumbnail": ""
+}

@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "4b80c0941c19d68a7ea1968f3098d1dd",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "4b80c0941c19d68a7ea1968f3098d1dd",
+    "name": "Knight Cloth ARM.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

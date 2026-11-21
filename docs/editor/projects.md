@@ -38,14 +38,17 @@ examples:
 ## Examples
 
 The **Examples** tab lists example projects with a thumbnail, a description, a size and a scene
-count. Opening one downloads it and adds it as a **new project** — your existing projects are
-untouched. Anything over 25 MB asks first.
+count. Opening one adds it as a **new project** (in the desktop app, a new project folder where you choose) —
+your existing projects are untouched. Anything over 25 MB asks first.
+
+In the engine's repository each example is a project folder, `examples/<slug>/`, with its own tests; the gallery
+is built from those folders (see `examples/README.md` in the repository).
 
 Examples are the fastest way to see a working setup. These are documented in depth:
 
 - [Sandbox](sandbox-example.md), locomotion in the style of Advanced Locomotion System v4
-- [Third-person strafe character](../../examples/scripts/README.md)
-- [Valley](../../examples/scripts/SOULS_DEMO.md), the souls-like example game
+- [Third-person strafe character](../scripting/third-person-character.md)
+- [Dungeon](../../examples/dungeon/docs/SOULS_DEMO.md), the souls-like example game
 
 ## Scenes
 

@@ -1,0 +1,33 @@
+{
+  "id": "28b23b7be05d4ef9f05faed8d9d5f44f",
+  "name": "Dungeon Iron",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "03353c3a7e7c32b910957b976defecc1",
+      "metallicRoughnessTexture": "70cf3e06c9c89fc8bd1f15e8264b7f8e",
+      "occlusionMap": "70cf3e06c9c89fc8bd1f15e8264b7f8e",
+      "normalMap": "45966ed5b8636ac55bf1a92ab5443f37"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "03353c3a7e7c32b910957b976defecc1",
+    "70cf3e06c9c89fc8bd1f15e8264b7f8e",
+    "45966ed5b8636ac55bf1a92ab5443f37"
+  ],
+  "thumbnail": ""
+}

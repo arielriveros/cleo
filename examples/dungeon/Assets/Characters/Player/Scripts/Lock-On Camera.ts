@@ -1,0 +1,281 @@
+import { CameraRigNode, Input, Node, dampTime } from 'cleo'
+import { find, onAction, attribute } from 'cleo/decorators'
+import { angleDiff, planarDistance, yawTo } from '@/Core/Scripts/SoulsMath'
+import { playSound } from '@/Core/Scripts/SoulsAudio'
+
+/**
+ * Hollow Keep — the third-person camera with target lock. Attach to the Player's `camera rig`, a Camera
+ * Rig node that sits BEFORE the Player Controller among the Player's children.
+ *
+ * Free: an ordinary orbit camera the controller steers with Look.
+ *
+ * Locked: the rig switches to `aimMode = 'lookAt'` on the target's `LockPoint`, so the camera holds the
+ * enemy in frame by itself. The controller keeps writing the rig's yaw into the intent as the aim, which
+ * is what makes the player STRAFE around the target — SoulsPlayer sets `facingMode = 'aim'` while locked.
+ *
+ *   LockOn                   toggle. With nothing to lock, it re-centres the camera behind the player.
+ *   SwitchTargetLeft/Right   cycle (keys); a hard flick of the right stick or the mouse does the same
+ *
+ * Candidates are the manager's live enemies within `lockRange` and in line of sight, ranked by angle off
+ * the camera's forward and then by distance (rankLockTargets, below). The lock breaks past
+ * `breakRange`, after `losBreakSeconds` behind a wall, or when the target dies — in which case another
+ * enemy within `retargetRange` is picked up, as the games do.
+ *
+ * The reticle is a world-space UI Root named `LockReticle`, a child of the player beside this rig. Its
+ * `uiTargetId` is kept pointed at the
+ * target's lock point.
+ *
+ * Framing: while locked, the boom eases in to `lockedArmLength` and over the shoulder to
+ * `lockedSocketOffset`, so the fight fills the frame; unlocking eases it back out to the authored values.
+ * Both blend over `lockBlendSeconds` — the rig itself does not damp its arm, so a snap would be a cut.
+ */
+export default class SoulsLockOnNode extends CameraRigNode {
+  @attribute
+  public lockRange: number = 20
+  @attribute
+  public breakRange: number = 26
+  /** Seconds the target may stay hidden behind geometry before the lock lets go. */
+  @attribute
+  public losBreakSeconds: number = 1.5
+  /** Seconds between two target switches, so one flick switches once. */
+  @attribute
+  public switchCooldown: number = 0.35
+  /** Right-stick deflection (scaled ×4 in the map) that counts as a flick. */
+  @attribute
+  public stickFlick: number = 2.6
+  /**
+   * Mouse speed, in pixels per SECOND, that counts as a flick. A per-frame pixel threshold made switching
+   * targets harder the higher the frame rate, since the same flick is spread over more frames.
+   */
+  @attribute
+  public mouseFlickPerSecond: number = 2700
+  /** Pitch limits while locked (positive looks down). Keeps a tall boss from flipping the camera. */
+  @attribute
+  public lockedPitchMin: number = -25
+  @attribute
+  public lockedPitchMax: number = 35
+  @attribute
+  public reticleName: string = 'LockReticle'
+  /** When the target dies, the lock jumps to another enemy only if one is this close. */
+  @attribute
+  public retargetRange: number = 10
+  /** Boom length while locked: closer than the free camera, for a tighter view of the fight. */
+  @attribute
+  public lockedArmLength: number = 2.3
+  /**
+   * Pivot offset while locked (rig space: +X is the rig's LEFT, +Y up) — negative X, so the camera sits
+   * over the RIGHT shoulder and the target is framed past it.
+   */
+  @attribute
+  public lockedSocketOffset: [number, number, number] = [-0.6, 0.15, 0]
+  /** Seconds the camera takes to move in on a lock, and back out on release. */
+  @attribute
+  public lockBlendSeconds: number = 0.3
+
+  /** The locked enemy (a SoulsEnemy root), or null. SoulsPlayer reads this. */
+  public lockTarget: Node = null
+
+  @find('GameManager')
+  private _gm: Node = null
+  private _player: Node = null
+  private _reticle: Node = null
+  private _hiddenFor: number = 0
+  private _switchWait: number = 0
+  private _freePitchMin: number = -80
+  private _freePitchMax: number = 80
+  private _freeArmLength: number = 4
+  private _freeSocket: [number, number, number] = [0, 0, 0]
+
+  onStart() {
+    this._player = this.parent
+    // The reticle is the player's (a sibling of this rig, inside the Player template).
+    this._reticle = this._player?.getChildByName(this.reticleName)[0] ?? null
+    this._freePitchMin = this.pitchMin
+    this._freePitchMax = this.pitchMax
+    this._freeArmLength = this.armLength
+    this._freeSocket = [this.socketOffset[0], this.socketOffset[1], this.socketOffset[2]]
+    this.aimMode = 'orbit'
+    this._showReticle(null)
+    // Start behind the player, whichever way the level placed them: the orbit's yaw is a world angle
+    // and does not follow the player's own rotation.
+    if (this._player) {
+      const f = this._player.worldForward
+      this.yaw = Math.atan2(f[0], f[2]) * 180 / Math.PI
+    }
+  }
+
+  /** The lock-on press: release the target, or lock the best one, or recentre the camera behind the player. */
+  @onAction('LockOn')
+  private _onLockOn(): void {
+    if ((this._player as any)?.isDead) return
+    if (this.lockTarget) this.unlock()
+    else if (!this._lockBest()) this._recenter()
+  }
+
+  onUpdate(delta: number) {
+    this._switchWait = Math.max(0, this._switchWait - delta)
+    const player = this._player as any
+    if (player?.isDead) { if (this.lockTarget) this.unlock(); return }
+
+    // Every frame, locked or not, so a release eases back out rather than stopping where it was. Runs
+    // before the rig's lateUpdate, so the boom it builds this frame already uses these values.
+    this._frame(delta)
+    if (!this.lockTarget) return
+
+    // Lost?
+    const target = this.lockTarget as any
+    if (!target || target.isDead || target.spawned === false || !this.scene?.getNodeById(this.lockTarget.id)) {
+      this.onTargetDied(this.lockTarget)
+      return
+    }
+    const me = this._player.worldPosition
+    const at = this.lockTarget.worldPosition
+    if (Math.hypot(at[0] - me[0], at[2] - me[2]) > this.breakRange) { this.unlock(); return }
+    this._hiddenFor = this._hasLineOfSight(this.lockTarget) ? 0 : this._hiddenFor + delta
+    if (this._hiddenFor > this.losBreakSeconds) { this.unlock(); return }
+
+    // Switching.
+    let dir = 0
+    if (Input.started('SwitchTargetLeft')) dir = 1
+    if (Input.started('SwitchTargetRight')) dir = -1
+    if (!dir && this._switchWait <= 0) {
+      const look = Input.vector('Look')
+      const device = Input.device('Look')
+      // A stick is a deflection; a mouse delta is distance this frame, so it is turned into a speed.
+      const amount = device === 'gamepadAxis' ? Math.abs(look[0]) : Math.abs(look[0]) / Math.max(delta, 1e-3)
+      const flick = device === 'gamepadAxis' ? this.stickFlick : this.mouseFlickPerSecond
+      // Look X is positive to the RIGHT; right means a clockwise (negative) yaw step.
+      if (amount >= flick) dir = look[0] > 0 ? -1 : 1
+    }
+    if (dir) this._switch(dir)
+  }
+
+  /** Drop the lock and hand the camera back to the player. */
+  public unlock(): void {
+    this.lockTarget = null
+    this.aimMode = 'orbit'
+    this.lookAtId = null
+    this.pitchMin = this._freePitchMin
+    this.pitchMax = this._freePitchMax
+    this._hiddenFor = 0
+    this._showReticle(null)
+  }
+
+  /** The manager calls this when any enemy dies; only our target matters. */
+  public onTargetDied(enemy: Node): void {
+    if (!this.lockTarget || enemy !== this.lockTarget) return
+    this.unlock()
+    const near = this._candidates().find(c => {
+      const me = this._player.worldPosition
+      return Math.hypot(c.position[0] - me[0], c.position[2] - me[2]) <= this.retargetRange
+    })
+    if (near) this.lockOnto(near.node)
+  }
+
+  /** Lock onto a specific enemy (e.g. the boss when its fight starts). */
+  public lockOnto(enemy: Node): void {
+    if (!enemy) return
+    const point = this._lockPoint(enemy)
+    this.lockTarget = enemy
+    this.aimMode = 'lookAt'
+    this.lookAtId = point.id
+    this.lookAtOffset = [0, 0, 0]
+    this.pitchMin = this.lockedPitchMin
+    this.pitchMax = this.lockedPitchMax
+    this._hiddenFor = 0
+    this._showReticle(point)
+  }
+
+  private _lockBest(): boolean {
+    const best = this._candidates()[0]
+    if (!best) return false
+    this.lockOnto(best.node)
+    playSound(this, 'Lock On')
+    return true
+  }
+
+  /** Step to the next candidate clockwise (dir -1) or counter-clockwise (dir +1) of the current one. */
+  private _switch(dir: number): void {
+    this._switchWait = this.switchCooldown
+    const current = this.lockTarget
+    const me = this._player.worldPosition
+    const base = yawTo(me, current.worldPosition)
+    let best: Node = null
+    let bestStep = Infinity
+    for (const c of this._candidates()) {
+      if (c.node === current) continue
+      // How far round in the requested direction this candidate is, 0..360.
+      let step = (yawTo(me, c.position) - base) * dir
+      step = ((step % 360) + 360) % 360
+      if (step > 0 && step < bestStep) { bestStep = step; best = c.node }
+    }
+    if (best) this.lockOnto(best)
+  }
+
+  private _candidates(): { node: Node, position: ArrayLike<number> }[] {
+    const gm = this._gm as any
+    if (!gm?.liveEnemies || !this._player) return []
+    const me = this._player.worldPosition
+    // Range BEFORE line of sight: the ray is the expensive half (a long one over the terrain walks every
+    // cell under it), and an enemy out of range is never a candidate whatever it can see.
+    const list = gm.liveEnemies()
+      .filter((e: Node) => planarDistance(me, e.worldPosition) <= this.lockRange)
+      .filter((e: Node) => this._hasLineOfSight(e))
+      .map((e: Node) => ({ node: e, position: e.worldPosition }))
+    return this.rankLockTargets(me, this.yaw, list, this.lockRange)
+  }
+
+  /** Ease the boom toward the locked framing, or back to the free one. */
+  private _frame(delta: number): void {
+    const locked = !!this.lockTarget
+    const s = this.lockBlendSeconds
+    this.armLength = dampTime(this.armLength, locked ? this.lockedArmLength : this._freeArmLength, s, delta)
+    const to = locked ? this.lockedSocketOffset : this._freeSocket
+    for (let i = 0; i < 3; i++) this.socketOffset[i] = dampTime(this.socketOffset[i], to[i], s, delta)
+  }
+
+  /**
+   * Order lock-on candidates: smallest angle off the camera's forward first, distance breaking ties in
+   * 10-degree buckets so two enemies side by side resolve to the nearer.
+   */
+  public rankLockTargets(origin: ArrayLike<number>, yawDeg: number, candidates: any[], maxRange: number): any[] {
+    return candidates
+      .map(c => ({ c, d: planarDistance(origin, c.position), a: Math.abs(angleDiff(yawTo(origin, c.position), yawDeg)) }))
+      .filter(x => x.d <= maxRange)
+      .sort((x, y) => (Math.floor(x.a / 10) - Math.floor(y.a / 10)) || (x.d - y.d))
+      .map(x => x.c)
+  }
+
+  /** Line of sight from the camera pivot to the enemy's lock point, ignoring characters. */
+  private _hasLineOfSight(enemy: Node): boolean {
+    const physics = this.scene?.physics as any
+    if (!physics?.raycast) return true
+    const from = this.worldPosition
+    const to = this._lockPoint(enemy).worldPosition
+    const hit = physics.raycast([from[0], from[1], from[2]], [to[0], to[1], to[2]], {
+      // A character's body is its Collider: it stands for the character.
+      reject: (owner: Node) => { const o = owner?.character ?? owner; return !!o && (o.nodeType === 'character'
+        || !!o.getVariable?.('isEnemy') || !!o.getVariable?.('isPlayer')) },
+    })
+    return !hit
+  }
+
+  private _lockPoint(enemy: Node): Node {
+    const e = enemy as any
+    return (e.lockPoint ? e.lockPoint() : null) ?? enemy.getChildByName('LockPoint')[0] ?? enemy
+  }
+
+  /** Swing the camera behind the player — what pressing lock with nothing in range does. */
+  private _recenter(): void {
+    if (!this._player) return
+    const f = this._player.worldForward
+    this.setOrbit(Math.atan2(f[0], f[2]) * 180 / Math.PI, 12)
+  }
+
+  private _showReticle(point: Node): void {
+    const reticle = this._reticle as any
+    if (!reticle) return
+    reticle.uiTargetId = point ? point.id : null
+    if (reticle.visible !== !!point) reticle.visible = !!point
+  }
+}

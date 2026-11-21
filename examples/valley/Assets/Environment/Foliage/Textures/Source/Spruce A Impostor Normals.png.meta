@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "8482f558ad371b346d922d498eb029c7__impostorNormal",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "8482f558ad371b346d922d498eb029c7__impostorNormal",
+    "name": "Spruce A Impostor Normals.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

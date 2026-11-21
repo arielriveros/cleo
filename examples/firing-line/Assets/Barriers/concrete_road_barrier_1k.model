@@ -1,0 +1,94 @@
+{
+  "id": "b81ead231a54904d2aaaa7fdd75ab217",
+  "name": "concrete_road_barrier_1k",
+  "nodeJson": {
+    "id": "c30ab74c-938e-412e-92da-822704460f77",
+    "name": "concrete_road_barrier_1k",
+    "type": "model",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [],
+    "variables": {
+      "__materialId": {
+        "type": "string",
+        "value": "b7b00a9f87b0cdfd66ada766fb2a4ea1",
+        "access": "public"
+      }
+    },
+    "spawnOnStart": true,
+    "model": {
+      "geometry": {
+        "$geo": {
+          "positions": {
+            "h": "50a82eda3161bfa8d33c464f726395d5cfab225ac0c5daf1a312c9c69e2b1f51",
+            "l": 378168
+          },
+          "normals": {
+            "h": "3e6066fd9ec836df74bf3323b4b76ff2f7b0728c31ca295cab7529de2755c86e",
+            "l": 378168
+          },
+          "tangents": {
+            "h": "f1cf073eff734a8f53508c9f20c37b1060b0078caeaddf69f997538263883dde",
+            "l": 378168
+          },
+          "bitangents": {
+            "h": "c102cb2ca36cbb0fdc527a03e5fee8aafec7e5981ad902988b44db499f39a164",
+            "l": 378168
+          },
+          "texCoords": {
+            "h": "60fe9b43d9fc1cccb324f559b773fd280a7ae943f15444b38deeec584ea08f6a",
+            "l": 252112
+          },
+          "indices": {
+            "h": "0d2c00551e9276efac2ee4eb99a99c09632e69bf08c39f3834b86b86c0eff0b0",
+            "l": 365568,
+            "bits": 16
+          },
+          "typed": true
+        }
+      },
+      "material": {
+        "type": "pbr",
+        "baseColor": [1, 1, 1],
+        "metallic": 0,
+        "roughness": 1,
+        "reflectance": 0.5,
+        "opacity": 1,
+        "alphaCutoff": 0,
+        "emissiveFactor": [0, 0, 0],
+        "emissiveIntensity": 1,
+        "displacementScale": 0.05,
+        "depthSpace": "world",
+        "invertHeight": false,
+        "clipSilhouette": false,
+        "textures": {
+          "baseColorTexture": "concrete_road_barrier_diff_1k.jpg",
+          "metallicMap": "concrete_road_barrier_arm_1k.jpg",
+          "roughnessMap": "concrete_road_barrier_arm_1k.jpg",
+          "normalMap": "concrete_road_barrier_nor_gl_1k.jpg"
+        },
+        "config": {
+          "side": "double",
+          "wireframe": false,
+          "transparent": false,
+          "castShadow": true,
+          "probeable": true
+        }
+      }
+    },
+    "animationMappings": null,
+    "stateMachine": null,
+    "ragdoll": null
+  },
+  "textureIds": [
+    "concrete_road_barrier_diff_1k.jpg",
+    "concrete_road_barrier_arm_1k.jpg",
+    "concrete_road_barrier_nor_gl_1k.jpg"
+  ],
+  "materialIds": [
+    "b7b00a9f87b0cdfd66ada766fb2a4ea1"
+  ],
+  "thumbnail": "",
+  "order": 9
+}

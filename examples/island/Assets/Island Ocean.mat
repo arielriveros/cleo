@@ -1,0 +1,51 @@
+{
+  "id": "fda7ad1c20b7f3de430d75c94a866891",
+  "name": "Island Ocean",
+  "material": {
+    "type": "basic",
+    "color": [0.05, 0.25, 0.32],
+    "opacity": 0.75,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": true,
+      "castShadow": false,
+      "probeable": true
+    },
+    "waterMaterial": true,
+    "look": {
+      "shallowColor": [0.05, 0.25, 0.32],
+      "deepColor": [0, 0.03, 0.08],
+      "absorption": [0.5, 0.12, 0.07],
+      "turbidity": 0.15,
+      "clarity": 12,
+      "roughness": 0.08,
+      "reflectivity": 0.02,
+      "screenReflections": 1,
+      "refraction": 0.25,
+      "detailStrength": 1,
+      "detailScale": 1.5,
+      "flowStrength": 1,
+      "flowScatter": 1,
+      "liveWaves": 1,
+      "foamColor": [0.9, 0.93, 0.95],
+      "shoreFoam": 3,
+      "crestFoam": 0.8,
+      "flowFoam": 0.4,
+      "caustics": 1,
+      "causticsScale": 1.4,
+      "rainRipples": 1,
+      "snowCover": 1,
+      "windResponse": 1,
+      "scatterColor": [0.05, 0.42, 0.42],
+      "subsurface": 1.4,
+      "subsurfaceSharpness": 6,
+      "subsurfaceDistortion": 0.35,
+      "underwaterColor": [0.03, 0.14, 0.16],
+      "underwaterFog": 0.12
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

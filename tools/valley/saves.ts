@@ -5,20 +5,10 @@
 
 import fs from 'fs'
 import path from 'path'
-import { SCRIPTS, id, nodes, scriptIdOf, attach, child, log, scriptAsset } from './bundleOps'
+import { id, nodes, scriptIdOf, attach, child, log, scriptAsset } from './bundleOps'
+import { syncScripts } from '../exampleKit/syncScripts.mjs'
 
 const defaultClass = (source: string) => /export\s+default\s+(?:abstract\s+)?class\s+(\w+)/.exec(source ?? '')?.[1]
-
-/** The souls scripts on disk, file name by the class each default-exports. */
-function soulsFiles(): Map<string, string> {
-  const out = new Map<string, string>()
-  for (const file of fs.readdirSync(SCRIPTS)) {
-    if (!/^Souls.*\.ts$/.test(file)) continue
-    const cls = defaultClass(fs.readFileSync(path.join(SCRIPTS, file), 'utf8'))
-    if (cls) out.set(cls, file.replace(/\.ts$/, ''))
-  }
-  return out
-}
 
 /** Every serialized tree in the bundle: each scene's root and each template's. */
 const roots = (bundle: any): any[] =>
@@ -29,23 +19,14 @@ const roots = (bundle: any): any[] =>
  * it (keeping the field values the script still declares). Modules (no default class) are left as they are.
  */
 export function refreshSoulsScripts(bundle: any): string[] {
-  const files = soulsFiles()
-  const lib = bundle.libraries.scripts
-  const refreshed = new Map<string, any>()
-  for (let i = 0; i < lib.length; i++) {
-    const s = lib[i]
-    const file = files.get(defaultClass(s.source) ?? '')
-    if (!file) continue
-    const fresh = scriptAsset(file, s.name, s.baseType)
-    if (fresh.source === s.source) continue
-    lib[i] = { ...s, source: fresh.source, variables: fresh.variables }
-    refreshed.set(s.id, lib[i])
-  }
+  // The scripts ARE the example folder's .ts files: what can be stale is their reflected fields.
+  const changed = new Set(syncScripts(bundle))
+  const refreshed = new Map<string, any>((bundle.libraries.scripts ?? []).filter((s: any) => changed.has(s.name)).map((s: any) => [s.id, s]))
   for (const root of roots(bundle)) for (const n of nodes(root)) {
     const asset = refreshed.get(scriptIdOf(n))
     if (asset) attach(n, asset)
   }
-  return [...refreshed.values()].map(s => s.name)
+  return [...changed]
 }
 
 const TITLE_FOLDER = '/Game/UI/Scripts'
@@ -53,7 +34,7 @@ const TITLE_FOLDER = '/Game/UI/Scripts'
 /** The title menu's script asset (SoulsTitleMenu.ts), added once and refreshed after. */
 function titleScript(bundle: any): any {
   const lib = bundle.libraries.scripts
-  const fresh = scriptAsset('SoulsTitleMenu', 'Title Menu', 'uiRoot')
+  const fresh = scriptAsset('SoulsTitleMenu', 'Title Menu', 'uiRoot', bundle)
   const at = lib.findIndex((s: any) => s.id === fresh.id)
   if (at >= 0) { lib[at] = { ...lib[at], source: fresh.source, variables: fresh.variables }; return lib[at] }
   lib.push(fresh)

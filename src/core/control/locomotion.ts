@@ -2,7 +2,7 @@
  * `stepLocomotion` — intent in, velocity and facing out. The whole character controller, as one pure
  * function.
  *
- * This is the body of `examples/scripts/ThirdPersonPlayable.ts` moved into the engine. It was ~150 lines
+ * This is the body of `docs/scripting/samples/ThirdPersonPlayable.ts` moved into the engine. It was ~150 lines
  * of user script documented by ~40 lines of comment and pinned by nothing, duplicated as a string in
  * three generated fixtures. Every sign convention it re-derived at each use is now derived once, here,
  * and asserted in `tests/locomotion.test.ts`.

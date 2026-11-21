@@ -1,0 +1,219 @@
+{
+  "id": "4528a08b435b708d50f0f84f34a08687",
+  "name": "Ruins",
+  "textureId": "main_lev_build.png",
+  "imageWidth": 2048,
+  "imageHeight": 1280,
+  "tileWidth": 16,
+  "tileHeight": 16,
+  "margin": 0,
+  "spacing": 0,
+  "columns": 128,
+  "rows": 80,
+  "pixelsPerUnit": 16,
+  "tiles": {
+    "526": {
+      "solid": true
+    },
+    "527": {
+      "solid": true
+    },
+    "528": {
+      "solid": true
+    },
+    "529": {
+      "solid": true
+    },
+    "530": {
+      "solid": true
+    },
+    "531": {
+      "solid": true
+    },
+    "532": {
+      "solid": true
+    },
+    "533": {
+      "solid": true
+    },
+    "534": {
+      "solid": true
+    },
+    "535": {
+      "solid": true
+    },
+    "1154": {
+      "solid": true
+    },
+    "1155": {
+      "solid": true
+    },
+    "1282": {
+      "solid": true
+    },
+    "1283": {
+      "solid": true
+    },
+    "1567": {
+      "solid": true
+    },
+    "1674": {
+      "solid": true
+    },
+    "1695": {
+      "solid": true
+    },
+    "1802": {
+      "solid": true
+    },
+    "1823": {
+      "solid": true
+    },
+    "1930": {
+      "solid": true
+    },
+    "1951": {
+      "solid": true
+    },
+    "2058": {
+      "solid": true
+    },
+    "2079": {
+      "solid": true
+    },
+    "2186": {
+      "solid": true
+    },
+    "2188": {
+      "oneWay": true
+    },
+    "2189": {
+      "oneWay": true
+    },
+    "2190": {
+      "oneWay": true
+    },
+    "2191": {
+      "oneWay": true
+    },
+    "2192": {
+      "oneWay": true
+    },
+    "2193": {
+      "oneWay": true
+    },
+    "2194": {
+      "oneWay": true
+    },
+    "2195": {
+      "oneWay": true
+    },
+    "2196": {
+      "oneWay": true
+    },
+    "2197": {
+      "oneWay": true
+    },
+    "2198": {
+      "oneWay": true
+    },
+    "2207": {
+      "solid": true
+    },
+    "2572": {
+      "solid": true
+    },
+    "2574": {
+      "solid": true
+    },
+    "2575": {
+      "solid": true
+    },
+    "2576": {
+      "solid": true
+    },
+    "2577": {
+      "solid": true
+    },
+    "2578": {
+      "solid": true
+    },
+    "2579": {
+      "solid": true
+    },
+    "2580": {
+      "solid": true
+    },
+    "2581": {
+      "solid": true
+    },
+    "2582": {
+      "solid": true
+    },
+    "2583": {
+      "solid": true
+    },
+    "2584": {
+      "solid": true
+    },
+    "2585": {
+      "solid": true
+    },
+    "2586": {
+      "solid": true
+    },
+    "2589": {
+      "solid": true
+    },
+    "2700": {
+      "solid": true
+    },
+    "2702": {
+      "solid": true
+    },
+    "2703": {
+      "solid": true
+    },
+    "2704": {
+      "solid": true
+    },
+    "2705": {
+      "solid": true
+    },
+    "2706": {
+      "solid": true
+    },
+    "2707": {
+      "solid": true
+    },
+    "2708": {
+      "solid": true
+    },
+    "2709": {
+      "solid": true
+    },
+    "2710": {
+      "solid": true
+    },
+    "2711": {
+      "solid": true
+    },
+    "2712": {
+      "solid": true
+    },
+    "2713": {
+      "solid": true
+    },
+    "2714": {
+      "solid": true
+    },
+    "2717": {
+      "solid": true
+    }
+  },
+  "terrains": [],
+  "variantSets": [],
+  "textureIds": [
+    "main_lev_build.png"
+  ]
+}

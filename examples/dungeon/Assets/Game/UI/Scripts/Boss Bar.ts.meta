@@ -1,0 +1,37 @@
+{
+  "cleo": 1,
+  "guid": "adee87d038c1448f0b2e7c27108bd93a",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "adee87d038c1448f0b2e7c27108bd93a",
+    "name": "Boss Bar",
+    "baseType": "uiRoot",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "_owner",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_w",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

@@ -6,7 +6,7 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
-import { scaffoldFiles } from '../src/features/projectFolder/scaffold';
+import { scaffoldFiles } from '../src/features/projectFolder/scaffoldText';
 import { projectTypesDeclaration } from '../src/utils/projectTriggers';
 import { PROJECT_TYPES_REL } from '@cleo/app-kit/code/projectTypes';
 

@@ -1,0 +1,244 @@
+{
+  "id": "681b3cac538d12331ede57fe3cfa29af",
+  "name": "Impact Sparks",
+  "system": {
+    "version": 1,
+    "emitters": [
+      {
+        "id": "83ed5df0897edcb051fb2feeec40025e",
+        "name": "Sparks",
+        "enabled": true,
+        "capacity": 48,
+        "simSpace": "world",
+        "duration": 1,
+        "looping": false,
+        "prewarm": false,
+        "startDelay": 0,
+        "seed": 14029497,
+        "maxLod": 99,
+        "spawn": [
+          {
+            "type": "spawnRate",
+            "enabled": true,
+            "params": {
+              "rate": 0,
+              "rateOverTime": {
+                "keys": [
+                  {
+                    "t": 0,
+                    "v": 1
+                  },
+                  {
+                    "t": 1,
+                    "v": 1
+                  }
+                ]
+              },
+              "perDistance": 0
+            }
+          },
+          {
+            "type": "spawnBurst",
+            "enabled": true,
+            "params": {
+              "bursts": [
+                {
+                  "time": 0,
+                  "count": 14,
+                  "cycles": 1,
+                  "interval": 1,
+                  "probability": 1
+                }
+              ]
+            }
+          }
+        ],
+        "init": [
+          {
+            "type": "shape",
+            "enabled": true,
+            "params": {
+              "shape": "cone",
+              "radius": 0.01,
+              "thickness": 1,
+              "arc": 360,
+              "angle": 55,
+              "box": [1, 1, 1],
+              "offset": [0, 0, 0],
+              "orbit": 0
+            }
+          },
+          {
+            "type": "lifetime",
+            "enabled": true,
+            "params": {
+              "range": [0.25, 0.7]
+            }
+          },
+          {
+            "type": "velocity",
+            "enabled": true,
+            "params": {
+              "mode": "shape",
+              "direction": [0, 1, 0],
+              "spread": 0,
+              "speed": [2, 6],
+              "inherit": 0
+            }
+          },
+          {
+            "type": "size",
+            "enabled": true,
+            "params": {
+              "range": [0.008, 0.02]
+            }
+          },
+          {
+            "type": "color",
+            "enabled": true,
+            "params": {
+              "mode": "constant",
+              "colorA": [1, 0.62, 0.2, 1],
+              "colorB": [1, 0.5, 0.2, 1],
+              "gradient": {
+                "color": [
+                  {
+                    "t": 0,
+                    "c": [1, 1, 1]
+                  },
+                  {
+                    "t": 1,
+                    "c": [1, 1, 1]
+                  }
+                ],
+                "alpha": [
+                  {
+                    "t": 0,
+                    "a": 1
+                  },
+                  {
+                    "t": 1,
+                    "a": 1
+                  }
+                ]
+              },
+              "intensity": 3.6
+            }
+          }
+        ],
+        "update": [
+          {
+            "type": "gravity",
+            "enabled": true,
+            "params": {
+              "scale": 1
+            }
+          },
+          {
+            "type": "drag",
+            "enabled": true,
+            "params": {
+              "coefficient": 0.4
+            }
+          },
+          {
+            "type": "collision",
+            "enabled": true,
+            "params": {
+              "bodies": true,
+              "depth": true,
+              "planes": [],
+              "radius": 1,
+              "restitution": 0.4,
+              "friction": 0.3,
+              "lifetimeLoss": 0,
+              "kill": false,
+              "thickness": 0.5
+            }
+          },
+          {
+            "type": "colorOverLife",
+            "enabled": true,
+            "params": {
+              "gradient": {
+                "color": [
+                  {
+                    "t": 0,
+                    "c": [1, 1, 1]
+                  },
+                  {
+                    "t": 1,
+                    "c": [1, 1, 1]
+                  }
+                ],
+                "alpha": [
+                  {
+                    "t": 0,
+                    "a": 0
+                  },
+                  {
+                    "t": 0.15,
+                    "a": 1
+                  },
+                  {
+                    "t": 0.7,
+                    "a": 1
+                  },
+                  {
+                    "t": 1,
+                    "a": 0
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "render": {
+          "mode": "billboard",
+          "alignment": "velocity",
+          "blend": "additive",
+          "stretch": 0.9,
+          "stretchRange": [1, 1],
+          "cutoff": 0.5,
+          "textureId": null,
+          "flipbook": {
+            "columns": 1,
+            "rows": 1,
+            "frames": 1,
+            "mode": "life",
+            "fps": 24,
+            "cycles": 1,
+            "randomStart": false,
+            "blend": true
+          },
+          "softness": 0,
+          "nearFade": 0,
+          "emissive": 1,
+          "lit": false,
+          "translucency": 0,
+          "normalTextureId": null,
+          "ormTextureId": null,
+          "normalStrength": 1,
+          "roughness": 1,
+          "metallic": 0,
+          "mesh": "cube",
+          "modelId": null,
+          "meshData": null,
+          "sort": false,
+          "sortingOrder": 0
+        }
+      }
+    ],
+    "bounds": {
+      "center": [0, 0.3, 0],
+      "extents": [1.5, 1.5, 1.5]
+    },
+    "lod": {
+      "enabled": true,
+      "levels": [],
+      "cullDistance": 0,
+      "scaleBursts": false
+    }
+  },
+  "thumbnail": ""
+}

@@ -1,8 +1,8 @@
-# Example scripts — third-person strafe character
+# Third-person strafe character
 
-> **Building a whole game?** [SOULS_DEMO.md](SOULS_DEMO.md) documents the *Valley* example, a souls-like:
-> stamina combat, rolls with i-frames, lock-on, bonfires and a second scene behind a skull cave, with a full
-> guide to swapping in final art. Its scripts are the `Souls*.ts` files.
+> **Building a whole game?** [SOULS_DEMO.md](../../examples/dungeon/docs/SOULS_DEMO.md) documents the *Dungeon*
+> example, a souls-like: stamina combat, rolls with i-frames, lock-on, bonfires, with a full guide to swapping in
+> final art. Its scripts are the `Souls*.ts` files in its project folder, `examples/dungeon/Assets/`.
 
 A third-person **strafe** character: move relative to the camera, sprint, jump, look. "Forward" is always where
 the camera looks — while moving, the character turns to face the camera and side-steps for left/right (the
@@ -15,13 +15,12 @@ lines of game-specific behaviour on top.
 
 | File | Attach to |
 |---|---|
-| `ThirdPersonPlayable.ts` | the **Playable** root — a **Character** node (the one with the RigidBody) |
-| `ThirdPersonCameraPivot.ts` | the **Camera Pivot** child — must be a **Camera Rig** node |
+| [`samples/ThirdPersonPlayable.ts`](samples/ThirdPersonPlayable.ts) | the **Playable** root — a **Character** node (the one with the RigidBody) |
+| [`samples/ThirdPersonCameraPivot.ts`](samples/ThirdPersonCameraPivot.ts) | the **Camera Pivot** child — must be a **Camera Rig** node |
 
-Script assets live in the editor's own storage, so these are source files to copy in: **Assets → + Add →
-Script** (or select the node → Scripts panel → **+ Create Script**), paste the file's contents over the
-starter class, then **Save Script**. `tsconfig.json` here is only so the files type-check in your IDE the same
-way the in-editor Monaco does — it is not part of the engine build.
+They are source files to copy in: **Assets → + Add → Script** (or select the node → Scripts panel → **+ Create
+Script**), paste the file's contents over the starter class, then **Save Script**. In a project folder, put the
+file under `Assets/` instead.
 
 ## Hierarchy
 

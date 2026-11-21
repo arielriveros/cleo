@@ -1,18 +1,18 @@
-// Firing Line: refresh the example from a project exported out of the editor.
+// Firing Line: bring a project exported out of the editor into the example's folder.
 //
 //   node --max-old-space-size=12288 tools/fps/ingest.mjs [path/to/Firing-Line.cleoproj.zip]
 //
-// The example is no longer generated: the project (build/Firing-Line.cleoproj.zip, edited and exported from the
-// editor) is the source of truth for the scene, templates, materials, models, animations, sounds and baked GI.
-// What this repository still owns is the SCRIPTS (examples/scripts/Fps*.ts), so this tool takes the zip and
+// The example is its project folder, examples/firing-line/: open it in the desktop editor and edit it there. This
+// tool is for a project edited elsewhere and exported as a zip (build/Firing-Line.cleoproj.zip by default). It
 //
 //   1. keeps one scene (the zip's main scene, renamed "Firing Line"), dropping the others;
-//   2. writes the current examples/scripts sources and reflected fields into the script library and into every
-//      node and template that embeds a copy, and carries the manager's old `mode` over to `gameType`;
-//   3. repacks the bundle (editor reader + writer, assets split in parts under GitHub's file limit) into
-//      applications/editor/public/examples/firing-line/, leaving example.json alone.
+//   2. writes the folder's own script sources (examples/firing-line/Assets/FPS/Scripts/*.ts) and reflected fields
+//      into the script library and into every node and template that embeds a copy, and carries the manager's old
+//      `mode` over to `gameType`;
+//   3. applies the passes every Firing Line build gets (the clip event actions, the warehouse annex) and writes the
+//      project folder, keeping the GI bakes the folder already has for the volumes the scene still names.
 //
-// After a script-only edit, run it on the example folder itself: `node tools/fps/ingest.mjs --scripts-only`.
+// After editing the passes: `node tools/fps/ingest.mjs --passes` re-applies them to the folder as it is.
 
 import fs from 'fs'
 import os from 'os'
@@ -20,18 +20,17 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { loadScriptReflector, stableId as nsId } from '../exampleKit/bundle.mjs'
-import { packFormat2, readGiBakes } from '../exampleKit/packFormat2.mjs'
+import { readBakes, readExampleFolder, scriptSourceAt, writeExampleFolder, writeExampleFromStaging } from '../exampleKit/folder.mjs'
 import { applyEventActions } from './eventActions.mjs'
 import { applyWarehouse } from './warehouse.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
-const SCRIPTS = path.join(ROOT, 'examples', 'scripts')
-const EXAMPLE = path.join(ROOT, 'applications', 'editor', 'public', 'examples', 'firing-line')
+const EXAMPLE = path.join(ROOT, 'examples', 'firing-line')
 const require = createRequire(path.join(ROOT, 'applications', 'editor', 'package.json'))
 const JSZip = require('jszip')
 
-const scriptsOnly = process.argv.includes('--scripts-only')
+const passesOnly = process.argv.includes('--passes')
 const zipPath = path.resolve(process.argv.slice(2).find(a => !a.startsWith('--')) ?? path.join(ROOT, 'build', 'Firing-Line.cleoproj.zip'))
 const SCENE_NAME = 'Firing Line'
 
@@ -43,7 +42,7 @@ const SCRIPT_FILES = [
   ['FpsBot', 'character'], ['FpsHud', 'uiRoot'], ['FpsFx', 'node'], ['FpsDecal', 'node'], ['FpsTracer', 'node'], ['FpsMarker', 'node'],
 ]
 const reflect = loadScriptReflector(ROOT)
-const readScript = (file) => fs.readFileSync(path.join(SCRIPTS, `${file}.ts`), 'utf8')
+const readScript = (file) => scriptSourceAt(EXAMPLE, `/FPS/Scripts/${file}.script`)
 
 /** A class script's fields including the ones it inherits from base-class scripts, base first. */
 function resolveVariables(file, seen = new Set()) {
@@ -128,7 +127,7 @@ function carriedBakes(dir) {
   const named = new Set()
   const walk = (n) => { if (n.type === 'giVolume' && n.giVolume?.bakeId) named.add(n.giVolume.bakeId); for (const c of n.children ?? []) walk(c) }
   for (const name of fs.readdirSync(path.join(dir, 'scenes'))) walk(readJson(path.join(dir, 'scenes', name)).scene)
-  return readGiBakes(EXAMPLE).filter(b => named.has(b.id))
+  return readBakes(EXAMPLE).filter(b => named.has(b.id))
 }
 
 // ----- the project ------------------------------------------------------------------------------------------
@@ -153,29 +152,18 @@ function singleScene(dir) {
   writeJson(mp, manifest)
 }
 
-function install(from, to) {
-  const OWNED = /^(manifest\.json|vfs\.json|assets\.json|assets(\.\d+)?\.bin)$/
-  for (const name of fs.readdirSync(to)) {
-    if (OWNED.test(name) || ['libraries', 'scenes', 'textures'].includes(name)) fs.rmSync(path.join(to, name), { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
-  }
-  for (const name of fs.readdirSync(from)) fs.cpSync(path.join(from, name), path.join(to, name), { recursive: true })
-}
-
 /** What every pack applies to the inflated bundle (each idempotent): the clip event actions, then the warehouse annex. */
 async function applyPasses(bundle) {
   applyEventActions(bundle)
   await applyWarehouse(bundle)
 }
 
-if (scriptsOnly) {
-  // The example folder itself: unpack format 2, refresh the scripts, pack it again.
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'fps-scripts-'))
-  fs.cpSync(EXAMPLE, work, { recursive: true })
-  refreshScripts(work)
-  await packFormat2(work, { mutate: applyPasses })
-  install(work, EXAMPLE)
-  fs.rmSync(work, { recursive: true, force: true })
-  console.log('scripts refreshed in', EXAMPLE)
+if (passesOnly) {
+  // The folder as it is, the passes applied again (each is idempotent).
+  const { bundle } = await readExampleFolder(EXAMPLE)
+  await applyPasses(bundle)
+  const stats = await writeExampleFolder(EXAMPLE, bundle)
+  console.log(`passes applied to ${path.relative(ROOT, EXAMPLE)}: ${stats.written.length} file(s) changed`)
 } else {
   if (!fs.existsSync(zipPath)) { console.error(`no project at ${zipPath}`); process.exit(1) }
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'fps-ingest-'))
@@ -185,9 +173,8 @@ if (scriptsOnly) {
   refreshScripts(work)
   ensureBakeIds(work)
   const giBakes = carriedBakes(work)
-  console.log(`repacking (${giBakes.length} GI bakes carried over)`)
-  const largest = await packFormat2(work, { giBakes, mutate: applyPasses })
-  install(work, EXAMPLE)
+  console.log(`writing the folder (${giBakes.length} GI bakes carried over)`)
+  const stats = await writeExampleFromStaging(work, EXAMPLE, { giBakes, mutate: applyPasses })
   fs.rmSync(work, { recursive: true, force: true })
-  console.log(`${EXAMPLE} written - largest file ${(largest / 1048576).toFixed(1)} MB`)
+  console.log(`${path.relative(ROOT, EXAMPLE)} written: ${stats.written.length} file(s) changed, ${stats.deleted.length} deleted`)
 }

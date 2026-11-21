@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "db4c9802cb612b49c97f946a5e237b32",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "db4c9802cb612b49c97f946a5e237b32",
+    "name": "Dungeon Cast Iron Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

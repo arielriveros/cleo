@@ -7,11 +7,8 @@ import { physicalFor, variantLogicalNames, EXTRA_LOGICAL_NAMES } from '../src/gr
 import { ShaderManager } from '../src/graphics/systems/shaderManager';
 import { PARTICLE_PROGRAMS } from '../src/graphics/particles/particleRenderer';
 import type { ShaderProgram } from '../src/graphics/rhi/shaderProgram';
-import { readExample } from '../tools/exampleKit/readExample.mjs';
 import { rendererSource } from './helpers/rendererSource';
 
-const VALLEY_EXAMPLE = await readExample(join(__dirname, '..', 'applications', 'editor', 'public', 'examples', 'valley'));
-const DUNGEON_EXAMPLE = await readExample(join(__dirname, '..', 'applications', 'editor', 'public', 'examples', 'dungeon'));
 
 /**
  * A published game builds only the programs `programsFor` lists. Two ways that goes wrong quietly:
@@ -46,44 +43,8 @@ describe('program classification', () => {
     });
 });
 
+// What the Valley's and the Dungeon's scenes need: examples/valley/tests and examples/dungeon/tests (programUsage).
 describe('programsFor', () => {
-    // Through the bundle reader: the example is checked in as format 2, with its payloads in assets.bin.
-    const VALLEY = VALLEY_EXAMPLE.read('scenes', 'd6387d3a3c48c8a3f5ebe850ffb9d3ab.json');
-
-    it('lists what the Valley scene draws, and nothing the editor alone uses', () => {
-        const use = createProgramUsage();
-        usageFromSceneJson(VALLEY.scene, use, castsShadows(VALLEY.scene));
-        usageFromRenderSettings({ shadowFilterMode: 0, ssaoEnabled: true, taaEnabled: false, motionBlurEnabled: false,
-                                  dofEnabled: false, autoExposureEnabled: false, lensFlareIntensity: 0,
-                                  chromaticAberrationStrength: 0, filmGrainIntensity: 0, vignetteStrength: 0.35 }, use);
-        const list = programsFor(use);
-        // Static PBR geometry, one shadow filter, the deferred resolve; the campfire's smoke a lit sprite, its
-        // flames batched unlit sprites.
-        for (const name of ['pbrGeometry~flat', 'deferredLighting~pcf',
-                            'screen', 'present', 'skyAtmosphere', 'volumetricClouds', 'particleBillboard', 'ssil', 'vignette',
-                            'spriteLit', 'sprite', 'ssr', 'localExposureLum', 'volumetricFogInject', 'volumetricFogApply'])
-            expect(list, name).toContain(name);
-        // Particles as stripped variants.
-        expect(list.some(n => /^particleSim~s\d+$/.test(n))).toBe(true);
-        // No characters walk the valley any more: nothing skinned.
-        for (const name of ['cel', 'cel~pcf', 'grid', 'outline', 'debugView', 'pbr~poisson',
-                            'dofCoc', 'taaResolve', 'motionBlur', 'exposureMeter', 'lensFlare', 'pbrSkinned~pcf', 'pbrGeometrySkinned~flat'])
-            expect(list, name).not.toContain(name);
-        // The impostor shadow program the Valley's pines cast through in the outer cascades; the smoke's
-        // lit sprite (no decals since the puddles went); the High tier's screen-space reflections (three)
-        // and local exposure (two); the fog volumes' three; the GI Volumes' seven (capture reduce,
-        // visibility, radiance, integrate, resolve, ambient cube, rescale); its water's local flow (eight passes).
-        expect(list.length).toBeLessThan(93);
-    });
-
-    it('lists the skinned programs for the Dungeon, whose knight and enemies are skinned', () => {
-        const DUNGEON = DUNGEON_EXAMPLE.read('scenes', `${DUNGEON_EXAMPLE.read('manifest.json').mainSceneId}.json`);
-        const use = createProgramUsage();
-        usageFromSceneJson(DUNGEON.scene, use, castsShadows(DUNGEON.scene));
-        const list = programsFor(use);
-        for (const name of ['pbrSkinned~pcf', 'pbrGeometrySkinned~flat', 'pbrGeometry~flat']) expect(list, name).toContain(name);
-    });
-
     it('builds the parallax variant only for a material that marches', () => {
         const model = (material: object) => ({ type: 'model', model: { material } });
         const flat = createProgramUsage();

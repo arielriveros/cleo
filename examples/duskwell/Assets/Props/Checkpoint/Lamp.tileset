@@ -1,0 +1,21 @@
+{
+  "id": "7aab2b4eb719012bc6464a7b0f6a27ea",
+  "name": "Lamp",
+  "textureId": "lamp.png",
+  "imageWidth": 64,
+  "imageHeight": 48,
+  "tileWidth": 16,
+  "tileHeight": 48,
+  "margin": 0,
+  "spacing": 0,
+  "columns": 4,
+  "rows": 1,
+  "overdrive": 2,
+  "pixelsPerUnit": 16,
+  "tiles": {},
+  "terrains": [],
+  "variantSets": [],
+  "textureIds": [
+    "lamp.png"
+  ]
+}

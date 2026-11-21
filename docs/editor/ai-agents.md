@@ -317,4 +317,4 @@ an agent thinks it is doing.
 
 ## See also
 
-[AI brains](ai-brains.md) · [AI (scripting)](../scripting/ai.md) · [Characters and controllers](../scripting/characters-and-controllers.md) · [Dungeon example](../../examples/scripts/SOULS_DEMO.md)
+[AI brains](ai-brains.md) · [AI (scripting)](../scripting/ai.md) · [Characters and controllers](../scripting/characters-and-controllers.md) · [Dungeon example](../../examples/dungeon/docs/SOULS_DEMO.md)

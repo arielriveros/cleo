@@ -24,8 +24,24 @@ jobs:
 
       - run: npm ci
 
-      # No build step: the suite is pure (node env, no DOM, no GL) and imports the engine source.
+      # The example projects' binary data (examples/*/data.lock.json), from the repository's example-data release,
+      # cached on the locks. Their suites run in this job and the engine's coverage counts on them; and a commit
+      # whose text names data no release holds fails here.
+      - uses: actions/cache@v4
+        with:
+          path: build/example-packs
+          key: example-packs-${{ hashFiles('examples/*/data.lock.json') }}
+          restore-keys: example-packs-
+      - name: Fetch the examples' data
+        run: npm run examples:fetch
+      - name: Check the examples against their locks and the release
+        run: npm run examples:check -- --remote
+
+      # No build step: the suite is pure (node env, no DOM, no GL) and imports the engine source. The examples'
+      # host suites (tick budgets, real sockets) are left out: they measure real time on a busy runner.
       - name: Test
+        env:
+          CLEO_TEST_HOST: '0'
         run: npm run test:coverage
 
       - name: Coverage summary

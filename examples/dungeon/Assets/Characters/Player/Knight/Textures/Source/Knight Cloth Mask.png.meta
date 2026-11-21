@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "de486eca8338ddeceb24178d258e0903",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "de486eca8338ddeceb24178d258e0903",
+    "name": "Knight Cloth Mask.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "fc75e180fc86673378dc6669184563b7",
+  "name": "Ruin Guard",
+  "textureId": "knight.png",
+  "imageWidth": 960,
+  "imageHeight": 32,
+  "tileWidth": 32,
+  "tileHeight": 32,
+  "margin": 0,
+  "spacing": 0,
+  "columns": 30,
+  "rows": 1,
+  "pixelsPerUnit": 16,
+  "tiles": {},
+  "terrains": [],
+  "variantSets": [],
+  "textureIds": [
+    "knight.png"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "2dfb3fc5ef7c6b043e9beaa4613f3dbd",
+  "name": "Car Glass",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.6036471919,
+    "opacity": 0.6522885772,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {
+      "baseColorTexture": "2c05fd51b6e5e34cdc4637f76df23e8f",
+      "metallicRoughnessTexture": "2698f3da165ddcbf08a89963e279095b"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": true,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "2c05fd51b6e5e34cdc4637f76df23e8f",
+    "2698f3da165ddcbf08a89963e279095b"
+  ],
+  "thumbnail": ""
+}

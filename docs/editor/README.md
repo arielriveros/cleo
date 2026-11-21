@@ -68,7 +68,7 @@ something you can look at:
 3. **Import a model** and let it create its materials ([Models and materials](models-and-materials.md)).
 4. **Give things colliders** so the level is solid ([Physics](physics.md)).
 5. **Add a character and a controller**, and confirm you can walk around in Play
-   ([AI agents](ai-agents.md), [Third-person example](../../examples/scripts/README.md)).
+   ([AI agents](ai-agents.md), [Third-person example](../scripting/third-person-character.md)).
 6. **Rig the animation** — clips, a blend space, a state machine ([Animation](animation.md)).
 7. **Add the game's own rules** as scripts ([Scripting guide](../scripting/README.md)).
 8. **Build a HUD** ([UI](ui.md)).
@@ -76,7 +76,7 @@ something you can look at:
 10. **Publish** ([Publishing](publishing.md)).
 
 Steps 5 and 6 are the ones worth doing carefully — the shipped
-[third-person character guide](../../examples/scripts/README.md) walks through a working setup with
+[third-person character guide](../scripting/third-person-character.md) walks through a working setup with
 measured numbers, and copying it is faster than deriving it.
 
 ## See also

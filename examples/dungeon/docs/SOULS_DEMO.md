@@ -923,7 +923,7 @@ The example folder `applications/editor/public/examples/dungeon/` is **generated
 
 ```
 node --max-old-space-size=12288 tools/valley/build.mjs   # rebuild (deterministic; re-runs are byte-identical)
-npm --prefix applications/editor run examples:list       # refresh the gallery index
+npm run examples:bundle dungeon                            # rebuild its gallery bundle
 npx vitest run tests/soulsDemo tests/dungeon             # rules + generated-project checks
 ```
 

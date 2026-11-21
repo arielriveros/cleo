@@ -1,0 +1,37 @@
+{
+  "id": "d98e78bfc92c6273d7546237b34958cf",
+  "name": "Snow",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "uv",
+    "textures": {
+      "baseColorTexture": "060635f66f84fc6df40e348125a5d038",
+      "metallicRoughnessTexture": "406130c5853a152291af53375d429e8e",
+      "occlusionMap": "406130c5853a152291af53375d429e8e",
+      "normalMap": "f4700bc90fd3793cd6a2e50512fe1abf",
+      "displacementMap": "be72878b83437d58035a11a3f9a88423"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "060635f66f84fc6df40e348125a5d038",
+    "406130c5853a152291af53375d429e8e",
+    "f4700bc90fd3793cd6a2e50512fe1abf",
+    "be72878b83437d58035a11a3f9a88423"
+  ],
+  "thumbnail": ""
+}

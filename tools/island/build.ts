@@ -1,4 +1,5 @@
-// Build the Island example (applications/editor/public/examples/island): the Creator's Island world (its
+// Build the Island example (examples/island, a project folder, from the Valley's folder examples/valley): the
+// Creator's Island world (its
 // preset, generated headless) as the landscape, dressed with the Valley's own assets - its landscape
 // material and plants, its hamlet (houses, windmill, well, poles, furniture, torches) stamped onto the
 // island with the ground it stands on - and water: an Ocean node round the island, a Lake node per lake,
@@ -8,7 +9,7 @@
 //
 //   NODE_OPTIONS=--max-old-space-size=16384 npx vite-node --config applications/creator/vitest.config.ts tools/island/build.ts [--dry]
 //
-// Then `npm --prefix applications/editor run examples:list` to refresh the gallery index.
+// Its gallery bundle is built from the folder by `npm run examples:bundle` (and every editor:dev / editor:build).
 
 import fs from 'fs'
 import path from 'path'
@@ -831,9 +832,5 @@ const removed = prune(bundle)
 log('pruned', JSON.stringify(removed.removed))
 if (!args.has('--dry')) fs.mkdirSync(ISLAND_DIR, { recursive: true })
 await write(ISLAND_DIR, bundle, 'Island', args.has('--dry'))
-if (!args.has('--dry')) fs.writeFileSync(path.join(ISLAND_DIR, 'example.json'), JSON.stringify({
-  name: 'Island',
-  description: 'A water demo: an island from the World Creator in open sea, with lakes and rivers that run from the peak into the lake and on to the sea, the Valley\'s forests, meadows and hamlet, drizzle, wind and a day cycle.',
-  order: 4,
-}, null, 2) + '\n')
-log('now run: npm --prefix applications/editor run examples:list')
+// The gallery's prose (name, description, order) is the folder's example.json; the folder is the example.
+log('done: npm run examples:publish island releases its data, npm run examples:bundle island its gallery bundle')

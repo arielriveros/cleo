@@ -1,0 +1,33 @@
+{
+  "id": "14b94d3fd885012864093b0581171638",
+  "name": "Swat Body",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "f3b36035f28846473c79525944643ca7",
+      "metallicRoughnessTexture": "3fed7a07808917be220b26251e47a299",
+      "occlusionMap": "3fed7a07808917be220b26251e47a299",
+      "normalMap": "6abc048a5e79bd71def07b2e33096b56"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "f3b36035f28846473c79525944643ca7",
+    "3fed7a07808917be220b26251e47a299",
+    "6abc048a5e79bd71def07b2e33096b56"
+  ],
+  "thumbnail": ""
+}

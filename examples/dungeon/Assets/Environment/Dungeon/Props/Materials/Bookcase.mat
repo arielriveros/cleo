@@ -1,0 +1,33 @@
+{
+  "id": "958a6745e686f5c75cd65319f1b96fee",
+  "name": "Bookcase",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "73708977de3352a0ca6b79581199f01c",
+      "metallicRoughnessTexture": "c3dee4a805a9a5dcea5819031a9dbcdf",
+      "occlusionMap": "c3dee4a805a9a5dcea5819031a9dbcdf",
+      "normalMap": "9fb1d6e7f8ee1b65b667d5133ad0bf42"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "73708977de3352a0ca6b79581199f01c",
+    "c3dee4a805a9a5dcea5819031a9dbcdf",
+    "9fb1d6e7f8ee1b65b667d5133ad0bf42"
+  ],
+  "thumbnail": ""
+}

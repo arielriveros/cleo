@@ -1,0 +1,29 @@
+{
+  "id": "655cc06ce9d8bd4658101a4824f36691",
+  "name": "Prop Grid",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.9, 0.62, 0.3],
+    "metallic": 0,
+    "roughness": 0.9,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {
+      "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    },
+    "uvProjection": "box",
+    "uvSpace": "object",
+    "uvWorldSize": 0.25
+  },
+  "textureIds": [
+    "d4a96a210b1af85c70925ceced937cb7"
+  ],
+  "thumbnail": ""
+}

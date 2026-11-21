@@ -1,0 +1,197 @@
+{
+  "cleo": 1,
+  "guid": "fe5e8d17ed7d4f9c554e56a29bd70869",
+  "kind": "script",
+  "created": 1795100000000,
+  "record": {
+    "id": "fe5e8d17ed7d4f9c554e56a29bd70869",
+    "name": "SandboxCamera",
+    "baseType": "cameraRig",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "thirdPersonArm",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3.4,
+        "hidden": false,
+        "attribute": {
+          "group": "Framing",
+          "min": 0.5,
+          "max": 12,
+          "step": 0.05,
+          "tooltip": "Third person (while sprinting): how far behind the character the camera sits (m)."
+        }
+      },
+      {
+        "name": "shoulderArm",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.9,
+        "hidden": false,
+        "attribute": {
+          "group": "Framing",
+          "min": 0.5,
+          "max": 12,
+          "step": 0.05,
+          "tooltip": "Over the shoulder: how far behind (m)."
+        }
+      },
+      {
+        "name": "shoulderOffset",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Framing",
+          "min": 0,
+          "max": 2,
+          "step": 0.05,
+          "tooltip": "Over the shoulder: how far to the right of the character the camera sits (m)."
+        }
+      },
+      {
+        "name": "aimArm",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.25,
+        "hidden": false,
+        "attribute": {
+          "group": "Framing",
+          "min": 0.3,
+          "max": 12,
+          "step": 0.05,
+          "tooltip": "Aiming: how far behind the character the camera sits (m), and how far to the right."
+        }
+      },
+      {
+        "name": "aimShoulderOffset",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {
+          "group": "Framing",
+          "min": 0,
+          "max": 2,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "pivotHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.45,
+        "hidden": false,
+        "attribute": {
+          "group": "Framing",
+          "min": 0,
+          "max": 4,
+          "step": 0.05,
+          "tooltip": "How high over the character's feet the camera orbits (m)."
+        }
+      },
+      {
+        "name": "switchSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "group": "Switch",
+          "min": 0,
+          "max": 5,
+          "step": 0.05,
+          "tooltip": "Seconds the switch between the two framings takes, either way."
+        }
+      },
+      {
+        "name": "aimSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.25,
+        "hidden": false,
+        "attribute": {
+          "group": "Switch",
+          "min": 0,
+          "max": 2,
+          "step": 0.05,
+          "tooltip": "Seconds the aim's framing takes to come in, and to go out."
+        }
+      },
+      {
+        "name": "sprintHold",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.4,
+        "hidden": false,
+        "attribute": {
+          "group": "Switch",
+          "min": 0,
+          "max": 2,
+          "step": 0.05,
+          "tooltip": "Seconds the third-person framing stays after a sprint ends, so letting go for a moment does not swing it."
+        }
+      },
+      {
+        "name": "_sinceSprint",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_mix",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_aimMix",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_aiming",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

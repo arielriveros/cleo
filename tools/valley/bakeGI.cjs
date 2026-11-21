@@ -31,6 +31,8 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const args = process.argv.slice(2);
 const arg = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
 const EXAMPLE = arg('--example') ?? 'valley';
+// The example's project folder (its bakes go into Baked/), and the gallery bundle the editor opens it through.
+const FOLDER = path.join(ROOT, 'examples', EXAMPLE);
 const OUT = path.join(ROOT, 'applications', 'editor', 'public', 'examples', EXAMPLE);
 const EDITOR_PORT = Number(process.env.GI_BAKE_PORT ?? 8092), CDP_PORT = Number(process.env.GI_BAKE_CDP ?? 9336);
 const CHROME = process.env.CHROME ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
@@ -45,6 +47,8 @@ const URL_ARG = arg('--url');
 const ONLY = arg('--only');
 const SCENE = arg('--scene');
 /** The example's scenes, in the order they are baked: the one it opens with, then the others by name (its manifest's, by default). */
+// The editor opens the example from its gallery bundle, built from the folder (tools/examples/gallery.mjs).
+execSync(`node ${JSON.stringify(path.join(ROOT, 'tools', 'examples', 'gallery.mjs'))} ${EXAMPLE}`, { stdio: 'inherit' });
 const SCENES = arg('--scenes') ? arg('--scenes').split(',') : (() => {
     const manifest = JSON.parse(fs.readFileSync(path.join(OUT, 'manifest.json'), 'utf8'));
     const metas = manifest.sceneMetas ?? [];
@@ -182,8 +186,8 @@ async function main() {
     log('the Valley is open');
 
     // Start from what the example carries: a volume this run does not bake keeps its bake.
-    const { packFormat2, readGiBakes } = await import(pathToFileURL(path.join(ROOT, 'tools', 'exampleKit', 'packFormat2.mjs')).href);
-    const bakes = new Map(readGiBakes(OUT).map(b => [b.id, b.bytes]));
+    const { readBakes, writeBakes } = await import(pathToFileURL(path.join(ROOT, 'tools', 'exampleKit', 'folder.mjs')).href);
+    const bakes = new Map(readBakes(FOLDER).map(b => [b.id, b.bytes]));
 
     // Every scene is opened, even one this run does not bake: its volumes name the bakes it keeps.
     const volumes = [];
@@ -215,9 +219,9 @@ async function main() {
     stopAll();
     children.length = 0;
     await sleep(1000);
-    const largest = await packFormat2(OUT, { giBakes });
+    writeBakes(FOLDER, giBakes);
     const total = giBakes.reduce((n, b) => n + b.bytes.length, 0);
-    log(`${giBakes.length} GI bakes (${(total / 1048576).toFixed(1)} MB) written into applications/editor/public/examples/${EXAMPLE}/; largest file ${(largest / 1048576).toFixed(1)} MB`);
+    log(`${giBakes.length} GI bakes (${(total / 1048576).toFixed(1)} MB) written into examples/${EXAMPLE}/Baked/ (npm run examples:publish ${EXAMPLE} to release them)`);
 }
 
 /** Capture each of `chosen` (volumes of the open scene) afresh and put its bake in `bakes` by bakeId. */

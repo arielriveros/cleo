@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "d6a2fdab8069567256010f2a96f06a72",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "d6a2fdab8069567256010f2a96f06a72",
+    "name": "Knight Cloth Base Color.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

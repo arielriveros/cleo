@@ -1,0 +1,72 @@
+{
+  "cleo": 1,
+  "guid": "6e91a6f6260a20c04634ef9ed8af84f9",
+  "kind": "script",
+  "created": 1795000000000,
+  "record": {
+    "id": "6e91a6f6260a20c04634ef9ed8af84f9",
+    "name": "DuskCheckpoint",
+    "baseType": "trigger",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "litTint",
+        "type": {
+          "kind": "color"
+        },
+        "access": "public",
+        "default": [1, 1, 1],
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "unlitTint",
+        "type": {
+          "kind": "color"
+        },
+        "access": "public",
+        "default": [0.35, 0.35, 0.45],
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "healTo",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 99,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "_lit",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true,
+        "save": true
+      },
+      {
+        "name": "_lamp",
+        "type": {
+          "kind": "node",
+          "className": "AnimatedSpriteNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Lamp"
+        }
+      }
+    ],
+    "reflect": 3
+  }
+}

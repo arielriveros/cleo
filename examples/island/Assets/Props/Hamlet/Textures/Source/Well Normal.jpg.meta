@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "a1d3326d2f1cb4f0b687e0c9782a236c",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "a1d3326d2f1cb4f0b687e0c9782a236c",
+    "name": "Well Normal.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

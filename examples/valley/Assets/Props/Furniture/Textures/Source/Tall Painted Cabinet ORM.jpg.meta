@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "263916f5a408bcb6093dd2b021a3d9aa",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "263916f5a408bcb6093dd2b021a3d9aa",
+    "name": "Tall Painted Cabinet ORM.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

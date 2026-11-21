@@ -1,0 +1,119 @@
+{
+  "cleo": 1,
+  "guid": "3ea205e7fec056a17e81758f4bc11f00",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "3ea205e7fec056a17e81758f4bc11f00",
+    "name": "Breakable",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "debrisTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "Barrel Debris",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The template spawned in its place, one physics body per piece. See SoulsDebris."
+        }
+      },
+      {
+        "name": "breakSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3.5,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Metres per second the pieces leave at, along the blow."
+        }
+      },
+      {
+        "name": "rollBreakSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "A roll breaks it only this fast or faster (metres per second)."
+        }
+      },
+      {
+        "name": "breakSound",
+        "type": {
+          "kind": "name",
+          "name": "sound"
+        },
+        "access": "public",
+        "default": "Break",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "team",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "enemy",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "isBreakable",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "isBroken",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hurtboxActive",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "_inside",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

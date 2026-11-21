@@ -40,7 +40,9 @@ export async function readModelLibrary(pid?: string, onProgress?: (done: number,
     }
     out.sort(byOrder)
     reportSize(out)
-    return out
+    // `order` is the store's, not the asset's: left on, it reached a folder project's .model files (a library
+    // reorder then rewrote every one of them) and every model's hash (a reorder read as "changed").
+    return out.map(withoutOrder)
   }
 
   let legacy: ModelAsset[] | null = null
@@ -122,6 +124,13 @@ export async function appendModelLibrary(assets: ModelAsset[], pid?: string,
 /** Library order, for assets read back out of an unordered prefix scan. */
 function byOrder(a: any, b: any): number {
   return (a.order ?? 0) - (b.order ?? 0)
+}
+
+/** A stored record as the asset it holds: without the store's `order`. */
+function withoutOrder(record: ModelAsset & { order?: number }): ModelAsset {
+  if (!('order' in record)) return record
+  const { order: _order, ...asset } = record
+  return asset
 }
 
 /** One log line naming the oversized assets, so a library too big to write says WHY. */

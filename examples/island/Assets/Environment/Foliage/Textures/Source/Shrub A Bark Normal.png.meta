@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "a2e55694b66cb5b6729bb1ece6fb27f7",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "a2e55694b66cb5b6729bb1ece6fb27f7",
+    "name": "Shrub A Bark Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

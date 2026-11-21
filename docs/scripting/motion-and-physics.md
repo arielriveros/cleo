@@ -262,7 +262,7 @@ const off = hitbox.onContact(c => { if (c.phase === 'enter') this.strike(c.node,
   returned remover and call it when you are done.
 - Overlap queries see hurtbox triggers with `{ includeTriggers: true, layerMask: HURTBOX }`; a disabled
   trigger is never found.
-- The Dungeon example's combat (`examples/scripts/SoulsHitbox.ts`) is built exactly like this.
+- The Dungeon example's combat (`examples/dungeon/Assets/Core/Scripts/SoulsHitbox.ts`) is built exactly like this.
 
 ```ts
 export default class PickupNode extends Node {
@@ -383,7 +383,7 @@ heightfields and planes are not tested at all — these queries are for hitting 
 A **sweep** is what makes fast things reliable. A sword swung through 90° in one frame at 30 fps never
 overlaps the enemy at either end pose; `sweepCapsule` from last frame's blade to this frame's samples
 the poses in between (no further apart than the radius) and catches it. The Hollow Keep example's
-combat is built exactly this way — see `examples/scripts/SoulsHitbox.ts`:
+combat is built exactly this way — see `examples/dungeon/Assets/Core/Scripts/SoulsHitbox.ts`:
 
 ```ts
 const hits = this.scene.physics.sweepCapsule(prev.a, prev.b, blade.a, blade.b, blade.radius, {
@@ -572,7 +572,7 @@ The defaults are Jolt's. `scene.physics.removeVehicle(car)` takes it off.
 ## Character body setup, measured
 
 The shipped third-person character documents this in detail
-([README](../../examples/scripts/README.md)); the headline numbers:
+([README](third-person-character.md)); the headline numbers:
 
 The character stands in a Collider, which holds these:
 

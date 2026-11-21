@@ -1,0 +1,35 @@
+{
+  "cleo": 1,
+  "guid": "f6b7a04f9e77eed3560ed96547e9e222",
+  "kind": "image",
+  "created": 1795282351353,
+  "record": {
+    "id": "f6b7a04f9e77eed3560ed96547e9e222",
+    "name": "f6b7a04f9e77eed3560ed96547e9e222",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 0
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "wrapU": "repeat",
+      "wrapV": "repeat",
+      "wrapW": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "minFilter": "linear",
+      "magFilter": "linear",
+      "anisotropy": 1,
+      "precision": "low",
+      "format": "rgba8unorm",
+      "target": "texture2D"
+    }
+  }
+}

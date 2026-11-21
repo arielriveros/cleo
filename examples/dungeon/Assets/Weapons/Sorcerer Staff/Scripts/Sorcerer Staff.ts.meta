@@ -1,0 +1,264 @@
+{
+  "cleo": 1,
+  "guid": "e20d6ceaf65467f252a12258662808a2",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "e20d6ceaf65467f252a12258662808a2",
+    "name": "Sorcerer Staff",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "displayName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Sorcerer Staff",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "baseDamage",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 40,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "strScaling",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "How fully the weapon scales with each stat: 1.0 is an \"A\", 0.2 an \"E\"."
+        }
+      },
+      {
+        "name": "dexScaling",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "strRequirement",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "dexRequirement",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "unmetRequirementPenalty",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Attack-rating multiplier when the wielder misses a STR or DEX requirement."
+        }
+      },
+      {
+        "name": "poiseDamage",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 10,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "staminaMul",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Multiplies every move's stamina cost."
+        }
+      },
+      {
+        "name": "lightMove",
+        "type": {
+          "kind": "name",
+          "name": "node"
+        },
+        "access": "public",
+        "default": "Light1",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "First move of the light chain, and the heavy attack. Names of child SoulsMove nodes."
+        }
+      },
+      {
+        "name": "heavyMove",
+        "type": {
+          "kind": "name",
+          "name": "node"
+        },
+        "access": "public",
+        "default": "Heavy",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "bladeStart",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "public",
+        "default": [0, 0.05, 0],
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "bladeEnd",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "public",
+        "default": [0, 1.12, 0],
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "bladeRadius",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.11,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hitStop",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.15,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Real seconds game time slows for when a hit of this weapon lands (the GameManager's hit-stop), for the light moves and for the heavy move. A killing blow holds it longer. 0 turns it off for this weapon."
+        }
+      },
+      {
+        "name": "heavyHitStop",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.22,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hitShake",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.12,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Camera kick when a hit lands (the GameManager's shake), light and heavy."
+        }
+      },
+      {
+        "name": "heavyHitShake",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.25,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hitSparkTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "Hit Spark",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Effect spawned where the blade meets a WALL (the swing bounces off it: SoulsPlayer/SoulsEnemy). A blade meeting a body draws blood instead (GameManager.bleed). And the sound of a hit."
+        }
+      },
+      {
+        "name": "hitSound",
+        "type": {
+          "kind": "name",
+          "name": "sound"
+        },
+        "access": "public",
+        "default": "Hit",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "isWeapon",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Marker characters look for among the nodes they spawn (a script class is never `instanceof`)."
+        }
+      },
+      {
+        "name": "_gm",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "GameManager"
+        }
+      }
+    ],
+    "reflect": 3
+  }
+}

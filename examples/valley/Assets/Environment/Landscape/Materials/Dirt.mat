@@ -1,0 +1,37 @@
+{
+  "id": "68102971a89ea4bc8a26fdaabfd23b1a",
+  "name": "Dirt",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "uv",
+    "textures": {
+      "baseColorTexture": "50fc41d3ce8c9ecc51ddd1bc9dea7e33",
+      "metallicRoughnessTexture": "3ac59cfc4db3f7b62b58125e5b04947f",
+      "occlusionMap": "3ac59cfc4db3f7b62b58125e5b04947f",
+      "normalMap": "4385970f04a7e65303d24eb1274cde86",
+      "displacementMap": "1321d0a97d096f1aa491f7369aad1015"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "50fc41d3ce8c9ecc51ddd1bc9dea7e33",
+    "3ac59cfc4db3f7b62b58125e5b04947f",
+    "4385970f04a7e65303d24eb1274cde86",
+    "1321d0a97d096f1aa491f7369aad1015"
+  ],
+  "thumbnail": ""
+}

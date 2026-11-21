@@ -1,0 +1,28 @@
+{
+  "id": "3492f812a1c540c3ba18dc604f148bb6",
+  "name": "Iron Cage",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0.8,
+    "roughness": 0.55,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "79f022ee61a779923848be93e658bf63"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "79f022ee61a779923848be93e658bf63"
+  ],
+  "thumbnail": ""
+}

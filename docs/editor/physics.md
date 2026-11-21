@@ -270,7 +270,7 @@ From a script, `teleport(position, yaw)` moves a character's whole body (its Col
 template's root is its Collider, so `scene.instantiate('Hollow')` returns the Collider and `.character` is
 the Character in it.
 
-The measured recommendation for the Collider, from the [third-person example](../../examples/scripts/README.md):
+The measured recommendation for the Collider, from the [third-person example](../scripting/third-person-character.md):
 
 | | |
 |---|---|
@@ -419,4 +419,4 @@ runtime the trigger overlay is live: it follows every trigger in the physics wor
 
 ## See also
 
-[Motion and physics (scripting)](../scripting/motion-and-physics.md) · [Node inspector](node-inspector.md) · [Third-person character](../../examples/scripts/README.md)
+[Motion and physics (scripting)](../scripting/motion-and-physics.md) · [Node inspector](node-inspector.md) · [Third-person character](../scripting/third-person-character.md)

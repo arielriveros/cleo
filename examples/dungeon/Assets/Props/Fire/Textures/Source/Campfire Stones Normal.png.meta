@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "f2f86e78825fbd91c54a76e92796bc54",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "f2f86e78825fbd91c54a76e92796bc54",
+    "name": "Campfire Stones Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

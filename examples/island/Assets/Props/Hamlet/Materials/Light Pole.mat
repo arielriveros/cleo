@@ -1,0 +1,32 @@
+{
+  "id": "edca6671235e7c093c762d9270513de6",
+  "name": "Light Pole",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "26e84ed6ed5fac56ff2f3e8485155173",
+      "metallicRoughnessTexture": "d459563ae77f79008900671ce8281dcf",
+      "normalMap": "46a88ce835910e2152dfb387c7a4c445"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "26e84ed6ed5fac56ff2f3e8485155173",
+    "d459563ae77f79008900671ce8281dcf",
+    "46a88ce835910e2152dfb387c7a4c445"
+  ],
+  "thumbnail": ""
+}

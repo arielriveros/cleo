@@ -1,0 +1,26 @@
+{
+  "id": "295b2e5a248a48e485fc610d6c620b5a",
+  "name": "Bullet Hole",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.9,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {
+      "baseColorTexture": "02abfa1666382b61c7233e92757bb43f"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "02abfa1666382b61c7233e92757bb43f"
+  ],
+  "thumbnail": ""
+}

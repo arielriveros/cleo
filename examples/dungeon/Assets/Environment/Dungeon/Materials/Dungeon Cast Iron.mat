@@ -1,0 +1,33 @@
+{
+  "id": "9723bfe627be381bcb6400718f79d1ba",
+  "name": "Dungeon Cast Iron",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "85703505602af3a3027a72a5c3f8a7d5",
+      "metallicRoughnessTexture": "7b9dce535e846b1cb083dba71e4c0f16",
+      "occlusionMap": "7b9dce535e846b1cb083dba71e4c0f16",
+      "normalMap": "db4c9802cb612b49c97f946a5e237b32"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "85703505602af3a3027a72a5c3f8a7d5",
+    "7b9dce535e846b1cb083dba71e4c0f16",
+    "db4c9802cb612b49c97f946a5e237b32"
+  ],
+  "thumbnail": ""
+}

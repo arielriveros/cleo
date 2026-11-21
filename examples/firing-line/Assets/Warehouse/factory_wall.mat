@@ -1,0 +1,39 @@
+{
+  "id": "d9fbb3c230ce3a811c3c43cd31fce84a",
+  "name": "factory_wall",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "b537ca476a1700b40b21c740f12e8a61",
+      "metallicMap": "a1f641d5b4b4f7692a1d0bf5b31d3ba1",
+      "roughnessMap": "a1f641d5b4b4f7692a1d0bf5b31d3ba1",
+      "normalMap": "8bb4681a9192f5b717c758ea88223d2a",
+      "occlusionMap": "a1f641d5b4b4f7692a1d0bf5b31d3ba1"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "b537ca476a1700b40b21c740f12e8a61",
+    "a1f641d5b4b4f7692a1d0bf5b31d3ba1",
+    "8bb4681a9192f5b717c758ea88223d2a"
+  ],
+  "thumbnail": ""
+}

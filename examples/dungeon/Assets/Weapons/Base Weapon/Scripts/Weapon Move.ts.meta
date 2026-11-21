@@ -1,0 +1,184 @@
+{
+  "cleo": 1,
+  "guid": "f01e760bd99206e45f8f6bf1a100f851",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "f01e760bd99206e45f8f6bf1a100f851",
+    "name": "Weapon Move",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "animTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The animator trigger that plays this move, e.g. \"Longsword Light1\". Empty: the node's name."
+        }
+      },
+      {
+        "name": "damageMul",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Multipliers on the weapon's attack rating and poise damage."
+        }
+      },
+      {
+        "name": "poiseMul",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "staminaCost",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 16,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "bounceOff",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The swing bounces off walls (`blocksSwings` bodies) it reaches before any enemy: sparks, a recoil, no damage. Heavy slams turn it off and plough through."
+        }
+      },
+      {
+        "name": "lungeStart",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.1,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Forward drive: from `lungeStart` (clip seconds) for `lungeSeconds`, at `lungeSpeed` m/s."
+        }
+      },
+      {
+        "name": "lungeSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.15,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "lungeSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.5,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "trackSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.2,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds after the swing starts during which the player can still turn toward the target."
+        }
+      },
+      {
+        "name": "hitTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.38,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Fallback timings, used only when the clip carries no `hit` event. Clip seconds."
+        }
+      },
+      {
+        "name": "activeSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.15,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "comboTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.45,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "recoverTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.62,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "next",
+        "type": {
+          "kind": "name",
+          "name": "node"
+        },
+        "access": "public",
+        "default": "Light2",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Name of the move a buffered light attack chains into. Empty restarts the chain."
+        }
+      },
+      {
+        "name": "isMove",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {}
+      }
+    ],
+    "reflect": 3
+  }
+}

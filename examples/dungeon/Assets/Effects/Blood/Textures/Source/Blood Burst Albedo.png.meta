@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "f3fda599f5b1231ef5d709465395de10",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "f3fda599f5b1231ef5d709465395de10",
+    "name": "Blood Burst Albedo.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

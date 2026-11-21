@@ -1,0 +1,20 @@
+{
+  "id": "dc569058cefcfbceb03e9151eacf251f",
+  "name": "Torch Fire",
+  "textureId": "f396f5de922603d384c20f2204826fe0",
+  "imageWidth": 1024,
+  "imageHeight": 1024,
+  "tileWidth": 128,
+  "tileHeight": 256,
+  "margin": 0,
+  "spacing": 0,
+  "columns": 8,
+  "rows": 4,
+  "overdrive": 0.5,
+  "tiles": {},
+  "terrains": [],
+  "variantSets": [],
+  "textureIds": [
+    "f396f5de922603d384c20f2204826fe0"
+  ]
+}

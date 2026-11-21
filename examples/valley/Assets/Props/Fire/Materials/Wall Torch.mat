@@ -1,0 +1,33 @@
+{
+  "id": "67219b8c906d5ce07d2fb6f458ce40a2",
+  "name": "Wall Torch",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "c5520662d8616b4b6c0247e1857b08fd",
+      "metallicRoughnessTexture": "32ca31510db358d8aafd0c45423d62b3",
+      "occlusionMap": "32ca31510db358d8aafd0c45423d62b3",
+      "normalMap": "77a38873ba10d0b9b6664a8e338187b2"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "c5520662d8616b4b6c0247e1857b08fd",
+    "32ca31510db358d8aafd0c45423d62b3",
+    "77a38873ba10d0b9b6664a8e338187b2"
+  ],
+  "thumbnail": ""
+}

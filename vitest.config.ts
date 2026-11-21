@@ -1,6 +1,7 @@
 import { defineConfig, mergeConfig } from 'vitest/config';
 import { fileURLToPath } from 'node:url';
 import engineConfig from './vite.config';
+import { exampleDirs, exampleProjects } from './tools/exampleKit/vitestPreset';
 
 // The engine is overwhelmingly WebGL2-bound and not testable without a GL context. What IS testable is
 // the pure math/data core — BVH traversal, ray-triangle intersection, convex hull generation, base64 —
@@ -17,18 +18,15 @@ import engineConfig from './vite.config';
 // outright once a vitest.config.ts exists.
 /** Engine suites that also run on every other physics backend (see the "engine on <backend>" projects). */
 const PHYSICS_SUITES = [
-    'characterGround', 'physicsOverlap', 'physicsTriggerOverlap', 'terrainCollider', 'foliageColliderPose', 'ragdollProfile', 'waterVolumeNode',
-    'characterLightBodies', 'characterSlopeHold', 'sandboxProject', 'vehicleNodes', 'vehiclePresets', 'colliderSuspend',
+    'characterGround', 'physicsOverlap', 'physicsTriggerOverlap', 'terrainCollider', 'foliageColliderPose', 'waterVolumeNode',
+    'characterLightBodies', 'characterSlopeHold', 'vehicleNodes', 'vehiclePresets', 'colliderSuspend',
 ];
 /** The backends besides cannon that the engine suites run on. */
 const OTHER_BACKENDS = ['rapier', 'jolt'];
 
 export default mergeConfig(engineConfig, defineConfig({
     resolve: {
-        // The Hollow Keep scripts import each other by their path in the example's Assets tree
-        // ('@/Core/Scripts/SoulsMath'); on disk they all sit flat in examples/scripts/.
         alias: [
-            { find: /^@\/(?:[^'"]*\/)?Scripts\/(Souls\w+)$/, replacement: fileURLToPath(new URL('./examples/scripts/', import.meta.url)) + '$1.ts' },
             // The example tests reach editor utilities (utils/vfs.ts), which import the app-kit by its alias.
             { find: /^@cleo\/app-kit\/(.+)$/, replacement: fileURLToPath(new URL('./applications/app-kit/src/', import.meta.url)) + '$1' },
         ],
@@ -53,6 +51,8 @@ export default mergeConfig(engineConfig, defineConfig({
                     setupFiles: ['tests/helpers/backendSetup.ts'],
                 },
             })),
+            // The example projects (examples/<slug>/tests): their own setup, the same as `npm test` in each folder.
+            ...exampleDirs().flatMap(exampleProjects),
         ],
         coverage: {
             // istanbul, not v8: the v8 provider under this vite version reports branch coverage as a flat

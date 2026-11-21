@@ -1,0 +1,208 @@
+{
+  "cleo": 1,
+  "guid": "255923d251c6cb5c818802af7ebda4da",
+  "kind": "script",
+  "created": 1795000000000,
+  "record": {
+    "id": "255923d251c6cb5c818802af7ebda4da",
+    "name": "DuskGuard",
+    "baseType": "characterBody2D",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "maxHealth",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "health",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "contactDamage",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "attackCooldown",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.1,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds between swings."
+        }
+      },
+      {
+        "name": "knockback",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 7,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "A sword hit's push away, and up."
+        }
+      },
+      {
+        "name": "knockup",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 4,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hurtSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds a hit staggers it."
+        }
+      },
+      {
+        "name": "reward",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Diamonds it drops."
+        }
+      },
+      {
+        "name": "_sprite",
+        "type": {
+          "kind": "node",
+          "className": "AnimatedSpriteNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Sprite"
+        }
+      },
+      {
+        "name": "_brain",
+        "type": {
+          "kind": "node",
+          "className": "ControllerNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_player",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "Player"
+        }
+      },
+      {
+        "name": "_home",
+        "type": {
+          "kind": "vector",
+          "size": 2
+        },
+        "access": "private",
+        "default": [0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_attacking",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_attackLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_cooldownLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_hurtLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_dead",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_deadLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

@@ -89,6 +89,15 @@ describe('readModelLibrary', () => {
     expect((await readModelLibrary()).map(m => m.id)).toEqual(['z', 'a', 'm']);
   });
 
+  it('keeps its `order` to itself: the records hold it, the assets read back do not', async () => {
+    // Left on, it reached a folder project's .model files and every model's hash, so a reorder rewrote them all.
+    await writeModelLibrary([asset('z'), asset('a')], []);
+    expect(kv.get('p:open:cleo_model:a').order).toBe(1);
+    const read = await readModelLibrary();
+    expect(read.map(m => 'order' in m)).toEqual([false, false]);
+    expect(read[1]).toEqual(asset('a'));
+  });
+
   it('returns empty for a project that has none', async () => {
     expect(await readModelLibrary()).toEqual([]);
   });

@@ -1,0 +1,29 @@
+{
+  "id": "30bd88eb2dd6719a3fbfe29ebc48047a",
+  "name": "Block Grid",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.85, 0.55, 0.32],
+    "metallic": 0,
+    "roughness": 0.9,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {
+      "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    },
+    "uvProjection": "box",
+    "uvSpace": "world",
+    "uvWorldSize": 1
+  },
+  "textureIds": [
+    "d4a96a210b1af85c70925ceced937cb7"
+  ],
+  "thumbnail": ""
+}

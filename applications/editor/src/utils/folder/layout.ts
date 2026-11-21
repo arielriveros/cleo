@@ -192,6 +192,21 @@ export function roleOfRel(rel: string): RelRole {
   return 'other'
 }
 
+/**
+ * Whether a file is the project's binary data rather than text: a blob, a bake, or the bytes of an image or a
+ * sound (in Assets/, or a LOD twin in Derived/, which is named by its id and so needs no extension). Every
+ * `.meta`, record, scene and script is text. What a repository can keep out of git (the shipped examples keep
+ * these in a release, not in the repo).
+ */
+export function isDataRel(rel: string, kind?: AssetKind | null): boolean {
+  const role = roleOfRel(rel)
+  if (role === 'blob' || role === 'bake') return true
+  if (role === 'derived') return !rel.toLowerCase().endsWith(KIND_EXT.texture)
+  if (role !== 'asset') return false
+  const k = kind ?? kindOfFileName(nameOfRel(rel))
+  return k === 'image' || k === 'audioSource'
+}
+
 /** The file name of a rel. */
 export const nameOfRel = (rel: string): string => rel.slice(rel.lastIndexOf('/') + 1)
 

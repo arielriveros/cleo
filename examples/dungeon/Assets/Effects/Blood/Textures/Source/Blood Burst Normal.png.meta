@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "5d196ca514dc18ee546aab9e76d5daf2",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "5d196ca514dc18ee546aab9e76d5daf2",
+    "name": "Blood Burst Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

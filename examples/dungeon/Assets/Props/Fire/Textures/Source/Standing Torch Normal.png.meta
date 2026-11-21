@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "0402208b066ade99f6c68f753396d9b9",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "0402208b066ade99f6c68f753396d9b9",
+    "name": "Standing Torch Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

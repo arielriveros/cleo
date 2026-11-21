@@ -1,0 +1,33 @@
+{
+  "id": "3a9e798f88941a388a8ac34d0946325b",
+  "name": "Viewmodel Shirt BlackCamo2",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "b4f73847aa3e807b48bbd4925d476e35",
+      "metallicRoughnessTexture": "7ac965cf02b314f7fb6b87d1826219b4",
+      "occlusionMap": "7ac965cf02b314f7fb6b87d1826219b4",
+      "normalMap": "939dbd96cf76e31508f1f694ab848686"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "b4f73847aa3e807b48bbd4925d476e35",
+    "7ac965cf02b314f7fb6b87d1826219b4",
+    "939dbd96cf76e31508f1f694ab848686"
+  ],
+  "thumbnail": ""
+}

@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "6719de4d03681fa25b8a16945114d6e2",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "6719de4d03681fa25b8a16945114d6e2",
+    "name": "Dungeon Hewn Stone ARM.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

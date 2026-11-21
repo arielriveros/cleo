@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "eb01dad11b36024a7f8d89f72a91bd1a",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "eb01dad11b36024a7f8d89f72a91bd1a",
+    "name": "Trail Base Color.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

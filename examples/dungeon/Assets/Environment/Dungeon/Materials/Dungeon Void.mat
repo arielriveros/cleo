@@ -1,0 +1,23 @@
+{
+  "id": "376738a60e62da5fc0a621d9b61799de",
+  "name": "Dungeon Void",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.01, 0.01, 0.01],
+    "metallic": 0,
+    "roughness": 1,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

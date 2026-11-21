@@ -1,0 +1,133 @@
+{
+  "cleo": 1,
+  "guid": "7c095a8298acc46f2359029191aa3deb",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "7c095a8298acc46f2359029191aa3deb",
+    "name": "Start Menu",
+    "baseType": "uiRoot",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "tour",
+        "type": {
+          "kind": "node",
+          "className": "SequenceNode"
+        },
+        "access": "public",
+        "default": null,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The Sequence node the Cinematic button plays."
+        }
+      },
+      {
+        "name": "day",
+        "type": {
+          "kind": "node",
+          "className": "SequenceNode"
+        },
+        "access": "public",
+        "default": null,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The Sequence node that runs the valley's day (paused while the tour has the sun)."
+        }
+      },
+      {
+        "name": "openGuard",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.25,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Real seconds after the menu opens during which a confirm is ignored (the press that opened it)."
+        }
+      },
+      {
+        "name": "isOpen",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "mode",
+        "type": {
+          "kind": "choice",
+          "values": [
+            "menu",
+            "cinematic",
+            "free",
+            "movie"
+          ]
+        },
+        "access": "public",
+        "default": "menu",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Where the player is: the menu, the tour, the free camera, or a movie being rendered."
+        }
+      },
+      {
+        "name": "_buttons",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "UIButtonNode"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_selected",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_navLast",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_clock",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_openedAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

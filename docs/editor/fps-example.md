@@ -1,7 +1,7 @@
 # Firing Line (the FPS example)
 
 A first-person shooter built from templates: put a **FPS Game Manager** and some fighters in any scene and it
-plays. An example project (see `tools/fps/README.md`); scripts are `examples/scripts/Fps*.ts`.
+plays. An example project (see `tools/fps/README.md`); scripts are `examples/firing-line/Assets/FPS/Scripts/Fps*.ts`.
 
 ## The scene
 
@@ -129,4 +129,5 @@ realtime (a realtime probe recaptures its cube every second), and at most three 
 
 The example is a project exported from the editor (see `tools/fps/README.md`). Edit it in the editor, Export,
 and run `node --max-old-space-size=12288 tools/fps/ingest.mjs <zip>`. The scripts are the one thing the repository
-owns: edit `examples/scripts/Fps*.ts`, then run `node --max-old-space-size=12288 tools/fps/ingest.mjs --scripts-only`.
+owns: open the folder `examples/firing-line/` in the desktop editor (or edit its `Assets/FPS/Scripts/*.ts` in VS Code, then
+`npm run examples:sync firing-line`).

@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "a6ac73fba55b628ffa1dda1b7563d2c9",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "a6ac73fba55b628ffa1dda1b7563d2c9",
+    "name": "Dungeon Cobblestone Floor Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

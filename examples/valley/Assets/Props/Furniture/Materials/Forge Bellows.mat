@@ -1,0 +1,32 @@
+{
+  "id": "728ca39707b19ecc3ceb88b1bff9a103",
+  "name": "Forge Bellows",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "428ef3a04ec22ac57c4d4e9ba6a49f82",
+      "metallicRoughnessTexture": "9f6394faf91bb6077623a3f08b573b28",
+      "normalMap": "0ea10cd639d3da0101e77f95fd536c9e"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "428ef3a04ec22ac57c4d4e9ba6a49f82",
+    "9f6394faf91bb6077623a3f08b573b28",
+    "0ea10cd639d3da0101e77f95fd536c9e"
+  ],
+  "thumbnail": ""
+}

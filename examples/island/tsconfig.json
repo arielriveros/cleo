@@ -1,0 +1,25 @@
+// The example's scripts, type-checked the way the editor's script editor checks them (the project scaffold's
+// options). `cleo` is this repository's engine declarations (npm run build at the root), or the SDK Cleo
+// installs into .cleo/ when it opens the folder.
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "lib": ["ES2020", "DOM"],
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "noImplicitThis": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@/*": ["./Assets/*"],
+      "cleo": ["../../dist/cleo", "./node_modules/cleo"],
+      "cleo/*": ["../../dist/*", "./node_modules/cleo/*"]
+    }
+  },
+  "include": ["Assets/**/*.ts", ".cleo/types/*.d.ts"],
+  "exclude": ["node_modules"]
+}

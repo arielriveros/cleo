@@ -1,0 +1,51 @@
+{
+  "id": "84af73a1345dc903c5218ba261405a80",
+  "name": "Island Rivers",
+  "material": {
+    "type": "basic",
+    "color": [0.25, 0.45, 0.45],
+    "opacity": 0.75,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": true,
+      "castShadow": false,
+      "probeable": true
+    },
+    "waterMaterial": true,
+    "look": {
+      "shallowColor": [0.25, 0.45, 0.45],
+      "deepColor": [0.04, 0.14, 0.16],
+      "absorption": [0.45, 0.09, 0.06],
+      "turbidity": 0.25,
+      "clarity": 4,
+      "roughness": 0.1,
+      "reflectivity": 0.02,
+      "screenReflections": 1,
+      "refraction": 0.25,
+      "detailStrength": 1,
+      "detailScale": 1.5,
+      "flowStrength": 1,
+      "flowScatter": 1,
+      "liveWaves": 1,
+      "foamColor": [0.9, 0.93, 0.95],
+      "shoreFoam": 0.2,
+      "crestFoam": 0.5,
+      "flowFoam": 0.9,
+      "caustics": 1,
+      "causticsScale": 0.9,
+      "rainRipples": 1,
+      "snowCover": 1,
+      "windResponse": 1,
+      "scatterColor": [0.3, 0.55, 0.5],
+      "subsurface": 0.8,
+      "subsurfaceSharpness": 5,
+      "subsurfaceDistortion": 0.6,
+      "underwaterColor": [0.03, 0.14, 0.16],
+      "underwaterFog": 0.12
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

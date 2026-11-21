@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "c5a553e5eeab2ec1df019ad756f0a050",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "c5a553e5eeab2ec1df019ad756f0a050",
+    "name": "Shrub A Bark ARM.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "cleo": 1,
+  "guid": "a13d482458670e23d0c854270416585d",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "a13d482458670e23d0c854270416585d",
+    "name": "AK-47 Material.000 ARM.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "wrapU": "repeat",
+      "wrapV": "repeat",
+      "wrapW": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "minFilter": "linear",
+      "magFilter": "linear",
+      "anisotropy": 1,
+      "precision": "low",
+      "format": "rgba8unorm",
+      "target": "texture2D"
+    }
+  }
+}

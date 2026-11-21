@@ -71,6 +71,9 @@ export function loadScriptReflector(root) {
 
   const parse = module.exports.parseScriptVariables
   if (typeof parse !== 'function') throw new Error('parseScriptVariables did not load out of scripts.ts')
+  // The version of the rules it reflects under: a script asset stamped with an older one is re-derived when the
+  // editor opens the project (SCRIPT_REFLECT_VERSION).
+  parse.version = module.exports.SCRIPT_REFLECT_VERSION
   return parse
 }
 

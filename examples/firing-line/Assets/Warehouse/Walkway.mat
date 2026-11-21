@@ -1,0 +1,38 @@
+{
+  "id": "95fb6ac2582a8a81ab078d5fda4211f5",
+  "name": "Walkway",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "9ce2e3641d818b4cd3ab9ce1a59a18e5",
+      "metallicMap": "7528b4aeb18f75a8cf45aae263e404dc",
+      "roughnessMap": "7528b4aeb18f75a8cf45aae263e404dc",
+      "normalMap": "f8422afd298e80512f20ef6f6e2f5f89"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "9ce2e3641d818b4cd3ab9ce1a59a18e5",
+    "7528b4aeb18f75a8cf45aae263e404dc",
+    "f8422afd298e80512f20ef6f6e2f5f89"
+  ],
+  "thumbnail": ""
+}

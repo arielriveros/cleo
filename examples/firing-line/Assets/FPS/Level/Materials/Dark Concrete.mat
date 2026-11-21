@@ -1,0 +1,47 @@
+{
+  "id": "2f0a2b6d89226828698b24fb4bc14e8e",
+  "name": "Dark Concrete",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.94,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.09,
+    "depthSpace": "uv",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "uvProjection": "box",
+    "uvSpace": "world",
+    "uvWorldSize": 5.26,
+    "uvBlend": 7.5,
+    "textures": {
+      "baseColorTexture": "concrete_layers_diff_1k.png",
+      "metallicMap": "concrete_layers_arm_1k.png",
+      "roughnessMap": "concrete_layers_rough_1k.png",
+      "normalMap": "concrete_layers_nor_gl_1k.png",
+      "occlusionMap": "concrete_layers_ao_1k.png",
+      "displacementMap": "concrete_layers_disp_1k.png"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "concrete_layers_diff_1k.png",
+    "concrete_layers_arm_1k.png",
+    "concrete_layers_rough_1k.png",
+    "concrete_layers_nor_gl_1k.png",
+    "concrete_layers_ao_1k.png",
+    "concrete_layers_disp_1k.png"
+  ],
+  "thumbnail": ""
+}

@@ -1,0 +1,22 @@
+{
+  "id": "9e831d31c1ff9e572a4ab810ab49a922",
+  "name": "Pistol 10",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.16, 0.08, 0.06],
+    "metallic": 0,
+    "roughness": 0,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

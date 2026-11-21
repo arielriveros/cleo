@@ -1,0 +1,38 @@
+{
+  "id": "75a9ad7d46a3201a27ba0005aae7dde4",
+  "name": "MetalRusted",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "a897d6c03431a0501f91e765d63748d0",
+      "metallicMap": "fd641a4e8ba86cbc0313aa39499fee4c",
+      "roughnessMap": "fd641a4e8ba86cbc0313aa39499fee4c",
+      "normalMap": "a85aba91f5631f8ed1da75f4b5dee96f"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "a897d6c03431a0501f91e765d63748d0",
+    "fd641a4e8ba86cbc0313aa39499fee4c",
+    "a85aba91f5631f8ed1da75f4b5dee96f"
+  ],
+  "thumbnail": ""
+}

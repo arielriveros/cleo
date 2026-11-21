@@ -1,0 +1,33 @@
+{
+  "id": "f67816566e930c812b4e74d76c2e9bbf",
+  "name": "Hollow Body 1",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "9743922531690de26cc8d3549ff0cbcb",
+      "metallicRoughnessTexture": "c807130a7f9886f9c728176fb3436919",
+      "occlusionMap": "c807130a7f9886f9c728176fb3436919",
+      "normalMap": "41ee5a59d2b0c9d9a58ad1e8f6ccaeae"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "9743922531690de26cc8d3549ff0cbcb",
+    "c807130a7f9886f9c728176fb3436919",
+    "41ee5a59d2b0c9d9a58ad1e8f6ccaeae"
+  ],
+  "thumbnail": ""
+}

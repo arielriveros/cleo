@@ -1,0 +1,84 @@
+{
+  "id": "540ce0d6c23ea0c6ea60341f69a3eace",
+  "name": "Rug",
+  "nodeJson": {
+    "id": "d5aba38649b41afc4a15172564f1de89",
+    "name": "Rug",
+    "type": "model",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [],
+    "variables": {
+      "__materialId": {
+        "type": "string",
+        "value": "d133ee34de16bc65e3c045c01a8a2f85",
+        "access": "public"
+      }
+    },
+    "spawnOnStart": true,
+    "model": {
+      "geometry": {
+        "$geo": {
+          "positions": {
+            "h": "19ef1299b98c9f42e0da348ae0b1391ed3447f9f68cf322621be270df26855ba",
+            "l": 24720
+          },
+          "normals": {
+            "h": "ca0cc37dc2843d0347ccd170bdde833d790c455e5f3588d802dd2b363e39305e",
+            "l": 24720
+          },
+          "empty": [
+            "tangents",
+            "bitangents"
+          ],
+          "texCoords": {
+            "h": "fe1d0e8ec939ab2302f54892b9b6fe383da7932a294dcb7f123a3753e5b735de",
+            "l": 16480
+          },
+          "indices": {
+            "h": "3f2eb7fbf60b8c826a79bfec687ea50c21567c95427497f4717933b3a258a354",
+            "l": 23676,
+            "bits": 16
+          },
+          "typed": true
+        }
+      },
+      "material": {
+        "type": "pbr",
+        "baseColor": [1, 1, 1],
+        "metallic": 0,
+        "roughness": 1,
+        "reflectance": 0.5,
+        "opacity": 1,
+        "emissiveFactor": [0, 0, 0],
+        "emissiveIntensity": 1,
+        "textures": {
+          "baseColorTexture": "2178553ec617ac414ed56a63e38e7d6b",
+          "metallicRoughnessTexture": "c2a000bf30700d39823a6bd36e1c9583",
+          "occlusionMap": "c2a000bf30700d39823a6bd36e1c9583",
+          "normalMap": "86b34fbe6267ce9c3421895a7af892ba"
+        },
+        "config": {
+          "side": "double",
+          "wireframe": false,
+          "transparent": false,
+          "castShadow": true,
+          "probeable": true
+        }
+      }
+    },
+    "animationMappings": null,
+    "stateMachine": null,
+    "ragdoll": null
+  },
+  "textureIds": [
+    "2178553ec617ac414ed56a63e38e7d6b",
+    "c2a000bf30700d39823a6bd36e1c9583",
+    "86b34fbe6267ce9c3421895a7af892ba"
+  ],
+  "materialIds": [
+    "d133ee34de16bc65e3c045c01a8a2f85"
+  ],
+  "thumbnail": ""
+}

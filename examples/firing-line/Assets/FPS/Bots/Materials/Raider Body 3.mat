@@ -1,0 +1,33 @@
+{
+  "id": "81095c7f27c9ff1d3d0a14875982438c",
+  "name": "Raider Body 3",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "d2eff9d6d3772bc685ff6b890db65467",
+      "metallicRoughnessTexture": "5785da617c817e1f86b7e1075f88b527",
+      "occlusionMap": "5785da617c817e1f86b7e1075f88b527",
+      "normalMap": "d2ccfc3397ee43804dca0ec3d77cd18a"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "d2eff9d6d3772bc685ff6b890db65467",
+    "5785da617c817e1f86b7e1075f88b527",
+    "d2ccfc3397ee43804dca0ec3d77cd18a"
+  ],
+  "thumbnail": ""
+}

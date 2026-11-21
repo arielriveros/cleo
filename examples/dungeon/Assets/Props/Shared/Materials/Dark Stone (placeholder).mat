@@ -1,0 +1,26 @@
+{
+  "id": "cf46ca459250e6a4a6444a0dfcd31d81",
+  "name": "Dark Stone (placeholder)",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.24, 0.23, 0.23],
+    "metallic": 0,
+    "roughness": 0.95,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {},
+    "uvProjection": "box",
+    "uvSpace": "world",
+    "uvWorldSize": 2,
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

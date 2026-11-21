@@ -1,0 +1,22 @@
+{
+  "id": "03a98a4ed87e114d64274471a02bbdfb",
+  "name": "Rifle 8",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.06, 0.06, 0.06],
+    "metallic": 0,
+    "roughness": 0.85,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

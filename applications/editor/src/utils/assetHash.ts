@@ -47,8 +47,11 @@ const NON_STRUCTURAL_KEYS = new Set(['thumbnail', 'ikRig', 'nodeNames', 'sockets
  * changed function makes every hash miss, `resyncScene` reads "every asset changed", and every placed
  * template and character is re-instantiated from an asset that knows nothing about how it was configured.
  * The version turns that mass rebuild into a no-op instead.
+ *
+ * 7: a model asset no longer carries the model store's `order` (utils/modelStore.ts), which every model's hash
+ * included until then.
  */
-export const ASSET_HASH_VERSION = 6
+export const ASSET_HASH_VERSION = 7
 
 /**
  * Whether a scene's stored hashes can be compared against ones produced by the CURRENT {@link hashAsset}.

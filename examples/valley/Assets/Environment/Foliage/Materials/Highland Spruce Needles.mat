@@ -1,0 +1,48 @@
+{
+  "id": "c142608f54c3ff7ce24d2653959d36ed",
+  "name": "Highland Spruce Needles",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.75,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.03,
+    "windStiffness": 2.2,
+    "windRole": "leaves",
+    "windFlutter": 0.2,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "93c31b0b15bdbab0ee829973a276b3fb",
+      "normalMap": "2110ab39f042c5fa070f84a791f56c2b"
+    },
+    "alphaCutoff": 0.5,
+    "translucency": 0.25,
+    "translucencyTint": [0.66, 0.72, 0.14, 0.2],
+    "interactBend": 0.05,
+    "interactRecovery": 1,
+    "variationHue": 0.03,
+    "variationValue": 0.12,
+    "variationDry": 0.05,
+    "wetResponse": 0.5,
+    "snowCover": 0.6,
+    "weightDroop": 0.08,
+    "rippleSheen": 0.15,
+    "leafFlip": 0,
+    "undersideColor": [0.62, 0.7, 0.5],
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "93c31b0b15bdbab0ee829973a276b3fb",
+    "2110ab39f042c5fa070f84a791f56c2b"
+  ],
+  "thumbnail": ""
+}

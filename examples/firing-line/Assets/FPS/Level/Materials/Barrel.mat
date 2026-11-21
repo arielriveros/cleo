@@ -1,0 +1,24 @@
+{
+  "id": "096cab0eca78437c654cb883866d3f65",
+  "name": "Barrel",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.12, 0.17, 0.34],
+    "metallic": 0.5,
+    "roughness": 0.55,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

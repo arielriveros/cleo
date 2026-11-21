@@ -1,0 +1,33 @@
+{
+  "id": "79fd9ade0ac73366e044bd4723c98e73",
+  "name": "Barrel Pieces",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "89178c0e868d2d62a4f46744a892a211",
+      "metallicRoughnessTexture": "bae59b52c3b788df36e4c634120c9748",
+      "occlusionMap": "bae59b52c3b788df36e4c634120c9748",
+      "normalMap": "d4c06ec158e51a2928d2e4db8f1592c0"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "89178c0e868d2d62a4f46744a892a211",
+    "bae59b52c3b788df36e4c634120c9748",
+    "d4c06ec158e51a2928d2e4db8f1592c0"
+  ],
+  "thumbnail": ""
+}

@@ -1,0 +1,31 @@
+{
+  "id": "5932b38920918b4dcb769072b1d2a6a0",
+  "name": "Weapon Arm",
+  "rigId": "4c356df98f971fef64c490f5419808f7",
+  "weights": {
+    "mixamorig1:RightShoulder": 1,
+    "mixamorig1:RightArm": 1,
+    "mixamorig1:RightForeArm": 1,
+    "mixamorig1:RightHand": 1,
+    "mixamorig1:RightHandThumb1": 1,
+    "mixamorig1:RightHandThumb2": 1,
+    "mixamorig1:RightHandThumb3": 1,
+    "mixamorig1:RightHandThumb4": 1,
+    "mixamorig1:RightHandIndex1": 1,
+    "mixamorig1:RightHandIndex2": 1,
+    "mixamorig1:RightHandIndex3": 1,
+    "mixamorig1:RightHandIndex4": 1,
+    "mixamorig1:RightHandMiddle1": 1,
+    "mixamorig1:RightHandMiddle2": 1,
+    "mixamorig1:RightHandMiddle3": 1,
+    "mixamorig1:RightHandMiddle4": 1,
+    "mixamorig1:RightHandRing1": 1,
+    "mixamorig1:RightHandRing2": 1,
+    "mixamorig1:RightHandRing3": 1,
+    "mixamorig1:RightHandRing4": 1,
+    "mixamorig1:RightHandPinky1": 1,
+    "mixamorig1:RightHandPinky2": 1,
+    "mixamorig1:RightHandPinky3": 1,
+    "mixamorig1:RightHandPinky4": 1
+  }
+}

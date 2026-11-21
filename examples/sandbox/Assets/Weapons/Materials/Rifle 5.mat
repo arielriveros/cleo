@@ -1,0 +1,22 @@
+{
+  "id": "7bcf3260a0fa444c7771e8ef482b37de",
+  "name": "Rifle 5",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.8, 0.8, 0.8],
+    "metallic": 0,
+    "roughness": 0.82,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

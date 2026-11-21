@@ -1,0 +1,33 @@
+{
+  "id": "bd9d9d609aeed64d48d676cd75e6bb97",
+  "name": "Ranger Body",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "ef52304c96fc63e8f7d8cb2b9a42ae28",
+      "metallicRoughnessTexture": "22f1f99b0ba1be19b1db2870fd995387",
+      "occlusionMap": "22f1f99b0ba1be19b1db2870fd995387",
+      "normalMap": "42a5825375c4add11477b64e77f66997"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "ef52304c96fc63e8f7d8cb2b9a42ae28",
+    "22f1f99b0ba1be19b1db2870fd995387",
+    "42a5825375c4add11477b64e77f66997"
+  ],
+  "thumbnail": ""
+}

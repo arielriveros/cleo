@@ -1,0 +1,48 @@
+{
+  "id": "8515f717d98fd73e2ffc4f0f5fc48ec4",
+  "name": "Shrub B Leaves",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.7,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.18,
+    "windStiffness": 1.2,
+    "windRole": "leaves",
+    "windFlutter": 0.5,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "5a98f53e21b879e936fa47178f1c2419",
+      "normalMap": "1d24031c2f0b6e926c441cfd75f8d711"
+    },
+    "alphaCutoff": 0.5,
+    "translucency": 0.45,
+    "translucencyTint": [0.66, 0.72, 0.14, 0.35],
+    "interactBend": 0.6,
+    "interactRecovery": 1,
+    "variationHue": 0.03,
+    "variationValue": 0.12,
+    "variationDry": 0.08,
+    "wetResponse": 0.5,
+    "snowCover": 0.6,
+    "weightDroop": 0.3,
+    "rippleSheen": 0.2,
+    "leafFlip": 0.35,
+    "undersideColor": [0.62, 0.7, 0.5],
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "5a98f53e21b879e936fa47178f1c2419",
+    "1d24031c2f0b6e926c441cfd75f8d711"
+  ],
+  "thumbnail": ""
+}

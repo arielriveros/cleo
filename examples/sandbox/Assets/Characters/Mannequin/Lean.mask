@@ -1,0 +1,19 @@
+{
+  "id": "8168cdbf9a3d10086cfbcbfce9736001",
+  "name": "Lean",
+  "rigId": "1ca1de6215e2febc1b4ec0cb651189eb",
+  "weights": {
+    "mixamorig1:Hips": 1,
+    "mixamorig1:LeftUpLeg": 1,
+    "mixamorig1:LeftLeg": 1,
+    "mixamorig1:LeftFoot": 1,
+    "mixamorig1:RightUpLeg": 1,
+    "mixamorig1:RightLeg": 1,
+    "mixamorig1:RightFoot": 1,
+    "mixamorig1:Spine": 1,
+    "mixamorig1:Spine1": 1,
+    "mixamorig1:Spine2": 1,
+    "mixamorig1:Neck": 1,
+    "mixamorig1:Head": 1
+  }
+}

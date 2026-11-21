@@ -605,7 +605,7 @@ M4A1 with its stock out).
 (it aims), and stays up `fireAimHold` (0.6 s) after the last shot: a pull made while it comes up fires as soon as it
 is up (`pullBuffer`, 0.35 s). A sprint, the car and a weapon going in or out of the hands hold fire.
 
-**A shot is two raycasts** (`examples/scripts/SandboxGun.ts`, on each weapon's grip holder):
+**A shot is two raycasts** (`examples/sandbox/Assets/Weapons/Scripts/SandboxGun.ts`, on each weapon's grip holder):
 
 1. From the camera through the crosshair, the middle of the screen, up to `range` (200 m): what the player aims at.
 2. From the Muzzle to that point: what the bullet meets on its way there. A corner the camera sees past but the gun

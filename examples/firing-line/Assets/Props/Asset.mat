@@ -1,0 +1,39 @@
+{
+  "id": "67cbd6664a16b0f5d12983f3da0f028f",
+  "name": "Asset",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "14169f23b9a28c059db5370996153269",
+      "metallicMap": "0b285286f1d27414d0556fc2b2788ca3",
+      "roughnessMap": "0b285286f1d27414d0556fc2b2788ca3",
+      "normalMap": "97d1ad27f1ced565b4a2cdcdf8154328",
+      "occlusionMap": "0b285286f1d27414d0556fc2b2788ca3"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "14169f23b9a28c059db5370996153269",
+    "0b285286f1d27414d0556fc2b2788ca3",
+    "97d1ad27f1ced565b4a2cdcdf8154328"
+  ],
+  "thumbnail": ""
+}

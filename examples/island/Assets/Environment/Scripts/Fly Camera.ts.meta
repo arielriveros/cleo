@@ -1,0 +1,98 @@
+{
+  "cleo": 1,
+  "guid": "ac15dc3ddf7872019feb079be9e58e97",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "ac15dc3ddf7872019feb079be9e58e97",
+    "name": "Fly Camera",
+    "baseType": "cameraRig",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "speed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 8,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Cruising speed, metres per second."
+        }
+      },
+      {
+        "name": "minSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Slowest and fastest cruising speed the wheel can set."
+        }
+      },
+      {
+        "name": "maxSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 80,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "sprintScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 4,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Multiplier while Sprint is held."
+        }
+      },
+      {
+        "name": "smoothing",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.15,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds to reach the speed being asked for. 0 is instant."
+        }
+      },
+      {
+        "name": "groundClearance",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Metres kept between the eye and the landscape below."
+        }
+      },
+      {
+        "name": "_velocity",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 0],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

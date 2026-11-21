@@ -1,0 +1,33 @@
+{
+  "id": "bf06898b2aa4efb3e8a92852be13ea6e",
+  "name": "Dungeon Wood Planks",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "818a24d6ab32fd708ad719509c68e939",
+      "metallicRoughnessTexture": "a28e1f4b0dfa69ba8f1d90ac44fde122",
+      "occlusionMap": "a28e1f4b0dfa69ba8f1d90ac44fde122",
+      "normalMap": "d2d7f100f823b46b5664a395527fdab5"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "818a24d6ab32fd708ad719509c68e939",
+    "a28e1f4b0dfa69ba8f1d90ac44fde122",
+    "d2d7f100f823b46b5664a395527fdab5"
+  ],
+  "thumbnail": ""
+}

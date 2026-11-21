@@ -1,0 +1,38 @@
+{
+  "id": "a6b814eddbb4adf7232103c2ea852111",
+  "name": "OfficeDoorMaterial",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "f90ed58435720ca8beb3a824c6831a6c",
+      "metallicMap": "fbaa23b08788af34b67751149c51393b",
+      "roughnessMap": "fbaa23b08788af34b67751149c51393b",
+      "normalMap": "d100dbde75b6c2371ee579094ad333ad"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": true,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "f90ed58435720ca8beb3a824c6831a6c",
+    "fbaa23b08788af34b67751149c51393b",
+    "d100dbde75b6c2371ee579094ad333ad"
+  ],
+  "thumbnail": ""
+}

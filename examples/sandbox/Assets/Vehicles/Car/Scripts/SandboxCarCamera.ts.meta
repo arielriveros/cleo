@@ -1,0 +1,199 @@
+{
+  "cleo": 1,
+  "guid": "24fa9abfa9a72492d3fbe8519bc37ec2",
+  "kind": "script",
+  "created": 1795100000000,
+  "record": {
+    "id": "24fa9abfa9a72492d3fbe8519bc37ec2",
+    "name": "SandboxCarCamera",
+    "baseType": "cameraRig",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "chaseArm",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 6.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Framing",
+          "min": 1,
+          "max": 20,
+          "step": 0.1,
+          "tooltip": "The chase framing: how far behind the camera sits (m), and how high over the car's floor it orbits."
+        }
+      },
+      {
+        "name": "chaseHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.6,
+        "hidden": false,
+        "attribute": {
+          "group": "Framing",
+          "min": 0,
+          "max": 5,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "blendSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1.6,
+        "hidden": false,
+        "attribute": {
+          "group": "Switch",
+          "min": 0,
+          "max": 5,
+          "step": 0.05,
+          "tooltip": "Seconds the view takes to ease out to the chase framing once the driver's camera hands over."
+        }
+      },
+      {
+        "name": "returnSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 3.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Switch",
+          "min": 0,
+          "max": 8,
+          "step": 0.05,
+          "tooltip": "Seconds it takes to ease back to the driver's camera while getting out (the clip is longer)."
+        }
+      },
+      {
+        "name": "recentreSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "group": "Chase",
+          "min": 0,
+          "max": 20,
+          "step": 0.1,
+          "tooltip": "Faster than this (m/s), and not looked round for `recentreDelay` seconds, the camera swings back behind."
+        }
+      },
+      {
+        "name": "recentreDelay",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Chase",
+          "min": 0,
+          "max": 5,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "recentreTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.8,
+        "hidden": false,
+        "attribute": {
+          "group": "Chase",
+          "min": 0.05,
+          "max": 5,
+          "step": 0.05,
+          "tooltip": "How quickly it swings back (a time constant, seconds)."
+        }
+      },
+      {
+        "name": "_player",
+        "type": {
+          "kind": "node",
+          "className": "CameraRigNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_mode",
+        "type": {
+          "kind": "choice",
+          "values": [
+            "idle",
+            "in",
+            "out"
+          ]
+        },
+        "access": "private",
+        "default": "idle",
+        "hidden": true
+      },
+      {
+        "name": "_mix",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_fromTarget",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_fromArm",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 3,
+        "hidden": true
+      },
+      {
+        "name": "_fromSocket",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_sinceLook",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

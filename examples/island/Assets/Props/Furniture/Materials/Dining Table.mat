@@ -1,0 +1,33 @@
+{
+  "id": "5e7aa2f3c69429a02d42e91b1efe5afb",
+  "name": "Dining Table",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "1e2e442b1f47e93ac38fbd6c4d8ec991",
+      "metallicRoughnessTexture": "7104677c198d03918a8ca8ea5a337558",
+      "occlusionMap": "7104677c198d03918a8ca8ea5a337558",
+      "normalMap": "826885e254d916a36bb7fd7c62c16944"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "1e2e442b1f47e93ac38fbd6c4d8ec991",
+    "7104677c198d03918a8ca8ea5a337558",
+    "826885e254d916a36bb7fd7c62c16944"
+  ],
+  "thumbnail": ""
+}

@@ -1,0 +1,33 @@
+{
+  "id": "a1248390bc76798c6fb9982c83dc7bd7",
+  "name": "Standing Torch",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "f8f002c64e5bf2a476e266cbea66b612",
+      "metallicRoughnessTexture": "0a229a4ee0548b908742115c1997bffe",
+      "occlusionMap": "0a229a4ee0548b908742115c1997bffe",
+      "normalMap": "0402208b066ade99f6c68f753396d9b9"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "f8f002c64e5bf2a476e266cbea66b612",
+    "0a229a4ee0548b908742115c1997bffe",
+    "0402208b066ade99f6c68f753396d9b9"
+  ],
+  "thumbnail": ""
+}

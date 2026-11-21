@@ -1,0 +1,25 @@
+{
+  "id": "ff0bec303e1b3e9b6fa4db0ec9f3792c",
+  "name": "Lamp Housing",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.9, 0.88, 0.8],
+    "metallic": 0,
+    "roughness": 0.85,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [1, 0.95, 0.8],
+    "emissiveIntensity": 2,
+    "emissiveExposureWeight": 0.1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

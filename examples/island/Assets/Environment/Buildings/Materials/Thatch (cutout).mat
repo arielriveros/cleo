@@ -1,0 +1,35 @@
+{
+  "id": "e98843920a15179a37f7089442d3ff5f",
+  "name": "Thatch (cutout)",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0.5,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "c7016bb32a63bf926a1578bddc692c24",
+      "roughnessMap": "b2055be2a7f9fcd43001ccce043e3f47",
+      "normalMap": "adec1fb4b13d41c567e3d0563002665b",
+      "mask": "a4593868f3aaa4401b30c6972a99e8df"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "c7016bb32a63bf926a1578bddc692c24",
+    "b2055be2a7f9fcd43001ccce043e3f47",
+    "adec1fb4b13d41c567e3d0563002665b",
+    "a4593868f3aaa4401b30c6972a99e8df"
+  ],
+  "thumbnail": ""
+}

@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "3ba285e7e185c9fa47b494c8d4ce3b36",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "3ba285e7e185c9fa47b494c8d4ce3b36",
+    "name": "Knight Plate ARM.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

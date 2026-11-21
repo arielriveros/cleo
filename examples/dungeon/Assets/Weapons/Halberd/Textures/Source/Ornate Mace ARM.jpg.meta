@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "e74da749e0d7d37b2e8666458e37b88d",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "e74da749e0d7d37b2e8666458e37b88d",
+    "name": "Ornate Mace ARM.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

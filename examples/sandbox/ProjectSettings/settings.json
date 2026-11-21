@@ -1,0 +1,63 @@
+{
+  "version": 6,
+  "engine": {
+    "gravity": [0, -9.81, 0],
+    "maxSubsteps": 8,
+    "simulationRange": 0,
+    "physicsWorker": "on",
+    "physicsBackend": "jolt",
+    "maxFrameDelta": 0.1,
+    "masterVolume": 1
+  },
+  "publish": {
+    "title": "",
+    "width": 1280,
+    "height": 720,
+    "fullscreen": false,
+    "resizable": true,
+    "onlyUsedShaders": true,
+    "webgl2Fallback": true
+  },
+  "features": {
+    "disabled": []
+  },
+  "addons": {
+    "enabled": [
+      "mcp-server",
+      "claude-code"
+    ],
+    "settings": {}
+  },
+  "saves": {
+    "version": 0,
+    "folder": ""
+  },
+  "collisionLayers": [
+    "Default",
+    "Ragdoll",
+    "See Through",
+    "No Camera",
+    "Character",
+    "Foot Detail",
+    "Stair Ramp",
+    "Vehicle",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "netsync": {
+    "enabled": false,
+    "tickRate": 30,
+    "maxPeers": 16,
+    "playerTemplate": "",
+    "spawn": [0, 1, 0],
+    "trust": "coop",
+    "allocator": "",
+    "mode": ""
+  }
+}

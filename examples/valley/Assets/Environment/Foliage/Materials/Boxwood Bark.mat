@@ -1,0 +1,46 @@
+{
+  "id": "b255524aa7e51d9fa5991fc6665c75b9",
+  "name": "Boxwood Bark",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.9,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.1,
+    "windStiffness": 1.2,
+    "windRole": "plant",
+    "windFlutter": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "f3dbfae700e90c1c82eed8d7cd5934b2",
+      "metallicRoughnessTexture": "d4420e64b04124aecf7463074542ddda",
+      "occlusionMap": "d4420e64b04124aecf7463074542ddda",
+      "normalMap": "62193aea5f24f883fc2d80613e3db89c"
+    },
+    "interactBend": 0.6,
+    "interactRecovery": 1,
+    "variationHue": 0.03,
+    "variationValue": 0.12,
+    "variationDry": 0.08,
+    "wetResponse": 0.5,
+    "snowCover": 0.6,
+    "weightDroop": 0.3,
+    "rippleSheen": 0.2,
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "f3dbfae700e90c1c82eed8d7cd5934b2",
+    "d4420e64b04124aecf7463074542ddda",
+    "62193aea5f24f883fc2d80613e3db89c"
+  ],
+  "thumbnail": ""
+}

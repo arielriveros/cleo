@@ -1,0 +1,33 @@
+{
+  "id": "41748028253efac1be4e1e52a15ce099",
+  "name": "Moss Rock",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "79f259e1fe97482dd0f37f03174f2a56",
+      "metallicRoughnessTexture": "38a1af7f1ed85c3ff75dc0ae71399903",
+      "occlusionMap": "38a1af7f1ed85c3ff75dc0ae71399903",
+      "normalMap": "0446e94e5537294f4081d82f3af66780"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "79f259e1fe97482dd0f37f03174f2a56",
+    "38a1af7f1ed85c3ff75dc0ae71399903",
+    "0446e94e5537294f4081d82f3af66780"
+  ],
+  "thumbnail": ""
+}

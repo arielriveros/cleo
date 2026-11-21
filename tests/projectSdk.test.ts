@@ -93,7 +93,7 @@ describe('npm test in a project folder', () => {
   it.skipIf(!built || !existsSync(path.join(ROOT, 'dist', 'cleo.d.ts')))('and its tests and scripts type-check (npm run typecheck)', async () => {
     // What the editor writes into the SDK from its bundle: the engine's declaration tree, and the scaffold's tsconfig.
     await cp(path.join(ROOT, 'dist'), path.join(project, '.cleo', 'sdk', 'cleo'), { recursive: true, filter: src => !src.endsWith('package.json') });
-    const { TSCONFIG } = await import('../applications/editor/src/features/projectFolder/scaffold');
+    const { TSCONFIG } = await import('../applications/editor/src/features/projectFolder/scaffoldText');
     await writeFile(path.join(project, 'tsconfig.json'), TSCONFIG);
     await mkdir(path.join(project, '.cleo', 'types'), { recursive: true });
     await writeFile(path.join(project, '.cleo', 'types', 'gl-matrix.d.ts'), await (await import('fs/promises')).readFile(path.join(ROOT, 'applications', 'node_modules', 'gl-matrix', 'index.d.ts'), 'utf8'));
@@ -102,4 +102,50 @@ describe('npm test in a project folder', () => {
     catch (e: any) { out = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
     expect(out).toBe('');
   }, 120_000);
+});
+
+// `openProject`: a whole project's main scene playing headless, through the SDK as a project folder gets it. The
+// project is a copy of the Duskwell example (when its folder and data are here).
+const DUSKWELL = path.join(ROOT, 'examples', 'duskwell');
+const duskwell = existsSync(path.join(DUSKWELL, 'project.cleo')) && existsSync(path.join(DUSKWELL, 'data.lock.json'));
+
+describe('openProject in a project folder', () => {
+  it.skipIf(!built || !duskwell)('plays the project\'s main scene, its models, templates and scripts', async () => {
+    const root = path.join(await mkdtemp(path.join(tmpdir(), 'cleo-sdk-')), 'Duskwell');
+    try {
+      for (const part of ['project.cleo', 'Assets', 'Blobs', 'Baked', 'ProjectSettings'])
+        if (existsSync(path.join(DUSKWELL, part))) await cp(path.join(DUSKWELL, part), path.join(root, part), { recursive: true });
+      await mkdir(path.join(root, 'tests'), { recursive: true });
+      await writeFile(path.join(root, 'tests', 'boot.test.ts'), `import { it, expect } from 'vitest'
+import { openProject, readProject } from 'cleo/testing'
+
+it('opens and plays', async () => {
+  const project = await readProject()
+  expect(project.libraries.scripts.length).toBeGreaterThan(0)
+  const game = await openProject()
+  game.input.setMove(1)
+  game.step(1)
+  expect(game.find('Warrior') ?? game.scene.root.children[0]).toBeTruthy()
+  game.dispose()
+})
+`);
+      await writeFile(path.join(root, 'vitest.config.mjs'), `import { cleoVitest } from 'cleo/testing/vitest'\nexport default cleoVitest()\n`);
+      folder.allow(root);
+      await folder.installSdk(root, { version: '1.0.0', sdkDir: SDK, cliFile: CLI });
+      await symlink(path.join(ROOT, 'node_modules', 'vitest'), path.join(root, 'node_modules', 'vitest'), process.platform === 'win32' ? 'junction' : 'dir');
+      let out = '';
+      let code = 0;
+      try {
+        const res = await exec(process.execPath, [VITEST, 'run', '--root', root], { cwd: root, env: { ...process.env, CI: '1', CLEO_PROJECT: '' }, timeout: 240_000 });
+        out = res.stdout + res.stderr;
+      } catch (e: any) {
+        code = e.code ?? 1;
+        out = `${e.stdout ?? ''}${e.stderr ?? ''}`;
+      }
+      expect(code, out).toBe(0);
+      expect(out).toMatch(/1 passed/);
+    } finally {
+      await rm(path.dirname(root), { recursive: true, force: true }).catch(() => {});
+    }
+  }, 300_000);
 });

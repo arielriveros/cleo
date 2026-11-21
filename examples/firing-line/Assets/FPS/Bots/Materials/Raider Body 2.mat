@@ -1,0 +1,33 @@
+{
+  "id": "27febb8db6e85d8b648b64bd8075960a",
+  "name": "Raider Body 2",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "334cf5313f77bdd369b435e0fbbf6663",
+      "metallicRoughnessTexture": "cdc110f8c630f2e822c7c5958a98a532",
+      "occlusionMap": "cdc110f8c630f2e822c7c5958a98a532",
+      "normalMap": "56c8004aa75f5e33dbd9a3632ecd4d67"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "334cf5313f77bdd369b435e0fbbf6663",
+    "cdc110f8c630f2e822c7c5958a98a532",
+    "56c8004aa75f5e33dbd9a3632ecd4d67"
+  ],
+  "thumbnail": ""
+}

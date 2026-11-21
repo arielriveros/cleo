@@ -1,0 +1,33 @@
+{
+  "id": "45fcc4049f80a742e68e7bf77cf4d26e",
+  "name": "Knight Plate",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "9078ae2cae2bd6a78e5f3cdf8c5862e6",
+      "metallicRoughnessTexture": "3ba285e7e185c9fa47b494c8d4ce3b36",
+      "occlusionMap": "3ba285e7e185c9fa47b494c8d4ce3b36",
+      "normalMap": "43a40d25ade55ed3960fbc27889c8940"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "9078ae2cae2bd6a78e5f3cdf8c5862e6",
+    "3ba285e7e185c9fa47b494c8d4ce3b36",
+    "43a40d25ade55ed3960fbc27889c8940"
+  ],
+  "thumbnail": ""
+}

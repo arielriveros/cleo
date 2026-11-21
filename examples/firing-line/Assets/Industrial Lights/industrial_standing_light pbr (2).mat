@@ -1,0 +1,29 @@
+{
+  "id": "d0f915b296874db1999cc20f162c4f23",
+  "name": "industrial_standing_light pbr",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.397182, 0.342354, 0.130979],
+    "metallic": 0,
+    "roughness": 0.9242533855838397,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {},
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

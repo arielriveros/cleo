@@ -125,13 +125,13 @@ After that the two halves are independent, and you can read either first:
 Two longer documents ship with the engine's example scripts and are worth reading once you have
 something moving. They are written against real, working scenes:
 
-- [Third-person strafe character](../examples/scripts/README.md) — a complete character: camera-relative
+- [Third-person strafe character](scripting/third-person-character.md) — a complete character: camera-relative
   movement, a blend-space locomotion set, turn-in-place, and the physics setup that makes it feel
   right. Includes measured numbers for friction, collider shape and grounding.
-- [Valley](../examples/scripts/SOULS_DEMO.md) — the souls-like example game: stamina combat, rolls,
+- [Dungeon](../examples/dungeon/docs/SOULS_DEMO.md) — the souls-like example game: stamina combat, rolls,
   lock-on, bonfires, levers, breakables and ragdolls on a 2 km landscape with foliage, water and a
   second scene behind a skull cave, plus a guide to swapping in final assets. Its
-  [feature matrix](../examples/scripts/SOULS_FEATURE_MATRIX.md) maps which engine and souls-like
+  [feature matrix](../examples/dungeon/docs/SOULS_FEATURE_MATRIX.md) maps which engine and souls-like
   features it uses and which are missing.
 
 ## A note on what these docs are

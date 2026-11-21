@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "5a90f08d82451e303d1261bfcc19221b__impostor",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "5a90f08d82451e303d1261bfcc19221b__impostor",
+    "name": "Oak Impostor.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

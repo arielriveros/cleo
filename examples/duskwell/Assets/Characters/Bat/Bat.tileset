@@ -1,0 +1,20 @@
+{
+  "id": "29246ba8ba9c1d613f76dd94e570aabc",
+  "name": "Bat",
+  "textureId": "bat.png",
+  "imageWidth": 512,
+  "imageHeight": 448,
+  "tileWidth": 64,
+  "tileHeight": 64,
+  "margin": 0,
+  "spacing": 0,
+  "columns": 8,
+  "rows": 7,
+  "pixelsPerUnit": 16,
+  "tiles": {},
+  "terrains": [],
+  "variantSets": [],
+  "textureIds": [
+    "bat.png"
+  ]
+}

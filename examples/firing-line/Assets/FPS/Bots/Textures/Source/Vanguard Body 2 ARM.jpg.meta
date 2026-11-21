@@ -1,0 +1,35 @@
+{
+  "cleo": 1,
+  "guid": "2579912f8e4b863f98c5abdd41b502e6",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "2579912f8e4b863f98c5abdd41b502e6",
+    "name": "Vanguard Body 2 ARM.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "wrapU": "repeat",
+      "wrapV": "repeat",
+      "wrapW": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "minFilter": "linear",
+      "magFilter": "linear",
+      "anisotropy": 1,
+      "precision": "low",
+      "format": "rgba8unorm",
+      "target": "texture2D"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "cleo": 1,
+  "guid": "efce757ea4000477edc7481b15c38107",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "efce757ea4000477edc7481b15c38107",
+    "name": "FpsMarker",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "kind",
+        "type": {
+          "kind": "choice",
+          "values": [
+            "spawn",
+            "cover"
+          ]
+        },
+        "access": "public",
+        "default": "spawn",
+        "hidden": false,
+        "attribute": {}
+      }
+    ],
+    "reflect": 3
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "id": "65b6c0c65466dc4e01995472389801a2",
+  "name": "Pillar Material",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.104029482235696,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "cracked_concrete_wall_diff_1k.png",
+      "metallicMap": "cracked_concrete_wall_arm_1k.png",
+      "roughnessMap": "cracked_concrete_wall_rough_1k.png",
+      "normalMap": "cracked_concrete_wall_nor_gl_1k.png",
+      "occlusionMap": "cracked_concrete_wall_ao_1k.png",
+      "displacementMap": "cracked_concrete_wall_disp_1k.png"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "cracked_concrete_wall_diff_1k.png",
+    "cracked_concrete_wall_arm_1k.png",
+    "cracked_concrete_wall_rough_1k.png",
+    "cracked_concrete_wall_nor_gl_1k.png",
+    "cracked_concrete_wall_ao_1k.png",
+    "cracked_concrete_wall_disp_1k.png"
+  ],
+  "thumbnail": ""
+}

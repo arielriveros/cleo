@@ -1,0 +1,28 @@
+{
+  "id": "79fd9204bafc6354011adedb5ea284a9",
+  "name": "Car Wheels",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.3,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {
+      "baseColorTexture": "32191a9a87ed8b24975e576d4acad4c3",
+      "normalMap": "9e364eb615e13dde59be59dcc4e6ce38"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "32191a9a87ed8b24975e576d4acad4c3",
+    "9e364eb615e13dde59be59dcc4e6ce38"
+  ],
+  "thumbnail": ""
+}

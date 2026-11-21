@@ -1,0 +1,420 @@
+{
+  "cleo": 1,
+  "guid": "d4c337d97faa6a10486009d4e8120dc2",
+  "kind": "script",
+  "created": 1795100000000,
+  "record": {
+    "id": "d4c337d97faa6a10486009d4e8120dc2",
+    "name": "SandboxGun",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "auto",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {
+          "group": "Firing",
+          "tooltip": "Holding the trigger keeps firing (a rifle); a pistol fires once per pull."
+        }
+      },
+      {
+        "name": "roundsPerMinute",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 420,
+        "hidden": false,
+        "attribute": {
+          "group": "Firing",
+          "min": 30,
+          "max": 1500,
+          "step": 10
+        }
+      },
+      {
+        "name": "range",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 200,
+        "hidden": false,
+        "attribute": {
+          "group": "Firing",
+          "min": 5,
+          "max": 1000,
+          "step": 5,
+          "tooltip": "How far a shot reaches, m."
+        }
+      },
+      {
+        "name": "impulse",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 14,
+        "hidden": false,
+        "attribute": {
+          "group": "Firing",
+          "min": 0,
+          "max": 500,
+          "step": 0.5,
+          "tooltip": "The push a hit gives a dynamic body, newton-seconds: far more than a real bullet's (a rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a ball is not shot away."
+        }
+      },
+      {
+        "name": "maxPushSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Firing",
+          "min": 0,
+          "max": 50,
+          "step": 0.25
+        }
+      },
+      {
+        "name": "aimSpread",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Spread",
+          "min": 0,
+          "max": 20,
+          "step": 0.05,
+          "tooltip": "Spread, degrees from the crosshair at most: aimed, from the hip, and the extra at a run."
+        }
+      },
+      {
+        "name": "hipSpread",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Spread",
+          "min": 0,
+          "max": 20,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "moveSpread",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Spread",
+          "min": 0,
+          "max": 20,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "bloomPerShot",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Spread",
+          "min": 0,
+          "max": 10,
+          "step": 0.05,
+          "tooltip": "Bloom: each shot widens the spread by this, up to `bloomMax`, settling at `bloomRecovery` degrees a second."
+        }
+      },
+      {
+        "name": "bloomMax",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Spread",
+          "min": 0,
+          "max": 20,
+          "step": 0.1
+        }
+      },
+      {
+        "name": "bloomRecovery",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 8,
+        "hidden": false,
+        "attribute": {
+          "group": "Spread",
+          "min": 0,
+          "max": 50,
+          "step": 0.5
+        }
+      },
+      {
+        "name": "recoilPitch",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.6,
+        "hidden": false,
+        "attribute": {
+          "group": "Recoil",
+          "min": 0,
+          "max": 20,
+          "step": 0.05,
+          "tooltip": "The camera's kick per shot, degrees: up, and up to this either way."
+        }
+      },
+      {
+        "name": "recoilYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.4,
+        "hidden": false,
+        "attribute": {
+          "group": "Recoil",
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "kick",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 6,
+        "hidden": false,
+        "attribute": {
+          "group": "Recoil",
+          "min": 0,
+          "max": 30,
+          "step": 0.5,
+          "tooltip": "The weapon's own kick in the hands per shot, degrees up (the aim settles it back)."
+        }
+      },
+      {
+        "name": "passThroughLayers",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "name",
+            "name": "layer"
+          }
+        },
+        "access": "public",
+        "default": [
+          "Stair Ramp"
+        ],
+        "hidden": false,
+        "attribute": {
+          "group": "Hits",
+          "tooltip": "Collision layers a shot passes through, by name, comma separated."
+        }
+      },
+      {
+        "name": "pullBuffer",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {
+          "group": "Firing",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "tooltip": "A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon as it can, if that is within this many seconds."
+        }
+      },
+      {
+        "name": "maxHoles",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 60,
+        "hidden": false,
+        "attribute": {
+          "group": "Hits",
+          "min": 0,
+          "max": 500,
+          "step": 1,
+          "tooltip": "Bullet holes this gun keeps; the oldest goes when there are more."
+        }
+      },
+      {
+        "name": "flashTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "Muzzle Flash",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "impactTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "Bullet Impact",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "holeTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "Bullet Hole",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "tracerTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "Tracer",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "shots",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "lastHit",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_cooldown",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_held",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_queued",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_bloom",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_mask",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_holes",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_missing",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

@@ -260,7 +260,7 @@ whatever velocity a script gives it.
 
 The body owns walking and jumping; a game's own moves are its script's, the way the 3D examples add a roll
 or a lunge over a Character's walking. A dash, a double jump, a wall slide and wall jump, a jump that is
-shorter when the button is let go — Duskwell's warrior has all of them, in `examples/scripts/DuskPlayer.ts`.
+shorter when the button is let go — Duskwell's warrior has all of them, in `examples/duskwell/Assets/Characters/Warrior/Scripts/DuskPlayer.ts`.
 
 They go in the script's `onMove2D(dt, substep)`, which runs every physics substep (1/120 s or shorter),
 before the engine steers, so a move comes out the same at any frame rate. The script reads the body

@@ -1,0 +1,92 @@
+{
+  "cleo": 1,
+  "guid": "962bd30f286d2f3c93402db5033c60c4",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "962bd30f286d2f3c93402db5033c60c4",
+    "name": "FpsFx",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "lifetime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "burstCount",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Particles per child system on start. 0 leaves them to their own spawn rate and bursts."
+        }
+      },
+      {
+        "name": "lightFalloff",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Fade the lights to nothing over `lifetime` (a flash's light falls off fast: this squares it)."
+        }
+      },
+      {
+        "name": "_age",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lights",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_holdsLight",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_intensities",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

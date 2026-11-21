@@ -1,0 +1,62 @@
+{
+  "cleo": 1,
+  "guid": "ef09dbc0a32a18ded4a9db0cbfbc33d8",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "ef09dbc0a32a18ded4a9db0cbfbc33d8",
+    "name": "Message",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "title",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "A message",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "text",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Try rolling.",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hiddenUntilRevealed",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "_gm",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "GameManager"
+        }
+      }
+    ],
+    "reflect": 3
+  }
+}

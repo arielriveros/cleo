@@ -1,0 +1,29 @@
+{
+  "id": "8aa2f149c706ee8d1dd0cc8a3d19251d",
+  "name": "Accent Grid",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.42, 0.55, 0.75],
+    "metallic": 0,
+    "roughness": 0.9,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {
+      "baseColorTexture": "d4a96a210b1af85c70925ceced937cb7"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    },
+    "uvProjection": "box",
+    "uvSpace": "world",
+    "uvWorldSize": 1
+  },
+  "textureIds": [
+    "d4a96a210b1af85c70925ceced937cb7"
+  ],
+  "thumbnail": ""
+}

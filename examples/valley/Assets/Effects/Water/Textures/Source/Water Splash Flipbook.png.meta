@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "32162ff79a6b37b8d558c624bee2aa6d",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "32162ff79a6b37b8d558c624bee2aa6d",
+    "name": "Water Splash Flipbook.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

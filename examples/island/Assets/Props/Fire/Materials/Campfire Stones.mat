@@ -1,0 +1,33 @@
+{
+  "id": "3303221a7d9e18db5ab23758bd9ba0ef",
+  "name": "Campfire Stones",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "65e9a6f1681cf7e6275ad4ab9157e401",
+      "metallicRoughnessTexture": "af169ec320d34b31aa5dc85d78bd216d",
+      "occlusionMap": "af169ec320d34b31aa5dc85d78bd216d",
+      "normalMap": "f2f86e78825fbd91c54a76e92796bc54"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "65e9a6f1681cf7e6275ad4ab9157e401",
+    "af169ec320d34b31aa5dc85d78bd216d",
+    "f2f86e78825fbd91c54a76e92796bc54"
+  ],
+  "thumbnail": ""
+}

@@ -33,7 +33,7 @@ const norm = (s: string) => s.replace(/\r\n/g, '\n').trimEnd()
 /** examples/scripts by the class a file default-exports, and by its base name (a module has no class). */
 function scriptFiles() {
   const byClass = new Map<string, string>(), byBase = new Map<string, string>()
-  for (const f of fs.readdirSync(SCRIPTS).filter(f => f.endsWith('.ts'))) {
+  for (const f of fs.existsSync(SCRIPTS) ? fs.readdirSync(SCRIPTS).filter(f => f.endsWith('.ts')) : []) {
     const source = fs.readFileSync(path.join(SCRIPTS, f), 'utf8')
     const m = DEFAULT_CLASS.exec(source)
     if (m) byClass.set(m[1], source)
@@ -76,7 +76,7 @@ function refreshScripts(bundle: any): number {
 
 for (const name of fs.readdirSync(EXAMPLES)) {
   const dir = path.join(EXAMPLES, name)
-  if (!fs.statSync(dir).isDirectory() || !fs.existsSync(path.join(dir, 'manifest.json'))) continue
+  if (!fs.statSync(dir).isDirectory() || !fs.existsSync(path.join(dir, 'project.cleo'))) continue
   if (only.length && !only.includes(name)) continue
   const bundle: any = await read(dir)
   const lib = bundle.libraries

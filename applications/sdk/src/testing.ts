@@ -26,6 +26,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { CleoEngine, InputSystem, Scene, parseNodeJson, setScriptModuleSources, resetScriptModules } from 'cleo'
 import type { Node } from 'cleo'
+import { folderToBundle } from '../../editor/src/utils/folder/projectCodec'
+import { hashOfBlobRel, isDataRel } from '../../editor/src/utils/folder/layout'
+import { settleScriptCopies } from '../../editor/src/utils/folder/scriptCopies'
+import { projectGameData } from '../../editor/src/features/publish/projectGameData'
+import { packGameBin } from '../../editor/src/features/publish/pack'
+import { HostRuntime } from '../../host/src/hostRuntime'
 
 /** The project folder: CLEO_PROJECT, else the nearest folder up from the working directory with project.cleo. */
 export function projectRoot(): string {
@@ -94,7 +100,8 @@ export function scriptSource(spec: string): string {
 /**
  * Scripted input: what `Input.pressed(...)`, `started(...)` and `vector(...)` read in a script, and what a
  * Player Controller reads. A press is a STARTED edge for exactly one frame (the world's `step` ends frames),
- * held until released — the input system's own contract.
+ * held until released — the input system's own contract. That frame the press is also among the frame's
+ * changes, so an `@onAction` method (and a node's `onAction`) gets it.
  */
 export interface FakeInput {
   /** The move vector (x right, y up) every action named as a move action reads. */
@@ -118,6 +125,14 @@ export function fakeInput(moveActions: string | string[] = 'Move'): FakeInput {
   sys.vector = (action: string) => (moves.has(action) ? [move[0], move[1]] : [0, 0])
   sys.pressed = (action: string) => held.has(action)
   sys.started = (action: string) => edges.has(action)
+  // The frame's action changes, which the scene hands to `@onAction` methods: an own getter over the class's.
+  Object.defineProperty(sys, 'changedThisFrame', {
+    configurable: true,
+    get: () => [...edges].map(action => ({
+      map: '', action,
+      state: { ...InputSystem.idle('button'), value: 1, pressed: true, started: true, phase: 'performed', device: 'key' },
+    })),
+  })
   return {
     setMove(x, y = 0) { move[0] = x; move[1] = y },
     press(action) { if (!held.has(action)) edges.add(action); held.add(action) },
@@ -128,7 +143,10 @@ export function fakeInput(moveActions: string | string[] = 'Move'): FakeInput {
       for (const action of tapped) held.delete(action)
       tapped.clear()
     },
-    restore() { sys.vector = original.vector; sys.pressed = original.pressed; sys.started = original.started },
+    restore() {
+      sys.vector = original.vector; sys.pressed = original.pressed; sys.started = original.started
+      delete sys.changedThisFrame
+    },
   }
 }
 
@@ -224,4 +242,127 @@ export function createTestWorld(options: { moveActions?: string | string[] } = {
 export function resetProjectScripts(): void {
   registered = null
   resetScriptModules()
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The whole project
+// ---------------------------------------------------------------------------------------------------
+
+/** The folders a project's content lives in (everything else at its root is tooling, tests and docs). */
+const CONTENT_ROOTS = ['Assets', 'Derived', 'Baked', 'Blobs', 'ProjectSettings']
+
+/**
+ * The project folder read the way the editor opens it (the project-folder codec), as a bundle: its manifest,
+ * scenes, libraries (materials, templates, scripts…), explorer tree, images, sounds and bakes. A scene node
+ * that runs a script carries the script's source, as Play gives it.
+ *
+ *   const project = await readProject()
+ *   const hero = project.libraries.templates.find(t => t.name === 'Hero')
+ */
+export async function readProject(root = projectRoot()): Promise<any> {
+  const files = new Map<string, string | Uint8Array>()
+  const blobs = new Map<string, Uint8Array>()
+  const dirs = ['Assets']
+  const walk = (rel: string) => {
+    let items: fs.Dirent[] = []
+    try { items = fs.readdirSync(path.join(root, rel), { withFileTypes: true }) } catch { return }
+    for (const item of items) {
+      if (item.name.startsWith('.')) continue
+      const r = `${rel}/${item.name}`
+      if (item.isDirectory()) { if (r.startsWith('Assets/')) dirs.push(r); walk(r); continue }
+      const abs = path.join(root, ...r.split('/'))
+      const hash = hashOfBlobRel(r)
+      if (hash) blobs.set(hash, new Uint8Array(fs.readFileSync(abs)))
+      else files.set(r, isDataRel(r) ? new Uint8Array(fs.readFileSync(abs)) : fs.readFileSync(abs, 'utf-8'))
+    }
+  }
+  if (fs.existsSync(path.join(root, 'project.cleo'))) files.set('project.cleo', fs.readFileSync(path.join(root, 'project.cleo'), 'utf-8'))
+  for (const top of CONTENT_ROOTS) walk(top)
+  const read = await folderToBundle({ files, dirs, blobs })
+  if (read.blocked.length)
+    throw new Error(`cleo/testing: ${read.blocked.length} file(s) of the project cannot be read: ${read.blocked.slice(0, 3).map(b => `${b.rel} (${b.message})`).join('; ')}`)
+  settleScriptCopies(read.bundle as any, { fill: true })
+  return read.bundle
+}
+
+/** A project's game, running headless (see {@link openProject}). */
+export interface TestGame {
+  /** The running game: its engine, its scene switching, its tick statistics. */
+  runtime: HostRuntime
+  /** The scene playing now. */
+  readonly scene: Scene
+  input: FakeInput
+  /** Advance `seconds` of game time, a tick at a time (`each` runs before every tick). */
+  step(seconds?: number, each?: () => void): void
+  /** A node of the scene playing now, by its name. */
+  find<T extends Node = Node>(name: string): (T & Record<string, any>) | undefined
+  /** Switch to another scene of the project, by name or id, as Game.loadScene does. */
+  loadScene(nameOrId: string): Promise<void>
+  dispose(): void
+}
+
+export interface OpenProjectOptions {
+  /** The project folder (default: projectRoot()). */
+  root?: string
+  /** The scene to start in, by name or id (default: the project's main scene). */
+  scene?: string
+  /** Simulation rate, Hz (default 60). */
+  tickRate?: number
+  /** Physics backend ('jolt', 'rapier', 'cannon'; default: the project's). */
+  physicsBackend?: string
+  /** Change the game data before it is loaded (a test raising a match's bot count, say). */
+  edit?: (data: Record<string, any>) => void
+  /** The vector actions `input.setMove` sets (default 'Move'). */
+  moveActions?: string | string[]
+  /** Keep the engine's log on (default on: a test wants to see a script's error). */
+  logging?: boolean
+}
+
+/**
+ * The whole project, playing: its main scene (or `scene`) loaded on the headless engine the way a published game
+ * loads — every model with its animator and clips (no GPU), templates, scripts and their imports, physics, AI —
+ * and stepped tick by tick.
+ *
+ *   const game = await openProject()
+ *   game.input.setMove(0, 1)
+ *   game.step(2)
+ *   expect(game.find('Player')!.worldPosition[2]).toBeLessThan(-1)
+ *   game.dispose()
+ */
+export async function openProject(options: OpenProjectOptions = {}): Promise<TestGame> {
+  const bundle = await readProject(options.root)
+  const data = projectGameData(bundle, { physicsBackend: options.physicsBackend, edit: options.edit })
+  const tickRate = options.tickRate ?? 60
+  const runtime = await HostRuntime.open({ bin: new Uint8Array(packGameBin(data).buffer) }, {
+    tickRate,
+    physicsBackend: options.physicsBackend,
+    logging: options.logging !== false,
+    // Single-player detail: every agent perceives every tick, every animator poses every tick.
+    aiDetail: { perceiveEvery: 1, probeEvery: 1 },
+    animationLod: false,
+  })
+  if (options.scene) await runtime.loadScene(options.scene)
+  const input = fakeInput(options.moveActions)
+  const game: TestGame = {
+    runtime,
+    get scene() { return runtime.scene },
+    input,
+    step(seconds = 1 / tickRate, each) {
+      const ticks = Math.max(1, Math.round(seconds * tickRate))
+      for (let i = 0; i < ticks; i++) {
+        each?.()
+        runtime.step(1)
+        input.endFrame()
+      }
+    },
+    find(name) {
+      let found: any
+      const visit = (node: any) => { if (found) return; if (node.name === name) { found = node; return } for (const c of node.children ?? []) visit(c) }
+      visit(runtime.scene.root)
+      return found
+    },
+    loadScene: (nameOrId) => runtime.loadScene(nameOrId),
+    dispose() { input.restore(); runtime.dispose() },
+  }
+  return game
 }

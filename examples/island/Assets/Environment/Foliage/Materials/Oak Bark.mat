@@ -1,0 +1,46 @@
+{
+  "id": "7d9f2727ac542a786327b6f549621309",
+  "name": "Oak Bark",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.04,
+    "windStiffness": 2,
+    "windRole": "plant",
+    "windFlutter": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "9830056a29db1e95011156f0f10bf759",
+      "metallicRoughnessTexture": "655da806949b22cac739f98603c4c540",
+      "occlusionMap": "655da806949b22cac739f98603c4c540",
+      "normalMap": "3361f83159183c213d1637cfbf86bc64"
+    },
+    "interactBend": 0.05,
+    "interactRecovery": 1,
+    "variationHue": 0.03,
+    "variationValue": 0.12,
+    "variationDry": 0.05,
+    "wetResponse": 0.5,
+    "snowCover": 0.6,
+    "weightDroop": 0.08,
+    "rippleSheen": 0.15,
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "9830056a29db1e95011156f0f10bf759",
+    "655da806949b22cac739f98603c4c540",
+    "3361f83159183c213d1637cfbf86bc64"
+  ],
+  "thumbnail": ""
+}

@@ -1,0 +1,44 @@
+{
+  "id": "015e40ae9861294ab52e707504a2f774",
+  "name": "Asphalt",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.96,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.045,
+    "depthSpace": "uv",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "uvProjection": "box",
+    "uvSpace": "world",
+    "uvWorldSize": 7.76,
+    "textures": {
+      "baseColorTexture": "concrete_floor_damaged_01_diff_1k.png",
+      "metallicMap": "concrete_floor_damaged_01_arm_1k.png",
+      "roughnessMap": "concrete_floor_damaged_01_rough_1k.png",
+      "normalMap": "concrete_floor_damaged_01_nor_gl_1k.png",
+      "occlusionMap": "concrete_floor_damaged_01_ao_1k.png"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "concrete_floor_damaged_01_diff_1k.png",
+    "concrete_floor_damaged_01_arm_1k.png",
+    "concrete_floor_damaged_01_rough_1k.png",
+    "concrete_floor_damaged_01_nor_gl_1k.png",
+    "concrete_floor_damaged_01_ao_1k.png"
+  ],
+  "thumbnail": ""
+}

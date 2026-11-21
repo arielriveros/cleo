@@ -1,0 +1,36 @@
+{
+  "id": "4164824d43cd2c3ee990ae6c39d36f7b",
+  "name": "WarehouseWindow",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "beb7862cb18fb5323faeb48d54bc22d2",
+      "metallicMap": "65f8c2eb296c507a9a1a9bdef40642dc",
+      "roughnessMap": "65f8c2eb296c507a9a1a9bdef40642dc"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": true,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "beb7862cb18fb5323faeb48d54bc22d2",
+    "65f8c2eb296c507a9a1a9bdef40642dc"
+  ],
+  "thumbnail": ""
+}

@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "0bce23a90a1e3d769b2c0e0cdfae8afe",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "0bce23a90a1e3d769b2c0e0cdfae8afe",
+    "name": "Bonfire Fire Animation.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-// The Valley's input map: a free-flying camera (examples/scripts/ValleyFlyCamera.ts), keyboard + mouse and a
+// The Valley's input map: a free-flying camera (examples/valley/Assets/Environment/Scripts/Fly Camera.ts), keyboard + mouse and a
 // standard gamepad. Written into the example as `libraries/inputMap.json`, which the editor installs as the
 // project's input map on import.
 //
@@ -64,7 +64,7 @@ export const FLY_INPUT_MAP = {
         },
       ],
     },
-    // The start menu's (examples/scripts/ValleyStartMenu.ts): pick Cinematic demo or Free mode, and Pause to
+    // The start menu's (examples/valley/Assets/Cinematic/Scripts/Start Menu.ts): pick Cinematic demo or Free mode, and Pause to
     // come back to it. Its own map, so the menu still answers while Gameplay is switched off.
     {
       name: 'UI',

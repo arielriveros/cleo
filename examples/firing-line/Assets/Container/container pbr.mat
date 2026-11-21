@@ -1,0 +1,39 @@
+{
+  "id": "caf1a9ac412dabc0ccb8f720d53acb7b",
+  "name": "container pbr",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "ccaf800f-5880-4de5-aa1c-5b3ed6093d70",
+      "metallicMap": "b4eae769-f5c8-4622-99ee-423c8b4456ff",
+      "roughnessMap": "b4eae769-f5c8-4622-99ee-423c8b4456ff",
+      "normalMap": "8457dbb7-dcf0-4e48-98fa-5d8da27d422e",
+      "occlusionMap": "b4eae769-f5c8-4622-99ee-423c8b4456ff"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "ccaf800f-5880-4de5-aa1c-5b3ed6093d70",
+    "b4eae769-f5c8-4622-99ee-423c8b4456ff",
+    "8457dbb7-dcf0-4e48-98fa-5d8da27d422e"
+  ],
+  "thumbnail": ""
+}

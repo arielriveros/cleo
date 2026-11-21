@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "78155ec7649e83f84898c90f0efc0366",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "78155ec7649e83f84898c90f0efc0366",
+    "name": "Well Rope Normal.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "4fef8ef076d15cd7a179629e04e319aa",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "4fef8ef076d15cd7a179629e04e319aa",
+    "name": "Tall Grass Blades.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

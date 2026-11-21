@@ -1,0 +1,37 @@
+{
+  "id": "925f07da7537fcd1aceb09f548a026ce",
+  "name": "Shore Sand",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "uv",
+    "textures": {
+      "baseColorTexture": "10b5a5479ed26c77f2907f02af1cdedd",
+      "metallicRoughnessTexture": "6a937e02d58f46ebb3324664f425526e",
+      "occlusionMap": "6a937e02d58f46ebb3324664f425526e",
+      "normalMap": "89e87b4e34cfac27051d805f2570ffbb",
+      "displacementMap": "79c5e94ea23703c7b4fd36898053631f"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "10b5a5479ed26c77f2907f02af1cdedd",
+    "6a937e02d58f46ebb3324664f425526e",
+    "89e87b4e34cfac27051d805f2570ffbb",
+    "79c5e94ea23703c7b4fd36898053631f"
+  ],
+  "thumbnail": ""
+}

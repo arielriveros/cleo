@@ -1,0 +1,37 @@
+{
+  "id": "18e9392006c9f94bb86f567994ead436",
+  "name": "Rocky Dirt",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "uv",
+    "textures": {
+      "baseColorTexture": "5cae15bc22226bb06b79f1f304373e59",
+      "metallicRoughnessTexture": "851d88bab6360de2902ce1a78a5787b9",
+      "occlusionMap": "851d88bab6360de2902ce1a78a5787b9",
+      "normalMap": "55c465a54f84ff505c93ee9eb7612e1d",
+      "displacementMap": "b65e90662d38185c5738bfcba570fa64"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "5cae15bc22226bb06b79f1f304373e59",
+    "851d88bab6360de2902ce1a78a5787b9",
+    "55c465a54f84ff505c93ee9eb7612e1d",
+    "b65e90662d38185c5738bfcba570fa64"
+  ],
+  "thumbnail": ""
+}

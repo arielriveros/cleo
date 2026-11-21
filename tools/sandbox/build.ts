@@ -32,7 +32,7 @@ import { KIND_EXT } from '../../applications/editor/src/utils/vfs'
 import { SCENE_REFS_VERSION } from '../../applications/editor/src/utils/references'
 import { TextureSet, stableId, writeJson, vars } from '../exampleKit/bundle.mjs'
 import { applyNodeFields } from '../exampleKit/nodeFields.mjs'
-import { packFormat2 } from '../exampleKit/packFormat2.mjs'
+import { scriptSourceAt, writeExampleFromStaging } from '../exampleKit/folder.mjs'
 import { templatizeScene, templatizeSubtree } from '../exampleKit/templatize'
 import { mergeStaticColliders } from '../exampleKit/mergeColliders'
 import { ALL_LAYERS, DEFAULT_LAYER_NAMES, LAYER } from '../../src/physics/collisionLayers'
@@ -64,13 +64,14 @@ const ROOT = path.resolve(HERE, '..', '..')
 const INPUTS_FLAG = process.argv.indexOf('--inputs')
 const INPUTS = INPUTS_FLAG >= 0 && process.argv[INPUTS_FLAG + 1] ? path.resolve(process.argv[INPUTS_FLAG + 1]) : ROOT
 const PREPARED = path.join(INPUTS, 'build', 'sandbox_prepared')
-// `--out <folder>`: write the bundle there instead (for building beside a dev server that watches the examples:
-// this removes the folder it writes and rebuilds it, which can crash Vite's watcher; copy the files that changed).
+// The example's project folder, examples/sandbox/: written through a format-1 staging tree in build/staging/
+// (tools/exampleKit/folder.mjs writeExampleFromStaging). Its scripts are the folder's own .ts files: edit them there.
+// `--out <folder>`: write the project folder there instead (a scratch copy to compare; the scripts still come
+// from examples/sandbox/).
+const HOME = path.join(ROOT, 'examples', 'sandbox')
 const OUT_FLAG = process.argv.indexOf('--out')
-const OUT = OUT_FLAG >= 0 && process.argv[OUT_FLAG + 1]
-    ? path.resolve(process.argv[OUT_FLAG + 1])
-    : path.join(ROOT, 'applications', 'editor', 'public', 'examples', 'sandbox')
-const SCRIPTS = path.join(ROOT, 'examples', 'scripts')
+const DEST = OUT_FLAG >= 0 && process.argv[OUT_FLAG + 1] ? path.resolve(process.argv[OUT_FLAG + 1]) : HOME
+const OUT = path.join(ROOT, 'build', 'staging', 'sandbox')
 const PROJECT = 'Sandbox'
 const CREATED_AT = 1795100000000
 const id = (key: string) => stableId('sandbox:' + key)
@@ -605,18 +606,18 @@ function shotEffectTemplates() {
 // Scripts
 // =====================================================================================================
 
-const playerSource = fs.readFileSync(path.join(SCRIPTS, 'SandboxPlayer.ts'), 'utf8')
+const playerSource = scriptSourceAt(HOME, '/Characters/Mannequin/Scripts/SandboxPlayer.script')
 const playerScript = { id: id('script:SandboxPlayer'), name: 'SandboxPlayer', baseType: 'character', source: playerSource, kind: 'class', variables: parseScriptVariables(playerSource) }
-const cameraSource = fs.readFileSync(path.join(SCRIPTS, 'SandboxCamera.ts'), 'utf8')
+const cameraSource = scriptSourceAt(HOME, '/Characters/Mannequin/Scripts/SandboxCamera.script')
 const cameraScript = { id: id('script:SandboxCamera'), name: 'SandboxCamera', baseType: 'cameraRig', source: cameraSource, kind: 'class', variables: parseScriptVariables(cameraSource) }
-const carSource = fs.readFileSync(path.join(SCRIPTS, 'SandboxCar.ts'), 'utf8')
+const carSource = scriptSourceAt(HOME, '/Vehicles/Car/Scripts/SandboxCar.script')
 const carScript = { id: id('script:SandboxCar'), name: 'SandboxCar', baseType: 'collider', source: carSource, kind: 'class', variables: parseScriptVariables(carSource) }
-const carCameraSource = fs.readFileSync(path.join(SCRIPTS, 'SandboxCarCamera.ts'), 'utf8')
+const carCameraSource = scriptSourceAt(HOME, '/Vehicles/Car/Scripts/SandboxCarCamera.script')
 const carCameraScript = { id: id('script:SandboxCarCamera'), name: 'SandboxCarCamera', baseType: 'cameraRig', source: carCameraSource, kind: 'class', variables: parseScriptVariables(carCameraSource) }
-const managerSource = fs.readFileSync(path.join(SCRIPTS, 'SandboxGameManager.ts'), 'utf8')
+const managerSource = scriptSourceAt(HOME, '/Level/Scripts/SandboxGameManager.script')
 const managerScript = { id: id('script:SandboxGameManager'), name: 'SandboxGameManager', baseType: 'node', source: managerSource, kind: 'class', variables: parseScriptVariables(managerSource) }
 const scriptOf = (name: string, baseType: string) => {
-    const source = fs.readFileSync(path.join(SCRIPTS, `${name}.ts`), 'utf8')
+    const source = scriptSourceAt(HOME, `/Weapons/Scripts/${name}.script`)
     return { id: id('script:' + name), name, baseType, source, kind: 'class', variables: parseScriptVariables(source) }
 }
 // The guns, and their effects' lifetimes.
@@ -1374,13 +1375,9 @@ async function main() {
         for (let i = 1; i < parts.length; i++) dirs.add('/' + parts.slice(0, i).join('/'))
     }
     writeJson(path.join(OUT, 'vfs.json'), { version: 1, folders: [...dirs].sort(), entries })
-    writeJson(path.join(OUT, 'example.json'), {
-        name: PROJECT,
-        description: 'A locomotion sandbox in the style of Advanced Locomotion System v4: a mannequin that walks and jogs in eight directions facing the camera, sprints freely, sets off, stops and turns round with their own clips, leans into curves, turns in place when you look away, jumps, falls and lands soft or hard, climbs stairs, with its feet planted and locked by IK on ramps, stairs and bumps. And a car to get into (E by the driver\'s door) and drive on the vehicle simulation. A pistol and a rifle to carry, aim and fire (Q, right mouse, left mouse), held over the walk by a layer each, their shots raycasts that push what they hit. All of it is the animator, the Character, Controller and Vehicle nodes and a few input-only scripts. Car model: "Dirty car" by 3D Error 404 (CC-BY-4.0). Weapons: "Low-Poly G40" and "Low-Poly M4a1" by TastyTony (CC-BY-4.0).',
-        order: 5,
-    })
-    const largest = await packFormat2(OUT)
-    console.log(`Sandbox written: ${animations.length} clips, ${textureCount} textures, ${machine.states.length} states, ${machine.transitions.length} transitions; largest file ${(largest / 1048576).toFixed(1)} MB`)
+    // The gallery's prose (name, description, order) is the folder's example.json; the folder is the example.
+    const stats = await writeExampleFromStaging(OUT, DEST)
+    console.log(`Sandbox written to ${path.relative(ROOT, DEST)}: ${animations.length} clips, ${textureCount} textures, ${machine.states.length} states, ${machine.transitions.length} transitions; ${stats.written.length} file(s) changed, ${stats.deleted.length} deleted`)
     for (const w of warnings) console.log('warning: ' + w)
 }
 

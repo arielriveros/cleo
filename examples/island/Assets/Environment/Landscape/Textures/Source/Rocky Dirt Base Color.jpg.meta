@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "5cae15bc22226bb06b79f1f304373e59",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "5cae15bc22226bb06b79f1f304373e59",
+    "name": "Rocky Dirt Base Color.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

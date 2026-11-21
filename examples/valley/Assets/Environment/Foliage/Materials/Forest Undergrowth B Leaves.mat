@@ -1,0 +1,48 @@
+{
+  "id": "d170faf364d3daf1608d57f320865fe1",
+  "name": "Forest Undergrowth B Leaves",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.7,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.22,
+    "windStiffness": 1.2,
+    "windRole": "leaves",
+    "windFlutter": 0.5,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "487769d958b23d20eb6b6173df50f66d",
+      "normalMap": "e214d37466a6a33c694bad3ff767d36a"
+    },
+    "alphaCutoff": 0.5,
+    "translucency": 0.5,
+    "translucencyTint": [0.66, 0.72, 0.14, 0.35],
+    "interactBend": 0.6,
+    "interactRecovery": 1,
+    "variationHue": 0.03,
+    "variationValue": 0.12,
+    "variationDry": 0.08,
+    "wetResponse": 0.5,
+    "snowCover": 0.6,
+    "weightDroop": 0.3,
+    "rippleSheen": 0.2,
+    "leafFlip": 0.35,
+    "undersideColor": [0.62, 0.7, 0.5],
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "487769d958b23d20eb6b6173df50f66d",
+    "e214d37466a6a33c694bad3ff767d36a"
+  ],
+  "thumbnail": ""
+}
