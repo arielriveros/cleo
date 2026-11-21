@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AnimatedSpriteNode, SpriteFrameSource } from 'cleo';
+import { AnimatedSpriteNode, SpriteFrameSource, SpriteNode } from 'cleo';
+import { DeclaredSection } from '../../properties/DeclaredSections';
 import Collapsable from '@cleo/app-kit/ui/Collapsable';
 import TilesetSlot, { tilesetAssetOf } from './TilesetSlot';
 import SpriteAppearance from './SpriteAppearance';
@@ -138,28 +139,13 @@ export default function SpriteSheetEditor() {
             </Section>
           )}
 
-          {frameSource === 'node' && (
-            <Section title='Playback'>
-              <PropertyTable columns={['45%', '55%']}>
-                <PropertyRow label='Frames per second'>
-                  <NumberInput min={0.01} step={1} value={fps} onChange={(v) => {
-                    const f = Math.max(0.01, v); node.fps = f; setFps(f); changed();
-                  }} />
-                </PropertyRow>
-                <PropertyRow label='Loop'>
-                  <Toggle checked={loop} onChange={(c) => { node.loop = c; setLoop(c); changed() }} />
-                </PropertyRow>
-                <PropertyRow label='Random start' divider={false}>
-                  <Toggle checked={randomStart} onChange={(c) => { node.randomStart = c; setRandomStart(c); changed() }} />
-                </PropertyRow>
-              </PropertyTable>
-              {frames.length > 0 && (
-                <Hint className='mt-1'>
-                  {frames.length} frame{frames.length === 1 ? '' : 's'} at {fps} fps — {(frames.length / Math.max(0.01, fps)).toFixed(2)} s per {loop ? 'loop' : 'play'}.
-                </Hint>
-              )}
-            </Section>
-          )}
+          <DeclaredSection node={node} of={AnimatedSpriteNode} title='Playback'>
+            {frames.length > 0 && (
+              <Hint className='mt-1'>
+                {frames.length} frame{frames.length === 1 ? '' : 's'} at {node.fps} fps — {(frames.length / Math.max(0.01, node.fps)).toFixed(2)} s per {node.loop ? 'loop' : 'play'}.
+              </Hint>
+            )}
+          </DeclaredSection>
 
           {frameSource === 'tile' && tileAnimation && (
             // The tile's rate is the TILESET's (shared by every sprite on that tile); a value typed here
@@ -188,15 +174,7 @@ export default function SpriteSheetEditor() {
             </Section>
           )}
 
-          <Field label='Constraints' className='mt-2'>
-            <Select value={node.constraints} onChange={(e) => {
-              node.constraints = e.target.value as any; changed(); bump(x => x + 1);
-            }}>
-              <option value='free'>Free</option>
-              <option value='spherical'>Spherical</option>
-              <option value='cylindrical'>Cylindrical</option>
-            </Select>
-          </Field>
+          <div className='mt-2'><DeclaredSection node={node} of={SpriteNode} title='' /></div>
         </div>
       </Collapsable>
 

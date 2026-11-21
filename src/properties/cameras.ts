@@ -16,7 +16,7 @@ export function rigOfCamera(node: Node): CameraRigNode | null {
 const perspective = (n: CameraNode) => n.camera.type === 'perspective';
 const ortho = (n: CameraNode) => n.camera.type === 'orthographic';
 /** Not the node itself, nor what is under it: a camera focusing on its own rig's child, a rig following its camera. */
-const outside = (n: Node, candidate: Node) => candidate !== n && !candidate.isDescendantOf(n);
+const outside = <T extends Node>(n: T, candidate: Node) => candidate !== n && !candidate.isDescendantOf(n);
 
 declareProperties(CameraNode, 'Camera', [
     { title: '', props: [

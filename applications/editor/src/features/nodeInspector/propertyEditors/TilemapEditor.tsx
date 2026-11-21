@@ -1,111 +1,35 @@
-import { useState } from 'react'
 import { TilemapNode } from 'cleo'
-import type { GridKind, HexOffset, HexOrientation } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { TilemapIcon } from '../../sceneInspector/nodeIcons'
-import { DocScope, Field, NumberInput, Select, Toggle } from '@cleo/app-kit/ui'
+import { DocScope, PropertyRow, PropertyTable, Select } from '@cleo/app-kit/ui'
 import { useCleoEngine } from '../../EngineContext'
+import DeclaredSections, { useNodeTick } from '../../properties/DeclaredSections'
 
 // Node inspector for a TilemapNode: the grid layout every cell coordinate is interpreted through, plus the
-// two map-wide settings that are not per-layer (which layer sprites sort against, and how deep colliders are).
+// map-wide settings that are not per-layer. Its rows are the tilemap's declared properties
+// (src/properties/sprites.ts); the entity layer, picked from the map's own layers, is the card's.
 
 export default function TilemapEditor(props: { node: TilemapNode }) {
   const { eventEmitter } = useCleoEngine()
-  const [, force] = useState(0)
+  useNodeTick(props.node)
   const tilemap = props.node.tilemap
-  const grid = tilemap.grid
-
-  const commit = () => { eventEmitter.emit('SCENE_CHANGED'); force(x => x + 1) }
-  const setGrid = (patch: Partial<typeof grid>) => { tilemap.setGrid({ ...grid, ...patch }); commit() }
 
   return (
     <DocScope page='editor/tilemap-2d'>
     <Collapsable title='Tilemap' icon={<TilemapIcon />} persistKey='node.tilemap' defaultOpen>
-      <div className='p-2 space-y-2'>
-        <Field className='my-0' labelClassName='w-auto' label='Grid' hint='How a cell coordinate is laid out. Isometric here is a screen-space diamond on the XY plane, not a 3D projection.'>
-          <Select
-            className='w-28'
-            value={grid.kind}
-            onChange={(e) => setGrid({ kind: e.target.value as GridKind })}
-          >
-            <option value='orthogonal'>Orthogonal</option>
-            <option value='isometric'>Isometric</option>
-            <option value='hexagonal'>Hexagonal</option>
-          </Select>
-        </Field>
-
-        <Field className='my-0' labelClassName='w-auto' label='Cell size' hint='World size of one cell’s bounding box'>
-          <span className='flex gap-1'>
-            <NumberInput className='w-14' value={grid.cellWidth} step={0.1} min={0.01}
-              onChange={(v) => setGrid({ cellWidth: Math.max(0.01, v) })} />
-            <NumberInput className='w-14' value={grid.cellHeight} step={0.1} min={0.01}
-              onChange={(v) => setGrid({ cellHeight: Math.max(0.01, v) })} />
-          </span>
-        </Field>
-
-        {grid.kind === 'hexagonal' && (
-          <>
-            <Field className='my-0' labelClassName='w-auto' label='Orientation'>
-              <Select
-                className='w-28'
-                value={grid.hexOrientation}
-                onChange={(e) => setGrid({ hexOrientation: e.target.value as HexOrientation })}
-              >
-                <option value='pointy'>Pointy top</option>
-                <option value='flat'>Flat top</option>
-              </Select>
-            </Field>
-            <Field className='my-0' labelClassName='w-auto' label='Offset' hint='Which line gets the half-cell shove'>
-              <Select
-                className='w-28'
-                value={grid.hexOffset}
-                onChange={(e) => setGrid({ hexOffset: e.target.value as HexOffset })}
-              >
-                {grid.hexOrientation === 'pointy'
-                  ? <><option value='odd-r'>Odd rows</option><option value='even-r'>Even rows</option></>
-                  : <><option value='odd-q'>Odd columns</option><option value='even-q'>Even columns</option></>}
-              </Select>
-            </Field>
-            <Field className='my-0' labelClassName='w-auto' label='Side length' hint='Length of the hexagon’s two axis-aligned sides'>
-              <NumberInput className='w-16' value={grid.hexSideLength} step={0.05} min={0.01}
-                onChange={(v) => setGrid({ hexSideLength: Math.max(0.01, v) })} />
-            </Field>
-          </>
-        )}
-
-        <Field className='my-0 pt-1' labelClassName='w-auto' label='Entity layer' hint='Sprites join this layer’s draw band when they depth-sort'>
-          <Select
-            className='w-28'
-            value={tilemap.entityLayer}
-            onChange={(e) => { tilemap.entityLayer = Number(e.target.value); commit() }}
-          >
-            {tilemap.layers.map((l, i) => <option key={i} value={i}>{l.cfg.name}</option>)}
-          </Select>
-        </Field>
-
-        <Field className='my-0' labelClassName='w-auto' label='Sprite order' hint='How sprites order on the entity layer. By Y suits a top-down map: lower on screen draws in front. Side view suits a platformer: sprites draw over the layer’s tiles, by sorting order and then scene order, never by height.'>
-          <Select
-            className='w-28'
-            value={tilemap.entitySort}
-            onChange={(e) => { tilemap.entitySort = e.target.value === 'none' ? 'none' : 'y'; commit() }}
-          >
-            <option value='y'>By Y</option>
-            <option value='none'>Side view</option>
-          </Select>
-        </Field>
-
-        <Field className='my-0' labelClassName='w-auto' label='3D colliders' hint='Build 3D physics boxes from the solid tiles, for 3D bodies on the XY plane. Off for a map only 2D character bodies walk on: they read its tiles directly.'>
-          <Toggle checked={tilemap.colliders3D} onChange={(c) => { tilemap.colliders3D = c; commit() }} />
-        </Field>
-
-        <Field className='my-0' labelClassName='w-auto' label='Collision depth' hint='Half-depth along Z given to generated colliders. Only square grids merge their solid cells into large collider boxes; isometric and hexagonal maps emit one convex prism per solid cell.'>
-          <NumberInput className='w-16' value={tilemap.collisionDepth} step={0.1} min={0.01}
-            onChange={(v) => { tilemap.collisionDepth = Math.max(0.01, v); commit() }} />
-        </Field>
-
-        <Field className='my-0 pt-1' labelClassName='w-auto' label='Layers'>
-          <span className='text-ui-sm text-muted'>{tilemap.layers.length}</span>
-        </Field>
+      <div className='w-full p-2'>
+        <DeclaredSections node={props.node} />
+        <PropertyTable columns={['45%', '55%']}>
+          <PropertyRow label='Entity layer'>
+            <Select value={tilemap.entityLayer}
+              onChange={(e) => { tilemap.entityLayer = Number(e.target.value); eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node }) }}>
+              {tilemap.layers.map((l, i) => <option key={i} value={i}>{l.cfg.name}</option>)}
+            </Select>
+          </PropertyRow>
+          <PropertyRow label='Layers' divider={false}>
+            <span className='text-ui-sm text-muted'>{tilemap.layers.length}</span>
+          </PropertyRow>
+        </PropertyTable>
       </div>
     </Collapsable>
     </DocScope>
