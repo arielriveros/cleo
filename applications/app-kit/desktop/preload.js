@@ -111,4 +111,47 @@ contextBridge.exposeInMainWorld('cleoDesktop', {
       return () => ipcRenderer.removeListener('scripts:changed', listener);
     },
   },
+
+  // A desktop project is a folder (projectFolder.js). Reads and writes go through the main process, which
+  // owns the snapshot and the watcher; `onChange` pushes what changed on disk outside the editor.
+  project: {
+    registry: () => ipcRenderer.invoke('project:registry'),
+    forget: (root) => ipcRenderer.invoke('project:forget', root),
+    remember: (root, name) => ipcRenderer.invoke('project:remember', root, name),
+    defaultParent: () => ipcRenderer.invoke('project:default-parent'),
+    hasCommand: (command) => ipcRenderer.invoke('project:has-command', command),
+    pickLocation: (options) => ipcRenderer.invoke('project:pick-location', options),
+    pickProject: (options) => ipcRenderer.invoke('project:pick-project', options),
+    inspect: (root) => ipcRenderer.invoke('project:inspect', root),
+    prepareNew: (root) => ipcRenderer.invoke('project:prepare-new', root),
+    open: (root, options) => ipcRenderer.invoke('project:open', root, options),
+    close: (root) => ipcRenderer.invoke('project:close', root),
+    relist: (root) => ipcRenderer.invoke('project:relist', root),
+    read: (root, rels) => ipcRenderer.invoke('project:read', root, rels),
+    readBlobs: (root, hashes) => ipcRenderer.invoke('project:read-blobs', root, hashes),
+    apply: (root, batch) => ipcRenderer.invoke('project:apply', root, batch),
+    gc: (root, hashes) => ipcRenderer.invoke('project:gc', root, hashes),
+    writeScaffold: (root, files) => ipcRenderer.invoke('project:write-scaffold', root, files),
+    reveal: (root, rel) => ipcRenderer.invoke('project:reveal', root, rel),
+    launch: (root, rel, command, line) => ipcRenderer.invoke('project:launch', root, rel, command, line),
+    gitInit: (root) => ipcRenderer.invoke('project:git-init', root),
+    npmInstall: (root) => ipcRenderer.invoke('project:npm-install', root),
+    trashFolder: (root) => ipcRenderer.invoke('project:trash-folder', root),
+    takeLaunchRequest: () => ipcRenderer.invoke('project:take-launch-request'),
+    onChange: (cb) => {
+      const listener = (_event, payload) => cb(payload);
+      ipcRenderer.on('project:changed', listener);
+      return () => ipcRenderer.removeListener('project:changed', listener);
+    },
+    onLaunchRequest: (cb) => {
+      const listener = (_event, payload) => cb(payload);
+      ipcRenderer.on('project:launch-request', listener);
+      return () => ipcRenderer.removeListener('project:launch-request', listener);
+    },
+    onNpmOutput: (cb) => {
+      const listener = (_event, payload) => cb(payload);
+      ipcRenderer.on('project:npm-output', listener);
+      return () => ipcRenderer.removeListener('project:npm-output', listener);
+    },
+  },
 });

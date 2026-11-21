@@ -21,6 +21,8 @@
       "gameSaves.js",
       "gamePreload.js",
       "scriptWorkspace.js",
+      "projectFolder.js",
+      "safeFs.js",
       "movieFiles.js",
       "playWindow.js",
       "devHostProcess.js",
