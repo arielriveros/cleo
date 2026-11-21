@@ -13,6 +13,7 @@ import './cameras';
 import './decals';
 import './water';
 import './sprites';
+import './effects';
 
 export {
     declareProperties, declarationOf, declaredClasses, labelOfKey, resolveProperty, readProperty, writeProperty,

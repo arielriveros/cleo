@@ -7,6 +7,7 @@ import {
 } from '@cleo/app-kit/ui'
 import { SoundIcon, FalloffIcon } from '../sectionIcons'
 import { useEventBus } from '../../EventBusContext'
+import { DeclaredSection, useNodeTick } from '../../properties/DeclaredSections'
 import SoundSampleSlot from './SoundSampleSlot'
 
 // The Sound node inspector: what this EMITTER does, never what the sample sounds like. Volume here is a
@@ -36,39 +37,11 @@ const MODEL_LABELS: Record<DistanceModel, string> = {
 export default function SoundEditor(props: { node: SoundNode }) {
   const eventEmitter = useEventBus()
 
-  const read = () => ({
-    mode: props.node.mode,
-    volume: props.node.volume,
-    loopMode: props.node.loopMode,
-    playOnStart: props.node.playOnStart,
-    distanceModel: props.node.distanceModel,
-    refDistance: props.node.refDistance,
-    maxDistance: props.node.maxDistance,
-    rolloffFactor: props.node.rolloffFactor,
-  })
-
-  const [values, setValues] = useState(read)
-  // Re-read when the selection changes, and force a repaint so the transport button tracks the node.
-  useEffect(() => { setValues(read()) }, [props.node])
-
-  /** Write one property through to the node, then re-read: every setter clamps, so the UI must follow. */
-  const set = (patch: Partial<ReturnType<typeof read>>) => {
-    const n = props.node
-    if (patch.mode !== undefined) n.mode = patch.mode
-    if (patch.volume !== undefined) n.volume = patch.volume
-    if (patch.loopMode !== undefined) n.loopMode = patch.loopMode
-    if (patch.playOnStart !== undefined) n.playOnStart = patch.playOnStart
-    if (patch.distanceModel !== undefined) n.distanceModel = patch.distanceModel
-    if (patch.refDistance !== undefined) n.refDistance = patch.refDistance
-    if (patch.maxDistance !== undefined) n.maxDistance = patch.maxDistance
-    if (patch.rolloffFactor !== undefined) n.rolloffFactor = patch.rolloffFactor
-    setValues(read())
-    eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
-  }
+  useNodeTick(props.node)
+  const values = props.node
 
   const applyFalloffPreset = (p: SoundFalloffPreset) => {
     applyPreset(props.node, SOUND_FALLOFF_PRESETS, p)
-    setValues(read())
     eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
   }
 
@@ -83,32 +56,7 @@ export default function SoundEditor(props: { node: SoundNode }) {
         <div className='p-2 flex flex-col gap-2'>
           <SoundSampleSlot node={props.node} onChange={() => force(x => x + 1)} />
 
-          <PropertyTable columns={['45%', '55%']}>
-            <PropertyRow label='Mode' divider>
-              <SegmentedControl
-                value={values.mode}
-                onChange={mode => set({ mode })}
-                options={MODES}
-                size='sm'
-                grow
-              />
-            </PropertyRow>
-            <PropertyRow label='Volume' divider>
-              <Slider min={0} max={1} step={0.01} value={values.volume} onChange={volume => set({ volume })} />
-            </PropertyRow>
-            <PropertyRow label='Loop' divider>
-              <SegmentedControl
-                value={values.loopMode}
-                onChange={loopMode => set({ loopMode })}
-                options={LOOP_MODES}
-                size='sm'
-                grow
-              />
-            </PropertyRow>
-            <PropertyRow label='Play on start'>
-              <Toggle checked={values.playOnStart} onChange={playOnStart => set({ playOnStart })} />
-            </PropertyRow>
-          </PropertyTable>
+          <DeclaredSection node={props.node} title='' />
 
           <div className='flex items-center gap-1'>
             <Button size='sm' variant='subtle' onClick={() => transport(() => props.node.play())} title='Audition this emitter'>▶ Play</Button>
@@ -124,25 +72,7 @@ export default function SoundEditor(props: { node: SoundNode }) {
         <Collapsable title='Falloff' icon={<FalloffIcon />} persistKey='soundFalloff'
           right={<PresetMenu presets={SOUND_FALLOFF_PRESETS} onApply={applyFalloffPreset} title='Falloff presets' />}>
           <div className='p-2 flex flex-col gap-2'>
-            <PropertyTable columns={['45%', '55%']}>
-              <PropertyRow label='Distance model' divider>
-                <Select
-                  value={values.distanceModel}
-                  onChange={e => set({ distanceModel: e.target.value as DistanceModel })}
-                >
-                  {DISTANCE_MODELS.map(m => <option key={m} value={m}>{MODEL_LABELS[m]}</option>)}
-                </Select>
-              </PropertyRow>
-              <PropertyRow label='Reference' divider>
-                <NumberInput value={values.refDistance} min={0.01} step={0.1} onChange={refDistance => set({ refDistance })} />
-              </PropertyRow>
-              <PropertyRow label='Max' divider>
-                <NumberInput value={values.maxDistance} min={0.02} step={1} onChange={maxDistance => set({ maxDistance })} />
-              </PropertyRow>
-              <PropertyRow label='Rolloff'>
-                <Slider min={0} max={10} step={0.1} value={values.rolloffFactor} onChange={rolloffFactor => set({ rolloffFactor })} />
-              </PropertyRow>
-            </PropertyTable>
+            <DeclaredSection node={props.node} title='Falloff' bare />
 
             <FalloffCurve
               model={values.distanceModel}

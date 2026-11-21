@@ -63,6 +63,8 @@ export interface ClassDeclaration<N = any> {
     kind: string;
     /** The docs page whose section titled like the card holds its rows (editor/node-inspector by default). */
     docs: string;
+    /** The heading of that page the card's rows are under, when it is not titled like the card. */
+    docsSection?: string;
     sections: SectionDeclaration<N>[];
 }
 
@@ -70,6 +72,8 @@ export interface ClassDeclaration<N = any> {
 export interface DeclarationOptions {
     kind?: string;
     docs?: string;
+    /** The heading of the docs page the card's rows are under (its anchor), when it is not titled like the card. */
+    section?: string;
 }
 
 /** A declared property with its type read, and its label and range settled for one node. */
@@ -88,7 +92,7 @@ export function declareProperties<N>(Class: abstract new (...args: any[]) => N, 
     for (const s of sections) for (const p of s.props)
         if (!typeOfToken(p.type)) throw new TypeError(`${Class.name}.${p.key}: not a property type`);
     const o = typeof options === 'string' ? { kind: options } : options;
-    declared.set(Class, { title, kind: o.kind ?? 'component', docs: o.docs ?? 'editor/node-inspector', sections });
+    declared.set(Class, { title, kind: o.kind ?? 'component', docs: o.docs ?? 'editor/node-inspector', docsSection: o.section, sections });
 }
 
 /**

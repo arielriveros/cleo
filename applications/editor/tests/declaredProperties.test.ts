@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
-import { declaredClasses, resolveProperty, typeOfToken, readProperty, writeProperty } from 'cleo'
+import { declaredClasses, resolveProperty, typeOfToken, readProperty, writeProperty, labelOfKey } from 'cleo'
 import { declaredSamples as instancesOf } from './support/declaredSamples'
 import { parseDocs, resolveTerm, slugify } from '@cleo/app-kit/docs/parseDocs'
 
@@ -44,10 +44,10 @@ describe('declared properties', () => {
 
   it.each(classes.map(([Class, decl]) => [decl.title, Class, decl] as const))('%s: every row has its docs row', (_title, Class, decl) => {
     const nodes = instancesOf(Class)
-    const section = slugify(decl.title)
+    const section = decl.docsSection ?? slugify(decl.title)
     const missing = new Set<string>()
     for (const s of decl.sections) for (const p of s.props) {
-      const labels = nodes.length ? nodes.map(node => resolveProperty(p, node).label) : [typeof p.label === 'string' ? p.label : p.key]
+      const labels = nodes.length ? nodes.map(node => resolveProperty(p, node).label) : [typeof p.label === 'string' ? p.label : labelOfKey(p.key)]
       // As the inspector looks a row up: in its section's own docs region when the docs give it one, else the card's.
       const regions = [...(s.title ? [slugify(s.title)] : []), section]
       for (const label of labels)
@@ -57,8 +57,8 @@ describe('declared properties', () => {
   })
 
   it.each(classes.map(([Class, decl]) => [decl.title, Class, decl] as const))('%s: the card and each titled section resolve in the docs', (_title, _Class, decl) => {
-    expect(resolveTerm(index, [{ page: decl.docs }], decl.title), `no "${decl.title}" in docs/${decl.docs}.md`).not.toBeNull()
-    const section = slugify(decl.title)
+    expect(decl.docsSection ? true : resolveTerm(index, [{ page: decl.docs }], decl.title), `no "${decl.title}" in docs/${decl.docs}.md`).toBeTruthy()
+    const section = decl.docsSection ?? slugify(decl.title)
     const missing = decl.sections.filter(s => s.title)
       .filter(s => !resolveTerm(index, [{ page: decl.docs, section, fields: true }, { page: decl.docs }], s.title)).map(s => s.title)
     expect(missing, `section titles with no docs entry under "${decl.title}"`).toEqual([])

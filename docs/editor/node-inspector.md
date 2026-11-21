@@ -760,8 +760,9 @@ last frame. It acts only with **Occlusion** at **+ Volumes** in
 **Particle System** — the effect asset it plays and how this instance plays it. See
 [Particles](particles.md#in-a-scene).
 
-**Force Field** — pushes the particles of emitters that have the **Force Fields** module, and up to 16
-fields act at once. **Force** picks what it does — **Wind** along the node's local +Y, **Radial**,
+#### Force Field
+
+Pushes the particles of emitters that have the **Force Fields** module, and up to 16 fields act at once. **Force** picks what it does — **Wind** along the node's local +Y, **Radial**,
 **Vortex** around local +Y, **Turbulence** or **Drag** — and **Shape** where: everywhere, a sphere or a
 box (axis-aligned in the world), fading in over **Falloff** from its edge. Direction and axis come from
 rotating the node, so there is no vector to type. See [Particles](particles.md#force-fields).
@@ -773,7 +774,21 @@ of its eddies — and a **Drag** field becomes a shelter, its strength the share
 Selecting it shows the wind field with its glyph: arrows, spokes in or out, a turning ring, eddies, or a
 cross. The **Wind:** presets set it up; the first 8 such fields count.
 
-**Cloth** — a rectangular panel that hangs, swings and blows in the wind: a cape, a banner, a flag.
+| Field | Meaning |
+|---|---|
+| **Enabled** | Off, the field pushes nothing. |
+| **Affects wind** | Also move the scene's air: foliage bends to it, Scene-wind particles ride it, and scripts read it with `windAt`. |
+| **Force** | **Wind** along local +Y, **Radial** toward the centre, **Vortex** round local +Y, **Turbulence** (curl-noise swirl) or **Drag**. |
+| **Strength** | m/s² (drag: per second), or the wind's speed. Moving the air: an air speed in m/s, or for a Drag field the share of the wind it blocks, 0 to 1. |
+| **Frequency** | Turbulence's noise features per metre: lower is broader swirls. |
+| **Shape** | **Global**, everywhere; a **Sphere**; or a **Box**, axis-aligned in the world. |
+| **Radius** | The sphere's, in metres before the node scale. |
+| **Half extents** | The box's, in metres before the node scale. |
+| **Falloff** | The share of the shape, from its edge inward, over which the force fades in. |
+
+#### Cloth
+
+A rectangular panel that hangs, swings and blows in the wind: a cape, a banner, a flag.
 It simulates while the scene plays (Play and Simulate) and shows its rest shape while you edit. The
 panel hangs in the node's local XY plane, down its −Y, so placing and turning the node places it.
 - **Width** and **Height** size it in metres; **Columns** and **Rows** set how finely it folds.
@@ -789,6 +804,21 @@ panel hangs in the node's local XY plane, down its −Y, so placing and turning 
 
 Its material is any PBR material, double-sided so both faces draw. The simulation costs a little CPU
 time per cloth each frame; the Performance panel lists it under **Scene** as **cloth**.
+
+| Field | Meaning |
+|---|---|
+| **Enabled** | Off, the cloth hangs at rest and does not simulate. |
+| **Width** / **Height** | The panel's size, in metres. |
+| **Columns** / **Rows** | How finely it folds. |
+| **Held Edge** | **Top** for a cape or a banner, **Left** for a flag on its pole, **None** to let it fall. |
+| **Ride On** | **This node** holds the edge where the node is; **Chest**, **Spine**, **Neck** or **Hips** carries it on that bone of the character above. |
+| **Stiffness** | How much it resists stretching. |
+| **Bend** | How much it resists folding: silk at 0, canvas at 1. |
+| **Damping** | Calms the swing. |
+| **Mass** | The whole panel's, in kilograms. |
+| **Thickness** | How far it stays off the character's limbs. |
+| **Wind Response** | How hard the scene's wind pushes it; 0 ignores it. |
+| **Collide With Character** | Keep it outside the limbs of the character it hangs from, using its ragdoll's capsules. |
 
 ### Gameplay
 

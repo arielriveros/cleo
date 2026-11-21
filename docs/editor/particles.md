@@ -192,6 +192,15 @@ torch's light.
 the fog: a fire lighting its own smoke and the mist round it, without a light that every surface pays for.
 It takes the colour and the flicker of the light the effect follows. 0, the default, adds nothing.
 
+| Field | Meaning |
+|---|---|
+| **Play on start** | Start emitting as soon as the scene starts. |
+| **Simulation speed** | Multiplies simulation time: 0.5 is slow motion. |
+| **Spawn rate** | Multiplies every emitter's continuous spawn rate. Bursts are not scaled. |
+| **Off screen** | What the system does while its bounds are out of view. **Auto** pauses a system whose emitters all loop and keeps simulating a one-shot, so an effect fired just off screen has still played out when the camera turns to it. |
+| **Distance LOD** | Follow the effect's LOD (set in the particle editor): spawn less and simulate less often with distance, and stop drawing past its cull distance. Off: full detail at any distance, for a hero effect seen from afar. |
+| **Tint** | Multiplies every particle's colour, alpha included. |
+
 **Effect** — the `.vfx` asset the node plays, with ✎ into the particle editor. Linking one copies it
 onto the node, so the effect still plays where the library is not around (a published game ships
 none); ✕ unlinks without changing what plays. A node always holds an effect — a new one starts with
