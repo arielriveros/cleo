@@ -1,0 +1,22 @@
+{
+  "id": "087af2e6cda3a9ed8e7e6df65a4befe7",
+  "name": "Rifle 7",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.03, 0.03, 0.03],
+    "metallic": 0,
+    "roughness": 0.82,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

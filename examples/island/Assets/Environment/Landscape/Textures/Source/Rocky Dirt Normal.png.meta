@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "55c465a54f84ff505c93ee9eb7612e1d",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "55c465a54f84ff505c93ee9eb7612e1d",
+    "name": "Rocky Dirt Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "244400caca8cfd0b8b660894f4b953bc",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "244400caca8cfd0b8b660894f4b953bc",
+    "name": "Blood Burst ORM.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

@@ -236,9 +236,21 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      # The example gallery the installer ships is built from examples/ (tools/examples/gallery.mjs), with their
+      # binary data from the example-data release; every example must make it in.
+      - uses: actions/cache@v4
+        with:
+          path: build/example-packs
+          key: example-packs-${{ hashFiles('examples/*/data.lock.json') }}
+          restore-keys: example-packs-
+      - name: Fetch the examples' data
+        run: npm ci && npm run examples:fetch
+
       # electron-builder (applications/app-kit/desktop) packages ../../editor/dist as extraResources, so the editor must be built first --
       # and with the production engine, since this is what ships in the installer.
       - name: Build engine and editor
+        env:
+          CLEO_EXAMPLES_REQUIRED: '1'
         run: npm ci && npm run build && npm run editor:install && npm run editor:build
 
       # Nothing here is signed. Without this, electron-builder hunts for a keychain identity on macOS and

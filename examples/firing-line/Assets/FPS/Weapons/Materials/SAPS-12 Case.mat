@@ -1,0 +1,33 @@
+{
+  "id": "80477285c6bfb5318ba887d6969cd719",
+  "name": "SAPS-12 Case",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "8fae4bbf0bb540d033cde134e7299c49",
+      "metallicRoughnessTexture": "78dc0596f88aae25df5ee2a3065d03e3",
+      "occlusionMap": "78dc0596f88aae25df5ee2a3065d03e3",
+      "normalMap": "fd5ede29ea9b1f683d7f1a33cecaaab6"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "8fae4bbf0bb540d033cde134e7299c49",
+    "78dc0596f88aae25df5ee2a3065d03e3",
+    "fd5ede29ea9b1f683d7f1a33cecaaab6"
+  ],
+  "thumbnail": ""
+}

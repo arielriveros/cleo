@@ -1,0 +1,35 @@
+{
+  "cleo": 1,
+  "guid": "0bc7237186ef110c6e79c1099c119b9d",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "0bc7237186ef110c6e79c1099c119b9d",
+    "name": "Viewmodel Gloves Black Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "wrapU": "repeat",
+      "wrapV": "repeat",
+      "wrapW": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "minFilter": "linear",
+      "magFilter": "linear",
+      "anisotropy": 1,
+      "precision": "low",
+      "format": "rgba8unorm",
+      "target": "texture2D"
+    }
+  }
+}

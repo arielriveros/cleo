@@ -1,0 +1,33 @@
+{
+  "id": "4d7188066dd1eea4cff9c3c3ee67b7d1",
+  "name": "Dungeon Old Wood",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "577218bd3d4d73d3e9ec61a2301a91c8",
+      "metallicRoughnessTexture": "35d8d6c9b56fb3a91940caf627e5135d",
+      "occlusionMap": "35d8d6c9b56fb3a91940caf627e5135d",
+      "normalMap": "4ce3b69c1cee44a2300525fdaee120a3"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "577218bd3d4d73d3e9ec61a2301a91c8",
+    "35d8d6c9b56fb3a91940caf627e5135d",
+    "4ce3b69c1cee44a2300525fdaee120a3"
+  ],
+  "thumbnail": ""
+}

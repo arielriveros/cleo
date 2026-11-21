@@ -1,0 +1,105 @@
+{
+  "id": "a3a20bfdab697ee7b2a11a3c198c74f1",
+  "name": "Tall Cabinet",
+  "nodeJson": {
+    "id": "ad948da429a4ff77c9cbd842f6e02655",
+    "name": "Tall Cabinet",
+    "type": "node",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [
+      {
+        "id": "504d3e1a638047355875a9e0e7e1610b",
+        "name": "Tall Painted Cabinet",
+        "type": "model",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [],
+        "variables": {
+          "__materialId": {
+            "type": "string",
+            "value": "3eece9105c90a94058423e548b61354f",
+            "access": "public"
+          }
+        },
+        "spawnOnStart": true,
+        "model": {
+          "geometry": {
+            "$geo": {
+              "positions": {
+                "h": "b855e366f69ce1d4e6e2cfb824165ab90f4ece183f68c691e3e26ffc334af0ae",
+                "l": 12576
+              },
+              "normals": {
+                "h": "32074ee7932ccf751dddde1167029fc4d7a1c9b03a15529fc90190b5b974130d",
+                "l": 12576
+              },
+              "empty": [
+                "tangents",
+                "bitangents"
+              ],
+              "texCoords": {
+                "h": "f8ffe4c0aae91fcb86b0deb337097c54f6bd838abd223022d51433bda7bd56a8",
+                "l": 8384
+              },
+              "indices": {
+                "h": "dcfe2d4ce8d44202cc9e84c4d869ec9a80da19cbaa4757de71c41fb07d68fb70",
+                "l": 5796,
+                "bits": 16
+              },
+              "typed": true
+            }
+          },
+          "material": {
+            "type": "pbr",
+            "baseColor": [1, 1, 1],
+            "metallic": 0,
+            "roughness": 1,
+            "reflectance": 0.5,
+            "opacity": 1,
+            "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "textures": {
+              "baseColorTexture": "5756d2dfb20d3060a26ee71647efd730",
+              "metallicRoughnessTexture": "263916f5a408bcb6093dd2b021a3d9aa",
+              "occlusionMap": "263916f5a408bcb6093dd2b021a3d9aa",
+              "normalMap": "3111c05599e16e5358c4c9d82573a865"
+            },
+            "config": {
+              "side": "double",
+              "wireframe": false,
+              "transparent": false,
+              "castShadow": true,
+              "probeable": true
+            }
+          }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
+      }
+    ],
+    "variables": {
+      "__modelId": {
+        "type": "string",
+        "value": "9b7afb339669d8c4a23e17c008282dff",
+        "access": "public"
+      },
+      "__modelBaseTRS": {
+        "type": "string",
+        "value": "[0,0,0,0,0,0,1,1,1]",
+        "access": "public"
+      }
+    },
+    "spawnOnStart": true,
+    "drawDistance": 40
+  },
+  "scripts": {},
+  "textureIds": [
+    "5756d2dfb20d3060a26ee71647efd730",
+    "263916f5a408bcb6093dd2b021a3d9aa",
+    "3111c05599e16e5358c4c9d82573a865"
+  ]
+}

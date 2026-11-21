@@ -1,0 +1,33 @@
+{
+  "id": "77698d17c5a503739e4f8e4a16e65c87",
+  "name": "Well",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "e7f5f376df123af67fdfa6b8772f7079",
+      "metallicRoughnessTexture": "732e9b683ffb79a272d636d30786d373",
+      "occlusionMap": "732e9b683ffb79a272d636d30786d373",
+      "normalMap": "a1d3326d2f1cb4f0b687e0c9782a236c"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "e7f5f376df123af67fdfa6b8772f7079",
+    "732e9b683ffb79a272d636d30786d373",
+    "a1d3326d2f1cb4f0b687e0c9782a236c"
+  ],
+  "thumbnail": ""
+}

@@ -1,0 +1,114 @@
+{
+  "cleo": 1,
+  "guid": "e8c75538041b8b5f2474752458e7d0d6",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "e8c75538041b8b5f2474752458e7d0d6",
+    "name": "Door",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "openOffset",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "public",
+        "default": [0, 4.2, 0],
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Offset from the closed position when fully open, in world metres."
+        }
+      },
+      {
+        "name": "openSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.6,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "isOpen",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {},
+        "save": true
+      },
+      {
+        "name": "lockedText",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Opens from the other side",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "lockedFromFront",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "_gm",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "GameManager"
+        }
+      },
+      {
+        "name": "_closed",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_t",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_opening",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

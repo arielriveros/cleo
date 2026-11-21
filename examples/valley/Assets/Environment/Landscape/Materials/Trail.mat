@@ -1,0 +1,37 @@
+{
+  "id": "983ec9c2b5cbda994c16f1ecc3856c1d",
+  "name": "Trail",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "uv",
+    "textures": {
+      "baseColorTexture": "eb01dad11b36024a7f8d89f72a91bd1a",
+      "metallicRoughnessTexture": "f0a66e0f13f007bf34dc93b2bd9c1575",
+      "occlusionMap": "f0a66e0f13f007bf34dc93b2bd9c1575",
+      "normalMap": "79119747f5f08de7e422f66868301b21",
+      "displacementMap": "7c58efe70a97d59372775ee97fa4f8e4"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "eb01dad11b36024a7f8d89f72a91bd1a",
+    "f0a66e0f13f007bf34dc93b2bd9c1575",
+    "79119747f5f08de7e422f66868301b21",
+    "7c58efe70a97d59372775ee97fa4f8e4"
+  ],
+  "thumbnail": ""
+}

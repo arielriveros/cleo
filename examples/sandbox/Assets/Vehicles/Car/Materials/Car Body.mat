@@ -1,0 +1,30 @@
+{
+  "id": "76a5cfc1d4438c09cd3c6f936dcbb81d",
+  "name": "Car Body",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {
+      "baseColorTexture": "cb7659db55197a90b53c365b62d8730b",
+      "metallicRoughnessTexture": "01d95c09379b2506b7e586cee9621bad",
+      "normalMap": "f07c32e1f6f317cf508324839e400a82"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "cb7659db55197a90b53c365b62d8730b",
+    "01d95c09379b2506b7e586cee9621bad",
+    "f07c32e1f6f317cf508324839e400a82"
+  ],
+  "thumbnail": ""
+}

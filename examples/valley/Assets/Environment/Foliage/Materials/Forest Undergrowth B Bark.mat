@@ -1,0 +1,46 @@
+{
+  "id": "ba924d9f38661769362dedfea5f78eca",
+  "name": "Forest Undergrowth B Bark",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.9,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.22,
+    "windStiffness": 1.2,
+    "windRole": "plant",
+    "windFlutter": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "e3a25178efd0145e10c2456c0f266d5d",
+      "metallicRoughnessTexture": "dff6671d05df973e0414627ff65bd082",
+      "occlusionMap": "dff6671d05df973e0414627ff65bd082",
+      "normalMap": "8feff5b39b404cd55f8fcf98f3a7caed"
+    },
+    "interactBend": 0.6,
+    "interactRecovery": 1,
+    "variationHue": 0.03,
+    "variationValue": 0.12,
+    "variationDry": 0.08,
+    "wetResponse": 0.5,
+    "snowCover": 0.6,
+    "weightDroop": 0.3,
+    "rippleSheen": 0.2,
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "e3a25178efd0145e10c2456c0f266d5d",
+    "dff6671d05df973e0414627ff65bd082",
+    "8feff5b39b404cd55f8fcf98f3a7caed"
+  ],
+  "thumbnail": ""
+}

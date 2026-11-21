@@ -1,0 +1,33 @@
+{
+  "id": "019d321b684a3db79456bccc80d58aba",
+  "name": "Ranger Body 3",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "8015b6fea772b8a8cbaece9a35c74e5f",
+      "metallicRoughnessTexture": "df87b9ef9a05752fba7f31a946d1acac",
+      "occlusionMap": "df87b9ef9a05752fba7f31a946d1acac",
+      "normalMap": "7b8e0f48c30bec88615f503061ecd0f8"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "8015b6fea772b8a8cbaece9a35c74e5f",
+    "df87b9ef9a05752fba7f31a946d1acac",
+    "7b8e0f48c30bec88615f503061ecd0f8"
+  ],
+  "thumbnail": ""
+}

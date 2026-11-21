@@ -1,0 +1,132 @@
+{
+  "cleo": 1,
+  "guid": "64c98090bd7ded3f71aa42e4ceca9229",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "64c98090bd7ded3f71aa42e4ceca9229",
+    "name": "Fire Light",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "lit",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Burning or not."
+        }
+      },
+      {
+        "name": "ignitionBlend",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.5,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds, at the end of the ignition, over which the burning flames take over from it."
+        }
+      },
+      {
+        "name": "ignitionFlare",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.4,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The light's peak as the fire catches, over its full intensity."
+        }
+      },
+      {
+        "name": "ignitionFlareTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.25,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds into the ignition the flare peaks."
+        }
+      },
+      {
+        "name": "_lights",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_visuals",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_sprites",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_ignition",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_shown",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": true,
+        "hidden": true
+      },
+      {
+        "name": "_igniting",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -1,
+        "hidden": true
+      },
+      {
+        "name": "_ignitionLength",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

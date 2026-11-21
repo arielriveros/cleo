@@ -1,0 +1,321 @@
+{
+  "id": "dee50a458417428157e05a3d50f12e0d",
+  "name": "Bat Brain",
+  "kind": "behavior",
+  "machine": {
+    "parameters": [
+      {
+        "name": "Dead",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "isDead"
+        }
+      },
+      {
+        "name": "Hurt",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "isHurt"
+        }
+      },
+      {
+        "name": "Awake",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "isAwake"
+        }
+      },
+      {
+        "name": "Swoop Ready",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "swoopReady"
+        }
+      },
+      {
+        "name": "Swooping",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "isSwooping"
+        }
+      },
+      {
+        "name": "From Home",
+        "type": "number",
+        "default": 0,
+        "source": {
+          "kind": "builtin",
+          "name": "distanceFromHome"
+        }
+      },
+      {
+        "name": "In Sight",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "sense",
+          "name": "targetInSight"
+        }
+      },
+      {
+        "name": "Has Target",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "sense",
+          "name": "hasTarget"
+        }
+      },
+      {
+        "name": "Distance",
+        "type": "number",
+        "default": 99,
+        "source": {
+          "kind": "sense",
+          "name": "distanceToTarget"
+        }
+      }
+    ],
+    "states": [
+      {
+        "name": "Sleep",
+        "goal": "idle",
+        "speedScale": 0,
+        "isEntry": true,
+        "x": 40,
+        "y": 160
+      },
+      {
+        "name": "Wake",
+        "goal": "script",
+        "speedScale": 0,
+        "x": 240,
+        "y": 160
+      },
+      {
+        "name": "Chase",
+        "goal": "path",
+        "speedScale": 1,
+        "x": 440,
+        "y": 160
+      },
+      {
+        "name": "Swoop",
+        "goal": "script",
+        "speedScale": 1,
+        "x": 640,
+        "y": 60
+      },
+      {
+        "name": "Hurt",
+        "goal": "script",
+        "speedScale": 0,
+        "x": 640,
+        "y": 260
+      },
+      {
+        "name": "Roost",
+        "goal": "path",
+        "targetKey": "point",
+        "speedScale": 0.6,
+        "x": 440,
+        "y": 320
+      },
+      {
+        "name": "Dead",
+        "goal": "idle",
+        "speedScale": 0,
+        "x": 40,
+        "y": 320
+      }
+    ],
+    "transitions": [
+      {
+        "from": "*",
+        "to": "Dead",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Dead",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Chase",
+        "to": "Hurt",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Hurt",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Swoop",
+        "to": "Hurt",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Hurt",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Roost",
+        "to": "Hurt",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Hurt",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Hurt",
+        "to": "Chase",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Hurt",
+              "op": "false"
+            }
+          ]
+        },
+        "minDwell": 0.1
+      },
+      {
+        "from": "Sleep",
+        "to": "Wake",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Wake",
+        "to": "Chase",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Awake",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Chase",
+        "to": "Swoop",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Distance",
+              "op": "lt",
+              "value": 3
+            },
+            {
+              "param": "Swoop Ready",
+              "op": "true"
+            }
+          ]
+        },
+        "minDwell": 0.6
+      },
+      {
+        "from": "Swoop",
+        "to": "Chase",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Swooping",
+              "op": "false"
+            }
+          ]
+        },
+        "minDwell": 0.2
+      },
+      {
+        "from": "Chase",
+        "to": "Roost",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Has Target",
+              "op": "false"
+            }
+          ]
+        },
+        "minDwell": 1
+      },
+      {
+        "from": "Roost",
+        "to": "Chase",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Roost",
+        "to": "Sleep",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "From Home",
+              "op": "lt",
+              "value": 0.6
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "graph": {
+    "goals": [],
+    "evaluators": [],
+    "arbitrationInterval": 0.5
+  },
+  "fuzzy": {
+    "variables": [],
+    "rules": [],
+    "defuzzification": "maxav"
+  }
+}

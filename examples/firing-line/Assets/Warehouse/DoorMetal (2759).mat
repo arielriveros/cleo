@@ -1,0 +1,36 @@
+{
+  "id": "27594ccbf71372fa24a9646c303ab22c",
+  "name": "DoorMetal",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "f6b7a04f9e77eed3560ed96547e9e222",
+      "metallicMap": "82db590965f9b77a7803769def9ba070",
+      "roughnessMap": "82db590965f9b77a7803769def9ba070"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "f6b7a04f9e77eed3560ed96547e9e222",
+    "82db590965f9b77a7803769def9ba070"
+  ],
+  "thumbnail": ""
+}

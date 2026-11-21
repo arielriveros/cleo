@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "fc7f74bf7d2669b3372b16928a8c771f",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "fc7f74bf7d2669b3372b16928a8c771f",
+    "name": "Hollow Body 2 Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

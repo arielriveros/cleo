@@ -1,19 +1,19 @@
-// Read a checked-in example folder (either bundle format) the way the editor does, from Node.
+// Read a shipped example the way the editor does, from Node: a project folder (examples/<slug>/, see folder.mjs),
+// or a bundle in either format (what the gallery serves from applications/editor/public/examples/<slug>/).
 //
-// Format 2 keeps no payload in the JSON — geometry, terrain blobs and textures sit in `assets.bin` behind
-// markers — so code that inspects an example (the generators' tests, mainly) cannot just JSON.parse the
-// files any more. This runs the editor's own `readBundle` over the folder, which inflates every marker
-// back into the original JSON, and offers the result under the familiar file paths.
+// Bundle format 2 keeps no payload in the JSON — geometry, terrain blobs and textures sit in `assets.bin` behind
+// markers — and a folder keeps them in Blobs/, so code that inspects an example (the generators and their tests)
+// cannot just JSON.parse the files. This runs the editor's own reader over either, which inflates every payload
+// back into the original JSON, and offers the result under the familiar bundle paths.
 
 import fs from 'fs'
 import path from 'path'
-import { fileURLToPath } from 'url'
-import { moduleRegistry } from './tsLoader.mjs'
+import { bundleModules } from './editorModules.mjs'
+import { isExampleFolder, readExampleFolder } from './folder.mjs'
 
-const HERE = path.dirname(fileURLToPath(import.meta.url))
-const UTILS = path.resolve(HERE, '..', '..', 'applications', 'editor', 'src', 'utils')
+export { bundleModules }
 
-/** A `BundleSource` over a folder on disk. */
+/** A `BundleSource` over a bundle folder on disk. */
 export function folderSource(dir) {
   const file = (p) => path.join(dir, ...p.split('/'))
   return {
@@ -33,23 +33,15 @@ export function folderSource(dir) {
   }
 }
 
-/** The editor's bundle modules, transpiled. Shared so the reader and the packer load them once. */
-let modules = null
-export function bundleModules() {
-  if (!modules) {
-    const load = moduleRegistry()
-    modules = { ...load(path.join(UTILS, 'bundle.ts')), ...load(path.join(UTILS, 'bundleRead.ts')) }
-  }
-  return modules
-}
-
 /**
- * The fully inflated bundle at `dir`, plus `read(...parts)` answering the format-1 paths
- * (`manifest.json`, `vfs.json`, `libraries/<name>.json`, `scenes/<id>.json`, `textures/index.json`)
- * from it, whatever format is on disk. Treat everything it returns as read-only.
+ * The fully inflated bundle at `dir` (a project folder or a bundle), plus `read(...parts)` answering the bundle's
+ * paths (`manifest.json`, `vfs.json`, `libraries/<name>.json`, `scenes/<id>.json`, `textures/index.json`) from it.
+ * Treat everything it returns as read-only.
  */
 export async function readExample(dir) {
-  const { bundle } = await bundleModules().readBundle(folderSource(dir))
+  const { bundle } = isExampleFolder(dir)
+    ? await readExampleFolder(dir)
+    : await bundleModules().readBundle(folderSource(dir))
   const read = (...parts) => {
     const p = parts.join('/')
     if (p === 'manifest.json') return bundle.manifest

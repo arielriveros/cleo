@@ -1,0 +1,27 @@
+{
+  "id": "564d74a11a2d1fdb18116ce55c64f342",
+  "name": "Concrete",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.44, 0.44, 0.42],
+    "metallic": 0,
+    "roughness": 0.92,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {},
+    "uvProjection": "box",
+    "uvSpace": "world",
+    "uvWorldSize": 3,
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

@@ -162,6 +162,13 @@ interface PendingField {
 }
 
 const pending = new WeakMap<object, Map<string, PendingField>>();
+/**
+ * The nodes whose script has attached: the only ones whose references become objects. The editor's own nodes
+ * never run their scripts, yet their scene starts and calls `fillScriptRefs` all the same; resolved there, a
+ * field would hold a node (or null, before a template's children are in) where the inspector, a save and Play
+ * read the stored path.
+ */
+const attached = new WeakSet<object>();
 
 /**
  * Set aside the fields of `vars` (a node's `scriptVars`, already on the node) whose values hold references, to
@@ -200,6 +207,7 @@ function reportOnce(key: string, message: string): void {
  * any of it runs. A field that also holds node references stays pending for {@link resolveNodeFields}.
  */
 export function resolveAssetFields(node: Node): void {
+    attached.add(node);
     const fields = pending.get(node);
     if (!fields) return;
     const n = node as any;
@@ -224,11 +232,12 @@ export function resolveAssetFields(node: Node): void {
  * Turn the node references in `node`'s pending fields into the nodes they lead to. Runs with `@child` /
  * `@find` (fillScriptRefs): before `onConstruct`, and `final`ly before `onStart`, for what was spawned in
  * between. A node not there by then stays null, reported once unless `optional(field)` (declared `name?:`).
- * A field the script set itself in the meantime is left as the script set it.
+ * A field the script set itself in the meantime is left as the script set it. A node whose script has not
+ * attached (the editor's) keeps its paths as stored.
  */
 export function resolveNodeFields(node: Node, final: boolean, optional?: (field: string) => boolean): void {
     const fields = pending.get(node);
-    if (!fields) return;
+    if (!fields || !attached.has(node)) return;
     const n = node as any;
     for (const [field, entry] of fields) {
         if (n[field] !== entry.written) { fields.delete(field); continue; }

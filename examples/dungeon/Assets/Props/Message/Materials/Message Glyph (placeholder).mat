@@ -1,0 +1,24 @@
+{
+  "id": "544c0aabc12df56bc66725c986fec6eb",
+  "name": "Message Glyph (placeholder)",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.9, 0.55, 0.2],
+    "metallic": 0,
+    "roughness": 0.85,
+    "opacity": 1,
+    "emissiveFactor": [1, 0.55, 0.15],
+    "emissiveIntensity": 2.2,
+    "emissiveExposureWeight": 0.1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

@@ -1,0 +1,255 @@
+{
+  "cleo": 1,
+  "guid": "cba0618c1d881f2aab5109bcc9fac012",
+  "kind": "script",
+  "created": 1795100000000,
+  "record": {
+    "id": "cba0618c1d881f2aab5109bcc9fac012",
+    "name": "SandboxCar",
+    "baseType": "collider",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "interactAction",
+        "type": {
+          "kind": "name",
+          "name": "action"
+        },
+        "access": "public",
+        "default": "Interact",
+        "hidden": false,
+        "attribute": {
+          "group": "Driving",
+          "tooltip": "The action that gets in and out."
+        }
+      },
+      {
+        "name": "driverLayer",
+        "type": {
+          "kind": "name",
+          "name": "layer"
+        },
+        "access": "public",
+        "default": "Character",
+        "hidden": false,
+        "attribute": {
+          "group": "Driving",
+          "tooltip": "The collision layer of the characters that may drive it (who the Door Zone looks for)."
+        }
+      },
+      {
+        "name": "exitSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Driving",
+          "min": 0,
+          "max": 5,
+          "step": 0.05,
+          "tooltip": "Slower than this (m/s), the driver may get out; faster, Interact brakes the car first."
+        }
+      },
+      {
+        "name": "_vehicle",
+        "type": {
+          "kind": "node",
+          "className": "VehicleNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Vehicle"
+        }
+      },
+      {
+        "name": "_seat",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Seat"
+        }
+      },
+      {
+        "name": "_enterPoint",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Seat/Enter Point"
+        }
+      },
+      {
+        "name": "_exitPoint",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Seat/Exit Point"
+        }
+      },
+      {
+        "name": "_doorZone",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Door Zone"
+        }
+      },
+      {
+        "name": "_controller",
+        "type": {
+          "kind": "node",
+          "className": "ControllerNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Car Controller"
+        }
+      },
+      {
+        "name": "_camera",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Car Camera Rig"
+        }
+      },
+      {
+        "name": "_lightsNode",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Lights"
+        }
+      },
+      {
+        "name": "tailShare",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Lights",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "The tail lights' glow while the car is not braking, as a share of their braking brightness."
+        }
+      },
+      {
+        "name": "brakeThreshold",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.05,
+        "hidden": false,
+        "attribute": {
+          "group": "Lights",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "Braking harder than this (0 .. 1) lights the brake lights."
+        }
+      },
+      {
+        "name": "lampSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.06,
+        "hidden": false,
+        "attribute": {
+          "group": "Lights",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "Seconds a lamp takes to come on or go off."
+        }
+      },
+      {
+        "name": "_lamps",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_state",
+        "type": {
+          "kind": "choice",
+          "values": [
+            "parked",
+            "entering",
+            "driving",
+            "stopping",
+            "exiting"
+          ]
+        },
+        "access": "private",
+        "default": "parked",
+        "hidden": true
+      },
+      {
+        "name": "_driver",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

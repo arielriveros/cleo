@@ -16,6 +16,7 @@ import { ASSETS_DIR, PROJECT_FILE, SETTINGS_REL, kindOfFileName, metaRelOf, name
 import { parseMeta } from '../../utils/folder/meta'
 import { isRawByteKind } from '../../utils/vfs'
 import { toJsonText } from '../../utils/folder/jsonText'
+import { settleScriptCopies } from '../../utils/folder/scriptCopies'
 import { registerFolderSync, switchProject } from '../projects/projectSwitch'
 import { getProjectBridge, requireProjectBridge, MAX_BATCH_BYTES, type FileStat, type FolderBatch } from './desktopProject'
 import { beginFolderSession, loadFolderState, loadJournal, saveFolderState, saveJournal } from './folderSession'
@@ -312,6 +313,10 @@ export async function installBundleToFolder(bundle: BundleData, rootIn: string, 
   const root = await prepare(rootIn)
   const load = options.load ?? continueLoad()
   const uid = cryptoRandomId()
+  // A bundle may carry a copy of each script's source on the scene nodes that run it (the shipped examples' gallery
+  // bundles do). The editor never saves those (the library is what Play runs), so the folder starts without them,
+  // as the scene's first save would leave it.
+  settleScriptCopies(bundle, { fill: false, templates: false })
   const { snapshot, notes } = await bundleToFolder(bundle, { uid, name })
   for (const n of notes) Logger.warn(`${n.rel ? `${n.rel}: ` : ''}${n.message}`, 'Editor')
   load?.addSteps([{ id: 'folder-write', label: 'Writing the project folder', weight: 3 }])

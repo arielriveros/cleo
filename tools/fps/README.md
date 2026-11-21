@@ -1,12 +1,12 @@
 # Firing Line tooling
 
-The example (`applications/editor/public/examples/firing-line`) is a project that was edited in the editor and
-exported; that project is the source of truth for the scene, templates, materials, models, animations, sounds and
-baked GI. It is no longer generated.
+The example is the project folder `examples/firing-line/` (see `examples/README.md`): open it in the desktop
+editor and edit it there. It is no longer generated.
 
-- `ingest.mjs` takes the exported zip (`build/Firing-Line.cleoproj.zip`), keeps one scene, writes the current
-  `examples/scripts/Fps*.ts` into the script library and every node that embeds a copy, and repacks the bundle.
-  After a script-only edit: `node --max-old-space-size=12288 tools/fps/ingest.mjs --scripts-only`.
+- `ingest.mjs` takes a project exported as a zip (`build/Firing-Line.cleoproj.zip`), keeps one scene, writes `Assets/FPS/Scripts/Fps*.ts` into the script library and every node that embeds a copy, and writes
+  the project folder examples/firing-line/.
+  After a script edit outside the editor: `npm run examples:sync firing-line`. After changing its passes
+  (`eventActions.mjs`, `warehouse.mjs`): `node --max-old-space-size=12288 tools/fps/ingest.mjs --passes`.
 - GI bakes: `ingest.mjs` gives every GI Volume a stable `bakeId` and carries existing bakes over. After changing the
   level, bake again with `node tools/valley/bakeGI.cjs --example firing-line --scenes "Firing Line"` (stop any editor
   dev server watching `applications/editor/public` first).

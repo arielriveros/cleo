@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "d4c06ec158e51a2928d2e4db8f1592c0",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "d4c06ec158e51a2928d2e4db8f1592c0",
+    "name": "Barrel Pieces Normal.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

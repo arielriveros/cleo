@@ -1,7 +1,7 @@
 # Sandbox tooling
 
-The example in `applications/editor/public/examples/sandbox` is generated. The bundle there is output; the files
-listed below are the source of truth. The example's guide is `docs/editor/sandbox-example.md`.
+The example is the project folder `examples/sandbox/` (see `examples/README.md`). It is generated: `build.ts` writes
+the folder from the files listed below and the folder's own scripts (`examples/sandbox/Assets/**/Sandbox*.ts`). The example's guide is `docs/editor/sandbox-example.md`.
 
 To build it:
 
@@ -11,7 +11,7 @@ npx vite-node --config vitest.config.ts tools/sandbox/build.ts --report   # what
 npx vite-node --config vitest.config.ts tools/sandbox/build.ts
 npx vite-node --config vitest.config.ts tools/sandbox/build.ts --out <folder>   # elsewhere: while a dev server
                                                                             # watches the examples, then copy what changed
-npm --prefix applications/editor run examples:list
+npm run examples:publish sandbox      # if its binary data changed
 npx vitest run tests/sandboxProject.test.ts --project engine
 ```
 
@@ -24,7 +24,7 @@ The files:
   windows, each wheel's mesh right under its Wheel node, and its head, tail and reverse lights.
 - **`build.ts`** also lays out the world round the course: the Environment (sun, sky, sky light, sunset clouds), the
   open Ocean, a one-layer GI Volume over the floor, a Light Probe over everything, the Game Manager
-  (`examples/scripts/SandboxGameManager.ts`: the light setups on 1, 2, 3) and its HUD, and the render settings'
+  (`examples/sandbox/Assets/Level/Scripts/SandboxGameManager.ts`: the light setups on 1, 2, 3) and its HUD, and the render settings'
   exposure (`EXPOSURE`: a low floor and one compensation curve for the day, the dusk and the night).
 - **`prepare.mjs`** (plain Node, assimp). It reads `build/LocomotionPack/Mannequin.fbx` and builds a skin in metres,
   with a weightless **Pivot** joint above the hips, a welded mesh and its maps at half size. It retargets every
@@ -90,7 +90,7 @@ The files:
     the aim poses (`aimPose`: the aim stance turned, the chest taking part, the arms the rest).
   - **`fx.ts`**: the shots' effects as data: the muzzle flash's and the impact's particle systems (the Firing Line's
     emitters), the bullet hole's texture (`bulletHolePng`) and the tracer's streak; `build.ts` makes them the
-    `/Weapons/Effects` templates, each with its script, and puts SandboxGun (`examples/scripts/SandboxGun.ts`) on each
+    `/Weapons/Effects` templates, each with its script, and puts SandboxGun (`examples/sandbox/Assets/Weapons/Scripts/SandboxGun.ts`) on each
     weapon's grip holder with its handling (`GUN_VARS`).
   - **`layers.ts`** (`weaponPoses`) turns the stances into POSES: per weapon Carry, Aim and Sprint (the bones they
     hold and the standing reference's Hips, as deltas from rest), and the 5 x 5 aim directions as variants of Aim
@@ -110,7 +110,7 @@ The files:
   times the default's.
 - **`environment.json`**: the sky, sun, sky light and render settings the scene starts with.
 
-After changing any `examples/scripts/Sandbox*.ts`, run the build again: the scene and the templates embed the
+After changing a `Sandbox*.ts` in examples/sandbox/Assets/, run the build again: the scene and the templates embed the
 scripts' source (the Sandbox suite checks they match).
 
 The scripts talk through events (docs/scripting/events.md):

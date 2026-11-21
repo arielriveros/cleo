@@ -1,0 +1,32 @@
+{
+  "id": "aa4db3da1dc7b9e99540b202262a44b9",
+  "name": "Wooden Saber",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "c3197cda68471622449bd0f5f704961d",
+      "metallicRoughnessTexture": "a3e363222c5eacacd803d7905bd17f7d",
+      "occlusionMap": "a3e363222c5eacacd803d7905bd17f7d",
+      "normalMap": "da231e76bf57b3d04827b66cdaa6a781"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "c3197cda68471622449bd0f5f704961d",
+    "a3e363222c5eacacd803d7905bd17f7d",
+    "da231e76bf57b3d04827b66cdaa6a781"
+  ],
+  "thumbnail": ""
+}

@@ -1,0 +1,33 @@
+{
+  "id": "215a885c1edf4b9c45c399aff8087cab",
+  "name": "Painted Cabinet",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "8f227e8a1c10b5f07eaa1a0155d9c3af",
+      "metallicRoughnessTexture": "37a8dea505b37f3afba87c94469d6873",
+      "occlusionMap": "37a8dea505b37f3afba87c94469d6873",
+      "normalMap": "0eb8254766e7147dd23cd4231f986f90"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "8f227e8a1c10b5f07eaa1a0155d9c3af",
+    "37a8dea505b37f3afba87c94469d6873",
+    "0eb8254766e7147dd23cd4231f986f90"
+  ],
+  "thumbnail": ""
+}

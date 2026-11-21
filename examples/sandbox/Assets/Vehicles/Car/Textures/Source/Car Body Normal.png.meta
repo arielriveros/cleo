@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "f07c32e1f6f317cf508324839e400a82",
+  "kind": "image",
+  "created": 1795100000000,
+  "record": {
+    "id": "f07c32e1f6f317cf508324839e400a82",
+    "name": "Car Body Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1795100000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

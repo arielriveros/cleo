@@ -1,0 +1,33 @@
+{
+  "id": "f5dd3a96a9ca8e8cc18b00546e679f43",
+  "name": "Campfire Logs",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "433ebf3b9582cd44f3349b41fa1703b9",
+      "metallicRoughnessTexture": "e7ef25cff42f6a5cc85462a682855947",
+      "occlusionMap": "e7ef25cff42f6a5cc85462a682855947",
+      "normalMap": "1ce089b25f35042dee00d4a82644f222"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "433ebf3b9582cd44f3349b41fa1703b9",
+    "e7ef25cff42f6a5cc85462a682855947",
+    "1ce089b25f35042dee00d4a82644f222"
+  ],
+  "thumbnail": ""
+}

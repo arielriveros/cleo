@@ -1,0 +1,20 @@
+{
+  "id": "7d513f40128d776793e13dc31a5e75e9",
+  "name": "Mountains",
+  "textureId": "bg_03_background_A_png",
+  "imageWidth": 426,
+  "imageHeight": 384,
+  "tileWidth": 426,
+  "tileHeight": 384,
+  "margin": 0,
+  "spacing": 0,
+  "columns": 1,
+  "rows": 1,
+  "pixelsPerUnit": 16,
+  "tiles": {},
+  "terrains": [],
+  "variantSets": [],
+  "textureIds": [
+    "bg_03_background_A_png"
+  ]
+}

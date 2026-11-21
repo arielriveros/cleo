@@ -1,0 +1,24 @@
+{
+  "id": "25bb6b557e40de61c2dc9b0a0fa164dd",
+  "name": "Fire Smoke",
+  "textureId": "42ec25571e39b8f214bf1db45b350865",
+  "imageWidth": 1536,
+  "imageHeight": 1536,
+  "tileWidth": 128,
+  "tileHeight": 256,
+  "margin": 0,
+  "spacing": 0,
+  "columns": 12,
+  "rows": 6,
+  "overdrive": 1,
+  "tiles": {},
+  "terrains": [],
+  "variantSets": [],
+  "textureIds": [
+    "42ec25571e39b8f214bf1db45b350865",
+    "d3fc90bddc42c2c8096abc02e9d99039",
+    "27912770b1e2fcf5b4ed9147a87a30c5"
+  ],
+  "sixWayPositiveTextureId": "d3fc90bddc42c2c8096abc02e9d99039",
+  "sixWayNegativeTextureId": "27912770b1e2fcf5b4ed9147a87a30c5"
+}

@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "ac7705ad74dc2958efb72643a61ea145",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "ac7705ad74dc2958efb72643a61ea145",
+    "name": "Dungeon Stone Brick Wall Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

@@ -1,0 +1,615 @@
+{
+  "id": "c749749608bd4f7967790b0e138288fd",
+  "name": "Souls Elite Knight",
+  "rigId": "4c356df98f971fef64c490f5419808f7",
+  "machine": {
+    "parameters": [
+      {
+        "name": "Speed",
+        "type": "variable",
+        "default": 0,
+        "variable": {
+          "nodeRef": "parent",
+          "varName": "planarSpeed",
+          "varType": "number",
+          "source": "builtin"
+        }
+      },
+      {
+        "name": "Direction",
+        "type": "variable",
+        "default": 0,
+        "variable": {
+          "nodeRef": "parent",
+          "varName": "planarAngle",
+          "varType": "number",
+          "source": "builtin"
+        }
+      },
+      {
+        "name": "Died",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Revive",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "AttackSpeed",
+        "type": "float",
+        "default": 1
+      },
+      {
+        "name": "Stop",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Cut",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Flinch",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Stagger",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Sweep",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Overhead",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Thrust",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Combo",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Flurry",
+        "type": "trigger",
+        "default": false
+      }
+    ],
+    "states": [
+      {
+        "name": "Idle",
+        "clipName": "Idle",
+        "loop": true,
+        "speed": 1,
+        "isEntry": true,
+        "x": 40,
+        "y": 40
+      },
+      {
+        "name": "Locomotion",
+        "clipName": "",
+        "fieldId": "b5c38e9c94a6b087db47b12df05a9264",
+        "field": {
+          "mode": "2d",
+          "xAxis": {
+            "name": "Direction",
+            "min": -180,
+            "max": 180,
+            "wrap": true,
+            "smoothing": 0.04,
+            "deadzone": 0
+          },
+          "samples": [
+            {
+              "clipName": "Walk",
+              "x": 0,
+              "y": 1.5
+            },
+            {
+              "clipName": "Run",
+              "x": 0,
+              "rateScale": 1,
+              "y": 4
+            },
+            {
+              "clipName": "WalkStrafeRight",
+              "x": -90,
+              "y": 1.5
+            },
+            {
+              "clipName": "RunStrafeRight",
+              "x": -90,
+              "y": 4
+            },
+            {
+              "clipName": "WalkStrafeLeft",
+              "x": 90,
+              "y": 1.5
+            },
+            {
+              "clipName": "RunStrafeLeft",
+              "x": 90,
+              "y": 4
+            },
+            {
+              "clipName": "WalkBackwards",
+              "x": 180,
+              "y": 1.5
+            },
+            {
+              "clipName": "RunBackwards",
+              "x": 180,
+              "y": 4
+            },
+            {
+              "clipName": "RunDiagLeft",
+              "x": 135,
+              "y": 4
+            },
+            {
+              "clipName": "RunDiagRight",
+              "x": -135,
+              "y": 4
+            },
+            {
+              "clipName": "Run",
+              "x": 0,
+              "y": 5.8,
+              "rateScale": 1.4
+            }
+          ],
+          "yAxis": {
+            "name": "Speed",
+            "min": 0,
+            "max": 5.8,
+            "smoothing": 0.04
+          },
+          "weightSmoothing": 0.06
+        },
+        "fieldInputs": {
+          "x": "Direction",
+          "y": "Speed"
+        },
+        "loop": true,
+        "speed": 1,
+        "isEntry": false,
+        "x": 300,
+        "y": 40
+      },
+      {
+        "name": "Dead",
+        "clipName": "Souls_Death",
+        "loop": false,
+        "speed": 1,
+        "isEntry": false,
+        "x": 170,
+        "y": 200
+      }
+    ],
+    "transitions": [
+      {
+        "from": "Idle",
+        "to": "Dead",
+        "conditions": [],
+        "minDwell": 0,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Died",
+              "op": "trigger"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Locomotion",
+        "to": "Dead",
+        "conditions": [],
+        "minDwell": 0,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Died",
+              "op": "trigger"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Dead",
+        "to": "Idle",
+        "conditions": [],
+        "minDwell": 0,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Revive",
+              "op": "trigger"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Idle",
+        "to": "Locomotion",
+        "conditions": [],
+        "minDwell": 0.05,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Speed",
+              "op": "gt",
+              "value": 0.5,
+              "hysteresis": 0.15
+            }
+          ]
+        },
+        "blendTime": 0.25
+      },
+      {
+        "from": "Locomotion",
+        "to": "Idle",
+        "conditions": [],
+        "minDwell": 0.1,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Speed",
+              "op": "lt",
+              "value": 0.5,
+              "hysteresis": 0.15
+            }
+          ]
+        },
+        "blendTime": 0.3
+      }
+    ],
+    "layers": [
+      {
+        "name": "UpperBody",
+        "blend": "override",
+        "weight": 1,
+        "maskId": "5932b38920918b4dcb769072b1d2a6a0",
+        "mask": {
+          "mixamorig1:RightShoulder": 1,
+          "mixamorig1:RightArm": 1,
+          "mixamorig1:RightForeArm": 1,
+          "mixamorig1:RightHand": 1,
+          "mixamorig1:RightHandThumb1": 1,
+          "mixamorig1:RightHandThumb2": 1,
+          "mixamorig1:RightHandThumb3": 1,
+          "mixamorig1:RightHandThumb4": 1,
+          "mixamorig1:RightHandIndex1": 1,
+          "mixamorig1:RightHandIndex2": 1,
+          "mixamorig1:RightHandIndex3": 1,
+          "mixamorig1:RightHandIndex4": 1,
+          "mixamorig1:RightHandMiddle1": 1,
+          "mixamorig1:RightHandMiddle2": 1,
+          "mixamorig1:RightHandMiddle3": 1,
+          "mixamorig1:RightHandMiddle4": 1,
+          "mixamorig1:RightHandRing1": 1,
+          "mixamorig1:RightHandRing2": 1,
+          "mixamorig1:RightHandRing3": 1,
+          "mixamorig1:RightHandRing4": 1,
+          "mixamorig1:RightHandPinky1": 1,
+          "mixamorig1:RightHandPinky2": 1,
+          "mixamorig1:RightHandPinky3": 1,
+          "mixamorig1:RightHandPinky4": 1
+        },
+        "states": [
+          {
+            "name": "Off",
+            "clipName": "",
+            "loop": true,
+            "speed": 1,
+            "isEntry": true,
+            "x": 40,
+            "y": 40
+          },
+          {
+            "name": "Sword Run",
+            "clipName": "Souls_RunWithSword",
+            "loop": true,
+            "speed": 1,
+            "isEntry": false,
+            "x": 300,
+            "y": 40
+          }
+        ],
+        "transitions": [
+          {
+            "from": "Off",
+            "to": "Sword Run",
+            "conditions": [],
+            "minDwell": 0.1,
+            "hasExitTime": false,
+            "exitTime": 1,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Speed",
+                  "op": "gt",
+                  "value": 2.2,
+                  "hysteresis": 0.15
+                }
+              ]
+            },
+            "blendTime": 0.25
+          },
+          {
+            "from": "Sword Run",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0.15,
+            "hasExitTime": false,
+            "exitTime": 1,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Speed",
+                  "op": "lt",
+                  "value": 1.8,
+                  "hysteresis": 0.15
+                }
+              ]
+            },
+            "blendTime": 0.3
+          },
+          {
+            "from": "Sword Run",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": false,
+            "exitTime": 1,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Died",
+                  "op": "trigger"
+                }
+              ]
+            },
+            "blendTime": 0.15
+          }
+        ]
+      },
+      {
+        "name": "Actions",
+        "blend": "override",
+        "weight": 1,
+        "states": [
+          {
+            "name": "Off",
+            "clipName": "",
+            "loop": true,
+            "speed": 1,
+            "isEntry": true,
+            "x": 40,
+            "y": 40,
+            "triggers": [
+              {
+                "trigger": "Died",
+                "blendTime": 0.15
+              },
+              {
+                "trigger": "Stop",
+                "blendTime": 0.22
+              },
+              {
+                "trigger": "Cut",
+                "blendTime": 0
+              }
+            ]
+          },
+          {
+            "name": "Flinch",
+            "clipName": "Souls_HitLight",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Flinch",
+                "blendTime": 0.1
+              }
+            ],
+            "x": 300,
+            "y": 40
+          },
+          {
+            "name": "Stagger",
+            "clipName": "Souls_HitHeavy",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Stagger",
+                "blendTime": 0.1
+              }
+            ],
+            "x": 510,
+            "y": 40
+          },
+          {
+            "name": "Sweep",
+            "clipName": "Souls_GS_L2",
+            "loop": false,
+            "speed": 1.3,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Sweep",
+                "blendTime": 0.12
+              }
+            ],
+            "speedScaleParam": "AttackSpeed",
+            "x": 720,
+            "y": 40
+          },
+          {
+            "name": "Overhead",
+            "clipName": "Souls_Enemy_Overhead",
+            "loop": false,
+            "speed": 1.1,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Overhead",
+                "blendTime": 0.12
+              }
+            ],
+            "speedScaleParam": "AttackSpeed",
+            "x": 930,
+            "y": 40
+          },
+          {
+            "name": "Thrust",
+            "clipName": "Souls_Enemy_Thrust",
+            "loop": false,
+            "speed": 1.25,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Thrust",
+                "blendTime": 0.12
+              }
+            ],
+            "speedScaleParam": "AttackSpeed",
+            "x": 300,
+            "y": 160
+          },
+          {
+            "name": "Combo",
+            "clipName": "Souls_Knight_Combo1",
+            "loop": false,
+            "speed": 1.2,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Combo",
+                "blendTime": 0.12
+              }
+            ],
+            "speedScaleParam": "AttackSpeed",
+            "x": 510,
+            "y": 160
+          },
+          {
+            "name": "Flurry",
+            "clipName": "Souls_Knight_Combo2",
+            "loop": false,
+            "speed": 1.2,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Flurry",
+                "blendTime": 0.12
+              }
+            ],
+            "speedScaleParam": "AttackSpeed",
+            "x": 720,
+            "y": 160
+          }
+        ],
+        "transitions": [
+          {
+            "from": "Flinch",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.511,
+            "blendTime": 0.22
+          },
+          {
+            "from": "Stagger",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.787,
+            "blendTime": 0.22
+          },
+          {
+            "from": "Sweep",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.856,
+            "blendTime": 0.35
+          },
+          {
+            "from": "Overhead",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.83,
+            "blendTime": 0.35
+          },
+          {
+            "from": "Thrust",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.854,
+            "blendTime": 0.35
+          },
+          {
+            "from": "Combo",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.91,
+            "blendTime": 0.35
+          },
+          {
+            "from": "Flurry",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.9,
+            "blendTime": 0.35
+          }
+        ]
+      }
+    ],
+    "events": []
+  }
+}

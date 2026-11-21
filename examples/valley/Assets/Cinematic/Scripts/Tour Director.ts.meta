@@ -1,0 +1,83 @@
+{
+  "cleo": 1,
+  "guid": "818b78643daab725d2e83672baea8a73",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "818b78643daab725d2e83672baea8a73",
+    "name": "Tour Director",
+    "baseType": "sequence",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "flash",
+        "type": {
+          "kind": "node",
+          "className": "LightNode"
+        },
+        "access": "public",
+        "default": null,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The light the strikes flash."
+        }
+      },
+      {
+        "name": "lightningLumens",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 600000000000,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Lumens at a pulse's peak (written out in full: the editor's field reader takes no exponents)."
+        }
+      },
+      {
+        "name": "lightningClouds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 5,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "How much the clouds' ambient light rises at a peak, over its own."
+        }
+      },
+      {
+        "name": "_clouds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_ambient",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_strikes",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

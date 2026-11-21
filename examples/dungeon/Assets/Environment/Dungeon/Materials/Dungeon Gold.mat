@@ -1,0 +1,33 @@
+{
+  "id": "03211c6429526a9fe48a2eafd85f472e",
+  "name": "Dungeon Gold",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "215dfe3f2145454056b4a38e4c93d2e8",
+      "metallicRoughnessTexture": "0aadef31862db76527e4e9a7f21e0802",
+      "occlusionMap": "0aadef31862db76527e4e9a7f21e0802",
+      "normalMap": "fd3eb276b03ed112dd74ce9e557c05f5"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "215dfe3f2145454056b4a38e4c93d2e8",
+    "0aadef31862db76527e4e9a7f21e0802",
+    "fd3eb276b03ed112dd74ce9e557c05f5"
+  ],
+  "thumbnail": ""
+}

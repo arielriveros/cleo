@@ -1,0 +1,46 @@
+{
+  "id": "9f2307602a42652c6ba24ca45f6692f9",
+  "name": "Spruce A Bark",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.03,
+    "windStiffness": 2.2,
+    "windRole": "plant",
+    "windFlutter": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "d5cb2321a4607ca5b04412f5caafb160",
+      "metallicRoughnessTexture": "ad0405454df24f97a3e7cd8708d8f7e1",
+      "occlusionMap": "ad0405454df24f97a3e7cd8708d8f7e1",
+      "normalMap": "e0a80ae66726683ae59de96cbff017ea"
+    },
+    "interactBend": 0.05,
+    "interactRecovery": 1,
+    "variationHue": 0.03,
+    "variationValue": 0.12,
+    "variationDry": 0.05,
+    "wetResponse": 0.5,
+    "snowCover": 0.6,
+    "weightDroop": 0.08,
+    "rippleSheen": 0.15,
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "d5cb2321a4607ca5b04412f5caafb160",
+    "ad0405454df24f97a3e7cd8708d8f7e1",
+    "e0a80ae66726683ae59de96cbff017ea"
+  ],
+  "thumbnail": ""
+}

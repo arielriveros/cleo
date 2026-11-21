@@ -11,134 +11,17 @@
 // user's projects and Documents are never touched. CLEO_PICK_DIRECTORY answers the folder dialogs.
 
 import { spawn } from 'node:child_process'
-import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { App, PORT, checks, exists, hashes, read, sleep, until, waitArmed, walk, mtimes } from './e2eKit.mjs'
 
-const here = path.dirname(fileURLToPath(import.meta.url))
-const DESKTOP = path.resolve(here, '..')
-const require = createRequire(import.meta.url)
-const ELECTRON = require(path.join(DESKTOP, 'node_modules', 'electron'))
-const PORT = Number(process.env.E2E_CDP_PORT ?? 9431)
-const ONLY = (process.env.E2E_ONLY ?? '').split(',').filter(Boolean)
-
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cleo-folder-e2e-'))
 const PROJECTS = path.join(temp, 'projects')
 fs.mkdirSync(PROJECTS)
-const sleep = ms => new Promise(r => setTimeout(r, ms))
-
-const results = []
-function check(name, ok, detail) {
-  results.push({ name, ok: !!ok })
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `   -> ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`}`)
-}
-
-async function until(fn, ms = 30000, step = 250) {
-  const deadline = Date.now() + ms
-  for (;;) {
-    let v
-    try { v = await fn() } catch { v = null }
-    if (v) return v
-    if (Date.now() > deadline) return null
-    await sleep(step)
-  }
-}
-
-// ---- one app instance -------------------------------------------------------------------------------
-
-class App {
-  constructor(profile, pick = '') {
-    this.profile = profile
-    const env = { ...process.env, CLEO_PROJECTS_DIR: PROJECTS, CLEO_PICK_DIRECTORY: pick }
-    delete env.ELECTRON_RUN_AS_NODE
-    delete env.CLEO_DEV
-    this.child = spawn(ELECTRON, [DESKTOP, `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`], { env, stdio: ['ignore', 'pipe', 'pipe'] })
-    this.log = ''
-    this.child.stdout.on('data', d => { this.log += d })
-    this.child.stderr.on('data', d => { this.log += d })
-    this.nextId = 1
-    this.pending = new Map()
-  }
-
-  async connect() {
-    const target = await until(async () => {
-      const res = await fetch(`http://127.0.0.1:${PORT}/json/list`)
-      const list = await res.json()
-      return list.find(t => t.type === 'page' && String(t.url).startsWith('app://editor'))
-    }, 60000)
-    if (!target) throw new Error('no editor window')
-    this.ws = new WebSocket(target.webSocketDebuggerUrl)
-    await new Promise((res, rej) => { this.ws.onopen = res; this.ws.onerror = rej })
-    this.console = []
-    this.ws.onmessage = e => {
-      const msg = JSON.parse(e.data)
-      if (msg.method === 'Runtime.consoleAPICalled') {
-        const text = msg.params.args.map(a => a.value ?? a.description ?? '').join(' ')
-        this.console.push(`[${msg.params.type}] ${text}`)
-        if (this.console.length > 400) this.console.shift()
-        return
-      }
-      if (msg.method === 'Runtime.exceptionThrown') { this.console.push(`[exception] ${msg.params.exceptionDetails?.exception?.description ?? msg.params.exceptionDetails?.text}`); return }
-      const p = this.pending.get(msg.id)
-      if (p) { this.pending.delete(msg.id); msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result) }
-    }
-    await this.send('Runtime.enable')
-  }
-
-  send(method, params = {}) {
-    const id = this.nextId++
-    this.ws.send(JSON.stringify({ id, method, params }))
-    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }))
-  }
-
-  /** Evaluate an async function body in the page; its returned value comes back as JSON. */
-  async eval(body) {
-    const res = await this.send('Runtime.evaluate', { expression: `(async () => { ${HELPERS}\n${body} })()`, awaitPromise: true, returnByValue: true })
-    if (res.exceptionDetails) throw new Error(res.exceptionDetails.exception?.description ?? res.exceptionDetails.text)
-    return res.result.value
-  }
-
-  async quit() {
-    try { this.ws?.close() } catch {}
-    if (process.platform === 'win32') spawn('taskkill', ['/PID', String(this.child.pid), '/T', '/F'], { stdio: 'ignore' })
-    else this.child.kill()
-    await sleep(1500)
-  }
-}
-
-// In-page helpers, prepended to every evaluation.
-const HELPERS = `
-const byText = (text, sel = 'button') => [...document.querySelectorAll(sel)].find(n => n.textContent && n.textContent.trim().startsWith(text) && n.offsetParent !== null);
-const click = el => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); return true };
-const setInput = (el, value) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); };
-const idb = async (store, key) => {
-  const db = await new Promise((res, rej) => { const r = indexedDB.open('cleo'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) });
-  const v = await new Promise((res, rej) => { const r = db.transaction(store, 'readonly').objectStore(store).get(key); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) });
-  db.close(); return v;
-};
-const pid = () => localStorage.getItem('cleo_active_project');
-const pf = () => globalThis.__cleoProjectFolder;
-`
-
-// ---- disk helpers -----------------------------------------------------------------------------------
-
-const exists = (...p) => fs.existsSync(path.join(...p))
-const read = (...p) => fs.readFileSync(path.join(...p), 'utf8')
-function walk(dir, base = dir, out = []) {
-  for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
-    const abs = path.join(dir, d.name)
-    if (d.isDirectory()) { if (!['.git', 'node_modules', '.cleo'].includes(d.name)) walk(abs, base, out) }
-    else out.push(path.relative(base, abs).split(path.sep).join('/'))
-  }
-  return out
-}
-const mtimes = root => new Map(walk(root).map(rel => [rel, fs.statSync(path.join(root, rel)).mtimeMs]))
-
-async function waitArmed(app, ms = 120000) {
-  return until(() => app.eval(`return !!(pf() && pf().armed)`), ms, 400)
-}
+const { check, finish } = checks()
 
 /** Click the folder chip's "Reload from disk", answering the unsaved-work question if one comes. */
 async function reloadFromDisk(app) {
@@ -156,7 +39,7 @@ async function reloadFromDisk(app) {
 
 async function main() {
   const profileA = path.join(temp, 'profile-a')
-  let app = new App(profileA)
+  let app = new App({ profile: profileA, projects: PROJECTS })
   await app.connect()
   const root = path.join(PROJECTS, 'E2E Game')
 
@@ -254,7 +137,7 @@ async function main() {
 
   // 5. Another machine: an empty profile opens the folder (Open Folder…) and gets the whole project.
   const profileB = path.join(temp, 'profile-b')
-  app = new App(profileB, root)
+  app = new App({ profile: profileB, projects: PROJECTS, pick: root })
   await app.connect()
   await until(() => app.eval(`return !!byText('Open Folder')`), 60000)
   await app.eval(`click(byText('Open Folder')); return true`)
@@ -286,6 +169,17 @@ async function main() {
     const files = walk(duskwell)
     check('every asset file has a meta', files.filter(r => r.startsWith('Assets/') && !r.endsWith('.meta')).every(r => files.includes(r + '.meta')),
       files.filter(r => r.startsWith('Assets/') && !r.endsWith('.meta') && !files.includes(r + '.meta')).slice(0, 5))
+    // The gallery's Duskwell is built from the repository's folder, and the codec's output is a fixed point, so
+    // installing it gives that folder back: every asset, blob and setting the same bytes.
+    const repo = path.join(REPO, 'examples', 'duskwell')
+    if (exists(repo, 'project.cleo')) {
+      const project = rel => /^(Assets|Blobs|Baked|Derived|ProjectSettings)\//.test(rel)
+      const want = [...hashes(repo)].filter(([rel]) => project(rel))
+      const got = new Map([...hashes(duskwell)].filter(([rel]) => project(rel)))
+      const differ = want.filter(([rel, sha]) => got.get(rel) !== sha).map(([rel]) => rel)
+      const extra = [...got.keys()].filter(rel => !want.some(([r]) => r === rel))
+      check('the installed folder is the repository\'s examples/duskwell', !differ.length && !extra.length, { differ: differ.slice(0, 10), extra: extra.slice(0, 10) })
+    }
   } else {
     check('the Projects modal opens from the editor', false, 'no Projects button found')
   }
@@ -294,11 +188,8 @@ async function main() {
 }
 
 main().catch(e => { check('the run finished', false, e?.stack ?? e) }).finally(() => {
-  const failed = results.filter(r => !r.ok).length
-  console.log(`\n${results.length - failed}/${results.length} passed`)
+  const code = finish()
   if (!process.env.E2E_KEEP) fs.rmSync(temp, { recursive: true, force: true })
   else console.log(`kept ${temp}`)
-  process.exit(failed ? 1 : 0)
+  process.exit(code)
 })
-
-void ONLY

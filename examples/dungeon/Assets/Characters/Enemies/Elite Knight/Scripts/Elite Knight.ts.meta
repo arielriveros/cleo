@@ -1,0 +1,973 @@
+{
+  "cleo": 1,
+  "guid": "085bfb65554b45f5868292761425d0cc",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "085bfb65554b45f5868292761425d0cc",
+    "name": "Elite Knight",
+    "baseType": "character",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "displayName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Elite Knight",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "team",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "enemy",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "maxHp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 650,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 650,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "defense",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.15,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "bodyRadius",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.45,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "bodyHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.16,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "weaponTemplates",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "name",
+            "name": "template"
+          }
+        },
+        "access": "public",
+        "default": [
+          "Maul"
+        ],
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "weaponSocket",
+        "type": {
+          "kind": "name",
+          "name": "socket"
+        },
+        "access": "public",
+        "default": "RightHand",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Socket on this character's skeleton the weapons attach to."
+        }
+      },
+      {
+        "name": "weaponsGroup",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Weapons",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Child group the weapons are spawned under (this node itself when there is none)."
+        }
+      },
+      {
+        "name": "weaponName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The held weapon's display name, for the HUD."
+        }
+      },
+      {
+        "name": "dropWeaponOnDeath",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "A dead enemy lets its weapon fall (a physics body); it lies there until the corpse goes."
+        }
+      },
+      {
+        "name": "droppedWeaponMass",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 4,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The dropped weapon's mass, kg."
+        }
+      },
+      {
+        "name": "maxWalkSlope",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 45,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The steepest ground, in degrees, this character can walk UP. On anything steeper it can still move across the slope or down it, but not climb (see limitClimb). The engine's own limit is 60°."
+        }
+      },
+      {
+        "name": "stopTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Stop",
+        "hidden": false,
+        "attribute": {
+          "group": "One-shots",
+          "tooltip": "Attacks, rolls and reactions are played by TRIGGER, by name (`_playTrigger`): the animator has a state each one enters, which leaves on its own at the clip's end. The graph owns every clip, its speed and its blends; the script owns the gameplay, and asks the animator how long what a trigger plays lasts (`Animator.triggerInfo`) and whether it still plays (`Animator.activeTrigger`). These two take the one-shot's layer back to rest from anything: with its blend-out, and at once."
+        }
+      },
+      {
+        "name": "cutTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Cut",
+        "hidden": false,
+        "attribute": {
+          "group": "One-shots"
+        }
+      },
+      {
+        "name": "_waterZones",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "isDead",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "hurtboxActive",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": true
+      },
+      {
+        "name": "_gm",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "GameManager"
+        }
+      },
+      {
+        "name": "_model",
+        "type": {
+          "kind": "node",
+          "className": "ModelNode"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_weapons",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "protected",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_weaponIndex",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_dropped",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "protected",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_raised",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_actTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "protected",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_actInfo",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_actEntered",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "protected",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_actWait",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_warnedActions",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wading",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_hurtboxChecked",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "maxPoise",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 70,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "poiseRegenDelay",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "soulsReward",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 900,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "isBoss",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "moveSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.8,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "engageTurnRate",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 300,
+        "hidden": false,
+        "attribute": {
+          "group": "Movement",
+          "tooltip": "Degrees per second the body turns toward the player while engaged."
+        }
+      },
+      {
+        "name": "strafeSpeedScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {
+          "group": "Movement"
+        }
+      },
+      {
+        "name": "retreatSpeedScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.7,
+        "hidden": false,
+        "attribute": {
+          "group": "Movement"
+        }
+      },
+      {
+        "name": "attackGapMin",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.8,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "attackGapMax",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.4,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "flinchOnHit",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting"
+        }
+      },
+      {
+        "name": "flinchTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Flinch",
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting",
+          "tooltip": "Animator triggers of the reactions' Actions states; the seconds are how long each holds the enemy."
+        }
+      },
+      {
+        "name": "flinchSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.4,
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting"
+        }
+      },
+      {
+        "name": "staggerTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Stagger",
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting"
+        }
+      },
+      {
+        "name": "staggerSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting"
+        }
+      },
+      {
+        "name": "tauntTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Taunt",
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting",
+          "tooltip": "A BOSS's battle cry, played once the first time it spots the player each life. Regular enemies never taunt -- a shout from every Hollow in the room is noise, not menace."
+        }
+      },
+      {
+        "name": "tauntOnAggro",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting"
+        }
+      },
+      {
+        "name": "deathSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting",
+          "tooltip": "Seconds the death clip plays before the ragdoll takes over (0 = no ragdoll)."
+        }
+      },
+      {
+        "name": "useRagdoll",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting"
+        }
+      },
+      {
+        "name": "corpseSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 6,
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting",
+          "tooltip": "Seconds the body lies there before it is removed."
+        }
+      },
+      {
+        "name": "corpseFadeSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting",
+          "tooltip": "Seconds the body then takes to dissolve away."
+        }
+      },
+      {
+        "name": "castSocket",
+        "type": {
+          "kind": "name",
+          "name": "socket"
+        },
+        "access": "public",
+        "default": "LeftHand",
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting",
+          "tooltip": "Socket projectiles leave from."
+        }
+      },
+      {
+        "name": "healthBarSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 4,
+        "hidden": false,
+        "attribute": {
+          "group": "Fighting",
+          "tooltip": "Seconds the health bar stays up after the last hit."
+        }
+      },
+      {
+        "name": "isAwake",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": true
+      },
+      {
+        "name": "phase",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "poise",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 70,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "fightState",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "ai",
+        "hidden": true
+      },
+      {
+        "name": "home",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "public",
+        "default": [0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "attackReady",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_player",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "Player"
+        }
+      },
+      {
+        "name": "_brain",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_lockPoint",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "LockPoint"
+        }
+      },
+      {
+        "name": "_healthBar",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "HealthBar"
+        }
+      },
+      {
+        "name": "_healthFill",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "HealthBar/Fill"
+        }
+      },
+      {
+        "name": "_aura",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "PhaseAura"
+        }
+      },
+      {
+        "name": "_attacks",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_stateTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_sinceHit",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 99,
+        "hidden": true
+      },
+      {
+        "name": "_gap",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_cooldowns",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lastAttack",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_attack",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_clip",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_playSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_usesEvents",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_windowOpened",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_swing",
+        "type": {
+          "kind": "node",
+          "className": "Swing",
+          "script": true
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_actionSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lungeSpeedNow",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_strafeDir",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_strafeTimer",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_speedMul",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_reactSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_taunted",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_phaseSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_attackSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

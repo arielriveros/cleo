@@ -1,0 +1,34 @@
+{
+  "id": "49ffecbd40a483837181c1b3262e8abf",
+  "name": "Dungeon Stone Slabs",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.58, 0.56, 0.54],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "ee1c0571cdb0d68c22c2397f33f75391",
+      "roughnessMap": "56c111253fb0eec90132ec47cece74bf",
+      "occlusionMap": "b18b7b6dffb0984b9ed70ded1c5970b8",
+      "normalMap": "e32748e9c5271b1dbe58ffda18d493d9"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "ee1c0571cdb0d68c22c2397f33f75391",
+    "56c111253fb0eec90132ec47cece74bf",
+    "b18b7b6dffb0984b9ed70ded1c5970b8",
+    "e32748e9c5271b1dbe58ffda18d493d9"
+  ],
+  "thumbnail": ""
+}

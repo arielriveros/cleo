@@ -1,0 +1,35 @@
+{
+  "cleo": 1,
+  "guid": "7ac965cf02b314f7fb6b87d1826219b4",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "7ac965cf02b314f7fb6b87d1826219b4",
+    "name": "Viewmodel Shirt BlackCamo2 ARM.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "wrapU": "repeat",
+      "wrapV": "repeat",
+      "wrapW": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "minFilter": "linear",
+      "magFilter": "linear",
+      "anisotropy": 1,
+      "precision": "low",
+      "format": "rgba8unorm",
+      "target": "texture2D"
+    }
+  }
+}

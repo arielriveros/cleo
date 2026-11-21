@@ -1,0 +1,389 @@
+{
+  "cleo": 1,
+  "guid": "992eeb030dc0f7f7cf97356f36f6f0f1",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "992eeb030dc0f7f7cf97356f36f6f0f1",
+    "name": "FpsGameManager",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "gameType",
+        "type": {
+          "kind": "choice",
+          "values": [
+            "oneVsAll",
+            "teamDeathmatch",
+            "ffa",
+            "coop"
+          ]
+        },
+        "access": "public",
+        "default": "oneVsAll",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The game type: how the scene's fighters are dealt into teams (the dropdown lists GAME_TYPES in FpsShared)."
+        }
+      },
+      {
+        "name": "botTemplates",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "name",
+            "name": "template"
+          }
+        },
+        "access": "public",
+        "default": [
+          "FPS Bot",
+          "FPS Vanguard",
+          "FPS Raider",
+          "FPS Swat"
+        ],
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Bot templates the manager spawns when the scene holds fewer fighters than the game type needs, cycling through the list, at spawn points. A scene with enough bots of its own never uses it."
+        }
+      },
+      {
+        "name": "scoreLimit",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 20,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Team kills that win the match (0: none)."
+        }
+      },
+      {
+        "name": "timeLimit",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Minutes (0: none)."
+        }
+      },
+      {
+        "name": "friendlyFire",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "playerRespawnSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 4,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds a fighter lies dead before it comes back."
+        }
+      },
+      {
+        "name": "botRespawnSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 6,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "corpseSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 9,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "How long a bot's body stays before it fades."
+        }
+      },
+      {
+        "name": "restartSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 9,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds the match-over banner shows before the scene reloads."
+        }
+      },
+      {
+        "name": "spawnAtStart",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Move every fighter onto a spawn point when the match starts (when the scene has spawn points)."
+        }
+      },
+      {
+        "name": "coopBots",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 24,
+        "hidden": false,
+        "attribute": {
+          "group": "Online",
+          "tooltip": "Online co-op: the bots against the players (a horde; the host runs up to about 50)."
+        }
+      },
+      {
+        "name": "onlineTeamSize",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 8,
+        "hidden": false,
+        "attribute": {
+          "group": "Online",
+          "tooltip": "Online team deathmatch: fighters a side, bots filling the seats players do not take."
+        }
+      },
+      {
+        "name": "maxDecals",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 90,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Bullet holes kept in the world; older ones are removed."
+        }
+      },
+      {
+        "name": "reinforcementRadius",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 55,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Bots of a team this close to a call for reinforcements answer it."
+        }
+      },
+      {
+        "name": "spawnSafeDistance",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 14,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "A spawn point this near a living enemy is passed over."
+        }
+      },
+      {
+        "name": "matchOver",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "winner",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "message",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "timeLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "elapsed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "activeType",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "scores",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "teamNames",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "feedLines",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "string"
+          }
+        },
+        "access": "public",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_fighters",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_decals",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_spawns",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_covers",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_started",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_scan",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_feed",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_usedSpawns",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_snapshots",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

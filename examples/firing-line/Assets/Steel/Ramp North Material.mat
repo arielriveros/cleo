@@ -1,0 +1,47 @@
+{
+  "id": "414efb81e6c61f8d32e9c537068a1762",
+  "name": "Ramp North Material",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "uvProjection": "box",
+    "uvSpace": "world",
+    "uvOffset": [1, 0.5],
+    "uvWorldSize": 2.51,
+    "textures": {
+      "baseColorTexture": "metal_plate_diff_1k.png",
+      "metallicMap": "metal_plate_arm_1k.png",
+      "roughnessMap": "metal_plate_rough_1k.png",
+      "normalMap": "metal_plate_nor_gl_1k.png",
+      "occlusionMap": "metal_plate_ao_1k.png",
+      "displacementMap": "metal_plate_disp_1k.png"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "metal_plate_diff_1k.png",
+    "metal_plate_arm_1k.png",
+    "metal_plate_rough_1k.png",
+    "metal_plate_nor_gl_1k.png",
+    "metal_plate_ao_1k.png",
+    "metal_plate_disp_1k.png"
+  ],
+  "thumbnail": ""
+}

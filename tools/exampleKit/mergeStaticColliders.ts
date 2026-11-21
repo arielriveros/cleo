@@ -18,7 +18,7 @@ const THREE_D = ['dungeon', 'valley', 'firing-line']
 
 for (const name of THREE_D) {
   const dir = path.join(EXAMPLES, name)
-  if (!fs.existsSync(path.join(dir, 'manifest.json')) || (only.length && !only.includes(name))) continue
+  if (!fs.existsSync(path.join(dir, 'project.cleo')) || (only.length && !only.includes(name))) continue
   const bundle: any = await read(dir)
   const scriptStrings = stringLiterals((bundle.libraries.scripts ?? []).map((s: any) => s.source))
   // A sequence keys its tracks to nodes by id.

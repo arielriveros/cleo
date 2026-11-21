@@ -1,0 +1,96 @@
+{
+  "cleo": 1,
+  "guid": "0d68912320962c44197ae9141a4470f2",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "0d68912320962c44197ae9141a4470f2",
+    "name": "Pickup",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "kind",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "souls",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "amount",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 200,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "itemName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Soul of a Lost Undead",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hiddenUntilRevealed",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "pickupGesture",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Pickup",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The trigger of the player animator's gesture state played on taking it."
+        }
+      },
+      {
+        "name": "taken",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {},
+        "save": true
+      },
+      {
+        "name": "_gm",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "GameManager"
+        }
+      }
+    ],
+    "reflect": 3
+  }
+}

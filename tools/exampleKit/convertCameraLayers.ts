@@ -79,7 +79,7 @@ function pillarsIntoTheirCollider(sceneRoot: any): boolean {
 
 for (const name of fs.readdirSync(EXAMPLES)) {
   const dir = path.join(EXAMPLES, name)
-  if (!fs.statSync(dir).isDirectory() || !fs.existsSync(path.join(dir, 'manifest.json'))) continue
+  if (!fs.statSync(dir).isDirectory() || !fs.existsSync(path.join(dir, 'project.cleo'))) continue
   if (only.length && !only.includes(name)) continue
   const bundle: any = await read(dir)
   const lib = bundle.libraries

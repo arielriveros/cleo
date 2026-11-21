@@ -1,0 +1,22 @@
+{
+  "id": "7fcbb70d1b9ddb2952786abf24450a52",
+  "name": "Rifle 6",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.06, 0.06, 0.06],
+    "metallic": 0,
+    "roughness": 0.82,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

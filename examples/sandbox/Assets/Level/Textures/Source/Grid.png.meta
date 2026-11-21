@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "d4a96a210b1af85c70925ceced937cb7",
+  "kind": "image",
+  "created": 1795100000000,
+  "record": {
+    "id": "d4a96a210b1af85c70925ceced937cb7",
+    "name": "Grid.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1795100000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

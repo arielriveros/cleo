@@ -105,24 +105,4 @@ describe('merging static colliders', () => {
     });
 });
 
-const EXAMPLES = join(__dirname, '..', 'applications', 'editor', 'public', 'examples');
-const THREE_D = ['dungeon', 'valley', 'firing-line', 'sandbox'].filter(n => existsSync(join(EXAMPLES, n, 'scenes')));
-
-describe.each(THREE_D)('the %s example', (name) => {
-    const scenes = readdirSync(join(EXAMPLES, name, 'scenes')).map(f => JSON.parse(readFileSync(join(EXAMPLES, name, 'scenes', f), 'utf8')));
-    const scripts: any[] = JSON.parse(readFileSync(join(EXAMPLES, name, 'libraries', 'scripts.json'), 'utf8'));
-
-    it('keeps its static scenery in Static Collision, at the origin, with nothing left to merge', () => {
-        for (const scene of scenes) {
-            const merged = scene.scene.children.filter((c: any) => c.type === 'collider' && /^Static Collision/.test(c.name));
-            expect(merged.length, 'Static Collision colliders').toBeGreaterThan(0);
-            for (const c of merged) {
-                expect([c.position, c.rotation, c.scale]).toEqual([[0, 0, 0], [0, 0, 0], [1, 1, 1]]);
-                expect(c.collider.mass).toBe(0);
-            }
-            const strings = new Set<string>();
-            for (const s of scripts) for (const m of String(s.source).matchAll(/(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g)) strings.add(m[2]);
-            expect(mergeStaticColliders(structuredClone(scene.scene), { scriptStrings: strings, idFor: k => k }).merged).toBe(0);
-        }
-    });
-});
+// Each 3D example keeps its scenery merged: tools/exampleKit/specs/project.ts, run by its own tests.

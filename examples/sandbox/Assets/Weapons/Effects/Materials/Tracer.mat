@@ -1,0 +1,24 @@
+{
+  "id": "e1f73e7f57770d79a93fd78d137cd948",
+  "name": "Tracer",
+  "textureIds": [],
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 0.85, 0.5],
+    "metallic": 0,
+    "roughness": 0.85,
+    "opacity": 1,
+    "emissiveFactor": [1, 0.78, 0.4],
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    },
+    "emissiveIntensity": 6,
+    "emissiveExposureWeight": 0.1
+  },
+  "thumbnail": ""
+}

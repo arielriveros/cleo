@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "076b3f4f5c862b837e4650f5df46bd51",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "076b3f4f5c862b837e4650f5df46bd51",
+    "name": "Dungeon Brass Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

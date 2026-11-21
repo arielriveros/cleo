@@ -1,0 +1,23 @@
+{
+  "id": "cd753a14b13b08e787e4235235f84784",
+  "name": "Blade (placeholder)",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.78, 0.8, 0.84],
+    "metallic": 1,
+    "roughness": 0.25,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

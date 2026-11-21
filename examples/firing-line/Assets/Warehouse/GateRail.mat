@@ -1,0 +1,36 @@
+{
+  "id": "a15b9b19ee562494d89d4f8d6e749e5b",
+  "name": "GateRail",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "1adeb14313bc957cdd8e255f5264fcea",
+      "metallicMap": "295e48a86f066c0742756a294cdf4487",
+      "roughnessMap": "295e48a86f066c0742756a294cdf4487"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "1adeb14313bc957cdd8e255f5264fcea",
+    "295e48a86f066c0742756a294cdf4487"
+  ],
+  "thumbnail": ""
+}

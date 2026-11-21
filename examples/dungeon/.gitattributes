@@ -1,0 +1,47 @@
+# Cleo example: text stays LF everywhere (scripts are hashed, and a CRLF checkout would change them).
+# The binary data is not in git (see .gitignore and data.lock.json).
+* text=auto eol=lf
+Blobs/** -text
+Baked/** -text
+Derived/** -text
+*.[pP][nN][gG] -text
+*.[jJ][pP][gG] -text
+*.[jJ][pP][eE][gG] -text
+*.[wW][eE][bB][pP] -text
+*.[gG][iI][fF] -text
+*.[bB][mM][pP] -text
+*.[tT][gG][aA] -text
+*.[tT][iI][fF][fF] -text
+*.[kK][tT][xX]2 -text
+*.[hH][dD][rR] -text
+*.[eE][xX][rR] -text
+*.[aA][vV][iI][fF] -text
+*.[wW][aA][vV] -text
+*.[mM][pP]3 -text
+*.[oO][gG][gG] -text
+*.[mM]4[aA] -text
+*.[fF][lL][aA][cC] -text
+*.[aA][aA][cC] -text
+*.[oO][pP][uU][sS] -text
+*.[wW][eE][bB][mM] -text
+*.cleo text eol=lf
+*.json text eol=lf
+*.meta text eol=lf
+*.ts text eol=lf
+*.mat text eol=lf
+*.tmat text eol=lf
+*.tpl text eol=lf
+*.model text eol=lf
+*.scene text eol=lf
+*.blendspace text eol=lf
+*.anim text eol=lf
+*.rig text eol=lf
+*.tileset text eol=lf
+*.brain text eol=lf
+*.animator text eol=lf
+*.mask text eol=lf
+*.pose text eol=lf
+*.vfx text eol=lf
+*.sequence text eol=lf
+*.tex text eol=lf
+*.sound text eol=lf

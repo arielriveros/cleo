@@ -1,0 +1,32 @@
+{
+  "id": "b2704674062deaf2fb59a07c90af8d5b",
+  "name": "Dirty Planks",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "2d43b9a2dbd72685fd7b2b77e0d3733e",
+      "roughnessMap": "a25d11e3b0af1d321bc5c690687d02ff",
+      "normalMap": "3a82fc4d6618c48a3ee0dedbbc732ad3"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "2d43b9a2dbd72685fd7b2b77e0d3733e",
+    "a25d11e3b0af1d321bc5c690687d02ff",
+    "3a82fc4d6618c48a3ee0dedbbc732ad3"
+  ],
+  "thumbnail": ""
+}

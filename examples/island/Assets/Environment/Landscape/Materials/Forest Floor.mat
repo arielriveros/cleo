@@ -1,0 +1,37 @@
+{
+  "id": "d67cb910c663affafeac5c56c494d6b8",
+  "name": "Forest Floor",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "uv",
+    "textures": {
+      "baseColorTexture": "46e3866d9f7f2ffae7a414dcc1049ad6",
+      "metallicRoughnessTexture": "c6f975e18762a396c495f11f935eecce",
+      "occlusionMap": "c6f975e18762a396c495f11f935eecce",
+      "normalMap": "9350f8b098021f13ef776ad66fb34967",
+      "displacementMap": "0858e7013454c17b1cc97e3724b54c04"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "46e3866d9f7f2ffae7a414dcc1049ad6",
+    "c6f975e18762a396c495f11f935eecce",
+    "9350f8b098021f13ef776ad66fb34967",
+    "0858e7013454c17b1cc97e3724b54c04"
+  ],
+  "thumbnail": ""
+}

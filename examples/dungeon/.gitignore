@@ -1,0 +1,29 @@
+# Cleo: regenerated when the project opens in Cleo.
+.cleo/
+node_modules/
+# The binary data: listed in data.lock.json, downloaded with `npm run examples:fetch` at the repository root.
+Blobs/
+Baked/
+Derived/*
+!Derived/*.tex
+!Derived/*.meta
+Assets/**/*.[pP][nN][gG]
+Assets/**/*.[jJ][pP][gG]
+Assets/**/*.[jJ][pP][eE][gG]
+Assets/**/*.[wW][eE][bB][pP]
+Assets/**/*.[gG][iI][fF]
+Assets/**/*.[bB][mM][pP]
+Assets/**/*.[tT][gG][aA]
+Assets/**/*.[tT][iI][fF][fF]
+Assets/**/*.[kK][tT][xX]2
+Assets/**/*.[hH][dD][rR]
+Assets/**/*.[eE][xX][rR]
+Assets/**/*.[aA][vV][iI][fF]
+Assets/**/*.[wW][aA][vV]
+Assets/**/*.[mM][pP]3
+Assets/**/*.[oO][gG][gG]
+Assets/**/*.[mM]4[aA]
+Assets/**/*.[fF][lL][aA][cC]
+Assets/**/*.[aA][aA][cC]
+Assets/**/*.[oO][pP][uU][sS]
+Assets/**/*.[wW][eE][bB][mM]

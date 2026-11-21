@@ -1,0 +1,136 @@
+{
+  "cleo": 1,
+  "guid": "5afbf02b28415b469ef4571f7b9e5233",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "5afbf02b28415b469ef4571f7b9e5233",
+    "name": "HUD",
+    "baseType": "uiRoot",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "pxPerHp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.75,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "pxPerStamina",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.4,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "minBarWidth",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 160,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "maxBarWidth",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 900,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "noticeSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.6,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "interactKey",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "E",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Key shown in front of the interaction prompt."
+        }
+      },
+      {
+        "name": "_player",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_w",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_barLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 48,
+        "hidden": true
+      },
+      {
+        "name": "_noticeAge",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 99,
+        "hidden": true
+      },
+      {
+        "name": "_message",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_messageAge",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "4385970f04a7e65303d24eb1274cde86",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "4385970f04a7e65303d24eb1274cde86",
+    "name": "Dirt Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

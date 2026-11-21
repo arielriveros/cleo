@@ -1,0 +1,35 @@
+{
+  "cleo": 1,
+  "guid": "barrel_03_diff_1k.jpg",
+  "kind": "image",
+  "created": 1794165259990,
+  "record": {
+    "id": "barrel_03_diff_1k.jpg",
+    "name": "barrel_03_diff_1k.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1794165259990
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "wrapU": "repeat",
+      "wrapV": "repeat",
+      "wrapW": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "minFilter": "linear",
+      "magFilter": "linear",
+      "anisotropy": 1,
+      "precision": "low",
+      "format": "rgba8unorm",
+      "target": "texture2D"
+    }
+  }
+}

@@ -365,7 +365,7 @@ Marker times are in CLIP seconds, so a state playing at `speed: 1.5` fires the m
 `time / 1.5` wall-clock seconds. A marker beyond a state's `exitTime` is never reached at all.
 A marker AT time 0 fires when its clip starts or restarts (a one-shot retriggered every shot fires it
 each time); a state that joins its clip part-way (`startTime`) fires only the markers after that.
-`examples/scripts/SoulsEnemy.ts` times its attacks' hits this way.
+`examples/dungeon/Assets/Characters/Enemies/Base Enemy/Scripts/SoulsEnemy.ts` times its attacks' hits this way.
 
 ### Event Actions: effects without a script
 

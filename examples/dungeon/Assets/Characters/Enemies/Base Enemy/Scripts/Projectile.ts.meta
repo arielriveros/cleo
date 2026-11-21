@@ -1,0 +1,147 @@
+{
+  "cleo": 1,
+  "guid": "a9d73eb2f530d833c5eed14d887c4d33",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "a9d73eb2f530d833c5eed14d887c4d33",
+    "name": "Projectile",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "speed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 12,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "damage",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 90,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "poiseDamage",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 30,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "lifetime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 4,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "radius",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.2,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The bolt's hitbox: a sphere of this radius swept along its flight."
+        }
+      },
+      {
+        "name": "impactTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "Bolt Burst",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The effect where the bolt strikes the world, or runs out of flight."
+        }
+      },
+      {
+        "name": "playerImpactTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "Bolt Impact",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The effect where it strikes the player."
+        }
+      },
+      {
+        "name": "_dir",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 1],
+        "hidden": true
+      },
+      {
+        "name": "_age",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_live",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_owner",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_gm",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "GameManager"
+        }
+      }
+    ],
+    "reflect": 3
+  }
+}

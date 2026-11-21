@@ -1,0 +1,24 @@
+{
+  "id": "e1ece14a082a8006df5f3e2530588745",
+  "name": "Container Blue",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.06, 0.15, 0.36],
+    "metallic": 0.55,
+    "roughness": 0.55,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

@@ -1,0 +1,37 @@
+{
+  "id": "f91a8997cf35c6930f23c9f87dd37fae",
+  "name": "Rock",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "uv",
+    "textures": {
+      "baseColorTexture": "edbb8156a5a4c3b024bf8c24c29c216d",
+      "metallicRoughnessTexture": "0acf4ac0c1deda00be5ce2385e34c5ec",
+      "occlusionMap": "0acf4ac0c1deda00be5ce2385e34c5ec",
+      "normalMap": "aea7cbd39da1054ad71d44de5e54f004",
+      "displacementMap": "038ea4b8670dec5e6c9fbbf413beb85f"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "edbb8156a5a4c3b024bf8c24c29c216d",
+    "0acf4ac0c1deda00be5ce2385e34c5ec",
+    "aea7cbd39da1054ad71d44de5e54f004",
+    "038ea4b8670dec5e6c9fbbf413beb85f"
+  ],
+  "thumbnail": ""
+}

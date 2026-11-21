@@ -1,0 +1,33 @@
+{
+  "id": "a98e0eb964fd6c451a71e08cf1bdd4b7",
+  "name": "Campfire Embers",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "735804d7983ff9055f8281c4bc2e2a0e",
+      "metallicRoughnessTexture": "bb7a75124bbc721e01abb0c017070d00",
+      "occlusionMap": "bb7a75124bbc721e01abb0c017070d00",
+      "normalMap": "779c0fb7fe3cf004f20a436a3223ac95"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "735804d7983ff9055f8281c4bc2e2a0e",
+    "bb7a75124bbc721e01abb0c017070d00",
+    "779c0fb7fe3cf004f20a436a3223ac95"
+  ],
+  "thumbnail": ""
+}

@@ -1,0 +1,153 @@
+{
+  "cleo": 1,
+  "guid": "0da62e50296e37e710b0f071cc29b346",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "0da62e50296e37e710b0f071cc29b346",
+    "name": "Bonfire Menu",
+    "baseType": "uiRoot",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "repeatDelay",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "repeatRate",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.09,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "selectedTint",
+        "type": {
+          "kind": "color",
+          "alpha": true
+        },
+        "access": "public",
+        "default": [0.85, 0.65, 0.3, 0.35],
+        "hidden": true
+      },
+      {
+        "name": "rowTint",
+        "type": {
+          "kind": "color",
+          "alpha": true
+        },
+        "access": "public",
+        "default": [1, 1, 1, 0.04],
+        "hidden": true
+      },
+      {
+        "name": "isOpen",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "_gm",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_player",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_pending",
+        "type": {
+          "kind": "vector",
+          "size": 4
+        },
+        "access": "private",
+        "default": [10, 10, 10, 10],
+        "hidden": true
+      },
+      {
+        "name": "_selected",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_navHeld",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_navRepeat",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_navLast",
+        "type": {
+          "kind": "vector",
+          "size": 2
+        },
+        "access": "private",
+        "default": [0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_openedAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_clock",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

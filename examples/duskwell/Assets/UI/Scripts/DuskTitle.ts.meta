@@ -1,0 +1,62 @@
+{
+  "cleo": 1,
+  "guid": "5635be0c7d627955d7e2a0670c885d0e",
+  "kind": "script",
+  "created": 1795000000000,
+  "record": {
+    "id": "5635be0c7d627955d7e2a0670c885d0e",
+    "name": "DuskTitle",
+    "baseType": "uiRoot",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "slot",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "auto",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The slot Continue loads: the one the checkpoints save to."
+        }
+      },
+      {
+        "name": "continueAction",
+        "type": {
+          "kind": "name",
+          "name": "action"
+        },
+        "access": "public",
+        "default": "Jump",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "newGameAction",
+        "type": {
+          "kind": "name",
+          "name": "action"
+        },
+        "access": "public",
+        "default": "Dash",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "isOpen",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {}
+      }
+    ],
+    "reflect": 3
+  }
+}

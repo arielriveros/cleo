@@ -763,4 +763,4 @@ rig's follow target instead.
 
 ## See also
 
-[Animation (scripting)](../scripting/animation.md) · [Animation built-ins](../reference/animation-builtins.md) · [Third-person character](../../examples/scripts/README.md)
+[Animation (scripting)](../scripting/animation.md) · [Animation built-ins](../reference/animation-builtins.md) · [Third-person character](../scripting/third-person-character.md)

@@ -1,0 +1,22 @@
+{
+  "id": "9f5e61c7ead73d4b8e2f452404c5b7b1",
+  "name": "Pistol 1",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 0.59, 0.35],
+    "metallic": 0,
+    "roughness": 0.85,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

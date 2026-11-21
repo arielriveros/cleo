@@ -1,0 +1,197 @@
+{
+  "id": "b995fa9b642fab0cd7255a139cab8023",
+  "name": "Message Glow",
+  "system": {
+    "version": 1,
+    "emitters": [
+      {
+        "id": "be06c205a2dfd865143d718d895980d0",
+        "name": "Motes",
+        "enabled": true,
+        "capacity": 64,
+        "simSpace": "world",
+        "duration": 5,
+        "looping": true,
+        "prewarm": false,
+        "startDelay": 0,
+        "seed": 3378614,
+        "maxLod": 99,
+        "spawn": [
+          {
+            "type": "spawnRate",
+            "enabled": true,
+            "params": {
+              "rate": 6,
+              "rateOverTime": {
+                "keys": [
+                  {
+                    "t": 0,
+                    "v": 1
+                  },
+                  {
+                    "t": 1,
+                    "v": 1
+                  }
+                ]
+              },
+              "perDistance": 0
+            }
+          }
+        ],
+        "init": [
+          {
+            "type": "shape",
+            "enabled": true,
+            "params": {
+              "shape": "circle",
+              "radius": 0.3,
+              "thickness": 1,
+              "arc": 360,
+              "angle": 20,
+              "box": [1, 1, 1],
+              "offset": [0, 0, 0],
+              "orbit": 0
+            }
+          },
+          {
+            "type": "lifetime",
+            "enabled": true,
+            "params": {
+              "range": [1, 2]
+            }
+          },
+          {
+            "type": "velocity",
+            "enabled": true,
+            "params": {
+              "mode": "direction",
+              "direction": [0, 1, 0],
+              "spread": 10,
+              "speed": [0.1, 0.3],
+              "inherit": 0
+            }
+          },
+          {
+            "type": "size",
+            "enabled": true,
+            "params": {
+              "range": [0.02, 0.05]
+            }
+          },
+          {
+            "type": "color",
+            "enabled": true,
+            "params": {
+              "mode": "constant",
+              "colorA": [1, 0.6, 0.2, 1],
+              "colorB": [1, 0.5, 0.2, 1],
+              "gradient": {
+                "color": [
+                  {
+                    "t": 0,
+                    "c": [1, 1, 1]
+                  },
+                  {
+                    "t": 1,
+                    "c": [1, 1, 1]
+                  }
+                ],
+                "alpha": [
+                  {
+                    "t": 0,
+                    "a": 1
+                  },
+                  {
+                    "t": 1,
+                    "a": 1
+                  }
+                ]
+              },
+              "intensity": 0.00628
+            }
+          }
+        ],
+        "update": [
+          {
+            "type": "colorOverLife",
+            "enabled": true,
+            "params": {
+              "gradient": {
+                "color": [
+                  {
+                    "t": 0,
+                    "c": [1, 1, 1]
+                  },
+                  {
+                    "t": 1,
+                    "c": [1, 1, 1]
+                  }
+                ],
+                "alpha": [
+                  {
+                    "t": 0,
+                    "a": 0
+                  },
+                  {
+                    "t": 0.15,
+                    "a": 1
+                  },
+                  {
+                    "t": 0.7,
+                    "a": 1
+                  },
+                  {
+                    "t": 1,
+                    "a": 0
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "render": {
+          "mode": "billboard",
+          "alignment": "camera",
+          "blend": "additive",
+          "stretch": 0.1,
+          "cutoff": 0.5,
+          "textureId": null,
+          "flipbook": {
+            "columns": 1,
+            "rows": 1,
+            "frames": 1,
+            "mode": "life",
+            "fps": 24,
+            "cycles": 1,
+            "randomStart": false,
+            "blend": true
+          },
+          "softness": 0,
+          "emissive": 1,
+          "lit": false,
+          "normalTextureId": null,
+          "ormTextureId": null,
+          "normalStrength": 1,
+          "roughness": 1,
+          "metallic": 0,
+          "mesh": "cube",
+          "modelId": null,
+          "meshData": null,
+          "sort": false,
+          "sortingOrder": 0
+        }
+      }
+    ],
+    "bounds": {
+      "center": [0, 0.4, 0],
+      "extents": [0.6, 0.6, 0.6]
+    },
+    "lod": {
+      "enabled": true,
+      "levels": [],
+      "cullDistance": 0,
+      "scaleBursts": false
+    }
+  },
+  "thumbnail": ""
+}

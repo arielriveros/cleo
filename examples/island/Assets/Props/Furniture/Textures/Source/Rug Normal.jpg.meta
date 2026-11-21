@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "86b34fbe6267ce9c3421895a7af892ba",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "86b34fbe6267ce9c3421895a7af892ba",
+    "name": "Rug Normal.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

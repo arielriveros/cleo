@@ -1,0 +1,17 @@
+{
+  "cleo": 1,
+  "guid": "c5374a269bdf75b344a962f4e747078e",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "c5374a269bdf75b344a962f4e747078e",
+    "name": "SoulsHitbox",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "module",
+    "variables": [],
+    "reflect": 3
+  }
+}

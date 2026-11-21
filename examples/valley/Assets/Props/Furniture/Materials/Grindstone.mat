@@ -1,0 +1,33 @@
+{
+  "id": "b55beb826a6dc9eaeaad6ac66b74481a",
+  "name": "Grindstone",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "3f4d332ee0e4fc9e78a05b13afb155b3",
+      "metallicRoughnessTexture": "bdf5a483ce14bf89cdf1980cd9ee4060",
+      "occlusionMap": "bdf5a483ce14bf89cdf1980cd9ee4060",
+      "normalMap": "82b2f4a167ca2219c104dcd15e8989a9"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "3f4d332ee0e4fc9e78a05b13afb155b3",
+    "bdf5a483ce14bf89cdf1980cd9ee4060",
+    "82b2f4a167ca2219c104dcd15e8989a9"
+  ],
+  "thumbnail": ""
+}

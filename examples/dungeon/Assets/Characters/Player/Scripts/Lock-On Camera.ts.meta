@@ -1,0 +1,266 @@
+{
+  "cleo": 1,
+  "guid": "bcb122a89dac4287ff7315e61288e5ab",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "bcb122a89dac4287ff7315e61288e5ab",
+    "name": "Lock-On Camera",
+    "baseType": "cameraRig",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "lockRange",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 20,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "breakRange",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 26,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "losBreakSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.5,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds the target may stay hidden behind geometry before the lock lets go."
+        }
+      },
+      {
+        "name": "switchCooldown",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds between two target switches, so one flick switches once."
+        }
+      },
+      {
+        "name": "stickFlick",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.6,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Right-stick deflection (scaled ×4 in the map) that counts as a flick."
+        }
+      },
+      {
+        "name": "mouseFlickPerSecond",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2700,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Mouse speed, in pixels per SECOND, that counts as a flick. A per-frame pixel threshold made switching targets harder the higher the frame rate, since the same flick is spread over more frames."
+        }
+      },
+      {
+        "name": "lockedPitchMin",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": -25,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Pitch limits while locked (positive looks down). Keeps a tall boss from flipping the camera."
+        }
+      },
+      {
+        "name": "lockedPitchMax",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 35,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "reticleName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "LockReticle",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "retargetRange",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 10,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "When the target dies, the lock jumps to another enemy only if one is this close."
+        }
+      },
+      {
+        "name": "lockedArmLength",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.3,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Boom length while locked: closer than the free camera, for a tighter view of the fight."
+        }
+      },
+      {
+        "name": "lockedSocketOffset",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "public",
+        "default": [-0.6, 0.15, 0],
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Pivot offset while locked (rig space: +X is the rig's LEFT, +Y up) — negative X, so the camera sits over the RIGHT shoulder and the target is framed past it."
+        }
+      },
+      {
+        "name": "lockBlendSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds the camera takes to move in on a lock, and back out on release."
+        }
+      },
+      {
+        "name": "lockTarget",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "public",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_gm",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "GameManager"
+        }
+      },
+      {
+        "name": "_player",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_reticle",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_hiddenFor",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_switchWait",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_freePitchMin",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -80,
+        "hidden": true
+      },
+      {
+        "name": "_freePitchMax",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 80,
+        "hidden": true
+      },
+      {
+        "name": "_freeArmLength",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 4,
+        "hidden": true
+      },
+      {
+        "name": "_freeSocket",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 0],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

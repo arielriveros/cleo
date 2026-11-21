@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "de553656356725a424249a859245ebd8",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "de553656356725a424249a859245ebd8",
+    "name": "Bonfire Ignition Animation.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

@@ -2,7 +2,8 @@
 //
 //   npx vite-node --config vitest.config.ts tools/duskwell/build.ts
 //
-// Writes applications/editor/public/examples/duskwell/ (bundle format 2) and refreshes the gallery index.
+// Writes the example's project folder, examples/duskwell/ (through a format-1 staging tree in build/staging/,
+// tools/exampleKit/folder.mjs writeExampleFromStaging). Its scripts are the folder's own .ts files: edit them there.
 //
 // Everything is built with the engine's own classes (Scene, TilemapNode, AnimatedSpriteNode, Camera2DNode...)
 // and serialized the way the editor saves a scene, so the project is exactly what the editor would write:
@@ -30,7 +31,7 @@ import { assetHashKey, hashAsset, ASSET_HASH_VERSION } from '../../applications/
 import { KIND_EXT } from '../../applications/editor/src/utils/vfs'
 import { SCENE_REFS_VERSION } from '../../applications/editor/src/utils/references'
 import { TextureSet, stableId, writeJson, vars } from '../exampleKit/bundle.mjs'
-import { packFormat2 } from '../exampleKit/packFormat2.mjs'
+import { scriptSourceAt, writeExampleFromStaging } from '../exampleKit/folder.mjs'
 import { folderFor, templatizeScene } from '../exampleKit/templatize'
 import { blankImage, blit, decodePng, encodePng } from '../exampleKit/png.mjs'
 import { COLS, ROWS, ROOMS, cellCentre, cellFeet, isRock, markers, roomBounds, GRID, GUARD_ROUTE, GUARD_ROUTE_NAME } from './level'
@@ -55,8 +56,9 @@ const LAYER_NAMES = DEFAULT_LAYER_NAMES.map((n, i) => ['', '', '', '', 'Player',
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
 const ART = path.join(ROOT, 'build', 'platformer')
-const OUT = path.join(ROOT, 'applications', 'editor', 'public', 'examples', 'duskwell')
-const SCRIPTS = path.join(ROOT, 'examples', 'scripts')
+/** The example's project folder, and the format-1 tree the generator writes before it becomes the folder. */
+const DEST = path.join(ROOT, 'examples', 'duskwell')
+const OUT = path.join(ROOT, 'build', 'staging', 'duskwell')
 /** The Pixel Platformer set: the ruins' tiles, the props, and the knight the Ruin Guard is drawn from. */
 const PP_ROOT = 'PixelPlatformerSet1v.1.1/'
 const PROJECT = 'Duskwell'
@@ -675,17 +677,19 @@ function buildScene(): Scene {
 // Scripts
 // =====================================================================================================
 
+/** Each script: its name, the Assets folder it lives in (its .ts there is its source), what it attaches to. */
 const SCRIPT_FILES: [string, string, string][] = [
-    ['DuskPlayer', 'DuskPlayer.ts', 'characterBody2D'],
-    ['DuskBat', 'DuskBat.ts', 'characterBody2D'],
-    ['DuskGuard', 'DuskGuard.ts', 'characterBody2D'],
-    ['DuskPickup', 'DuskPickup.ts', 'trigger'],
-    ['DuskCheckpoint', 'DuskCheckpoint.ts', 'trigger'],
-    ['DuskHud', 'DuskHud.ts', 'uiRoot'],
-    ['DuskTitle', 'DuskTitle.ts', 'uiRoot'],
+    ['DuskPlayer', '/Characters/Warrior/Scripts', 'characterBody2D'],
+    ['DuskBat', '/Characters/Bat/Scripts', 'characterBody2D'],
+    ['DuskGuard', '/Characters/Ruin Guard/Scripts', 'characterBody2D'],
+    ['DuskPickup', '/Props/Scripts', 'trigger'],
+    ['DuskCheckpoint', '/Props/Checkpoint/Scripts', 'trigger'],
+    ['DuskHud', '/UI/Scripts', 'uiRoot'],
+    ['DuskTitle', '/UI/Scripts', 'uiRoot'],
 ]
-const scriptAssets = SCRIPT_FILES.map(([name, file, baseType]) => {
-    const source = fs.readFileSync(path.join(SCRIPTS, file), 'utf8')
+const scriptFolder = Object.fromEntries(SCRIPT_FILES.map(([name, folder]) => [name, folder]))
+const scriptAssets = SCRIPT_FILES.map(([name, folder, baseType]) => {
+    const source = scriptSourceAt(DEST, `${folder}/${name}.script`)
     return { id: id('script:' + name), name, baseType, source, kind: 'class', variables: parseScriptVariables(source) }
 })
 const scriptByName = new Map(scriptAssets.map(s => [s.name, s]))
@@ -841,11 +845,6 @@ async function main() {
     const add = (folder: string, name: string, kind: string, assetId: string) =>
         entries.push({ path: `${folder}/${name}${(KIND_EXT as any)[kind]}`, kind, assetId, created: CREATED_AT })
     add('/Scenes', PROJECT, 'scene', SCENE_ID)
-    const scriptFolder: Record<string, string> = {
-        DuskPlayer: '/Characters/Warrior/Scripts', DuskBat: '/Characters/Bat/Scripts', DuskGuard: '/Characters/Ruin Guard/Scripts',
-        DuskPickup: '/Props/Scripts',
-        DuskCheckpoint: '/Props/Checkpoint/Scripts', DuskHud: '/UI/Scripts', DuskTitle: '/UI/Scripts',
-    }
     for (const s of scriptAssets) add(scriptFolder[s.name], s.name, 'script', s.id)
     add('/Characters/Ruin Guard', GUARD_BRAIN.name, 'aiBrain', GUARD_BRAIN.id)
     add('/Characters/Bat', BAT_BRAIN.name, 'aiBrain', BAT_BRAIN.id)
@@ -868,14 +867,9 @@ async function main() {
         for (let i = 1; i < parts.length; i++) dirs.add('/' + parts.slice(0, i).join('/'))
     }
     writeJson(path.join(OUT, 'vfs.json'), { version: 1, folders: [...dirs].sort(), entries })
-    writeJson(path.join(OUT, 'example.json'), {
-        name: PROJECT,
-        description: 'A small 2D metroidvania on the flat 2D renderer: a warrior with a three-hit combo, bats that wake as you pass, two rooms the camera slides between, one-way platforms, checkpoints that save the game, diamonds, and the dash relic that carries you over the pit. Pixel-perfect at 480 x 270, with parallax backdrops and glowing torches.',
-        order: 3,
-    })
-
-    const largest = await packFormat2(OUT)
-    console.log(`Duskwell written: ${textureCount} textures, ${tilesetAssets.length} tilesets, ${scriptAssets.length} scripts; largest file ${(largest / 1048576).toFixed(1)} MB`)
+    // The gallery's prose (name, description, order) is the folder's example.json; the folder is the example.
+    const stats = await writeExampleFromStaging(OUT, DEST)
+    console.log(`Duskwell written to examples/duskwell: ${textureCount} textures, ${tilesetAssets.length} tilesets, ${scriptAssets.length} scripts; ${stats.written.length} file(s) changed, ${stats.deleted.length} deleted`)
 }
 
 await main()

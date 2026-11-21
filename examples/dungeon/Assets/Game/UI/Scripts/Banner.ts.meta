@@ -1,0 +1,100 @@
+{
+  "cleo": 1,
+  "guid": "5b07d551b05447a8f4519736cf7de87f",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "5b07d551b05447a8f4519736cf7de87f",
+    "name": "Banner",
+    "baseType": "uiRoot",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "fadeIn",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hold",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.2,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "fadeOut",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "redColor",
+        "type": {
+          "kind": "color"
+        },
+        "access": "public",
+        "default": [0.72, 0.08, 0.06],
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "goldColor",
+        "type": {
+          "kind": "color"
+        },
+        "access": "public",
+        "default": [0.96, 0.82, 0.46],
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "_text",
+        "type": {
+          "kind": "node",
+          "className": "UITextNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "BannerText"
+        }
+      },
+      {
+        "name": "_age",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -1,
+        "hidden": true
+      },
+      {
+        "name": "_sticky",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

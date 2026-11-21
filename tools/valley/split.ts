@@ -18,7 +18,7 @@
 //
 // It edits the shipped data, not the generator's inputs (build/ no longer holds the Valley's source art), and
 // it can be run again: on a two-scene Valley it splits it; afterwards it re-applies itself to each project,
-// which refreshes the Valley scripts from examples/scripts.
+// which re-reflects the Valley scripts' fields from the folder's own .ts files.
 
 import fs from 'fs'
 import path from 'path'

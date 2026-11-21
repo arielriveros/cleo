@@ -6,7 +6,7 @@ import {
 } from '../src/utils/scriptGraph'
 import { attachScriptModules } from '../src/features/publish/buildGameData'
 import { extractScripts, buildScriptsSource } from '../src/features/publish/extractScripts'
-import { TSCONFIG } from '../src/features/projectFolder/scaffold'
+import { TSCONFIG } from '../src/features/projectFolder/scaffoldText'
 
 // The editor half of script modules: what a script IS (a node class or a shared module), what it extends
 // through other scripts, which fields it inherits, and which modules a build ships.

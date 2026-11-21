@@ -1,0 +1,22 @@
+{
+  "id": "00fb734f8ee7813cb3f793cdb2fda103",
+  "name": "Rifle 3",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.01, 0.01, 0.01],
+    "metallic": 0,
+    "roughness": 0.85,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

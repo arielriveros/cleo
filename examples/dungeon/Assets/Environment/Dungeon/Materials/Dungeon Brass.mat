@@ -1,0 +1,33 @@
+{
+  "id": "cc32701a711b5f9358ce83a2779abf8c",
+  "name": "Dungeon Brass",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "13c3bbdb2a326370fb1e37994517959a",
+      "metallicRoughnessTexture": "78a782bd1904dc67f5c6e10d3ddda06a",
+      "occlusionMap": "78a782bd1904dc67f5c6e10d3ddda06a",
+      "normalMap": "076b3f4f5c862b837e4650f5df46bd51"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "13c3bbdb2a326370fb1e37994517959a",
+    "78a782bd1904dc67f5c6e10d3ddda06a",
+    "076b3f4f5c862b837e4650f5df46bd51"
+  ],
+  "thumbnail": ""
+}

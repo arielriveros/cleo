@@ -1,0 +1,24 @@
+{
+  "id": "3b47fd3e03535433fccff3165c80280a",
+  "name": "Crate Wood",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.38, 0.26, 0.15],
+    "metallic": 0,
+    "roughness": 0.88,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

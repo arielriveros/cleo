@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "67eeb54e955687622e24ad310beffc68",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "67eeb54e955687622e24ad310beffc68",
+    "name": "Enemy Brain",
+    "baseType": "controller",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "targetMarker",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "isPlayer",
+        "hidden": false,
+        "attribute": {}
+      }
+    ],
+    "reflect": 3
+  }
+}

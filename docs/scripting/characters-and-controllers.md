@@ -314,7 +314,7 @@ Return `true` to own the substep — gravity (times `gravityScale`) and collisio
 `gravityScale = 0` for its length. `maxFallSpeed` is writable too (a wall slide). The body publishes what
 a script or a sprite's state machine reads: `isGrounded`, `onWall` (-1, 0, 1), `facing`, `canJump`,
 `jumpRequested`, `isJumping`, `justJumped`, `justLanded`, and the measured-motion builtins (`planarSpeed` is
-|vx| for a walker). Duskwell's warrior (`examples/scripts/DuskPlayer.ts`) is the full set: double jump,
+|vx| for a walker). Duskwell's warrior (`examples/duskwell/Assets/Characters/Warrior/Scripts/DuskPlayer.ts`) is the full set: double jump,
 dash, wall slide and wall jump, jump cut, knock-back.
 
 ## Camera rigs
@@ -380,4 +380,4 @@ reimplementing the same arithmetic.
 
 ## See also
 
-[AI](ai.md) · [Motion and physics](motion-and-physics.md) · [Animation](animation.md) · [Third-person character example](../../examples/scripts/README.md)
+[AI](ai.md) · [Motion and physics](motion-and-physics.md) · [Animation](animation.md) · [Third-person character example](third-person-character.md)

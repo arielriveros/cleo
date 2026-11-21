@@ -1,0 +1,32 @@
+{
+  "id": "abd565a29f0fac661b91415d49caeea2",
+  "name": "Ornate Mace",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "8865bedfe69ccc2d46d95a7a3dced5e7",
+      "metallicRoughnessTexture": "e74da749e0d7d37b2e8666458e37b88d",
+      "occlusionMap": "e74da749e0d7d37b2e8666458e37b88d",
+      "normalMap": "728ccf89c91d18180da014a2e740a7e9"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "8865bedfe69ccc2d46d95a7a3dced5e7",
+    "e74da749e0d7d37b2e8666458e37b88d",
+    "728ccf89c91d18180da014a2e740a7e9"
+  ],
+  "thumbnail": ""
+}

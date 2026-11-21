@@ -1,0 +1,374 @@
+{
+  "cleo": 1,
+  "guid": "84b1f5cb438a807eb68fe1e2599ed12d",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "84b1f5cb438a807eb68fe1e2599ed12d",
+    "name": "SoulsCharacter",
+    "baseType": "character",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "displayName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Character",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "team",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "enemy",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Which side attacks see this on: 'player' or 'enemy'."
+        }
+      },
+      {
+        "name": "maxHp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 100,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 100,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "defense",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Fraction of incoming damage ignored, 0..0.9."
+        }
+      },
+      {
+        "name": "bodyRadius",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.4,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Collision-ish size, used by hit effects and lock-on height."
+        }
+      },
+      {
+        "name": "bodyHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.8,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "weaponTemplates",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "name",
+            "name": "template"
+          }
+        },
+        "access": "public",
+        "default": [],
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Weapon templates to spawn on start. The first is held."
+        }
+      },
+      {
+        "name": "weaponSocket",
+        "type": {
+          "kind": "name",
+          "name": "socket"
+        },
+        "access": "public",
+        "default": "RightHand",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Socket on this character's skeleton the weapons attach to."
+        }
+      },
+      {
+        "name": "weaponsGroup",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Weapons",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Child group the weapons are spawned under (this node itself when there is none)."
+        }
+      },
+      {
+        "name": "weaponName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The held weapon's display name, for the HUD."
+        }
+      },
+      {
+        "name": "dropWeaponOnDeath",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Let go of the held weapon on death, as a physics body (see dropWeapon)."
+        }
+      },
+      {
+        "name": "droppedWeaponMass",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 4,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The dropped weapon's mass, kg."
+        }
+      },
+      {
+        "name": "maxWalkSlope",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 45,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The steepest ground, in degrees, this character can walk UP. On anything steeper it can still move across the slope or down it, but not climb (see limitClimb). The engine's own limit is 60°."
+        }
+      },
+      {
+        "name": "stopTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Stop",
+        "hidden": false,
+        "attribute": {
+          "group": "One-shots",
+          "tooltip": "Attacks, rolls and reactions are played by TRIGGER, by name (`_playTrigger`): the animator has a state each one enters, which leaves on its own at the clip's end. The graph owns every clip, its speed and its blends; the script owns the gameplay, and asks the animator how long what a trigger plays lasts (`Animator.triggerInfo`) and whether it still plays (`Animator.activeTrigger`). These two take the one-shot's layer back to rest from anything: with its blend-out, and at once."
+        }
+      },
+      {
+        "name": "cutTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Cut",
+        "hidden": false,
+        "attribute": {
+          "group": "One-shots"
+        }
+      },
+      {
+        "name": "_waterZones",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "isDead",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "hurtboxActive",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": true
+      },
+      {
+        "name": "_gm",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "GameManager"
+        }
+      },
+      {
+        "name": "_model",
+        "type": {
+          "kind": "node",
+          "className": "ModelNode"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_weapons",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "protected",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_weaponIndex",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_dropped",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "protected",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_raised",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_actTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "protected",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_actInfo",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_actEntered",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "protected",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_actWait",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_warnedActions",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wading",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_hurtboxChecked",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

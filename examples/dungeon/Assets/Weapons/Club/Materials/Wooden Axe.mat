@@ -1,0 +1,32 @@
+{
+  "id": "954c66320192240ec1daf91c20d8f59c",
+  "name": "Wooden Axe",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "a12c626a0cc8e388ad99c86de6bb4d90",
+      "metallicRoughnessTexture": "933a22890e06d573adecbc966a15d820",
+      "occlusionMap": "933a22890e06d573adecbc966a15d820",
+      "normalMap": "43afbd23e6572d311595d660b33692f6"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "a12c626a0cc8e388ad99c86de6bb4d90",
+    "933a22890e06d573adecbc966a15d820",
+    "43afbd23e6572d311595d660b33692f6"
+  ],
+  "thumbnail": ""
+}

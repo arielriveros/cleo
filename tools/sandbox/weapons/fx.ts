@@ -1,6 +1,6 @@
 // The Sandbox guns' effects, as data: a muzzle flash and a bullet's impact (particle systems), a bullet hole (a decal
 // and its texture) and a tracer (a glowing streak). build.ts makes each a template, with its script
-// (examples/scripts/SandboxShotFx.ts, SandboxBulletHole.ts, SandboxTracer.ts); SandboxGun instantiates them by name.
+// (examples/sandbox/Assets/Weapons/Scripts/: SandboxShotFx, SandboxBulletHole, SandboxTracer); SandboxGun instantiates them by name.
 //
 // The flash and the impact are the Firing Line's (the FPS example's), its emitters rebuilt here, each split in two:
 // its additive glow (the flash's core and sparks, the impact's sparks), which the camera's exposure brightens only by

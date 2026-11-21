@@ -16,6 +16,27 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **The examples are project folders.**
+  - *Edit an example as a project.* Each shipped example is a Cleo project folder in `examples/<slug>/` (Valley, Dungeon,
+    Firing Line, Duskwell, Island, Sandbox). Open it in the desktop editor and what you save is the repository's
+    diff. Opening one and changing nothing writes nothing, so a checkout stays clean (`npm run test:example-folders`
+    checks that in the real desktop app). Its scripts are `.ts` files beside the assets that use them; the shared
+    `examples/scripts/` folder is gone.
+  - *Binary data in a release, not in git.* Meshes, clips, textures, sounds and bakes are listed in each folder's
+    `data.lock.json` and kept as packs in the `example-data` release: `npm run examples:fetch` downloads them,
+    `npm run examples:publish` uploads only the packs that changed, `npm run examples:check` stops a commit whose
+    text names data no release holds. The gallery bundles are built from the folders (`npm run examples:bundle`,
+    and on every `editor:dev`, `desktop:dev` and `editor:build`) and are no longer committed.
+  - *Each example's tests are its own.* `npm test` inside an example folder runs its suites, including the engine,
+    editor and host tests that use it as their fixture; the root `npm test` runs them all. Every example is checked
+    to be exactly what the editor's folder codec writes, its scripts' fields to match their sources, and its
+    templates and colliders to follow the editor's rules.
+  - *`cleo/testing` plays a whole project.* `openProject()` loads a project's main scene headless, the way a
+    published game loads it (models and their animators, templates, scripts, physics, AI), and steps it;
+    `readProject()` gives the project as data. Its `fakeInput` presses reach `@onAction` methods too.
+  - *The generators write folders.* The Sandbox, Duskwell and Island generators, the Firing Line ingest, the Valley
+    and Dungeon patch tools and the GI baker write the example folders; a rerun on unchanged inputs changes
+    nothing.
 - **Forks in the animator graph.**
   - *A junction, not a state.* A fork takes ways in and hands them on to its ways out. A transition into a fork fires
     only when one of the fork's ways out holds, and goes straight on, in the same frame, to the first that does. A
@@ -1122,6 +1143,11 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Fixes & refactors
 
+- **A model's place in the library stays out of its file.** In a folder project every `.model` file the editor
+  wrote carried the model's position in the library (`order`), so adding or reordering a model rewrote the others,
+  and a reorder made every scene that places them rebuild those models on open. The position now stays in the
+  editor's cache. Scenes saved before this keep their models as placed until they are saved again (the stored
+  asset hashes moved to version 7).
 - **Fullscreen Play keeps the game UI.** Play's fullscreen took only the canvas, so a HUD (and the touch controls)
   disappeared in it; it now takes the whole viewport panel, the canvas and what is drawn over it together.
 - **Shadows start at their casters.** Sun shadows began a few centimetres from what cast them, and spot and point

@@ -1,0 +1,30 @@
+{
+  "cleo": 1,
+  "guid": "bg_05_background_png",
+  "kind": "image",
+  "created": 1795000000000,
+  "record": {
+    "id": "bg_05_background_png",
+    "name": "Near Woods.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1795000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": false,
+      "mipMapFilter": "nearest",
+      "precision": "low",
+      "target": "texture2D",
+      "minFilter": "nearest",
+      "magFilter": "nearest"
+    }
+  }
+}

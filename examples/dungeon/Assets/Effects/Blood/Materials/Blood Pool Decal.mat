@@ -1,0 +1,33 @@
+{
+  "id": "7651d50953d9ea7bacd6a0af5c7e7007",
+  "name": "Blood Pool Decal",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "c24cbe345d6f4adc9471675a380eeacc",
+      "metallicRoughnessTexture": "fc35266fc7e27d16264afa5db2821b72",
+      "occlusionMap": "fc35266fc7e27d16264afa5db2821b72",
+      "normalMap": "698ccaf1d3ca579550c0efac8df3b9c2"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "c24cbe345d6f4adc9471675a380eeacc",
+    "fc35266fc7e27d16264afa5db2821b72",
+    "698ccaf1d3ca579550c0efac8df3b9c2"
+  ],
+  "thumbnail": ""
+}

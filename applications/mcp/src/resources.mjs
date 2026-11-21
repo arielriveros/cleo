@@ -1,6 +1,6 @@
 // @ts-check
 // Engine knowledge as MCP resources, served straight from the checkout so they never drift from the code:
-// the docs (docs/**/*.md) and the example game scripts (examples/scripts). No editor needed. A Claude Code
+// the docs (docs/**/*.md) and the example projects' scripts and docs (examples/<slug>/). No editor needed. A Claude Code
 // session inside the repo can read these files directly; the resources are for clients that cannot
 // (Claude Desktop), and for discovery.
 
@@ -17,7 +17,7 @@ function walk(dir, keep) {
         try { entries = fs.readdirSync(path.join(dir, rel), { withFileTypes: true }); } catch { return; }
         for (const e of entries) {
             const child = rel ? `${rel}/${e.name}` : e.name;
-            if (e.isDirectory()) { if (e.name !== 'media' && e.name !== 'node_modules') visit(child); }
+            if (e.isDirectory()) { if (!['media', 'node_modules', '.cleo', 'Blobs', 'Baked', 'Derived'].includes(e.name)) visit(child); }
             else if (keep(e.name)) out.push(child);
         }
     };
@@ -39,7 +39,7 @@ function titleOf(file) {
  */
 export function registerResources(server, engineRoot) {
     const docsDir = path.join(engineRoot, 'docs');
-    const examplesDir = path.join(engineRoot, 'examples', 'scripts');
+    const examplesDir = path.join(engineRoot, 'examples');
 
     /**
      * @param {string} name @param {string} base the resource URI prefix @param {string} dir
@@ -69,6 +69,6 @@ export function registerResources(server, engineRoot) {
 
     folder('docs', 'cleo://docs/', docsDir, n => n.endsWith('.md'), 'text/markdown',
         'Cleo documentation: scripting guide (scripting/), node types and file formats (reference/), editor manual (editor/).');
-    folder('example-scripts', 'cleo://examples/scripts/', examplesDir, n => n.endsWith('.ts') || n.endsWith('.md'), 'text/x-typescript',
-        'Working game scripts from the example projects: third-person controller and camera, combat, pickups, UI, AI.');
+    folder('example-scripts', 'cleo://examples/', examplesDir, n => (n.endsWith('.ts') && !n.endsWith('.test.ts')) || n.endsWith('.md'), 'text/x-typescript',
+        'Working game scripts from the example projects (each a project folder: <slug>/Assets/…): souls-like combat, FPS, 2D platformer, vehicles, UI, AI.');
 }

@@ -1,0 +1,20 @@
+{
+  "id": "6a00f542d5d78587df643f0d039ed735",
+  "name": "Bonfire Ignition",
+  "textureId": "de553656356725a424249a859245ebd8",
+  "imageWidth": 1536,
+  "imageHeight": 1536,
+  "tileWidth": 128,
+  "tileHeight": 256,
+  "margin": 0,
+  "spacing": 0,
+  "columns": 12,
+  "rows": 6,
+  "overdrive": 0.5,
+  "tiles": {},
+  "terrains": [],
+  "variantSets": [],
+  "textureIds": [
+    "de553656356725a424249a859245ebd8"
+  ]
+}

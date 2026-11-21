@@ -121,6 +121,31 @@ describe('Mover', () => {
 game, so their imports of other scripts and their decorators behave exactly as they do when you press Play.
 `spawn` takes the node's scene JSON for anything else (`type: 'characterBody2D'`, `characterBody2D: { size }`, …).
 
+A test can also play the whole project: `openProject()` loads its main scene (or `scene`) the way a published game
+loads it, every model with its animator, every template and script, physics and AI, and steps it tick by tick. A
+key press reaches `Input.started` and `@onAction` methods alike. `readProject()` gives the project as data: its
+scenes, libraries and Assets tree.
+
+```ts
+import { it, expect } from 'vitest'
+import { openProject, readProject } from 'cleo/testing'
+
+it('walks the player forward', async () => {
+  const game = await openProject()             // or openProject({ scene: 'Level 2' })
+  const player = game.find('Player')!
+  const start = player.worldPosition[2]
+  game.input.setMove(0, 1)
+  game.step(2)                                 // two seconds, 60 ticks a second
+  expect(player.worldPosition[2]).not.toBe(start)
+  game.dispose()
+})
+
+it('ships every level', async () => {
+  const project = await readProject()
+  expect(project.manifest.sceneMetas.map(s => s.name)).toContain('Level 2')
+})
+```
+
 The engine for `npm test` and the declarations for `npm run typecheck` are in `.cleo/sdk/cleo`, which Cleo writes
 when it opens the project; `node_modules/cleo` points at it.
 

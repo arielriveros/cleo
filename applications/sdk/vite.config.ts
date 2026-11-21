@@ -2,6 +2,7 @@ import { defineConfig, mergeConfig } from 'vite';
 import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import engineConfig from '../../vite.config';
+import { appKitAlias } from '../app-kit/vite.preset';
 
 // The project SDK's runtime: the engine for Node, as `cleo`, `cleo/decorators`, `cleo/testing` and
 // `cleo/testing/vitest` of a project folder (.cleo/sdk/cleo/runtime). One build with every entry, so the
@@ -12,6 +13,8 @@ import engineConfig from '../../vite.config';
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default mergeConfig(engineConfig, defineConfig({
+    // cleo/testing reads project folders with the editor's codec, which imports the app-kit by its alias.
+    resolve: { alias: appKitAlias },
     build: {
         ssr: true,
         // Electron 31 ships Node 20; a user's own Node may be newer, never older than that.

@@ -1,0 +1,29 @@
+{
+  "id": "925fe777703fe2fc7d356c04b94240b0",
+  "name": "Dungeon Night Sky",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0.55, 0.65, 1],
+    "emissiveIntensity": 0.45,
+    "textures": {
+      "baseColorTexture": "324aece82ba5cd3bb03240671d9d2265"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    },
+    "emissiveExposureWeight": 0.1
+  },
+  "textureIds": [
+    "324aece82ba5cd3bb03240671d9d2265"
+  ],
+  "thumbnail": ""
+}

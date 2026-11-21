@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "fc35266fc7e27d16264afa5db2821b72",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "fc35266fc7e27d16264afa5db2821b72",
+    "name": "Blood Pool Decal ORM.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

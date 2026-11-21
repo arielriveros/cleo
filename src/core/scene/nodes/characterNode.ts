@@ -19,7 +19,7 @@ import { finiteOr } from "../../math";
 /**
  * A pawn: something that walks, turns and jumps because a driver told it to.
  *
- * This is `examples/scripts/ThirdPersonPlayable.ts` promoted into the engine. It was a user script with
+ * This is `docs/scripting/samples/ThirdPersonPlayable.ts` promoted into the engine. It was a user script with
  * `Input.vector('Move')` wired into its `onUpdate`, which meant the behaviour was unreachable by anything
  * but a player — an NPC wanting the same locomotion had to fork it. Here the character reads a
  * {@link ControlIntent} and has no idea where it came from, so the same node walks under a keyboard, a

@@ -1,0 +1,179 @@
+{
+  "id": "a58159ad6b094661549cd05263282873",
+  "name": "Rubble D",
+  "nodeJson": {
+    "id": "15c49b57e65fbf4a385849aebd05aba6",
+    "name": "Rubble D",
+    "type": "model",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [],
+    "variables": {
+      "__materialId": {
+        "type": "string",
+        "value": "41748028253efac1be4e1e52a15ce099",
+        "access": "public"
+      }
+    },
+    "spawnOnStart": true,
+    "model": {
+      "geometry": {
+        "$geo": {
+          "positions": {
+            "h": "b2b0a1ab042d378e71386e04c85fcae479749a67e1734b732b8246c4f137545d",
+            "l": 50268
+          },
+          "normals": {
+            "h": "1e2924217b697252a70bddaf37c18e3db03edd4ef7fab49a1ce3ebc14228e64e",
+            "l": 50268
+          },
+          "empty": [
+            "tangents",
+            "bitangents"
+          ],
+          "texCoords": {
+            "h": "3f333c9ee70a68bae67157d8f98bd238f32a13578f70eaef776d9ed3aeb21872",
+            "l": 33512
+          },
+          "indices": {
+            "h": "c75c82755907e27eeeefec5b9caed2af09631be8dd810818ed8046316b8b5ae4",
+            "l": 47568,
+            "bits": 16
+          },
+          "typed": true
+        }
+      },
+      "material": {
+        "type": "pbr",
+        "baseColor": [1, 1, 1],
+        "metallic": 0,
+        "roughness": 1,
+        "reflectance": 0.5,
+        "opacity": 1,
+        "emissiveFactor": [0, 0, 0],
+        "emissiveIntensity": 1,
+        "textures": {
+          "baseColorTexture": "79f259e1fe97482dd0f37f03174f2a56",
+          "metallicRoughnessTexture": "38a1af7f1ed85c3ff75dc0ae71399903",
+          "occlusionMap": "38a1af7f1ed85c3ff75dc0ae71399903",
+          "normalMap": "0446e94e5537294f4081d82f3af66780"
+        },
+        "config": {
+          "side": "front",
+          "wireframe": false,
+          "transparent": false,
+          "castShadow": true,
+          "probeable": true
+        }
+      }
+    },
+    "animationMappings": null,
+    "stateMachine": null,
+    "ragdoll": null
+  },
+  "textureIds": [
+    "79f259e1fe97482dd0f37f03174f2a56",
+    "38a1af7f1ed85c3ff75dc0ae71399903",
+    "0446e94e5537294f4081d82f3af66780"
+  ],
+  "materialIds": [
+    "41748028253efac1be4e1e52a15ce099"
+  ],
+  "thumbnail": "",
+  "lods": [
+    {
+      "generated": true,
+      "distance": 10,
+      "nodeJson": {
+        "id": "ac0a3813ce909aa26ee8f1508f32e44b",
+        "name": "Rubble D",
+        "type": "node",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [
+          {
+            "id": "d421f18adada80f4433846ed211dfc78",
+            "name": "Rubble D",
+            "type": "model",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [],
+            "variables": {
+              "__lodMaterialId": {
+                "type": "string",
+                "value": "41748028253efac1be4e1e52a15ce099",
+                "access": "public"
+              },
+              "__lodLevel": {
+                "type": "string",
+                "value": "1",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "h": "27168f67b60aa87e00b798ba1f5cea70e5bfb379a6e2ac04bd9a8a743f2426db",
+                    "l": 45420
+                  },
+                  "normals": {
+                    "h": "dcf7b645f79e19751265ba4cde0ae5490486b31e3c0dd674e49a1567053232c4",
+                    "l": 45420
+                  },
+                  "empty": [
+                    "tangents",
+                    "bitangents"
+                  ],
+                  "texCoords": {
+                    "h": "5bfef6dd1f466e9b77d2a09aa30e797678274d06c239a42d0a8d9e06ab47ea5a",
+                    "l": 30280
+                  },
+                  "indices": {
+                    "h": "3197de7eea81c61e7b57879e29da456d5708d5a874ed1ef336e9b6d0ce783986",
+                    "l": 16644,
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [1, 1, 1],
+                "metallic": 0,
+                "roughness": 1,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "textures": {
+                  "baseColorTexture": "79f259e1fe97482dd0f37f03174f2a56",
+                  "metallicRoughnessTexture": "38a1af7f1ed85c3ff75dc0ae71399903",
+                  "occlusionMap": "38a1af7f1ed85c3ff75dc0ae71399903",
+                  "normalMap": "0446e94e5537294f4081d82f3af66780"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          }
+        ],
+        "variables": {},
+        "spawnOnStart": true
+      }
+    }
+  ],
+  "cullDistance": 30
+}

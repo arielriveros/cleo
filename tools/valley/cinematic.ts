@@ -8,11 +8,11 @@
 //     Cinematic Camera    a plain camera, inactive until the tour cuts to it
 //     Valley Tour         a Sequence node playing the `Valley Tour.sequence` asset (/Cinematic), made from
 //                         tools/valley/cinematic/valley-tour.sequence.json; its director
-//                         examples/scripts/ValleyTourDirector.ts (the storm's lightning)
+//                         examples/valley/Assets/Cinematic/Scripts/Tour Director.ts (the storm's lightning)
 //     Lightning           the point light the director flashes, unbaked and unshadowed
 //     Cinematic Overlay   letterbox bars, a fade to black, a title and a caption the tour animates, and the
 //                         Cleo logo and wordmark it ends on (the logo a texture of its own, /Cinematic/Textures)
-//     Start Menu          "Cinematic demo" or "Free mode" (examples/scripts/ValleyStartMenu.ts)
+//     Start Menu          "Cinematic demo" or "Free mode" (examples/valley/Assets/Cinematic/Scripts/Start Menu.ts)
 //
 // The valley's day is keyed, never scripted: the tour keys the sun, the sky's fill, the mist, the god rays and
 // the fog volumes itself (cinematic/dayPath.ts), and a `Day Cycle` Sequence node at the root (the

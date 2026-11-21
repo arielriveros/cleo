@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "d459563ae77f79008900671ce8281dcf",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "d459563ae77f79008900671ce8281dcf",
+    "name": "Light Pole ORM.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

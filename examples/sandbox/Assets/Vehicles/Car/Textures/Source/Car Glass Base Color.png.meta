@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "2c05fd51b6e5e34cdc4637f76df23e8f",
+  "kind": "image",
+  "created": 1795100000000,
+  "record": {
+    "id": "2c05fd51b6e5e34cdc4637f76df23e8f",
+    "name": "Car Glass Base Color.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1795100000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

@@ -9,7 +9,7 @@
 //     feeds it to Monaco and to the on-disk script workspace an external IDE opens;
 //   - applications/editor/package.json's "cleo": "file:../dist" is how `cd editor && npm run typecheck` resolves a
 //     bare `import ... from 'cleo'`;
-//   - examples/scripts/tsconfig.json points `cleo` at ../../dist/cleo.
+//   - every example folder's tsconfig.json (examples/<slug>/) points `cleo` at ../../dist/cleo.
 import { rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';

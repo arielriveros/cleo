@@ -1,0 +1,33 @@
+{
+  "id": "7f1c7815561e409ea5bf0c4c13e8250d",
+  "name": "Blood Spatter Decal",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "d88596b430c455d1e99953a4dc4286e4",
+      "metallicRoughnessTexture": "13d83f4367b7e64a8afbe7d3d9e3ae06",
+      "occlusionMap": "13d83f4367b7e64a8afbe7d3d9e3ae06",
+      "normalMap": "abb1275c521aca6df2499615e2c3d791"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "d88596b430c455d1e99953a4dc4286e4",
+    "13d83f4367b7e64a8afbe7d3d9e3ae06",
+    "abb1275c521aca6df2499615e2c3d791"
+  ],
+  "thumbnail": ""
+}

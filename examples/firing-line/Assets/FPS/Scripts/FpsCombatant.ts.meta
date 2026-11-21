@@ -1,0 +1,272 @@
+{
+  "cleo": 1,
+  "guid": "d3dda001a7564b255fe9eb068a5a680c",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "d3dda001a7564b255fe9eb068a5a680c",
+    "name": "FpsCombatant",
+    "baseType": "character",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "displayName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Combatant",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "team",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "red",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "maxHp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 100,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 100,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "weapon",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "ak47",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Which WEAPONS entry this fighter uses."
+        }
+      },
+      {
+        "name": "respawnTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The template the Game Manager respawns this fighter from (blank: this node itself is reset instead)."
+        }
+      },
+      {
+        "name": "headMultiplier",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.2,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Damage multiplier for a head shot."
+        }
+      },
+      {
+        "name": "standHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.78,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Height of the body standing and crouching, metres (hit zones, the eye, the target)."
+        }
+      },
+      {
+        "name": "crouchHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "headLine",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.84,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "A hit above this share of the body's height is the head."
+        }
+      },
+      {
+        "name": "impactTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "FPS Impact",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "bloodTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "FPS Blood Hit",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "holeTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "FPS Bullet Hole",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "tracerTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "FPS Tracer",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "isDead",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "isCrouching",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "kills",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "deaths",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "lastHitFrom",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "public",
+        "default": [0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "lastHitAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "ammo",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 30,
+        "hidden": true
+      },
+      {
+        "name": "reserve",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 150,
+        "hidden": true
+      },
+      {
+        "name": "_time",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_missing",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

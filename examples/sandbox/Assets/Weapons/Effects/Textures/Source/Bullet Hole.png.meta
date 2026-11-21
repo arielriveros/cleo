@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "02abfa1666382b61c7233e92757bb43f",
+  "kind": "image",
+  "created": 1795100000000,
+  "record": {
+    "id": "02abfa1666382b61c7233e92757bb43f",
+    "name": "Bullet Hole.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1795100000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "clamp",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

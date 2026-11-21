@@ -1,0 +1,267 @@
+{
+  "id": "b26de658bccc957e43369b47fc482eec",
+  "name": "Old House",
+  "nodeJson": {
+    "id": "8612fc296734d6a9fef6ba3460f2e583",
+    "name": "Old House",
+    "type": "model",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [],
+    "variables": {
+      "__materialId": {
+        "type": "string",
+        "value": "e14f7989cd0302ae165ad71c71411e2c",
+        "access": "public"
+      }
+    },
+    "spawnOnStart": true,
+    "model": {
+      "geometry": {
+        "$geo": {
+          "positions": {
+            "h": "cb4b975453670e271ef30795089a9c65b687b61c0021f56a73ad343d1f9eecc3",
+            "l": 1131480
+          },
+          "normals": {
+            "h": "fbe69e101a2e564e8ffe3b3775f451f62a8c893bab8bb6c37f226035c173ce7a",
+            "l": 1131480
+          },
+          "empty": [
+            "tangents",
+            "bitangents"
+          ],
+          "texCoords": {
+            "h": "c95e5343d7fe626125f4fecd6b8ac526713df795aeee50a76ccb8a2238fe8d64",
+            "l": 754320
+          },
+          "indices": {
+            "h": "16859fbea41adf938d78302cc17430190aed77ae0f2bf25148beef8cff4e24b9",
+            "l": 377160,
+            "bits": 32
+          },
+          "typed": true
+        }
+      },
+      "material": {
+        "type": "pbr",
+        "baseColor": [1, 1, 1],
+        "metallic": 0,
+        "roughness": 1,
+        "reflectance": 0.5,
+        "opacity": 1,
+        "emissiveFactor": [0, 0, 0],
+        "emissiveIntensity": 1,
+        "textures": {
+          "baseColorTexture": "f51802c16078fd10f0ffaa7c678eb72c",
+          "roughnessMap": "e2e03041a58e752583f477cd81e0e31b",
+          "normalMap": "2f65d8ea8fca214ed3793e600239618f"
+        },
+        "config": {
+          "side": "front",
+          "wireframe": false,
+          "transparent": false,
+          "castShadow": true,
+          "probeable": true
+        }
+      }
+    },
+    "animationMappings": null,
+    "stateMachine": null,
+    "ragdoll": null
+  },
+  "textureIds": [
+    "f51802c16078fd10f0ffaa7c678eb72c",
+    "e2e03041a58e752583f477cd81e0e31b",
+    "2f65d8ea8fca214ed3793e600239618f"
+  ],
+  "materialIds": [
+    "e14f7989cd0302ae165ad71c71411e2c"
+  ],
+  "thumbnail": "",
+  "lods": [
+    {
+      "generated": true,
+      "distance": 40,
+      "nodeJson": {
+        "id": "7af2f2db351e0f2a2c551df6a8575127",
+        "name": "Old House",
+        "type": "node",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [
+          {
+            "id": "795a7f737a6c6cce19fadbf53825a4d5",
+            "name": "Old House",
+            "type": "model",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [],
+            "variables": {
+              "__lodMaterialId": {
+                "type": "string",
+                "value": "e14f7989cd0302ae165ad71c71411e2c",
+                "access": "public"
+              },
+              "__lodLevel": {
+                "type": "string",
+                "value": "1",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "h": "2ad00a761f03648965b580d3ead134ab931ce3cde955588781504d3bc2c3f10f",
+                    "l": 452556
+                  },
+                  "normals": {
+                    "h": "743e6bc57f16f7486a2c671ead0197d2bb546e0accd336bc21f9306529f50792",
+                    "l": 452556
+                  },
+                  "empty": [
+                    "tangents",
+                    "bitangents"
+                  ],
+                  "texCoords": {
+                    "h": "dc6968e9c0b8369cf99a1838cd3a71add7df1401860a3a9263b905810a6d42b9",
+                    "l": 301704
+                  },
+                  "indices": {
+                    "h": "0e7b03f60be07e84bba4bfc7638cbf46eac35e6f1e11627fbd76dab32919977d",
+                    "l": 75426,
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [1, 1, 1],
+                "metallic": 0,
+                "roughness": 1,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "textures": {
+                  "baseColorTexture": "f51802c16078fd10f0ffaa7c678eb72c",
+                  "roughnessMap": "e2e03041a58e752583f477cd81e0e31b",
+                  "normalMap": "2f65d8ea8fca214ed3793e600239618f"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          }
+        ],
+        "variables": {},
+        "spawnOnStart": true
+      }
+    },
+    {
+      "generated": true,
+      "distance": 80,
+      "nodeJson": {
+        "id": "e94b7a1317d7e0fbfbcd83d09dca3b4b",
+        "name": "Old House",
+        "type": "node",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [
+          {
+            "id": "f82b8da5e0edda57e43b3d393a79f1d4",
+            "name": "Old House",
+            "type": "model",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [],
+            "variables": {
+              "__lodMaterialId": {
+                "type": "string",
+                "value": "e14f7989cd0302ae165ad71c71411e2c",
+                "access": "public"
+              },
+              "__lodLevel": {
+                "type": "string",
+                "value": "2",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "h": "a9de12b387d4a37bc45d30b12db94d4aa4ad6c16c4206558c6620892e8c204c5",
+                    "l": 169740
+                  },
+                  "normals": {
+                    "h": "ad26eb636ee75232c4c40aef1e43e2737b4a1b428554783137dc4dddfe8cc63e",
+                    "l": 169740
+                  },
+                  "empty": [
+                    "tangents",
+                    "bitangents"
+                  ],
+                  "texCoords": {
+                    "h": "6d942c206cd737463603511b36d43295c9cfe880dec2bfe3192d9c6f98ae987c",
+                    "l": 113160
+                  },
+                  "indices": {
+                    "h": "9aa3b26ec15d22f719a6ce6a0122c6d8a85fe648f76b083ed3b1aebe8767a75d",
+                    "l": 28290,
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [1, 1, 1],
+                "metallic": 0,
+                "roughness": 1,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "textures": {
+                  "baseColorTexture": "f51802c16078fd10f0ffaa7c678eb72c",
+                  "roughnessMap": "e2e03041a58e752583f477cd81e0e31b",
+                  "normalMap": "2f65d8ea8fca214ed3793e600239618f"
+                },
+                "config": {
+                  "side": "front",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          }
+        ],
+        "variables": {},
+        "spawnOnStart": true
+      }
+    }
+  ]
+}

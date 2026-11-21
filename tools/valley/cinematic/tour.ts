@@ -1,4 +1,4 @@
-// The Valley Tour: the cinematic the Valley's start menu plays (examples/scripts/ValleyStartMenu.ts).
+// The Valley Tour: the cinematic the Valley's start menu plays (examples/valley/Assets/Cinematic/Scripts/Start Menu.ts).
 //
 // Written as SHOTS — camera paths through points placed by hand on the valley's own layout (layout.mjs),
 // each point with what the camera looks at as it passes — and turned into a sequence (src/sequencer/types.ts)
@@ -323,7 +323,7 @@ const TREE_CULL: Keys = ramp([[13, 1], [15.5, 0.15], [17.5, 0.15], [21, 1]])
 const FOLIAGE_SHADOWS: Keys = ramp([[13, 110], [15.5, 30], [17.5, 30], [21, 110]])
 
 /**
- * The storm's lightning: the director's `lightning` (examples/scripts/ValleyTourDirector.ts) over most of the
+ * The storm's lightning: the director's `lightning` (examples/valley/Assets/Cinematic/Scripts/Tour Director.ts) over most of the
  * storm shot, with its seed and number of strikes.
  */
 const LIGHTNING = () => ({ start: when('storm', 5), end: before('storm', 3), args: [7, 8] })

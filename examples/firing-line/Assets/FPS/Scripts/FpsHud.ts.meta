@@ -1,0 +1,109 @@
+{
+  "cleo": 1,
+  "guid": "96b9050c58f044a27b2f066eee87e3e4",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "96b9050c58f044a27b2f066eee87e3e4",
+    "name": "FpsHud",
+    "baseType": "uiRoot",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "pixelsPerDegree",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 11,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Pixels of crosshair gap per degree of spread, at the hip field of view."
+        }
+      },
+      {
+        "name": "crosshairGap",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 5,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "crosshairLength",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 9,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hitMarkerSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.22,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "indicatorSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.4,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hideCrosshairAimed",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Hide the crosshair while aimed (the sights are the aim)."
+        }
+      },
+      {
+        "name": "_player",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_w",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_gap",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -1,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

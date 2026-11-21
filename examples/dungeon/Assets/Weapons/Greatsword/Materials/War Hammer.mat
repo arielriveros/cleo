@@ -1,0 +1,32 @@
+{
+  "id": "ac821019d78f456633ac95a14281ac00",
+  "name": "War Hammer",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "06ff80cd8794fe262b6a49bf2e18b74f",
+      "metallicRoughnessTexture": "f39a56c278e0a2fd4e9849ad377d50fa",
+      "occlusionMap": "f39a56c278e0a2fd4e9849ad377d50fa",
+      "normalMap": "c20433c7c412b6286ac838ac876bfa8c"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "06ff80cd8794fe262b6a49bf2e18b74f",
+    "f39a56c278e0a2fd4e9849ad377d50fa",
+    "c20433c7c412b6286ac838ac876bfa8c"
+  ],
+  "thumbnail": ""
+}

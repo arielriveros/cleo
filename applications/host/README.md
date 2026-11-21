@@ -11,7 +11,7 @@ npm run host:install          # from the repo root, once (native WebTransport ad
 npm run build:player          # once, for --serve: the published player
 
 # Development: publish an example as a web game, host it, serve it, print a link that opens it joined.
-npm run host -- --example ../editor/public/examples/sandbox --serve --player-template Player --spawn 30,0.05,-30
+npm run host -- --example ../../examples/sandbox --serve --player-template Player --spawn 30,0.05,-30
 
 npm run host -- --game path/to/game.bin           # a published game (game.scripts.js beside it is picked up)
 npm run host                                       # no game: a session only

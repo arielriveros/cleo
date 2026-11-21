@@ -1,0 +1,1336 @@
+{
+  "id": "4d2aab21ab7c1d64de571708556d90b5",
+  "name": "Souls Character",
+  "rigId": "4c356df98f971fef64c490f5419808f7",
+  "machine": {
+    "parameters": [
+      {
+        "name": "Speed",
+        "type": "variable",
+        "default": 0,
+        "variable": {
+          "nodeRef": "parent",
+          "varName": "planarSpeed",
+          "varType": "number",
+          "source": "builtin"
+        }
+      },
+      {
+        "name": "Direction",
+        "type": "variable",
+        "default": 0,
+        "variable": {
+          "nodeRef": "parent",
+          "varName": "planarAngle",
+          "varType": "number",
+          "source": "builtin"
+        }
+      },
+      {
+        "name": "Died",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Revive",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "InCombat",
+        "type": "bool",
+        "default": false
+      },
+      {
+        "name": "Stop",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Cut",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Roll",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Backstep",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "RunTurnRight",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "RunTurnLeft",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Drink",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "HitLight",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "HitHeavy",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Recoil",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Swap",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Rest",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "FogWalk",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Pickup",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Interact",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Longsword Light1",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Longsword Light2",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Longsword Light3",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Longsword Heavy",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Greatsword Light1",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Greatsword Light2",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Greatsword Heavy",
+        "type": "trigger",
+        "default": false
+      }
+    ],
+    "states": [
+      {
+        "name": "Idle",
+        "clipName": "Idle",
+        "loop": true,
+        "speed": 1,
+        "isEntry": true,
+        "x": 40,
+        "y": 40
+      },
+      {
+        "name": "Locomotion",
+        "clipName": "",
+        "fieldId": "b5c38e9c94a6b087db47b12df05a9264",
+        "field": {
+          "mode": "2d",
+          "xAxis": {
+            "name": "Direction",
+            "min": -180,
+            "max": 180,
+            "wrap": true,
+            "smoothing": 0.04,
+            "deadzone": 0
+          },
+          "samples": [
+            {
+              "clipName": "Walk",
+              "x": 0,
+              "y": 1.5
+            },
+            {
+              "clipName": "Run",
+              "x": 0,
+              "rateScale": 1,
+              "y": 4
+            },
+            {
+              "clipName": "WalkStrafeRight",
+              "x": -90,
+              "y": 1.5
+            },
+            {
+              "clipName": "RunStrafeRight",
+              "x": -90,
+              "y": 4
+            },
+            {
+              "clipName": "WalkStrafeLeft",
+              "x": 90,
+              "y": 1.5
+            },
+            {
+              "clipName": "RunStrafeLeft",
+              "x": 90,
+              "y": 4
+            },
+            {
+              "clipName": "WalkBackwards",
+              "x": 180,
+              "y": 1.5
+            },
+            {
+              "clipName": "RunBackwards",
+              "x": 180,
+              "y": 4
+            },
+            {
+              "clipName": "RunDiagLeft",
+              "x": 135,
+              "y": 4
+            },
+            {
+              "clipName": "RunDiagRight",
+              "x": -135,
+              "y": 4
+            },
+            {
+              "clipName": "Run",
+              "x": 0,
+              "y": 5.8,
+              "rateScale": 1.4
+            }
+          ],
+          "yAxis": {
+            "name": "Speed",
+            "min": 0,
+            "max": 5.8,
+            "smoothing": 0.04
+          },
+          "weightSmoothing": 0.06
+        },
+        "fieldInputs": {
+          "x": "Direction",
+          "y": "Speed"
+        },
+        "loop": true,
+        "speed": 1,
+        "isEntry": false,
+        "x": 300,
+        "y": 40
+      },
+      {
+        "name": "Dead",
+        "clipName": "Souls_Dying",
+        "loop": false,
+        "speed": 1,
+        "isEntry": false,
+        "x": 170,
+        "y": 200
+      },
+      {
+        "name": "CombatIdle",
+        "clipName": "Souls_LS_Stance",
+        "loop": true,
+        "speed": 1,
+        "isEntry": false,
+        "x": 40,
+        "y": 200
+      }
+    ],
+    "transitions": [
+      {
+        "from": "Idle",
+        "to": "Dead",
+        "conditions": [],
+        "minDwell": 0,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Died",
+              "op": "trigger"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Locomotion",
+        "to": "Dead",
+        "conditions": [],
+        "minDwell": 0,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Died",
+              "op": "trigger"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Dead",
+        "to": "Idle",
+        "conditions": [],
+        "minDwell": 0,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Revive",
+              "op": "trigger"
+            }
+          ]
+        }
+      },
+      {
+        "from": "Idle",
+        "to": "Locomotion",
+        "conditions": [],
+        "minDwell": 0.05,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Speed",
+              "op": "gt",
+              "value": 0.5,
+              "hysteresis": 0.15
+            }
+          ]
+        },
+        "blendTime": 0.25
+      },
+      {
+        "from": "Locomotion",
+        "to": "Idle",
+        "conditions": [],
+        "minDwell": 0.1,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Speed",
+              "op": "lt",
+              "value": 0.5,
+              "hysteresis": 0.15
+            },
+            {
+              "param": "InCombat",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.3
+      },
+      {
+        "from": "Locomotion",
+        "to": "CombatIdle",
+        "conditions": [],
+        "minDwell": 0.1,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Speed",
+              "op": "lt",
+              "value": 0.5,
+              "hysteresis": 0.15
+            },
+            {
+              "param": "InCombat",
+              "op": "true"
+            }
+          ]
+        },
+        "blendTime": 0.3
+      },
+      {
+        "from": "Idle",
+        "to": "CombatIdle",
+        "conditions": [],
+        "minDwell": 0,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "InCombat",
+              "op": "true"
+            }
+          ]
+        },
+        "blendTime": 0.35
+      },
+      {
+        "from": "CombatIdle",
+        "to": "Idle",
+        "conditions": [],
+        "minDwell": 0.5,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "InCombat",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.6
+      },
+      {
+        "from": "CombatIdle",
+        "to": "Locomotion",
+        "conditions": [],
+        "minDwell": 0.05,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Speed",
+              "op": "gt",
+              "value": 0.5,
+              "hysteresis": 0.15
+            }
+          ]
+        },
+        "blendTime": 0.25
+      },
+      {
+        "from": "CombatIdle",
+        "to": "Dead",
+        "conditions": [],
+        "minDwell": 0,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Died",
+              "op": "trigger"
+            }
+          ]
+        }
+      }
+    ],
+    "layers": [
+      {
+        "name": "Guard",
+        "blend": "override",
+        "weight": 1,
+        "maskId": "f2b756eabaf08fa36011c6ac25913f7f",
+        "mask": {
+          "mixamorig1:LeftShoulder": 1,
+          "mixamorig1:LeftArm": 1,
+          "mixamorig1:LeftForeArm": 1,
+          "mixamorig1:LeftHand": 1,
+          "mixamorig1:LeftHandThumb1": 1,
+          "mixamorig1:LeftHandThumb2": 1,
+          "mixamorig1:LeftHandThumb3": 1,
+          "mixamorig1:LeftHandThumb4": 1,
+          "mixamorig1:LeftHandIndex1": 1,
+          "mixamorig1:LeftHandIndex2": 1,
+          "mixamorig1:LeftHandIndex3": 1,
+          "mixamorig1:LeftHandIndex4": 1,
+          "mixamorig1:LeftHandMiddle1": 1,
+          "mixamorig1:LeftHandMiddle2": 1,
+          "mixamorig1:LeftHandMiddle3": 1,
+          "mixamorig1:LeftHandMiddle4": 1,
+          "mixamorig1:LeftHandRing1": 1,
+          "mixamorig1:LeftHandRing2": 1,
+          "mixamorig1:LeftHandRing3": 1,
+          "mixamorig1:LeftHandRing4": 1,
+          "mixamorig1:LeftHandPinky1": 1,
+          "mixamorig1:LeftHandPinky2": 1,
+          "mixamorig1:LeftHandPinky3": 1,
+          "mixamorig1:LeftHandPinky4": 1,
+          "mixamorig1:RightShoulder": 1,
+          "mixamorig1:RightArm": 1,
+          "mixamorig1:RightForeArm": 1,
+          "mixamorig1:RightHand": 1,
+          "mixamorig1:RightHandThumb1": 1,
+          "mixamorig1:RightHandThumb2": 1,
+          "mixamorig1:RightHandThumb3": 1,
+          "mixamorig1:RightHandThumb4": 1,
+          "mixamorig1:RightHandIndex1": 1,
+          "mixamorig1:RightHandIndex2": 1,
+          "mixamorig1:RightHandIndex3": 1,
+          "mixamorig1:RightHandIndex4": 1,
+          "mixamorig1:RightHandMiddle1": 1,
+          "mixamorig1:RightHandMiddle2": 1,
+          "mixamorig1:RightHandMiddle3": 1,
+          "mixamorig1:RightHandMiddle4": 1,
+          "mixamorig1:RightHandRing1": 1,
+          "mixamorig1:RightHandRing2": 1,
+          "mixamorig1:RightHandRing3": 1,
+          "mixamorig1:RightHandRing4": 1,
+          "mixamorig1:RightHandPinky1": 1,
+          "mixamorig1:RightHandPinky2": 1,
+          "mixamorig1:RightHandPinky3": 1,
+          "mixamorig1:RightHandPinky4": 1
+        },
+        "states": [
+          {
+            "name": "Off",
+            "clipName": "",
+            "loop": true,
+            "speed": 1,
+            "isEntry": true,
+            "x": 40,
+            "y": 40
+          },
+          {
+            "name": "Guard",
+            "clipName": "Souls_LS_Guard",
+            "loop": true,
+            "speed": 1,
+            "isEntry": false,
+            "x": 300,
+            "y": 40
+          }
+        ],
+        "transitions": [
+          {
+            "from": "Off",
+            "to": "Guard",
+            "conditions": [],
+            "minDwell": 0.1,
+            "hasExitTime": false,
+            "exitTime": 1,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "InCombat",
+                  "op": "true"
+                },
+                {
+                  "param": "Speed",
+                  "op": "gt",
+                  "value": 0.5,
+                  "hysteresis": 0.15
+                },
+                {
+                  "param": "Speed",
+                  "op": "lt",
+                  "value": 4.7,
+                  "hysteresis": 0.15
+                }
+              ]
+            },
+            "blendTime": 0.3
+          },
+          {
+            "from": "Guard",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0.15,
+            "hasExitTime": false,
+            "exitTime": 1,
+            "condition": {
+              "op": "or",
+              "children": [
+                {
+                  "param": "InCombat",
+                  "op": "false"
+                },
+                {
+                  "param": "Speed",
+                  "op": "lt",
+                  "value": 0.4,
+                  "hysteresis": 0.15
+                },
+                {
+                  "param": "Speed",
+                  "op": "gt",
+                  "value": 4.9,
+                  "hysteresis": 0.15
+                }
+              ]
+            },
+            "blendTime": 0.35
+          },
+          {
+            "from": "Guard",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": false,
+            "exitTime": 1,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Died",
+                  "op": "trigger"
+                }
+              ]
+            },
+            "blendTime": 0.15
+          }
+        ]
+      },
+      {
+        "name": "UpperBody",
+        "blend": "override",
+        "weight": 1,
+        "maskId": "5932b38920918b4dcb769072b1d2a6a0",
+        "mask": {
+          "mixamorig1:RightShoulder": 1,
+          "mixamorig1:RightArm": 1,
+          "mixamorig1:RightForeArm": 1,
+          "mixamorig1:RightHand": 1,
+          "mixamorig1:RightHandThumb1": 1,
+          "mixamorig1:RightHandThumb2": 1,
+          "mixamorig1:RightHandThumb3": 1,
+          "mixamorig1:RightHandThumb4": 1,
+          "mixamorig1:RightHandIndex1": 1,
+          "mixamorig1:RightHandIndex2": 1,
+          "mixamorig1:RightHandIndex3": 1,
+          "mixamorig1:RightHandIndex4": 1,
+          "mixamorig1:RightHandMiddle1": 1,
+          "mixamorig1:RightHandMiddle2": 1,
+          "mixamorig1:RightHandMiddle3": 1,
+          "mixamorig1:RightHandMiddle4": 1,
+          "mixamorig1:RightHandRing1": 1,
+          "mixamorig1:RightHandRing2": 1,
+          "mixamorig1:RightHandRing3": 1,
+          "mixamorig1:RightHandRing4": 1,
+          "mixamorig1:RightHandPinky1": 1,
+          "mixamorig1:RightHandPinky2": 1,
+          "mixamorig1:RightHandPinky3": 1,
+          "mixamorig1:RightHandPinky4": 1
+        },
+        "states": [
+          {
+            "name": "Off",
+            "clipName": "",
+            "loop": true,
+            "speed": 1,
+            "isEntry": true,
+            "x": 40,
+            "y": 40
+          },
+          {
+            "name": "Sword Run",
+            "clipName": "Souls_RunWithSword",
+            "loop": true,
+            "speed": 1,
+            "isEntry": false,
+            "x": 300,
+            "y": 40
+          }
+        ],
+        "transitions": [
+          {
+            "from": "Off",
+            "to": "Sword Run",
+            "conditions": [],
+            "minDwell": 0.1,
+            "hasExitTime": false,
+            "exitTime": 1,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Speed",
+                  "op": "gt",
+                  "value": 2.2,
+                  "hysteresis": 0.15
+                },
+                {
+                  "op": "or",
+                  "children": [
+                    {
+                      "param": "InCombat",
+                      "op": "false"
+                    },
+                    {
+                      "param": "Speed",
+                      "op": "gt",
+                      "value": 4.7,
+                      "hysteresis": 0.15
+                    }
+                  ]
+                }
+              ]
+            },
+            "blendTime": 0.25
+          },
+          {
+            "from": "Sword Run",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0.15,
+            "hasExitTime": false,
+            "exitTime": 1,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Speed",
+                  "op": "lt",
+                  "value": 1.8,
+                  "hysteresis": 0.15
+                }
+              ]
+            },
+            "blendTime": 0.3
+          },
+          {
+            "from": "Sword Run",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": false,
+            "exitTime": 1,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Died",
+                  "op": "trigger"
+                }
+              ]
+            },
+            "blendTime": 0.15
+          },
+          {
+            "from": "Sword Run",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0.15,
+            "hasExitTime": false,
+            "exitTime": 1,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "InCombat",
+                  "op": "true"
+                },
+                {
+                  "param": "Speed",
+                  "op": "lt",
+                  "value": 4.5,
+                  "hysteresis": 0.15
+                }
+              ]
+            },
+            "blendTime": 0.3
+          }
+        ]
+      },
+      {
+        "name": "Actions",
+        "blend": "override",
+        "weight": 1,
+        "states": [
+          {
+            "name": "Off",
+            "clipName": "",
+            "loop": true,
+            "speed": 1,
+            "isEntry": true,
+            "x": 40,
+            "y": 40,
+            "triggers": [
+              {
+                "trigger": "Died",
+                "blendTime": 0.15
+              },
+              {
+                "trigger": "Stop",
+                "blendTime": 0.22
+              },
+              {
+                "trigger": "Cut",
+                "blendTime": 0
+              }
+            ]
+          },
+          {
+            "name": "Roll",
+            "clipName": "Souls_Roll",
+            "loop": false,
+            "speed": 1.5,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Roll",
+                "blendTime": 0.1
+              }
+            ],
+            "ikWeight": 0,
+            "extractRootMotion": true,
+            "x": 300,
+            "y": 40
+          },
+          {
+            "name": "Backstep",
+            "clipName": "Souls_Backstep",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Backstep",
+                "blendTime": 0.1
+              }
+            ],
+            "ikWeight": 0,
+            "x": 510,
+            "y": 40
+          },
+          {
+            "name": "RunTurnRight",
+            "clipName": "Souls_RunTurn180",
+            "loop": false,
+            "speed": 1.2,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "RunTurnRight",
+                "blendTime": 0.1
+              }
+            ],
+            "ikWeight": 0,
+            "x": 720,
+            "y": 40
+          },
+          {
+            "name": "RunTurnLeft",
+            "clipName": "Souls_RunTurn180L",
+            "loop": false,
+            "speed": 1.2,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "RunTurnLeft",
+                "blendTime": 0.1
+              }
+            ],
+            "ikWeight": 0,
+            "x": 930,
+            "y": 40
+          },
+          {
+            "name": "Drink",
+            "clipName": "Souls_Drink",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Drink",
+                "blendTime": 0.1
+              }
+            ],
+            "x": 300,
+            "y": 160
+          },
+          {
+            "name": "HitLight",
+            "clipName": "Souls_HitLight",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "HitLight",
+                "blendTime": 0.1
+              }
+            ],
+            "x": 510,
+            "y": 160
+          },
+          {
+            "name": "HitHeavy",
+            "clipName": "Souls_HitHeavy",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "HitHeavy",
+                "blendTime": 0.1
+              }
+            ],
+            "x": 720,
+            "y": 160
+          },
+          {
+            "name": "Recoil",
+            "clipName": "Souls_HitLight",
+            "loop": false,
+            "speed": 1.4,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Recoil",
+                "blendTime": 0.1
+              }
+            ],
+            "x": 930,
+            "y": 160
+          },
+          {
+            "name": "Sheath",
+            "clipName": "Souls_Sheath",
+            "loop": false,
+            "speed": 2,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Swap",
+                "blendTime": 0.1
+              }
+            ],
+            "x": 300,
+            "y": 280
+          },
+          {
+            "name": "Draw",
+            "clipName": "Souls_Draw",
+            "loop": false,
+            "speed": 2,
+            "isEntry": false,
+            "x": 510,
+            "y": 280
+          },
+          {
+            "name": "Rest",
+            "clipName": "Souls_Rest",
+            "loop": true,
+            "speed": 1,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Rest",
+                "blendTime": 0.1
+              }
+            ],
+            "x": 720,
+            "y": 280
+          },
+          {
+            "name": "FogWalk",
+            "clipName": "Souls_FogWalk",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "FogWalk",
+                "blendTime": 0.1
+              }
+            ],
+            "x": 930,
+            "y": 280
+          },
+          {
+            "name": "Pickup",
+            "clipName": "Souls_Pickup",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Pickup",
+                "blendTime": 0.1
+              }
+            ],
+            "x": 300,
+            "y": 400
+          },
+          {
+            "name": "Interact",
+            "clipName": "Souls_Interact",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Interact",
+                "blendTime": 0.1
+              }
+            ],
+            "x": 510,
+            "y": 400
+          },
+          {
+            "name": "Longsword Light1",
+            "clipName": "Souls_LS_Combo",
+            "loop": false,
+            "speed": 1.1,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Longsword Light1",
+                "blendTime": 0.12
+              }
+            ],
+            "extractRootMotion": true,
+            "x": 720,
+            "y": 400
+          },
+          {
+            "name": "Longsword Light2",
+            "clipName": "Souls_LS_Combo",
+            "loop": false,
+            "speed": 1.1,
+            "isEntry": false,
+            "startTime": 0.9,
+            "extractRootMotion": true,
+            "x": 930,
+            "y": 400
+          },
+          {
+            "name": "Longsword Light3",
+            "clipName": "Souls_LS_Combo",
+            "loop": false,
+            "speed": 1.1,
+            "isEntry": false,
+            "startTime": 1.74,
+            "extractRootMotion": true,
+            "x": 300,
+            "y": 520
+          },
+          {
+            "name": "Longsword Heavy",
+            "clipName": "Souls_LS_Heavy",
+            "loop": false,
+            "speed": 1.05,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Longsword Heavy",
+                "blendTime": 0.12
+              }
+            ],
+            "extractRootMotion": true,
+            "x": 510,
+            "y": 520
+          },
+          {
+            "name": "Greatsword Light1",
+            "clipName": "Souls_GS_L1",
+            "loop": false,
+            "speed": 1.35,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Greatsword Light1",
+                "blendTime": 0.12
+              }
+            ],
+            "x": 720,
+            "y": 520
+          },
+          {
+            "name": "Greatsword Light2",
+            "clipName": "Souls_GS_L2",
+            "loop": false,
+            "speed": 1.35,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Greatsword Light2",
+                "blendTime": 0.12
+              }
+            ],
+            "x": 930,
+            "y": 520
+          },
+          {
+            "name": "Greatsword Heavy",
+            "clipName": "Souls_GS_Heavy",
+            "loop": false,
+            "speed": 1.15,
+            "isEntry": false,
+            "triggers": [
+              {
+                "trigger": "Greatsword Heavy",
+                "blendTime": 0.12
+              }
+            ],
+            "x": 300,
+            "y": 640
+          }
+        ],
+        "transitions": [
+          {
+            "from": "Sheath",
+            "to": "Draw",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 1,
+            "blendTime": 0.1
+          },
+          {
+            "from": "Longsword Light1",
+            "to": "Longsword Light2",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.28938906752411575,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Longsword Light2",
+                  "op": "trigger"
+                }
+              ]
+            },
+            "blendTime": 0
+          },
+          {
+            "from": "Longsword Light2",
+            "to": "Longsword Light3",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.5594855305466239,
+            "condition": {
+              "op": "and",
+              "children": [
+                {
+                  "param": "Longsword Light3",
+                  "op": "trigger"
+                }
+              ]
+            },
+            "blendTime": 0
+          },
+          {
+            "from": "Roll",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.798,
+            "blendTime": 0.22
+          },
+          {
+            "from": "Backstep",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.511,
+            "blendTime": 0.22
+          },
+          {
+            "from": "RunTurnRight",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 1,
+            "blendTime": 0
+          },
+          {
+            "from": "RunTurnLeft",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 1,
+            "blendTime": 0
+          },
+          {
+            "from": "Drink",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.843,
+            "blendTime": 0.22
+          },
+          {
+            "from": "HitLight",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.511,
+            "blendTime": 0.22
+          },
+          {
+            "from": "HitHeavy",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.787,
+            "blendTime": 0.22
+          },
+          {
+            "from": "Recoil",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.316,
+            "blendTime": 0.22
+          },
+          {
+            "from": "Draw",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.707,
+            "blendTime": 0.22
+          },
+          {
+            "from": "FogWalk",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.853,
+            "blendTime": 0.22
+          },
+          {
+            "from": "Pickup",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.725,
+            "blendTime": 0.22
+          },
+          {
+            "from": "Interact",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.756,
+            "blendTime": 0.22
+          },
+          {
+            "from": "Longsword Light1",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.28938906752411575,
+            "blendTime": 0.35
+          },
+          {
+            "from": "Longsword Light2",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.5594855305466239,
+            "blendTime": 0.35
+          },
+          {
+            "from": "Longsword Light3",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.876,
+            "blendTime": 0.35
+          },
+          {
+            "from": "Longsword Heavy",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.799,
+            "blendTime": 0.35
+          },
+          {
+            "from": "Greatsword Light1",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.851,
+            "blendTime": 0.35
+          },
+          {
+            "from": "Greatsword Light2",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.851,
+            "blendTime": 0.35
+          },
+          {
+            "from": "Greatsword Heavy",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.822,
+            "blendTime": 0.35
+          }
+        ]
+      }
+    ],
+    "events": []
+  }
+}

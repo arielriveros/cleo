@@ -1,0 +1,110 @@
+{
+  "cleo": 1,
+  "guid": "a078de267719d678491145c245b8cf38",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "a078de267719d678491145c245b8cf38",
+    "name": "Enemy Spawn",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "spawnables",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "name",
+            "name": "template"
+          }
+        },
+        "access": "public",
+        "default": [
+          "Hollow",
+          "Hollow Sorcerer",
+          "Elite Knight",
+          "Hollow Warden"
+        ],
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The templates a spawn may create. Edit the list in the Enemy Spawn template."
+        }
+      },
+      {
+        "name": "templateName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Hollow",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Which of `spawnables` this spawn creates."
+        },
+        "options": "spawnables"
+      },
+      {
+        "name": "isBossSpawn",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "patrolRoute",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "A patrol route on the scene's Nav Mesh, by name: the enemy walks it, looping, until it sees someone, and goes back to it after giving up a chase. Empty: it stands where it spawned."
+        }
+      },
+      {
+        "name": "initialDelay",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.1,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds after the scene starts before the first spawn — lets the level settle first."
+        }
+      },
+      {
+        "name": "_gm",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "GameManager"
+        }
+      },
+      {
+        "name": "_live",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

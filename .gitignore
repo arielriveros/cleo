@@ -18,3 +18,7 @@ tools/naga-wasm/target/
 CLAUDE.md
 .claude
 graphify-out
+
+# The example gallery: built from examples/<slug>/ by tools/examples/gallery.mjs (npm run examples:bundle), never
+# committed.
+applications/editor/public/examples/

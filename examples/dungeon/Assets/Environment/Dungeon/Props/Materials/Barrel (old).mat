@@ -1,0 +1,33 @@
+{
+  "id": "9d4105c2f946587137d8fecb87a76e7a",
+  "name": "Barrel (old)",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "8312b40b37c87207f82ba80d19f66ccc",
+      "metallicRoughnessTexture": "4f94695d401f697410260d83bb637937",
+      "occlusionMap": "4f94695d401f697410260d83bb637937",
+      "normalMap": "717ed51afd066c70b4b1cebc4c8703d2"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "8312b40b37c87207f82ba80d19f66ccc",
+    "4f94695d401f697410260d83bb637937",
+    "717ed51afd066c70b4b1cebc4c8703d2"
+  ],
+  "thumbnail": ""
+}

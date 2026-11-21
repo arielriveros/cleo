@@ -1,0 +1,34 @@
+{
+  "id": "274f5aacf9394ef8647051f557171514",
+  "name": "Dungeon Cobblestone Floor",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "4a90120c28e2f45e12faa916372435d0",
+      "roughnessMap": "67802811897d58bbc7f22f397afc3936",
+      "occlusionMap": "f4027a8513d4bec556e583c21f1f514c",
+      "normalMap": "a6ac73fba55b628ffa1dda1b7563d2c9"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "4a90120c28e2f45e12faa916372435d0",
+    "67802811897d58bbc7f22f397afc3936",
+    "f4027a8513d4bec556e583c21f1f514c",
+    "a6ac73fba55b628ffa1dda1b7563d2c9"
+  ],
+  "thumbnail": ""
+}

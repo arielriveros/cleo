@@ -1,0 +1,48 @@
+{
+  "id": "ea3f7847ee5c6bd80de313a9b65f0292",
+  "name": "Oak Leaves",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.7,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.04,
+    "windStiffness": 2,
+    "windRole": "leaves",
+    "windFlutter": 0.45,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "87a0c6a4f625ba51519aeb6abfae44a9",
+      "normalMap": "c49995307ce631a1d2b12db92d5b0360"
+    },
+    "alphaCutoff": 0.5,
+    "translucency": 0.5,
+    "translucencyTint": [0.66, 0.72, 0.14, 0.35],
+    "interactBend": 0.05,
+    "interactRecovery": 1,
+    "variationHue": 0.03,
+    "variationValue": 0.12,
+    "variationDry": 0.05,
+    "wetResponse": 0.5,
+    "snowCover": 0.6,
+    "weightDroop": 0.08,
+    "rippleSheen": 0.15,
+    "leafFlip": 0.4,
+    "undersideColor": [0.62, 0.7, 0.5],
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "87a0c6a4f625ba51519aeb6abfae44a9",
+    "c49995307ce631a1d2b12db92d5b0360"
+  ],
+  "thumbnail": ""
+}

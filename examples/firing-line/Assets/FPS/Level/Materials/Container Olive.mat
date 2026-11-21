@@ -1,0 +1,24 @@
+{
+  "id": "2683e6a38c6ab19af0db32bce6fc2996",
+  "name": "Container Olive",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.17, 0.22, 0.1],
+    "metallic": 0.55,
+    "roughness": 0.55,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

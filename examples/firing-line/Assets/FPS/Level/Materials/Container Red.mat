@@ -1,0 +1,24 @@
+{
+  "id": "f3d5d2dd14a5faf0f4abdd89b6cec5f1",
+  "name": "Container Red",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.42, 0.07, 0.05],
+    "metallic": 0.55,
+    "roughness": 0.55,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

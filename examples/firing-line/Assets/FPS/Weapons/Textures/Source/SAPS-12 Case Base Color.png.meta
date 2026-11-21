@@ -1,0 +1,35 @@
+{
+  "cleo": 1,
+  "guid": "8fae4bbf0bb540d033cde134e7299c49",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "8fae4bbf0bb540d033cde134e7299c49",
+    "name": "SAPS-12 Case Base Color.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "wrapU": "repeat",
+      "wrapV": "repeat",
+      "wrapW": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "minFilter": "linear",
+      "magFilter": "linear",
+      "anisotropy": 1,
+      "precision": "low",
+      "format": "rgba8unorm",
+      "target": "texture2D"
+    }
+  }
+}

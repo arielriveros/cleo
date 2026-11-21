@@ -1,0 +1,7 @@
+# Sandbox
+
+A locomotion sandbox in the style of Advanced Locomotion System v4: a mannequin that walks and jogs in eight directions facing the camera, sprints freely, sets off, stops and turns round with their own clips, leans into curves, turns in place when you look away, jumps, falls and lands soft or hard, climbs stairs, with its feet planted and locked by IK on ramps, stairs and bumps. And a car to get into (E by the driver's door) and drive on the vehicle simulation. A pistol and a rifle to carry, aim and fire (Q, right mouse, left mouse), held over the walk by a layer each, their shots raycasts that push what they hit. All of it is the animator, the Character, Controller and Vehicle nodes and a few input-only scripts. Car model: "Dirty car" by 3D Error 404 (CC-BY-4.0). Weapons: "Low-Poly G40" and "Low-Poly M4a1" by TastyTony (CC-BY-4.0).
+
+A Cleo project folder: open it in the Cleo desktop app (Project ▸ Open Folder…), and what you change is what
+git sees. See [examples/README.md](../README.md) for how the examples are kept: their binary data
+(`npm run examples:fetch`), their tests (`npm test` here), and publishing a change.

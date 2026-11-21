@@ -19,11 +19,11 @@ export default mergeConfig(engineConfig, defineConfig({
         environment: 'node',
         // What the engine barrel installs (the script compiler), for the tests that reach the runtime alone.
         setupFiles: ['../../tests/helpers/engineTools.ts'],
-        // bundleAssetsRealProject round-trips the shipped 3D example, and scriptWorkspaceTypes shells out
-        // to tsc; both are slow by nature rather than hung.
+        // scriptWorkspaceTypes shells out to tsc: slow by nature rather than hung. (The tests that round-trip the
+        // shipped examples are in the example folders now, examples/<slug>/tests.)
         testTimeout: 30_000,
-        // The same test holds the example several times over (its JSON, packed, re-parsed and inflated): with
-        // the dungeon that is past a worker's default heap.
+        // A bundle test holds its project several times over (its JSON, packed, re-parsed and inflated), which
+        // for a big project is past a worker's default heap.
         poolOptions: { forks: { execArgv: ['--max-old-space-size=8192'] } },
         coverage: {
             // istanbul, not v8 — see the note in ../vitest.config.ts.

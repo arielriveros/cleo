@@ -1,0 +1,812 @@
+{
+  "cleo": 1,
+  "guid": "ac02c9677351e7a978234ec7fad33166",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "ac02c9677351e7a978234ec7fad33166",
+    "name": "FpsBot",
+    "baseType": "character",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "displayName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Bot",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "team",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "red",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "maxHp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 100,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 100,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "weapon",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "ak47",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Which WEAPONS entry this fighter uses."
+        }
+      },
+      {
+        "name": "respawnTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The template the Game Manager respawns this fighter from (blank: this node itself is reset instead)."
+        }
+      },
+      {
+        "name": "headMultiplier",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.2,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Damage multiplier for a head shot."
+        }
+      },
+      {
+        "name": "standHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.78,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Height of the body standing and crouching, metres (hit zones, the eye, the target)."
+        }
+      },
+      {
+        "name": "crouchHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "headLine",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.84,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "A hit above this share of the body's height is the head."
+        }
+      },
+      {
+        "name": "impactTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "FPS Impact",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "bloodTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "FPS Blood Hit",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "holeTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "FPS Bullet Hole",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "tracerTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "FPS Tracer",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects"
+        }
+      },
+      {
+        "name": "isDead",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "isCrouching",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "kills",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "deaths",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "lastHitFrom",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "public",
+        "default": [0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "lastHitAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "ammo",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 30,
+        "hidden": true
+      },
+      {
+        "name": "reserve",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 150,
+        "hidden": true
+      },
+      {
+        "name": "_time",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_missing",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "skill",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.55,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "0..1: aim, reaction and how long it keeps its head up."
+        }
+      },
+      {
+        "name": "sightRange",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 55,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Sees this far, and across this cone (the full angle)."
+        }
+      },
+      {
+        "name": "sightAngle",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 140,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "reactionSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.45,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds between noticing a target and opening fire (the worse the skill, the longer)."
+        }
+      },
+      {
+        "name": "patrolSpeedScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.42,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Walk and run speeds, metres a second."
+        }
+      },
+      {
+        "name": "coverAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.62,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Below this share of health: seek cover. Below `retreatAt`: run for it and call for help."
+        }
+      },
+      {
+        "name": "retreatAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "regenPerSecond",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Health regained a second while out of combat."
+        }
+      },
+      {
+        "name": "crouchChance",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.45,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Probability of crouching while standing and shooting at long range."
+        }
+      },
+      {
+        "name": "coverSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3.5,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds it waits behind cover before it looks."
+        }
+      },
+      {
+        "name": "ragdollAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.62,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds the clip plays before the body goes ragdoll (0: the clip's length times `ragdollAt`)."
+        }
+      },
+      {
+        "name": "corpseSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 8,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "damageScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.55,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Damage multiplier for a bot's bullets against everyone."
+        }
+      },
+      {
+        "name": "fireRateScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.7,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Rounds a second as a share of the weapon's rate."
+        }
+      },
+      {
+        "name": "navMode",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {
+          "group": "Published for the Brain graph and the HUD"
+        }
+      },
+      {
+        "name": "state",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "patrol",
+        "hidden": true
+      },
+      {
+        "name": "goalPoint",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "public",
+        "default": [0, 0, 0],
+        "hidden": false,
+        "attribute": {
+          "group": "Published for the Brain graph and the HUD"
+        }
+      },
+      {
+        "name": "hasThreat",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {
+          "group": "Published for the Brain graph and the HUD",
+          "tooltip": "Mirrors of the controller's blackboard, for the graph."
+        }
+      },
+      {
+        "name": "_brain",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_model",
+        "type": {
+          "kind": "node",
+          "className": "ModelNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_animator",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_weapons",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_muzzle",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_home",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_target",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_seenAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "_noticedAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "_lastKnown",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_sees",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_alert",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_alertUntil",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_stateTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wait",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_burst",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_nextShot",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_strafe",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_strafeUntil",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_crouching",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_crouchUntil",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_reloading",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_coverPoint",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_inCover",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_calledAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "_hurtAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "_patrolWait",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_coverRetryAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_losTimer",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_pathTimer",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_sinceCombat",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 99,
+        "hidden": true
+      },
+      {
+        "name": "_ammoClip",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_crouchParam",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_speedScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_sprint",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

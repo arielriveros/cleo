@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "b10180b576ab0a8f8b9ae7a695710f9b",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "b10180b576ab0a8f8b9ae7a695710f9b",
+    "name": "Meadow Grass A Blades.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

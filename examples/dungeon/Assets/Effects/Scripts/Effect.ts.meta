@@ -1,0 +1,71 @@
+{
+  "cleo": 1,
+  "guid": "d9a7c3b075f9d7aa51316d4a0e1075f5",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "d9a7c3b075f9d7aa51316d4a0e1075f5",
+    "name": "Effect",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "lifetime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "burstCount",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Particles per child system on start. 0 leaves them to their own spawn rate / bursts."
+        }
+      },
+      {
+        "name": "_age",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lights",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_intensities",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

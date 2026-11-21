@@ -1,0 +1,80 @@
+{
+  "cleo": 1,
+  "guid": "e0c994760f9c66782feaff85ca8171ab",
+  "kind": "script",
+  "created": 1795000000000,
+  "record": {
+    "id": "e0c994760f9c66782feaff85ca8171ab",
+    "name": "DuskHud",
+    "baseType": "uiRoot",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "playerName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Player",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "_player",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_health",
+        "type": {
+          "kind": "node",
+          "className": "UITextNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Health"
+        }
+      },
+      {
+        "name": "_diamonds",
+        "type": {
+          "kind": "node",
+          "className": "UITextNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Diamonds"
+        }
+      },
+      {
+        "name": "_notice",
+        "type": {
+          "kind": "node",
+          "className": "UITextNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Notice"
+        }
+      }
+    ],
+    "reflect": 3
+  }
+}

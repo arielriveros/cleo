@@ -73,6 +73,37 @@ export interface TestWorld {
   dispose(): void
 }
 export function createTestWorld(options?: { moveActions?: string | string[] }): TestWorld
+
+/** The project folder read the way the editor opens it, as a bundle (manifest, scenes, libraries, vfs, images, sounds). */
+export function readProject(root?: string): Promise<any>
+
+/** A project's game, running headless (openProject). */
+export interface TestGame {
+  /** The running game (its engine, scene switching and tick statistics). */
+  runtime: any
+  readonly scene: Scene
+  input: FakeInput
+  /** Advance seconds of game time, a tick at a time. */
+  step(seconds?: number, each?: () => void): void
+  find<T extends Node = Node>(name: string): (T & Record<string, any>) | undefined
+  loadScene(nameOrId: string): Promise<void>
+  dispose(): void
+}
+export interface OpenProjectOptions {
+  root?: string
+  /** The scene to start in, by name or id (default: the main scene). */
+  scene?: string
+  /** Simulation rate, Hz (default 60). */
+  tickRate?: number
+  physicsBackend?: string
+  /** Change the game data before it is loaded. */
+  edit?: (data: Record<string, any>) => void
+  moveActions?: string | string[]
+  /** Keep the engine's log on (default on). */
+  logging?: boolean
+}
+/** The whole project playing: its main scene on the headless engine, every model, template, script and body, stepped tick by tick. */
+export function openProject(options?: OpenProjectOptions): Promise<TestGame>
 `)
 fs.writeFileSync(path.join(RUNTIME, 'vitest.d.ts'), `export interface CleoVitestOptions { include?: string[]; test?: Record<string, unknown> }
 /** The Vitest configuration of a Cleo project folder: tests/**/*.test.ts in Node, against the project's SDK. */

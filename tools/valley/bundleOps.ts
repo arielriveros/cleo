@@ -1,5 +1,7 @@
-// Operations on the shipped Valley (and Dungeon) bundles, shared by the tools that edit them in place:
-// split.ts (the two examples out of one) and cinematic.ts (the start menu and the tour).
+// Operations on the shipped examples (the Valley's and the Dungeon's above all), shared by the tools that edit them
+// in place: split.ts (the two examples out of one), cinematic.ts (the start menu and the tour), the exampleKit
+// migrations. Each example is a project folder in examples/<slug>/ (tools/exampleKit/folder.mjs): `read` gives it as
+// a bundle, `write` puts it back as the editor would store it.
 //
 // The generator (build.mjs) can no longer run — its source art is gone — so these tools edit the SHIPPED data,
 // and every edit must be re-runnable: find the node by its stable id and replace it, never append blindly.
@@ -7,18 +9,21 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { readBundle } from '../../applications/editor/src/utils/bundleRead'
 import { hashAsset, assetHashKey } from '../../applications/editor/src/utils/assetHash'
 import { isFlatBuffer, isTupleBuffer } from '../../applications/editor/src/utils/binaryPayload'
 import { walkRefs, edgesOfAsset, type EdgeSpec } from '../../applications/editor/src/utils/assetEdges'
-import { folderSource } from '../exampleKit/readExample.mjs'
+import { readExample } from '../exampleKit/readExample.mjs'
 import { writeBundleFolder } from '../exampleKit/packFormat2.mjs'
-import { loadScriptReflector, stableId } from '../exampleKit/bundle.mjs'
+import { isExampleFolder, writeExampleFolder } from '../exampleKit/folder.mjs'
+import { reflectScripts } from '../exampleKit/syncScripts.mjs'
+import { stableId } from '../exampleKit/bundle.mjs'
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-export const EXAMPLES = path.join(ROOT, 'applications', 'editor', 'public', 'examples')
+/** The example project folders (examples/<slug>/). */
+export const EXAMPLES = path.join(ROOT, 'examples')
 export const VALLEY_DIR = path.join(EXAMPLES, 'valley')
 export const DUNGEON_DIR = path.join(EXAMPLES, 'dungeon')
+/** Where the examples' scripts lived before each example became a folder: only a fallback for a script a tool adds. */
 export const SCRIPTS = path.join(ROOT, 'examples', 'scripts')
 
 /** The generator's ids (tools/valley/build.mjs `id`), so what the tools add lives in the Valley's namespace. */
@@ -41,29 +46,19 @@ export const VALLEY_SCRIPTS: [string, string, string, string][] = [
   ['ValleyTourDirector', 'Tour Director', 'sequence', '/Cinematic/Scripts'],
 ]
 
-let reflector: ((source: string) => any) | null = null
-
 /**
- * A class script's fields INCLUDING those it inherits from base-class scripts (`extends SoulsCharacterNode`,
- * imported from another file in examples/scripts), base first. Reflecting the class alone would drop the
- * inherited ones, and `attach` would then trim every node's values for them.
+ * The script asset `file` (an id in the generator's namespace) as the bundle holds it now, its fields reflected with
+ * the ones it inherits from base-class scripts (tools/exampleKit/syncScripts.mjs). A script the bundle does not hold
+ * yet takes its source from examples/scripts/, where the examples' scripts lived before they were folders.
  */
-export function resolveVariables(file: string, seen = new Set<string>()): any[] {
-  reflector ??= loadScriptReflector(ROOT)
-  const source = fs.readFileSync(path.join(SCRIPTS, `${file}.ts`), 'utf8')
-  const own = reflector!(source)
-  const ext = /export\s+default\s+class\s+\w+\s+extends\s+(\w+)/.exec(source)
-  const imp = ext && new RegExp(`import\\s+${ext[1]}\\s+from\\s+['"](?:\\./|@/(?:[^'"]*/)?)(\\w+)['"]`).exec(source)
-  if (!imp || seen.has(imp[1]) || !fs.existsSync(path.join(SCRIPTS, `${imp[1]}.ts`))) return own
-  seen.add(file)
-  const merged = new Map<string, any>()
-  for (const v of [...resolveVariables(imp[1], seen), ...own]) merged.set(v.name, v)
-  return [...merged.values()]
-}
-
-export const scriptAsset = (file: string, name: string, baseType: string) => {
-  const source = fs.readFileSync(path.join(SCRIPTS, `${file}.ts`), 'utf8')
-  return { id: id(`script:${file}`), name, baseType, source, kind: 'class', variables: resolveVariables(file) }
+export function scriptAsset(file: string, name: string, baseType: string, bundle?: any) {
+  const sid = id(`script:${file}`)
+  const own = bundle?.libraries?.scripts?.find((s: any) => s.id === sid)
+  const source = own?.source ?? fs.readFileSync(path.join(SCRIPTS, `${file}.ts`), 'utf8')
+  const asset: any = { id: sid, name, baseType, source, kind: 'class', variables: [] }
+  const scripts = [...(bundle?.libraries?.scripts ?? []).filter((s: any) => s.id !== sid), asset]
+  asset.variables = reflectScripts({ vfs: bundle?.vfs, libraries: { scripts } }).get(sid) ?? []
+  return asset
 }
 
 /** Every node below `root` (itself included). */
@@ -93,7 +88,7 @@ export function refreshValleyScripts(bundle: any, add: string[]) {
   for (const [file, name, baseType, folder] of VALLEY_SCRIPTS) {
     const at = lib.findIndex((s: any) => s.id === id(`script:${file}`))
     if (at < 0 && !add.includes(file)) continue
-    const fresh = scriptAsset(file, name, baseType)
+    const fresh = scriptAsset(file, name, baseType, bundle)
     if (at >= 0) lib[at] = { ...lib[at], source: fresh.source, kind: fresh.kind, variables: fresh.variables }
     else {
       lib.push(fresh)
@@ -144,7 +139,7 @@ export function assetHashes(bundle: any): Record<string, string> {
 // ----- read / write ----------------------------------------------------------------------------------------
 
 export async function read(dir: string) {
-  const { bundle } = await readBundle(folderSource(dir) as any)
+  const { bundle } = await readExample(dir)
   return bundle as any
 }
 
@@ -156,6 +151,11 @@ export async function write(dir: string, bundle: any, label: string, dry = false
   if (dry) { log(`${label}: dry run, not written`); return }
   const hashes = assetHashes(bundle)
   for (const scene of Object.values(bundle.scenes) as any[]) scene.assetHashes = { ...hashes }
+  if (isExampleFolder(dir) || path.resolve(dir).startsWith(EXAMPLES + path.sep)) {
+    const stats = await writeExampleFolder(dir, bundle)
+    log(`${label} written to ${path.relative(ROOT, dir)} (${stats.written.length} file(s) changed, ${stats.deleted.length} deleted)`)
+    return
+  }
   const largest = await writeBundleFolder(dir, bundle)
   log(`${label} written to ${path.relative(ROOT, dir)} (largest file ${(largest / 1048576).toFixed(1)} MB)`)
 }

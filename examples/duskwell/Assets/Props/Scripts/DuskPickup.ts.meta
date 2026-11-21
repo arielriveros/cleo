@@ -1,0 +1,88 @@
+{
+  "cleo": 1,
+  "guid": "1aed05f92f0cc5b980c5abf1be50ee9a",
+  "kind": "script",
+  "created": 1795000000000,
+  "record": {
+    "id": "1aed05f92f0cc5b980c5abf1be50ee9a",
+    "name": "DuskPickup",
+    "baseType": "trigger",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "kind",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "diamond",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "amount",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "bobHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.12,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "bobSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "_time",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_taken",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_base",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

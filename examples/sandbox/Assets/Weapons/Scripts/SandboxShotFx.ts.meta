@@ -1,0 +1,65 @@
+{
+  "cleo": 1,
+  "guid": "7a7cb7da81b55c9894a45bad7c1c1861",
+  "kind": "script",
+  "created": 1795100000000,
+  "record": {
+    "id": "7a7cb7da81b55c9894a45bad7c1c1861",
+    "name": "SandboxShotFx",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "lifetime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {
+          "min": 0.05,
+          "max": 10,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "lightFalloff",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "min": 0.5,
+          "max": 8,
+          "step": 0.5
+        }
+      },
+      {
+        "name": "_age",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_lights",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

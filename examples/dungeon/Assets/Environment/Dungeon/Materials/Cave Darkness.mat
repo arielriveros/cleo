@@ -1,0 +1,23 @@
+{
+  "id": "adf57e8f9a8d7605ee39837091b7f366",
+  "name": "Cave Darkness",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0, 0, 0],
+    "metallic": 0,
+    "roughness": 1,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

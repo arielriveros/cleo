@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "3fa150eb-400f-4ead-8ce1-7c1459f2c60d",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "3fa150eb-400f-4ead-8ce1-7c1459f2c60d",
+    "name": "mannequin Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": false,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

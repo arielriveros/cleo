@@ -1,0 +1,24 @@
+{
+  "id": "f252ef5aaf99284e68bc54a5b8b91356",
+  "name": "Fog Wall (placeholder)",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.95, 0.95, 1],
+    "metallic": 0,
+    "roughness": 0.85,
+    "opacity": 0.28,
+    "emissiveFactor": [0.6, 0.62, 0.7],
+    "emissiveIntensity": 0.6,
+    "emissiveExposureWeight": 0.1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": true,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

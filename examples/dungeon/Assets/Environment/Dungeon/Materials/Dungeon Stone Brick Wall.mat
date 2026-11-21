@@ -1,0 +1,34 @@
+{
+  "id": "3dc1d2a1f311035f256fc7105cd3d5c9",
+  "name": "Dungeon Stone Brick Wall",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "352032ffa6e5a36770c4cdef2d2af0ee",
+      "roughnessMap": "89975e3f7257da8fed3fded68e3c2dd7",
+      "occlusionMap": "5086c868739083ba53fb3ceba80eebfe",
+      "normalMap": "ac7705ad74dc2958efb72643a61ea145"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "352032ffa6e5a36770c4cdef2d2af0ee",
+    "89975e3f7257da8fed3fded68e3c2dd7",
+    "5086c868739083ba53fb3ceba80eebfe",
+    "ac7705ad74dc2958efb72643a61ea145"
+  ],
+  "thumbnail": ""
+}

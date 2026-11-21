@@ -1,0 +1,75 @@
+{
+  "id": "1c669df31c22e1d3a54e39d396e5b17a",
+  "name": "Look",
+  "rigId": "1ca1de6215e2febc1b4ec0cb651189eb",
+  "mode": "2d",
+  "xAxis": {
+    "name": "Yaw",
+    "min": -90,
+    "max": 90,
+    "smoothing": 0.08
+  },
+  "yAxis": {
+    "name": "Pitch",
+    "min": -45,
+    "max": 45,
+    "smoothing": 0.08
+  },
+  "weightSmoothing": 0.05,
+  "samples": [
+    {
+      "clipName": "LookC",
+      "x": 0,
+      "y": 0,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "LookL",
+      "x": 90,
+      "y": 0,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "LookR",
+      "x": -90,
+      "y": 0,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "LookU",
+      "x": 0,
+      "y": -45,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "LookD",
+      "x": 0,
+      "y": 45,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "LookUL",
+      "x": 90,
+      "y": -45,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "LookUR",
+      "x": -90,
+      "y": -45,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "LookDL",
+      "x": 90,
+      "y": 45,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "LookDR",
+      "x": -90,
+      "y": 45,
+      "phaseOffset": 0.5
+    }
+  ]
+}

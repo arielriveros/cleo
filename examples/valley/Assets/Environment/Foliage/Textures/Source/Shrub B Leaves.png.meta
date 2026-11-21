@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "5a98f53e21b879e936fa47178f1c2419",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "5a98f53e21b879e936fa47178f1c2419",
+    "name": "Shrub B Leaves.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

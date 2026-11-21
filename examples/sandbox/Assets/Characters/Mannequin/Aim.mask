@@ -1,0 +1,19 @@
+{
+  "id": "e7258b893313f74c18b3c2519a0ba835",
+  "name": "Aim",
+  "rigId": "1ca1de6215e2febc1b4ec0cb651189eb",
+  "weights": {
+    "mixamorig1:Spine1": 1,
+    "mixamorig1:Spine2": 1,
+    "mixamorig1:Neck": 1,
+    "mixamorig1:Head": 1,
+    "mixamorig1:LeftShoulder": 1,
+    "mixamorig1:LeftArm": 1,
+    "mixamorig1:LeftForeArm": 1,
+    "mixamorig1:LeftHand": 1,
+    "mixamorig1:RightShoulder": 1,
+    "mixamorig1:RightArm": 1,
+    "mixamorig1:RightForeArm": 1,
+    "mixamorig1:RightHand": 1
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "4ec0c0cfa235155727308dda6ffe379c",
+  "name": "Far Hills",
+  "textureId": "bg_02_background_png",
+  "imageWidth": 426,
+  "imageHeight": 384,
+  "tileWidth": 426,
+  "tileHeight": 384,
+  "margin": 0,
+  "spacing": 0,
+  "columns": 1,
+  "rows": 1,
+  "pixelsPerUnit": 16,
+  "tiles": {},
+  "terrains": [],
+  "variantSets": [],
+  "textureIds": [
+    "bg_02_background_png"
+  ]
+}

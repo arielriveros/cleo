@@ -1,0 +1,38 @@
+{
+  "id": "8b2774da0d7f2689873f4b9ead35825f",
+  "name": "WarehouseMainConcrete",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "world",
+    "invertHeight": false,
+    "clipSilhouette": false,
+    "textures": {
+      "baseColorTexture": "d4f71da3f0203549fbef7d9702e94815",
+      "metallicMap": "3fbc451bb41638514ebce4028a9c2adf",
+      "roughnessMap": "3fbc451bb41638514ebce4028a9c2adf",
+      "normalMap": "b631df2675b0befb783140acf12d1f85"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "d4f71da3f0203549fbef7d9702e94815",
+    "3fbc451bb41638514ebce4028a9c2adf",
+    "b631df2675b0befb783140acf12d1f85"
+  ],
+  "thumbnail": ""
+}

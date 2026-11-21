@@ -1,0 +1,24 @@
+{
+  "id": "e411e0321f61a85151a9bf487e68610c",
+  "name": "Item Glow (placeholder)",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.95, 0.9, 0.75],
+    "metallic": 0,
+    "roughness": 0.85,
+    "opacity": 1,
+    "emissiveFactor": [1, 0.92, 0.7],
+    "emissiveIntensity": 4,
+    "emissiveExposureWeight": 0.1,
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

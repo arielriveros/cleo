@@ -1,9 +1,14 @@
 # Valley example generator
 
+> **Archived generator.** `build.mjs` (and `tools/soulsDemo/build.mjs`) can no longer run: their source art is gone.
+> The Valley and the Dungeon are their project folders now (`examples/valley/`, `examples/dungeon/`, see
+> `examples/README.md`): edit them in the desktop editor, or with the patch tools below (`split.ts`, `apply*.ts`), which
+> read and write the folders.
+
 Builds two examples:
 
-- `applications/editor/public/examples/valley/`, the **Valley**: an outdoor mountain valley with a day and night cycle, as scenery. Play flies a free camera (`examples/scripts/ValleyFlyCamera.ts`, on the input map in `flyInputMap.mjs`).
-- `applications/editor/public/examples/dungeon/`, the **Dungeon**: the souls content of `tools/soulsDemo/build.mjs` in a three-level dungeon, the engine's example game.
+- `examples/valley/`, the **Valley**: an outdoor mountain valley with a day and night cycle, as scenery. Play flies a free camera (`examples/valley/Assets/Environment/Scripts/Fly Camera.ts`, on the input map in `flyInputMap.mjs`).
+- `examples/dungeon/`, the **Dungeon**: the souls content of `tools/soulsDemo/build.mjs` in a three-level dungeon, the engine's example game.
 
 `build.mjs` writes them as one project with two scenes, the souls game on both and the skull cave in the cliff notch the door between them, as it always has; then `split.ts` makes that two projects. It takes the Valley's gameplay out (the player, enemies, nav mesh, Game Manager, barrels, messages, pickups, lever and gate, the skull cave with its probe, GI volume, mist and torches, the pond's wading zone; the bonfire becomes a plain campfire), puts the fly camera in, removes the Dungeon's way back up, and keeps in each project only the assets it reaches. `split.ts` also runs on its own over the two shipped folders: it edits the shipped data, and running it again refreshes the Valley scripts from `examples/scripts`.
 
@@ -12,7 +17,7 @@ python tools/valley/prepare.py                          # unzips new downloads; 
 node --max-old-space-size=12288 tools/valley/build.mjs  # writes both examples (build, then split.ts)
 node tools/valley/bakeGI.cjs                            # captures the Valley's GI volumes into it (Chrome, WebGPU; a few minutes)
 node tools/valley/bakeGI.cjs --example dungeon          # the Dungeon's
-npm --prefix applications/editor run examples:list      # refreshes the gallery index
+npm run examples:bundle valley dungeon                   # rebuilds their gallery bundles
 npx vitest run tests/valleyProject.test.ts tests/dungeonProject.test.ts tests/dungeonSouls.test.ts tests/dungeonCollision.test.ts
 
 # without build/: re-apply the split to the shipped examples (after editing a Valley script, say)
@@ -95,11 +100,11 @@ into `creatorFoliage.mjs`.
 ## Light and time
 
 - **The day is keyed, not scripted.** `tools/valley/cinematic/dayPath.ts` turns a spring day's sun path into keys on the Sun (rotation, colour, lux), the Sky Light, the sky's mist and god rays and the fog volumes. The tour keys its own day that way, and the **Day Cycle** Sequence node (the `/Cinematic/Day Cycle.sequence` asset: a whole day in 24 minutes, looping) plays it under the menu and through Free mode; the menu pauses it while the tour plays. The renderer hands the key light to the moon at night by itself.
-- **Fires** (`examples/scripts/ValleyFireLight.ts`) are linked templates with a flame, embers, sparks that bounce on the floor, and a flickering light. The flames are FX Creator flipbooks: Torch Fire (tall 128 x 256 frames) on the torches, braziers and candles, Bonfire Fire (a 2.7 s loop) on the bonfire, fire pits and hearth. Lighting a bonfire plays Bonfire Ignition once, a flare that settles into the loop as the light swells and the smoke thickens.
+- **Fires** (`examples/valley/Assets/Props/Fire/Scripts/Fire Light.ts`) are linked templates with a flame, embers, sparks that bounce on the floor, and a flickering light. The flames are FX Creator flipbooks: Torch Fire (tall 128 x 256 frames) on the torches, braziers and candles, Bonfire Fire (a 2.7 s loop) on the bonfire, fire pits and hearth. Lighting a bonfire plays Bonfire Ignition once, a flare that settles into the loop as the light swells and the smoke thickens.
 - **GI volumes.** Probe grids light the hamlet and each house interior with the light bounced off what is round them (`giVolumes()` in `build.mjs`): 5.5 m apart over the hamlet, a metre apart inside, where the box is the interior exposure volume's grown 0.3 m past the walls. They relight themselves as the sun turns. Their captures are baked by `bakeGI.cjs`: the editor on a private dev server (8092) in the installed Chrome over the DevTools protocol (9336), the Valley imported, each volume captured afresh and saved into the example's assets under its `bakeId`. `build.mjs` carries the bakes over from one build to the next (the volumes keep their ids); a bake whose geometry has since moved is caught when it loads, and that volume captures again. `bakeGI.cjs --only "Hamlet GI"` re-bakes one.
 - **Light probes.** The Valley Probe (unbounded, reflections only) is the fallback everywhere. Local probes reflect their own surroundings: the Bonfire, the Hamlet, the Pond (the water reflects it) and the Windmill. Each house interior is lit and reflected by its own probe, box-projected, its box the interior exposure volume's; its lighting and reflections hold from outside the door too. Every capture is shadowed by the sun, and each probe relights itself every 4 degrees of sun (`relightDegrees`: the captured scene lit again, a few frames per probe, no geometry redrawn).
 - **Smoke** rises off the Valley's campfire and the Dungeon's bonfire and fire pits: the Creator's smoke plume on a lit sprite, relit by its six-way lightmaps (the sun and its shadows, the fire below).
-- **Blood and splashes** are FX Creator liquids too: a hit's blood is a lit Blood Burst splatter at the contact point and the Blood Spatter decal (three quarters of the bake's size) as the blood lands, no particles; the Blood Pool decal is the bloodstain where the player last died. The pond throws a Water Splash crown where something enters it (a floating crate dropped in, say) and a small Water Step at a wading character's feet, both played by `examples/scripts/ValleyFx.ts`.
+- **Blood and splashes** are FX Creator liquids too: a hit's blood is a lit Blood Burst splatter at the contact point and the Blood Spatter decal (three quarters of the bake's size) as the blood lands, no particles; the Blood Pool decal is the bloodstain where the player last died. The pond throws a Water Splash crown where something enters it (a floating crate dropped in, say) and a small Water Step at a wading character's feet, both played by `examples/valley/Assets/Splash.ts`.
 - **The Dungeon** is held at EV 15, the valley's noon, and its fires are lit for that: the souls content (glyphs, glows, bolts) is tuned for an exposure about that.
 
 - **Leaves let light through** (Material translucency), at the Foliage Creator's values: broad leaves 0.5, grass 0.45, needles 0.25; bark none. The trees' far impostors carry the same glow.

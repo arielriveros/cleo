@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "f51802c16078fd10f0ffaa7c678eb72c",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "f51802c16078fd10f0ffaa7c678eb72c",
+    "name": "Old House Base Color.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

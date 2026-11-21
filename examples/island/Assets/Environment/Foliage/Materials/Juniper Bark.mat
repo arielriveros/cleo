@@ -1,0 +1,46 @@
+{
+  "id": "06d31a3198e93373c4b5ff2b146012b2",
+  "name": "Juniper Bark",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.9,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.08,
+    "windStiffness": 1.2,
+    "windRole": "plant",
+    "windFlutter": 0,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "72e503f00a045cfa61af898c303a3c03",
+      "metallicRoughnessTexture": "78071635afd94e000a6d0e3c005a16dd",
+      "occlusionMap": "78071635afd94e000a6d0e3c005a16dd",
+      "normalMap": "89d55f97283be97bee83f931be88f5e7"
+    },
+    "interactBend": 0.6,
+    "interactRecovery": 1,
+    "variationHue": 0.03,
+    "variationValue": 0.12,
+    "variationDry": 0.08,
+    "wetResponse": 0.5,
+    "snowCover": 0.6,
+    "weightDroop": 0.3,
+    "rippleSheen": 0.2,
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "72e503f00a045cfa61af898c303a3c03",
+    "78071635afd94e000a6d0e3c005a16dd",
+    "89d55f97283be97bee83f931be88f5e7"
+  ],
+  "thumbnail": ""
+}

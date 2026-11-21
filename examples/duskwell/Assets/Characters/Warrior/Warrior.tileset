@@ -1,0 +1,20 @@
+{
+  "id": "9a8bc653fa28cf67cc2b78a1cb5eeb6f",
+  "name": "Warrior",
+  "textureId": "warrior.png",
+  "imageWidth": 945,
+  "imageHeight": 945,
+  "tileWidth": 135,
+  "tileHeight": 135,
+  "margin": 0,
+  "spacing": 0,
+  "columns": 7,
+  "rows": 7,
+  "pixelsPerUnit": 16,
+  "tiles": {},
+  "terrains": [],
+  "variantSets": [],
+  "textureIds": [
+    "warrior.png"
+  ]
+}

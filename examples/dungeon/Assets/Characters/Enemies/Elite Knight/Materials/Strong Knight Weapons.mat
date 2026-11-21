@@ -1,0 +1,33 @@
+{
+  "id": "bfe61b8055a4ea200968c5e8709527e2",
+  "name": "Strong Knight Weapons",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "570399fbc8816b58950b648036def466",
+      "metallicRoughnessTexture": "cba8424bf1be863c495735f8c4302074",
+      "occlusionMap": "cba8424bf1be863c495735f8c4302074",
+      "normalMap": "63fc4fd80914382dd49a634adedfb453"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "570399fbc8816b58950b648036def466",
+    "cba8424bf1be863c495735f8c4302074",
+    "63fc4fd80914382dd49a634adedfb453"
+  ],
+  "thumbnail": ""
+}

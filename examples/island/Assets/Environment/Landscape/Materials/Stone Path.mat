@@ -1,0 +1,37 @@
+{
+  "id": "0f8044c025d037a37d2f29d4d10e02de",
+  "name": "Stone Path",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "uv",
+    "textures": {
+      "baseColorTexture": "88a935f3a0dbaa578c313b4dc05b91bb",
+      "metallicRoughnessTexture": "e9bbc3b1527fd0db5d3149273318a174",
+      "occlusionMap": "e9bbc3b1527fd0db5d3149273318a174",
+      "normalMap": "2118bda568e5a15e752a2114860037fd",
+      "displacementMap": "f1d48fffe023975f2ca30b04c598294b"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "88a935f3a0dbaa578c313b4dc05b91bb",
+    "e9bbc3b1527fd0db5d3149273318a174",
+    "2118bda568e5a15e752a2114860037fd",
+    "f1d48fffe023975f2ca30b04c598294b"
+  ],
+  "thumbnail": ""
+}

@@ -1,0 +1,17 @@
+{
+  "cleo": 1,
+  "guid": "956f228ba71efebe772404a84b84d0d4",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "956f228ba71efebe772404a84b84d0d4",
+    "name": "SoulsMath",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "module",
+    "variables": [],
+    "reflect": 3
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "0f3d559ec3368c34a5d898e282904dc8",
+  "name": "Well Roof",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "63870e926baca4529f10e3abc34f53d1",
+      "metallicRoughnessTexture": "adea1b90a31df421e2e90d0ecf08d6dd",
+      "normalMap": "50daea05c417d033a06bdf39c85bde4f"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "63870e926baca4529f10e3abc34f53d1",
+    "adea1b90a31df421e2e90d0ecf08d6dd",
+    "50daea05c417d033a06bdf39c85bde4f"
+  ],
+  "thumbnail": ""
+}

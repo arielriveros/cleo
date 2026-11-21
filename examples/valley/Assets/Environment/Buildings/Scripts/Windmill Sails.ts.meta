@@ -1,0 +1,42 @@
+{
+  "cleo": 1,
+  "guid": "020fde2769c535b028bb18e8e7e00e9b",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "020fde2769c535b028bb18e8e7e00e9b",
+    "name": "Windmill Sails",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "degreesPerSecond",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 24,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Sail speed in degrees per second at the wind's usual strength; negative turns the other way."
+        }
+      },
+      {
+        "name": "followWind",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Turn faster in a stronger wind (the scene's Wind node), slower in a weaker one."
+        }
+      }
+    ],
+    "reflect": 3
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "id": "7223058adaaaa23051808e07c6f1657c",
+  "name": "Hollow Body 2",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "71ad1fa74cebe1d86545eddde1402578",
+      "metallicRoughnessTexture": "dd6a62dde0f1d9c47d0477ee55ac548f",
+      "occlusionMap": "dd6a62dde0f1d9c47d0477ee55ac548f",
+      "normalMap": "fc7f74bf7d2669b3372b16928a8c771f"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "71ad1fa74cebe1d86545eddde1402578",
+    "dd6a62dde0f1d9c47d0477ee55ac548f",
+    "fc7f74bf7d2669b3372b16928a8c771f"
+  ],
+  "thumbnail": ""
+}

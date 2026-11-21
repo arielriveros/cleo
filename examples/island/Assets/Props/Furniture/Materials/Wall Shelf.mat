@@ -1,0 +1,33 @@
+{
+  "id": "8c3eb584c2f085e2508254da76babc8e",
+  "name": "Wall Shelf",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "af566dbf812d5ab5b0ee34c65b046613",
+      "metallicRoughnessTexture": "b71b774d92a68c27ff523b9e4a2292a8",
+      "occlusionMap": "b71b774d92a68c27ff523b9e4a2292a8",
+      "normalMap": "9020ad5bfa93ec487b36fc373a38c2a4"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "af566dbf812d5ab5b0ee34c65b046613",
+    "b71b774d92a68c27ff523b9e4a2292a8",
+    "9020ad5bfa93ec487b36fc373a38c2a4"
+  ],
+  "thumbnail": ""
+}

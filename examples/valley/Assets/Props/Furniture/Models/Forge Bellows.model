@@ -1,0 +1,83 @@
+{
+  "id": "8750d40088fded27947125d69bbbe5d4",
+  "name": "Forge Bellows",
+  "nodeJson": {
+    "id": "7d80e5a84b53757ec6182b2699e9ac9e",
+    "name": "Forge Bellows",
+    "type": "model",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [],
+    "variables": {
+      "__materialId": {
+        "type": "string",
+        "value": "728ca39707b19ecc3ceb88b1bff9a103",
+        "access": "public"
+      }
+    },
+    "spawnOnStart": true,
+    "model": {
+      "geometry": {
+        "$geo": {
+          "positions": {
+            "h": "dd8874a26e94d8ad5bcbac1b5e568cb37752146dd804fe46357770b8eb371a02",
+            "l": 30888
+          },
+          "normals": {
+            "h": "bb8f66fcffd470e0789da09c8bf9c63f9b2f72d1615029d6b70a10a1886dbbdc",
+            "l": 30888
+          },
+          "empty": [
+            "tangents",
+            "bitangents"
+          ],
+          "texCoords": {
+            "h": "d56141567c984d035e9efc36934794c88ac69bb1d4ea5504d46052c4952ca6e8",
+            "l": 20592
+          },
+          "indices": {
+            "h": "88e082a5647396eb12d98a28fa2d808e896bfb92f4cbf9cb74453b851e63046c",
+            "l": 10812,
+            "bits": 16
+          },
+          "typed": true
+        }
+      },
+      "material": {
+        "type": "pbr",
+        "baseColor": [1, 1, 1],
+        "metallic": 0,
+        "roughness": 1,
+        "reflectance": 0.5,
+        "opacity": 1,
+        "emissiveFactor": [0, 0, 0],
+        "emissiveIntensity": 1,
+        "textures": {
+          "baseColorTexture": "428ef3a04ec22ac57c4d4e9ba6a49f82",
+          "metallicRoughnessTexture": "9f6394faf91bb6077623a3f08b573b28",
+          "normalMap": "0ea10cd639d3da0101e77f95fd536c9e"
+        },
+        "config": {
+          "side": "double",
+          "wireframe": false,
+          "transparent": false,
+          "castShadow": true,
+          "probeable": true
+        }
+      }
+    },
+    "animationMappings": null,
+    "stateMachine": null,
+    "ragdoll": null
+  },
+  "textureIds": [
+    "428ef3a04ec22ac57c4d4e9ba6a49f82",
+    "9f6394faf91bb6077623a3f08b573b28",
+    "0ea10cd639d3da0101e77f95fd536c9e"
+  ],
+  "materialIds": [
+    "728ca39707b19ecc3ceb88b1bff9a103"
+  ],
+  "thumbnail": ""
+}

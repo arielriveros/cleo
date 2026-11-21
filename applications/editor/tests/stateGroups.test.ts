@@ -1,6 +1,4 @@
 import { describe, it, expect } from 'vitest'
-import { existsSync, readFileSync } from 'fs'
-import { join } from 'path'
 import { mat4 } from 'gl-matrix'
 import { Animator } from 'cleo'
 import type { AnimationState, AnimationStateMachine, AnimationTransition } from 'cleo'
@@ -12,7 +10,8 @@ import {
 // State groups in the animator editor: the pure half under the graph and the inspector. A group is drawn as one
 // node with a port per outside end; its own transitions fire from any of its states. What can go wrong here is
 // silent: a rename that leaves a transition naming a group that is gone, an ungroup that changes what the
-// machine does, a layer view that shows the base's groups.
+// machine does, a layer view that shows the base's groups. (The Sandbox's own animator:
+// examples/sandbox/tests/stateGroups.test.ts.)
 
 const when = (param: string) => ({ op: 'and' as const, children: [{ param, op: 'true' as const }] })
 const edge = (from: string, to: string, param = 'go'): AnimationTransition =>
@@ -182,29 +181,5 @@ describe('state groups: the graph', () => {
     expect(plan.groups).toEqual([])
     expect(plan.links.every(l => !l.summary && !l.dashed && !l.sourceHandle && !l.targetHandle)).toBe(true)
     expect(plan.links.map(l => l.key).sort()).toEqual(['Fall|Stop', 'Fall|StopMirror', 'Idle|Run', 'Idle|Stop', 'Idle|StopMirror', 'Run|Stop', 'Run|StopMirror'])
-  })
-
-  const SANDBOX = join(__dirname, '..', 'public', 'examples', 'sandbox')
-  it.skipIf(!existsSync(join(SANDBOX, 'manifest.json')))('shows the Sandbox animator as a few states and its groups, every transition somewhere', () => {
-    const manifest = JSON.parse(readFileSync(join(SANDBOX, 'manifest.json'), 'utf8'))
-    const scene = JSON.parse(readFileSync(join(SANDBOX, 'scenes', `${manifest.mainSceneId}.json`), 'utf8')).scene
-    const find = (n: any): any => n.name === 'Mannequin' ? n : (n.children ?? []).map(find).find(Boolean)
-    const sm: AnimationStateMachine = find(scene).stateMachine
-    const top = graphPlan(sm, null)
-    expect(top.states.sort()).toEqual(['Idle', 'Locomotion', 'Stairs', 'Start'])
-    expect(top.groups.map(g => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car'])
-    // Its forks are its groups': each drawn inside its group, the group standing for it outside.
-    expect(top.forks).toEqual([])
-    expect(top.groups.flatMap(g => g.forks)).toEqual(['Pick Turn', 'Pick Stop', 'Settle', 'Pick Run Turn', 'Take Off'])
-    const drawn = new Set(top.links.flatMap(l => [...l.forward, ...l.backward]))
-    const memberOf = new Map(sm.groups!.flatMap(g => g.states.map(s => [s, g.name] as const)))
-    for (const t of sm.transitions) {
-      const inside = (memberOf.get(t.from) ?? t.from) === (memberOf.get(t.to) ?? t.to)
-      if (inside) {
-        const g = memberOf.get(t.from) ?? t.from
-        const opened = graphPlan(sm, g)
-        expect(opened.links.some(l => [...l.forward, ...l.backward].includes(t)), `${t.from} -> ${t.to} inside ${g}`).toBe(true)
-      } else expect(drawn.has(t), `${t.from} -> ${t.to}`).toBe(true)
-    }
   })
 })

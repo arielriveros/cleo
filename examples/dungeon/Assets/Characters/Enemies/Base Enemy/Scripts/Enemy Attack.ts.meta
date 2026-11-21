@@ -1,0 +1,301 @@
+{
+  "cleo": 1,
+  "guid": "3a76519a3c7acf974ce439731c9de090",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "3a76519a3c7acf974ce439731c9de090",
+    "name": "Enemy Attack",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "animTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The animator trigger that plays this attack. Empty: the node's name."
+        }
+      },
+      {
+        "name": "damage",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 70,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "poiseDamage",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 20,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "minRange",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "maxRange",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.2,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "weight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "cooldown",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "phase",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "trackSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.45,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "lungeStart",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "lungeSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "lungeSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "lungeToTarget",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "hyperArmor",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "No flinch while this attack plays (poise breaks still stagger)."
+        }
+      },
+      {
+        "name": "comboNext",
+        "type": {
+          "kind": "name",
+          "name": "node"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Attack that follows immediately, without a gap, when the player is still in its range."
+        }
+      },
+      {
+        "name": "hitTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Fallback active window (clip seconds) for a clip without `hit`/`hitEnd` events."
+        }
+      },
+      {
+        "name": "activeSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.15,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "bounceOff",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The swing bounces off walls (`blocksSwings` bodies). Off by default: AI swings beside walls a lot."
+        }
+      },
+      {
+        "name": "aoeRadius",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Ground-slam radius. 0 is an ordinary swing."
+        }
+      },
+      {
+        "name": "impactTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Effect template spawned at the enemy's feet on a slam."
+        }
+      },
+      {
+        "name": "projectileTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Projectile template; non-empty makes this a ranged attack."
+        }
+      },
+      {
+        "name": "projectileSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 12,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "projectileCount",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "spreadDeg",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "sound",
+        "type": {
+          "kind": "name",
+          "name": "sound"
+        },
+        "access": "public",
+        "default": "Enemy Swing",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Sound cue played when the attack starts (a SoundNode name under Sounds)."
+        }
+      },
+      {
+        "name": "isEnemyAttack",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {}
+      }
+    ],
+    "reflect": 3
+  }
+}

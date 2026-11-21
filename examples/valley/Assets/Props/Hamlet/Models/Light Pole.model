@@ -1,0 +1,83 @@
+{
+  "id": "c30646c201bf532a88e9406d0041c905",
+  "name": "Light Pole",
+  "nodeJson": {
+    "id": "ee95c9dc203aa0cca9bd1aa691f912e3",
+    "name": "Light Pole",
+    "type": "model",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [],
+    "variables": {
+      "__materialId": {
+        "type": "string",
+        "value": "edca6671235e7c093c762d9270513de6",
+        "access": "public"
+      }
+    },
+    "spawnOnStart": true,
+    "model": {
+      "geometry": {
+        "$geo": {
+          "positions": {
+            "h": "2cee981f3a57317b672af580240a7819616a8ed18a49bfa4edb68ceead6f5e86",
+            "l": 30552
+          },
+          "normals": {
+            "h": "68402144e6401e29dc37e9b14d181392c99fec3f3c418df2d06d1b4e34fbda8b",
+            "l": 30552
+          },
+          "empty": [
+            "tangents",
+            "bitangents"
+          ],
+          "texCoords": {
+            "h": "de32ca380f54c6fe2db3a586a73a7ebbcd82fa81b2815759bbbc7b82cb786fee",
+            "l": 20368
+          },
+          "indices": {
+            "h": "defc1ed9e95fb803fd47af8082b59615886c06f122ec4089e113bffc1bc40dcc",
+            "l": 16692,
+            "bits": 16
+          },
+          "typed": true
+        }
+      },
+      "material": {
+        "type": "pbr",
+        "baseColor": [1, 1, 1],
+        "metallic": 0,
+        "roughness": 1,
+        "reflectance": 0.5,
+        "opacity": 1,
+        "emissiveFactor": [0, 0, 0],
+        "emissiveIntensity": 1,
+        "textures": {
+          "baseColorTexture": "26e84ed6ed5fac56ff2f3e8485155173",
+          "metallicRoughnessTexture": "d459563ae77f79008900671ce8281dcf",
+          "normalMap": "46a88ce835910e2152dfb387c7a4c445"
+        },
+        "config": {
+          "side": "double",
+          "wireframe": false,
+          "transparent": false,
+          "castShadow": true,
+          "probeable": true
+        }
+      }
+    },
+    "animationMappings": null,
+    "stateMachine": null,
+    "ragdoll": null
+  },
+  "textureIds": [
+    "26e84ed6ed5fac56ff2f3e8485155173",
+    "d459563ae77f79008900671ce8281dcf",
+    "46a88ce835910e2152dfb387c7a4c445"
+  ],
+  "materialIds": [
+    "edca6671235e7c093c762d9270513de6"
+  ],
+  "thumbnail": ""
+}

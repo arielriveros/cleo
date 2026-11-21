@@ -1,0 +1,1723 @@
+{
+  "cleo": 1,
+  "guid": "d42708efc597b36e59bb0bf8838f131a",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "d42708efc597b36e59bb0bf8838f131a",
+    "name": "Player",
+    "baseType": "character",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "displayName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Player",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "team",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "player",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "maxHp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 400,
+        "hidden": true
+      },
+      {
+        "name": "hp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 400,
+        "hidden": true
+      },
+      {
+        "name": "defense",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Fraction of incoming damage ignored, 0..0.9."
+        }
+      },
+      {
+        "name": "bodyRadius",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Resources"
+        }
+      },
+      {
+        "name": "bodyHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.8,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "weaponTemplates",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "name",
+            "name": "template"
+          }
+        },
+        "access": "public",
+        "default": [
+          "Longsword",
+          "Greatsword"
+        ],
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The weapons the player starts with, by template. F swaps between them."
+        }
+      },
+      {
+        "name": "weaponSocket",
+        "type": {
+          "kind": "name",
+          "name": "socket"
+        },
+        "access": "public",
+        "default": "RightHand",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Socket on this character's skeleton the weapons attach to."
+        }
+      },
+      {
+        "name": "weaponsGroup",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Weapons",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Child group the weapons are spawned under (this node itself when there is none)."
+        }
+      },
+      {
+        "name": "weaponName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The held weapon's display name, for the HUD."
+        }
+      },
+      {
+        "name": "dropWeaponOnDeath",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Let go of the held weapon on death, as a physics body (see dropWeapon)."
+        }
+      },
+      {
+        "name": "droppedWeaponMass",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 4,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The dropped weapon's mass, kg."
+        }
+      },
+      {
+        "name": "maxWalkSlope",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 45,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The steepest ground, in degrees, this character can walk UP. On anything steeper it can still move across the slope or down it, but not climb (see limitClimb). The engine's own limit is 60°."
+        }
+      },
+      {
+        "name": "stopTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Stop",
+        "hidden": false,
+        "attribute": {
+          "group": "One-shots",
+          "tooltip": "Attacks, rolls and reactions are played by TRIGGER, by name (`_playTrigger`): the animator has a state each one enters, which leaves on its own at the clip's end. The graph owns every clip, its speed and its blends; the script owns the gameplay, and asks the animator how long what a trigger plays lasts (`Animator.triggerInfo`) and whether it still plays (`Animator.activeTrigger`). These two take the one-shot's layer back to rest from anything: with its blend-out, and at once."
+        }
+      },
+      {
+        "name": "cutTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Cut",
+        "hidden": false,
+        "attribute": {
+          "group": "One-shots"
+        }
+      },
+      {
+        "name": "_waterZones",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "isDead",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "hurtboxActive",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": true
+      },
+      {
+        "name": "_gm",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "GameManager"
+        }
+      },
+      {
+        "name": "_model",
+        "type": {
+          "kind": "node",
+          "className": "ModelNode"
+        },
+        "access": "protected",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_weapons",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "protected",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_weaponIndex",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_dropped",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "protected",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_raised",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_actTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "protected",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_actInfo",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_actEntered",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "protected",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_actWait",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_warnedActions",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wading",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_hurtboxChecked",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "vigor",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 10,
+        "hidden": false,
+        "attribute": {
+          "group": "Stats"
+        },
+        "save": true
+      },
+      {
+        "name": "endurance",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 10,
+        "hidden": false,
+        "attribute": {
+          "group": "Stats"
+        },
+        "save": true
+      },
+      {
+        "name": "strength",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 10,
+        "hidden": false,
+        "attribute": {
+          "group": "Stats"
+        },
+        "save": true
+      },
+      {
+        "name": "dexterity",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 10,
+        "hidden": false,
+        "attribute": {
+          "group": "Stats"
+        },
+        "save": true
+      },
+      {
+        "name": "souls",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {
+          "group": "Stats"
+        },
+        "save": true
+      },
+      {
+        "name": "stamina",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 90,
+        "hidden": true
+      },
+      {
+        "name": "maxStamina",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 90,
+        "hidden": true
+      },
+      {
+        "name": "estus",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": true
+      },
+      {
+        "name": "estusMax",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {
+          "group": "Resources",
+          "tooltip": "Estus Shards raise it for good."
+        },
+        "save": true
+      },
+      {
+        "name": "estusHeal",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 250,
+        "hidden": false,
+        "attribute": {
+          "group": "Resources",
+          "tooltip": "HP restored per flask, spread over `estusHealSeconds`."
+        }
+      },
+      {
+        "name": "estusHealSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.4,
+        "hidden": false,
+        "attribute": {
+          "group": "Resources"
+        }
+      },
+      {
+        "name": "baseHp",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 400,
+        "hidden": false,
+        "attribute": {
+          "group": "Stat curves",
+          "tooltip": "HP at Vigor 10. Each point to 30 adds `hpPerVigor`, then the curve flattens."
+        }
+      },
+      {
+        "name": "hpPerVigor",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 30,
+        "hidden": false,
+        "attribute": {
+          "group": "Stat curves"
+        }
+      },
+      {
+        "name": "baseStamina",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 90,
+        "hidden": false,
+        "attribute": {
+          "group": "Stat curves",
+          "tooltip": "Stamina at Endurance 10, plus `staminaPerEndurance` per point to 40."
+        }
+      },
+      {
+        "name": "staminaPerEndurance",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {
+          "group": "Stat curves"
+        }
+      },
+      {
+        "name": "jogSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3.8,
+        "hidden": false,
+        "attribute": {
+          "group": "Movement"
+        }
+      },
+      {
+        "name": "waterNotice",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Can't roll or sprint in water",
+        "hidden": false,
+        "attribute": {
+          "group": "Movement",
+          "tooltip": "Shown once on wading in: water slows you and stops rolls and sprints."
+        }
+      },
+      {
+        "name": "sprintSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 5.8,
+        "hidden": false,
+        "attribute": {
+          "group": "Movement"
+        }
+      },
+      {
+        "name": "lockedSpeedScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.8,
+        "hidden": false,
+        "attribute": {
+          "group": "Movement",
+          "tooltip": "Throttle while locked on: strafing is slower than running."
+        }
+      },
+      {
+        "name": "freeAcceleration",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 24,
+        "hidden": false,
+        "attribute": {
+          "group": "Movement",
+          "tooltip": "Ramp while freely moving. Actions snap (0) so a roll starts at full speed."
+        }
+      },
+      {
+        "name": "lockTurnSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 540,
+        "hidden": false,
+        "attribute": {
+          "group": "Movement",
+          "tooltip": "Degrees per second the body turns toward a locked target while standing."
+        }
+      },
+      {
+        "name": "staminaRegen",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 45,
+        "hidden": false,
+        "attribute": {
+          "group": "Stamina"
+        }
+      },
+      {
+        "name": "staminaRegenDelay",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.6,
+        "hidden": false,
+        "attribute": {
+          "group": "Stamina"
+        }
+      },
+      {
+        "name": "sprintCostPerSecond",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 14,
+        "hidden": false,
+        "attribute": {
+          "group": "Stamina"
+        }
+      },
+      {
+        "name": "exhaustThreshold",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 15,
+        "hidden": false,
+        "attribute": {
+          "group": "Stamina",
+          "tooltip": "After sprinting to empty, sprint stays locked until stamina recovers to this."
+        }
+      },
+      {
+        "name": "rollCost",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 20,
+        "hidden": false,
+        "attribute": {
+          "group": "Roll / backstep"
+        }
+      },
+      {
+        "name": "rollSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.7,
+        "hidden": false,
+        "attribute": {
+          "group": "Roll / backstep"
+        }
+      },
+      {
+        "name": "rollInvulnStart",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.06,
+        "hidden": false,
+        "attribute": {
+          "group": "Roll / backstep"
+        }
+      },
+      {
+        "name": "rollInvulnEnd",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.42,
+        "hidden": false,
+        "attribute": {
+          "group": "Roll / backstep"
+        }
+      },
+      {
+        "name": "rollSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 6.5,
+        "hidden": false,
+        "attribute": {
+          "group": "Roll / backstep"
+        }
+      },
+      {
+        "name": "rollFastSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.45,
+        "hidden": false,
+        "attribute": {
+          "group": "Roll / backstep"
+        }
+      },
+      {
+        "name": "rollSlowSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "group": "Roll / backstep"
+        }
+      },
+      {
+        "name": "rollRootMotion",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "group": "Roll / backstep",
+          "tooltip": "Move by the roll's OWN travel (the Roll state extracts its clip's root travel) instead of the rollSpeed curve above: the body covers exactly the ground the dive does, through its own collision, for as long as the state lasts. The roll always faces the way it goes -- there is only a forward roll."
+        }
+      },
+      {
+        "name": "runTurnEnabled",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn",
+          "tooltip": "Reversing at a run plays a planted 180° turn instead of spinning on the spot. Off: the plain turn."
+        }
+      },
+      {
+        "name": "runTurnAngle",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 130,
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn",
+          "tooltip": "Degrees between where the player is running and where the stick now points that count as reversing."
+        }
+      },
+      {
+        "name": "runTurnMinSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn",
+          "tooltip": "Running at least this fast (m/s); a walker just turns."
+        }
+      },
+      {
+        "name": "runTurnPlant",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.45,
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn",
+          "tooltip": "Share of the turn spent braking to a stop before pushing off the other way."
+        }
+      },
+      {
+        "name": "runTurnSpeedParam",
+        "type": {
+          "kind": "name",
+          "name": "param"
+        },
+        "access": "public",
+        "default": "Speed",
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn",
+          "tooltip": "The animator parameters the turn holds on a straight-ahead run underneath its clip (see _pinRunPose): the character's measured speed and direction, which would otherwise drop to Idle at the plant."
+        }
+      },
+      {
+        "name": "runTurnDirectionParam",
+        "type": {
+          "kind": "name",
+          "name": "param"
+        },
+        "access": "public",
+        "default": "Direction",
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn"
+        }
+      },
+      {
+        "name": "runTurnReleaseSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn",
+          "tooltip": "After the turn, the longest the speed parameter keeps following the body while the measured speed catches up."
+        }
+      },
+      {
+        "name": "backstepCost",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 12,
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn"
+        }
+      },
+      {
+        "name": "backstepSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.45,
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn"
+        }
+      },
+      {
+        "name": "backstepInvulnEnd",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.22,
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn"
+        }
+      },
+      {
+        "name": "backstepSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 4,
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn"
+        }
+      },
+      {
+        "name": "backstepMoveSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.25,
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn"
+        }
+      },
+      {
+        "name": "sprintHoldSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.25,
+        "hidden": false,
+        "attribute": {
+          "group": "Running turn",
+          "tooltip": "Hold Roll longer than this while moving and it becomes a sprint instead of a roll."
+        }
+      },
+      {
+        "name": "inputBufferSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Input / reactions"
+        }
+      },
+      {
+        "name": "heavyHitThreshold",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 150,
+        "hidden": false,
+        "attribute": {
+          "group": "Input / reactions",
+          "tooltip": "A hit at or above this much damage is a heavy stagger with knockback; below, a flinch."
+        }
+      },
+      {
+        "name": "hurtHitStop",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.08,
+        "hidden": false,
+        "attribute": {
+          "group": "Input / reactions",
+          "tooltip": "Real seconds of hit-stop when a hit lands on the player (the GameManager's), light and heavy."
+        }
+      },
+      {
+        "name": "heavyHurtHitStop",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.14,
+        "hidden": false,
+        "attribute": {
+          "group": "Input / reactions"
+        }
+      },
+      {
+        "name": "hitLightSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.45,
+        "hidden": false,
+        "attribute": {
+          "group": "Input / reactions"
+        }
+      },
+      {
+        "name": "recoilSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.45,
+        "hidden": false,
+        "attribute": {
+          "group": "Input / reactions",
+          "tooltip": "A swing that meets a wall (a `blocksSwings` body) before any enemy bounces off it for this long."
+        }
+      },
+      {
+        "name": "hitHeavySeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.9,
+        "hidden": false,
+        "attribute": {
+          "group": "Input / reactions"
+        }
+      },
+      {
+        "name": "knockbackSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 4,
+        "hidden": false,
+        "attribute": {
+          "group": "Input / reactions"
+        }
+      },
+      {
+        "name": "knockbackSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.15,
+        "hidden": false,
+        "attribute": {
+          "group": "Input / reactions"
+        }
+      },
+      {
+        "name": "killY",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": -15,
+        "hidden": false,
+        "attribute": {
+          "group": "Input / reactions",
+          "tooltip": "Falling below this height is death."
+        }
+      },
+      {
+        "name": "rollTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Roll",
+        "hidden": false,
+        "attribute": {
+          "group": "Animator triggers"
+        }
+      },
+      {
+        "name": "backstepTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Backstep",
+        "hidden": false,
+        "attribute": {
+          "group": "Animator triggers"
+        }
+      },
+      {
+        "name": "runTurnRightTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "RunTurnRight",
+        "hidden": false,
+        "attribute": {
+          "group": "Animator triggers",
+          "tooltip": "The running 180° turn, turning right and turning left (Left falls back to Right when it is missing)."
+        }
+      },
+      {
+        "name": "runTurnLeftTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "RunTurnLeft",
+        "hidden": false,
+        "attribute": {
+          "group": "Animator triggers"
+        }
+      },
+      {
+        "name": "drinkTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Drink",
+        "hidden": false,
+        "attribute": {
+          "group": "Animator triggers"
+        }
+      },
+      {
+        "name": "drinkTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.85,
+        "hidden": false,
+        "attribute": {
+          "group": "Animator triggers",
+          "tooltip": "Fallback seconds into the drink clip at which the heal starts when it has no `drink` event."
+        }
+      },
+      {
+        "name": "hitLightTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "HitLight",
+        "hidden": false,
+        "attribute": {
+          "group": "Animator triggers"
+        }
+      },
+      {
+        "name": "hitHeavyTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "HitHeavy",
+        "hidden": false,
+        "attribute": {
+          "group": "Animator triggers"
+        }
+      },
+      {
+        "name": "recoilTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Recoil",
+        "hidden": false,
+        "attribute": {
+          "group": "Animator triggers",
+          "tooltip": "Played when a swing bounces off a wall."
+        }
+      },
+      {
+        "name": "swapTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Swap",
+        "hidden": false,
+        "attribute": {
+          "group": "Animator triggers",
+          "tooltip": "A weapon swap: the layer sheathes the one in hand, then draws the next. The weapon changes on the sheathe clip's `swap` event (or as the draw begins, when the clip has none)."
+        }
+      },
+      {
+        "name": "restTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "Rest",
+        "hidden": false,
+        "attribute": {
+          "group": "Animator triggers",
+          "tooltip": "Sitting at a bonfire: a looping state, left on SoulsCharacter's `stopTrigger`."
+        }
+      },
+      {
+        "name": "fogWalkTrigger",
+        "type": {
+          "kind": "name",
+          "name": "trigger"
+        },
+        "access": "public",
+        "default": "FogWalk",
+        "hidden": false,
+        "attribute": {
+          "group": "Animator triggers"
+        }
+      },
+      {
+        "name": "combatLinger",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 5,
+        "hidden": false,
+        "attribute": {
+          "group": "Fight",
+          "tooltip": "Seconds the combat stance holds after the last blow given or taken (once no enemy is engaged and nothing is locked). While `inCombat`, the animator's `InCombat` swaps the idle for the Longsword's guard and keeps both hands on the hilt while moving."
+        }
+      },
+      {
+        "name": "combatScanInterval",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.25,
+        "hidden": false,
+        "attribute": {
+          "group": "Fight",
+          "tooltip": "How often the engaged enemies are looked for, seconds."
+        }
+      },
+      {
+        "name": "level",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "invulnerable",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "actionState",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "free",
+        "hidden": true
+      },
+      {
+        "name": "isSprinting",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "attackRatingNow",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "inCombat",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "interactPrompt",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "lastSoulsGain",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "soulsGainAge",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 99,
+        "hidden": true
+      },
+      {
+        "name": "lastSafePosition",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "public",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_rig",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_stateTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_bufferAction",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_bufferAge",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 99,
+        "hidden": true
+      },
+      {
+        "name": "_rollHeld",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -1,
+        "hidden": true
+      },
+      {
+        "name": "_rollLength",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_runTurnLength",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_runTurnSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_runTurnOut",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 1],
+        "hidden": true
+      },
+      {
+        "name": "_runTurnYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_runTurnDone",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": true,
+        "hidden": true
+      },
+      {
+        "name": "_runPinSettle",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -1,
+        "hidden": true
+      },
+      {
+        "name": "_frameDelta",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_sprintedThisHold",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_sinceSpend",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 99,
+        "hidden": true
+      },
+      {
+        "name": "_sprintLocked",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_safeTimer",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_sinceBlow",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 99,
+        "hidden": true
+      },
+      {
+        "name": "_combatScan",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_enemyEngaged",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_move",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_moveInfo",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_clip",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_playSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_windowOpened",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_swing",
+        "type": {
+          "kind": "node",
+          "className": "Swing",
+          "script": true
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_comboOpen",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_recovered",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_usesEvents",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_chainQueued",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_motionDir",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 1],
+        "hidden": true
+      },
+      {
+        "name": "_actionSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_healLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_healRate",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_drank",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_swapped",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_swapEvent",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_gestureSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_fogSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_interactTarget",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_nearby",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "cleo": 1,
+  "guid": "1e7f37dffa09572f39dce4bd5f00495d",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "1e7f37dffa09572f39dce4bd5f00495d",
+    "name": "Fog Gate",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "entryDistance",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.1,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Metres in front of the gate (outside) the player is lined up at before walking."
+        }
+      },
+      {
+        "name": "walkDistance",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.8,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "walkSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.5,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "isFogGate",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "gateState",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "closed",
+        "hidden": false,
+        "attribute": {
+          "tooltip": "'closed' | 'fight' | 'gone'"
+        },
+        "save": true
+      },
+      {
+        "name": "_gm",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "GameManager"
+        }
+      },
+      {
+        "name": "_fog",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Fog"
+        }
+      },
+      {
+        "name": "_wall",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "FogWall"
+        }
+      },
+      {
+        "name": "_fade",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -1,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

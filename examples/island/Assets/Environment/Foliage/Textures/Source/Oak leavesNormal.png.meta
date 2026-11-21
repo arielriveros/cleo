@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "c49995307ce631a1d2b12db92d5b0360",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "c49995307ce631a1d2b12db92d5b0360",
+    "name": "Oak leavesNormal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

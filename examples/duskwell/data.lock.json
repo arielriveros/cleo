@@ -1,0 +1,25 @@
+{
+  "cleoData": 1,
+  "repo": "arielriveros/cleo",
+  "buckets": 1,
+  "packs": [
+    ["duskwell.0.215065ac2a830947.pack","example-data","ddb1767a9ec636e8eb98e28b1f620524ff03ba2bfd5f68cfe92fc7938163755d",338786]
+  ],
+  "files": {
+    "Assets/Characters/Bat/Textures/Source/Bat.png": ["0758932ad072784e3877a828be075f392470269252aae7e703c5964bc5413114",6407,0],
+    "Assets/Characters/Ruin Guard/Textures/Source/Ruin Guard.png": ["5a5fe7d879b49eeddb5c767eaeb7155154a7fe8094cb0209f349b16fe0668b61",4789,0],
+    "Assets/Characters/Warrior/Textures/Source/Warrior.png": ["a083810e5171df113aa936483510cdb2a369fe723bf79b591b53278749e9c771",14105,0],
+    "Assets/Level/Backdrop/Textures/Source/Far Hills.png": ["1206c15f84971f3163732b41f8dbd05c9b9c108baece2f8e7c6604e0150b78b5",8368,0],
+    "Assets/Level/Backdrop/Textures/Source/Mountains.png": ["5f0a9f5381ae8a5b918c70e14c44d6e579cd2d4705562a3ea5006031faafb567",13668,0],
+    "Assets/Level/Backdrop/Textures/Source/Near Woods.png": ["3cf1992819e2d5e8a929f4b211a18fd6a5389762e0fe719654068278042beb19",20352,0],
+    "Assets/Level/Backdrop/Textures/Source/Sky.png": ["ac40a755520389c0fc3208eb7de6d7f86f1ae3f440c63bc5f96f8387aa03e597",14615,0],
+    "Assets/Level/Backdrop/Textures/Source/Woods.png": ["7f39f763db5e752d81e9cd8a4912f463e85fb304ccb8ee7d1e42bd4eeae58a62",24382,0],
+    "Assets/Level/Textures/Source/Ruins Tiles.png": ["0ccc8d727e0c8c57bf5c7de14f30c4463375795302d0d1030871919e7d06b68d",216949,0],
+    "Assets/Props/Checkpoint/Textures/Source/Lamp.png": ["8fc39b994c3c5485675c7822f9659094f8b237ecae64a443eb6c94b8190cd851",958,0],
+    "Assets/Props/Diamond/Textures/Source/Diamond.png": ["044475184804a3058224b33e09552c2528ec1b2613bbc07c8ff3105cbddbb455",315,0],
+    "Assets/Props/Torch/Textures/Source/Torch.png": ["4d0f320d0194273f42a3e7ae59e84c23c298be901fdc949926ed0980ff21bef3",449,0],
+    "Blobs/91/9125dbc2f00df85446cc21cf50c098c4511b97e654307e403fe3b968d367f1ba.bin": ["9125dbc2f00df85446cc21cf50c098c4511b97e654307e403fe3b968d367f1ba",4096,0],
+    "Blobs/9f/9f584ae0a495ff0239b988c95f871e1cad0db05fd185229be504a42bf2e1dce5.bin": ["9f584ae0a495ff0239b988c95f871e1cad0db05fd185229be504a42bf2e1dce5",4096,0],
+    "Blobs/aa/aa41bd6d5932205e35d6df68e70c8b7ea51655f8fa2bc77bd4ef59bc4eb5258f.bin": ["aa41bd6d5932205e35d6df68e70c8b7ea51655f8fa2bc77bd4ef59bc4eb5258f",4096,0]
+  }
+}

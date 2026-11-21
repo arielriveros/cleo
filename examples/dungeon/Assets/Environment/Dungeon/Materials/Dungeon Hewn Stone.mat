@@ -1,0 +1,33 @@
+{
+  "id": "b6eacc93bb06f73dfe15f6fd4cb2057b",
+  "name": "Dungeon Hewn Stone",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "e27c87cd77db0322f44f52ab162cada2",
+      "metallicRoughnessTexture": "6719de4d03681fa25b8a16945114d6e2",
+      "occlusionMap": "6719de4d03681fa25b8a16945114d6e2",
+      "normalMap": "55d73f6fe371d1496b4bcade679bfcdd"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "e27c87cd77db0322f44f52ab162cada2",
+    "6719de4d03681fa25b8a16945114d6e2",
+    "55d73f6fe371d1496b4bcade679bfcdd"
+  ],
+  "thumbnail": ""
+}

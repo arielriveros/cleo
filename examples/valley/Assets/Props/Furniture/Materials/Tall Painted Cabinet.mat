@@ -1,0 +1,33 @@
+{
+  "id": "3eece9105c90a94058423e548b61354f",
+  "name": "Tall Painted Cabinet",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "5756d2dfb20d3060a26ee71647efd730",
+      "metallicRoughnessTexture": "263916f5a408bcb6093dd2b021a3d9aa",
+      "occlusionMap": "263916f5a408bcb6093dd2b021a3d9aa",
+      "normalMap": "3111c05599e16e5358c4c9d82573a865"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "5756d2dfb20d3060a26ee71647efd730",
+    "263916f5a408bcb6093dd2b021a3d9aa",
+    "3111c05599e16e5358c4c9d82573a865"
+  ],
+  "thumbnail": ""
+}

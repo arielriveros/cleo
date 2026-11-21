@@ -1,0 +1,443 @@
+{
+  "cleo": 1,
+  "guid": "408e168dd0429e6b26baafd1cd435dcd",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "408e168dd0429e6b26baafd1cd435dcd",
+    "name": "Game Manager",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "deathBannerDelay",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Flow",
+          "tooltip": "Seconds between the killing blow and the YOU DIED banner."
+        }
+      },
+      {
+        "name": "respawnDelay",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 5,
+        "hidden": false,
+        "attribute": {
+          "group": "Flow",
+          "tooltip": "Seconds between the killing blow and the respawn at the bonfire."
+        }
+      },
+      {
+        "name": "bloodstainTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "Bloodstain",
+        "hidden": false,
+        "attribute": {
+          "group": "Flow",
+          "tooltip": "Template instantiated where the player died, carrying their souls."
+        }
+      },
+      {
+        "name": "bloodEnabled",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "group": "Blood",
+          "tooltip": "Off, no blood at all: no spray and no decals."
+        }
+      },
+      {
+        "name": "bloodSprayTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "Blood Spray",
+        "hidden": false,
+        "attribute": {
+          "group": "Blood",
+          "tooltip": "The blood thrown off a wound, spawned where the hit struck and scaled with it (particles in the kit; the Valley's is a lit flipbook of an FX Creator liquid simulation). Empty: no spray, the decal alone."
+        }
+      },
+      {
+        "name": "bloodDropsTemplate",
+        "type": {
+          "kind": "name",
+          "name": "template"
+        },
+        "access": "public",
+        "default": "Blood Drops",
+        "hidden": false,
+        "attribute": {
+          "group": "Blood",
+          "tooltip": "The spatter decal thrown along the blow."
+        }
+      },
+      {
+        "name": "bloodDropsOffset",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.9,
+        "hidden": false,
+        "attribute": {
+          "group": "Blood",
+          "tooltip": "Metres along the blow from the target to the spatter decal's centre (at a full-size hit)."
+        }
+      },
+      {
+        "name": "maxBloodDecals",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 24,
+        "hidden": false,
+        "attribute": {
+          "group": "Blood",
+          "tooltip": "Blood decals alive at once. The oldest goes first, so a long fight cannot pile up draws."
+        }
+      },
+      {
+        "name": "bloodReferenceDamage",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 120,
+        "hidden": false,
+        "attribute": {
+          "group": "Blood",
+          "tooltip": "Damage that leaves a full-size splat; less shrinks it, more grows it (0.6x to 1.6x)."
+        }
+      },
+      {
+        "name": "bossReward",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "public",
+        "default": null,
+        "hidden": false,
+        "attribute": {
+          "group": "Blood",
+          "tooltip": "The reward pickup revealed once the boss falls."
+        }
+      },
+      {
+        "name": "bossEpilogue",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "public",
+        "default": null,
+        "hidden": false,
+        "attribute": {
+          "group": "Blood",
+          "tooltip": "The lore message revealed once the boss falls."
+        }
+      },
+      {
+        "name": "hitStopEnabled",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "group": "Hit-stop",
+          "tooltip": "Off, every blow plays at full speed."
+        }
+      },
+      {
+        "name": "hitStopScale",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Hit-stop",
+          "tooltip": "Game speed during a hit-stop: 0.2 is 80% slower."
+        }
+      },
+      {
+        "name": "killHitStop",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Hit-stop",
+          "tooltip": "Real seconds a killing blow holds the hit-stop, at least."
+        }
+      },
+      {
+        "name": "checkInputMap",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "group": "Hit-stop",
+          "tooltip": "Log a one-off warning when the project's input map lacks the souls actions."
+        }
+      },
+      {
+        "name": "bossActive",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "bossDefeated",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true,
+        "save": true
+      },
+      {
+        "name": "saveSlot",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "auto",
+        "hidden": true
+      },
+      {
+        "name": "_player",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "find",
+          "name": "Player"
+        }
+      },
+      {
+        "name": "_hud",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_banner",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Banner"
+        }
+      },
+      {
+        "name": "_menu",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_lockOn",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_enemies",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_interactables",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_spawns",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_bonfires",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_restBonfire",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "save": true
+      },
+      {
+        "name": "_respawnPoint",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "number"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true,
+        "save": true
+      },
+      {
+        "name": "_respawnYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true,
+        "save": true
+      },
+      {
+        "name": "_bloodstain",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "save": true
+      },
+      {
+        "name": "_bloodDecals",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_boss",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_fogGate",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_dying",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

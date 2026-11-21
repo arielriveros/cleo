@@ -1,0 +1,33 @@
+{
+  "id": "98b3140abfc069e49cdaa36dcf9959e9",
+  "name": "Strong Knight Cloth",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "5e6e6f713141f3b5fafac8d56ecc5b90",
+      "metallicRoughnessTexture": "6d6aa3dd1a313966e0c6a4f26019b720",
+      "occlusionMap": "6d6aa3dd1a313966e0c6a4f26019b720",
+      "normalMap": "89cc08099e8f350732f3785407037661"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "5e6e6f713141f3b5fafac8d56ecc5b90",
+    "6d6aa3dd1a313966e0c6a4f26019b720",
+    "89cc08099e8f350732f3785407037661"
+  ],
+  "thumbnail": ""
+}

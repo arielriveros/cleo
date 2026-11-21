@@ -1,0 +1,33 @@
+{
+  "id": "cdf180ac029fcaf83b36b4878d592b1f",
+  "name": "Well Bucket",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "8e71713dea935f87d83d2e91af2ea076",
+      "metallicRoughnessTexture": "627e1b74f319c6c67ac4d4039f72121d",
+      "occlusionMap": "627e1b74f319c6c67ac4d4039f72121d",
+      "normalMap": "19bfc79efc6b25bf8b1ff77ce88a7a87"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "8e71713dea935f87d83d2e91af2ea076",
+    "627e1b74f319c6c67ac4d4039f72121d",
+    "19bfc79efc6b25bf8b1ff77ce88a7a87"
+  ],
+  "thumbnail": ""
+}

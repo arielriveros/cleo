@@ -1,0 +1,559 @@
+{
+  "id": "9b76d203b315f60bb6aec5ab49a9a4eb",
+  "name": "Windmill",
+  "nodeJson": {
+    "id": "f0cd9a608368a35741b6dfe7b0f06ff6",
+    "name": "Windmill",
+    "type": "node",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [
+      {
+        "id": "597bc90889d9efe9235fe3f83f3a179e",
+        "name": "Windmill",
+        "type": "model",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [],
+        "variables": {
+          "__materialId": {
+            "type": "string",
+            "value": "b2704674062deaf2fb59a07c90af8d5b",
+            "access": "public"
+          }
+        },
+        "spawnOnStart": true,
+        "model": {
+          "geometry": {
+            "$geo": {
+              "positions": {
+                "h": "c87433e6bf191645c804bbb41f940d8ba354f54be9a3d4c90b8fe52b066d0f4e",
+                "l": 192528
+              },
+              "normals": {
+                "h": "17dc9507bae9bcc282a7ccdc451541f03a07deeb5717705c3ef123ac1f03aae9",
+                "l": 192528
+              },
+              "empty": [
+                "tangents",
+                "bitangents"
+              ],
+              "texCoords": {
+                "h": "7e5d181b3781a314ed5b39c5cb0a3310d044701829dccb11eda6bb33a960b261",
+                "l": 128352
+              },
+              "indices": {
+                "h": "54a74601bfd7c6e02238f49e32a02f5b5373a357ca53f88292fdfb8e7703009e",
+                "l": 32088,
+                "bits": 16
+              },
+              "typed": true
+            }
+          },
+          "material": {
+            "type": "pbr",
+            "baseColor": [1, 1, 1],
+            "metallic": 0,
+            "roughness": 1,
+            "reflectance": 0.5,
+            "opacity": 1,
+            "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "textures": {
+              "baseColorTexture": "2d43b9a2dbd72685fd7b2b77e0d3733e",
+              "roughnessMap": "a25d11e3b0af1d321bc5c690687d02ff",
+              "normalMap": "3a82fc4d6618c48a3ee0dedbbc732ad3"
+            },
+            "config": {
+              "side": "double",
+              "wireframe": false,
+              "transparent": false,
+              "castShadow": true,
+              "probeable": true
+            }
+          }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
+      },
+      {
+        "id": "a8a5b8b18a613f1c683cd02b46a091ee",
+        "name": "Sails",
+        "type": "node",
+        "position": [-2.5631, 7.1355, -0.0253],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [
+          {
+            "id": "3d422f33bbecee690fc46d31d31aa71e",
+            "name": "Sail 1",
+            "type": "model",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [],
+            "variables": {
+              "__materialId": {
+                "type": "string",
+                "value": "b2704674062deaf2fb59a07c90af8d5b",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "h": "82a11a3973e67885b65f9c47848bcae5267feee758ed6afb3df7ddb624eae5dd",
+                    "l": 193392
+                  },
+                  "normals": {
+                    "h": "749913aff6f4fb03fb4c034163d444fa616f6c4009ebaef843116564f9fa16c1",
+                    "l": 193392
+                  },
+                  "empty": [
+                    "tangents",
+                    "bitangents"
+                  ],
+                  "texCoords": {
+                    "h": "0a4fb40ed2e1b36941b79080096ee6ca1f6c19285cb07a02b9035b87e31b7960",
+                    "l": 128928
+                  },
+                  "indices": {
+                    "h": "8d4bc6fc11f33946fee055ce37b1a513e8b51ed2dbc296810f4cc5d1ae31e614",
+                    "l": 32232,
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [1, 1, 1],
+                "metallic": 0,
+                "roughness": 1,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "textures": {
+                  "baseColorTexture": "2d43b9a2dbd72685fd7b2b77e0d3733e",
+                  "roughnessMap": "a25d11e3b0af1d321bc5c690687d02ff",
+                  "normalMap": "3a82fc4d6618c48a3ee0dedbbc732ad3"
+                },
+                "config": {
+                  "side": "double",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          }
+        ],
+        "variables": {
+          "__scriptId": {
+            "type": "string",
+            "value": "020fde2769c535b028bb18e8e7e00e9b",
+            "access": "public"
+          }
+        },
+        "spawnOnStart": true,
+        "script": "import { Node } from 'cleo'\n\n/**\n * Valley — turns a windmill's sails. Attach to the `Sails` node, whose origin is the hub and whose local\n * X is the axle (the Valley example builds them that way). Pure decoration: no physics, no gameplay.\n */\nexport default class ValleyWindmillNode extends Node {\n  /** Sail speed in degrees per second; negative turns the other way. */\n  public degreesPerSecond: number = 24\n\n  onUpdate(delta: number) {\n    this.rotateX(this.degreesPerSecond * delta)\n    // Keep the angle small so it never loses precision over a long session.\n    if (Math.abs(this.rotation[0]) > 360) this.setRotation([this.rotation[0] % 360, this.rotation[1], this.rotation[2]])\n  }\n}\n",
+        "scriptVars": {}
+      }
+    ],
+    "variables": {},
+    "spawnOnStart": true
+  },
+  "textureIds": [
+    "2d43b9a2dbd72685fd7b2b77e0d3733e",
+    "a25d11e3b0af1d321bc5c690687d02ff",
+    "3a82fc4d6618c48a3ee0dedbbc732ad3"
+  ],
+  "materialIds": [
+    "b2704674062deaf2fb59a07c90af8d5b"
+  ],
+  "thumbnail": "",
+  "lods": [
+    {
+      "generated": true,
+      "distance": 40,
+      "nodeJson": {
+        "id": "759feb0abedb931745960e8642906325",
+        "name": "Windmill",
+        "type": "node",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [
+          {
+            "id": "f0d271aa6e9f747d2e67a517c0cd6424",
+            "name": "Windmill",
+            "type": "model",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [],
+            "variables": {
+              "__lodMaterialId": {
+                "type": "string",
+                "value": "b2704674062deaf2fb59a07c90af8d5b",
+                "access": "public"
+              },
+              "__lodLevel": {
+                "type": "string",
+                "value": "1",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "h": "098a1c15dbf35c146bc2afaa107ca88b2313aa1f2979d4070442fab022e59b81",
+                    "l": 76968
+                  },
+                  "normals": {
+                    "h": "d7624c5900847479c1bb2554618cb49d883d8cb4248670efa0315f09386c1f74",
+                    "l": 76968
+                  },
+                  "empty": [
+                    "tangents",
+                    "bitangents"
+                  ],
+                  "texCoords": {
+                    "h": "8b561d6340119acd70a9a9a953121ef519545ae2ae14381f78fb6108dea46e73",
+                    "l": 51312
+                  },
+                  "indices": {
+                    "h": "00aab64cc3c421e6167c6501e6dd8fdf231d8d19d5e5a023da51a994c43c88da",
+                    "l": 12828,
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [1, 1, 1],
+                "metallic": 0,
+                "roughness": 1,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "textures": {
+                  "baseColorTexture": "2d43b9a2dbd72685fd7b2b77e0d3733e",
+                  "roughnessMap": "a25d11e3b0af1d321bc5c690687d02ff",
+                  "normalMap": "3a82fc4d6618c48a3ee0dedbbc732ad3"
+                },
+                "config": {
+                  "side": "double",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "b0cc7643607625fbaab8d3667b6ce107",
+            "name": "Sails",
+            "type": "node",
+            "position": [-2.5631, 7.1355, -0.0253],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [
+              {
+                "id": "c9345042bae0fc7ca8a83a3002b76f76",
+                "name": "Sail 1",
+                "type": "model",
+                "position": [0, 0, 0],
+                "rotation": [0, 0, 0],
+                "scale": [1, 1, 1],
+                "children": [],
+                "variables": {
+                  "__lodMaterialId": {
+                    "type": "string",
+                    "value": "b2704674062deaf2fb59a07c90af8d5b",
+                    "access": "public"
+                  },
+                  "__lodLevel": {
+                    "type": "string",
+                    "value": "1",
+                    "access": "public"
+                  }
+                },
+                "spawnOnStart": true,
+                "model": {
+                  "geometry": {
+                    "$geo": {
+                      "positions": {
+                        "h": "3105c2ee73d3292acb6c8a90207ea387ef687c14e08dfc20018af10c5453c46b",
+                        "l": 77328
+                      },
+                      "normals": {
+                        "h": "518631ba0429946497f6e2d4e3c5e88c0d778ac2be1818d20a7304752de01f63",
+                        "l": 77328
+                      },
+                      "empty": [
+                        "tangents",
+                        "bitangents"
+                      ],
+                      "texCoords": {
+                        "h": "c6f4aff6ec443178485d23f20103499ad59881cd063b36db472cc476d823c8b8",
+                        "l": 51552
+                      },
+                      "indices": {
+                        "h": "ecb3e77eeaedd5af6a94fa2a044e03ac5b5e03d5a6a529886e7923bd7c04f046",
+                        "l": 12888,
+                        "bits": 16
+                      },
+                      "typed": true
+                    }
+                  },
+                  "material": {
+                    "type": "pbr",
+                    "baseColor": [1, 1, 1],
+                    "metallic": 0,
+                    "roughness": 1,
+                    "reflectance": 0.5,
+                    "opacity": 1,
+                    "emissiveFactor": [0, 0, 0],
+                    "emissiveIntensity": 1,
+                    "textures": {
+                      "baseColorTexture": "2d43b9a2dbd72685fd7b2b77e0d3733e",
+                      "roughnessMap": "a25d11e3b0af1d321bc5c690687d02ff",
+                      "normalMap": "3a82fc4d6618c48a3ee0dedbbc732ad3"
+                    },
+                    "config": {
+                      "side": "double",
+                      "wireframe": false,
+                      "transparent": false,
+                      "castShadow": true,
+                      "probeable": true
+                    }
+                  }
+                },
+                "animationMappings": null,
+                "stateMachine": null,
+                "ragdoll": null
+              }
+            ],
+            "variables": {
+              "__scriptId": {
+                "type": "string",
+                "value": "020fde2769c535b028bb18e8e7e00e9b",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "script": "import { Node } from 'cleo'\n\n/**\n * Valley — turns a windmill's sails. Attach to the `Sails` node, whose origin is the hub and whose local\n * X is the axle (the Valley example builds them that way). Pure decoration: no physics, no gameplay.\n */\nexport default class ValleyWindmillNode extends Node {\n  /** Sail speed in degrees per second; negative turns the other way. */\n  public degreesPerSecond: number = 24\n\n  onUpdate(delta: number) {\n    this.rotateX(this.degreesPerSecond * delta)\n    // Keep the angle small so it never loses precision over a long session.\n    if (Math.abs(this.rotation[0]) > 360) this.setRotation([this.rotation[0] % 360, this.rotation[1], this.rotation[2]])\n  }\n}\n",
+            "scriptVars": {}
+          }
+        ],
+        "variables": {},
+        "spawnOnStart": true
+      }
+    },
+    {
+      "generated": true,
+      "distance": 80,
+      "nodeJson": {
+        "id": "0d7f98254ef8b7e4ec632fc68d7e05f6",
+        "name": "Windmill",
+        "type": "node",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [
+          {
+            "id": "bc131371f6a56cfa6a64088f145301a3",
+            "name": "Windmill",
+            "type": "model",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [],
+            "variables": {
+              "__lodMaterialId": {
+                "type": "string",
+                "value": "b2704674062deaf2fb59a07c90af8d5b",
+                "access": "public"
+              },
+              "__lodLevel": {
+                "type": "string",
+                "value": "2",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "h": "708db4b485d4294487e6ebae0508c628b0d7d8878088ee73564cd1ef45dc4d0b",
+                    "l": 28872
+                  },
+                  "normals": {
+                    "h": "8b51062bfb2795c925ace1d5710d228dbd8706be80aa26b5ad4ea252274d112e",
+                    "l": 28872
+                  },
+                  "empty": [
+                    "tangents",
+                    "bitangents"
+                  ],
+                  "texCoords": {
+                    "h": "d48debc099c9e2eb50dea7418524199ce398e5aee462e2e61be09c04f7807ef4",
+                    "l": 19248
+                  },
+                  "indices": {
+                    "h": "9b9a7aaebd8670eb25a2b24c2dbe7eb04e3fd8394d81eb3c2a1fd1782a0c24b0",
+                    "l": 4812,
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [1, 1, 1],
+                "metallic": 0,
+                "roughness": 1,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "textures": {
+                  "baseColorTexture": "2d43b9a2dbd72685fd7b2b77e0d3733e",
+                  "roughnessMap": "a25d11e3b0af1d321bc5c690687d02ff",
+                  "normalMap": "3a82fc4d6618c48a3ee0dedbbc732ad3"
+                },
+                "config": {
+                  "side": "double",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "e3a3fc68d32036eb186e231d63e04114",
+            "name": "Sails",
+            "type": "node",
+            "position": [-2.5631, 7.1355, -0.0253],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [
+              {
+                "id": "1e0575308c58ac87baaa22c11491563b",
+                "name": "Sail 1",
+                "type": "model",
+                "position": [0, 0, 0],
+                "rotation": [0, 0, 0],
+                "scale": [1, 1, 1],
+                "children": [],
+                "variables": {
+                  "__lodMaterialId": {
+                    "type": "string",
+                    "value": "b2704674062deaf2fb59a07c90af8d5b",
+                    "access": "public"
+                  },
+                  "__lodLevel": {
+                    "type": "string",
+                    "value": "2",
+                    "access": "public"
+                  }
+                },
+                "spawnOnStart": true,
+                "model": {
+                  "geometry": {
+                    "$geo": {
+                      "positions": {
+                        "h": "2e1b38db19023c16c91f88f00e8bca021b18265ced483900a745da8a9594f314",
+                        "l": 29016
+                      },
+                      "normals": {
+                        "h": "672c036f9924d33f5b6c1a50fed5f47d647bbb5cc7362be4eaa9dff81fa69ae5",
+                        "l": 29016
+                      },
+                      "empty": [
+                        "tangents",
+                        "bitangents"
+                      ],
+                      "texCoords": {
+                        "h": "9d7637b76982724a601d078fe01372d06c2fc8893d62d35e4d5b15c5edfe6b74",
+                        "l": 19344
+                      },
+                      "indices": {
+                        "h": "320661d3c2375b41c49e4decbb47fb9ef65754971948278837c52eabdd2de943",
+                        "l": 4836,
+                        "bits": 16
+                      },
+                      "typed": true
+                    }
+                  },
+                  "material": {
+                    "type": "pbr",
+                    "baseColor": [1, 1, 1],
+                    "metallic": 0,
+                    "roughness": 1,
+                    "reflectance": 0.5,
+                    "opacity": 1,
+                    "emissiveFactor": [0, 0, 0],
+                    "emissiveIntensity": 1,
+                    "textures": {
+                      "baseColorTexture": "2d43b9a2dbd72685fd7b2b77e0d3733e",
+                      "roughnessMap": "a25d11e3b0af1d321bc5c690687d02ff",
+                      "normalMap": "3a82fc4d6618c48a3ee0dedbbc732ad3"
+                    },
+                    "config": {
+                      "side": "double",
+                      "wireframe": false,
+                      "transparent": false,
+                      "castShadow": true,
+                      "probeable": true
+                    }
+                  }
+                },
+                "animationMappings": null,
+                "stateMachine": null,
+                "ragdoll": null
+              }
+            ],
+            "variables": {
+              "__scriptId": {
+                "type": "string",
+                "value": "020fde2769c535b028bb18e8e7e00e9b",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "script": "import { Node } from 'cleo'\n\n/**\n * Valley — turns a windmill's sails. Attach to the `Sails` node, whose origin is the hub and whose local\n * X is the axle (the Valley example builds them that way). Pure decoration: no physics, no gameplay.\n */\nexport default class ValleyWindmillNode extends Node {\n  /** Sail speed in degrees per second; negative turns the other way. */\n  public degreesPerSecond: number = 24\n\n  onUpdate(delta: number) {\n    this.rotateX(this.degreesPerSecond * delta)\n    // Keep the angle small so it never loses precision over a long session.\n    if (Math.abs(this.rotation[0]) > 360) this.setRotation([this.rotation[0] % 360, this.rotation[1], this.rotation[2]])\n  }\n}\n",
+            "scriptVars": {}
+          }
+        ],
+        "variables": {},
+        "spawnOnStart": true
+      }
+    }
+  ]
+}

@@ -236,4 +236,20 @@ describe('node fields', () => {
         scene.start();
         expect(a.target).toBe(mine);
     });
+
+    it("stay the stored path on a node whose script never attached (the editor's), its scene started or not", () => {
+        // The editor's scene starts, but its nodes never run their scripts. Resolved there, the Sandbox's Game
+        // Manager held null for its sun (the Environment template's children come in later) and Play got that.
+        const warn = vi.spyOn(Logger, 'warn').mockImplementation(() => {});
+        const scene = new Scene();
+        const lamp = new LightNode('Lamp', new AreaLight());
+        scene.root.addChild(lamp);
+        const node = new Node('Game Manager');
+        scene.root.addChild(node);
+        (Node as any)._parseScriptVars(node, { sun: { $nodePath: '../Lamp' }, gone: { $nodePath: '../Later' } });
+        scene.start();
+        expect((node as any).sun).toEqual({ $nodePath: '../Lamp' });
+        expect((node as any).gone).toEqual({ $nodePath: '../Later' });
+        expect(warn.mock.calls.filter(c => String(c[0]).includes('Later'))).toHaveLength(0);
+    });
 });

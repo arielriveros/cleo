@@ -1,0 +1,33 @@
+{
+  "id": "13e028527d9295dafb66d3d748310a80",
+  "name": "Old Bed",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "7f1125773985642d29e5a384e3cf9390",
+      "metallicRoughnessTexture": "765042cfe722d7a11258be64932766b0",
+      "occlusionMap": "765042cfe722d7a11258be64932766b0",
+      "normalMap": "253cfaad2276b25b6d4ec66d4f5a1c5a"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "7f1125773985642d29e5a384e3cf9390",
+    "765042cfe722d7a11258be64932766b0",
+    "253cfaad2276b25b6d4ec66d4f5a1c5a"
+  ],
+  "thumbnail": ""
+}

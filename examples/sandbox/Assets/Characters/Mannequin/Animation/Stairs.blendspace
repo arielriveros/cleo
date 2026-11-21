@@ -1,0 +1,63 @@
+{
+  "id": "d7c21fe0d92e8048f5618ed618360bea",
+  "name": "Stairs",
+  "rigId": "1ca1de6215e2febc1b4ec0cb651189eb",
+  "mode": "2d",
+  "xAxis": {
+    "name": "Climb",
+    "min": -1,
+    "max": 1,
+    "smoothing": 0.15
+  },
+  "yAxis": {
+    "name": "Speed",
+    "min": 0,
+    "max": 1.9,
+    "smoothing": 0.03
+  },
+  "weightSmoothing": 0.04,
+  "samples": [
+    {
+      "clipName": "StairsUpCreep",
+      "x": 1,
+      "y": 0.329,
+      "rateScale": 1.25,
+      "phaseOffset": 0.671
+    },
+    {
+      "clipName": "StairsUpWalk",
+      "x": 1,
+      "y": 0.549,
+      "rateScale": 1.25,
+      "phaseOffset": 0.671
+    },
+    {
+      "clipName": "StairsUpRun",
+      "x": 1,
+      "y": 1.25,
+      "rateScale": 1.25,
+      "phaseOffset": 0.722
+    },
+    {
+      "clipName": "StairsDownCreep",
+      "x": -1,
+      "y": 0.482,
+      "rateScale": 1.25,
+      "phaseOffset": 0.607
+    },
+    {
+      "clipName": "StairsDownWalk",
+      "x": -1,
+      "y": 0.804,
+      "rateScale": 1.25,
+      "phaseOffset": 0.607
+    },
+    {
+      "clipName": "StairsDownRun",
+      "x": -1,
+      "y": 1.875,
+      "rateScale": 1.25,
+      "phaseOffset": 0.625
+    }
+  ]
+}

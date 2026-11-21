@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "e3a25178efd0145e10c2456c0f266d5d",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "e3a25178efd0145e10c2456c0f266d5d",
+    "name": "Forest Undergrowth B Bark.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

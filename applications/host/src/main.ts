@@ -3,7 +3,7 @@
 // contract, settings.ts); the game's own NetSync settings fill in the rest.
 //
 //   npm start -- --game path/to/game.bin [--scripts path/to/game.scripts.js]
-//   npm start -- --example ../editor/public/examples/sandbox --serve      (development: publish, host and serve it)
+//   npm start -- --example ../../examples/sandbox --serve                 (development: publish, host and serve it)
 //   npm start                                                              (no game: a session only)
 //   npm start -- --dev                                                     (the editor's Play › Multiplayer host)
 

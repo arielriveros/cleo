@@ -1,0 +1,21 @@
+{
+  "id": "b2a3da3627db44801d729ee2599a91cd",
+  "name": "Diamond",
+  "textureId": "diamond.png",
+  "imageWidth": 40,
+  "imageHeight": 9,
+  "tileWidth": 8,
+  "tileHeight": 9,
+  "margin": 0,
+  "spacing": 0,
+  "columns": 5,
+  "rows": 1,
+  "overdrive": 1.6,
+  "pixelsPerUnit": 16,
+  "tiles": {},
+  "terrains": [],
+  "variantSets": [],
+  "textureIds": [
+    "diamond.png"
+  ]
+}

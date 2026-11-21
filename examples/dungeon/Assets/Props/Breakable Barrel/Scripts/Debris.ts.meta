@@ -1,0 +1,100 @@
+{
+  "cleo": 1,
+  "guid": "970b8a56d2a3cb8d17d04037c3ba7dd4",
+  "kind": "script",
+  "created": 1790000000000,
+  "record": {
+    "id": "970b8a56d2a3cb8d17d04037c3ba7dd4",
+    "name": "Debris",
+    "baseType": "node",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "lifeSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 6,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds a piece lies there before it dissolves."
+        }
+      },
+      {
+        "name": "lifeJitter",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.5,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Spread of that, so the pile does not vanish in one frame."
+        }
+      },
+      {
+        "name": "scatterSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Metres per second each piece flies out from the centre, on top of the burst velocity."
+        }
+      },
+      {
+        "name": "spin",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 8,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Radians per second of tumble, at most."
+        }
+      },
+      {
+        "name": "density",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 600,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Kilograms per cubic metre of a piece's box: wood is around 600."
+        }
+      },
+      {
+        "name": "_burst",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_pieces",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

@@ -1,0 +1,510 @@
+{
+  "id": "d9e1f39143b720cd258743622341e806",
+  "name": "Long House",
+  "nodeJson": {
+    "id": "d0a80eb0ad8fab5e1e437ec7f33930be",
+    "name": "Long House",
+    "type": "node",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [
+      {
+        "id": "ec22e1e608280f30018285121f16fca3",
+        "name": "Long House 1",
+        "type": "model",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [],
+        "variables": {
+          "__materialId": {
+            "type": "string",
+            "value": "e98843920a15179a37f7089442d3ff5f",
+            "access": "public"
+          }
+        },
+        "spawnOnStart": true,
+        "model": {
+          "geometry": {
+            "$geo": {
+              "positions": {
+                "h": "02c0eabd399ac96fea9e431a262960fd6d456d6301940202041b0398a7c2a190",
+                "l": 265824
+              },
+              "normals": {
+                "h": "c6f37df68019c77f03182ba77ea9bfddd0e17cbb49f69ae67ea2505fb7f9290f",
+                "l": 265824
+              },
+              "empty": [
+                "tangents",
+                "bitangents"
+              ],
+              "texCoords": {
+                "h": "c31bf6399361b1dc466e6b32cb7244d6f200e0b218f97e1e0f21a9964ceb5638",
+                "l": 177216
+              },
+              "indices": {
+                "h": "55e293b6f136460095bd1f2bbce1871ee3b4ecc642864118b7b21a4e4c14650a",
+                "l": 44304,
+                "bits": 16
+              },
+              "typed": true
+            }
+          },
+          "material": {
+            "type": "pbr",
+            "baseColor": [1, 1, 1],
+            "metallic": 0,
+            "roughness": 1,
+            "reflectance": 0.5,
+            "opacity": 1,
+            "alphaCutoff": 0.5,
+            "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "textures": {
+              "baseColorTexture": "c7016bb32a63bf926a1578bddc692c24",
+              "roughnessMap": "b2055be2a7f9fcd43001ccce043e3f47",
+              "normalMap": "adec1fb4b13d41c567e3d0563002665b",
+              "mask": "a4593868f3aaa4401b30c6972a99e8df"
+            },
+            "config": {
+              "side": "double",
+              "wireframe": false,
+              "transparent": false,
+              "castShadow": true,
+              "probeable": true
+            }
+          }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
+      },
+      {
+        "id": "7cacf31c85537f403f32696f996bad3c",
+        "name": "Long House 2",
+        "type": "model",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [],
+        "variables": {
+          "__materialId": {
+            "type": "string",
+            "value": "b2704674062deaf2fb59a07c90af8d5b",
+            "access": "public"
+          }
+        },
+        "spawnOnStart": true,
+        "model": {
+          "geometry": {
+            "$geo": {
+              "positions": {
+                "h": "f4d3c80ba4a5735cf410311d77fb79fa752642f1320056fd9fdb2cefa19f17e7",
+                "l": 258192
+              },
+              "normals": {
+                "h": "6d40d611c528ab80d16c800ab083baad4c98dff66d0ff740564a4be941f61193",
+                "l": 258192
+              },
+              "empty": [
+                "tangents",
+                "bitangents"
+              ],
+              "texCoords": {
+                "h": "68cd081ad467ad49ef27cb2ac8136ef08be76960ab2e38492e343c4cf7ba1681",
+                "l": 172128
+              },
+              "indices": {
+                "h": "4d3791f1978f1c216837de384318a9f2b3aac9a3032bebafe057d4d6fd680634",
+                "l": 43032,
+                "bits": 16
+              },
+              "typed": true
+            }
+          },
+          "material": {
+            "type": "pbr",
+            "baseColor": [1, 1, 1],
+            "metallic": 0,
+            "roughness": 1,
+            "reflectance": 0.5,
+            "opacity": 1,
+            "emissiveFactor": [0, 0, 0],
+            "emissiveIntensity": 1,
+            "textures": {
+              "baseColorTexture": "2d43b9a2dbd72685fd7b2b77e0d3733e",
+              "roughnessMap": "a25d11e3b0af1d321bc5c690687d02ff",
+              "normalMap": "3a82fc4d6618c48a3ee0dedbbc732ad3"
+            },
+            "config": {
+              "side": "double",
+              "wireframe": false,
+              "transparent": false,
+              "castShadow": true,
+              "probeable": true
+            }
+          }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
+      }
+    ],
+    "variables": {},
+    "spawnOnStart": true
+  },
+  "textureIds": [
+    "c7016bb32a63bf926a1578bddc692c24",
+    "b2055be2a7f9fcd43001ccce043e3f47",
+    "adec1fb4b13d41c567e3d0563002665b",
+    "a4593868f3aaa4401b30c6972a99e8df",
+    "2d43b9a2dbd72685fd7b2b77e0d3733e",
+    "a25d11e3b0af1d321bc5c690687d02ff",
+    "3a82fc4d6618c48a3ee0dedbbc732ad3"
+  ],
+  "materialIds": [
+    "e98843920a15179a37f7089442d3ff5f",
+    "b2704674062deaf2fb59a07c90af8d5b"
+  ],
+  "thumbnail": "",
+  "lods": [
+    {
+      "generated": true,
+      "distance": 40,
+      "nodeJson": {
+        "id": "a61b8f4161096ada6d2b2dd9e08f8e82",
+        "name": "Long House",
+        "type": "node",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [
+          {
+            "id": "ca02a2de0638d313f2befd83540b040f",
+            "name": "Long House 1",
+            "type": "model",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [],
+            "variables": {
+              "__lodMaterialId": {
+                "type": "string",
+                "value": "e98843920a15179a37f7089442d3ff5f",
+                "access": "public"
+              },
+              "__lodLevel": {
+                "type": "string",
+                "value": "1",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "h": "0f973cff87d03fe3b40fcfb3d0566cac26e02ae63ffdc516dc13c58a6c2fb81f",
+                    "l": 106344
+                  },
+                  "normals": {
+                    "h": "823db606537cf9588e03f6b689a77823d9b9ac380fb4c295d509f05a86db7d7c",
+                    "l": 106344
+                  },
+                  "empty": [
+                    "tangents",
+                    "bitangents"
+                  ],
+                  "texCoords": {
+                    "h": "ad19efbc01bf860c631535cc022b639d117c641a24f7fbbbe877382de001d4cb",
+                    "l": 70896
+                  },
+                  "indices": {
+                    "h": "617ecee759ee3a1d13571a52c369ca849797150ee7632d003e8306b2168e00b5",
+                    "l": 17724,
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [1, 1, 1],
+                "metallic": 0,
+                "roughness": 1,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0.5,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "textures": {
+                  "baseColorTexture": "c7016bb32a63bf926a1578bddc692c24",
+                  "roughnessMap": "b2055be2a7f9fcd43001ccce043e3f47",
+                  "normalMap": "adec1fb4b13d41c567e3d0563002665b",
+                  "mask": "a4593868f3aaa4401b30c6972a99e8df"
+                },
+                "config": {
+                  "side": "double",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "f2f82c583b6fa3b134b158beb94e572e",
+            "name": "Long House 2",
+            "type": "model",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [],
+            "variables": {
+              "__lodMaterialId": {
+                "type": "string",
+                "value": "b2704674062deaf2fb59a07c90af8d5b",
+                "access": "public"
+              },
+              "__lodLevel": {
+                "type": "string",
+                "value": "1",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "h": "6e443a6c2c43745428b36e137ade66bc20384f003984251af9a9b6d25208b97b",
+                    "l": 103284
+                  },
+                  "normals": {
+                    "h": "6ac82a8059a731738619dbd407145ba58d96229e605e2ac1a619cebd5d81850d",
+                    "l": 103284
+                  },
+                  "empty": [
+                    "tangents",
+                    "bitangents"
+                  ],
+                  "texCoords": {
+                    "h": "001937637caac9a7d1dbc9f8d5a69cf8ffde70c77ab11a5407cf2282d91e59a5",
+                    "l": 68856
+                  },
+                  "indices": {
+                    "h": "586dc80c05764eb8c2b16ae4b69345d12652d4e4a61395af0f4691c21ba950e2",
+                    "l": 17214,
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [1, 1, 1],
+                "metallic": 0,
+                "roughness": 1,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "textures": {
+                  "baseColorTexture": "2d43b9a2dbd72685fd7b2b77e0d3733e",
+                  "roughnessMap": "a25d11e3b0af1d321bc5c690687d02ff",
+                  "normalMap": "3a82fc4d6618c48a3ee0dedbbc732ad3"
+                },
+                "config": {
+                  "side": "double",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          }
+        ],
+        "variables": {},
+        "spawnOnStart": true
+      }
+    },
+    {
+      "generated": true,
+      "distance": 80,
+      "nodeJson": {
+        "id": "126d1b46cf840bb50ccfe88b161b6dda",
+        "name": "Long House",
+        "type": "node",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1],
+        "children": [
+          {
+            "id": "20f53439eb8e585fbee7a6e678d5028b",
+            "name": "Long House 1",
+            "type": "model",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [],
+            "variables": {
+              "__lodMaterialId": {
+                "type": "string",
+                "value": "e98843920a15179a37f7089442d3ff5f",
+                "access": "public"
+              },
+              "__lodLevel": {
+                "type": "string",
+                "value": "2",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "h": "729ada18a7eeb02e9a03ed1b6a5fa126f11e1b2d3b344612e9f4920f4e59caf4",
+                    "l": 39888
+                  },
+                  "normals": {
+                    "h": "3dbaf9b533b48bd95f1d34461240f27151087fff430381ad5add6d785e04c947",
+                    "l": 39888
+                  },
+                  "empty": [
+                    "tangents",
+                    "bitangents"
+                  ],
+                  "texCoords": {
+                    "h": "d12448251e3407117bfbc825affeb36d4349fa51da2ed77ee0eddaa6a6a4abcf",
+                    "l": 26592
+                  },
+                  "indices": {
+                    "h": "d7bd83def87e87c9b2fbb192a622db89a00617e373a36cd649d7ad8497725cc6",
+                    "l": 6648,
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [1, 1, 1],
+                "metallic": 0,
+                "roughness": 1,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "alphaCutoff": 0.5,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "textures": {
+                  "baseColorTexture": "c7016bb32a63bf926a1578bddc692c24",
+                  "roughnessMap": "b2055be2a7f9fcd43001ccce043e3f47",
+                  "normalMap": "adec1fb4b13d41c567e3d0563002665b",
+                  "mask": "a4593868f3aaa4401b30c6972a99e8df"
+                },
+                "config": {
+                  "side": "double",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          },
+          {
+            "id": "99e840d9250dc9ca0582ffe2bac20182",
+            "name": "Long House 2",
+            "type": "model",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "children": [],
+            "variables": {
+              "__lodMaterialId": {
+                "type": "string",
+                "value": "b2704674062deaf2fb59a07c90af8d5b",
+                "access": "public"
+              },
+              "__lodLevel": {
+                "type": "string",
+                "value": "2",
+                "access": "public"
+              }
+            },
+            "spawnOnStart": true,
+            "model": {
+              "geometry": {
+                "$geo": {
+                  "positions": {
+                    "h": "0844350dacdb2d8bd6b42fefd1dcbe8f325a6f213d59d6314988886625a23814",
+                    "l": 38736
+                  },
+                  "normals": {
+                    "h": "a5242dfc62260fdbf373afa914164007b9642c850e9734c39566df23d8757a61",
+                    "l": 38736
+                  },
+                  "empty": [
+                    "tangents",
+                    "bitangents"
+                  ],
+                  "texCoords": {
+                    "h": "f1d9977c05cf0230a009d4535f703954bb99a36264e12b17b7d4d8a152124959",
+                    "l": 25824
+                  },
+                  "indices": {
+                    "h": "7ff47f31d37d3406542d9f8d808b80b033973508c03e33d48b9c15c2d7b09995",
+                    "l": 6456,
+                    "bits": 16
+                  },
+                  "typed": true
+                }
+              },
+              "material": {
+                "type": "pbr",
+                "baseColor": [1, 1, 1],
+                "metallic": 0,
+                "roughness": 1,
+                "reflectance": 0.5,
+                "opacity": 1,
+                "emissiveFactor": [0, 0, 0],
+                "emissiveIntensity": 1,
+                "textures": {
+                  "baseColorTexture": "2d43b9a2dbd72685fd7b2b77e0d3733e",
+                  "roughnessMap": "a25d11e3b0af1d321bc5c690687d02ff",
+                  "normalMap": "3a82fc4d6618c48a3ee0dedbbc732ad3"
+                },
+                "config": {
+                  "side": "double",
+                  "wireframe": false,
+                  "transparent": false,
+                  "castShadow": true,
+                  "probeable": true
+                }
+              }
+            },
+            "animationMappings": null,
+            "stateMachine": null,
+            "ragdoll": null
+          }
+        ],
+        "variables": {},
+        "spawnOnStart": true
+      }
+    }
+  ]
+}

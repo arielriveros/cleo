@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "6d6aa3dd1a313966e0c6a4f26019b720",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "6d6aa3dd1a313966e0c6a4f26019b720",
+    "name": "Strong Knight Cloth ARM.jpg",
+    "mime": "image/jpeg",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/jpeg",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

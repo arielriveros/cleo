@@ -1,0 +1,32 @@
+{
+  "id": "e14f7989cd0302ae165ad71c71411e2c",
+  "name": "Old House",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "f51802c16078fd10f0ffaa7c678eb72c",
+      "roughnessMap": "e2e03041a58e752583f477cd81e0e31b",
+      "normalMap": "2f65d8ea8fca214ed3793e600239618f"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "f51802c16078fd10f0ffaa7c678eb72c",
+    "e2e03041a58e752583f477cd81e0e31b",
+    "2f65d8ea8fca214ed3793e600239618f"
+  ],
+  "thumbnail": ""
+}

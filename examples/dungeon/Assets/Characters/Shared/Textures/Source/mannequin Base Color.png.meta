@@ -1,0 +1,28 @@
+{
+  "cleo": 1,
+  "guid": "0694051b-2680-4e7f-a583-e761ed33fc1c",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "0694051b-2680-4e7f-a583-e761ed33fc1c",
+    "name": "mannequin Base Color.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "mipMap": false,
+      "mipMapFilter": "linear",
+      "precision": "low",
+      "target": "texture2D"
+    }
+  }
+}

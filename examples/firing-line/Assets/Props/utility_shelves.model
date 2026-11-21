@@ -1,0 +1,87 @@
+{
+  "id": "af653c9ae84389b210b0135c132cbb06",
+  "name": "utility_shelves",
+  "nodeJson": {
+    "id": "501461559b460c95f8072781a0e96a64",
+    "name": "utility_shelves",
+    "type": "model",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [],
+    "variables": {
+      "__materialId": {
+        "type": "string",
+        "value": "d1965db3bfa24e0cfc4f4079f7aa62b0",
+        "access": "public"
+      }
+    },
+    "spawnOnStart": true,
+    "model": {
+      "geometry": {
+        "$geo": {
+          "positions": {
+            "h": "52292eca04c71f395b88e43eb3cc0b0f7c22d9c3c9a4eeb14da27bc753f75057",
+            "l": 253896
+          },
+          "normals": {
+            "h": "36f706f1b63945c3f6cf7284b671c9ec1e34cb90c5a97bb521f0abed00690c98",
+            "l": 253896
+          },
+          "empty": [
+            "tangents",
+            "bitangents"
+          ],
+          "texCoords": {
+            "h": "649c8030ed1fe15c833cd1cdd2e1e6a85af1cdda70ce3e8ef493f74839a04302",
+            "l": 169264
+          },
+          "indices": {
+            "h": "49421b43851b997d012e57ec83bde79fc458e43627be453ee480c7ab012a45a7",
+            "l": 58968,
+            "bits": 16
+          },
+          "typed": true
+        }
+      },
+      "material": {
+        "type": "pbr",
+        "baseColor": [1, 1, 1],
+        "metallic": 1,
+        "roughness": 1,
+        "reflectance": 0.5,
+        "opacity": 1,
+        "alphaCutoff": 0,
+        "emissiveFactor": [0, 0, 0],
+        "emissiveIntensity": 1,
+        "displacementScale": 0.05,
+        "depthSpace": "world",
+        "invertHeight": false,
+        "clipSilhouette": false,
+        "textures": {
+          "baseColorTexture": "2bed3669d8f7ada1beceb09d8f0b55ac",
+          "metallicMap": "1376fe19ff1c7163d3053bc38ef6db52",
+          "roughnessMap": "1376fe19ff1c7163d3053bc38ef6db52"
+        },
+        "config": {
+          "side": "double",
+          "wireframe": false,
+          "transparent": false,
+          "castShadow": true,
+          "probeable": true
+        }
+      }
+    },
+    "animationMappings": null,
+    "stateMachine": null,
+    "ragdoll": null
+  },
+  "textureIds": [
+    "2bed3669d8f7ada1beceb09d8f0b55ac",
+    "1376fe19ff1c7163d3053bc38ef6db52"
+  ],
+  "materialIds": [
+    "d1965db3bfa24e0cfc4f4079f7aa62b0"
+  ],
+  "thumbnail": ""
+}

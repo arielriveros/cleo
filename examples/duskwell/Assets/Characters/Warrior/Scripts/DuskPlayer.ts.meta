@@ -1,0 +1,623 @@
+{
+  "cleo": 1,
+  "guid": "295122bc3e341caaf8810047f94917cc",
+  "kind": "script",
+  "created": 1795000000000,
+  "record": {
+    "id": "295122bc3e341caaf8810047f94917cc",
+    "name": "DuskPlayer",
+    "baseType": "characterBody2D",
+    "source": {
+      "$file": 1
+    },
+    "kind": "class",
+    "variables": [
+      {
+        "name": "maxHealth",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 5,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "health",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 5,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "diamonds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": false,
+        "attribute": {},
+        "save": true
+      },
+      {
+        "name": "invulnerableSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.1,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds of invulnerability after a hit, the sprite flickering."
+        }
+      },
+      {
+        "name": "hurtSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds the controls are taken away by a hit."
+        }
+      },
+      {
+        "name": "knockback",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 9,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "The knock-back of a hit: away, and up."
+        }
+      },
+      {
+        "name": "knockup",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 7,
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "attackRunSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.5,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Running speed while a swing is on: a swing commits."
+        }
+      },
+      {
+        "name": "comboWindow",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds after a swing ends in which a press still chains the next one."
+        }
+      },
+      {
+        "name": "attackAction",
+        "type": {
+          "kind": "name",
+          "name": "action"
+        },
+        "access": "public",
+        "default": "Attack",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "jumpAction",
+        "type": {
+          "kind": "name",
+          "name": "action"
+        },
+        "access": "public",
+        "default": "Jump",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "dashAction",
+        "type": {
+          "kind": "name",
+          "name": "action"
+        },
+        "access": "public",
+        "default": "Dash",
+        "hidden": false,
+        "attribute": {}
+      },
+      {
+        "name": "killY",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": -4,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Below this the player has fallen out of the world (the map's bottom edge is y = 0)."
+        }
+      },
+      {
+        "name": "deathSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.8,
+        "hidden": false,
+        "attribute": {
+          "tooltip": "Seconds the death plays before the respawn."
+        }
+      },
+      {
+        "name": "hasDoubleJump",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves"
+        },
+        "save": true
+      },
+      {
+        "name": "hasDash",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves"
+        },
+        "save": true
+      },
+      {
+        "name": "hasWallJump",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves"
+        },
+        "save": true
+      },
+      {
+        "name": "airJumps",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves",
+          "tooltip": "Jumps in the air before landing again, with the double jump, and their height as a share of a jump's."
+        }
+      },
+      {
+        "name": "airJumpHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.85,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves"
+        }
+      },
+      {
+        "name": "jumpCut",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.45,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves",
+          "tooltip": "Letting go of jump while still rising keeps this share of the speed: a tap is a hop."
+        }
+      },
+      {
+        "name": "dashSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 22,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves",
+          "tooltip": "The dash: speed, seconds, seconds before the next, and dashes in the air before landing."
+        }
+      },
+      {
+        "name": "dashTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves"
+        }
+      },
+      {
+        "name": "dashCooldown",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves"
+        }
+      },
+      {
+        "name": "airDashes",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves"
+        }
+      },
+      {
+        "name": "wallSlideSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 3,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves",
+          "tooltip": "The fastest slide down a wall pressed into; a wall jump's push away and up; seconds the push holds."
+        }
+      },
+      {
+        "name": "wallJumpX",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 9,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves"
+        }
+      },
+      {
+        "name": "wallJumpY",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 12,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves"
+        }
+      },
+      {
+        "name": "wallJumpLock",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.16,
+        "hidden": false,
+        "attribute": {
+          "group": "Moves"
+        }
+      },
+      {
+        "name": "_sprite",
+        "type": {
+          "kind": "node",
+          "className": "AnimatedSpriteNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "Sprite"
+        }
+      },
+      {
+        "name": "_baseWalk",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 8,
+        "hidden": true
+      },
+      {
+        "name": "_baseMaxFall",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 24,
+        "hidden": true
+      },
+      {
+        "name": "_combo",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_swinging",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_queued",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_graceLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_hurtLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_invulnLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_dead",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_deathLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_respawn",
+        "type": {
+          "kind": "vector",
+          "size": 2
+        },
+        "access": "private",
+        "default": [0, 0],
+        "hidden": true,
+        "save": true
+      },
+      {
+        "name": "_touching",
+        "type": {
+          "kind": "list",
+          "of": {
+            "kind": "node",
+            "className": "Node"
+          }
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_notice",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_noticeAge",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 99,
+        "hidden": true
+      },
+      {
+        "name": "_jumpHeld",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_dashPress",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_airJumpsLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_airDashesLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_dashLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_dashDir",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_dashCooldownLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wallLockLeft",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wallLockDir",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_rising",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_engineJumpSeen",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_wallSliding",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_dashing",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_slidingParam",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      }
+    ],
+    "reflect": 3
+  }
+}

@@ -32,4 +32,4 @@ Engine conventions
 - Prefer existing templates and models (asset_list) over primitives; makeTemplate turns a built object into a reusable one.
 - play_control always plays in the editor; a game in its own window is only stopped or paused from here.
 
-Engine API: before writing a script, look the API up with engine_api instead of reading whole doc files: {"query":"play animation action"} finds classes, members and doc sections; {"symbol":"Animator.playAction"} gives the signature and doc; {"doc":"scripting/node-api.md#transform"} reads one docs section. Whole docs are resources under cleo://docs/, working examples under cleo://examples/scripts/.`;
+Engine API: before writing a script, look the API up with engine_api instead of reading whole doc files: {"query":"play animation action"} finds classes, members and doc sections; {"symbol":"Animator.playAction"} gives the signature and doc; {"doc":"scripting/node-api.md#transform"} reads one docs section. Whole docs are resources under cleo://docs/, working examples under cleo://examples/ (each example project's scripts, under <slug>/Assets/).`;

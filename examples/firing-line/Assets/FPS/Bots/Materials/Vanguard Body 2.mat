@@ -1,0 +1,33 @@
+{
+  "id": "b2a6446c689782edd73405483b2135f9",
+  "name": "Vanguard Body 2",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "dddf9a4585043e47d1d932b34e43ce9b",
+      "metallicRoughnessTexture": "2579912f8e4b863f98c5abdd41b502e6",
+      "occlusionMap": "2579912f8e4b863f98c5abdd41b502e6",
+      "normalMap": "e6ac1c0ef7c758576df4705411dac16c"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "dddf9a4585043e47d1d932b34e43ce9b",
+    "2579912f8e4b863f98c5abdd41b502e6",
+    "e6ac1c0ef7c758576df4705411dac16c"
+  ],
+  "thumbnail": ""
+}

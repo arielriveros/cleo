@@ -1,0 +1,22 @@
+{
+  "id": "af79c2b1810dc7afbef563e280ea5950",
+  "name": "Pistol 7",
+  "material": {
+    "type": "pbr",
+    "baseColor": [0.07, 0.07, 0.07],
+    "metallic": 0,
+    "roughness": 0.85,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "textures": {},
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [],
+  "thumbnail": ""
+}

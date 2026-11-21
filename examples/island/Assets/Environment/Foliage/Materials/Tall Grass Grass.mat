@@ -1,0 +1,44 @@
+{
+  "id": "68fc4852efda67ba78a7e1fb2f6451a3",
+  "name": "Tall Grass Grass",
+  "material": {
+    "type": "foliage",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 0.8,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "windStrength": 0.25,
+    "windStiffness": 1,
+    "windRole": "plant",
+    "windFlutter": 0.3,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "4fef8ef076d15cd7a179629e04e319aa"
+    },
+    "translucency": 0.45,
+    "translucencyTint": [0.62, 0.7, 0.16, 0.3],
+    "interactBend": 0.8,
+    "interactRecovery": 1.5,
+    "variationHue": 0.04,
+    "variationValue": 0.15,
+    "variationDry": 0.15,
+    "wetResponse": 0.6,
+    "snowCover": 0.5,
+    "weightDroop": 0.5,
+    "rippleSheen": 0.6,
+    "dryColor": [0.52, 0.45, 0.22],
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": false,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "4fef8ef076d15cd7a179629e04e319aa"
+  ],
+  "thumbnail": ""
+}

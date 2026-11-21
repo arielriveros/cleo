@@ -1,0 +1,36 @@
+{
+  "id": "cba4b592eb108c6c8620f50667d6ad14",
+  "name": "Knight Armour",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "alphaCutoff": 0.5,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "9483feb09d8a8b7060c57cf542762665",
+      "metallicRoughnessTexture": "95daea2404623cbe46eef3a4f1f96573",
+      "occlusionMap": "95daea2404623cbe46eef3a4f1f96573",
+      "normalMap": "b7822a21fc8d24e2e246aa2918442c77",
+      "mask": "bdc4a42acb7790627130a4bf631dab1a"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "9483feb09d8a8b7060c57cf542762665",
+    "95daea2404623cbe46eef3a4f1f96573",
+    "b7822a21fc8d24e2e246aa2918442c77",
+    "bdc4a42acb7790627130a4bf631dab1a"
+  ],
+  "thumbnail": ""
+}

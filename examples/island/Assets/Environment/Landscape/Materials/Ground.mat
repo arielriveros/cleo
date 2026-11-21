@@ -1,0 +1,37 @@
+{
+  "id": "222658e0be359218aa8d423f3fced49c",
+  "name": "Ground",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "displacementScale": 0.05,
+    "depthSpace": "uv",
+    "textures": {
+      "baseColorTexture": "4b87e663ca1464ed00cda771868c2ffe",
+      "metallicRoughnessTexture": "46d210d630d33ba8e1541d0eb71b4e2b",
+      "occlusionMap": "46d210d630d33ba8e1541d0eb71b4e2b",
+      "normalMap": "fa04af7ecb8357260c4e2c3c65587d86",
+      "displacementMap": "f1a360c33c948e37b76cbe23465ae7f5"
+    },
+    "config": {
+      "side": "front",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "4b87e663ca1464ed00cda771868c2ffe",
+    "46d210d630d33ba8e1541d0eb71b4e2b",
+    "fa04af7ecb8357260c4e2c3c65587d86",
+    "f1a360c33c948e37b76cbe23465ae7f5"
+  ],
+  "thumbnail": ""
+}
