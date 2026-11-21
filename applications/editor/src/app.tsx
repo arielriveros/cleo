@@ -8,14 +8,18 @@ import LoadingScreen from './components/LoadingScreen'
 import { BOOT_TITLE, beginBootLoad } from './features/loading/bootLoad'
 import { continueLoad, currentLoad } from '@cleo/app-kit/feedback/loadingStore'
 import ProjectLauncher from './features/projects/ProjectLauncher'
-import { ProjectRecord, initProjects, loadProjects } from './utils/projects'
-import { registerProjectHost } from './features/projects/projectSwitch'
+import { ProjectRecord, foldersOnly, initProjects, loadProjects, preferActiveProject } from './utils/projects'
+import { registerProjectHost, takeSwitchFailure } from './features/projects/projectSwitch'
+import { adoptRegisteredFolders, syncCacheFromFolder, takeLaunchProject } from './features/projectFolder/openFolder'
+import { ProjectFolderProvider } from './features/projectFolder/ProjectFolderProvider'
+import { setLaunchPlayRequest } from './features/projectFolder/launchRequests'
+import { installControlHost } from './features/projectFolder/controlHost'
 import { reloadDiscarding } from './features/unloadGuard'
 import { Button } from '@cleo/app-kit/ui'
 
 type BootState =
   | { phase: 'loading' }
-  | { phase: 'launcher'; projects: ProjectRecord[] }
+  | { phase: 'launcher'; projects: ProjectRecord[]; message?: string }
   /** A project is open. `epoch` counts the projects opened in this window: a new one mounts everything afresh. */
   | { phase: 'ready'; epoch: number }
   /** Between two projects (features/projects/projectSwitch.ts): only the loading screen is up. */
@@ -44,17 +48,41 @@ export default function App() {
     // The startup load: begun here, before any project is open, and carried on by EngineContext. A
     // reload that ends another flow (installing an example, switching project) hands its title and
     // finished steps over, and they show first.
+    // The project's `cleo` CLI (npm run play / debug) can drive this editor from here on, the launcher included.
+    installControlHost()
     const load = beginBootLoad()
     const step = load.step('project').start()
-    void initProjects()
-      .then(({ projects, activeId }) => {
+    void (async () => {
+      // The desktop: every project is a folder. The main process's list of them outlives this app's
+      // storage, and a launch may have asked for one (a double-clicked project.cleo, `npm run play`).
+      if (foldersOnly()) {
+        await adoptRegisteredFolders()
+        const launch = await takeLaunchProject()
+        if (launch) { preferActiveProject(launch.id); setLaunchPlayRequest(launch) }
+      }
+      return initProjects()
+    })()
+      .then(async ({ projects, activeId }) => {
         if (cancelled) return
         const active = projects.find(p => p.id === activeId)
         step.done(active?.name)
         // Named after the project — unless a hand-off already titled it ("Installing Hollow Keep").
         if (active && currentLoad()?.title === BOOT_TITLE) load.setTitle(`Opening ${active.name}`)
+        // A folder project: what changed in its folder goes into the cache before anything mounts.
+        if (active?.folder) {
+          load.addSteps([{ id: 'folder', label: 'Reading the project folder', weight: 2 }])
+          try {
+            await syncCacheFromFolder(active.id, active.folder.root, load)
+          } catch (e) {
+            const message = `Could not open ${active.name}: ${(e as Error)?.message ?? e}`
+            load.finish()
+            if (!cancelled) setState({ phase: 'launcher', projects, message })
+            return
+          }
+        }
         // No project to open: the launcher takes over, and there is nothing left to load.
         if (!activeId) load.finish()
+        if (cancelled) return
         setState(activeId ? { phase: 'ready', epoch: ++epochRef.current } : { phase: 'launcher', projects })
       })
       .catch((e: unknown) => {
@@ -75,7 +103,7 @@ export default function App() {
     showLauncher: async () => {
       const projects = await loadProjects()
       continueLoad()?.finish()
-      setState({ phase: 'launcher', projects })
+      setState({ phase: 'launcher', projects, message: takeSwitchFailure() ?? undefined })
     },
     showFailure: message => setState({ phase: 'switchFailed', message }),
   }), [])
@@ -117,7 +145,7 @@ export default function App() {
 
   // The full-window loading screen is mounted once, out here, so every flow can show it: the startup,
   // and an example install or project switch started from the launcher as much as from the editor.
-  if (state.phase === 'launcher') return <><ProjectLauncher projects={state.projects} /><LoadingScreen /></>
+  if (state.phase === 'launcher') return <><ProjectLauncher projects={state.projects} message={state.message} /><LoadingScreen /></>
 
   if (state.phase === 'loading' || state.phase === 'switching') return <div className='h-screen w-screen bg-bg'><LoadingScreen /></div>
 
@@ -136,7 +164,11 @@ export default function App() {
                   {/* Mirrors the script library to a folder on disk for editing in an external IDE. Inside
                       VfsProvider because it syncs the VFS layout as well as the sources. */}
                   <ScriptWorkspaceProvider>
-                      <Editor />
+                      {/* A folder project's link to its folder: the editor's edits go to disk, and what
+                          changed on disk outside the editor is noticed. Nothing in the web build. */}
+                      <ProjectFolderProvider>
+                          <Editor />
+                      </ProjectFolderProvider>
                   </ScriptWorkspaceProvider>
               </VfsProvider>
               </AssetGraphProvider>

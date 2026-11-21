@@ -203,3 +203,27 @@ describe('bundle input map', () => {
     expect(back.libraries.inputMap).toBeNull();
   });
 });
+
+describe('image and texture records', () => {
+  const image = { id: 'tex', name: 'Rock.png', mime: 'image/png', width: 2, height: 2, byteSize: 10, origin: 'upload', created: 1 };
+  const texture = { id: 'tex', name: 'Rock', version: 1, source: { kind: 'image', imageId: 'tex' }, settings: { wrapU: 'clamp' }, textureIds: ['tex'], imageIds: ['tex'] };
+
+  it('travel when carried, so a folder project exports and re-imports without losing names or settings', async () => {
+    const b = makeBundle();
+    (b.libraries as any).images = [image];
+    (b.libraries as any).textures = [texture];
+    const archive = archiveOf(await bundleEntries(b));
+    expect(archive.has(`${BUNDLE_PATHS.librariesDir}images.json`)).toBe(true);
+    const { bundle } = await readBundle(sourceOver(archive));
+    expect(bundle.libraries.images).toEqual([image]);
+    expect(bundle.libraries.textures).toEqual([texture]);
+  });
+
+  it('are left out when absent, and read back as absent, so an older bundle is unchanged', async () => {
+    const archive = archiveOf(await bundleEntries(makeBundle()));
+    expect(archive.has(`${BUNDLE_PATHS.librariesDir}images.json`)).toBe(false);
+    const { bundle } = await readBundle(sourceOver(archive));
+    expect(bundle.libraries.images).toBeUndefined();
+    expect(bundle.libraries.textures).toBeUndefined();
+  });
+});

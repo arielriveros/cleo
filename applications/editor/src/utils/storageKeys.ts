@@ -120,3 +120,19 @@ export function inputMapKey(projectId?: string): string {
 export function projectSettingsKey(projectId?: string): string {
   return scoped(KEYS.projectSettings, projectId);
 }
+
+/**
+ * A folder project's cache state: the content hash, identity and references of every file the cache last
+ * took in from the folder (features/projectFolder). What lets an open read only what changed on disk.
+ */
+export function folderStateKey(projectId?: string): string {
+  return scoped('cleo_folder_state', projectId);
+}
+
+/**
+ * A folder project's write journal: the assets written into the cache whose files the folder has not
+ * confirmed yet. Non-empty at open means the editor stopped between the two writes.
+ */
+export function folderPendingKey(projectId?: string): string {
+  return scoped('cleo_folder_pending', projectId);
+}

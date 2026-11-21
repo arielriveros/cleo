@@ -93,22 +93,59 @@ contextBridge.exposeInMainWorld('cleoDesktop', {
     },
   },
 
-  // The script workspace: a folder on disk that mirrors the project's script library so it can be edited
-  // in VSCode. `onChange` is push, not poll -- the main process watches the folder and sends a coalesced
-  // changeset whenever the disk diverges from what it last wrote.
-  scripts: {
-    pickFolder: () => ipcRenderer.invoke('scripts:pick-folder'),
-    open: (root) => ipcRenderer.invoke('scripts:open', root),
-    close: (root) => ipcRenderer.invoke('scripts:close', root),
-    apply: (root, batch) => ipcRenderer.invoke('scripts:apply', root, batch),
-    writeScaffold: (root, files) => ipcRenderer.invoke('scripts:write-scaffold', root, files),
-    launch: (root, rel, command, line) => ipcRenderer.invoke('scripts:launch', root, rel, command, line),
-    exists: (root) => ipcRenderer.invoke('scripts:exists', root),
-    /** Subscribe to workspace changes. Returns an unsubscribe -- the raw listener never escapes here. */
+  // A desktop project is a folder (projectFolder.js). Reads and writes go through the main process, which
+  // owns the snapshot and the watcher; `onChange` pushes what changed on disk outside the editor.
+  project: {
+    registry: () => ipcRenderer.invoke('project:registry'),
+    forget: (root) => ipcRenderer.invoke('project:forget', root),
+    remember: (root, name) => ipcRenderer.invoke('project:remember', root, name),
+    defaultParent: () => ipcRenderer.invoke('project:default-parent'),
+    hasCommand: (command) => ipcRenderer.invoke('project:has-command', command),
+    pickLocation: (options) => ipcRenderer.invoke('project:pick-location', options),
+    pickProject: (options) => ipcRenderer.invoke('project:pick-project', options),
+    inspect: (root) => ipcRenderer.invoke('project:inspect', root),
+    prepareNew: (root) => ipcRenderer.invoke('project:prepare-new', root),
+    open: (root, options) => ipcRenderer.invoke('project:open', root, options),
+    close: (root) => ipcRenderer.invoke('project:close', root),
+    relist: (root) => ipcRenderer.invoke('project:relist', root),
+    read: (root, rels) => ipcRenderer.invoke('project:read', root, rels),
+    readBlobs: (root, hashes) => ipcRenderer.invoke('project:read-blobs', root, hashes),
+    apply: (root, batch) => ipcRenderer.invoke('project:apply', root, batch),
+    gc: (root, hashes) => ipcRenderer.invoke('project:gc', root, hashes),
+    writeScaffold: (root, files) => ipcRenderer.invoke('project:write-scaffold', root, files),
+    reveal: (root, rel) => ipcRenderer.invoke('project:reveal', root, rel),
+    launch: (root, rel, command, line) => ipcRenderer.invoke('project:launch', root, rel, command, line),
+    gitInit: (root) => ipcRenderer.invoke('project:git-init', root),
+    npmInstall: (root) => ipcRenderer.invoke('project:npm-install', root),
+    trashFolder: (root) => ipcRenderer.invoke('project:trash-folder', root),
+    takeLaunchRequest: () => ipcRenderer.invoke('project:take-launch-request'),
+    installSdk: (root, typesHash) => ipcRenderer.invoke('project:install-sdk', root, typesHash),
     onChange: (cb) => {
       const listener = (_event, payload) => cb(payload);
-      ipcRenderer.on('scripts:changed', listener);
-      return () => ipcRenderer.removeListener('scripts:changed', listener);
+      ipcRenderer.on('project:changed', listener);
+      return () => ipcRenderer.removeListener('project:changed', listener);
+    },
+    onLaunchRequest: (cb) => {
+      const listener = (_event, payload) => cb(payload);
+      ipcRenderer.on('project:launch-request', listener);
+      return () => ipcRenderer.removeListener('project:launch-request', listener);
+    },
+    onNpmOutput: (cb) => {
+      const listener = (_event, payload) => cb(payload);
+      ipcRenderer.on('project:npm-output', listener);
+      return () => ipcRenderer.removeListener('project:npm-output', listener);
+    },
+  },
+
+  // Commands from the project's `cleo` CLI (controlPipe.js): play, open, ping. The editor says when it can take
+  // them (`ready`), answers each one by its id.
+  control: {
+    ready: () => ipcRenderer.invoke('control:ready'),
+    reply: (id, result) => ipcRenderer.invoke('control:reply', id, result),
+    onCommand: (cb) => {
+      const listener = (_event, command) => cb(command);
+      ipcRenderer.on('control:command', listener);
+      return () => ipcRenderer.removeListener('control:command', listener);
     },
   },
 });

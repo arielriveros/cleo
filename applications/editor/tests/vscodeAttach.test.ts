@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   getVsCodeDebugStatus, onVsCodeEvent, onVsCodeResumed, stoppedInVsCode, waitForVsCode, forgetVsCodeSession,
 } from '../src/features/scriptDebugger/vscodeAttach';
-import { launchConfiguration, launchJson, staticScaffold, DEFAULT_DEBUG_PORT } from '../src/features/scriptWorkspace/scaffold';
+import { launchConfiguration, launchJson, scaffoldFiles, DEFAULT_DEBUG_PORT } from '../src/features/projectFolder/scaffold';
 import { parseEditorPrefs, DEFAULT_VSCODE_DEBUG_PORT } from '../src/features/options/editorPrefs';
 
 // Debugging from VS Code: what the editor keeps of the desktop app's debug port (vscodeAttach.ts), and the
@@ -64,12 +64,12 @@ describe('VS Code attached to the debug port', () => {
   });
 });
 
-describe('the workspace\'s launch configuration', () => {
-  it('attaches VS Code\'s Chrome debugger to the game windows on the debug port, mapping script URLs to the folder', () => {
+describe('the project folder\'s launch configuration', () => {
+  it('attaches VS Code\'s Chrome debugger to the game windows on the debug port, mapping script URLs to Assets/', () => {
     const c = launchConfiguration(9444);
     expect(c).toMatchObject({
       type: 'chrome', request: 'attach', port: 9444, urlFilter: '*play.html*',
-      pathMapping: { 'cleo-script:///': '${workspaceFolder}/' },
+      pathMapping: { 'cleo-script:///': '${workspaceFolder}/Assets/' },
       // The running code is the TypeScript with its types stripped: it never matches the file byte for byte.
       enableContentValidation: false,
     });
@@ -78,15 +78,20 @@ describe('the workspace\'s launch configuration', () => {
     expect(DEFAULT_DEBUG_PORT).toBe(DEFAULT_VSCODE_DEBUG_PORT);
   });
 
-  it('is a launch.json VS Code reads (JSON with comments), written only where the workspace has none', () => {
+  it('is a launch.json VS Code reads (JSON with comments): F5 plays and attaches, or only attaches', () => {
     const text = launchJson(9339);
     const json = JSON.parse(text.split('\n').filter(l => !l.trim().startsWith('//')).join('\n'));
     expect(json.version).toBe('0.2.0');
-    expect(json.configurations[0].name).toBe('Attach to the Cleo game');
-    const file = staticScaffold(9339).find(f => f.rel === '.vscode/launch.json');
-    expect(file).toMatchObject({ keep: true });
-    // The rest of the scaffold is rewritten on every connect, as before.
-    expect(staticScaffold().filter(f => f.keep).map(f => f.rel)).toEqual(['.vscode/launch.json']);
+    expect(json.configurations.map((c: any) => c.name)).toEqual(['Debug Cleo game', 'Attach to the Cleo game']);
+    // "Debug Cleo game" first runs `npm run debug` (tasks.json), which starts Play in window with the port on.
+    expect(json.configurations[0].preLaunchTask).toBe('cleo: debug');
+    expect(json.configurations[1].preLaunchTask).toBeUndefined();
+  });
+
+  it('every tooling file is written once, never over the user\'s own', () => {
+    const files = scaffoldFiles('Game', 9339);
+    expect(files.every(f => f.keep)).toBe(true);
+    expect(files.find(f => f.rel === '.vscode/launch.json')!.content).toContain('"port": 9339');
   });
 });
 

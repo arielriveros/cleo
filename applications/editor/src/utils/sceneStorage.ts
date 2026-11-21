@@ -4,6 +4,7 @@ import { idbGet, idbSet, idbDelete } from '@cleo/app-kit/utils/idb';
 import { saveToStorage } from '../workers/workerClient';
 import { loadProject, ProjectPrefs } from './projectStorage';
 import { cryptoRandomId } from './ids';
+import { folderStoreListener } from './folderStoreEvents';
 import { metaKey, sceneKey, scenePrefix } from './storageKeys';
 
 // Multi-scene project storage: a small meta record (scene list, which scene is main, which was last open)
@@ -111,11 +112,15 @@ export async function loadSceneData(id: string): Promise<SceneAssetData | null> 
 
 /** Scene blobs are chunky — write through the project worker like the legacy project blob did. */
 export async function saveSceneData(id: string, data: SceneAssetData): Promise<void> {
+  // Told first: a folder project journals the scene before the cache holds it, so a crash between the two
+  // writes is caught at the next open (features/projectFolder/folderSink.ts).
+  folderStoreListener()?.sceneSaved?.(id, data);
   await saveToStorage(sceneKey(id), data);
 }
 
 export async function deleteSceneData(id: string): Promise<void> {
   await idbDelete(sceneKey(id));
+  folderStoreListener()?.sceneDeleted?.(id);
 }
 
 /**

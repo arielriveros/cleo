@@ -7,8 +7,10 @@ import { IMPORT_WRITE_STEPS } from '../../utils/bundleImport'
 import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
 import { LauncherCard, LauncherGlyph, LauncherGrid } from '@cleo/app-kit/launcher/Launcher'
 import {
-  ExampleEntry, exampleThumbnailUrl, formatBytes, importExample, loadExampleIndex,
+  ExampleEntry, ExampleFolderTarget, exampleThumbnailUrl, formatBytes, importExample, loadExampleIndex,
 } from '../../utils/examples'
+import { foldersOnly } from '../../utils/projects'
+import { LocationModal } from '../projectFolder/LocationField'
 
 // The gallery of example projects that ship with this build. Picking one downloads its folder from
 // examples/ and opens it as a brand-new project.
@@ -44,9 +46,12 @@ export default function ExamplesGallery({ examples, className = '' }: {
   className?: string
 }) {
   const [busySlug, setBusySlug] = useState<string | null>(null)
+  // The desktop asks where the example's folder goes first; the install continues from the dialog's answer.
+  const [asking, setAsking] = useState<ExampleEntry | null>(null)
 
-  const open = useCallback(async (entry: ExampleEntry) => {
+  const open = useCallback(async (entry: ExampleEntry, folder?: ExampleFolderTarget) => {
     if (busySlug) return
+    if (foldersOnly() && !folder) { setAsking(entry); return }
     if (entry.bytes > CONFIRM_BYTES) {
       const ok = await confirmDialog({
         title: `Download "${entry.name}"?`,
@@ -76,7 +81,7 @@ export default function ExamplesGallery({ examples, className = '' }: {
       if (!await importExample(entry, (done, total) => {
         download.progress(done, total, 'files')
         if (total > 0 && done >= total) download.done()
-      }, true)) {
+      }, true, { folder })) {
         setBusySlug(null)
         return
       }
@@ -93,6 +98,14 @@ export default function ExamplesGallery({ examples, className = '' }: {
 
   return (
     <div className={`w-full h-full flex flex-col text-ui ${className}`}>
+      {asking && (
+        <LocationModal title={`Install ${asking.name}`} name={asking.name} confirmLabel='Install'
+          onDone={result => {
+            const entry = asking
+            setAsking(null)
+            if (result) void open(entry, result)
+          }} />
+      )}
       <div className='h-[28px] flex items-center px-2 border-b border-border-subtle shrink-0 bg-surface-sunken'>
         <span className='min-w-0 truncate text-ui-sm text-dim'>
           {busySlug ? 'Downloading…' : 'Click an example to add it as a new project'}

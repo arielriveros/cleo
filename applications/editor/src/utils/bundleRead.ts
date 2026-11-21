@@ -67,7 +67,13 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     inputMap: (await src.json(`${BUNDLE_PATHS.librariesDir}inputMap.json`)) ?? null,
     // Absent when the project runs on the default engine/publish options.
     projectSettings: (await src.json(`${BUNDLE_PATHS.librariesDir}projectSettings.json`)) ?? null,
-  };
+  } as BundleData['libraries'];
+  // Absent in a bundle written before project folders (the importer then derives them from the payloads):
+  // left out of the object rather than set to undefined, so the libraries look exactly as they always did.
+  const imageRecords = await src.json(`${BUNDLE_PATHS.librariesDir}images.json`);
+  const textureRecords = await src.json(`${BUNDLE_PATHS.librariesDir}textures.json`);
+  if (imageRecords) libraries.images = imageRecords;
+  if (textureRecords) libraries.textures = textureRecords;
   const vfs = (await src.json(BUNDLE_PATHS.vfs)) ?? { version: 1, folders: [], entries: [] };
 
   const scenePaths = await src.scenePaths(manifest);
@@ -77,11 +83,11 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     ? (((await src.json(BUNDLE_PATHS.texturesIndex)) ?? []) as BundleTextureIndexRow[])
     : [];
 
-  // 15 fixed JSON entries are already read by the time the total is known (9, plus the two audio
-  // libraries, the three animation-authoring ones and the input map); report against the full set or the
-  // progress bar jumps backwards.
-  const total = 15 + scenePaths.length + (format === 2 ? 2 : texIndex.length);
-  let done = 15;
+  // The fixed JSON entries are already read by the time the total is known (the libraries, the image and
+  // texture records, the input map and the settings); report against the full set or the progress bar
+  // jumps backwards.
+  const total = 17 + scenePaths.length + (format === 2 ? 2 : texIndex.length);
+  let done = 17;
   src.onEntry?.(done, total);
 
   const scenes: Record<string, any> = {};
@@ -186,6 +192,9 @@ export async function bundleEntries(bundle: BundleData): Promise<BundleEntry[]> 
   // identical to what it was before input maps travelled.
   if (libraries.inputMap) entries.push(json(`${BUNDLE_PATHS.librariesDir}inputMap.json`, libraries.inputMap));
   if (libraries.projectSettings) entries.push(json(`${BUNDLE_PATHS.librariesDir}projectSettings.json`, libraries.projectSettings));
+  // Only when carried, so a bundle without the records stays exactly what it was.
+  if (libraries.images) entries.push(json(`${BUNDLE_PATHS.librariesDir}images.json`, libraries.images));
+  if (libraries.textures) entries.push(json(`${BUNDLE_PATHS.librariesDir}textures.json`, libraries.textures));
   for (const [id, data] of Object.entries(scenes)) entries.push(json(`${BUNDLE_PATHS.scenesDir}${id}.json`, data));
 
   entries.push(json(BUNDLE_PATHS.assetsIndex, index));

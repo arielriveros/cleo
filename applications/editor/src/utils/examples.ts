@@ -128,6 +128,7 @@ export async function importExample(
   onProgress?: (done: number, total: number) => void,
   /** The caller already asked about unsaved work (before showing a loading screen over the dialog). */
   alreadyConfirmed = false,
+  options?: { folder?: ExampleFolderTarget },
 ): Promise<boolean> {
   // Asked BEFORE the download: this ends in a reload into the new project, so anything unsaved in the
   // open one is lost, and finding that out after fetching several megabytes is the wrong order. On the
@@ -139,8 +140,18 @@ export async function importExample(
   if (bundle.manifest.kind !== 'project') {
     throw new Error(`Example "${entry.slug}" is not a project bundle`);
   }
+  // In the desktop app a project is a folder: the example is written into the one the user picked.
+  if (options?.folder) {
+    const { installBundleToFolder } = await import('../features/projectFolder/openFolder');
+    return installBundleToFolder(bundle, options.folder.root, options.folder.name, {
+      gitInit: options.folder.gitInit, npmInstall: options.folder.npmInstall,
+    });
+  }
   return applyBundleAsNewProject(bundle, entry.name, true);
 }
+
+/** Where a desktop install puts the example (the location dialog's answer). */
+export interface ExampleFolderTarget { root: string; name: string; gitInit: boolean; npmInstall: boolean }
 
 /** Human-readable download size for a card. */
 export function formatBytes(bytes: number): string {

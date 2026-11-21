@@ -5,7 +5,7 @@ import { editorPrefsStore, useEditorPrefs } from '../options/editorPrefs';
 import { usePlayTarget, writePlayTarget } from '../playWindow/playTarget';
 import { useWindowPlay } from '../playWindow/windowPlay';
 import { useScriptWorkspace } from '../scriptWorkspace/ScriptWorkspaceContext';
-import { launchConfiguration } from '../scriptWorkspace/scaffold';
+import { launchConfiguration } from '../projectFolder/scaffold';
 import { useVsCodeDebug } from './vscodeAttach';
 import { BugIcon } from './debugIcons';
 
@@ -88,13 +88,12 @@ export function VsCodeDebugging() {
       </div>
       <ol className='mt-3 list-decimal space-y-2 pl-5 leading-5'>
         <li>
-          Open the script workspace in VS Code.
-          {ws.rootPath
-            ? <Button size='sm' className='ml-2 h-[20px]' onClick={() => void ws.openInEditor()}>Open in VS Code</Button>
-            : <Button size='sm' variant='primary' className='ml-2 h-[20px]' onClick={() => void ws.setup()}>Set up the workspace…</Button>}
+          Open the project folder in VS Code.
+          {ws.rootPath && <Button size='sm' className='ml-2 h-[20px]' onClick={() => void ws.openInEditor()}>Open in VS Code</Button>}
         </li>
         <li>
-          In VS Code, set breakpoints in your scripts and press <Kbd>F5</Kbd> (<b>Attach to the Cleo game</b>).
+          In VS Code, set breakpoints in your scripts and press <Kbd>F5</Kbd>: <b>Debug Cleo game</b> plays it for you,
+          <b> Attach to the Cleo game</b> waits for Play.
         </li>
         <li>Press Play: the game plays in a window and stops at VS Code's breakpoints.</li>
       </ol>

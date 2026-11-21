@@ -6,7 +6,7 @@ import {
 } from '../src/utils/scriptGraph'
 import { attachScriptModules } from '../src/features/publish/buildGameData'
 import { extractScripts, buildScriptsSource } from '../src/features/publish/extractScripts'
-import { staticScaffold } from '../src/features/scriptWorkspace/scaffold'
+import { TSCONFIG } from '../src/features/projectFolder/scaffold'
 
 // The editor half of script modules: what a script IS (a node class or a shared module), what it extends
 // through other scripts, which fields it inherits, and which modules a build ships.
@@ -164,11 +164,10 @@ describe('game data', () => {
   })
 })
 
-describe('the VS Code workspace', () => {
-  it('maps @/ to the workspace root, with no baseUrl to make bare paths resolve', () => {
-    const tsconfig = staticScaffold().find(f => f.rel === 'tsconfig.json')!.content
-    expect(tsconfig).toContain('"paths": { "@/*": ["./*"] }')
-    expect(tsconfig).not.toMatch(/"baseUrl"\s*:/)
-    expect(tsconfig).toContain('**/*.test.ts')
+describe('the project folder as a TypeScript project', () => {
+  it('maps @/ to Assets/, with no baseUrl to make bare paths resolve', () => {
+    expect(TSCONFIG).toContain('"paths": { "@/*": ["./Assets/*"] }')
+    expect(TSCONFIG).not.toMatch(/"baseUrl"\s*:/)
+    expect(TSCONFIG).toContain('"Assets/**/*.ts"')
   })
 })

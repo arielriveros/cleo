@@ -11,8 +11,10 @@ export default function ImportBundleModal(props: {
   onReplace: () => void
   onMerge: () => void
   onCancel: () => void
+  /** A folder project (the desktop): the import becomes a project folder of its own; merging is not offered. */
+  newProjectOnly?: boolean
 }) {
-  const { bundle, onNewProject, onReplace, onMerge, onCancel } = props
+  const { bundle, onNewProject, onReplace, onMerge, onCancel, newProjectOnly } = props
   const isProject = bundle.manifest.kind === 'project'
   const sceneCount = Object.keys(bundle.scenes).length
   const { materials, terrainMaterials, templates, models } = bundle.libraries
@@ -49,8 +51,8 @@ export default function ImportBundleModal(props: {
 
       <ModalFooter>
         <Button onClick={onCancel}>Cancel</Button>
-        <Button onClick={onMerge}>Merge</Button>
-        <Button variant='danger' className='font-semibold' onClick={onReplace}>Replace</Button>
+        {!newProjectOnly && <Button onClick={onMerge}>Merge</Button>}
+        {!newProjectOnly && <Button variant='danger' className='font-semibold' onClick={onReplace}>Replace</Button>}
         <Button variant='primary' className='font-semibold' onClick={onNewProject}>New project</Button>
       </ModalFooter>
     </Modal>

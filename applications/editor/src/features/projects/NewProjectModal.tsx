@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { Logger, presetMatching, FEATURE_PRESETS } from 'cleo'
 import { Button, DocScope, Modal, ModalFooter, ModalHeader, SectionTitle, TextInput, Toggle } from '@cleo/app-kit/ui'
-import { createProject } from '../../utils/projects'
+import { createProject, foldersOnly } from '../../utils/projects'
+import { LocationField, useLocation } from '../projectFolder/LocationField'
+import { createFolderProject } from '../projectFolder/openFolder'
 import { openProject } from './projectSwitch'
 import { DEFAULT_PROJECT_SETTINGS, parseProjectSettings, PROJECT_SETTINGS_VERSION } from '../options/projectSettings'
 import FeaturePicker, { presetChoice, type FeatureChoice } from '../projectFeatures/FeaturePicker'
@@ -11,6 +13,8 @@ import { missingRequirements, withAddon, withoutAddon } from '../addons/dependen
 
 // The new-project dialog: a name, the engine features its games ship (a preset to start from, every box
 // changeable here and later in Project ▸ Features) and the editor addons it turns on. Creating switches to it.
+// In the desktop app a project is a folder, so the dialog also asks where it goes (and whether to start a git
+// repository and install the script tools there).
 
 export default function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreated?: () => void }) {
   const [name, setName] = useState('')
@@ -18,6 +22,8 @@ export default function NewProjectModal({ onClose, onCreated }: { onClose: () =>
   const [addons, setAddons] = useState<string[]>(() => BUILT_IN_ADDONS.filter(a => a.defaultOn).map(a => a.id))
   const [busy, setBusy] = useState(false)
   const sizes = useFeatureSizes()
+  const desktop = foldersOnly()
+  const [location, browse, patchLocation] = useLocation(name)
 
   const create = async () => {
     const trimmed = name.trim()
@@ -33,6 +39,13 @@ export default function NewProjectModal({ onClose, onCreated }: { onClose: () =>
       })
       // The first scene takes the preset's dimension: a 2D project opens on a 2D scene.
       const dimension = presetMatching(choice.disabled)?.dimension ?? (choice.disabled.includes('world2d') ? '3D' : undefined)
+      if (desktop) {
+        if (!location.root || location.problem) { setBusy(false); return }
+        onCreated?.()
+        // Opens it too; a declined unsaved-work confirm leaves the folder made and not opened.
+        if (!await createFolderProject(location.root, trimmed, { settings, dimension, gitInit: location.gitInit, npmInstall: location.npmInstall })) { setBusy(false); onClose() }
+        return
+      }
       const record = await createProject(trimmed, { settings, dimension })
       onCreated?.()
       // A declined confirm (unsaved work in the open project) leaves the new project created, not switched to.
@@ -50,6 +63,7 @@ export default function NewProjectModal({ onClose, onCreated }: { onClose: () =>
         <div className='px-4 py-3 flex flex-col gap-3'>
           <TextInput autoFocus placeholder='Project name' value={name} onChange={setName} maxLength={120}
             onKeyDown={e => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') onClose() }} />
+          {desktop && <LocationField value={location} onBrowse={() => void browse()} onChange={patchLocation} />}
           <FeaturePicker value={choice} onChange={setChoice} sizes={sizes} compact />
           <div className='flex flex-col gap-1'>
             <SectionTitle title='Addons' doc='editor/addons' />
@@ -73,7 +87,7 @@ export default function NewProjectModal({ onClose, onCreated }: { onClose: () =>
         </div>
         <ModalFooter>
           <Button onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button variant='success' className='font-semibold' disabled={!name.trim() || busy} onClick={() => void create()}>
+          <Button variant='success' className='font-semibold' disabled={!name.trim() || busy || (desktop && (!location.root || !!location.problem))} onClick={() => void create()}>
             Create
           </Button>
         </ModalFooter>

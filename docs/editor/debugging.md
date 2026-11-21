@@ -121,13 +121,17 @@ In the desktop app, VS Code's debugger can attach to a game playing in a window 
 1. *Options ▸ Editor ▸ Scripts ▸ Debugging*: **Debug scripts with** — *VS Code*. The app opens a debug
    port (**VS Code debug port**, 9339 unless you change it) that reaches only game windows, and only from
    this computer.
-2. Set up the [script workspace](scripting-workflow.md#editing-in-vs-code) if you have not. It gets a
-   `.vscode/launch.json` with **Attach to the Cleo game** when it has none. If you already had a launch.json,
-   it is left alone: **Copy launch configuration** (in Options or the Debugger panel) and add it yourself.
-3. In VS Code, set breakpoints in your scripts and press **F5**. The Debugger panel shows *VS Code is
-   attached*.
-4. Press Play. The game plays in a window and stops at VS Code's breakpoints; step and inspect there. Cleo's
-   top bar reads *Stopped in VS Code*, and its Play continues the game too.
+2. Open the [project folder](project-folders.md) in VS Code (**Project ▸ Open in Code Editor**). Its
+   `.vscode/launch.json` has two configurations. If you replaced it with your own, **Copy launch configuration**
+   (in Options or the Debugger panel) and add it back.
+3. In VS Code, set breakpoints in your scripts and press **F5**:
+   - **Debug Cleo game** runs `npm run debug`, which turns on VS Code debugging for this session and plays the
+     game in a window (opening the project in Cleo first if it is not open), then attaches;
+   - **Attach to the Cleo game** only attaches: press Play in Cleo yourself.
+
+   The Debugger panel shows *VS Code is attached*.
+4. The game plays in a window and stops at VS Code's breakpoints; step and inspect there. Cleo's top bar reads
+   *Stopped in VS Code*, and its Play continues the game too.
 
 Things to know:
 
@@ -137,8 +141,8 @@ Things to know:
   catches every script's error so one script cannot stop the frame, so they are never "uncaught".
 - **Columns are approximate** where types were stripped, so a step can highlight a little off within the
   line. Lines are exact.
-- A script whose workspace file had to be renamed (two scripts whose names differ only in a character a file
-  name cannot hold) does not bind breakpoints.
+- A script whose name holds a character a file name cannot (written `%`-escaped in the folder) does not bind
+  breakpoints: rename it.
 - Restart keeps VS Code attached; Stop or closing the game window ends its session.
 
 ## See also

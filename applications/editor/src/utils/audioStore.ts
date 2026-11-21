@@ -18,6 +18,7 @@
 import { AudioManager, parseSoundSettings } from 'cleo'
 import { openDB, AUDIO_STORE, idbGet } from '@cleo/app-kit/utils/idb'
 import { projectPrefix } from './projectScope'
+import { folderStoreListener } from './folderStoreEvents'
 import { libKey } from './storageKeys'
 import type { SoundSampleAsset } from './soundSamples'
 
@@ -83,6 +84,16 @@ export async function putAudio(records: StoredAudio[], projectId?: string): Prom
   const prefix = projectPrefix(projectId)
   const owner = projectId ?? prefix.slice(2, -1)
   await writeTx(store => { for (const r of records) store.put({ ...r, projectId: owner }, prefix + r.id) })
+  if (projectId === undefined) folderStoreListener()?.audioPut?.(records)
+}
+
+/** One payload of the open project, or null. */
+export async function getStoredAudio(id: string): Promise<StoredAudio | null> {
+  try {
+    return ((await request((await tx('readonly')).get(projectPrefix() + id))) as StoredAudio | undefined) ?? null
+  } catch {
+    return null
+  }
 }
 
 export async function getAllAudio(projectId?: string): Promise<StoredAudio[]> {
@@ -98,6 +109,7 @@ export async function deleteAudio(ids: string[], projectId?: string): Promise<vo
   if (!ids.length) return
   const prefix = projectPrefix(projectId)
   await writeTx(store => { for (const id of ids) store.delete(prefix + id) })
+  if (projectId === undefined) folderStoreListener()?.audioDeleted?.(ids)
 }
 
 /** Drop every payload a project owns — the audio half of deleting a project. */

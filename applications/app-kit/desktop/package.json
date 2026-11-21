@@ -20,7 +20,10 @@
       "gameProtocol.js",
       "gameSaves.js",
       "gamePreload.js",
-      "scriptWorkspace.js",
+      "projectFolder.js",
+      "safeFs.js",
+      "controlPipe.js",
+      "sdk/**",
       "movieFiles.js",
       "playWindow.js",
       "devHostProcess.js",
@@ -33,6 +36,10 @@
       {
         "from": "../../editor/dist",
         "to": "editor"
+      },
+      {
+        "from": "../../sdk/dist/cleo",
+        "to": "sdk/cleo"
       },
       {
         "from": "../../host/dist",
@@ -48,6 +55,14 @@
     "directories": {
       "output": "dist"
     },
+    "fileAssociations": [
+      {
+        "ext": "cleo",
+        "name": "Cleo Project",
+        "description": "Cleo project",
+        "role": "Editor"
+      }
+    ],
     "win": {
       "target": "nsis",
       "icon": "icons/icon.ico"

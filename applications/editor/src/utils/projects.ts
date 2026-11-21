@@ -34,12 +34,11 @@ export type ProjectRecord = {
   /** Set while the one-time migration of an existing install is in flight; cleared when it completes. */
   migrating?: boolean;
   /**
-   * Absolute path of the folder this project's scripts are mirrored into for editing in an external IDE.
-   * Machine-local, so it lives on the project record and never in exportable scoped storage.
+   * The project's folder, in the desktop app, where every project is one: the folder is the project and
+   * everything under `p:<id>:` is only a cache of it. `uid` is the project file's own id, which lets
+   * "Locate…" confirm that a folder moved elsewhere is the same project. Machine-local, like the record.
    */
-  scriptWorkspacePath?: string;
-  /** Command used to open that folder ('code', 'cursor', 'codium', …). Defaults to 'code'. */
-  scriptEditorCommand?: string;
+  folder?: { root: string; uid?: string };
 };
 
 /** Registry of all projects. Unscoped — this is what defines the scopes. */
@@ -54,6 +53,55 @@ const ACTIVE_KEY = 'cleo_active_project';
 const PENDING_DELETE_KEY = 'cleo_pending_project_delete';
 
 let legacyImportAllowed = false;
+
+/** True in the desktop app, where projects are folders and IndexedDB-only projects are not opened. */
+export function foldersOnly(): boolean {
+  return !!(globalThis as any).cleoDesktop?.project;
+}
+
+/** Whether a record can be opened here: on the desktop only folder projects can. */
+export const openable = (p: ProjectRecord): boolean => !foldersOnly() || !!p.folder;
+
+/** One spelling per folder, for comparing roots: separators and (case-insensitive disks) case folded. */
+export function folderKey(root: string): string {
+  return root.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/** The record of the project in `root`, if this machine has opened it before. */
+export async function recordOfFolder(root: string): Promise<ProjectRecord | null> {
+  const key = folderKey(root);
+  return (await loadProjects()).find(p => p.folder && folderKey(p.folder.root) === key) ?? null;
+}
+
+/**
+ * The record a folder project is cached under, made when the folder is first opened on this machine. It
+ * writes no project data: opening the folder fills the cache from the folder itself.
+ */
+export async function ensureFolderRecord(root: string, name: string, uid?: string): Promise<ProjectRecord> {
+  const existing = await recordOfFolder(root);
+  if (existing) {
+    if (existing.name !== name || existing.folder!.uid !== uid || existing.folder!.root !== root) {
+      const updated = { ...existing, name, folder: { root, uid: uid ?? existing.folder!.uid } };
+      await saveProjects((await loadProjects()).map(p => (p.id === existing.id ? updated : p)));
+      return updated;
+    }
+    return existing;
+  }
+  const now = Date.now();
+  const record: ProjectRecord = { id: cryptoRandomId(), name, createdAt: now, updatedAt: now, legacyMigrated: true, folder: { root, uid } };
+  await saveProjects([...(await loadProjects()), record]);
+  return record;
+}
+
+/** Open `id` at the next initProjects (a launch that asked for a project). */
+export function preferActiveProject(id: string): void {
+  try { localStorage.setItem(ACTIVE_KEY, id); } catch { /* ignore */ }
+}
+
+/** Point a folder record at where its folder is now (after "Locate…"). */
+export async function relocateFolderRecord(id: string, root: string): Promise<void> {
+  await saveProjects((await loadProjects()).map(p => (p.id === id && p.folder ? { ...p, folder: { ...p.folder, root } } : p)));
+}
 
 /** May the open project consume the legacy single-scene `cleo_project` blob? Only the migrated one may. */
 export function activeProjectAllowsLegacyImport(): boolean {
@@ -150,7 +198,7 @@ async function migrateWorkspace(existing?: ProjectRecord): Promise<ProjectRecord
 
 /**
  * Erase every trace of a project: kv keys, texture, audio and GI bake payloads, its Play saves, localStorage,
- * and its registry entry. The folder its scripts are mirrored into (a script workspace) is the user's, and stays.
+ * and its registry entry. A folder project's folder is the user's, and stays.
  */
 export async function wipeProject(id: string): Promise<void> {
   for (const key of await idbKeysByPrefix(projectPrefix(id))) await idbDelete(key);
@@ -189,7 +237,7 @@ export async function activateProject(id: string): Promise<void> {
 
 /** The project to open once `id` is deleted: the most recently used of the rest, or null when it is the last. */
 export async function nextProjectAfterDelete(id: string): Promise<ProjectRecord | null> {
-  const remaining = (await loadProjects()).filter(p => p.id !== id);
+  const remaining = (await loadProjects()).filter(p => p.id !== id && openable(p));
   return remaining.length ? [...remaining].sort((a, b) => b.updatedAt - a.updatedAt)[0] : null;
 }
 
@@ -219,13 +267,15 @@ export async function initProjects(): Promise<{ projects: ProjectRecord[]; activ
     projects = await loadProjects();
   }
 
-  if (!projects.length) return { projects, activeId: null };
+  // In the desktop app only folder projects open; the others are listed for export only.
+  const candidates = projects.filter(openable);
+  if (!candidates.length) return { projects, activeId: null };
 
   let activeId: string | null = null;
   try { activeId = localStorage.getItem(ACTIVE_KEY); } catch { /* ignore */ }
-  if (!activeId || !projects.some(p => p.id === activeId)) activeId = await idbGet<string>(ACTIVE_KEY);
-  if (!activeId || !projects.some(p => p.id === activeId)) {
-    activeId = [...projects].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+  if (!activeId || !candidates.some(p => p.id === activeId)) activeId = await idbGet<string>(ACTIVE_KEY);
+  if (!activeId || !candidates.some(p => p.id === activeId)) {
+    activeId = [...candidates].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
   }
 
   await activateProject(activeId);
@@ -275,21 +325,6 @@ export async function renameProject(id: string, name: string): Promise<void> {
   if (!trimmed) return;
   // Metadata only; nothing in storage is keyed by name.
   await saveProjects((await loadProjects()).map(p => (p.id === id ? { ...p, name: trimmed } : p)));
-}
-
-/** The script-workspace settings for a project, or empty defaults when it has never been set up. */
-export async function scriptWorkspaceOf(id: string): Promise<{ path?: string; command?: string }> {
-  const record = (await loadProjects()).find(p => p.id === id);
-  return { path: record?.scriptWorkspacePath, command: record?.scriptEditorCommand };
-}
-
-/** Point a project at a script workspace folder, or pass `undefined` to disconnect it. */
-export async function setScriptWorkspace(id: string, path: string | undefined, command?: string): Promise<void> {
-  const list = await loadProjects();
-  if (!list.some(p => p.id === id)) return;
-  await saveProjects(list.map(p => (p.id === id
-    ? { ...p, scriptWorkspacePath: path, scriptEditorCommand: command ?? p.scriptEditorCommand }
-    : p)));
 }
 
 /** Record a project's latest activity (and its cover image) for the browser's ordering and cards. */

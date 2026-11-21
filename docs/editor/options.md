@@ -74,13 +74,11 @@ What happens when you double-click a script, press ✎ on a script slot, or crea
 - **External editor** — the command the desktop app runs to open the workspace: `code` (VSCode),
   `cursor`, `codium`… A program name on your `PATH`, no arguments.
 
-**Script workspace folder**
+**Project folder**
 
-Every script of this project, mirrored to a real folder with typings, so an external editor gets
-autocomplete; saved files sync back into the editor. The section shows the folder and its sync
-status, with *Open*, *Disconnect*, and — when the sync needs attention — *Rewrite from editor* and
-*Apply deletions*. Desktop app only. See [Scripting workflow](scripting-workflow.md#editing-in-vs-code).
-The menu bar only shows a chip when the sync needs attention (paused or in error).
+The open project's [folder](project-folders.md) (desktop app), where its scripts are the `.ts` files under
+`Assets/`, with *Open in VS Code* and *Show folder*. A script saved in another editor is taken in at once. See
+[Scripting workflow](scripting-workflow.md#editing-in-vs-code).
 
 **Debugging**
 

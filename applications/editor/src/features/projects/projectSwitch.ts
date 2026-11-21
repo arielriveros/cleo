@@ -1,8 +1,8 @@
 import { Logger } from 'cleo'
-import { beginLoad, continueLoad } from '@cleo/app-kit/feedback/loadingStore'
+import { beginLoad, continueLoad, type LoadHandle } from '@cleo/app-kit/feedback/loadingStore'
 import { setProjectTypes } from '@cleo/app-kit/code/projectTypes'
 import {
-  activateProject, clearPendingDelete, createProject, loadProjects, nextProjectAfterDelete, parkPendingDelete, wipeProject,
+  activateProject, clearPendingDelete, createProject, foldersOnly, loadProjects, nextProjectAfterDelete, parkPendingDelete, wipeProject,
   type NewProjectOptions, type ProjectRecord,
 } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
@@ -40,6 +40,16 @@ export interface ProjectHost {
 
 let host: ProjectHost | null = null
 
+/**
+ * Reading a folder project's folder into its cache (features/projectFolder/openFolder.ts), registered by that
+ * module so this one does not import it. Runs after the closed project is gone and before the next mounts.
+ */
+type FolderSync = (pid: string, root: string, load: LoadHandle) => Promise<void>
+let folderSync: FolderSync | null = null
+export function registerFolderSync(fn: FolderSync): void {
+  folderSync = fn
+}
+
 /** app.tsx, once mounted. Returns the unregister. */
 export function registerProjectHost(next: ProjectHost): () => void {
   host = next
@@ -47,8 +57,11 @@ export function registerProjectHost(next: ProjectHost): () => void {
 }
 
 export interface SwitchRequest {
-  /** The project to open, or one to create first (after the confirm, so a declined switch creates nothing). */
-  to: string | { create: { name: string; options?: NewProjectOptions } }
+  /**
+   * The project to open, or one to create first (after the confirm, so a declined switch creates nothing).
+   * Null: close the open project and show the launcher (the desktop, deleting the last folder project).
+   */
+  to: string | { create: { name: string; options?: NewProjectOptions } } | null
   /** Ask about unsaved work first, completing "<confirm> discards these unsaved edits." Null: asked already. */
   confirm?: string | null
   /** The open project, to wipe once it is closed (deleting it). Its waiting writes are dropped, not flushed. */
@@ -77,13 +90,14 @@ export async function switchProject(req: SwitchRequest): Promise<boolean> {
   const from = activeProjectId()
   const projects = await loadProjects()
   const nameOf = (id: string) => projects.find(p => p.id === id)?.name ?? 'project'
-  const targetName = typeof req.to === 'string' ? nameOf(req.to) : req.to.create.name
+  const targetName = req.to === null ? 'the project list' : typeof req.to === 'string' ? nameOf(req.to) : req.to.create.name
   const onScreen = continueLoad()
   const title = req.title ?? `Opening ${targetName}`
 
   try {
     // No host (a test, or a page that is not the editor): the old way, a reload into the project.
     if (!host) {
+      if (req.to === null) { if (req.deleting) parkPendingDelete(req.deleting); reloadDiscarding(); return true }
       const target = typeof req.to === 'string' ? req.to : (await createProject(req.to.create.name, req.to.create.options)).id
       if (req.deleting) parkPendingDelete(req.deleting)
       await activateProject(target)
@@ -119,9 +133,9 @@ export async function switchProject(req: SwitchRequest): Promise<boolean> {
     lap('reset')
     unload.done()
 
-    let target: string
+    let target: string | null
     try {
-      target = typeof req.to === 'string' ? req.to : (await createProject(req.to.create.name, req.to.create.options)).id
+      target = req.to === null ? null : typeof req.to === 'string' ? req.to : (await createProject(req.to.create.name, req.to.create.options)).id
       if (req.deleting) {
         await wipeProject(req.deleting)
         // A write still running could put a key back: then the next boot sweeps it again.
@@ -129,6 +143,14 @@ export async function switchProject(req: SwitchRequest): Promise<boolean> {
         Logger.info(`Deleted "${nameOf(req.deleting)}"`, 'Editor')
       }
       await req.prepare?.()
+      if (target === null) { await host.showLauncher(); return true }
+      // A folder project: the folder is the truth, so it is read into the cache before anything mounts.
+      const record = (await loadProjects()).find(p => p.id === target)
+      if (record?.folder) {
+        if (!folderSync) throw new Error('Folder projects are not available here')
+        load.addSteps([{ id: 'folder', label: 'Reading the project folder', weight: 2 }])
+        await folderSync(target, record.folder.root, load)
+      }
     } catch (e) {
       await recover(from, req.deleting, `Could not open ${targetName}: ${(e as Error)?.message ?? e}`)
       return true
@@ -153,13 +175,22 @@ export async function switchProject(req: SwitchRequest): Promise<boolean> {
 async function recover(from: string, deleted: string | undefined, message: string): Promise<void> {
   Logger.error(message, 'Editor')
   const projects = await loadProjects()
-  const back = from && from !== deleted && projects.some(p => p.id === from)
+  // A folder project cannot be put back by remounting: its folder was closed. The launcher says why.
+  const back = foldersOnly() ? undefined : from && from !== deleted && projects.some(p => p.id === from)
     ? from
     : [...projects].sort((a, b) => b.updatedAt - a.updatedAt)[0]?.id
-  if (!back) { await host?.showLauncher(); return }
+  if (!back) { lastFailure = message; await host?.showLauncher(); return }
   await activateProject(back)
   beginSwitchLoad(`Opening ${projects.find(p => p.id === back)?.name ?? 'project'}`)
   host?.mount()
+}
+
+let lastFailure: string | null = null
+/** Why the last switch ended on the launcher, once (the launcher shows it). */
+export function takeSwitchFailure(): string | null {
+  const m = lastFailure
+  lastFailure = null
+  return m
 }
 
 /** Open a project from the browser: asks about unsaved work. False when the user backed out. */
@@ -185,5 +216,7 @@ export async function deleteProject(id: string, isActive: boolean): Promise<void
     return
   }
   const next: ProjectRecord | null = await nextProjectAfterDelete(id)
-  await switchProject({ to: next ? next.id : { create: { name: 'Untitled Project' } }, deleting: id, confirm: null })
+  // The desktop never makes an IndexedDB-only project: with no folder project left, the launcher opens.
+  const fallback = foldersOnly() ? null : { create: { name: 'Untitled Project' } }
+  await switchProject({ to: next ? next.id : fallback, deleting: id, confirm: null })
 }

@@ -1,39 +1,20 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore } from 'react'
 import { PROJECT_TYPES_REL, getProjectTypes, subscribeProjectTypes } from '@cleo/app-kit/code/projectTypes'
 import { Logger } from 'cleo'
-import { useCleoEngine } from '../EngineContext'
-import { useVfs } from '../assets/VfsContext'
-import { deleteAsset } from '../assets/assetKinds'
-import { activeProjectId } from '../../utils/projectScope'
-import { scriptWorkspaceOf, setScriptWorkspace } from '../../utils/projects'
-import { buildScriptAsset, type ScriptAsset, type ScriptVarSchema } from '../../utils/scripts'
-import { buildScriptGraphCtx, deriveBaseType, moduleIdOfVfsPath, resolveScriptVariables } from '../../utils/scriptGraph'
-import {
-  advanceState, buildDesiredMirror, planPull, planPush, vfsPathOfRel,
-  type ExternalChange, type MirrorState, type PullPlan,
-} from '../../utils/scriptMirror'
-import {
-  applyAdd, applyCreateFolder, applyDelete, applyMoveOne, ancestorsOf, stemOf,
-  type VfsIndex,
-} from '../../utils/vfs'
-import { cryptoRandomId } from '../../utils/ids'
-import { getScriptsBridge, hasScriptWorkspace } from './desktopScripts'
-import { buildManifest, buildScaffold, readManifest, staticScaffold } from './scaffold'
-import { clearExternalSource } from './externalSourceStore'
-import { getEditorPrefs } from '../options/editorPrefs'
 import { setExternalScriptOpener } from '../options/scriptOpener'
-import { trackProjectWrite } from '../../utils/projectLifecycle'
+import { folderSession } from '../projectFolder/folderSession'
+import { folderSink } from '../projectFolder/folderSink'
+import { openProjectInCodeEditor } from '../projectFolder/folderActions'
+import { getProjectBridge } from '../projectFolder/desktopProject'
 
-// Keeps the project's script library and a folder on disk in step, so scripts can be edited in VSCode.
+// Scripts as files an external editor (VS Code) can open. A desktop project IS a folder (features/
+// projectFolder), so its scripts are already files there: under Assets/, at the path the Assets panel shows,
+// as `<name>.ts`. This context is what the rest of the editor asks about them — is there a folder, open a
+// script in VS Code at a line — and it keeps the project's own type declarations (its animators' trigger
+// names, projectTypes.ts) written for the IDE.
 //
-// The two directions are asymmetric. Editor -> disk is derived: a debounced effect over (vfs,
-// scriptAssets) recomputes what should be on disk and writes the difference, so every origin is covered
-// at once. Disk -> editor is an event: the main process reports a coalesced changeset, which planPull
-// turns into renames/updates/creates/deletes.
-//
-// `agreedRef` is the state both sides last agreed on and the pivot for both plans. It must stay a ref:
-// it is written from an async apply and read by the next push, and a render in between would plan
-// against a stale mirror.
+// It used to mirror the script library into a folder of its own (the "script workspace"); the project folder
+// replaced that. The web build has no folder: everything here reports `off`.
 
 export type WorkspaceStatus = 'off' | 'connecting' | 'live' | 'paused' | 'error'
 
@@ -42,21 +23,18 @@ export type ScriptConflict = { scriptId: string; name: string; external: string;
 
 type ScriptWorkspaceValue = {
   status: WorkspaceStatus
+  /** The project folder, or null (the web build). */
   rootPath: string | null
   message: string | null
   conflicts: ScriptConflict[]
-  /** Pick a folder, scaffold it and start syncing. Resolves true once connected (false if cancelled). */
+  /** Kept for callers from before project folders: there is nothing to set up, the folder is the project. */
   setup: () => Promise<boolean>
-  /** Stop syncing and forget the folder (the files on disk are left alone). */
   disconnect: () => Promise<void>
-  /** Open the workspace in the external editor, optionally selecting one script's file. True on success. */
-  /** `line` (1-based) puts the cursor there. */
+  /** Open the project folder in the external editor, at one script's file and `line` (1-based) when given. */
   openInEditor: (scriptId?: string, line?: number) => Promise<boolean>
-  /** Rewrite every file from the library, discarding whatever is on disk. Resolves a paused workspace. */
+  /** Write whatever the editor holds that the folder does not have yet. */
   resync: () => Promise<void>
-  /** Apply the deletions a paused changeset was holding back. */
   applyPendingDeletions: () => Promise<void>
-  /** Resolve a conflict by taking one side. */
   resolveConflict: (scriptId: string, keep: 'external' | 'mine') => void
   available: boolean
 }
@@ -69,403 +47,55 @@ export function useScriptWorkspace(): ScriptWorkspaceValue {
   return ctx
 }
 
-const PUSH_DEBOUNCE_MS = 250
+/** The file a script is in, from the folder session's state (its identity is the meta's, not the name). */
+function relOfScript(scriptId: string): string | undefined {
+  const s = folderSession()
+  if (!s) return undefined
+  for (const [rel, f] of s.state) if (f.kind === 'script' && f.guid === scriptId) return rel
+  return undefined
+}
 
 export function ScriptWorkspaceProvider({ children }: { children: React.ReactNode }) {
-  const engine = useCleoEngine()
-  const { vfs, setVfs, depsRef, ready } = useVfs()
-  const { scriptAssets, adoptExternalScriptSource, renameScriptAsset, addScriptAsset } = engine
-
-  const [status, setStatus] = useState<WorkspaceStatus>('off')
-  const [rootPath, setRootPath] = useState<string | null>(null)
-  const [message, setMessage] = useState<string | null>(null)
-  const [conflicts, setConflicts] = useState<ScriptConflict[]>([])
-
-  const agreedRef = useRef<MirrorState>(new Map())
-  const rootRef = useRef<string | null>(null)
-  const typesHashRef = useRef('')
-  const statusRef = useRef<WorkspaceStatus>('off')
-  const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pushingRef = useRef(false)
-  // The last change reported while paused, so "Apply deletions" has something to act on.
-  const pendingDeletionsRef = useRef<PullPlan | null>(null)
-  /** Fingerprint of the last manifest written, so an unchanged one is not rewritten on every push. */
-  const manifestRef = useRef('')
-
-  const available = hasScriptWorkspace()
-
-  const setStatusBoth = useCallback((next: WorkspaceStatus, msg: string | null = null) => {
-    statusRef.current = next
-    setStatus(next)
-    setMessage(msg)
-  }, [])
-
-  /* --------------------------------------------------------------------- */
-  /* Editor -> disk                                                         */
-  /* --------------------------------------------------------------------- */
-
-  /** Latest library + layout, read through refs so the push effect never plans against a stale render. */
-  const vfsRef = useRef<VfsIndex>(vfs)
-  vfsRef.current = vfs
-  const scriptsRef = useRef<ScriptAsset[]>(scriptAssets)
-  scriptsRef.current = scriptAssets
-
-  const push = useCallback(async () => {
-    const bridge = getScriptsBridge()
-    const root = rootRef.current
-    if (!bridge || !root || statusRef.current !== 'live' || pushingRef.current) return
-    // Tracked, so a project switch waits for a push under way (it names the project in its manifest).
-    return trackProjectWrite(pushNow(bridge, root))
-  }, [setStatusBoth])
-
-  const pushNow = async (bridge: NonNullable<ReturnType<typeof getScriptsBridge>>, root: string) => {
-
-    const desired = buildDesiredMirror(vfsRef.current, scriptsRef.current)
-    const plan = planPush(agreedRef.current, desired)
-    const manifest = buildManifest(activeProjectId(), plan.next, typesHashRef.current)
-    const fingerprint = JSON.stringify(manifest)
-
-    // The manifest must be written even when no FILE changes: it is the identity record, and a script
-    // created or edited on disk is already in the right place, so only the id -> path mapping is new.
-    // Without it the next connect mints fresh asset ids and breaks `__scriptId` on every node.
-    if (!plan.filesChanged && fingerprint === manifestRef.current) return
-
-    pushingRef.current = true
-    try {
-      const res = await bridge.apply(root, {
-        deletes: plan.deletes,
-        renames: plan.renames,
-        writes: plan.writes,
-        manifest,
-      })
-      if (!res.ok) { setStatusBoth('error', res.error ?? 'Could not write to the script workspace.'); return }
-      agreedRef.current = plan.next
-      manifestRef.current = fingerprint
-    } finally {
-      pushingRef.current = false
-    }
-  }
-
-  const schedulePush = useCallback(() => {
-    if (pushTimerRef.current) clearTimeout(pushTimerRef.current)
-    pushTimerRef.current = setTimeout(() => { void push() }, PUSH_DEBOUNCE_MS)
-  }, [push])
-
-  useEffect(() => {
-    if (status !== 'live') return
-    schedulePush()
-  }, [vfs, scriptAssets, status, schedulePush])
-
-  // The project's own declarations (its animators' trigger names, projectTypes.ts), so the external editor
-  // checks scripts as the in-editor one does. Rewritten when they change; on connect `projectTypesRef` is
-  // cleared, so the first live render writes them.
-  const projectTypes = useSyncExternalStore(subscribeProjectTypes, getProjectTypes)
-  const projectTypesRef = useRef<string | null>(null)
-  useEffect(() => {
-    const bridge = getScriptsBridge()
-    const root = rootRef.current
-    if (status !== 'live' || !bridge || !root || projectTypes === projectTypesRef.current) return
-    projectTypesRef.current = projectTypes
-    void bridge.writeScaffold(root, [{ rel: PROJECT_TYPES_REL, content: projectTypes || 'export {}\n' }])
-  }, [status, projectTypes])
-
-  /* --------------------------------------------------------------------- */
-  /* Disk -> editor                                                         */
-  /* --------------------------------------------------------------------- */
-
-  /**
-   * Place a file that appeared on disk into the VFS at the folder it lives in, minting the asset.
-   * Returns the new script id so the agreed state can adopt it.
-   *
-   * The asset's KIND comes from the source (buildScriptAsset): a file of helpers becomes a script
-   * module, a file with a default class a node script. An EMPTY file stays empty — VS Code's "New File"
-   * creates it before the user types, and writing a template class into it would race their typing
-   * through auto-save. Its kind is re-derived on the first real save.
-   */
-  const createFromFile = useCallback((
-    rel: string, source: string, baseType: ScriptAsset['baseType'], variables?: ScriptVarSchema[],
-  ): string => {
-    const path = vfsPathOfRel(rel)
-    const name = stemOf(path) || 'Script'
-    const asset = buildScriptAsset(name, baseType, source, cryptoRandomId(), variables)
-    addScriptAsset(asset)
-    setVfs(v => {
-      // The folders the file sits in may not exist in the index yet: an IDE can create a directory the
-      // editor has never seen.
-      let next = v
-      for (const folder of ancestorsOf(path)) next = applyCreateFolder(next, folder)
-      return applyAdd(next, { path, kind: 'script', assetId: asset.id, created: Date.now() })
-    })
-    return asset.id
-  }, [addScriptAsset, setVfs])
-
-  const applyPull = useCallback((plan: PullPlan) => {
-    const createdIds = new Map<string, string>()
-    const raised: ScriptConflict[] = []
-
-    for (const r of plan.renames) {
-      const target = vfsPathOfRel(r.to)
-      setVfs(v => {
-        let next = v
-        for (const folder of ancestorsOf(target)) next = applyCreateFolder(next, folder)
-        return applyMoveOne(next, vfsPathOfRel(r.from), target)
-      })
-      renameScriptAsset(r.scriptId, stemOf(target))
-      if (r.sourceChanged) {
-        const res = adoptExternalScriptSource(r.scriptId, r.source)
-        if (res.replacedUnsaved) raised.push(conflictFor(r.scriptId, r.source))
-      }
-    }
-
-    for (const u of plan.updates) {
-      const res = adoptExternalScriptSource(u.scriptId, u.source)
-      if (res.replacedUnsaved) raised.push(conflictFor(u.scriptId, u.source))
-    }
-
-    // Base types and inherited fields resolve through imports — `Hollow extends EnemyBase` is a Character
-    // because EnemyBase is. Resolved against the library PLUS everything created in this same changeset:
-    // a base class and its subclass often arrive together (a `git pull`, a folder copied in).
-    if (plan.creates.length) {
-      const pending: ScriptAsset[] = plan.creates.map(c => ({
-        id: `pending:${c.rel}`, name: stemOf(vfsPathOfRel(c.rel)), baseType: c.baseType, source: c.source, variables: [],
-      }))
-      const paths = new Map<string, string>(vfsRef.current.entries.filter(e => e.kind === 'script').map(e => [e.assetId, e.path]))
-      for (const c of plan.creates) paths.set(`pending:${c.rel}`, vfsPathOfRel(c.rel))
-      const ctx = buildScriptGraphCtx(paths, [...scriptsRef.current, ...pending])
-      for (const c of plan.creates) {
-        const moduleId = moduleIdOfVfsPath(vfsPathOfRel(c.rel))
-        const derived = deriveBaseType(c.source, moduleId, ctx)
-        const baseType = derived !== 'node' ? derived : c.baseType
-        createdIds.set(c.rel, createFromFile(c.rel, c.source, baseType, resolveScriptVariables(c.source, moduleId, ctx)))
-      }
-    }
-
-    for (const d of plan.deletes) {
-      // The explorer's own delete path, so node unlinking and history match deleting the card in the
-      // Assets tab.
-      deleteAsset('script', d.scriptId, depsRef.current)
-      setVfs(v => applyDelete(v, [vfsPathOfRel(d.rel)]))
-      clearExternalSource(d.scriptId)
-    }
-
-    agreedRef.current = advanceState(agreedRef.current, plan, createdIds)
-    if (raised.length) setConflicts(prev => [...prev.filter(c => !raised.some(r => r.scriptId === c.scriptId)), ...raised])
-
-    function conflictFor(scriptId: string, external: string): ScriptConflict {
-      const asset = scriptsRef.current.find(a => a.id === scriptId)
-      return {
-        scriptId,
-        name: asset?.name ?? 'Script',
-        external,
-        mine: engine.getScriptTabSource(scriptId) ?? asset?.source ?? '',
-      }
-    }
-  }, [adoptExternalScriptSource, createFromFile, depsRef, engine, renameScriptAsset, setVfs])
-
-  const onExternalChange = useCallback((change: ExternalChange) => {
-    if (statusRef.current !== 'live' && statusRef.current !== 'paused') return
-
-    const plan = planPull(agreedRef.current, change)
-    if (plan.paused) {
-      // Nothing is applied: a vanished folder or a pile of deletions is more likely a git checkout or a
-      // moved directory than an intent to drop scripts.
-      pendingDeletionsRef.current = plan
-      setStatusBoth('paused', plan.pauseReason ?? 'Script sync paused.')
-      Logger.warn(`Script workspace paused: ${plan.pauseReason}`, 'Editor')
-      return
-    }
-    applyPull(plan)
-  }, [applyPull, setStatusBoth])
-
-  // Must be a ref so the IPC subscription below is registered once, never re-registered on a render.
-  const onExternalChangeRef = useRef(onExternalChange)
-  onExternalChangeRef.current = onExternalChange
-
-  useEffect(() => {
-    const bridge = getScriptsBridge()
-    if (!bridge) return
-    return bridge.onChange(({ root, change }) => {
-      if (root !== rootRef.current) return // a workspace from a previous session, already torn down
-      onExternalChangeRef.current(change)
-    })
-  }, [])
-
-  /* --------------------------------------------------------------------- */
-  /* Connecting                                                             */
-  /* --------------------------------------------------------------------- */
-
-  /**
-   * Attach to `root`: scaffold it, recover what a previous session agreed with it, reconcile whatever
-   * changed while we were away, then go live.
-   */
-  const connect = useCallback(async (root: string, announce: boolean) => {
-    const bridge = getScriptsBridge()
-    if (!bridge) return
-    setStatusBoth('connecting')
-
-    const opened = await bridge.open(root)
-    if (!opened.ok) { setStatusBoth('error', opened.error ?? 'Could not open the script workspace.'); return }
-
-    const restored = readManifest(opened.manifest, activeProjectId())
-    agreedRef.current = restored?.state ?? new Map()
-
-    // The declaration payload only moves when the engine is rebuilt, so skip ~100 writes when it has not.
-    const scaffold = await buildScaffold(getEditorPrefs().vscodeDebugPort)
-    typesHashRef.current = scaffold.typesHash
-    const stale = !restored || restored.typesHash !== scaffold.typesHash
-    const written = await bridge.writeScaffold(root, stale ? scaffold.files : staticScaffold(getEditorPrefs().vscodeDebugPort))
-    if (!written.ok) { setStatusBoth('error', written.error ?? 'Could not write the workspace scaffolding.'); return }
-
-    rootRef.current = root
-    setRootPath(root)
-    projectTypesRef.current = null
-    statusRef.current = 'live'
-    setStatus('live')
-    setMessage(null)
-
-    // Whatever the folder holds now is a changeset against what was last agreed, covering edits made
-    // while the editor was closed. Reusing the pull path applies the bulk-delete guard to those too.
-    const knownRels = new Set([...agreedRef.current.values()].map(v => v.rel))
-    const present = new Map(opened.files.map(f => [f.rel, f.source]))
-    onExternalChangeRef.current({
-      added: opened.files.filter(f => !knownRels.has(f.rel)).map(f => ({ rel: f.rel, source: f.source })),
-      changed: opened.files.filter(f => knownRels.has(f.rel)).map(f => ({ rel: f.rel, source: f.source })),
-      removed: [...knownRels].filter(rel => !present.has(rel)),
-    })
-
-    await push()
-    if (announce) Logger.info(`Scripts are mirrored to ${root}`, 'Editor')
-  }, [push, setStatusBoth])
-
-  const setup = useCallback(async (): Promise<boolean> => {
-    const bridge = getScriptsBridge()
-    if (!bridge) return false
-    const picked = await bridge.pickFolder()
-    if (!picked.ok || !picked.path) return false
-    await setScriptWorkspace(activeProjectId(), picked.path)
-    await connect(picked.path, true)
-    return rootRef.current === picked.path
-  }, [connect])
-
-  const disconnect = useCallback(async () => {
-    const bridge = getScriptsBridge()
-    const root = rootRef.current
-    if (bridge && root) await bridge.close(root)
-    await setScriptWorkspace(activeProjectId(), undefined)
-    rootRef.current = null
-    agreedRef.current = new Map()
-    manifestRef.current = ''
-    pendingDeletionsRef.current = null
-    setRootPath(null)
-    setConflicts([])
-    setStatusBoth('off')
-  }, [setStatusBoth])
-
-  // The project closing in this window (another one opening: features/projects/projectSwitch.ts): its folder
-  // stops being mirrored. The pending push goes, and the watcher closes; the project keeps its folder setting.
-  useEffect(() => () => {
-    if (pushTimerRef.current) clearTimeout(pushTimerRef.current)
-    pushTimerRef.current = null
-    const bridge = getScriptsBridge()
-    const root = rootRef.current
-    rootRef.current = null
-    if (bridge && root) void trackProjectWrite(bridge.close(root)).catch(() => {})
-  }, [])
-
-  /** Reconnect at boot when this project already has a workspace and the folder is still there. */
-  useEffect(() => {
-    if (!ready || !available) return
-    let cancelled = false
-    void (async () => {
-      const saved = await scriptWorkspaceOf(activeProjectId())
-      if (cancelled || !saved.path) return
-      const bridge = getScriptsBridge()
-      const stat = await bridge?.exists(saved.path)
-      if (cancelled) return
-      if (!stat?.exists) {
-        setStatusBoth('paused', `The script workspace folder is missing: ${saved.path}`)
-        setRootPath(saved.path)
-        return
-      }
-      await connect(saved.path, false)
-    })()
-    return () => { cancelled = true }
-  }, [ready, available, connect, setStatusBoth])
-
-  /* --------------------------------------------------------------------- */
-  /* Recovery actions                                                       */
-  /* --------------------------------------------------------------------- */
-
-  const resync = useCallback(async () => {
-    const root = rootRef.current
-    const bridge = getScriptsBridge()
-    if (!root || !bridge) return
-    // Forget the agreement entirely, so planPush treats every script as new and rewrites the folder.
-    pendingDeletionsRef.current = null
-    agreedRef.current = new Map()
-    manifestRef.current = ''
-    statusRef.current = 'live'
-    setStatus('live')
-    setMessage(null)
-    await bridge.open(root) // re-arm the watcher if the folder vanished and came back
-    await push()
-    Logger.info('Script workspace rewritten from the editor', 'Editor')
-  }, [push])
-
-  const applyPendingDeletions = useCallback(async () => {
-    const plan = pendingDeletionsRef.current
-    pendingDeletionsRef.current = null
-    statusRef.current = 'live'
-    setStatus('live')
-    setMessage(null)
-    // A root-missing pause carries an empty plan, so applying it is a harmless no-op.
-    if (plan) applyPull({ ...plan, paused: false })
-    await push()
-  }, [applyPull, push])
-
-  const resolveConflict = useCallback((scriptId: string, keep: 'external' | 'mine') => {
-    setConflicts(prev => {
-      const hit = prev.find(c => c.scriptId === scriptId)
-      if (hit && keep === 'mine') {
-        // The external edit was already adopted when it arrived, so keeping the editor's version means
-        // putting it back; the derived push then mirrors that to disk.
-        adoptExternalScriptSource(scriptId, hit.mine)
-      }
-      return prev.filter(c => c.scriptId !== scriptId)
-    })
-  }, [adoptExternalScriptSource])
+  const session = folderSession()
+  const root = session?.root ?? null
 
   const openInEditor = useCallback(async (scriptId?: string, line?: number): Promise<boolean> => {
-    const bridge = getScriptsBridge()
-    const root = rootRef.current
-    if (!bridge || !root) return false
-    // Make sure the file the IDE is about to open is the current one.
-    await push()
-    const rel = scriptId ? agreedRef.current.get(scriptId)?.rel : undefined
-    // The command from Options ▸ Editor ▸ Scripts; a per-project override on the record still wins.
-    const saved = await scriptWorkspaceOf(activeProjectId())
-    const res = await bridge.launch(root, rel, saved.command ?? getEditorPrefs().externalEditorCommand, rel ? line : undefined)
-    if (!res.ok) Logger.error(`Could not open the script workspace: ${res.error}`, 'Editor')
-    return !!res.ok
-  }, [push])
+    if (!folderSession()) return false
+    // Pending writes first, so a script created a moment ago is a file by the time the IDE looks for it.
+    await folderSink.flushNow()
+    const rel = scriptId ? relOfScript(scriptId) : undefined
+    return openProjectInCodeEditor(rel, rel ? line : undefined)
+  }, [])
 
-  // "Open scripts with VSCode" (Options ▸ Editor): the engine context's script opener routes through
-  // this. With no workspace yet, the first open asks for a folder — cancelling falls back to the
-  // built-in editor.
+  // "Open scripts with VS Code" (Options ▸ Editor): the engine context's script opener routes through here.
   useEffect(() => {
-    if (!available) { setExternalScriptOpener(null); return }
-    setExternalScriptOpener(async (scriptId, line) => {
-      if (!rootRef.current && !(await setup())) return false
-      return openInEditor(scriptId, line)
-    })
+    if (!root) { setExternalScriptOpener(null); return }
+    setExternalScriptOpener((scriptId, line) => openInEditor(scriptId, line))
     return () => setExternalScriptOpener(null)
-  }, [available, setup, openInEditor])
+  }, [root, openInEditor])
+
+  // The project's own declarations, so the IDE checks scripts as the in-editor editor does.
+  const projectTypes = useSyncExternalStore(subscribeProjectTypes, getProjectTypes)
+  useEffect(() => {
+    const bridge = getProjectBridge()
+    if (!root || !bridge) return
+    void bridge.writeScaffold(root, [{ rel: PROJECT_TYPES_REL, content: projectTypes || 'export {}\n' }])
+      .then(res => { if (!res.ok) Logger.warn(`Could not write the project's type declarations: ${res.error}`, 'Editor') })
+  }, [root, projectTypes])
 
   const value = useMemo<ScriptWorkspaceValue>(() => ({
-    status, rootPath, message, conflicts, available,
-    setup, disconnect, openInEditor, resync, applyPendingDeletions, resolveConflict,
-  }), [status, rootPath, message, conflicts, available,
-    setup, disconnect, openInEditor, resync, applyPendingDeletions, resolveConflict])
+    status: root ? 'live' : 'off',
+    rootPath: root,
+    message: null,
+    conflicts: [],
+    setup: async () => !!root,
+    disconnect: async () => {},
+    openInEditor,
+    resync: () => folderSink.flushNow(),
+    applyPendingDeletions: async () => { folderSink.confirmDeletes() },
+    resolveConflict: () => {},
+    available: !!root,
+  }), [root, openInEditor])
 
   return <ScriptWorkspaceContext.Provider value={value}>{children}</ScriptWorkspaceContext.Provider>
 }

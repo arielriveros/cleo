@@ -420,7 +420,7 @@ function normalizePath(path: string): string {
  * Does this path's stem still represent `name`? A disambiguating ' (2)' suffix still counts, otherwise
  * the reconciler would read it as a rename on every pass and never reach a fixed point.
  */
-function stemRepresents(stem: string, name: string): boolean {
+export function stemRepresents(stem: string, name: string): boolean {
   if (stem === name) return true
   const m = /^(.*) \(\d+\)$/.exec(stem)
   return m ? m[1] === name : false

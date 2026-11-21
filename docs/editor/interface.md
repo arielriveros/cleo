@@ -49,7 +49,7 @@ After the menus come, when there is something to say:
 | Item | Shows |
 |---|---|
 | **Status** | What Save, Save All or Publish did last: *Saving…*, *Saved*, *Save failed*, *Publishing web build…*. |
-| **Script sync chip** | Appears only when the VS Code workspace needs attention (sync paused or in error). Its setup lives in [Options ▸ Editor ▸ Scripts](options.md#editor). |
+| **Folder chip** | Desktop. Appears only when the [project folder](project-folders.md#changes-outside-cleo) needs attention: files changed on disk (**Reload from disk**), files Cleo cannot read, a write the folder refused, deletions waiting for a yes, or a folder gone missing. |
 | **Agent chip** | The agent link: shown while the MCP server addon is on. See [The AI agent link](ai-agent-link.md). |
 
 **Centre** — the transport.

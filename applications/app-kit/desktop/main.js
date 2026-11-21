@@ -5,7 +5,8 @@ const os = require('os');
 const fsp = fs.promises;
 const { pathToFileURL } = require('url');
 const { GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme, writeDesktopShell } = require('./gameTemplates');
-const scriptWorkspace = require('./scriptWorkspace');
+const projectFolder = require('./projectFolder');
+const controlPipe = require('./controlPipe');
 const movieFiles = require('./movieFiles');
 const playWindow = require('./playWindow');
 const devHostProcess = require('./devHostProcess');
@@ -209,6 +210,8 @@ function createWindow() {
   win.setMenuBarVisibility(false);
   windowControls.track(win);
   openCreatorWindows(win);
+  // The project's `cleo` CLI (npm run play / debug) talks to this window through the control pipe.
+  controlPipe.attach(win.webContents);
 
   // Optional: forward renderer console + failed loads to the terminal (CLEO_LOG_CONSOLE=1).
   if (process.env.CLEO_LOG_CONSOLE === '1') {
@@ -278,7 +281,67 @@ function createWindow() {
   } else win.loadURL(`${APP_ORIGIN}/index.html`);
 }
 
+// --- One editor per build, and requests to open a project -------------------------------------
+//
+// A project can be opened from outside: `--cleo-open <folder>` (what `npm run play` in a project relaunches
+// the editor with), or a `project.cleo` passed on the command line (the file association; macOS sends it as
+// 'open-file'). A second launch of the same build hands its request to the running editor instead of
+// starting a second one on the same projects. The dev and packaged builds have separate userData, hence
+// separate locks: two of them can run at once, and the folder's own lock file keeps them off one project.
+
+const gotSingleInstance = app.requestSingleInstanceLock();
+if (!gotSingleInstance) app.quit();
+
+/** The project a launch asks for, or null. `--cleo-play` / `--cleo-debug` ask to play it once it is open. */
+function parseLaunchArgs(argv) {
+  const args = Array.isArray(argv) ? argv : [];
+  let root = null;
+  const at = args.indexOf('--cleo-open');
+  if (at >= 0 && typeof args[at + 1] === 'string') root = args[at + 1];
+  if (!root) {
+    const file = args.find(a => typeof a === 'string' && /(^|[\\/])project\.cleo$/i.test(a));
+    if (file) root = path.dirname(file);
+  }
+  if (!root) return null;
+  root = path.resolve(root);
+  if (!fs.existsSync(path.join(root, 'project.cleo'))) return null;
+  return { root, play: args.includes('--cleo-play'), debug: args.includes('--cleo-debug') };
+}
+
+const launchRequests = [];
+function deliverLaunch(request) {
+  if (!request) return;
+  // The command line is the user's own act: the folder becomes reachable.
+  request.root = projectFolder.allow(request.root);
+  const win = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w.webContents.getURL().indexOf('play.html') < 0);
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+    win.webContents.send('project:launch-request', request);
+  } else {
+    launchRequests.push(request);
+  }
+}
+
+app.on('second-instance', (_event, argv) => deliverLaunch(parseLaunchArgs(argv)));
+app.on('open-file', (event, file) => {
+  event.preventDefault();
+  const request = parseLaunchArgs([file]);
+  if (app.isReady()) deliverLaunch(request); else if (request) launchRequests.push(request);
+});
+{
+  const first = parseLaunchArgs(process.argv);
+  if (first) launchRequests.push(first);
+}
+// The renderer asks for the request that started the app once it has booted far enough to act on it.
+ipcMain.handle('project:take-launch-request', () => {
+  const request = launchRequests.shift() || null;
+  if (request) request.root = projectFolder.allow(request.root);
+  return request;
+});
+
 app.whenReady().then(() => {
+  if (!gotSingleInstance) return;
   if (!isDev) registerAppProtocol();
   installAppMenu();
   createWindow();
@@ -293,9 +356,10 @@ app.on('window-all-closed', () => {
 
 // --- Publish IPC -------------------------------------------------------------------------------
 
-async function pickDirectory(win, title) {
+async function pickDirectory(win, title, defaultPath) {
   const res = await dialog.showOpenDialog(win, {
     title,
+    ...(defaultPath ? { defaultPath } : {}),
     properties: ['openDirectory', 'createDirectory'],
   });
   if (res.canceled || res.filePaths.length === 0) return null;
@@ -466,13 +530,30 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
   }
 });
 
-// --- Script workspace IPC ----------------------------------------------------------------------
+// --- Project folder IPC ------------------------------------------------------------------------
 //
-// Mirrors the editor's script library into a folder the user picks, so it can be opened in VSCode. Every
-// channel (and all the filesystem work behind it) lives in scriptWorkspace.js; this just hands it the
-// Electron pieces it needs.
+// A desktop project is a folder: its files are the truth and the editor's IndexedDB only caches them. Every
+// read and write of one goes through projectFolder.js (snapshot, watcher, atomic writes, the allowlist).
+// `CLEO_PICK_DIRECTORY` lets a test harness answer the folder dialogs without a native one.
 
-scriptWorkspace.registerIpc({ ipcMain, BrowserWindow, pickDirectory });
+const pickProjectDirectory = process.env.CLEO_PICK_DIRECTORY
+  ? async () => {
+      const queue = process.env.CLEO_PICK_DIRECTORY.split(path.delimiter);
+      const next = queue.shift() || null;
+      process.env.CLEO_PICK_DIRECTORY = queue.join(path.delimiter);
+      return next;
+    }
+  : pickDirectory;
+// The project's `cleo` package: the headless runtime this build ships (app-kit SDK build), and the CLI.
+const sdkDir = () => (app.isPackaged
+  ? path.join(process.resourcesPath, 'sdk', 'cleo')
+  : path.join(__dirname, '..', '..', 'sdk', 'dist', 'cleo'));
+if (gotSingleInstance) controlPipe.start(app.getPath('userData'));
+controlPipe.registerIpc({ ipcMain, allow: (root) => projectFolder.allow(root) });
+projectFolder.registerIpc({
+  ipcMain, BrowserWindow, app, pickDirectory: pickProjectDirectory,
+  editorRecord: () => controlPipe.editorRecord(app), sdkDir, cliFile: path.join(__dirname, 'sdk', 'cleo.mjs'),
+});
 
 // --- Movie output IPC --------------------------------------------------------------------------
 //
