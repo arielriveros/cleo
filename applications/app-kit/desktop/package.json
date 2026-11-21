@@ -8,7 +8,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "node dev.js",
-    "dist": "electron-builder"
+    "dist": "cross-env ALLOW_ELECTRON_BUILDER_AS_PRODUCTION_DEPENDENCY=true electron-builder --publish never"
   },
   "build": {
     "appId": "com.cleo.editor",
@@ -30,7 +30,13 @@
       "windowControls.js",
       "playDebugger.js",
       "debugPort.js",
-      "icons/**"
+      "desktopUpdater.js",
+      "icons/**",
+      "!node_modules/app-builder-bin/!(${os})/**",
+      "!node_modules/7zip-bin/!(${os})/**"
+    ],
+    "asarUnpack": [
+      "node_modules/**"
     ],
     "extraResources": [
       {
@@ -44,17 +50,32 @@
       {
         "from": "../../host/dist",
         "to": "host",
-        "filter": ["**/*", "!**/*.map"]
+        "filter": [
+          "**/*",
+          "!**/*.map"
+        ]
       },
       {
         "from": "../../host/node_modules",
         "to": "host/node_modules",
-        "filter": ["**/*", "!@types/**", "!**/*.d.ts", "!**/*.map"]
+        "filter": [
+          "**/*",
+          "!@types/**",
+          "!**/*.d.ts",
+          "!**/*.map"
+        ]
       }
     ],
     "directories": {
       "output": "dist"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "arielriveros",
+        "repo": "cleo"
+      }
+    ],
     "fileAssociations": [
       {
         "ext": "cleo",
@@ -74,11 +95,25 @@
     "linux": {
       "target": "AppImage",
       "icon": "icons/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "Cleo-Editor-Setup-${version}.${ext}"
+    },
+    "dmg": {
+      "artifactName": "Cleo-Editor-${version}-${arch}.${ext}"
+    },
+    "appImage": {
+      "artifactName": "Cleo-Editor-${version}-${arch}.${ext}"
     }
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
-    "electron": "^31.7.0",
-    "electron-builder": "^24.13.3"
+    "electron": "^31.7.0"
+  },
+  "dependencies": {
+    "electron-builder": "^24.13.3",
+    "electron-updater": "^6.8.11"
   }
 }

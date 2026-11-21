@@ -1,0 +1,6 @@
+# Read only by an UNPACKAGED editor checking for updates: `CLEO_UPDATE_FEED=http://127.0.0.1:8765/ npm run dev`
+# (see desktopUpdater.js). electron-updater wants a cache folder name from it; the feed itself comes from
+# CLEO_UPDATE_FEED. Not in package.json `files`, so it never ships.
+provider: generic
+url: http://127.0.0.1:8765/
+updaterCacheDirName: cleo-desktop-updater-dev

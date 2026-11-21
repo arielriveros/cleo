@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "engine": {
     "gravity": [0, -9.81, 0],
     "maxSubsteps": 8,
@@ -17,6 +17,12 @@
     "resizable": true,
     "onlyUsedShaders": true,
     "webgl2Fallback": true
+  },
+  "identity": {
+    "version": "1.0.0",
+    "appId": "",
+    "icon": "",
+    "cover": ""
   },
   "features": {
     "disabled": []

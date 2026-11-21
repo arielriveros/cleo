@@ -139,6 +139,8 @@ export interface PublishJobInput {
   scriptsSource: string;
   templates: PlayerTemplates;
   zip: boolean;
+  /** The game's icon files (features/publish/gameIcons.ts), shipped beside index.html. */
+  icons?: { png: ArrayBuffer; ico: ArrayBuffer };
 }
 
 export interface PublishJobOutput {

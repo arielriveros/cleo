@@ -63,6 +63,31 @@ export interface PublishWindowSettings {
 }
 
 /**
+ * Who the published game is, as against how its window looks (`publish`): what an installer, an update and a
+ * player's machine know it by. Kept out of `publish` on purpose: that block is the published window's options,
+ * sent to the game whole, and "Reset publish options" sets it back to the defaults, which must never mint the
+ * game a new identity.
+ */
+export interface ProjectIdentitySettings {
+  /**
+   * The game's own version, semver (`1.0.0`, `1.2.0-beta.1`): its installer's and its package's, and written into
+   * game.bin. Raise it for every release; an update is a higher version. Not the save version (`saves.version`).
+   */
+  version: string;
+  /**
+   * The game's application id, reverse-DNS (`com.studio.game`): what Windows installs it under (its uninstaller
+   * entry and taskbar grouping), macOS's bundle id, and what an update must match to install over it. Empty until
+   * frozen: a new project gets one, an older one keeps what its installers were built with (`legacyAppId`) from
+   * its next publish. Changing it later makes the next installer a different app.
+   */
+  appId: string;
+  /** The image asset (texture id) the game's icon is made from: window, executable, installer, favicon. Empty: Cleo's. */
+  icon: string;
+  /** The project's cover image (texture id): its card in the project browser. Empty: the main scene's thumbnail. */
+  cover: string;
+}
+
+/**
  * The engine features this project's games leave out (Project ▸ Features; the catalog is the engine's
  * src/modules/catalog.ts). A DISABLED list, as Godot's build profiles are: a feature the engine gains later is
  * on in every project until someone turns it off.
@@ -124,15 +149,20 @@ export interface ProjectNetSyncSettings {
 
 export interface ProjectSettings {
   /**
-   * The settings' format (6: collision layer names, absent before and read as the engine's defaults). 2: the
-   * physics worker became the default. A stored 'off' from before that is the
+   * The settings' format. 2: the physics worker became the default. A stored 'off' from before that is the
    * old default rather than a choice, so it reads as 'on'. 3: features and addons. A project from before
    * reads as every feature on and the Claude Code addon on, which is what it had. 4: the MCP server is an addon of
    * its own, which Claude Code needs; a version-3 project with Claude Code on gets it, as the link was part of it.
+   * 5: Jolt became the default physics backend; a stored 'cannon' from before reads as 'jolt'. 6: collision layer
+   * names, absent before and read as the engine's defaults. 7: the game's identity (version, app id, icon, cover);
+   * a project from before reads as version 1.0.0 with no app id (frozen at its next publish from the title its
+   * installers were built with), no icon and no cover.
    */
   version: number;
   engine: EngineRuntimeSettings;
   publish: PublishWindowSettings;
+  /** Read tolerantly: a project from before reads as `1.0.0`, no app id, icon or cover. */
+  identity: ProjectIdentitySettings;
   features: ProjectFeatureSettings;
   addons: ProjectAddonSettings;
   /** Read tolerantly: a project from before saves existed reads as version 0 and the derived folder. */
@@ -148,7 +178,7 @@ export interface ProjectSettings {
   netsync: ProjectNetSyncSettings;
 }
 
-export const PROJECT_SETTINGS_VERSION = 6;
+export const PROJECT_SETTINGS_VERSION = 7;
 
 /** How many collision layers a project names (the engine's LAYER_COUNT). */
 export const COLLISION_LAYER_COUNT = 16;
@@ -174,6 +204,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   version: PROJECT_SETTINGS_VERSION,
   engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'on', physicsBackend: 'jolt', maxFrameDelta: 0.1, masterVolume: 1 },
   publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true, webgl2Fallback: true },
+  identity: { version: '1.0.0', appId: '', icon: '', cover: '' },
   features: { disabled: [] },
   addons: { enabled: [...LEGACY_ADDONS], settings: {} },
   saves: { version: 0, folder: '' },
@@ -192,6 +223,56 @@ export function resolveSaveFolder(s: ProjectSettings, projectName: string): stri
 }
 
 const ID = /^[\w.-]{1,64}$/;
+
+/** A game version: semver, with an optional pre-release (`1.0.0`, `2.1.3-beta.2`). Build metadata is not allowed. */
+const GAME_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/;
+/** A reverse-DNS application id: two segments or more, the first starting with a letter (`com.studio.game`). */
+const APP_ID = /^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z0-9-]+)+$/;
+const APP_ID_MAX = 128;
+/** The app id prefix Cleo has always given games (app-kit/desktop/gameTemplates.js `gameAppId`). */
+export const GAME_APP_ID_PREFIX = 'com.cleo.game.';
+
+/** A game version as typed, or '' when it is not one. */
+export function cleanGameVersion(raw: unknown): string {
+  const v = typeof raw === 'string' ? raw.trim().replace(/^v/i, '') : '';
+  return v.length <= 64 && GAME_VERSION.test(v) ? v : '';
+}
+
+/** An app id as typed, or '' when it is not one. */
+export function cleanAppId(raw: unknown): string {
+  const v = typeof raw === 'string' ? raw.trim() : '';
+  return v.length <= APP_ID_MAX && APP_ID.test(v) ? v : '';
+}
+
+/** The published game's name: the title, else the project's name (what MenuBar publishes under). */
+export function resolveGameName(s: ProjectSettings, projectName: string): string {
+  return s.publish.title.trim() || projectName.trim();
+}
+
+/**
+ * The app id a game's installers were built with before it had one of its own: the shell made it from the game's
+ * name (`com.cleo.game.` + its letters and digits). Kept for a project that predates identity, so its next
+ * installer still installs over the last one. Mirrors gameTemplates.js `gameAppId` (tests/desktopGameProtocol).
+ */
+export function legacyAppId(gameName: string): string {
+  const slug = String(gameName || '').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'cleogame';
+  return GAME_APP_ID_PREFIX + slug;
+}
+
+const BASE36 = '0123456789abcdefghijklmnopqrstuvwxyz';
+
+/** A new project's app id: its name's letters and a random tail, so two projects called the same never collide. */
+export function newAppId(name: string, random: () => number = Math.random): string {
+  const slug = String(name || '').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 40) || 'game';
+  let tail = '';
+  for (let i = 0; i < 6; i++) tail += BASE36[Math.min(35, Math.floor(random() * 36))];
+  return `${GAME_APP_ID_PREFIX}${slug}.${tail}`;
+}
+
+/** The app id a publish uses: the project's own, else the one its installers had (`legacyAppId`). */
+export function resolveAppId(s: ProjectSettings, projectName: string): string {
+  return cleanAppId(s.identity.appId) || legacyAppId(resolveGameName(s, projectName));
+}
 const idList = (v: unknown): string[] | null =>
   Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === 'string' && ID.test(x)))] : null;
 
@@ -202,6 +283,7 @@ const num = (v: unknown, d: number, min: number, max: number) =>
 export function parseProjectSettings(raw: unknown): ProjectSettings {
   const o = (raw && typeof raw === 'object' ? raw : {}) as any;
   const e = o.engine ?? {}, p = o.publish ?? {}, f = o.features ?? {}, a = o.addons ?? {}, sv = o.saves ?? {}, ns = o.netsync ?? {};
+  const id = o.identity ?? {};
   const d = DEFAULT_PROJECT_SETTINGS;
   const version = typeof o.version === 'number' && Number.isFinite(o.version) ? o.version : 1;
   // Before version 2 every project stored 'off' whether or not anyone chose it: it was the default.
@@ -235,6 +317,12 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       resizable: typeof p.resizable === 'boolean' ? p.resizable : d.publish.resizable,
       onlyUsedShaders: typeof p.onlyUsedShaders === 'boolean' ? p.onlyUsedShaders : d.publish.onlyUsedShaders,
       webgl2Fallback: typeof p.webgl2Fallback === 'boolean' ? p.webgl2Fallback : d.publish.webgl2Fallback,
+    },
+    identity: {
+      version: cleanGameVersion(id.version) || d.identity.version,
+      appId: cleanAppId(id.appId),
+      icon: typeof id.icon === 'string' && ID.test(id.icon) ? id.icon : '',
+      cover: typeof id.cover === 'string' && ID.test(id.cover) ? id.cover : '',
     },
     features: { disabled: idList(f.disabled) ?? [] },
     addons: {

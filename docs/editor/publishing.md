@@ -141,6 +141,22 @@ and never ship.
 The desktop game's page is still sandboxed: its one preload, `gamePreload.js`, lends it the save folder
 through four calls that take slot names, never paths.
 
+### Identity, icon and updates
+
+What a build says about itself comes from Options ▸ Project ▸ General ▸ Published game:
+
+| Setting | Where it goes |
+|---|---|
+| **Title** | The page's `<title>`, the desktop window's title and the installer's product name. |
+| **Version** | The desktop game's `package.json`, so its installer's name and its `latest.yml`, and `game.bin`'s manifest. |
+| **App id** | The installer, the Windows taskbar grouping, and `game.bin`'s manifest. An installer upgrades an install with the same app id. |
+| **Icon** | `icon.png` (512 px) and `icon.ico` (16 to 256 px) beside the game: the web page's favicon, the desktop window's icon, and the executable's, the installer's and the uninstaller's. |
+
+A desktop installer is written with its update files beside it: `latest.yml` (`latest-mac.yml`,
+`latest-linux.yml`) and the installer's `.blockmap`. Nothing reads them yet; they are what an update of the
+game will be offered from. See [Game updates](../design/game-updates.md) for the plan: full updates and content
+patches on the desktop, a version check on the web, and the stores.
+
 ## See also
 
-[Projects](projects.md) · [File formats](../reference/file-formats.md) · [Scene and game (scripting)](../scripting/scene-and-game.md)
+[Projects](projects.md) · [File formats](../reference/file-formats.md) · [Scene and game (scripting)](../scripting/scene-and-game.md) · [Game updates (plan)](../design/game-updates.md)

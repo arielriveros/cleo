@@ -193,3 +193,62 @@ describe('the desktop game folder', () => {
     }
   });
 });
+
+/**
+ * Who a published desktop game is (Options ▸ Project ▸ Published game: version, app id, icon). An installer only
+ * upgrades an install with the same app id, so the one a game has must reach electron-builder unchanged, and a
+ * project from before it had one must keep the id its installers were always given. None of this fails loudly:
+ * a wrong id installs a second copy of the game beside the first.
+ */
+describe('the desktop game identity', () => {
+  it('derives the app id an older project\'s installers had from its name, as the shell always did', () => {
+    expect(templates.gameAppId('My Game!')).toBe('com.cleo.game.mygame');
+    expect(templates.gameAppId('Hollow Keep 2')).toBe('com.cleo.game.hollowkeep2');
+    // Nothing left of the name: an id that is still one (the shell used to build `com.cleo.game.` here).
+    expect(templates.gameAppId('')).toBe('com.cleo.game.cleogame');
+    expect(templates.isAppId(templates.gameAppId('東京'))).toBe(true);
+  });
+
+  it('accepts only reverse-DNS app ids and semver versions', () => {
+    for (const ok of ['com.studio.game', 'com.cleo.game.keep.a1b2c3', 'io.x-y.z']) expect(templates.isAppId(ok), ok).toBe(true);
+    for (const bad of ['', 'game', 'com.', '.com.x', '1com.x', 'com..x', 'com.x/y', 'a'.repeat(130) + '.x']) expect(templates.isAppId(bad), bad).toBe(false);
+    for (const ok of ['1.0.0', '0.3.12', '2.1.0-beta.1']) expect(templates.isGameVersion(ok), ok).toBe(true);
+    for (const bad of ['', '1.0', 'v1.0.0', '01.0.0', '1.0.0+build', '1.0.0-']) expect(templates.isGameVersion(bad), bad).toBe(false);
+  });
+
+  it('puts the game\'s version in its package, and 1.0.0 for one that is not a version', () => {
+    expect(JSON.parse(templates.gamePackageJson('Keep', '31.7.7', '2.3.0')).version).toBe('2.3.0');
+    expect(JSON.parse(templates.gamePackageJson('Keep', '31.7.7')).version).toBe('1.0.0');
+    expect(JSON.parse(templates.gamePackageJson('Keep', '31.7.7', 'soon')).version).toBe('1.0.0');
+  });
+
+  it('writes the app id and version into window.json, and the shell groups its taskbar button and shows its icon by them', () => {
+    const out = mkdtempSync(join(tmpdir(), 'cleo-game-identity-'));
+    try {
+      templates.writeDesktopShell(out, { window: { title: 'Keep' }, appId: 'com.studio.keep', version: '1.4.0' });
+      expect(JSON.parse(readFileSync(join(out, 'window.json'), 'utf-8'))).toMatchObject({ appId: 'com.studio.keep', version: '1.4.0' });
+      templates.writeDesktopShell(out, { window: { title: 'Keep' }, appId: 'not an id', version: 'x' });
+      const win = JSON.parse(readFileSync(join(out, 'window.json'), 'utf-8'));
+      expect(win.appId).toBeUndefined();
+      expect(win.version).toBeUndefined();
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+    expect(templates.GAME_MAIN_JS).toContain('app.setAppUserModelId(appId)');
+    expect(templates.GAME_MAIN_JS).toMatch(/icon: windowIcon\(\)/);
+    expect(templates.GAME_MAIN_JS).toContain("process.platform === 'win32' ? 'icon.ico' : 'icon.png'");
+  });
+
+  it('Publish builds the installer under that app id, with the icon, and keeps its update files', () => {
+    const main = readFileSync(join(DESKTOP, 'main.js'), 'utf-8');
+    expect(main).toMatch(/const appId = isAppId\(options && options\.appId\) \? options\.appId : gameAppId\(name\);/);
+    expect(main).toMatch(/config: \{\s*appId,/);
+    expect(main).toContain('gamePackageJson(name, electronVersion, gameVersion)');
+    expect(main).toContain("publish: 'never'");
+    expect(main).toContain("publish: [{ provider: 'generic', url: `https://updates.invalid/${appId}/` }]");
+    expect(main).toContain('installerIcon: winIcon');
+    // The update files stay beside the installer (they used to be filtered out with the builder's logs).
+    expect(main).not.toMatch(/!\/\\.\(blockmap\|ya\?ml\)\$\/i\.test/);
+    expect(main).toContain('isInstallerArtifact(f.name)');
+  });
+});

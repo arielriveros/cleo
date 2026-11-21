@@ -4,7 +4,9 @@ const fs = require('fs');
 const os = require('os');
 const fsp = fs.promises;
 const { pathToFileURL } = require('url');
-const { GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme, writeDesktopShell } = require('./gameTemplates');
+const {
+  GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme, writeDesktopShell, gameAppId, isAppId, isGameVersion,
+} = require('./gameTemplates');
 const projectFolder = require('./projectFolder');
 const controlPipe = require('./controlPipe');
 const movieFiles = require('./movieFiles');
@@ -12,6 +14,7 @@ const playWindow = require('./playWindow');
 const devHostProcess = require('./devHostProcess');
 const debugPort = require('./debugPort');
 const windowControls = require('./windowControls');
+const desktopUpdater = require('./desktopUpdater');
 
 const isDev = process.env.CLEO_DEV === '1';
 
@@ -345,6 +348,7 @@ app.whenReady().then(() => {
   if (!isDev) registerAppProtocol();
   installAppMenu();
   createWindow();
+  updater.start();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -407,6 +411,30 @@ async function writeWebFiles(dir, files) {
   }
   await fsp.writeFile(path.join(dir, 'game.scripts.js'), files.scriptsJs || 'window.CLEO_GAME_SCRIPTS = {};\nwindow.CLEO_GAME_MODULES = {};\n', 'utf-8');
   await fsp.writeFile(path.join(dir, 'game.bin'), Buffer.from(files.gameBin));
+  // The game's icon (Options ▸ Project ▸ Published game ▸ Icon), made in the editor: the web page's favicon, the
+  // desktop window's icon, and the executable's and installer's.
+  for (const [file, bytes] of Object.entries(gameIconFiles(files.icons))) await fsp.writeFile(path.join(dir, file), bytes);
+}
+
+/** What an icon may be: PNG or ICO bytes, under a size no icon needs to reach. Checked: they arrive over IPC. */
+const ICON_FILES = {
+  'icon.png': (b) => b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47,
+  'icon.ico': (b) => b.length > 6 && b[0] === 0 && b[1] === 0 && b[2] === 1 && b[3] === 0,
+};
+const ICON_MAX_BYTES = 8 * 1024 * 1024;
+
+/** The icon files a publish writes, `{ 'icon.png': Buffer, 'icon.ico': Buffer }`, from what the editor sent. */
+function gameIconFiles(icons) {
+  const out = {};
+  if (!icons || typeof icons !== 'object') return out;
+  for (const [key, file] of [['png', 'icon.png'], ['ico', 'icon.ico']]) {
+    const raw = icons[key];
+    if (!raw) continue;
+    const bytes = Buffer.from(raw instanceof ArrayBuffer ? new Uint8Array(raw) : raw);
+    if (bytes.length > ICON_MAX_BYTES || !ICON_FILES[file](bytes)) throw new Error(`Refusing an icon that is not a ${file.slice(5).toUpperCase()}: ${file}`);
+    out[file] = bytes;
+  }
+  return out;
 }
 
 ipcMain.handle('publish:web', async (event, files, options) => {
@@ -435,6 +463,15 @@ ipcMain.handle('publish:web', async (event, files, options) => {
   }
 });
 
+// electron-builder packs a game's installer from inside this process, so it is one of the shell's dependencies
+// rather than a build tool. The packaged editor keeps its dependencies unpacked beside app.asar (`asarUnpack` in
+// package.json), and loads this one from there: the build runs with `process.noAsar` set (see below), under which
+// nothing inside the archive can be read -- electron-builder's own lazily required modules included.
+function loadElectronBuilder() {
+  if (!app.isPackaged) return require('electron-builder');
+  return require(path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'electron-builder'));
+}
+
 ipcMain.handle('publish:desktop', async (event, files, options) => {
   try {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -450,18 +487,25 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
       // 1) The web files + Electron scaffold. main.js serves the folder over game:// (gameProtocol.js), game.bin
       // a byte range at a time; its preload (gamePreload.js) only lends the page its save files (gameSaves.js).
       await writeWebFiles(stage, files);
-      const electronVersion = require('electron/package.json').version;
+      // The running shell's Electron: its npm package is a devDependency, absent from the packaged editor.
+      const electronVersion = process.versions.electron;
       const win0 = (options && options.window) || {};
       const title = typeof win0.title === 'string' && win0.title.trim() ? win0.title.trim().slice(0, 120) : '';
+      // Who the game is (Options ▸ Project ▸ Published game): its app id, which every installer of it must share to
+      // install over the last one, and its version. A project from before them sends none: the id is then the one
+      // its installers were always given, made from its name.
+      const appId = isAppId(options && options.appId) ? options.appId : gameAppId(name);
+      const gameVersion = isGameVersion(options && options.version) ? options.version : '1.0.0';
       // The project's window options (size, fullscreen, title), and the data folder its saves go in
       // (Options ▸ Project ▸ Saves); the game's main.js reads them at launch.
       writeDesktopShell(stage, {
         window: { ...win0, title },
         savesFolder: safeFolderName((options && options.savesFolder) || title || name),
+        appId, version: gameVersion,
       });
       // A folder published before had a preload that read all of game.bin into the page; nothing loads it now.
       await fsp.rm(path.join(stage, 'preload.js'), { force: true });
-      await fsp.writeFile(path.join(stage, 'package.json'), gamePackageJson(name, electronVersion), 'utf-8');
+      await fsp.writeFile(path.join(stage, 'package.json'), gamePackageJson(name, electronVersion, gameVersion), 'utf-8');
 
       // The runnable folder is played with `npm install && npm start`, which its README explains.
       if (!installer) {
@@ -479,11 +523,17 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
       const prevNoAsar = process.noAsar;
       process.noAsar = true;
       try {
-        const builder = require('electron-builder');
+        const builder = loadElectronBuilder();
+        const hasIcon = (file) => fs.existsSync(path.join(stage, file));
+        const winIcon = hasIcon('icon.ico') ? path.join(stage, 'icon.ico') : undefined;
+        const pngIcon = hasIcon('icon.png') ? path.join(stage, 'icon.png') : undefined;
         await builder.build({
           projectDir: stage,
+          // Nothing is uploaded from here: the publish block below exists so electron-builder writes the update
+          // files (latest.yml, the block map) a future updater reads. See docs/design/game-updates.md.
+          publish: 'never',
           config: {
-            appId: 'com.cleo.game.' + name.replace(/[^a-z0-9]/gi, '').toLowerCase(),
+            appId,
             productName: title || name,
             electronVersion,
             npmRebuild: false,
@@ -500,7 +550,13 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
               createDesktopShortcut: true,
               createStartMenuShortcut: true,
               include: nsisInclude,
+              ...(winIcon ? { installerIcon: winIcon, uninstallerIcon: winIcon, installerHeaderIcon: winIcon } : {}),
             },
+            ...(winIcon ? { win: { icon: winIcon } } : {}),
+            ...(pngIcon ? { mac: { icon: pngIcon }, linux: { icon: pngIcon } } : {}),
+            // A placeholder feed that never resolves (.invalid): the shell has no updater yet, but with a publish
+            // provider electron-builder writes latest.yml and app-update.yml, which an update needs to be offered.
+            publish: [{ provider: 'generic', url: `https://updates.invalid/${appId}/` }],
           },
         });
       } catch (e) {
@@ -513,15 +569,16 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
         process.noAsar = prevNoAsar;
       }
 
-      // The installer itself (Setup .exe / .dmg / .AppImage) sits at the top of the output; the
-      // update block maps and builder logs beside it are not needed to install the game.
+      // The installer itself (Setup .exe / .dmg / .AppImage) sits at the top of the output, with what a release
+      // of it needs for updates: its latest*.yml and its block map. electron-builder's own logs stay behind.
       const artifacts = (await fsp.readdir(outDir, { withFileTypes: true }))
-        .filter(f => f.isFile() && !/\.(blockmap|ya?ml)$/i.test(f.name))
+        .filter(f => f.isFile() && isInstallerArtifact(f.name))
         .map(f => f.name);
-      if (artifacts.length === 0) return { ok: false, error: 'Installer packaging produced no installer.' };
+      const setup = artifacts.find(f => INSTALLER_FILE.test(f));
+      if (!setup) return { ok: false, error: 'Installer packaging produced no installer.' };
       await fsp.mkdir(dir, { recursive: true });
       for (const f of artifacts) await fsp.copyFile(path.join(outDir, f), path.join(dir, f));
-      return { ok: true, path: path.join(dir, artifacts[0]) };
+      return { ok: true, path: path.join(dir, setup) };
     } finally {
       if (installer) await fsp.rm(stage, { recursive: true, force: true }).catch(() => {});
     }
@@ -529,6 +586,13 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
     return { ok: false, error: String(e && e.stack ? e.stack : e) };
   }
 });
+
+/** An installer electron-builder made. */
+const INSTALLER_FILE = /\.(exe|dmg|AppImage|deb|rpm|zip|pkg)$/i;
+/** What of an installer build a publish keeps: the installer, its update feed (latest*.yml) and its block map. */
+function isInstallerArtifact(name) {
+  return INSTALLER_FILE.test(name) || /^latest(-[a-z0-9]+)?\.yml$/i.test(name) || /\.blockmap$/i.test(name);
+}
 
 // --- Project folder IPC ------------------------------------------------------------------------
 //
@@ -582,3 +646,17 @@ debugPort.registerIpc({ ipcMain, play, product: `Cleo/${app.getVersion()}` });
 // Play › Multiplayer's local NetSync host, started by the editor instead of in a terminal; see devHostProcess.js.
 
 devHostProcess.registerIpc({ ipcMain, app, BrowserWindow, utilityProcess });
+
+// --- Updater IPC -------------------------------------------------------------------------------
+//
+// The editor updating itself from GitHub Releases, and the menu bar's Update button; see desktopUpdater.js.
+// Installing restarts the app: the editor has saved by then, so every window's unload guard stands down.
+
+const updater = desktopUpdater.registerIpc({
+  ipcMain, BrowserWindow, app, shell,
+  standDownUnloadGuards: () => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed() && !w.webContents.isDestroyed()) clearedToUnload.add(w.webContents.id);
+    }
+  },
+});

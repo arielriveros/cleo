@@ -50,7 +50,7 @@ export const FM_MODE_KEY = 'cleo_assets_view_mode'
 // (SVAR dedupes colliding names by appending '.new').
 
 export function useFileManagerBridge() {
-  const { mainScene, instance } = useCleoEngine()
+  const { mainScene, instance, projectSettings } = useCleoEngine()
   const { vfs, setVfs, libs, pathIndexRef, landingFolderRef, browsedFolderRef, depsRef } = useVfs()
 
   const apiRef = useRef<IApi | null>(null)
@@ -62,6 +62,11 @@ export function useFileManagerBridge() {
   sceneRef.current = mainScene
   const engineRef = useRef(instance)
   engineRef.current = instance
+  // The game's icon and cover (Options ▸ Project ▸ Published game) name textures that no scene or asset does.
+  const identityRef = useRef(projectSettings.identity)
+  identityRef.current = projectSettings.identity
+  const heldBySettings = (entry: VfsEntry) =>
+    entry.kind === 'texture' && !!entry.assetId && (identityRef.current.icon === entry.assetId || identityRef.current.cover === entry.assetId)
   const refreshingRef = useRef(false)
   // A delete confirmation is on screen. The interceptor is synchronous, so it cancels every pass while
   // this is set: without it a second Delete press opens a second dialog over the same ids, and once both
@@ -148,7 +153,8 @@ export function useFileManagerBridge() {
       case 'boneMask': return collectReferencedBoneMaskIds(scene).has(entry.assetId)
       case 'pose': return collectReferencedPoseAssetIds(scene).has(entry.assetId)
       case 'texture':
-        return collectReferencedTextureIds(scene, l.materials, l.models, l.templates, l.terrainMaterials,
+        return heldBySettings(entry) ||
+          collectReferencedTextureIds(scene, l.materials, l.models, l.templates, l.terrainMaterials,
                                            l.tilesets, [engineRef.current?.renderer?.colorGradingLut,
                                             engineRef.current?.renderer?.lensDirtTexture])
           .has(entry.assetId)
@@ -170,6 +176,7 @@ export function useFileManagerBridge() {
    */
   const referrerSuffix = useCallback((entry: VfsEntry, batch?: ReadonlySet<string>): string => {
     const names: string[] = []
+    if (heldBySettings(entry)) names.push(identityRef.current.icon === entry.assetId ? 'the game icon' : 'the project cover')
     for (const edge of assetGraph.incoming(assetKey(entry.kind, entry.assetId))) {
       if (batch?.has(edge.from)) continue // going away with it; not something the user is breaking
       const from = assetGraph.refOf(edge.from)

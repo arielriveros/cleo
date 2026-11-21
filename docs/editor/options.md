@@ -145,6 +145,21 @@ build fills the page it is embedded in, so only the title applies there.
 
 - **Title** — the window or browser-tab title, the desktop installer's product name and the folder a
   publish saves into. Empty = the project name.
+- **Version** — the game's own version, as three numbers (`1.2.0`, or `1.2.0-beta.1` before a release): its
+  installer's and its package's, and written into `game.bin`. Raise it for every release, since an update is a
+  higher version. 1.0.0 by default. It is not the save version below.
+- **App id** — the game's application id, reverse-DNS (`com.studio.game`): what Windows installs it under and
+  groups its taskbar button by, and what a newer installer must share to install over the old one. A new project
+  gets one of its own; an older one keeps the id its installers were always given (`com.cleo.game.` and its
+  name), written here at its next publish. Set it before the first release and keep it: changing it makes the
+  next installer a different app. See [Game updates](../design/game-updates.md).
+- **Icon** — the image the game's icon is made from: the desktop window's, the executable's and the installer's,
+  and the web page's favicon. Pick a square one of 512 pixels or more; another shape is fitted inside a square
+  with clear sides, and a small one comes out soft. None = Cleo's icon.
+- **Cover** — the project's picture: the card the project browser shows for it, instead of its main scene's
+  thumbnail. Pick an image, or press the camera to capture the view being edited (the focused pane of a split
+  viewport) at 1920×1080 and full detail, without the grid, gizmos, collider wireframes, icons or the selection
+  outline. A capture is an image in Assets ▸ Publishing; capturing again replaces it.
 - **Window size** — the desktop window's size at launch, in pixels.
 - **Start fullscreen** / **Resizable window** — how the desktop window opens, and whether the player
   may resize it.

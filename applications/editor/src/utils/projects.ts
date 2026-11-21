@@ -27,6 +27,13 @@ export type ProjectRecord = {
   /** Data URL of the project's main scene thumbnail, shown on its card in the browser. */
   thumbnail?: string;
   /**
+   * Data URL of the project's cover (Options ▸ Project ▸ Published game ▸ Cover), a small copy of it: shown on the
+   * card instead of the scene thumbnail while the project has one. `coverId` is the texture it was made from, so
+   * a new cover is noticed.
+   */
+  cover?: string;
+  coverId?: string;
+  /**
    * This project has already had its shot at the legacy single-scene `cleo_project` blob. Without it,
    * migrateLegacyProject runs once per project and imports that scene into every project the user creates.
    */
@@ -327,9 +334,32 @@ export async function renameProject(id: string, name: string): Promise<void> {
   await saveProjects((await loadProjects()).map(p => (p.id === id ? { ...p, name: trimmed } : p)));
 }
 
-/** Record a project's latest activity (and its cover image) for the browser's ordering and cards. */
-export async function touchProject(id: string, thumbnail?: string): Promise<void> {
-  const list = await loadProjects();
-  if (!list.some(p => p.id === id)) return;
-  await saveProjects(list.map(p => (p.id === id ? { ...p, updatedAt: Date.now(), thumbnail: thumbnail ?? p.thumbnail } : p)));
+/**
+ * Change one project's record. One at a time: two read-modify-writes of the registry racing (a save's touch, a new
+ * cover) would each write back the list they read, and one of them would be lost.
+ */
+let registryWrites: Promise<unknown> = Promise.resolve();
+export function updateProjectRecord(id: string, patch: (record: ProjectRecord) => ProjectRecord): Promise<void> {
+  const run = registryWrites.then(async () => {
+    const list = await loadProjects();
+    if (!list.some(p => p.id === id)) return;
+    await saveProjects(list.map(p => (p.id === id ? patch(p) : p)));
+  });
+  registryWrites = run.catch(() => {});
+  return run;
+}
+
+/** Record a project's latest activity (and its scene thumbnail) for the browser's ordering and cards. */
+export function touchProject(id: string, thumbnail?: string): Promise<void> {
+  return updateProjectRecord(id, p => ({ ...p, updatedAt: Date.now(), thumbnail: thumbnail ?? p.thumbnail }));
+}
+
+/** Set (or with null, clear) the cover a project's card shows instead of its scene thumbnail. */
+export function setProjectCover(id: string, cover: { url: string; coverId: string } | null): Promise<void> {
+  return updateProjectRecord(id, ({ cover: _c, coverId: _i, ...p }) => (cover ? { ...p, cover: cover.url, coverId: cover.coverId } : p));
+}
+
+/** What a project's card shows: its cover when it has one, else its main scene's thumbnail. */
+export function projectCardImage(record: Pick<ProjectRecord, 'cover' | 'thumbnail'>): string | undefined {
+  return record.cover || record.thumbnail || undefined;
 }

@@ -137,6 +137,21 @@ contextBridge.exposeInMainWorld('cleoDesktop', {
     },
   },
 
+  // The editor updating itself from GitHub Releases (desktopUpdater.js): the menu bar's Update button reads the
+  // state, and `onState` pushes every change; it returns an unsubscribe, and the raw listener never escapes here.
+  // `install` restarts into the downloaded version -- the editor saves and closes its project first.
+  updater: {
+    getState: () => ipcRenderer.invoke('updater:get-state'),
+    check: () => ipcRenderer.invoke('updater:check'),
+    install: () => ipcRenderer.invoke('updater:install'),
+    openRelease: () => ipcRenderer.invoke('updater:open-release'),
+    onState: (cb) => {
+      const listener = (_event, state) => cb(state);
+      ipcRenderer.on('updater:state-changed', listener);
+      return () => ipcRenderer.removeListener('updater:state-changed', listener);
+    },
+  },
+
   // Commands from the project's `cleo` CLI (controlPipe.js): play, open, ping. The editor says when it can take
   // them (`ready`), answers each one by its id.
   control: {

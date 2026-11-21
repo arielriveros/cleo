@@ -23,6 +23,8 @@ export interface PublishFiles {
   playerFiles: Record<string, string>;
   gameBin: ArrayBuffer; // all game data, binary-packed
   scriptsJs: string;   // per-game scripts as real functions (game.scripts.js)
+  /** The game's icon (features/publish/gameIcons.ts), when the project has one: icon.png and icon.ico. */
+  icons?: { png: ArrayBuffer; ico: ArrayBuffer };
 }
 
 /** Player templates are fetched same-origin on the main thread and handed to the job. */
@@ -43,6 +45,8 @@ export type ProjectJob =
       templates: PlayerTemplates;
       /** When true the job also zips the result and returns only the archive bytes. */
       zip: boolean;
+      /** The game's icon files, shipped beside index.html. */
+      icons?: { png: ArrayBuffer; ico: ArrayBuffer };
     }
   | { kind: 'exportBundle'; bundle: BundleData }
   | { kind: 'importBundle'; buffer: ArrayBuffer }
@@ -130,6 +134,7 @@ async function runPublish(job: Extract<ProjectJob, { kind: 'publish' }>): Promis
     playerFiles: job.templates.files,
     gameBin,
     scriptsJs,
+    ...(job.icons ? { icons: job.icons } : {}),
   };
 
   if (!job.zip) return { result: { kind: 'publish', files, warnings }, transfer: [gameBin] };
@@ -139,6 +144,10 @@ async function runPublish(job: Extract<ProjectJob, { kind: 'publish' }>): Promis
   for (const [file, text] of Object.entries(files.playerFiles)) archive.file(file, text);
   archive.file('game.scripts.js', files.scriptsJs);
   archive.file('game.bin', gameBin);
+  if (job.icons) {
+    archive.file('icon.png', job.icons.png);
+    archive.file('icon.ico', job.icons.ico);
+  }
   const zipped = await archive.generateAsync({ type: 'arraybuffer' });
 
   return { result: { kind: 'publish', zip: zipped, warnings }, transfer: [zipped] };

@@ -18,6 +18,10 @@ export interface PopoverProps {
   className?: string;
   /** Classes for the wrapper around the trigger (e.g. `w-full` for a full-width trigger). */
   rootClassName?: string;
+  /** Controlled: whether the panel is open. Leave out and the popover keeps its own. */
+  open?: boolean;
+  /** Told of every open and close (trigger, outside click, Escape, the children's `close()`). */
+  onOpenChange?: (open: boolean) => void;
 }
 
 /**
@@ -27,8 +31,19 @@ export interface PopoverProps {
  * an absolute panel is clipped by any ancestor overflow (the inspector's scroll container,
  * Collapsable's `overflow-hidden`), and z-index cannot lift it out of a clip.
  */
-export function Popover({ trigger, children, align = 'left', side = 'below', disabled, title, triggerClassName, className, rootClassName }: PopoverProps) {
-  const [open, setOpen] = useState(false);
+export function Popover({ trigger, children, align = 'left', side = 'below', disabled, title, triggerClassName, className, rootClassName, open: openProp, onOpenChange }: PopoverProps) {
+  const [ownOpen, setOwnOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : ownOpen;
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+  const openRef = useRef(open);
+  openRef.current = open;
+  const setOpen = useCallback((next: boolean | ((o: boolean) => boolean)) => {
+    const value = typeof next === 'function' ? next(openRef.current) : next;
+    if (!controlled) setOwnOpen(value);
+    if (value !== openRef.current) onOpenChangeRef.current?.(value);
+  }, [controlled]);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -69,7 +84,7 @@ export function Popover({ trigger, children, align = 'left', side = 'below', dis
       window.removeEventListener('scroll', onReflow, true);
       window.removeEventListener('resize', onReflow);
     };
-  }, [open, place]);
+  }, [open, place, setOpen]);
 
   return (
     <div className={cn('relative inline-block', rootClassName)}>

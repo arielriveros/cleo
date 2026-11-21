@@ -13,7 +13,7 @@ import { bootLoad, booting, finishIfSettled, LOGO, LOGO_PIXELS } from './bootLoa
 import { APPS, CreatorShellContext, appLabel, type AppId, type Tool } from './shell';
 import { Home } from './Home';
 import { creatorMenu } from './menuStore';
-import { VERSION_LABEL } from '../version';
+import { APP_CHANGELOG, VERSION_LABEL } from '../version';
 const TOOL_KEY = 'cleo_creator_tool';
 
 // Each sub-application is its own code chunk, fetched the first time it is selected: World Creator's
@@ -185,7 +185,8 @@ function CreatorMenus({ tool }: { tool: Tool }) {
     {dialog === 'shortcuts' && <ShortcutsDialog page='creator/index' anchor='keyboard-shortcuts' onClose={() => setDialog(null)} />}
     {dialog === 'about' && (
       <AboutDialog appName='Cleo Creator' version={VERSION_LABEL} logo={LOGO}
-                   lines={['World, FX, foliage and motion assets for the Cleo Engine.']} onClose={() => setDialog(null)} />
+                   lines={['World, FX, foliage and motion assets for the Cleo Engine.']} changelog={APP_CHANGELOG}
+                   onClose={() => setDialog(null)} />
     )}
   </>;
 }

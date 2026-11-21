@@ -21,6 +21,7 @@
     "build:sdk": "node tools/buildSdk.mjs",
     "test:project-folders": "node applications/app-kit/desktop/tools/projectFolderE2E.mjs",
     "test:example-folders": "node applications/app-kit/desktop/tools/exampleFolderE2E.mjs",
+    "test:updates": "node applications/app-kit/desktop/tools/updatesE2E.mjs",
     "editor:install": "cd applications && npm ci",
     "editor:dev": "node tools/ensurePlayer.mjs && node tools/ensureExamples.mjs && concurrently \"npm run watch:types\" \"npm run editor\"",
     "editor:build": "npm run build:player && node tools/ensureExamples.mjs && cd applications/editor && npm run build",

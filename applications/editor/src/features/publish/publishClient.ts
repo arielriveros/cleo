@@ -6,6 +6,7 @@ import type { PublishFiles, PlayerTemplates } from '../../workers/projectJobs';
 import type { PublishWindowSettings } from '../options/projectSettings';
 import { isSafePlayerPath, playerFeaturesFor, playerFilesFor, withModulePreloads, type PlayerBuild } from './playerManifest';
 import { selectShaders, type ShaderLibraryJson } from './shaderSelection';
+import { withGameHead, type GameIconFiles } from './gameIcons';
 
 // Re-exported so callers keep importing the publish types from the publish module.
 export type { PublishFiles } from '../../workers/projectJobs';
@@ -17,11 +18,33 @@ export interface PublishResult {
   error?: string;
 }
 
+/** What a desktop publish tells the shell, beside the files. */
+export interface DesktopPublishOptions {
+  installer: boolean;
+  /** The game's name: the shell saves the build in a folder of that name inside the one picked. */
+  name?: string;
+  window?: PublishWindowSettings;
+  /** The game's data folder under the player's app data (Options ▸ Project ▸ Saves). */
+  savesFolder?: string;
+  /** The game's application id (Options ▸ Project ▸ Published game ▸ App id): every installer of it shares it. */
+  appId?: string;
+  /** The game's version (Options ▸ Project ▸ Published game ▸ Version): its package's and its installer's. */
+  version?: string;
+}
+
+/** What the page and its files say about the game beyond its data: its title and its icon. */
+export interface PublishExtras {
+  /** The page's `<title>`. */
+  title?: string;
+  /** icon.png + icon.ico (gameIcons.ts), when the project has an icon. */
+  icons?: GameIconFiles | null;
+}
+
 // Exposed by the Electron preload (window.cleoDesktop) when running in the desktop app.
 export interface DesktopBridge {
   // `name` is the game's name: the shell saves the build in a folder of that name inside the one picked.
   publishWeb: (files: PublishFiles, options?: { name?: string }) => Promise<PublishResult>;
-  publishDesktop: (files: PublishFiles, options: { installer: boolean; name?: string; window?: PublishWindowSettings; savesFolder?: string }) => Promise<PublishResult>;
+  publishDesktop: (files: PublishFiles, options: DesktopPublishOptions) => Promise<PublishResult>;
 }
 
 export function getDesktopBridge(): DesktopBridge | undefined {
@@ -104,31 +127,35 @@ async function loadShaderLibrary(build: PlayerBuild, config: any): Promise<Shade
  * obfuscation, geometry dedupe, packing and zipping run off-thread. `data` is cloned into the worker,
  * so the packer's mutations never reach the caller's object.
  */
-async function assemble(data: any, zip: boolean) {
-  const { build, ...templates } = await loadPlayerTemplates(data?.config);
+async function assemble(data: any, zip: boolean, extras: PublishExtras = {}) {
+  const { build, ...loaded } = await loadPlayerTemplates(data?.config);
+  // The page as this game's: its title, and its icon when it ships one.
+  const icons = extras.icons ?? undefined;
+  const templates = { ...loaded, indexHtml: withGameHead(loaded.indexHtml, { title: extras.title, icon: !!icons }) };
   // Into the pack's manifest (pack.ts): the player's shaders read it.
   data.shaderLibrary = await loadShaderLibrary(build, data?.config);
   const { scripts, paths, modules } = extractScripts(data); // strips node scripts and modules out of `data`
   const scriptsSource = buildScriptsSource(scripts, paths, modules);
 
-  const output = await runPublishJob({ data, scriptsSource, templates, zip });
+  const output = await runPublishJob({ data, scriptsSource, templates, zip, ...(icons ? { icons } : {}) });
   for (const warning of output.warnings) Logger.warn(warning, 'Publish');
   return output;
 }
 
 /** Build the published file set (used by the desktop bridge, which writes them itself). */
-export async function assemblePublishFiles(data: any): Promise<PublishFiles> {
-  const { files } = await assemble(data, false);
+export async function assemblePublishFiles(data: any, extras: PublishExtras = {}): Promise<PublishFiles> {
+  const { files } = await assemble(data, false, extras);
   if (!files) throw new Error('Publish produced no files');
   return files;
 }
 
 // Web publish. Desktop -> native folder write. Browser -> .zip download.
-export async function publishWeb(data: any, name?: string): Promise<string> {
+export async function publishWeb(data: any, name?: string, extras: PublishExtras = {}): Promise<string> {
   const bridge = getDesktopBridge();
+  extras = { title: name, ...extras };
 
   if (bridge) {
-    const files = await assemblePublishFiles(data);
+    const files = await assemblePublishFiles(data, extras);
     const res = await bridge.publishWeb(files, { name });
     if (res.canceled) return 'Publish canceled';
     if (!res.ok) throw new Error(res.error || 'Publish failed');
@@ -136,7 +163,7 @@ export async function publishWeb(data: any, name?: string): Promise<string> {
   }
 
   // Browser fallback: the worker also zips, so the main thread only wraps the bytes and downloads.
-  const { zip } = await assemble(data, true);
+  const { zip } = await assemble(data, true, extras);
   if (!zip) throw new Error('Publish produced no archive');
 
   const blob = new Blob([zip], { type: 'application/zip' });
@@ -154,15 +181,19 @@ export async function publishWeb(data: any, name?: string): Promise<string> {
 // a native installer via electron-builder.
 export async function publishDesktop(
   data: any,
-  /** savesFolder: the game's data folder under the player's app data (Options ▸ Project ▸ Saves). */
-  options: { installer: boolean; name?: string; window?: PublishWindowSettings; savesFolder?: string },
+  options: DesktopPublishOptions,
+  extras: Pick<PublishExtras, 'icons'> = {},
 ): Promise<string> {
   const bridge = getDesktopBridge();
   if (!bridge) throw new Error('Desktop publishing is only available in the Cleo desktop app.');
-  const files = await assemblePublishFiles(data);
+  const files = await assemblePublishFiles(data, { title: options.window?.title?.trim() || options.name, ...extras });
   // The window settings travel to the desktop shell, which writes them next to the game's main.js
-  // (window size, fullscreen, title) and names the installer after the title.
-  const res = await bridge.publishDesktop(files, { installer: options.installer, name: options.name, window: options.window, savesFolder: options.savesFolder });
+  // (window size, fullscreen, title) and names the installer after the title; the app id and version go into
+  // its package and its installer.
+  const res = await bridge.publishDesktop(files, {
+    installer: options.installer, name: options.name, window: options.window, savesFolder: options.savesFolder,
+    appId: options.appId, version: options.version,
+  });
   if (res.canceled) return 'Publish canceled';
   if (!res.ok) throw new Error(res.error || 'Publish failed');
   return `Published desktop build to ${res.path}`;

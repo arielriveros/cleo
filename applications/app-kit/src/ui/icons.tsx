@@ -82,6 +82,16 @@ export const RestartIcon = (props: IconProps) => (
   <Glyph {...props}><path d='M4.5 12a7.5 7.5 0 1 0 2.2-5.3' /><path d='M4 3.5v4.5h4.5' /></Glyph>
 );
 
+/** An arrow down into a tray: an update to download, or downloading. */
+export const UpdateIcon = (props: IconProps) => (
+  <Glyph {...props}><path d='M12 3.5v11' /><path d='M7.5 10 12 14.5 16.5 10' /><path d='M4.5 15.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3' /></Glyph>
+);
+
+/** An arrow up out of a circle's gap: restart into the new version. */
+export const RestartUpdateIcon = (props: IconProps) => (
+  <Glyph {...props}><path d='M19.5 12a7.5 7.5 0 1 1-2.2-5.3' /><path d='M20 3.5v4.5h-4.5' /><path d='M12 15.5v-7' /><path d='M9 11.5l3-3 3 3' /></Glyph>
+);
+
 /** Two chain links: linked to an item of a library rather than owned. */
 export const LinkIcon = (props: IconProps) => (
   <Glyph {...props}>

@@ -12,7 +12,7 @@ const mem = new Map<string, string>();
 import {
   DEFAULT_PROJECT_SETTINGS, applyEngineRuntime, applyCollisionLayers, isDefaultProjectSettings, parseProjectSettings, projectSettingsConfig,
   physicsWorkerOverride, physicsWorkerOverrideSource, storePhysicsWorkerOverride, physicsBackendOverride,
-  cleanSaveFolder, resolveSaveFolder,
+  cleanSaveFolder, resolveSaveFolder, PROJECT_SETTINGS_VERSION,
 } from '../src/features/options/projectSettings';
 import { DEFAULT_EDITOR_PREFS, editorPrefsStore, getEditorPrefs, parseEditorPrefs } from '../src/features/options/editorPrefs';
 import { loadTabState, saveTabState } from '../src/utils/tabState';
@@ -120,7 +120,7 @@ describe('project settings', () => {
     expect(parseProjectSettings({ version: 5, engine: { physicsBackend: 'cannon' } }).engine.physicsBackend).toBe('cannon');
     // Once read it is stored at the current version (5 or later), so a project switched back to cannon stays there.
     const reread = parseProjectSettings(parseProjectSettings({ version: 4, engine: { physicsBackend: 'cannon' } }));
-    expect([reread.version, reread.engine.physicsBackend]).toEqual([6, 'jolt']);
+    expect([reread.version, reread.engine.physicsBackend]).toEqual([PROJECT_SETTINGS_VERSION, 'jolt']);
     expect(parseProjectSettings({ ...reread, engine: { ...reread.engine, physicsBackend: 'cannon' } }).engine.physicsBackend).toBe('cannon');
   });
 

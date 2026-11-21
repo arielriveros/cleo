@@ -10,6 +10,7 @@ import {
   type ProjectNetSyncSettings, type ProjectSaveSettings, type PublishWindowSettings,
 } from './projectSettings'
 import { useAssetLibrary } from '../AssetLibraryContext'
+import GameIdentityRows from './GameIdentityRows'
 
 // Options ▸ Project: what belongs to THIS game and travels with it — its name, the scene it starts in,
 // how a published build presents itself, online play, the input map and the collision layers' names. Carried in
@@ -124,6 +125,7 @@ function GeneralOptions() {
           <TextInput value={w.title} placeholder={name || 'Project name'} maxLength={120}
             onChange={v => setWindow({ title: v })} />
         </Field>
+        <GameIdentityRows projectName={name} />
         <Field label='Window size' labelClassName={OPTION_LABEL}>
           <div className='flex flex-1 items-center gap-1.5'>
             <NumberInput value={w.width} min={320} max={7680} step={1}
