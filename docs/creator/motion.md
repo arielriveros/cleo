@@ -16,6 +16,9 @@ model instead, add it as a [character](#characters).
 Clip events (a `hit`, a `footstep`) are not made here: they belong to the clip, and the Editor's clip
 player sets them. They survive every change you make to the motion afterwards.
 
+To animate over filmed action, link a video as the motion's [reference](#reference): it plays with the
+motion, frame for frame.
+
 ## Poses
 
 The left dock lists the poses, in two groups. Click one to select it and hold it in the viewport; drag one
@@ -146,16 +149,48 @@ segment to edit it in the key's **Parts** section; click a lane's name to select
 
 | Do | How |
 |---|---|
-| **Play** | **Play** in the Timeline, or **Space**. The preview loops. |
-| **Loop** | Bakes the clip to loop: set the last key to the first pose. |
+| **Play** | The [transport](#transport)'s play button, or **Space**. |
 | **Scrub** | Drag on the ruler. |
-| **Select a key** | Click its chip. The stage holds its pose, and the Pose tab edits it. |
-| **Retime** | Drag a chip. Keys snap to frames; the first key stays at 0. |
+| **Select a key** | Click its chip. The stage holds its pose, the Pose tab edits it, and the playhead moves to it, so a reference video shows that key's frame. |
+| **Retime** | Drag a chip. Keys snap to frames (a reference video's own frames, when it has them); the first key stays at 0. |
 | **Add a key** | Double-click the track (the selected pose), drag a pose from the Poses list onto it, or **+ Key** (at the playhead). A library pose dropped on it joins the motion's poses. |
 | **Delete a key** | **Delete**, or **Delete** in the Key section. |
 | **Zoom** | **Ctrl + wheel**, **−** / **+**, or **Fit**. |
 
 The shaded part of the ruler past the last key is the overlap tail: the trailing joints still arriving.
+
+With a [reference](#reference), the **Video** lane under the ruler lays the clip along the motion: a strip of
+its frames and, under them, its sound. Footsteps and impacts show as spikes, often the quickest way to time a
+contact. Drag the strip to slide the video along the motion; drag either end to trim it. The timeline runs
+to the end of the video when it is longer than the motion: past the clip's last frame the character holds
+its last pose, or cycles when the motion loops.
+
+Once the clip is [analysed](#analysis), the **Motion energy** lane under it draws how much the subject
+changes from frame to frame: the curve dips where the action holds or turns. A yellow mark at a dip is a
+key-pose candidate (click it to go there), a shaded stretch is held frames, and a red line is a cut. With
+[tracks](#tracking), a tracked foot's contacts show along its bottom in the track's colour, and a dot at the
+top marks where a tracked hand or head turns (click it to go there).
+
+### Transport
+
+The row at the top of the Timeline plays the motion. Left to right:
+
+| Button | Does | Key |
+|---|---|---|
+| **To the start** | The first frame (of the loop range, when one is set). | **Home** |
+| **Back one frame** | One frame back: the reference video's own frame, else one at the bake rate. **Shift** goes ten. | **,** or **←** |
+| **Play / Pause** | Plays the motion, the video with it. | **Space** |
+| **Forward one frame** | One frame on. **Shift** goes ten. | **.** or **→** |
+| **To the end** | The last frame. | **End** |
+| **Loop** | Playback wraps at the end; off, it stops there. | |
+| **Speed** | 0.1× to 2×: slow it down to read a fast action. | |
+
+**J**, **K** and **L** shuttle: **L** plays forwards and doubles the speed with each press, **J** does the same
+backwards, and **K** stops. **I** and **O** set a loop range at the playhead (its start and end); the range
+shows under the ruler, and its button beside the transport plays the whole timeline again.
+
+The timecode is minutes, seconds and the frame within the second. With a reference, the video's own frame
+number follows it.
 
 ### Key
 
@@ -207,10 +242,163 @@ The **Motion** tab holds what shapes the whole clip.
 - **Variation rate** — how fast the variation drifts.
 - **Seed** — picks another take of the variation.
 
-**Clip** — its **Frames per second**. **File ▸ Download .anim** writes `<name>.anim.json`, which holds
+**Clip** — its **Frames per second**: a common rate, the NTSC ones included (23.976, 29.97, 59.94), or any
+rate from 10 to 240. **Loop** bakes the clip to loop: set the last key to the first pose. **File ▸ Download
+.anim** writes `<name>.anim.json`, which holds
 the clip and the skeleton it was made on, and a `.motion.json` sidecar that regenerates it, both named
 after the asset (`untitled` on Scratch). **Assets ▸ Import** reads a `.motion.json` back as a new motion,
 to edit it again.
+
+## Reference
+
+The **Reference** tab links a video to the motion, to animate over filmed action: a person or an animal
+doing the move, a phone clip, a slow-motion take. The video plays with the motion frame for frame, over the
+3D view or behind the character, and the stage's camera can be set up as the one that filmed it, so the
+character stands in the footage's perspective. Step to the frame where the action turns, make a key there,
+and pose the character to match.
+
+The clip is kept in the library, under **/Video**; it stays in the Creator and is never sent to the Editor.
+A motion keeps only which clip it uses and how its time lines up.
+
+### Video
+
+**Load video…** adds a file: an `.mp4`, `.mov`, `.mkv` or `.webm` whose video the browser can decode (H.264,
+HEVC where the graphics card has it, VP8, VP9 or AV1; not ProRes or DNxHD). Its size, frame rate, length and
+codec show under its name. **From the library…** uses a clip already there; **Assets ▸ + Add ▸ Video
+reference…** and **Assets ▸ Import** add one too, and opening a clip in the Assets tab links it to the open
+motion. **Replace…** links another file and **Unlink** stops using one (the clip stays in the library).
+
+The first time a clip is opened its frames are read (where each one falls in time), and the Timeline's
+thumbnails and sound are made and kept with it.
+
+A phone often records at a **variable frame rate**: its frames are unevenly spaced. The tab says so, and
+every frame is then placed at its own time, so stepping and snapping still land on real frames.
+
+### Timing
+
+How the video's time lines up with the motion's. The motion's timeline is real time.
+
+- **Filmed at** — the rate the camera filmed at. It is the file's rate for ordinary footage; for slow motion
+  it is higher (a phone's 240 fps clip is stored at 30). The motion then runs at real speed, and a slow-motion
+  clip lies stretched out on the Timeline. **Real speed** sets it back to the file's rate.
+- **Offset** — the video's time at the motion's start. **Start here** makes the frame at the playhead start
+  the motion. Dragging the Video lane does the same thing by hand.
+- **In · out** — the stretch of the video used, in its own seconds. **Trim here** moves the nearer end to the
+  playhead. Dragging the lane's ends does it by hand.
+- **Motion** — the motion's bake rate. **Match video** bakes the motion at the video's real-time rate (the
+  rate it was filmed at), so every frame of the footage has a frame of the clip.
+- **Keys snap to the video's frames** — keys dragged on the Timeline, and the transport's frame steps, land on
+  the video's own frames; off, on the bake rate's.
+
+### Display
+
+How the video is drawn in the viewport:
+- **Off** hides it; **Over** draws it over the 3D view, see-through, at its **Opacity**.
+- **Behind** draws it behind the character, wherever nothing else is: the floor is hidden, the grid and the
+  skeleton stay on top. With [Look through](#camera) the character then stands in the footage.
+- **Difference** draws the difference of the two pictures instead: where the character covers the filmed
+  body exactly it goes dark, so a pose can be matched by making the silhouette disappear.
+- **Mirror** flips it left to right, for footage of the other side.
+- **Film gate** darkens the viewport outside the video's frame.
+- **Sound** plays the video's sound while the motion plays forwards at up to twice real speed.
+- **Decode at** — the width the video is decoded at for the viewport. A smaller size plays a 4K clip smoothly.
+
+The video is always shown whole, as large as fits the viewport.
+
+### Analysis
+
+**Analyze** reads the whole clip in the background, frame by frame at a small size, and keeps what it
+finds with the clip. It uses no AI: every step is ordinary image arithmetic, so what it finds can be
+checked by eye.
+
+- **Key poses** — the subject's motion energy (how much its pixels change from the frame before) falls
+  where the action holds or turns: a contact, an extreme, the top of a jump. Its dips, ranked by how deep
+  they are against the curve around them and kept a little apart, are the **key candidates**. **Key
+  sensitivity** offers fewer, surer ones or more. **Add keys at candidates** makes a key at each, with a pose
+  from the motion there, ready to pose against its frame.
+- **Held frames** — a frame no different from the one before. When most of the clip holds every other
+  frame the tab says **animated on twos** (or threes): the drawings change at half the frame rate.
+- **Cuts** — a jump in the frame's brightness histogram far beyond the clip's usual change: a shot
+  change, where the clip probably wants trimming.
+- **Subject** — with a still camera, the empty scene is each pixel's median over many frames (anything
+  that moves covers a pixel in fewer than half of them), worked out per shot. What differs from it, in
+  brightness or colour, cleaned of specks and holes, is the moving subject, and its largest region its box.
+  **Show its box** outlines it over the video. **Crop** zooms the Over display onto it: **Subject** onto
+  everywhere it goes (a still crop), **Follow** onto it frame by frame (the same size throughout, so it never
+  pumps). Looking through the camera and Behind always show the whole frame.
+
+A clip filmed with a moving camera has no still background: the tab warns that the subject's box is then
+unreliable. The key candidates still come from the whole frame's energy.
+
+### Tracking
+
+Follows points through the clip: a foot, a hand, the head, anything with a little texture. No AI here
+either: each point's small window is matched from frame to frame by the Lucas–Kanade method, coarse to
+fine, and every step is checked by tracking back to where it came from. A point that does not come back
+(hidden behind a leg, blurred) is lost there rather than guessed on.
+
+- **Show the tracks** draws each point on the frame shown, with a short trail of where it was and will be.
+- Pick what the point is (**Left foot**, **Right foot**, **Left hand**, **Right hand**, **Head**,
+  **Other**), **Add point**, and click it on the frame. **Suggest** offers the subject's furthest points on
+  the frame (head, hands, feet, a tail: the ends of its silhouette, for animals too); click one to track it.
+- **Track** follows every point through the whole clip. When a point slips, step to a frame where it is
+  wrong and drag it into place: that frame becomes a seed, and the stretches either side are tracked again
+  from it and blended. Change a track's role in the list; **Remove** deletes it.
+- A foot track's **contacts** are where it stays still: planted. A hand's or the head's turns are where it
+  reverses: extremes worth a key.
+- **Plant feet** sets the foot's IK goal in every key inside one of its contacts: over the point where the
+  tracked foot meets the floor through the reference [camera](#camera), at the foot's standing height. A pose
+  another key shares is copied for the key first. It needs the camera set up, and works best tracking a
+  textured point on the shoe near the sole: a point on the outline's edge can slide onto the floor behind.
+
+The tracks belong to the clip and are kept with it, whichever motion uses it.
+
+### Camera
+
+The camera the video was filmed with, as the stage's camera.
+
+- **Look through** frames the viewport as the video: the reference camera's place, roll and lens, with the
+  video's frame filling the film gate. Orbiting still works and moves the view, not the camera.
+- **Set from view** makes the view as it is now the reference camera: orbit until the grid lies on the filmed
+  floor and the character stands where the subject does, then set it. Without a camera yet, Look through
+  starts from the view.
+- **Lens** — the focal length, on the chosen **sensor** (a phone's is usually quoted as a 35 mm equivalent:
+  use Full frame). A frame filmed upright takes the sensor's long side.
+- **Turn** turns the camera about the subject, so it faces another way in the shot.
+
+The line under the lens reads the camera back: its field of view, tilt, roll and height over the ground.
+
+### Calibrate
+
+Solves the camera from lines drawn on the frame, with no guessing by eye. **Show the lines** draws them over
+the video:
+- the **red** lines go along one direction of the filmed floor (tile edges, a road, the foot of a wall), the
+  **blue** along the direction square to it. Each pair is dashed on to where it meets: its vanishing point.
+  The yellow dashed line is the horizon they give.
+- the **white cross** goes under the subject's feet: the world's origin, where the character stands.
+- the **green mark** goes on top of the subject's head, straight above the cross: with its **Height** it sets
+  how far away the camera is. **Ruler** instead takes two points on the floor a known **Length** apart.
+
+**Two axes** solves the lens too, from where the two pairs meet. When one direction of the floor runs
+straight across the frame (a shot square to a wall), its lines never meet: use **One axis + lens**, give the
+lens, and draw the blue lines along the floor going away and one red line across it (for the roll).
+
+The camera follows every drag, and is set when the drag ends. The line under the switches says what was
+solved, or what is wrong (lines that never meet, a cross above the horizon).
+
+### Match pose
+
+Solves the camera from the character itself. Pose the character as the subject is in the frame, pick a
+joint, **Pin**, and click where that joint is in the video; do the same for four joints or more, spread over
+the body. **Match the camera** finds the camera that puts each joint on its pin. **Solve the lens too**
+frees the lens as well (five pins or more). **Show the pins** draws them, each with a line to where the
+camera puts its joint; the error in pixels follows the button.
+
+### Keys
+
+**Key from frame** makes a key at the playhead with a new pose, named after the video's frame: the motion as
+it is at that moment, ready to be posed against the frame. While a key is selected the viewport holds its
+pose over its frame, and the transport's frame steps still move the video, to compare the frames around it.
 
 ## Characters
 

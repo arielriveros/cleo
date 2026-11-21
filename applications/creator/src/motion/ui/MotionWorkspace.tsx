@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Collapsable, LinkIcon, NumberInput, SegmentedControl, Select, Slider, Toggle } from '@cleo/app-kit/ui';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
 import { confirmDialog, promptDialog } from '@cleo/app-kit/feedback/dialogStore';
@@ -10,6 +10,7 @@ import { CreatorWorkspace, ListRow, PanelBody, PanelHeader, ViewportOverlay } fr
 import { downloadAll } from '../../core/download';
 import { useCreatorAsset, writeCreatorAsset } from '../../core/useCreatorAsset';
 import { useStageCapture } from '../../core/stageCapture';
+import { subscribeOpen, takeOpen } from '../../core/creatorOpen';
 import { useGeneration } from '../../core/useGeneration';
 import { frameBox, installOrbitCamera } from '../../fx/ui/fxPreview';
 import { bakeMotion, bakePose, gripFrom, limbTipFrame, mirrorPose, poseFromClip, solvedPoseLocals, type BakedClip } from '../bakeMotion';
@@ -18,9 +19,29 @@ import type { ExportFile } from '../../core/generator';
 import type { Animation } from 'cleo/animation/animatedModel';
 import { exportMotion } from '../exportMotion';
 import {
-  DEFAULT_MOTION, LIMB_CHAINS, LIMB_LABELS, LIMB_MIRROR, LIMBS, motionDuration, newId, normaliseMotion, restPose,
-  type IkGoal, type Limb, type MotionDoc, type MotionPose, type Vec3,
+  DEFAULT_MOTION, FPS_PRESETS, LIMB_CHAINS, LIMB_LABELS, LIMB_MIRROR, LIMBS, motionDuration, newId, normaliseMotion, presetBlend, restPose,
+  type IkGoal, type Limb, type MotionDoc, type MotionKey, type MotionPose, type Vec3,
 } from '../motionDoc';
+import { MotionTransport, motionClipTime, type TransportState } from '../reference/transport';
+import {
+  newReference, referenceSpan, showsVideoAt, timelineFrames, videoFrameAt, videoTimeOf, type FrameGrid, type MotionReference,
+} from '../reference/referenceDoc';
+import { importVideo } from '../reference/videoImport';
+import { normaliseVideoDoc, rateLabel } from '../reference/videoDoc';
+import { useReference } from './useReference';
+import { ReferencePanel } from './ReferencePanel';
+import { ReferenceOverlay } from './ReferenceOverlay';
+import { CalibrationOverlay } from './CalibrationOverlay';
+import { useReferenceBackdrop } from './referenceBackdrop';
+import type { Rect } from '../reference/gate';
+import { projectPoint, cameraBasis, videoFovOfView, viewportFov, type ReferenceCamera, type Vec2 } from '../reference/referenceCamera';
+import { defaultCalibration, solveCalibration, type CalibrationDoc } from '../reference/calibrate';
+import { analysisFrameAt, readAnalysis } from '../reference/cv/analysisView';
+import { followCrop } from '../reference/cv/signal';
+import { timelineTimeOf } from '../reference/referenceDoc';
+import { TrackOverlay } from './TrackOverlay';
+import { newTrack, plantFeet as plantFeetIn, withSeed, type TrackRole } from '../reference/tracks';
+import type { Extremity } from '../reference/cv/silhouette';
 import { loadSavedPresets, type BlendPreset } from '../blendCurve';
 import { boneGroups, defaultParts } from '../parts';
 import {
@@ -49,6 +70,10 @@ import { DEFAULT_MOTION_STAGE, MotionStage, type MotionStageSettings } from './m
 // Poses are the motion's own, or LIBRARY poses (poseAsset.ts: Pose assets in the shared library, per
 // subject) that the motion uses live: editing one edits the asset, and every motion on the subject that
 // uses it follows -- this one at once, the others re-baked and re-published as the asset is saved.
+//
+// A REFERENCE video (the Reference tab, reference/) plays with the motion: the transport (reference/
+// transport.ts) owns the playhead in the Pose and Motion views, the character is seeked to it every frame,
+// and the video shows the frame of the same moment -- over the 3D view, a frame at a time when stepping.
 //
 // The subject is the mannequin or a CHARACTER: a rigged model uploaded with Assets ▸ + Add ▸ Rigged
 // character… (motion/characterImport.ts). A character keeps its file's clips -- renamed, hidden or dropped
@@ -80,7 +105,13 @@ export function MotionWorkspace() {
   const [view, setView] = useState<View>('pose');
   const [clip, setClip] = useState<BakedClip | null>(null);
   const [time, setTime] = useState(0);
+  /** The clip view's play state (its clip runs on the animator); the other views play on the transport. */
   const [playing, setPlaying] = useState(true);
+  const transportRef = useRef<MotionTransport | null>(null);
+  const transport = transportRef.current ??= new MotionTransport();
+  const readTransport = (): TransportState => ({ playing: transport.playing, rate: transport.rate, loop: transport.loop, range: transport.range });
+  const [transportState, setTransportState] = useState<TransportState>(readTransport);
+  useEffect(() => transport.subscribe(() => setTransportState(readTransport())), [transport]); // eslint-disable-line react-hooks/exhaustive-deps
   const stageRef = useRef<MotionStage | null>(null);
   const orbit = useRef<ReturnType<typeof installOrbitCamera> | null>(null);
   const exportJob = useGeneration();
@@ -95,6 +126,12 @@ export function MotionWorkspace() {
   const [savedPresets, setSavedPresets] = useState<BlendPreset[]>(loadSavedPresets);
 
   const setDoc = (d: MotionDoc) => { const n = normaliseMotion(d); docRef.current = n; setDocState(n); };
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const stageSettingsRef = useRef(stageSettings);
+  stageSettingsRef.current = stageSettings;
+  /** The clip time the character was last seeked to in the Motion view (NaN: seek again). */
+  const seekedAt = useRef(NaN);
   const subject = doc.characterId ?? null;
   const ready = !!rig && rigSubject === subject;
   useEffect(() => { const t = setTimeout(() => save(DOC_KEY, doc), 250); return () => clearTimeout(t); }, [doc]);
@@ -379,8 +416,8 @@ export function MotionWorkspace() {
         setClip(motion);
         if (view === 'pose') stage.show(bakePose(rig, pose), false, 0);
         else if (view === 'clip') { if (sourceClip) stage.playSource(sourceClip); }
-        // The preview always loops, so a one-shot can be watched again and again.
-        else { stage.show(motion, true); if (!playing) stage.seek(Math.min(time, motion.samplers[0]?.input.at(-1) ?? 0)); }
+        // The motion: the transport holds the playhead, so an edit re-bakes under it without starting over.
+        else { stage.show(motion, true, motionClipTime(transport.time, motion.samplers[0]?.input.at(-1) ?? 0, docRef.current.loop)); seekedAt.current = NaN; }
         publish(motion, doc);
       } catch (e) {
         console.error(e);
@@ -390,23 +427,288 @@ export function MotionWorkspace() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rig, doc, view, pose, sourceClip, asset.name]);
+  const clipRef = useRef(clip);
+  clipRef.current = clip;
   function publish(motion: BakedClip, from: MotionDoc) {
     const skin = stageRef.current?.skin;
     if (!asset.active || !skin || !ready) return;
     asset.publish({ from, files: exportMotion(from, motion, skin as any, rigName, asset.name) });
   }
 
-  // The playhead, for the scrubber.
+  // --- The reference video and the transport ---
+  const reference = useReference(doc.reference?.videoId, stageSettings.refProxy);
+  const referenceRef = useRef(reference);
+  referenceRef.current = reference;
+  const clipEnd = clip?.samplers[0]?.input.at(-1) ?? motionDuration(doc);
+  const timelineEnd = Math.max(clipEnd, doc.reference ? referenceSpan(doc.reference).end : 0, 0.5);
+  const grid = useMemo<FrameGrid>(() => {
+    const ref = doc.reference;
+    if (ref && reference.timestamps && stageSettings.refSnap) {
+      const frames = timelineFrames(ref, reference.timestamps);
+      if (frames.length > 1) return { frames };
+    }
+    return { fps: doc.fps };
+  }, [doc.reference, doc.fps, reference.timestamps, stageSettings.refSnap]);
+  transport.grid = grid;
+  transport.end = timelineEnd;
+
+  // Every frame, before the stage draws: the transport moves, the character follows it (Motion view), and
+  // the video shows the frame of the same moment (Pose and Motion views).
   useEffect(() => {
-    const id = setInterval(() => { const s = stageRef.current; if (s && view !== 'pose') setTime(s.time()); }, 100);
+    const stage = stageRef.current;
+    if (!stage) return;
+    stage.onTick = dt => {
+      const v = viewRef.current;
+      if (v === 'motion') {
+        transport.advance(dt);
+        const c = clipRef.current;
+        const ct = motionClipTime(transport.time, c?.samplers[0]?.input.at(-1) ?? 0, docRef.current.loop);
+        if (c && Math.abs(ct - seekedAt.current) > 1e-6) { stage.seek(ct); seekedAt.current = ct; }
+      }
+      const ref = docRef.current.reference, player = referenceRef.current.player, st = stageSettingsRef.current;
+      if (!player || !ref) return;
+      const t = transport.time;
+      const vt = v !== 'clip' && st.refMode !== 'off' && showsVideoAt(ref, t) ? videoTimeOf(ref, t) : null;
+      const rate = v === 'motion' && transport.playing ? transport.rate * ref.speed : 0;
+      player.show(vt, rate);
+      player.sound(vt, rate, !st.refSound);
+    };
+    return () => { stage.onTick = null; };
+  }, [rig, transport]);
+  // A change of view hands the character to that view's own clip; back in Motion it is seeked again.
+  useEffect(() => { seekedAt.current = NaN; }, [view]);
+
+  // The playhead, for the readouts.
+  useEffect(() => {
+    const id = setInterval(() => { const s = stageRef.current; if (s) setTime(view === 'clip' ? s.time() : transport.time); }, 100);
     return () => clearInterval(id);
-  }, [view]);
-  const scrub = (t: number) => { if (view === 'pose') setView('motion'); setPlaying(false); stageRef.current?.seek(t); setTime(t); };
+  }, [view, transport]);
+  const stageTime = useCallback(() => (viewRef.current === 'clip' ? stageRef.current?.time() ?? 0 : transport.time), [transport]);
+  const scrub = (t: number) => {
+    if (view === 'clip') { setPlaying(false); stageRef.current?.seek(t); setTime(t); return; }
+    if (view === 'pose') setView('motion');
+    transport.pause();
+    transport.seek(t);
+    setTime(transport.time);
+  };
   const showSourceClip = (source: string) => { setSourceClip(source); setView('clip'); setPlaying(true); stageRef.current?.playSource(source); };
   const togglePlay = () => {
-    if (view === 'pose') { setView('motion'); setPlaying(true); return; }
-    if (playing) stageRef.current?.pause(); else stageRef.current?.play();
-    setPlaying(!playing);
+    if (view === 'pose') { setView('motion'); transport.play(); return; }
+    if (view === 'clip') {
+      if (playing) stageRef.current?.pause(); else stageRef.current?.play();
+      setPlaying(!playing);
+      return;
+    }
+    transport.toggle();
+  };
+  const stepFrames = (n: number) => {
+    if (view === 'clip') { const s = stageRef.current; if (s) { setPlaying(false); s.seek(Math.max(0, s.time() + n / docRef.current.fps)); } return; }
+    transport.step(n);
+    setTime(transport.time);
+  };
+  const toStart = () => { if (view === 'clip') { stepFrames(-1e6); return; } transport.toStart(); setTime(transport.time); };
+  const toEnd = () => { if (view === 'clip') { stepFrames(1e6); return; } transport.toEnd(); setTime(transport.time); };
+  /** J / K / L: play backwards (faster each press), stop, play forwards (faster each press). */
+  const shuttle = (dir: -1 | 0 | 1) => {
+    if (view === 'clip') { togglePlay(); return; }
+    if (view === 'pose') setView('motion');
+    if (dir === 0) { transport.pause(); transport.setRate(1); return; }
+    const r = transport.rate;
+    transport.setRate(transport.playing && Math.sign(r) === dir ? r * 2 : dir);
+    transport.play();
+  };
+
+  const setReference = (r: MotionReference) => setDoc({ ...docRef.current, reference: r });
+  const linkVideo = async (source: File | string | null) => {
+    if (source === null) { const { reference: _, ...rest } = docRef.current; setDoc(rest); return; }
+    try {
+      let id: string, start: number, duration: number;
+      if (typeof source === 'string') {
+        if (docRef.current.reference?.videoId === source) return;
+        const meta = await getCreatorAsset(source);
+        const vd = meta && !meta.deleted ? normaliseVideoDoc(meta.doc) : null;
+        if (!vd) throw new Error('That clip is not in the library any more.');
+        ({ start, duration } = vd);
+        id = source;
+      } else {
+        const made = await importVideo(source);
+        id = made.id;
+        ({ start, duration } = made.doc);
+        toast.success(`${made.name} is in the library, under /Video.`);
+      }
+      setDoc({ ...docRef.current, reference: newReference(id, start, duration) });
+      transport.seek(0);
+    } catch (e) {
+      toast.error(String((e as Error)?.message ?? e), { title: 'Could not use the video' });
+    }
+  };
+  // --- Matching the stage camera to the video's ---
+  const [gateView, setGateView] = useState<{ gate: Rect | null; view: { w: number; h: number } }>({ gate: null, view: { w: 0, h: 0 } });
+  const gateRef = useRef(gateView);
+  gateRef.current = gateView;
+  const gateKey = gateView.gate ? `${gateView.gate.w.toFixed(1)}x${gateView.gate.h.toFixed(1)}@${gateView.view.w}x${gateView.view.h}` : '';
+  const [lookThrough, setLookThroughState] = useState(false);
+  const lookRef = useRef(lookThrough);
+  lookRef.current = lookThrough;
+  const [calibrating, setCalibrating] = useState<'off' | 'lines' | 'pins'>('off');
+  const [calibDraft, setCalibDraft] = useState<CalibrationDoc | null>(null);
+  const [placingPin, setPlacingPin] = useState<string | null>(null);
+  const video = reference.video;
+  const subjectHeight = rig ? rig.height * (stageRef.current?.displayScale ?? 1) : 1.75;
+  useEffect(() => { setCalibDraft(null); setPlacingPin(null); }, [doc.reference?.videoId]);
+  const calibration = doc.reference && video ? calibDraft ?? doc.reference.calib ?? defaultCalibration(video.width, video.height, subjectHeight) : null;
+  const solve = useMemo(() => (calibration && video ? solveCalibration(calibration, video.width, video.height) : null), [calibration, video]);
+
+  /** The view framed through a reference camera: its place, its roll, the video's lens in this viewport's gate. */
+  const frameThrough = (cam: ReferenceCamera) => {
+    const o = orbit.current, gv = gateRef.current;
+    if (!o || !gv.gate || gv.view.h < 1) return;
+    o.frame({ target: [...cam.target], distance: cam.distance, pitch: cam.pitch, yaw: cam.yaw, roll: cam.roll, fov: viewportFov(cam.vfov, gv.gate.h, gv.view.h) });
+  };
+  useEffect(() => {
+    const cam = doc.reference?.camera;
+    if (lookThrough && cam) frameThrough(cam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lookThrough, doc.reference?.camera, gateKey]);
+  const setLookThrough = (on: boolean) => {
+    setLookThroughState(on);
+    if (!on) { const c = orbit.current?.current(); if (c) orbit.current!.frame({ ...c, roll: undefined, fov: undefined }); }
+  };
+  /** The view as a reference camera: the orbit, with the video's lens (from the view's when it has none). */
+  const viewCamera = (): ReferenceCamera | null => {
+    const o = orbit.current?.current(), gv = gateRef.current;
+    if (!o || !camera) return null;
+    const own = docRef.current.reference?.camera;
+    const vfov = lookRef.current && own ? own.vfov : gv.gate && gv.view.h > 0 ? videoFovOfView(camera.camera.fov, gv.gate.h, gv.view.h) : camera.camera.fov;
+    return { target: [...o.target] as Vec3, distance: o.distance, pitch: o.pitch, yaw: o.yaw, roll: o.roll ?? 0, vfov };
+  };
+  const setCamera = (c: ReferenceCamera) => {
+    const ref = docRef.current.reference;
+    if (ref) setDoc({ ...docRef.current, reference: { ...ref, camera: c } });
+  };
+  /**
+   * A calibration edit: solved at once (and shown through, when looking through); when the edit is done it
+   * is written, with the solved camera when the lines, origin or scale changed (not for a pin).
+   */
+  const setCalibration = (next: CalibrationDoc, done: boolean) => {
+    const ref = docRef.current.reference, v = referenceRef.current.video;
+    if (!ref || !v) return;
+    const res = solveCalibration(next, v.width, v.height);
+    const before = calibDraft ?? ref.calib ?? defaultCalibration(v.width, v.height, subjectHeight);
+    const lines = JSON.stringify({ ...next, pins: [] }) !== JSON.stringify({ ...before, pins: [] }) || !ref.camera;
+    if (res.ok && lines && lookRef.current) frameThrough(res.solve.camera);
+    if (!done) { setCalibDraft(next); return; }
+    setCalibDraft(null);
+    setDoc({ ...docRef.current, reference: { ...ref, calib: next, ...(res.ok && lines ? { camera: res.solve.camera } : {}) } });
+  };
+  const jointPositions = () => {
+    const out = new Map<string, Vec3>();
+    for (const [k, v] of stageRef.current?.jointWorld() ?? []) out.set(k, [v[0], v[1], v[2]]);
+    return out;
+  };
+  // Behind: the frames to the renderer's backdrop, the floor out of the way.
+  const behind = !!doc.reference && stageSettings.refMode === 'behind' && view !== 'clip';
+  useReferenceBackdrop(instance, reference.player, gateView.gate, gateView.view, behind, stageSettings.refFlip);
+  useEffect(() => { stageRef.current?.setFloorSuppressed(behind); }, [behind, rig]);
+
+  // --- The analysis ---
+  const analysisView = useMemo(() => (reference.analysis && video ? readAnalysis(reference.analysis, video.fps, stageSettings.refKeySensitivity) : null),
+    [reference.analysis, video, stageSettings.refKeySensitivity]);
+  const addKeysAtCandidates = () => {
+    const d = docRef.current, c = clipRef.current, ref = d.reference, a = referenceRef.current.analysis;
+    if (!rig || !c || !ref || !a || !analysisView) return;
+    const len = c.samplers[0]?.input.at(-1) ?? 0;
+    const poses = [...d.poses], keys = [...d.keys];
+    let added = 0;
+    for (const cand of analysisView.candidates) {
+      const v = a.times[cand.frame];
+      if (v < ref.in - 1e-6 || v > ref.out + 1e-6) continue;
+      const t = transport.snap(timelineTimeOf(ref, v));
+      if (t < 0 || keys.some(k => Math.abs(k.time - t) < 0.5 / Math.max(1, d.fps))) continue;
+      const p = poseFromClip(rig, c, motionClipTime(t, len, d.loop), `Frame ${cand.frame + 1}`);
+      poses.push(p);
+      keys.push({ id: newId(), poseId: p.id, time: t, ...presetBlend() });
+      added++;
+    }
+    if (!added) { toast.info('Every candidate already has a key.'); return; }
+    setDoc({ ...d, poses, keys });
+    toast.success(`${added} key${added === 1 ? '' : 's'} at the candidates: pose each against its frame.`);
+  };
+  // --- Tracking ---
+  const [showTracks, setShowTracks] = useState(false);
+  const [trackRole, setTrackRole] = useState<TrackRole>('footL');
+  const [placingTrack, setPlacingTrack] = useState(false);
+  const [suggestions, setSuggestions] = useState<Extremity[]>([]);
+  useEffect(() => { setSuggestions([]); setPlacingTrack(false); }, [doc.reference?.videoId]);
+  const suggestPoints = async () => {
+    const ref = docRef.current.reference, v = referenceRef.current.video, a = referenceRef.current.analysis;
+    if (!ref || !v) return;
+    const at = videoTimeOf(ref, transport.time);
+    // The shot the frame is in: between the cuts around it, when the clip has been analysed.
+    let shot: [number, number] = [v.start, v.start + v.duration];
+    if (a && analysisView) {
+      for (const c of analysisView.cuts) { const t = a.times[c]; if (t <= at) shot = [t, shot[1]]; else { shot = [shot[0], t]; break; } }
+    }
+    const found = await referenceRef.current.suggest(at, shot);
+    setSuggestions(found);
+    if (!found.length) toast.info('No moving subject on this frame: the suggestions need a still camera and something moving.');
+  };
+  const placeTrack = (frame: number, x: number, y: number) => {
+    const r = referenceRef.current;
+    r.setTracks({ ...r.tracks, tracks: [...r.tracks.tracks, newTrack(trackRole, frame, x, y)] });
+    setPlacingTrack(false);
+    setSuggestions(s => s.filter(p => Math.hypot(p.x - x, p.y - y) > 0.01));
+  };
+  const seedTrack = (id: string, frame: number, x: number, y: number) => {
+    const r = referenceRef.current;
+    r.setTracks({ ...r.tracks, tracks: r.tracks.tracks.map(t => (t.id === id ? withSeed(t, frame, x, y) : t)) });
+  };
+  const plantFeet = () => {
+    const d = docRef.current, ref = d.reference, v = referenceRef.current.video, stage = stageRef.current;
+    if (!ref?.camera || !v || !rig || !stage) { toast.info('Set up the reference camera first (Camera, Calibrate or Match pose).'); return; }
+    if (!referenceRef.current.tracks.result) { toast.info('Track the feet first.'); return; }
+    const foot = rig.bySlot.get('foot.L') ?? rig.bySlot.get('foot.R');
+    const footHeight = foot !== undefined ? rig.restModel.pos[foot][1] * stage.displayScale : 0.08;
+    const { doc: next, planted, inContact } = plantFeetIn(d, ref, ref.camera, { width: v.width, height: v.height, fps: v.fps }, referenceRef.current.tracks,
+      footHeight, w => { const m = stage.modelOf(w); return [m[0], m[1], m[2]]; });
+    if (!inContact) { toast.info('No key falls inside a foot’s contact: key the frames where a foot is planted.'); return; }
+    if (!planted) { toast.info('The tracked feet never reach the ground through this camera: check the camera, and that each foot track sits on the foot.'); return; }
+    setDoc(next);
+    toast.success(`${planted} foot goal${planted === 1 ? '' : 's'} planted where the tracked feet meet the ground.`);
+  };
+
+  /** The subject crop for the Over display (none while looking through, Behind or tracking: they need the whole frame). */
+  const cropMode = lookThrough || showTracks || stageSettings.refMode !== 'over' || !analysisView ? 'none' : stageSettings.refCrop;
+  const cropAt = useMemo(() => {
+    if (cropMode !== 'follow' || !analysisView?.followSize || !reference.analysis) return null;
+    const times = reference.analysis.times, size = analysisView.followSize;
+    return (v: number) => { const b = analysisView.boxes[analysisFrameAt(times, v)]; return b ? followCrop(b, size) : null; };
+  }, [cropMode, analysisView, reference.analysis]);
+  const boxAt = useMemo(() => {
+    if (!stageSettings.refShowBox || !analysisView || !reference.analysis) return null;
+    const times = reference.analysis.times;
+    return (v: number) => analysisView.boxes[analysisFrameAt(times, v)] ?? null;
+  }, [stageSettings.refShowBox, analysisView, reference.analysis]);
+
+  // A clip opened from the Assets explorer (or just added there) becomes this motion's reference.
+  useEffect(() => {
+    const take = () => { const id = takeOpen('video'); if (id) void live.current.linkVideo(id); };
+    take();
+    return subscribeOpen(take);
+  }, []);
+  const keyFromFrame = () => {
+    const d = docRef.current, c = clipRef.current;
+    if (!rig || !c) return;
+    const t = transport.snap(transport.time);
+    if (d.keys.some(k => Math.abs(k.time - t) < 0.5 / Math.max(1, d.fps))) { toast.info('There is a key at this frame already.'); return; }
+    const ref = d.reference, ts = referenceRef.current.timestamps;
+    const n = ref && ts ? videoFrameAt(ref, ts, t) : null;
+    const p = poseFromClip(rig, c, motionClipTime(t, c.samplers[0]?.input.at(-1) ?? 0, d.loop), n !== null ? `Frame ${n + 1}` : `At ${t.toFixed(2)} s`);
+    const key: MotionKey = { id: newId(), poseId: p.id, time: t, ...presetBlend() };
+    setDoc({ ...d, poses: [...d.poses, p], keys: [...d.keys, key] });
+    setKeyId(key.id);
+    setPoseId(p.id);
+    setView('pose');
   };
 
   const onExport = async () => {
@@ -419,25 +721,75 @@ export function MotionWorkspace() {
   };
 
   // The context's callbacks read the latest state through this, so they can stay in a memoised value.
-  const live = useRef({ setPose, saveToLibrary, setPoseId });
-  live.current = { setPose, saveToLibrary, setPoseId };
+  const actions = { setPose, saveToLibrary, setPoseId, scrub, togglePlay, stepFrames, toStart, toEnd, linkVideo, setReference, keyFromFrame,
+                    setLookThrough, viewCamera, setCamera, setCalibration, jointPositions, addKeysAtCandidates, suggestPoints, plantFeet };
+  const live = useRef(actions);
+  live.current = actions;
   const value = useMemo<MotionState>(() => ({
     doc, setDoc, rig, poseId, setPoseId: id => live.current.setPoseId(id), libraryPoseId, setLibraryPoseId,
     pose, setPose: p => live.current.setPose(p), libraryPoses, saveToLibrary: id => void live.current.saveToLibrary(id),
-    bone, setBone, view, setView, clip, time, scrub, playing, togglePlay,
-    stageTime: () => stageRef.current?.time() ?? 0,
+    bone, setBone, view, setView, clip, time, scrub: t => live.current.scrub(t),
+    playing: view === 'clip' ? playing : transportState.playing, togglePlay: () => live.current.togglePlay(),
+    stageTime,
     keyId, setKeyId, partId, setPartId, setPartsOpen, savedPresets, setSavedPresets,
     character, setCharacter, sourceClip, showSourceClip, sourceAnimations,
+    transport, transportState, stepFrames: n => live.current.stepFrames(n), toStart: () => live.current.toStart(), toEnd: () => live.current.toEnd(),
+    grid, timelineEnd, reference, linkVideo: src => live.current.linkVideo(src), setReference: r => live.current.setReference(r),
+    keyFromFrame: () => live.current.keyFromFrame(), stage: stageSettings, setStage: setStageSettings,
+    gate: gateView.gate, viewSize: gateView.view, lookThrough, setLookThrough: on => live.current.setLookThrough(on),
+    viewCamera: () => live.current.viewCamera(), setCamera: c => live.current.setCamera(c),
+    calibrating, setCalibrating, calibration, setCalibration: (c, done) => live.current.setCalibration(c, done), solve,
+    placingPin, setPlacingPin, jointPositions: () => live.current.jointPositions(), subjectHeight,
+    analysisView, addKeysAtCandidates: () => live.current.addKeysAtCandidates(),
+    showTracks, setShowTracks, trackRole, setTrackRole, placingTrack, setPlacingTrack, suggestions,
+    suggestPoints: () => live.current.suggestPoints(), plantFeet: () => live.current.plantFeet(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [doc, rig, poseId, libraryPoseId, pose, libraryPoses, bone, view, clip, time, playing, keyId, partId, savedPresets, character, sourceClip, sourceAnimations]);
+  }), [doc, rig, poseId, libraryPoseId, pose, libraryPoses, bone, view, clip, time, playing, keyId, partId, savedPresets, character, sourceClip, sourceAnimations,
+       transportState, grid, timelineEnd, reference, stageSettings, gateView, lookThrough, calibrating, calibration, solve, placingPin, subjectHeight,
+       analysisView, showTracks, trackRole, placingTrack, suggestions]);
 
   const duration = clip?.samplers[0]?.input.at(-1) ?? motionDuration(doc);
+  /** The pinned joints where the reference camera sees them now (video pixels). */
+  function projectedPins(): Map<string, Vec2> {
+    const out = new Map<string, Vec2>();
+    const cam = doc.reference?.camera;
+    if (!cam || !video) return out;
+    const b = cameraBasis(cam), world = jointPositions();
+    for (const p of calibration?.pins ?? []) {
+      const w = world.get(p.joint);
+      const pr = w && projectPoint(b, cam.vfov, video.width, video.height, w);
+      if (pr) out.set(p.joint, pr.px);
+    }
+    return out;
+  }
   const overlay = (<>
+    <ReferenceOverlay player={reference.player} visible={!!doc.reference && stageSettings.refMode === 'over' && view !== 'clip'}
+                      opacity={stageSettings.refOpacity} difference={stageSettings.refDifference} flip={stageSettings.refFlip}
+                      gate={stageSettings.refGate && !!doc.reference && stageSettings.refMode !== 'off' && view !== 'clip'}
+                      crop={cropMode === 'union' ? analysisView?.union : null} cropAt={cropAt} boxAt={boxAt}
+                      onGate={(gate, view) => setGateView({ gate, view })} />
+    {calibration && video && gateView.gate && calibrating !== 'off' && view !== 'clip' && (
+      <CalibrationOverlay gate={gateView.gate} videoW={video.width} videoH={video.height} calib={calibration}
+                          solve={solve?.ok ? solve.solve : null} show={{ lines: calibrating === 'lines', pins: calibrating === 'pins' }}
+                          projected={calibrating === 'pins' ? projectedPins() : undefined}
+                          placing={placingPin}
+                          onPlace={at => {
+                            if (!placingPin) return;
+                            setCalibration({ ...calibration, pins: [...calibration.pins.filter(p => p.joint !== placingPin), { joint: placingPin, at }] }, true);
+                            setPlacingPin(null);
+                          }}
+                          onChange={setCalibration} />
+    )}
+    {showTracks && video && gateView.gate && reference.timestamps && view !== 'clip' && (
+      <TrackOverlay gate={gateView.gate} videoW={video.width} videoH={video.height} player={reference.player} timestamps={reference.timestamps}
+                    state={reference.tracks} placing={placingTrack} suggestions={suggestions}
+                    onPlace={placeTrack} onSeed={seedTrack} />
+    )}
     <ViewportOverlay
       readout={rig && <>
         {rigName} · {view === 'pose' ? `Pose “${pose.name}”`
           : view === 'clip' ? `Clip “${character?.clips.find(c => c.source === sourceClip)?.name ?? sourceClip}” ${time.toFixed(2)} s`
-          : `Motion ${time.toFixed(2)} / ${duration.toFixed(2)} s`} · {doc.poses.length} poses · {doc.keys.length} keys · {doc.fps} fps
+          : `Motion ${time.toFixed(2)} / ${Math.max(duration, timelineEnd).toFixed(2)} s`} · {doc.poses.length} poses · {doc.keys.length} keys · {rateLabel(doc.fps)} fps
         {clip ? ` · ${clip.channels.length} channels` : ''}
       </>}
       stage={{
@@ -488,10 +840,17 @@ export function MotionWorkspace() {
           { id: 'pose', title: 'Pose', render: () => <PosePanel /> },
           { id: 'parts', title: 'Parts', render: () => <PartsPanel /> },
           { id: 'motion', title: 'Motion', render: () => <MotionPanel /> },
+          { id: 'reference', title: 'Reference', render: () => <ReferencePanel /> },
         ]}
+        layoutVersion={1}
         bottom={[{ id: 'motionTimeline', title: 'Timeline', render: () => <TimelinePanel /> }]}
         viewport={overlay} viewportRef={viewportRef} onFrame={frame}
-        hotkeys={{ ' ': togglePlay }}
+        hotkeys={{
+          ' ': togglePlay, ',': () => stepFrames(-1), '.': () => stepFrames(1), '<': () => stepFrames(-10), '>': () => stepFrames(10),
+          arrowleft: () => stepFrames(-1), arrowright: () => stepFrames(1), home: toStart, end: toEnd,
+          j: () => shuttle(-1), k: () => shuttle(0), l: () => shuttle(1),
+          i: () => transport.markIn(), o: () => transport.markOut(),
+        }}
         generation={{ status: exportJob.status, onCancel: exportJob.cancel }} />
     </MotionCtx.Provider>
   );
@@ -740,7 +1099,17 @@ function MotionPanel() {
         </div>
       </Collapsable>
       <Collapsable title='Clip' persistKey='cleo_creator_motion_clip'>
-        <Slider label='Frames per second' min={10} max={60} step={1} readout value={doc.fps} onChange={v => setDoc({ ...doc, fps: Math.round(v) })} />
+        <div className='flex items-center gap-2'>
+          <span className='text-ui-sm text-muted'>Frames per second</span>
+          <Select className='w-24' value={FPS_PRESETS.includes(doc.fps) ? String(doc.fps) : ''} title='The rate the clip is baked at'
+                  onChange={e => { if (e.target.value) setDoc({ ...doc, fps: Number(e.target.value) }); }}>
+            {!FPS_PRESETS.includes(doc.fps) && <option value=''>{rateLabel(doc.fps)}</option>}
+            {FPS_PRESETS.map(f => <option key={f} value={f}>{rateLabel(f)}</option>)}
+          </Select>
+          <NumberInput className='w-20' value={doc.fps} step={1} title='Any rate from 10 to 240' onChange={v => setDoc({ ...doc, fps: v })} />
+        </div>
+        <Toggle label='Loop' checked={doc.loop} title='Bake the clip to loop: the last key should return to the first pose'
+                onChange={v => setDoc({ ...doc, loop: v })} />
       </Collapsable>
     </PanelBody>
   );

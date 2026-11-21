@@ -579,6 +579,25 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
 };
 
 /**
+ * Editor-only reference picture behind the scene: an animator's video frame, drawn where no geometry is
+ * (Renderer.setReferenceBackdrop). Display-referred: exposure and grading never touch it.
+ */
+export interface ReferenceBackdrop {
+    /** The picture: a decoded video frame (a canvas, a VideoFrame), an image. Uploaded when `version` changes. */
+    source: TexImageSource | null;
+    width: number;
+    height: number;
+    /** Bumped by the caller with every new picture; the same version is not uploaded again. */
+    version: number;
+    /** Where the picture lands: its corners [x0, y0, x1, y1], fractions of the view from the top-left. */
+    rect: [number, number, number, number];
+    /** 0..1. */
+    opacity: number;
+    /** Mirrored left to right. */
+    flipX?: boolean;
+}
+
+/**
  * Editor-only skeleton overlay: joint spheres and bone connectors, drawn instanced and always-on-top
  * in the gizmo pass. The caller packs world-space matrices and refreshes them every frame.
  */

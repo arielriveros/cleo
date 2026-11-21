@@ -35,9 +35,37 @@ export interface MotionStageSettings {
   chain: number;
   sunYaw: number;
   sunElevation: number;
+  /** How the reference video is drawn: not at all, over the 3D view, or behind the character. */
+  refMode: ReferenceMode;
+  /** The video's opacity over the 3D view (Over). */
+  refOpacity: number;
+  /** Over, as the difference of the two pictures: where the pose matches the video, it goes dark. */
+  refDifference: boolean;
+  /** Mirrored left to right (filmed the other way round). */
+  refFlip: boolean;
+  /** Darken the viewport outside the video's frame. */
+  refGate: boolean;
+  /** Play the video's sound while the timeline plays near real speed. */
+  refSound: boolean;
+  /** Keys snap to the video's own frames (else to the bake rate). */
+  refSnap: boolean;
+  /** The width the video is decoded at for the viewport, pixels (0: its own). */
+  refProxy: number;
+  /** How readily the analysis offers key-pose candidates (0..1: fewer, surer ones to more). */
+  refKeySensitivity: number;
+  /** Draw the analysis's subject box over the video. */
+  refShowBox: boolean;
+  /** Zoom the video onto the subject: not at all, the box it never leaves, or following it. */
+  refCrop: 'none' | 'union' | 'follow';
 }
 
-export const DEFAULT_MOTION_STAGE: MotionStageSettings = { grid: true, ground: true, skeleton: true, keepLengths: true, chain: 0, sunYaw: 35, sunElevation: 40 };
+export type ReferenceMode = 'off' | 'over' | 'behind';
+
+export const DEFAULT_MOTION_STAGE: MotionStageSettings = {
+  grid: true, ground: true, skeleton: true, keepLengths: true, chain: 0, sunYaw: 35, sunElevation: 40,
+  refMode: 'over', refOpacity: 0.5, refDifference: false, refFlip: false, refGate: true, refSound: true, refSnap: true, refProxy: 720,
+  refKeySensitivity: 0.5, refShowBox: false, refCrop: 'none',
+};
 
 export class MotionStage {
   private ground: ModelNode | null = null;
@@ -58,6 +86,12 @@ export class MotionStage {
   /** The character's extent at rest, in the scene (after the display scale): for framing. */
   public bounds: { size: [number, number, number]; floor: [number, number, number] } | null = null;
   private readonly saved: { sunIntensity: number | null; sunRotation: vec3 | null; ambient: vec3; animations: boolean };
+  /**
+   * Called first every frame with the seconds since the last: the workspace's clock (the transport) moves,
+   * seeks the character and hands the reference video its frame here, so the pose, the skeleton drawn over
+   * it and the video frame all land on the same render.
+   */
+  public onTick: ((dt: number) => void) | null = null;
 
   constructor(private engine: CleoEngine, private world: Scene, private sun: LightNode | null) {
     const light = sun?.light as DirectionalLight | undefined;
@@ -65,11 +99,32 @@ export class MotionStage {
                    animations: world.animationsEnabled !== false };
     // The Creator's scene is an authoring scene, which holds skinned meshes still; this stage plays them.
     world.animationsEnabled = true;
-    const frame = () => { this.tick(); this.raf = requestAnimationFrame(frame); };
+    let last = 0;
+    const frame = (now: number) => {
+      const dt = last ? Math.min(0.25, (now - last) / 1000) : 0;
+      last = now;
+      try { this.onTick?.(dt); } catch (e) { console.error(e); }
+      this.tick();
+      this.raf = requestAnimationFrame(frame);
+    };
     this.raf = requestAnimationFrame(frame);
   }
 
+  private lastSettings: MotionStageSettings | null = null;
+  private floorSuppressed = false;
+
+  /**
+   * Hide the floor whatever the settings say: the reference video is drawn BEHIND the character, where no
+   * geometry is, and a floor would cover the filmed ground.
+   */
+  setFloorSuppressed(on: boolean): void {
+    if (on === this.floorSuppressed) return;
+    this.floorSuppressed = on;
+    if (this.lastSettings) this.apply(this.lastSettings);
+  }
+
   apply(s: MotionStageSettings): void {
+    this.lastSettings = s;
     if (this.sun) {
       aimSun(this.sun, { lightYaw: s.sunYaw, lightElevation: s.sunElevation });
       (this.sun.light as DirectionalLight).intensity = 60000;
@@ -77,10 +132,11 @@ export class MotionStage {
     this.world.ambientLight = vec3.fromValues(8000, 8000, 8000);
     this.engine.renderer.setGridVisible(s.grid);
     this.skeleton = s.skeleton !== false;
-    if (s.ground && !this.ground) {
+    const ground = s.ground && !this.floorSuppressed;
+    if (ground && !this.ground) {
       this.ground = new ModelNode(PREFIX + 'ground', new Model(Geometry.Plane(30, 30), Material.PBR({ baseColor: [0.32, 0.31, 0.29], roughness: 0.95 })));
       this.world.addNode(this.ground);
-    } else if (!s.ground && this.ground) {
+    } else if (!ground && this.ground) {
       this.world.removeNode(this.ground);
       this.ground = null;
     }
@@ -177,6 +233,24 @@ export class MotionStage {
   /** The clip's playhead, seconds. */
   time(): number { return this.models[0]?.node.animator?.currentTime ?? 0; }
   playing(): boolean { return !!this.models[0]?.node.animator?.isPlaying; }
+
+  /** Every joint's position in the scene right now, by bone name: the pose on screen (Match pose pins them). */
+  jointWorld(): Map<string, vec3> {
+    const out = new Map<string, vec3>();
+    const body = this.models[0];
+    const animator = body?.node.animator;
+    const skin = body?.model.skin as Skin | undefined;
+    if (!body || !animator || !skin) return out;
+    const nodeWorld = body.node.worldTransform as unknown as mat4;
+    skin.joints.forEach((j, i) => {
+      const name = skin.nodeNames?.get(j.nodeIndex);
+      const jm = animator.getJointModelMatrix(i);
+      if (!name || !jm) return;
+      const w = mat4.multiply(mat4.create(), nodeWorld, jm as mat4);
+      out.set(name, vec3.fromValues(w[12], w[13], w[14]));
+    });
+    return out;
+  }
 
   /** Hold a pose right now, without waiting for the panels' debounced rebake: what a viewport drag shows. */
   showPoseNow(rig: MotionRig, pose: MotionPose): void { this.show(bakePose(rig, pose), false, 0); }

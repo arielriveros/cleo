@@ -1893,3 +1893,59 @@ export function moveToward2D(v: [number, number], tx: number, ty: number, maxDel
     v[0] += dx * k; v[1] += dy * k;
     return v;
 }
+
+// --- Small linear systems and image-plane lines ---------------------------------------------------
+
+/**
+ * Solve the n×n system `a·x = b` by Gaussian elimination with partial pivoting (a camera solve's normal
+ * equations, a least-squares fit). `a` is row-major; neither argument is changed. Null when the system is
+ * singular (a pivot below `eps` times the largest entry).
+ */
+export function solveLinear(a: ArrayLike<ArrayLike<number>>, b: ArrayLike<number>, eps = 1e-12): number[] | null {
+    const n = b.length;
+    const m: number[][] = [];
+    let scale = 0;
+    for (let i = 0; i < n; i++) {
+        const row: number[] = [];
+        for (let j = 0; j < n; j++) { row.push(a[i][j]); scale = Math.max(scale, Math.abs(a[i][j])); }
+        row.push(b[i]);
+        m.push(row);
+    }
+    if (!(scale > 0)) return null;
+    for (let c = 0; c < n; c++) {
+        let p = c;
+        for (let r = c + 1; r < n; r++) if (Math.abs(m[r][c]) > Math.abs(m[p][c])) p = r;
+        if (Math.abs(m[p][c]) <= eps * scale) return null;
+        if (p !== c) { const t = m[p]; m[p] = m[c]; m[c] = t; }
+        for (let r = c + 1; r < n; r++) {
+            const k = m[r][c] / m[c][c];
+            if (k === 0) continue;
+            for (let j = c; j <= n; j++) m[r][j] -= k * m[c][j];
+        }
+    }
+    const x = new Array<number>(n).fill(0);
+    for (let r = n - 1; r >= 0; r--) {
+        let s = m[r][n];
+        for (let j = r + 1; j < n; j++) s -= m[r][j] * x[j];
+        x[r] = s / m[r][r];
+    }
+    return x.every(Number.isFinite) ? x : null;
+}
+
+/** The line through two image points, in homogeneous form [a, b, c] (a·x + b·y + c = 0). */
+export function lineThrough(p: ArrayLike<number>, q: ArrayLike<number>): [number, number, number] {
+    return [p[1] - q[1], q[0] - p[0], p[0] * q[1] - q[0] * p[1]];
+}
+
+/**
+ * Where two homogeneous lines cross (a vanishing point, for two images of parallel lines). Null when they
+ * are parallel in the image too: the crossing is at infinity.
+ */
+export function intersectLines(l: ArrayLike<number>, m: ArrayLike<number>, eps = 1e-12): [number, number] | null {
+    const x = l[1] * m[2] - l[2] * m[1];
+    const y = l[2] * m[0] - l[0] * m[2];
+    const w = l[0] * m[1] - l[1] * m[0];
+    const size = Math.hypot(l[0], l[1]) * Math.hypot(m[0], m[1]);
+    if (!(Math.abs(w) > eps * Math.max(1e-300, size))) return null;
+    return [x / w, y / w];
+}

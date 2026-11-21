@@ -183,6 +183,8 @@ export class CreatorSync {
       case 'character': next = await this.upsertCharacter(meta, files, link); break
       case 'pose': next = await this.upsertPose(meta, files); break
       case 'world': next = await this.upsertWorld(meta, files, link); break
+      // A Motion Creator reference video stays in the Creator (it has no files to import, so it never gets here).
+      case 'video': return
       // A kind from a newer Creator: skipped, rather than built as something it is not.
       default: Logger.warn(`Cleo Creator asset "${meta.name}" is of a kind this editor does not know (${meta.kind})`, 'Creator'); return
     }

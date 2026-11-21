@@ -166,7 +166,7 @@ describe('bake', () => {
     const d = normaliseMotion({ poses: [{ id: 'x', name: '', bones: { a: { rot: [1, 2, 'q'] } } }] as any, keys: [{ poseId: 'nope' }] as any, fps: 999 });
     expect(d.poses[0].bones).toEqual({});
     expect(d.keys).toHaveLength(1);
-    expect(d.fps).toBe(120);
+    expect(d.fps).toBe(240);
     expect(() => bakeMotion(rig, d)).not.toThrow();
   });
 });

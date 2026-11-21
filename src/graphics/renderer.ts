@@ -45,7 +45,7 @@ import { FullscreenPasses } from './render/fullscreenPasses';
 import { MaterialBinder } from './render/materialBinder';
 import { ViewProjection } from './render/viewProjection';
 import { QUALITY_TIERS, FXAA_SEARCH_STEPS, clampFinite } from './render/settingsTypes';
-import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay, Pipeline2D } from './render/settingsTypes';
+import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay, Pipeline2D, ReferenceBackdrop } from './render/settingsTypes';
 import { TemporalPasses } from './render/temporal';
 import { AutoExposure } from './render/autoExposure';
 import { PostEffects } from './render/postEffects';
@@ -93,7 +93,7 @@ import { renderNow, renderClockOverridden } from './render/renderClock';
 import { anyPaneCulling, isSplitLayout, paneRects, paneViewport, type PaneCulling, type PaneRect, type ViewLayout } from './render/viewLayout';
 import type { RenderPassEncoder } from './rhi/device';
 export { QUALITY_TIERS, RENDER_2D_DEFAULTS, RENDER_3D_DEFAULTS } from './render/settingsTypes';
-export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay, Pipeline2D } from './render/settingsTypes';
+export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay, Pipeline2D, ReferenceBackdrop } from './render/settingsTypes';
 import { describeCapabilities } from './rhi/device';
 import type { BackendKind, DeviceCapabilities, Device } from './rhi/device';
 import { createDevice } from './rhi/createDevice';
@@ -3495,6 +3495,32 @@ export class Renderer {
     /** Editor: set (or clear) the instanced skeleton overlay drawn in the gizmo pass. */
     public setSkeletonOverlay(overlay: SkeletonOverlay | null): void {
         this._overlays.skeletonOverlay = overlay;
+    }
+
+    // The reference picture's texture, kept between pictures (a video uploads into it every frame).
+    private _backdropTexture: Texture | null = null;
+    private _backdropVersion = -1;
+
+    /**
+     * Editor: set (or clear) a reference picture drawn BEHIND the scene -- where no geometry is -- in the
+     * overlay layer: an animator's video frame under the character. Uploaded at once whenever `version`
+     * changes (the caller may then reuse its canvas), placed by `rect`, display-referred.
+     */
+    public setReferenceBackdrop(backdrop: ReferenceBackdrop | null): void {
+        if (!backdrop || !backdrop.source || backdrop.width < 1 || backdrop.height < 1) {
+            this._overlays.referenceBackdrop = null;
+            return;
+        }
+        // Not load-only: copyExternalImageToTexture (how a canvas or video frame uploads) needs the
+        // render-attachment usage on its destination as well as copy-dst.
+        this._backdropTexture ??= new Texture({ mipMap: false, wrapping: 'clamp' });
+        if (backdrop.version !== this._backdropVersion) {
+            this._backdropTexture.uploadSource(backdrop.source, backdrop.width, backdrop.height);
+            this._backdropVersion = backdrop.version;
+        }
+        this._overlays.referenceBackdrop = {
+            texture: this._backdropTexture, rect: backdrop.rect, opacity: backdrop.opacity, flipX: !!backdrop.flipX,
+        };
     }
 
 }

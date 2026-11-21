@@ -2,10 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isTextEntryEvent } from 'cleo'
 import type { SequenceData, SequenceSlot, SequenceTrack } from 'cleo'
 import {
-  Button, ContextMenu, MenuItem, Popover, FilmIcon, LoopIcon, PauseIcon, PilotIcon, PlayIcon, SnapIcon, StepBackIcon,
-  StepForwardIcon, StopIcon, ToEndIcon, ToStartIcon, cn,
+  Button, ContextMenu, MenuItem, Popover, FilmIcon, PauseIcon, PilotIcon, SnapIcon, cn,
 } from '@cleo/app-kit/ui'
-import { TimeRuler, fitZoom, formatTimecode, snapTime, startPointerDrag, timeToX, xToTime, zoomStep } from '@cleo/app-kit/timeline'
+import { TimeRuler, TransportBar, fitZoom, formatTimecode, snapTime, startPointerDrag, timeToX, xToTime, zoomStep } from '@cleo/app-kit/timeline'
 import { promptDialog } from '@cleo/app-kit/feedback/dialogStore'
 import { toast } from '@cleo/app-kit/feedback/toastStore'
 import { useCleoEngine } from '../EngineContext'
@@ -497,16 +496,13 @@ export default function SequencerPanel({ active }: { active: boolean }) {
       {/* Toolbar */}
       <div className='flex shrink-0 items-center gap-1 border-b border-border px-2 py-1'>
         <span className='mr-1 max-w-[160px] truncate text-ui-sm text-fg' title={ed.asset?.name ?? seq.name}>{ed.asset?.name ?? seq.name}</span>
-        {transportButton('To the start (Home)', <ToStartIcon />, () => { preview.pause(); preview.seek(0) })}
-        {transportButton('Back one frame (,)', <StepBackIcon />, () => step(-frame))}
-        {transportButton(preview.playing ? 'Pause (Space)' : 'Play the preview (Space)', preview.playing ? <PauseIcon /> : <PlayIcon />, preview.toggle)}
-        {transportButton('Forward one frame (.)', <StepForwardIcon />, () => step(frame))}
-        {transportButton('To the end (End)', <ToEndIcon />, () => { preview.pause(); preview.seek(duration) })}
-        {transportButton('To the start, and stop playing', <StopIcon />, () => { preview.pause(); preview.seek(0) })}
-        {transportButton('Loop the preview', <LoopIcon />, () => preview.setLoop(!preview.loop), preview.loop)}
-        <span className='ml-1 w-[150px] text-ui-xs tabular-nums text-muted'>
-          {formatTimecode(preview.time, fps)} / {formatTimecode(duration, fps)}
-        </span>
+        <TransportBar
+          playing={preview.playing} onToggle={preview.toggle}
+          onToStart={() => { preview.pause(); preview.seek(0) }} onToEnd={() => { preview.pause(); preview.seek(duration) }}
+          onStep={n => step(n * frame)} onStop={() => { preview.pause(); preview.seek(0) }}
+          loop={preview.loop} onLoop={preview.setLoop}
+          time={preview.time} duration={duration} fps={fps}
+          keys={{ toggle: 'Space', toStart: 'Home', toEnd: 'End', back: ',', forward: '.' }} />
         <span className='whitespace-nowrap text-ui-xs text-sequence' title='Every property change made to a node now is keyed at the playhead. The scene tab shows the scene as authored.'>keying at {formatTimecode(preview.time, fps)}</span>
         <div className='flex-1' />
         {transportButton('Pilot: look through the shot camera', <PilotIcon />, () => preview.setPilot(!preview.pilot), preview.pilot)}

@@ -43,7 +43,9 @@ export function exportMotion(doc: MotionDoc, clip: BakedClip, skin: ExportSkin, 
   const stem = fileStem(name);
   const anim = { clips: [{ ...clip, name }], sourceSkin: storedSkin(skin), rigName };
   const out: ExportFile[] = [{ name: `${stem}.anim.json`, mime: 'application/json', bytes: new TextEncoder().encode(JSON.stringify(anim)) }];
-  const json = sidecar('motion', doc, doc.seed, {
+  // The reference video stays in the Creator: the sidecar regenerates the clip, which never needed it.
+  const { reference: _, ...params } = doc;
+  const json = sidecar('motion', params, doc.seed, {
     name,
     anim: `${stem}.anim.json`,
     rig: rigName,

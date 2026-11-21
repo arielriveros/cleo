@@ -51,6 +51,10 @@ describe('timeline math', () => {
         expect(formatTimecode(0, 30)).toBe('00:00.00');
         expect(formatTimecode(61.5, 30)).toBe('01:01.15');
         expect(formatTimecode(1 - 1e-9, 30)).toBe('00:00.29');
+        // Fractional (NTSC) rates: frames counted at the true rate, never past the last of the second.
+        expect(formatTimecode(1.5, 30000 / 1001)).toBe('00:01.14');
+        expect(formatTimecode(2 - 1e-9, 30000 / 1001)).toBe('00:01.29');
+        expect(snapToFps(0.51, 24000 / 1001)).toBeCloseTo(12 / (24000 / 1001), 9);
     });
 
     it('tells a drag from a click, and snaps to nearby targets before frames', () => {

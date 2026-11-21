@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Button, Collapsable, NumberInput, Select, Toggle } from '@cleo/app-kit/ui';
-import { clampZoom, fitZoom, formatTick, rulerTicks, snapToFps, timeToX, xToTime, zoomStep } from '@cleo/app-kit/timeline';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Button, CloseIcon, Collapsable, NumberInput, Select, Toggle } from '@cleo/app-kit/ui';
+import { TransportBar, clampZoom, fitZoom, formatTick, rulerTicks, timeToX, xToTime, zoomStep } from '@cleo/app-kit/timeline';
 import { promptDialog } from '@cleo/app-kit/feedback/dialogStore';
 import {
   BUILTIN_PRESETS, cloneCurve, evalBlend, presetOf, storeSavedPresets, toKeys, type BlendCurve, type BlendPreset,
@@ -11,12 +11,20 @@ import { withAssetPose } from '../poseAsset';
 import { BlendCurveEditor, blendPath } from './BlendCurveEditor';
 import { POSE_DRAG_TYPE, useMotion } from './motionContext';
 import { PartBlendFields } from './PartsPanel';
+import { VIDEO_LANE_H, VideoLane } from './VideoLane';
+import { ANALYSIS_LANE_H, AnalysisLane } from './AnalysisLane';
+import { footContacts, roleOf, trackTurns } from '../reference/tracks';
+import { snapToGrid, timelineTimeOf, videoFrameAt } from '../reference/referenceDoc';
+import { rateLabel } from '../reference/videoDoc';
 
 // The Motion Creator's timeline, docked under the viewport: the motion as a row of POSES on a time ruler,
 // and under it the BLEND into each one -- the curve the Creator follows from the previous pose to the
 // arriving one, drawn across the gap, so the motion's whole shape reads at a glance (a step is a hold, a
 // bump over the top line an overshoot, a wobble a spring).
 //
+//   transport  to the start, a frame back, play, a frame forward, to the end, loop, speed, the timecode
+//              (and the reference video's own frame number): reference/transport.ts is the clock
+//   video      the reference clip (VideoLane.tsx), when the motion has one: slide it, trim it
 //   keys       a key: a pose at a time. Click to select (the stage holds that pose), drag to retime,
 //              double-click empty track or drop a pose from the Poses list to add one, Delete to remove.
 //   base       the keys' own blends. Click one to edit it on the right: pick a preset, then shape it
@@ -41,7 +49,8 @@ const editable = (t: EventTarget) => /^(INPUT|TEXTAREA|SELECT)$/.test((t as HTML
 export function TimelinePanel() {
   const {
     doc, setDoc, poseId, setPoseId, libraryPoseId, libraryPoses, view, setView, keyId, setKeyId, partId, setPartId,
-    playing, togglePlay, scrub, stageTime, clip, savedPresets,
+    playing, togglePlay, scrub, stageTime, clip, savedPresets, transport, transportState, stepFrames, toStart, toEnd, grid,
+    timelineEnd, reference, setReference, keyFromFrame, analysisView,
   } = useMotion();
   const scrollRef = useRef<HTMLDivElement>(null);
   const playheadRef = useRef<HTMLDivElement>(null);
@@ -54,16 +63,39 @@ export function TimelinePanel() {
   const keys = doc.keys;
   const parts = doc.parts;
   const duration = motionDuration(doc);
-  const end = Math.max(duration, clip?.samplers[0]?.input.at(-1) ?? 0, 0.5);
+  const clipEnd = Math.max(duration, clip?.samplers[0]?.input.at(-1) ?? 0, 0.5);
+  const end = Math.max(clipEnd, timelineEnd);
   const fps = doc.fps;
-  const snap = (t: number) => snapToFps(t, fps);
+  /** Keys snap to the grid: the reference's frames when it has them (and snapping to them is on), else the bake rate. */
+  const snap = (t: number) => snapToGrid(t, grid);
+  const ref = doc.reference;
+  const videoLane = !!ref && !!reference.video;
+  // Tracked feet's contacts and hands' turns, on the timeline.
+  const trackMarks = useMemo(() => {
+    const res = reference.tracks.result, r = doc.reference;
+    if (!res || !r) return null;
+    const fpsV = reference.video?.fps ?? 30;
+    const at = (i: number) => timelineTimeOf(r, res.times[i]);
+    const contacts: { t0: number; t1: number; color: string; label: string }[] = [];
+    const turnMarks: { t: number; color: string; label: string }[] = [];
+    for (const t of reference.tracks.tracks) {
+      const pts = res.points[t.id];
+      if (!pts) continue;
+      const role = roleOf(t.role);
+      if (t.role === 'footL' || t.role === 'footR') for (const [a, b] of footContacts(pts, fpsV)) contacts.push({ t0: at(a), t1: at(b), color: role.color, label: role.label });
+      else for (const i of trackTurns(pts, fpsV)) turnMarks.push({ t: at(i), color: role.color, label: role.label });
+    }
+    return { contacts, turns: turnMarks, times: Float64Array.from(res.times) };
+  }, [reference.tracks, reference.video, doc.reference]);
+  const analysisLane = videoLane && ((!!analysisView && !!reference.analysis) || !!trackMarks);
+  const top = RULER_H + (videoLane ? VIDEO_LANE_H : 0) + (analysisLane ? ANALYSIS_LANE_H : 0);
   const x = (t: number) => timeToX(t, pxPerSec, GUTTER);
   const tAt = (clientX: number) => {
     const el = scrollRef.current!;
     return xToTime(clientX, el.getBoundingClientRect().left, el.scrollLeft, pxPerSec, GUTTER);
   };
   const width = x(end) + 120;
-  const height = RULER_H + TRACK_H + LANE_H + parts.length * PART_H;
+  const height = top + TRACK_H + LANE_H + parts.length * PART_H;
   const sel = keys.find(k => k.id === keyId) ?? keys[Math.min(1, keys.length - 1)];
 
   const fit = () => {
@@ -77,7 +109,7 @@ export function TimelinePanel() {
   useEffect(() => {
     let raf = 0;
     const tick = () => {
-      const t = view === 'motion' ? stageTime() : view === 'pose' ? (sel?.time ?? 0) : null;
+      const t = view === 'clip' ? null : stageTime();
       const ph = playheadRef.current, dot = dotRef.current;
       if (ph) { ph.style.display = t === null ? 'none' : ''; if (t !== null) ph.style.left = `${x(t)}px`; }
       if (dot) {
@@ -99,7 +131,8 @@ export function TimelinePanel() {
   // --- Editing keys ---
   const setKeys = (next: MotionKey[], base: MotionDoc = docRef.current) => setDoc({ ...base, keys: next });
   const patchKey = (id: string, patch: Partial<MotionKey>) => setKeys(docRef.current.keys.map(k => (k.id === id ? { ...k, ...patch } : k)));
-  const select = (k: MotionKey) => { setKeyId(k.id); setPoseId(k.poseId); setView('pose'); };
+  /** A key picked: its pose held for editing, and the playhead (with the reference's frame) on its time. */
+  const select = (k: MotionKey) => { setKeyId(k.id); setPoseId(k.poseId); setView('pose'); transport.pause(); transport.seek(k.time); };
   /** A key at `t` with a motion pose, or with a library pose (`asset:<id>`: the motion links it first). */
   const addKey = (t: number, pose: string) => {
     let base = docRef.current, id = pose;
@@ -109,7 +142,7 @@ export function TimelinePanel() {
       ({ doc: base, poseId: id } = withAssetPose(base, entry));
     }
     const time = snap(t);
-    if (base.keys.some(k => Math.abs(k.time - time) < 0.5 / fps)) return;
+    if (base.keys.some(k => Math.abs(k.time - time) < 0.5 / Math.max(1, fps))) return;
     const key: MotionKey = { id: newId(), poseId: id, time, ...presetBlend() };
     setKeys([...base.keys, key], base);
     setKeyId(key.id);
@@ -134,6 +167,7 @@ export function TimelinePanel() {
       moved = true;
       const time = Math.max(1 / fps, snap(t0 + (ev.clientX - startX) / pxPerSec));
       patchKey(k.id, { time });
+      transport.seek(time);
     };
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
     window.addEventListener('pointermove', move);
@@ -176,11 +210,27 @@ export function TimelinePanel() {
   return (
     <div className='flex h-full min-h-0 flex-col outline-none' tabIndex={0} onKeyDown={onKeyDown}>
       <div className='flex shrink-0 items-center gap-2 border-b border-border px-2 py-1'>
-        <Button size='sm' onClick={togglePlay} title='Play or pause the motion (Space)'>{view !== 'pose' && playing ? 'Pause' : 'Play'}</Button>
-        <span className='w-28 text-ui-xs tabular-nums text-muted'>{(view === 'motion' ? stageTime() : sel?.time ?? 0).toFixed(2)} / {duration.toFixed(2)} s</span>
-        <Toggle label='Loop' checked={doc.loop} onChange={v => setDoc({ ...doc, loop: v })} />
+        <TransportBar
+          playing={view !== 'pose' && playing} onToggle={togglePlay} onToStart={toStart} onToEnd={toEnd} onStep={stepFrames}
+          loop={transportState.loop} onLoop={v => transport.setLoop(v)}
+          rate={transportState.rate} onRate={r => transport.setRate(r)}
+          clock={stageTime} duration={end} fps={'fps' in grid ? grid.fps : (reference.video ? reference.video.fps * (ref?.speed ?? 1) : fps)}
+          extra={ref && reference.timestamps ? t => { const n = videoFrameAt(ref, reference.timestamps!, t); return n === null ? 'video –' : `video ${n + 1}`; } : undefined}
+          extraTitle='The reference video’s own frame number at the playhead'
+          keys={{ toggle: 'Space', toStart: 'Home', toEnd: 'End', back: ', or ←', forward: '. or →' }} />
+        {transportState.range && (
+          <Button size='sm' variant='ghost' title='Play the whole timeline again (I and O set the loop range at the playhead)'
+                  onClick={() => transport.setRange(null)}>
+            <span className='tabular-nums'>{transportState.range[0].toFixed(2)}–{transportState.range[1].toFixed(2)} s</span>
+            <span className='block h-3 w-3'><CloseIcon /></span>
+          </Button>
+        )}
         <Button size='sm' title='Add a key with the selected pose at the playhead'
-                onClick={() => addKey(view === 'motion' ? stageTime() : duration + 0.5, currentPose)}>+ Key</Button>
+                onClick={() => addKey(view === 'clip' ? duration + 0.5 : stageTime(), currentPose)}>+ Key</Button>
+        {videoLane && (
+          <Button size='sm' disabled={view === 'clip'} title='A key at the playhead with a new pose: the motion as it is at this frame of the video, to pose against it'
+                  onClick={keyFromFrame}>Key from frame</Button>
+        )}
         <div className='flex-1' />
         <span className='text-ui-xs text-dim'>Ctrl+wheel zooms</span>
         <Button size='sm' onClick={() => setPxPerSec(p => clampZoom(p / 1.4))} title='Zoom out'>−</Button>
@@ -193,6 +243,8 @@ export function TimelinePanel() {
             {/* Lane names */}
             <div className='shrink-0 border-r border-border' style={{ width: LABEL_W }}>
               <div style={{ height: RULER_H }} className='border-b border-border bg-surface-raised' />
+              {videoLane && label(`Video · ${rateLabel(reference.video!.fps)} fps`, VIDEO_LANE_H)}
+              {analysisLane && label('Motion energy', ANALYSIS_LANE_H)}
               {label('Keys', TRACK_H)}
               {label('Base', LANE_H, undefined, () => setPartId(null), !selPart)}
               {parts.map(p => <div key={p.id}>{label(p.name, PART_H, p.color, () => setPartId(p.id), p.id === selPart?.id)}</div>)}
@@ -207,11 +259,29 @@ export function TimelinePanel() {
                       {big && <span className='absolute -top-3 left-1 text-[9px] tabular-nums text-dim'>{formatTick(t)}</span>}
                     </div>
                   ))}
-                  <div className='absolute bottom-0 top-0 bg-primary/10' style={{ left: x(duration), width: Math.max(0, x(end) - x(duration)) }}
+                  <div className='absolute bottom-0 top-0 bg-primary/10' style={{ left: x(duration), width: Math.max(0, x(clipEnd) - x(duration)) }}
                        title='The overlap tail: the trailing joints arriving after the last key' />
+                  {transportState.range && (
+                    <div className='pointer-events-none absolute bottom-0 h-[3px] bg-warning/70'
+                         style={{ left: x(transportState.range[0]), width: Math.max(1, x(transportState.range[1]) - x(transportState.range[0])) }} />
+                  )}
                 </div>
+                {/* The reference video */}
+                {videoLane && (
+                  <div className='absolute inset-x-0 border-b border-border/40' style={{ top: RULER_H, height: VIDEO_LANE_H }}>
+                    <VideoLane reference={ref!} video={reference.video!} thumbs={reference.thumbs} peaks={reference.peaks}
+                               x={x} pxPerSec={pxPerSec} width={width} onChange={setReference} />
+                  </div>
+                )}
+                {analysisLane && (
+                  <div className='absolute inset-x-0 border-b border-border/40' style={{ top: RULER_H + VIDEO_LANE_H, height: ANALYSIS_LANE_H }}>
+                    <AnalysisLane reference={ref!} times={reference.analysis?.times ?? trackMarks!.times} view={reference.analysis ? analysisView : null}
+                                  contacts={trackMarks?.contacts} turns={trackMarks?.turns} x={x} width={width}
+                                  onSeek={t => { transport.pause(); transport.seek(t); if (view === 'pose') setView('motion'); }} />
+                  </div>
+                )}
                 {/* Keys */}
-                <div className='absolute inset-x-0' style={{ top: RULER_H, height: TRACK_H }}
+                <div className='absolute inset-x-0' style={{ top, height: TRACK_H }}
                      onDoubleClick={e => addKey(tAt(e.clientX), currentPose)}
                      onDragOver={e => { if (e.dataTransfer.types.includes(POSE_DRAG_TYPE)) e.preventDefault(); }}
                      onDrop={e => { const id = e.dataTransfer.getData(POSE_DRAG_TYPE); if (id) { e.preventDefault(); addKey(tAt(e.clientX), id); } }}
@@ -226,7 +296,7 @@ export function TimelinePanel() {
                   ))}
                 </div>
                 {/* Base: the keys' own blends */}
-                <svg className='absolute left-0' style={{ top: RULER_H + TRACK_H, height: LANE_H }} width={width} height={LANE_H}>
+                <svg className='absolute left-0' style={{ top: top + TRACK_H, height: LANE_H }} width={width} height={LANE_H}>
                   <line x1={0} x2={width} y1={laneY(0)} y2={laneY(0)} stroke='currentColor' className='text-border' />
                   <line x1={0} x2={width} y1={laneY(1)} y2={laneY(1)} stroke='currentColor' className='text-border' strokeDasharray='2 3' />
                   {keys.map((k, i) => {
@@ -246,7 +316,7 @@ export function TimelinePanel() {
                 </svg>
                 {/* Parts: each part's blends, moved by its offsets; a key's override solid, an inherited one faded */}
                 {parts.length > 0 && (
-                  <svg className='absolute left-0' style={{ top: RULER_H + TRACK_H + LANE_H, height: parts.length * PART_H }} width={width} height={parts.length * PART_H}>
+                  <svg className='absolute left-0' style={{ top: top + TRACK_H + LANE_H, height: parts.length * PART_H }} width={width} height={parts.length * PART_H}>
                     {parts.map((p, pi) => {
                       const resolved = keys.map(k => resolvePartBlend(k, p));
                       return (
@@ -350,7 +420,7 @@ function KeyInspector({ k, index, patchKey, removeKey }: {
       </div>
       <div className='flex items-center gap-1 pt-1'>
         <span className='w-12 text-ui-sm text-muted'>Time</span>
-        <NumberInput className='w-20' value={k.time} step={1 / doc.fps} disabled={index === 0}
+        <NumberInput className='w-20' value={Math.round(k.time * 10000) / 10000} step={1 / doc.fps} disabled={index === 0}
                      onChange={v => patchKey(k.id, { time: Math.max(index === 0 ? 0 : 1 / doc.fps, v) })} />
         <span className='text-ui-xs text-dim'>s</span>
         <div className='flex-1' />
