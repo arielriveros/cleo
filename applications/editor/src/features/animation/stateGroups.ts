@@ -1,4 +1,4 @@
-import type { AnimationStateGroup, AnimationStateMachine, AnimationTransition } from 'cleo'
+import type { AnimationFork, AnimationStateGroup, AnimationStateMachine, AnimationTransition } from 'cleo'
 
 /**
  * State groups in the animator editor: the pure half, which the graph, the inspector and the context share.
@@ -17,12 +17,18 @@ import type { AnimationStateGroup, AnimationStateMachine, AnimationTransition } 
 const ANY = '*'
 
 export const groupsOf = (sm: AnimationStateMachine): AnimationStateGroup[] => sm.groups ?? []
+/** The view's forks (see forks.ts): junctions transitions go through. */
+export const forksOf = (sm: AnimationStateMachine): AnimationFork[] => sm.forks ?? []
 
-/** The group a state is in, if any. */
+/** The group a state (or a fork) is in, if any. */
 export const groupOf = (sm: AnimationStateMachine, state: string): AnimationStateGroup | undefined =>
   groupsOf(sm).find(g => g.states.includes(state))
 
 export const isGroupName = (sm: AnimationStateMachine, name: string): boolean => groupsOf(sm).some(g => g.name === name)
+/** Whether `name` is a fork of this view (and not a state or group, which would win: names are kept unique). */
+export const isForkName = (sm: AnimationStateMachine, name: string): boolean =>
+  forksOf(sm).some(f => f.name === name) && !sm.states.some(s => s.name === name) && !isGroupName(sm, name)
+const isStateName = (sm: AnimationStateMachine, name: string): boolean => sm.states.some(s => s.name === name)
 
 /** The state a transition into the group enters: its entry, else its first member. */
 export const entryOf = (g: AnimationStateGroup): string | undefined =>
@@ -35,31 +41,45 @@ export function withGroups(sm: AnimationStateMachine, groups: AnimationStateGrou
   return next
 }
 
-/** A name no state and no group has: "Group", then "Group 2", "Group 3" ... */
-export function freshGroupName(sm: AnimationStateMachine, base = 'Group'): string {
-  const taken = new Set([...sm.states.map(s => s.name), ...groupsOf(sm).map(g => g.name)])
+/** The view with these forks; the key is dropped when there are none, as with groups. */
+export function withForks(sm: AnimationStateMachine, forks: AnimationFork[]): AnimationStateMachine {
+  const next: AnimationStateMachine = { ...sm, forks }
+  if (!forks.length) delete next.forks
+  return next
+}
+
+/** Every name a state, a group or a fork of this view has: they share one namespace. */
+export const takenNames = (sm: AnimationStateMachine): string[] =>
+  [...sm.states.map(s => s.name), ...groupsOf(sm).map(g => g.name), ...forksOf(sm).map(f => f.name)]
+
+/** A name no state, group or fork has: `base`, then "`base` 2", "`base` 3" ... */
+export function freshName(sm: AnimationStateMachine, base: string): string {
+  const taken = new Set(takenNames(sm))
   if (!taken.has(base)) return base
   let n = 2
   while (taken.has(`${base} ${n}`)) n++
   return `${base} ${n}`
 }
 
-/** Whether `name` would clash with a state or a group other than `except`. */
+/** A name no state, group or fork has: "Group", then "Group 2", "Group 3" ... */
+export const freshGroupName = (sm: AnimationStateMachine, base = 'Group'): string => freshName(sm, base)
+
+/** Whether `name` would clash with a state, a group or a fork other than `except`. */
 export function nameTaken(sm: AnimationStateMachine, name: string, except?: string): boolean {
   if (name === except) return false
-  return name === ANY || sm.states.some(s => s.name === name) || groupsOf(sm).some(g => g.name === name)
+  return name === ANY || takenNames(sm).includes(name)
 }
 
 /**
- * Group `members` (states of this view, each leaving any group it was in) under a new group, placed at their
- * average position. Returns the view and the group's name, or null when no member is a state.
+ * Group `members` (states and forks of this view, each leaving any group it was in) under a new group, placed at
+ * their average position. Returns the view and the group's name, or null when no member is a state or a fork.
  */
 export function createGroup(sm: AnimationStateMachine, members: string[], name?: string): { view: AnimationStateMachine; name: string } | null {
-  const names = new Set(sm.states.map(s => s.name))
+  const names = new Set([...sm.states.map(s => s.name), ...forksOf(sm).map(f => f.name)])
   const picked = [...new Set(members)].filter(m => names.has(m))
   if (!picked.length) return null
   const groupName = name && !nameTaken(sm, name) ? name : freshGroupName(sm)
-  const placed = sm.states.filter(s => picked.includes(s.name) && typeof s.x === 'number' && typeof s.y === 'number')
+  const placed = [...sm.states, ...forksOf(sm)].filter(s => picked.includes(s.name) && typeof s.x === 'number' && typeof s.y === 'number')
   const avg = (k: 'x' | 'y') => Math.round(placed.reduce((sum, s) => sum + (s[k] as number), 0) / placed.length)
   const group: AnimationStateGroup = {
     name: groupName,
@@ -96,8 +116,9 @@ export function setGroupFields(sm: AnimationStateMachine, name: string, patch: P
  *
  * - `ungroup` keeps its states and keeps what it did: each transition FROM the group becomes one from each of
  *   its states (appended, so it still comes after each state's own ways out, as the group's did), skipping a
- *   state that already has a transition to that target; each transition TO it goes to its entry state.
- * - `delete` removes the group, its states and every transition touching any of them.
+ *   state that already has a transition to that target; each transition TO it goes to its entry (a state, or a
+ *   fork). Its forks keep their own ways out and get none of the group's: the machine is never in a fork.
+ * - `delete` removes the group, its states and forks, and every transition touching any of them.
  */
 export function removeGroup(sm: AnimationStateMachine, name: string, mode: 'ungroup' | 'delete'): AnimationStateMachine {
   const g = groupsOf(sm).find(x => x.name === name)
@@ -105,11 +126,11 @@ export function removeGroup(sm: AnimationStateMachine, name: string, mode: 'ungr
   const groups = groupsOf(sm).filter(x => x.name !== name)
   if (mode === 'delete') {
     const gone = new Set([name, ...g.states])
-    return withGroups({
+    return withForks(withGroups({
       ...sm,
       states: sm.states.filter(s => !gone.has(s.name)),
       transitions: sm.transitions.filter(t => !gone.has(t.from) && !gone.has(t.to)),
-    }, groups)
+    }, groups), forksOf(sm).filter(f => !gone.has(f.name)))
   }
   const entry = entryOf(g)
   const kept: AnimationTransition[] = []
@@ -123,16 +144,16 @@ export function removeGroup(sm: AnimationStateMachine, name: string, mode: 'ungr
     if (!to) continue
     if (t.from !== name) { if (t.from !== to && !has(t.from, to)) kept.push({ ...t, to }); continue }
     for (const member of g.states) {
-      if (member === to || has(member, to)) continue
+      if (!isStateName(sm, member) || member === to || has(member, to)) continue
       expanded.push({ ...clone(t), from: member, to })
     }
   }
   return withGroups({ ...sm, transitions: [...kept, ...expanded] }, groups)
 }
 
-/** Put a state in `group` (out of whichever it was in), or in none with `group` null. */
+/** Put a state (or a fork) in `group` (out of whichever it was in), or in none with `group` null. */
 export function moveToGroup(sm: AnimationStateMachine, state: string, group: string | null): AnimationStateMachine {
-  if (!sm.states.some(s => s.name === state)) return sm
+  if (!isStateName(sm, state) && !isForkName(sm, state)) return sm
   if (group !== null && !isGroupName(sm, group)) return sm
   const groups = groupsOf(sm).map(g => {
     if (g.name === group) return g.states.includes(state) ? g : { ...g, states: [...g.states, state] }
@@ -166,13 +187,15 @@ const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v))
 
 // ----- layer views ---------------------------------------------------------------------------------------
 
-/** Layer `i`'s view of a machine: its states, transitions and groups over the machine's shared everything-else. */
+/** Layer `i`'s view of a machine: its states, transitions, groups and forks over the machine's shared everything-else. */
 export function layerView(sm: AnimationStateMachine, i: number): AnimationStateMachine {
   if (i <= 0) return sm
   const layer = sm.layers?.[i - 1]
   if (!layer) return sm
-  const view: AnimationStateMachine = { ...sm, states: layer.states, transitions: layer.transitions, groups: layer.groups }
+  const view: AnimationStateMachine = { ...sm, states: layer.states, transitions: layer.transitions, groups: layer.groups, forks: layer.forks }
+  // The base's own are not the layer's: a layer without any has none.
   if (!layer.groups) delete view.groups
+  if (!layer.forks) delete view.forks
   return view
 }
 
@@ -181,8 +204,9 @@ export function writeLayer(sm: AnimationStateMachine, i: number, view: Animation
   if (i <= 0) return { ...view, layers: sm.layers, slots: view.slots ?? sm.slots }
   const layers = (sm.layers ?? []).map((l, idx) => {
     if (idx !== i - 1) return l
-    const next = { ...l, states: view.states, transitions: view.transitions, groups: view.groups }
+    const next = { ...l, states: view.states, transitions: view.transitions, groups: view.groups, forks: view.forks }
     if (!view.groups?.length) delete next.groups
+    if (!view.forks?.length) delete next.forks
     return next
   })
   // Everything that is not the layer's own states/transitions/groups stays the machine's.
@@ -204,7 +228,10 @@ export const realName = (nodeId: string): string =>
 
 export interface PlanGroup {
   name: string
+  /** Its members: states and forks. */
   members: string[]
+  /** The members that are forks. */
+  forks: string[]
   /** The outside ends whose transitions come INTO it, in order of first appearance. */
   inputs: string[]
   /** The outside ends its transitions (its states' and its own) go to. */
@@ -246,6 +273,8 @@ export interface PlanLink {
 export interface GraphPlan {
   /** The states drawn as state nodes. */
   states: string[]
+  /** The forks drawn as fork nodes: those in no group at the top level, the group's own inside an open group. */
+  forks: string[]
   /** Group nodes (top level only). */
   groups: PlanGroup[]
   /** Outside ends (inside an open group only). */
@@ -315,7 +344,8 @@ function topPlan(sm: AnimationStateMachine): GraphPlan {
 
   return {
     states: sm.states.filter(s => !memberOf.has(s.name)).map(s => s.name),
-    groups: groups.map(g => ({ name: g.name, members: g.states, ...ports.get(g.name)! })),
+    forks: forksOf(sm).filter(f => !memberOf.has(f.name)).map(f => f.name),
+    groups: groups.map(g => ({ name: g.name, members: g.states, forks: g.states.filter(m => isForkName(sm, m)), ...ports.get(g.name)! })),
     proxies: [],
     self: null,
     links: [...plain.values(), ...ported.values()],
@@ -365,6 +395,7 @@ function insidePlan(sm: AnimationStateMachine, g: AnimationStateGroup): GraphPla
 
   return {
     states: g.states.filter(s => sm.states.some(x => x.name === s)),
+    forks: g.states.filter(s => isForkName(sm, s)),
     groups: [],
     proxies: [...proxies.values()],
     self,

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useEditorSessions } from '../EditorSessionsContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
-import type { Animator, AnimationVariableBinding, AnimationParameterType, AnimationParameter, AnimationStateTrigger } from 'cleo'
+import type { Animator, AnimationVariableBinding, AnimationParameterType, AnimationParameter, AnimationStateTrigger, AnimationTransition } from 'cleo'
 import { NODE_BUILTINS, isConditionGroup } from 'cleo'
 import { AccessibleVariable, UNSIGNED_BUILTINS } from './skeleton'
 import FieldDebugReadout from './FieldDebugReadout'
@@ -9,7 +9,9 @@ import type { AnimationFieldAsset } from '../../utils/animationFields'
 import { useStateMachine, ANY_STATE, linkKey } from './StateMachineContext'
 import { entryOf, transitionsBetween } from './stateGroups'
 import { transitionLabel } from './StateGraph'
-import { HoldIcon, IntoGroupIcon, OutOfGroupIcon, UngroupIcon, EntryIcon } from './groupIcons'
+import { HoldIcon, IntoGroupIcon, OutOfGroupIcon, UngroupIcon, EntryIcon, ForkIcon, DissolveIcon } from './groupIcons'
+import { waysIn, waysOut } from './forks'
+import { ForkGlyph } from '../../components/MachineGraph'
 import ConditionTree from './ConditionTree'
 import { AssetDropRow, LayerSection, SlotsSection } from './LayerPanels'
 import { EventActionsSection } from './EventActionsPanel'
@@ -206,7 +208,7 @@ export function StateMachinePanel() {
       <LayerSection />
       <Collapsable title='Selected' defaultOpen>
         <div className='p-2 flex flex-col gap-2'>
-          {!selection && <p className='text-ui-sm text-muted'>Select a state, a group or a transition in the graph.</p>}
+          {!selection && <p className='text-ui-sm text-muted'>Select a state, a group, a fork or a transition in the graph.</p>}
           {selection?.kind === 'state' && selection.name === ANY_STATE && (
             <p className='text-ui-sm text-muted'>
               <b>Any State</b> — a transition from here fires whichever state this layer is in, the moment its
@@ -216,6 +218,7 @@ export function StateMachinePanel() {
           )}
           {selection?.kind === 'state' && <SelectedState />}
           {selection?.kind === 'group' && <SelectedGroup />}
+          {selection?.kind === 'fork' && <SelectedFork />}
           {selection?.kind === 'summary' && <SelectedSummary />}
           {selection?.kind === 'transition' && <SelectedTransition />}
         </div>
@@ -749,13 +752,14 @@ function disjointReciprocal(fwd: any, bwd: any): { fwd: string[]; bwd: string[] 
 function SelectedGroup() {
   const {
     sm, selection, setSelection, groups, groupOf, setGroup, removeGroup, moveToGroup, openGroup, setOpenGroup, paramOf,
+    forks, isFork,
   } = useStateMachine()
   if (selection?.kind !== 'group') return null
   const g = groups.find(x => x.name === selection.name)
   if (!g) return null
   const entry = entryOf(g)
   const own = sm.transitions.filter(t => t.from === g.name || t.to === g.name)
-  const free = sm.states.filter(st => !groupOf(st.name))
+  const free = [...sm.states, ...forks].filter(st => !groupOf(st.name))
   const icon = (C: (p: React.SVGProps<SVGSVGElement>) => JSX.Element) => <span className='inline-block w-4 h-4'><C /></span>
   const strip = 'flex items-center justify-center px-1.5 py-1 text-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:pointer-events-none'
   const pickTransition = (from: string, to: string) => { const [a, b] = linkKey(from, to); setSelection({ kind: 'transition', a, b }) }
@@ -776,11 +780,11 @@ function SelectedGroup() {
       </div>
       <p className={hintClass}>
         A transition from the group fires from any of its states, after that state’s own ways out; one into the
-        group enters its entry state.
+        group enters its entry state (or goes on through its entry fork).
       </p>
 
       <div className='flex items-center gap-1'>
-        <span className='text-ui-xs text-muted w-[42px] shrink-0' title='The state a transition into the group enters'>Entry</span>
+        <span className='text-ui-xs text-muted w-[42px] shrink-0' title='The state a transition into the group enters, or the fork it goes on through'>Entry</span>
         <Select className={cn(tight, 'flex-1 min-w-0')} value={entry ?? ''} disabled={!g.states.length}
           onChange={e => setGroup(g.name, { entry: e.target.value || undefined })}>
           {g.states.map(m => <option key={m} value={m}>{m}{!g.entry && m === g.states[0] ? ' (first)' : ''}</option>)}
@@ -791,11 +795,13 @@ function SelectedGroup() {
       {g.states.length === 0 && <p className={hintClass}>No states: nothing to enter, nothing to leave from.</p>}
       {g.states.map(m => (
         <div key={m} className='flex items-center gap-1 text-ui-sm'>
-          <button type='button' className='flex-1 truncate text-left text-muted hover:text-fg' title={`Select ${m}`}
-            onClick={() => setSelection({ kind: 'state', name: m })}>{m}</button>
+          <button type='button' className='flex-1 truncate text-left text-muted hover:text-fg flex items-center gap-1' title={`Select ${m}`}
+            onClick={() => setSelection(isFork(m) ? { kind: 'fork', name: m } : { kind: 'state', name: m })}>
+            {isFork(m) && <ForkGlyph />}<span className='truncate'>{m}</span>
+          </button>
           {m === entry
-            ? <span className='w-5 h-5 p-0.5 text-success' title='The entry state'><EntryIcon /></span>
-            : <Button variant='ghost' size='sm' title='Make it the group’s entry state' onClick={() => setGroup(g.name, { entry: m })}>
+            ? <span className='w-5 h-5 p-0.5 text-success' title='The entry'><EntryIcon /></span>
+            : <Button variant='ghost' size='sm' title='Make it the group’s entry' onClick={() => setGroup(g.name, { entry: m })}>
                 <span className='inline-block w-3.5 h-3.5'><EntryIcon /></span>
               </Button>}
           <Button variant='ghost' size='sm' title='Take it out of the group' onClick={() => moveToGroup(m, null)}>
@@ -804,10 +810,10 @@ function SelectedGroup() {
         </div>
       ))}
       {free.length > 0 && (
-        <Select className={cn(tight, 'self-start')} value='' title='Put another state in this group'
+        <Select className={cn(tight, 'self-start')} value='' title='Put another state (or a fork) in this group'
           onChange={e => { if (e.target.value) moveToGroup(e.target.value, g.name) }}>
           <option value=''>+ state…</option>
-          {free.map(st => <option key={st.name} value={st.name}>{st.name}</option>)}
+          {free.map(st => <option key={st.name} value={st.name}>{st.name}{isFork(st.name) ? ' (fork)' : ''}</option>)}
         </Select>
       )}
 
@@ -822,6 +828,96 @@ function SelectedGroup() {
               <span className='text-ui-xs text-dim truncate max-w-[50%]'>{transitionLabel(t, paramOf)}</span>
             </button>
           ))}
+    </div>
+  )
+}
+
+// ---- Selected fork ------------------------------------------------------------------------------------
+function SelectedFork() {
+  const {
+    sm, selection, setSelection, groups, groupOf, setGroup, moveToGroup, forks, setFork, removeFork, dissolveFork,
+    moveTransition, addTransition, paramOf,
+  } = useStateMachine()
+  if (selection?.kind !== 'fork') return null
+  const f = forks.find(x => x.name === selection.name)
+  if (!f) return null
+  const ins = waysIn(sm, f.name)
+  const outs = waysOut(sm, f.name)
+  const home = groupOf(f.name)
+  const name = (n: string) => (n === ANY_STATE ? 'Any State' : n)
+  const pick = (t: AnimationTransition) => { const [a, b] = linkKey(t.from, t.to); setSelection({ kind: 'transition', a, b }) }
+  const icon = (C: (p: React.SVGProps<SVGSVGElement>) => JSX.Element) => <span className='inline-block w-4 h-4'><C /></span>
+  const strip = 'flex items-center justify-center px-1.5 py-1 text-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:pointer-events-none'
+  // Where a new way out can go: anything but the fork itself and the places it already goes.
+  const targets = [...sm.states.map(s => s.name), ...groups.map(g => g.name), ...forks.map(x => x.name)]
+    .filter(n => n !== f.name && !outs.some(t => t.to === n))
+  const row = 'flex items-center gap-1 text-ui-sm text-muted'
+
+  return (
+    <div className='flex flex-col gap-2'>
+      <div className='flex items-center gap-1'>
+        <span className='w-4 h-4 text-warning shrink-0'><ForkIcon /></span>
+        <TextInput className={cn(tight, 'flex-1 min-w-0')} title='Fork name: no state, group or other fork may have it' value={f.name}
+          onChange={v => setFork(f.name, { name: v })} />
+        <div className={JOINED_GROUP_CLASS}>
+          <button type='button' className={strip} disabled={!ins.length || !outs.length}
+            title='Dissolve: take the fork away and keep what it did, each way in joined to each way out'
+            onClick={() => dissolveFork(f.name)}>{icon(DissolveIcon)}</button>
+        </div>
+        <ButtonWithConfirm variant='remove' size='sm' title='Delete the fork and every transition into or out of it' onClick={() => removeFork(f.name)}>✕</ButtonWithConfirm>
+      </div>
+      <p className={hintClass}>
+        Not a state: the machine goes straight through. A way in fires only when a way out holds, and then goes on to
+        the first that does, in this order. Every gate is tested on the state being left.
+      </p>
+
+      {groups.length > 0 && (
+        <div className='flex items-center gap-1'>
+          <span className='text-ui-xs text-muted w-[42px] shrink-0' title='The state group this fork is in'>Group</span>
+          <Select className={cn(tight, 'flex-1 min-w-0')} value={home?.name ?? ''}
+            onChange={e => moveToGroup(f.name, e.target.value || null)}>
+            <option value=''>(none)</option>
+            {groups.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
+          </Select>
+          {home && (entryOf(home) === f.name
+            ? <span className='w-5 h-5 p-0.5 text-success shrink-0' title={`The entry of ${home.name}: a transition into it goes on through this fork`}><EntryIcon /></span>
+            : <Button variant='ghost' size='sm' className='shrink-0' title={`Make it ${home.name}’s entry: a transition into the group goes on through it`}
+                onClick={() => setGroup(home.name, { entry: f.name })}>
+                <span className='inline-block w-3.5 h-3.5'><EntryIcon /></span>
+              </Button>)}
+        </div>
+      )}
+
+      <SectionTitle title='Ways in' className='mt-1' />
+      {ins.length === 0
+        ? <p className={cn(hintClass, 'text-ui-sm')}>None. Drag from a state onto the fork in the graph.</p>
+        : ins.map(t => (
+            <button type='button' key={`${t.from}>${t.to}`} className={cn(row, 'hover:text-fg text-left')} title='Edit this transition' onClick={() => pick(t)}>
+              <span className='truncate flex-1'>{name(t.from)}{t.to !== f.name && <span className='text-dim'> → {t.to}</span>}</span>
+              <span className='text-ui-xs text-dim truncate max-w-[50%]'>{transitionLabel(t, paramOf) || 'always'}</span>
+            </button>
+          ))}
+
+      <SectionTitle title='Ways out' className='mt-1' />
+      {outs.length === 0 && <p className={cn(hintClass, 'text-ui-sm')}>None: nothing goes through it. Drag from the fork to a state.</p>}
+      {outs.map((t, k) => (
+        <div key={`${t.from}>${t.to}`} className={row}>
+          <span className='text-dim w-4 text-right shrink-0' title='Tried in this order: the first that holds is taken'>{k + 1}</span>
+          <button type='button' className='flex-1 min-w-0 flex items-center gap-1 hover:text-fg text-left' title='Edit this transition' onClick={() => pick(t)}>
+            <span className='truncate'>{t.to}</span>
+            <span className='ml-auto text-ui-xs text-dim truncate max-w-[55%]'>{transitionLabel(t, paramOf) || 'always'}</span>
+          </button>
+          <Button variant='ghost' size='sm' className='shrink-0 px-1' disabled={k === 0} title='Try it earlier' onClick={() => moveTransition(t.from, t.to, -1)}>↑</Button>
+          <Button variant='ghost' size='sm' className='shrink-0 px-1' disabled={k === outs.length - 1} title='Try it later' onClick={() => moveTransition(t.from, t.to, 1)}>↓</Button>
+        </div>
+      ))}
+      {targets.length > 0 && (
+        <Select className={cn(tight, 'self-start')} value='' title='Add a way out of the fork (tried after the others)'
+          onChange={e => { if (e.target.value) addTransition(f.name, e.target.value) }}>
+          <option value=''>+ way out…</option>
+          {targets.map(n => <option key={n} value={n}>{n}</option>)}
+        </Select>
+      )}
     </div>
   )
 }
@@ -852,10 +948,13 @@ function SelectedSummary() {
 
 // ---- Selected transition (a LINK: up to one transition each way) -------------------------------------
 function SelectedTransition() {
-  const { selection, linkOf, addTransition, setTransition, removeTransition, groups } = useStateMachine()
+  const { selection, linkOf, addTransition, setTransition, removeTransition, groups, isFork } = useStateMachine()
   if (selection?.kind !== 'transition') return null
   const link = linkOf(selection.a, selection.b)
   if (!link) return null
+  // A transition into a fork (or into a group entered through one) only fires on through one of its ways out.
+  const entryName = (n: string) => { const g = groups.find(x => x.name === n); return g ? entryOf(g) ?? n : n }
+  const intoFork = (t: AnimationTransition | null) => !!t && isFork(entryName(t.to))
 
   // Nothing transitions INTO "any state", so a link to it has one direction only.
   const dirs: { from: string; to: string; t: typeof link.forward }[] = [
@@ -868,7 +967,7 @@ function SelectedTransition() {
   const unconditional = [
     { t: link.forward, from: link.a, to: link.b },
     { t: link.backward, from: link.b, to: link.a },
-  ].filter(d => d.t && leafConditions(d.t).length === 0)
+  ].filter(d => d.t && leafConditions(d.t).length === 0 && !intoFork(d.t))
 
   return (
     <div className='flex flex-col gap-2'>
@@ -895,6 +994,14 @@ function SelectedTransition() {
           alternating frames — which shows up as the character vibrating, not as a state problem.
           {' '}Give each condition a <b>tolerance</b> (0.1 is plenty for a speed), separate the two
           thresholds, or set <b>stay at least</b> below.
+        </p>
+      )}
+      {[link.a, link.b].some(isFork) && (
+        <p className={hintClass}>
+          {[link.a, link.b].filter(isFork).map(n => <b key={n}>{n} </b>)}
+          is a fork: a transition into it fires only when one of its ways out holds, and goes straight on; each way
+          out is tried in its order. Gates on either side are tested on the state being left, and the way out’s blend
+          wins. Put a trigger on a way out, not on the way in: a way in that waits on its ways out keeps its trigger raised.
         </p>
       )}
       {groups.some(g => g.name === link.a || g.name === link.b) && (
@@ -934,7 +1041,7 @@ function SelectedTransition() {
               <OptionalNumberInput className={cn(tight, 'w-[52px]')} placeholder='0.3'
                 value={t.blendTime}
                 onChange={v => setTransition(from, to, { blendTime: v === undefined ? undefined : Math.max(0, v) })} />
-              <span className='text-dim'>s {t.blendTime === undefined && '(default)'}</span>
+              <span className='text-dim'>s {t.blendTime === undefined ? (intoFork(t) ? '(the way out’s)' : '(default)') : intoFork(t) ? '(when the way out sets none)' : ''}</span>
             </label>
             {/* The blunt fix for a state pair that ping-pongs. A blend covers a change visually, but the
                 machine can still change its mind mid-blend and re-arm from a pose that barely moved — which

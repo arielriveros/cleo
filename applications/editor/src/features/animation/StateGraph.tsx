@@ -10,7 +10,8 @@ import type { GraphLinkModel, GraphMenuItem, GraphNodeModel } from '../../compon
 import { isConditionGroup } from 'cleo'
 import type { AnimationTransition, AnimationCondition, AnimationConditionNode } from 'cleo'
 import { graphPlan, inPort, outPort, realName, entryOf, PROXY_PREFIX, SELF_PREFIX, type PlanLink } from './stateGroups'
-import { GroupIcon, IntoGroupIcon, OutOfGroupIcon, UngroupIcon, EntryIcon } from './groupIcons'
+import { GroupIcon, IntoGroupIcon, OutOfGroupIcon, UngroupIcon, EntryIcon, ForkIcon, DissolveIcon } from './groupIcons'
+import { rankOf, waysIn, waysOut } from './forks'
 
 /**
  * The animation state machine on the shared node-graph canvas.
@@ -26,6 +27,12 @@ import { GroupIcon, IntoGroupIcon, OutOfGroupIcon, UngroupIcon, EntryIcon } from
  * stands for every transition between those ends, a dashed one for the group's own (from or to the group
  * itself, which fire from any of its states). Double-click a group to open it: its states, a stand-in for
  * each outside end, and "Any state in …" where the group's own transitions start.
+ *
+ * ## Forks
+ *
+ * A fork is drawn as a small diamond pill: transitions go in and come out, and the machine goes straight through
+ * to the first way out that holds. Its ways out are labelled with their rank (1, 2, …), because that order is what
+ * decides. A fork in a group is drawn inside it (a group's entry may be one), and stands for its group outside.
  */
 
 const AUTO_COLS = 4
@@ -57,14 +64,22 @@ export function transitionLabel(t: AnimationTransition, paramOf: (n: string) => 
   return parts.join(', ') + extra
 }
 
-/** What a drawn line says: the gate of the one transition each way, or how many it stands for. */
-function linkLabel(l: PlanLink, paramOf: (n: string) => any): string {
+/**
+ * What a drawn line says: the gate of the one transition each way, or how many it stands for. A fork's way out leads
+ * with its rank (`rank` is 0 for any other transition), since the first that holds is the one taken.
+ */
+function linkLabel(l: PlanLink, paramOf: (n: string) => any, rank: (t: AnimationTransition) => number): string {
   if (l.summary) {
     const all = [...l.forward, ...l.backward]
     return all.length === 1 ? `${all[0].from}: ${transitionLabel(all[0], paramOf) || 'always'}` : `${all.length} transitions`
   }
-  const fwd = l.forward[0] ? transitionLabel(l.forward[0], paramOf) : ''
-  const bwd = l.backward[0] ? transitionLabel(l.backward[0], paramOf) : ''
+  const one = (t: AnimationTransition | undefined) => {
+    if (!t) return ''
+    const r = rank(t), gate = transitionLabel(t, paramOf)
+    return r ? `${r} · ${gate || 'always'}` : gate
+  }
+  const fwd = one(l.forward[0])
+  const bwd = one(l.backward[0])
   return l.forward.length && l.backward.length ? [fwd, bwd].filter(Boolean).join(' ⇄ ') || '⇄' : (fwd || bwd)
 }
 
@@ -77,6 +92,7 @@ export default function StateGraph() {
     addState, setState, addTransition, apply, stateIndex, commitLayout, deleteElements, paramOf,
     removeState, animationFields, fieldOf, fullSm, activeLayer,
     groups, groupOf, createGroup, setGroup, removeGroup, moveToGroup, openGroup, setOpenGroup,
+    forks, isFork, addFork, setFork, removeFork, dissolveFork,
   } = useStateMachine()
   // The highlighted state is the ACTIVE layer's: the base reads `currentStateName`, a layer its own.
   const layerName = activeLayer > 0 ? fullSm.layers?.[activeLayer - 1]?.name ?? null : null
@@ -91,7 +107,17 @@ export default function StateGraph() {
     if (s && typeof s.x === 'number' && typeof s.y === 'number') return { x: s.x, y: s.y }
     return { x: (idx % AUTO_COLS) * AUTO_DX, y: Math.floor(idx / AUTO_COLS) * AUTO_DY }
   }, [sm.states])
-  const posOfName = useCallback((name: string) => posOf(Math.max(0, sm.states.findIndex(s => s.name === name))), [posOf, sm.states])
+  // A fork without coordinates sits below the auto-grid, one slot per fork.
+  const forkPos = useCallback((name: string): { x: number; y: number } => {
+    const i = Math.max(0, forks.findIndex(f => f.name === name))
+    const f = forks[i]
+    if (f && typeof f.x === 'number' && typeof f.y === 'number') return { x: f.x, y: f.y }
+    const rows = Math.ceil(sm.states.length / AUTO_COLS) + 1
+    return { x: (i % AUTO_COLS) * AUTO_DX + 30, y: (rows + Math.floor(i / AUTO_COLS)) * AUTO_DY }
+  }, [forks, sm.states.length])
+  const posOfName = useCallback((name: string) => (isFork(name) ? forkPos(name) : posOf(Math.max(0, sm.states.findIndex(s => s.name === name)))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [posOf, sm.states, forkPos])
   // A group without coordinates sits where its states are.
   const groupPos = useCallback((name: string): { x: number; y: number } => {
     const g = groups.find(x => x.name === name)
@@ -106,13 +132,15 @@ export default function StateGraph() {
     if (!graphView || sm.states.length === 0) return
     const missing = sm.states.some(s => typeof s.x !== 'number' || typeof s.y !== 'number')
       || groups.some(g => typeof g.x !== 'number' || typeof g.y !== 'number')
+      || forks.some(f => typeof f.x !== 'number' || typeof f.y !== 'number')
     if (!missing) return
     const coords: Record<string, { x: number; y: number }> = {}
     sm.states.forEach((s, i) => { coords[s.name] = posOf(i) })
+    for (const f of forks) coords[f.name] = forkPos(f.name)
     for (const g of groups) coords[g.name] = groupPos(g.name)
     commitLayout(coords)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphView, sm.states.length, groups.length])
+  }, [graphView, sm.states.length, groups.length, forks.length])
 
   // Polls the animator's active state for the Simulate highlight, only while the graph is visible.
   useEffect(() => {
@@ -136,11 +164,11 @@ export default function StateGraph() {
   const plan = useMemo(() => graphPlan(sm, openGroup), [sm, openGroup])
 
   const anyPos = useMemo(() => {
-    const placed = plan.states.map(posOfName).concat(plan.groups.map(g => groupPos(g.name)))
+    const placed = plan.states.map(posOfName).concat(plan.groups.map(g => groupPos(g.name)), plan.forks.map(forkPos))
     const minX = placed.length ? Math.min(...placed.map(p => p.x)) : 0
     const minY = placed.length ? Math.min(...placed.map(p => p.y)) : 0
     return { x: minX - AUTO_DX, y: minY }
-  }, [plan, posOfName, groupPos])
+  }, [plan, posOfName, groupPos, forkPos])
   const anyCount = sm.transitions.filter(t => t.from === ANY_STATE).length
 
   const stateNode = useCallback((name: string): GraphNodeModel | null => {
@@ -196,15 +224,30 @@ export default function StateGraph() {
       })
     }
     for (const name of plan.states) { const n = stateNode(name); if (n) out.push(n) }
+    for (const name of plan.forks) {
+      const ins = waysIn(sm, name).length, outs = waysOut(sm, name).length
+      const home = groupOf(name)
+      out.push({
+        id: name,
+        ...forkPos(name),
+        shape: 'fork',
+        isEntry: !!home && entryOf(home) === name,
+        entryable: false,
+        noun: 'fork and its transitions',
+        subtitle: `${ins} in · ${outs} out`,
+      })
+    }
     for (const g of plan.groups) {
       const peer = (p: string) => ({ label: nameOf(p), title: `${nameOf(p)}` })
+      const stateCount = g.members.length - g.forks.length
+      const counts = `${stateCount} state${stateCount === 1 ? '' : 's'}${g.forks.length ? `, ${g.forks.length} fork${g.forks.length === 1 ? '' : 's'}` : ''}`
       out.push({
         id: g.name,
         ...groupPos(g.name),
         entryable: false,
         noun: 'group and its states',
-        badge: `${g.members.length}`,
-        subtitle: `${g.members.length} state${g.members.length === 1 ? '' : 's'}: ${g.members.join(', ')}`,
+        badge: `${stateCount}`,
+        subtitle: `${counts}: ${g.members.join(', ')}`,
         ports: {
           inputs: g.inputs.map(p => ({ id: inPort(p), ...peer(p), title: `From ${nameOf(p)}` })),
           outputs: g.outputs.map(p => ({ id: outPort(p), ...peer(p), title: `To ${nameOf(p)}` })),
@@ -213,7 +256,7 @@ export default function StateGraph() {
     }
     if (openGroup && plan.self) {
       // The stand-ins: what comes in on the left, what it goes to on the right, stacked from the top of its states.
-      const ps = plan.states.map(posOfName)
+      const ps = plan.states.map(posOfName).concat(plan.forks.map(forkPos))
       const minX = ps.length ? Math.min(...ps.map(p => p.x)) : 0
       const maxX = ps.length ? Math.max(...ps.map(p => p.x)) : 0
       const minY = ps.length ? Math.min(...ps.map(p => p.y)) : 0
@@ -241,13 +284,13 @@ export default function StateGraph() {
           sourceOnly: p.name === ANY_STATE,
           deletable: false,
           entryable: false,
-          subtitle: other ? `in ${other.name}` : groups.some(g => g.name === p.name) ? 'group' : 'outside this group',
+          subtitle: other ? `in ${other.name}` : groups.some(g => g.name === p.name) ? 'group' : isFork(p.name) ? 'fork' : 'outside this group',
         })
       }
     }
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plan, stateNode, groupPos, anyPos, anyCount, moved, openGroup, groups, activeLayer])
+  }, [plan, stateNode, groupPos, forkPos, anyPos, anyCount, moved, openGroup, groups, activeLayer, sm.transitions])
 
   const graphLinks: GraphLinkModel[] = useMemo(() => plan.links.map(l => ({
     a: l.a,
@@ -257,14 +300,14 @@ export default function StateGraph() {
     nodeB: l.nodeB,
     forward: l.forward.length > 0,
     backward: l.backward.length > 0,
-    label: linkLabel(l, paramOf),
+    label: linkLabel(l, paramOf, t => rankOf(sm, t)),
     sourceHandle: l.sourceHandle,
     targetHandle: l.targetHandle,
     dashed: l.dashed,
     // A summary stands for transitions it does not name: those are removed from the inspector, one by one.
     deletable: !l.summary,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  })), [plan, sm.parameters])
+  })), [plan, sm.parameters, sm.transitions])
 
   // The highlighted line: the selected link's (either order), or the summary's.
   const selectedLinkKey = useMemo(() => {
@@ -287,15 +330,17 @@ export default function StateGraph() {
 
   const isGroupNode = (id: string) => !openGroup && groups.some(g => g.name === id)
   const isState = (id: string) => stateIndex(id) >= 0
-  // What Group would take: the picked states drawn on their own (not in a group), else the selected one.
-  const groupable = (picked.length ? picked : selection?.kind === 'state' ? [selection.name] : [])
-    .filter(n => isState(n) && !groupOf(n))
+  // What Group would take: the picked states and forks drawn on their own (not in a group), else the selected one.
+  const single = selection?.kind === 'state' || selection?.kind === 'fork' ? [selection.name] : []
+  const groupable = (picked.length ? picked : single)
+    .filter(n => (isState(n) || isFork(n)) && !groupOf(n))
   const selectedGroup = selection?.kind === 'group' ? selection.name : null
 
   const select = (id: string | null) => {
     if (!id) { setSelection(null); return }
     const name = realName(id)
     if (id.startsWith(SELF_PREFIX) || groups.some(g => g.name === name)) setSelection({ kind: 'group', name })
+    else if (isFork(name)) setSelection({ kind: 'fork', name })
     else setSelection({ kind: 'state', name })
   }
 
@@ -315,7 +360,7 @@ export default function StateGraph() {
     }
     if (id.startsWith(PROXY_PREFIX)) {
       setOpenGroup(groupOf(name)?.name ?? null)
-      setSelection({ kind: 'state', name })
+      setSelection(isFork(name) ? { kind: 'fork', name } : { kind: 'state', name })
     }
   }
 
@@ -325,6 +370,7 @@ export default function StateGraph() {
     for (const { id, x, y } of moves) {
       if (id === ANY_STATE || id.startsWith(PROXY_PREFIX) || id.startsWith(SELF_PREFIX)) { session[movedKey(id)] = { x, y }; continue }
       if (isGroupNode(id)) { setGroup(id, { x, y }); continue }
+      if (isFork(id)) { setFork(id, { x, y }); continue }
       const i = stateIndex(id)
       if (i >= 0) setState(i, { x, y })
     }
@@ -340,26 +386,33 @@ export default function StateGraph() {
         { label: 'Ungroup', icon: icon(UngroupIcon), title: 'Its states back on the graph; each keeps the group’s transitions as its own', onClick: () => removeGroup(name, 'ungroup') },
       ]
     }
-    if (!isState(name) || id.startsWith(PROXY_PREFIX)) return []
+    if ((!isState(name) && !isFork(name)) || id.startsWith(PROXY_PREFIX)) return []
     const items: GraphMenuItem[] = []
     const home = groupOf(name)
     if (!home) {
       const members = picked.includes(name) ? groupable : [name]
       items.push({
-        label: members.length > 1 ? `Group ${members.length} states` : 'Group',
+        label: members.length > 1 ? `Group ${members.length}` : 'Group',
         icon: icon(GroupIcon),
         title: 'Put the selected states in a new group (Ctrl+click or Shift+drag to select several)',
         onClick: () => { createGroup(members); setPicked([]) },
       })
     } else {
       if (entryOf(home) !== name) {
-        items.push({ label: 'Make group entry', icon: icon(EntryIcon), title: `A transition into ${home.name} enters this state`, onClick: () => setGroup(home.name, { entry: name }) })
+        items.push({ label: 'Make group entry', icon: icon(EntryIcon), title: `A transition into ${home.name} enters ${isFork(name) ? 'through this fork' : 'this state'}`, onClick: () => setGroup(home.name, { entry: name }) })
       }
       items.push({ label: 'Take out of group', icon: icon(OutOfGroupIcon), title: `Out of ${home.name}, back on the whole graph`, onClick: () => moveToGroup(name, null) })
     }
     for (const g of groups) {
       if (g.name === home?.name) continue
-      items.push({ label: `Move to ${g.name}`, icon: icon(IntoGroupIcon), title: `Make it one of ${g.name}’s states`, onClick: () => moveToGroup(name, g.name) })
+      items.push({ label: `Move to ${g.name}`, icon: icon(IntoGroupIcon), title: `Make it one of ${g.name}’s ${isFork(name) ? 'forks' : 'states'}`, onClick: () => moveToGroup(name, g.name) })
+    }
+    if (isFork(name)) {
+      items.push({
+        label: 'Dissolve', icon: icon(DissolveIcon),
+        title: 'Take the fork away and keep what it did: each way in joined to each way out',
+        onClick: () => dissolveFork(name),
+      })
     }
     return items
   }
@@ -372,7 +425,7 @@ export default function StateGraph() {
       links={graphLinks}
       activeId={activeId}
       viewKey={`${activeLayer}|${openGroup ?? ''}`}
-      selectedNode={selection?.kind === 'state' ? selection.name : selection?.kind === 'group' ? (openGroup === selection.name ? null : selection.name) : null}
+      selectedNode={selection?.kind === 'state' || selection?.kind === 'fork' ? selection.name : selection?.kind === 'group' ? (openGroup === selection.name ? null : selection.name) : null}
       selectedLink={null}
       selectedLinkKey={selectedLinkKey}
       onMoveNode={(id, x, y) => { moveNodes([{ id, x, y }]) }}
@@ -410,6 +463,7 @@ export default function StateGraph() {
       }}
       onRemoveNode={(id) => {
         if (isGroupNode(id)) { removeGroup(id, 'delete'); return }
+        if (isFork(id)) { removeFork(id); return }
         const i = stateIndex(id)
         if (i >= 0) removeState(i)
       }}
@@ -419,6 +473,7 @@ export default function StateGraph() {
       toolbar={
         <>
           <SegmentedControl<'3d' | 'graph'>
+            className='shrink-0'
             options={[
               { value: '3d', label: 'Animations', doc: 'editor/animation#the-animator::Animations' },
               { value: 'graph', label: 'Graph', doc: 'editor/animation#the-animator::Graph' },
@@ -426,10 +481,16 @@ export default function StateGraph() {
             value='graph'
             onChange={v => setGraphView(v === 'graph')} />
           <LayerTabs />
-          <Button variant='primary'
+          <Button variant='primary' className='shrink-0 whitespace-nowrap'
             onClick={addAtCenter} title='Add a new state (or double-click the canvas)'>+ State</Button>
-          <div className={JOINED_GROUP_CLASS}>
-            <button type='button' className={iconButton} disabled={!groupable.length || !!openGroup}
+          {/* Never squeezed: a long row of layer tabs would crush the strip down to its first button. */}
+          <div className={cn(JOINED_GROUP_CLASS, 'shrink-0')}>
+            <button type='button' className={iconButton}
+              title={openGroup ? `Add a fork to ${openGroup}: transitions go in, and on to the first of its ways out that holds` : 'Add a fork: transitions go in, and on to the first of its ways out that holds'}
+              onClick={() => { const n = forks.length; addFork({ x: (n % AUTO_COLS) * AUTO_DX + 60, y: Math.floor(n / AUTO_COLS) * AUTO_DY + 60 }) }}>
+              <span className='w-4 h-4'><ForkIcon /></span>
+            </button>
+            <button type='button' className={cn(iconButton, JOINED_DIVIDER_CLASS)} disabled={!groupable.length || !!openGroup}
               title={groupable.length > 1 ? `Group the ${groupable.length} selected states` : 'Group the selected states (Ctrl+click or Shift+drag to select several)'}
               onClick={() => { createGroup(groupable); setPicked([]) }}>
               <span className='w-4 h-4'><GroupIcon /></span>
@@ -446,7 +507,7 @@ export default function StateGraph() {
             </button>
           </div>
           {openGroup && (
-            <div className={cn(JOINED_GROUP_CLASS, 'items-center text-ui-xs')}>
+            <div className={cn(JOINED_GROUP_CLASS, 'items-center text-ui-xs shrink-0 whitespace-nowrap')}>
               <button type='button' className={iconButton} title='Back to the whole layer'
                 onClick={() => { setOpenGroup(null); setSelection({ kind: 'group', name: openGroup }) }}>
                 <span className='w-4 h-4'><ChevronLeftIcon /></span>
@@ -456,7 +517,7 @@ export default function StateGraph() {
               </span>
             </div>
           )}
-          <Button variant='success'
+          <Button variant='success' className='shrink-0'
             onClick={apply} title='Save this animator (Ctrl+S)'>Save</Button>
         </>
       }

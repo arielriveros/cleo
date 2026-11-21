@@ -74,8 +74,10 @@ The files:
   - each stop's settle and each landing's impact.
 
   It also sets the start's entry gate and how far into the start clip the Start state begins, and groups the
-  states (Turning, Stopping, Running Turn, Air, Landing): the transitions a group's states share are written
-  once, from the group. `lookField` is the Look layer's blend space. `stairsField` is the flights' (2D: Climb, up
+  states (Turning, Stopping, Running Turn, Air, Landing, Car): the transitions a group's states share are written
+  once, from the group. Its forks (`FORKS`: Take Off, Pick Turn, Pick Stop, Settle, Pick Run Turn) write a choice
+  several states share once, as the fork's ways out, each the entry of its group but Settle. `--inputs <checkout>`
+  reads `build/` from another checkout, for a second worktree. `lookField` is the Look layer's blend space. `stairsField` is the flights' (2D: Climb, up
   +1 and down -1, by speed), each sample at `STAIR_RATE` and one tread a step (`stairPaces`, which also gives the
   script its stair speeds). Its Stairs state is in the **Gait** sync group with Locomotion, so they hand over in
   step.

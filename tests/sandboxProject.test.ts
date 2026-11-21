@@ -2194,17 +2194,46 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     it('groups its turns, stops, running turns, air, landings and the car, each state in one group', () => {
         const sm = machine();
         const states = new Set(sm.states.map((s: any) => s.name));
+        const forks = new Set((sm.forks ?? []).map((f: any) => f.name));
         expect(sm.groups.map((g: any) => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car']);
         const seen = new Set<string>();
         for (const g of sm.groups) {
-            expect(states.has(g.name), `${g.name} is not also a state`).toBe(false);
-            for (const m of g.states) { expect(states.has(m), m).toBe(true); expect(seen.has(m), m).toBe(false); seen.add(m); }
+            expect(states.has(g.name) || forks.has(g.name), `${g.name} is not also a state or a fork`).toBe(false);
+            for (const m of g.states) { expect(states.has(m) || forks.has(m), m).toBe(true); expect(seen.has(m), m).toBe(false); seen.add(m); }
         }
         // Left outside: the ones everything comes back to.
         for (const s of ['Idle', 'Locomotion', 'Start', 'Stairs']) expect(seen.has(s), s).toBe(false);
         const fromGroups = sm.transitions.filter((t: any) => sm.groups.some((g: any) => g.name === t.from));
         expect(fromGroups.length).toBeGreaterThan(6);
         expect(sm.states.find((s: any) => s.name === 'LandHard').holdMovement).toBe(true);
+    });
+
+    it('untangles its transitions with forks: each group entered at several states starts with one, entered by one line from each source', () => {
+        const sm = machine();
+        const states = new Set(sm.states.map((s: any) => s.name));
+        const forks = new Set((sm.forks ?? []).map((f: any) => f.name));
+        expect([...forks]).toEqual(['Take Off', 'Pick Turn', 'Pick Stop', 'Settle', 'Pick Run Turn']);
+        for (const f of forks) expect(states.has(f), `${f} is not also a state`).toBe(false);
+        const group = (name: string) => sm.groups.find((g: any) => g.name === name);
+        for (const [g, f] of [['Air', 'Take Off'], ['Turning', 'Pick Turn'], ['Stopping', 'Pick Stop'], ['Running Turn', 'Pick Run Turn']]) {
+            expect(group(g).entry, `${g} starts with its fork`).toBe(f);
+            expect(group(g).states).toContain(f);
+            // Nothing outside the group names one of its states: everything comes in through the group, so its fork.
+            const outside = sm.transitions.filter((t: any) => group(g).states.includes(t.to) && !group(g).states.includes(t.from) && t.from !== g);
+            if (g !== 'Stopping') expect(outside.map((t: any) => `${t.from} -> ${t.to}`), g).toEqual([]);
+            // Into the group: at most one transition from each source.
+            const into = sm.transitions.filter((t: any) => t.to === g).map((t: any) => t.from);
+            expect(new Set(into).size, `${g}: one line from each source`).toBe(into.length);
+        }
+        // Into the air from eight places, each one line: 22 transitions once.
+        expect(sm.transitions.filter((t: any) => t.to === 'Air').map((t: any) => t.from).sort())
+            .toEqual(['Idle', 'Landing', 'Locomotion', 'Running Turn', 'Stairs', 'Start', 'Stopping', 'Turning']);
+        expect(sm.transitions.filter((t: any) => t.from === 'Take Off').map((t: any) => t.to)).toEqual(['JumpRun', 'JumpStand', 'Fall']);
+        // The start's stop goes straight to the early stop: Pick Stop's exit is the run's phase, not the start clip's.
+        expect(sm.transitions.filter((t: any) => group('Stopping').states.includes(t.to) && t.from === 'Start').map((t: any) => t.to)).toHaveLength(1);
+        // The Car keeps its triggers (no fork): getting in and out are entered from anywhere by them.
+        expect(group('Car').entry).toBeUndefined();
+        expect(sm.transitions.length).toBeLessThan(70);
     });
 
 

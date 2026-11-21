@@ -56,7 +56,9 @@ function borderOf(node: InternalNode, point: { x: number; y: number }): Position
 
 // `markerEnd`/`markerStart` arrive already resolved by xyflow into `url(#…)` strings; the marker objects
 // they come from are set on the edge in StateGraph.
-export default function FloatingEdge({ id, source, target, data, style, markerEnd, markerStart }: EdgeProps) {
+export default function FloatingEdge({
+  id, source, target, data, style, markerEnd, markerStart, label, labelStyle, labelBgStyle, labelBgPadding, labelBgBorderRadius,
+}: EdgeProps) {
   const sourceNode = useInternalNode(source)
   const targetNode = useInternalNode(target)
   // Nodes are measured a frame after mount; drawing before that would put the edge at 0,0.
@@ -65,7 +67,7 @@ export default function FloatingEdge({ id, source, target, data, style, markerEn
   const sourcePoint = intersection(sourceNode, targetNode)
   const targetPoint = intersection(targetNode, sourceNode)
 
-  const [path] = getBezierPath({
+  const [path, labelX, labelY] = getBezierPath({
     sourceX: sourcePoint.x,
     sourceY: sourcePoint.y,
     sourcePosition: borderOf(sourceNode, sourcePoint),
@@ -76,9 +78,11 @@ export default function FloatingEdge({ id, source, target, data, style, markerEn
 
   const d = (data ?? {}) as Partial<TransitionEdgeData>
   const both = !!d.forward && !!d.backward
+  // The gate's summary at the curve's middle, as xyflow's own edges draw theirs (a fork's way out leads with its rank).
+  const text = { label, labelX, labelY, labelStyle, labelShowBg: true, labelBgStyle, labelBgPadding, labelBgBorderRadius }
 
   if (!both) {
-    return <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} markerStart={markerStart} />
+    return <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} markerStart={markerStart} {...text} />
   }
 
   // Two directions: the same curve drawn twice, translated along the normal of the straight source->target
@@ -94,7 +98,7 @@ export default function FloatingEdge({ id, source, target, data, style, markerEn
       <BaseEdge id={id} path={path} markerEnd={markerEnd}
         style={{ ...style, transform: `translate(${nx}px, ${ny}px)` }} />
       <BaseEdge id={`${id}__back`} path={path} markerStart={markerStart}
-        style={{ ...style, transform: `translate(${-nx}px, ${-ny}px)` }} />
+        style={{ ...style, transform: `translate(${-nx}px, ${-ny}px)` }} {...text} />
     </>
   )
 }

@@ -48,16 +48,18 @@ export function LayerTabs() {
   const { fullSm, activeLayer, setActiveLayer, addLayer } = useStateMachine()
   const layers = fullSm.layers ?? []
   const tab = (i: number, label: string) => (
-    <Button key={i} size='sm' variant='subtle' active={i === activeLayer}
+    <Button key={i} size='sm' variant='subtle' active={i === activeLayer} className='shrink-0 whitespace-nowrap'
       onClick={() => setActiveLayer(i)}
       title={i === 0 ? 'The base layer: drives the whole body and the character’s root motion' : `Edit the “${label}” layer`}
     >{label}</Button>
   )
+  // The one part of the graph's toolbar that gives way to the rest: a machine with many layers scrolls its tabs
+  // rather than squeezing the buttons beside them.
   return (
-    <div className='flex items-center gap-1'>
+    <div className='flex items-center gap-1 min-w-0 overflow-x-auto'>
       {tab(0, 'Base')}
       {layers.map((l, i) => tab(i + 1, l.name))}
-      <Button size='sm' variant='subtle' onClick={addLayer}
+      <Button size='sm' variant='subtle' className='shrink-0 whitespace-nowrap' onClick={addLayer}
         title='Add a layer: its own states over the same parameters, blended on top through a bone mask'>+ Layer</Button>
     </div>
   )
