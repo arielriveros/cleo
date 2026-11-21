@@ -31,7 +31,8 @@ import { ANIMATION_CHANNEL, CANCEL_EVENT, DEFAULT_CHANNEL, fireEvent, splitEvent
 import type { EventDestination } from '../events/broker';
 import type { Node } from '../scene/nodes/node';
 import type { ActionState } from '../../input/actionMap';
-import type { ActionName, ScriptPickKind } from './fieldTypes';
+import type { ActionName, ScriptPickKind, TriggerName } from './fieldTypes';
+import { ANIMATOR_CHANNEL } from '../../animation/animatorCommands';
 
 /**
  * Where a class keeps its decorator metadata: the standard `Symbol.metadata`, or, while the JS engine has
@@ -61,6 +62,9 @@ export type ScriptMember =
     | { kind: 'targetEvent'; method: string; name: string; channel: string; capture: boolean; once: boolean; priority: number; where?: EventWhereLiteral }
     | { kind: 'dispatch'; method: string; name: string; channel: string }
     | { kind: 'observable'; field: string; name: string; channel: string }
+    | { kind: 'animTrigger'; method: string; trigger: string }
+    | { kind: 'animAction'; method: string; clip: string }
+    | { kind: 'animParam'; field: string; param: string }
     | { kind: 'every'; method: string; seconds: number }
     | { kind: 'enter' | 'exit'; method: string; filter: string }
     | { kind: 'hold'; method: string; action: string; seconds: number }
@@ -408,6 +412,133 @@ export const observable: ObservableDecorator = function observable(event?: unkno
     if (event !== undefined && typeof event !== 'string') throw new TypeError(`@observable takes the event's name, or nothing`);
     return apply(event as string | undefined);
 } as ObservableDecorator;
+
+/** How the animator decorators send their commands: down from the script's node, to every animator beneath it. */
+const DOWN = { down: true } as const;
+
+/** Wrap `original` so each call, once it has returned (awaited if async), hands its value to `after`. */
+function afterEachCall<This>(original: (this: This, ...args: any[]) => unknown, after: (self: unknown, value: unknown) => unknown) {
+    const wrapped = function (this: unknown, ...args: unknown[]): unknown {
+        const result = original.apply(this as This, args);
+        if (result && typeof (result as PromiseLike<unknown>).then === 'function')
+            return Promise.resolve(result).then((value) => after(this, value));
+        return after(this, result);
+    };
+    // Written above a @netcall (so wrapping its router), the network must still find the method a call runs.
+    const netOriginal = (original as any)[NETCALL_ORIGINAL];
+    if (netOriginal) Object.defineProperty(wrapped, NETCALL_ORIGINAL, { value: netOriginal });
+    return wrapped;
+}
+
+/**
+ * Fires an animator trigger each time the method runs: sent down from this node to every animator beneath it (the
+ * character's model, a sprite), as the `animator:SetTrigger` command.
+ *
+ * With a name, that trigger. Without one, the method's return value names it, so the trigger can come from a
+ * field; returning nothing (or `null`, `''`) fires none. Returning `Events.cancel` fires none, and the caller
+ * gets `undefined`. An async method's value is awaited first. The caller gets what the method returned.
+ *
+ * - `@animTrigger('Jump') jump() { … }` — every call fires Jump
+ * - `@animTrigger() getIn() { return this.enterTrigger }` — the trigger a field names
+ * - `@animTrigger('Roll') roll() { if (!this.grounded) return Events.cancel }`
+ *
+ * @param name The trigger: one the project's animators read. Leave it out to name it by the method's return value.
+ */
+export function animTrigger(name?: TriggerName): MethodDecorator<any[]> {
+    const literal = name === undefined ? null : needName('@animTrigger', name);
+    return function <This>(method: (this: This, ...args: any[]) => unknown, context: ClassMethodDecoratorContext<This>): any {
+        record('@animTrigger', context, { kind: 'animTrigger', method: memberName('@animTrigger', context, 'method'), trigger: literal ?? '' });
+        return afterEachCall(method, (self, value) => {
+            if (value === CANCEL_EVENT) return undefined;
+            const trigger = literal ?? (typeof value === 'string' ? value : '');
+            if (trigger && self && typeof self === 'object') fireEvent(`${ANIMATOR_CHANNEL}:SetTrigger`, [trigger], self, DOWN);
+            return value;
+        });
+    };
+}
+
+/** What `@animAction` hands the animator with the clip: the options of `playAction` (a sprite reads `restart`). */
+export type AnimActionOptions = Readonly<Record<string, string | number | boolean | null>>;
+
+/**
+ * Plays a one-shot each time the method runs: sent down from this node to every animator beneath it, as the
+ * `animator:PlayAction` command — `playAction` on a skeletal animator (in a slot, over the machine), `play` on a
+ * sprite.
+ *
+ * With a clip, that clip. Without one, the method's return value names it: a clip name, or `{ clip, ...options }`.
+ * Returning nothing or `Events.cancel` plays nothing. The caller gets what the method returned.
+ *
+ * - `@animAction('Wave') wave() { … }`
+ * - `@animAction() swing() { return { clip: 'attack' + this.combo, restart: true } }` — a sprite's combo
+ *
+ * @param clip The clip. Leave it out to name it by the method's return value.
+ * @param options What the animator plays it with: a slot, `blendIn`, `blendOut`, `loop`, `speed`; a sprite's `restart`.
+ */
+export function animAction(clip?: string, options?: AnimActionOptions): MethodDecorator<any[]> {
+    const literal = clip === undefined ? null : needName('@animAction', clip);
+    const fixed = options && typeof options === 'object' ? { ...options } : undefined;
+    return function <This>(method: (this: This, ...args: any[]) => unknown, context: ClassMethodDecoratorContext<This>): any {
+        record('@animAction', context, { kind: 'animAction', method: memberName('@animAction', context, 'method'), clip: literal ?? '' });
+        return afterEachCall(method, (self, value) => {
+            if (value === CANCEL_EVENT) return undefined;
+            let play = literal, opts: Record<string, unknown> | undefined = fixed;
+            if (play === null) {
+                if (typeof value === 'string') play = value;
+                else if (value && typeof value === 'object' && typeof (value as { clip?: unknown }).clip === 'string') {
+                    const { clip: named, ...rest } = value as { clip: string } & Record<string, unknown>;
+                    play = named;
+                    opts = { ...fixed, ...rest };
+                }
+            }
+            if (play && self && typeof self === 'object') fireEvent(`${ANIMATOR_CHANNEL}:PlayAction`, [play, opts ?? {}], self, DOWN);
+            return value;
+        });
+    };
+}
+
+/** What `animParam` is: the bare decorator, and the way of calling it with the parameter's name. */
+export interface AnimParamDecorator {
+    /**
+     * Sends the field's value to the animator parameter of the field's own name whenever it changes, and once
+     * when the node spawns.
+     *
+     * - `@animParam crouch = false`
+     */
+    <This, V extends number | boolean>(value: undefined, context: ClassFieldDecoratorContext<This, V>): void;
+    /**
+     * Sends the field's value to the animator parameter `name` whenever it changes, and once when the node spawns.
+     *
+     * - `@animParam('Moving') moving = false`
+     *
+     * @param name The parameter, as the animators under this node name it.
+     */
+    (name?: string): FieldDecorator<number | boolean>;
+}
+
+/**
+ * Keeps an animator parameter set from the field: each new value (`!==`) is sent down from this node to every
+ * animator beneath it as `animator:SetParam`, and the value it holds once when the node spawns. Assign the field,
+ * every frame if you like: only changes are sent.
+ *
+ * For a parameter the animator does not read from the node itself (a Linked parameter does).
+ *
+ * - `@animParam('Moving') moving = false`
+ * - `@animParam('AttackSpeed') attackSpeed = 1`
+ */
+export const animParam: AnimParamDecorator = function animParam(name?: unknown, context?: unknown): any {
+    const apply = (param: string | undefined) =>
+        function <This, V>(_value: undefined, ctx: ClassFieldDecoratorContext<This, V>): void {
+            const field = memberName('@animParam', ctx, 'field');
+            record('@animParam', ctx, { kind: 'animParam', field, param: param || field });
+        };
+    // Bare `@animParam`: called as the decorator itself, with the field's context.
+    if (name === undefined && context && typeof context === 'object' && 'kind' in (context as object)) {
+        apply(undefined)(undefined, context as ClassFieldDecoratorContext<unknown, unknown>);
+        return undefined;
+    }
+    if (name !== undefined && typeof name !== 'string') throw new TypeError(`@animParam takes the parameter's name, or nothing`);
+    return apply(name as string | undefined);
+} as AnimParamDecorator;
 
 /**
  * Calls the method every `seconds` of unpaused game time, from the node's spawn until it despawns.
@@ -760,6 +891,8 @@ function overrideKey(m: ScriptMember): string {
     return m.kind === 'action' ? `action:${m.method}:${m.action}:${m.when}`
         : m.kind === 'event' || m.kind === 'targetEvent' || m.kind === 'dispatch' ? `${m.kind}:${m.method}:${m.channel}:${m.name}`
         : m.kind === 'observable' ? `observable:${m.field}`
+        : m.kind === 'animParam' ? `animParam:${m.field}`
+        : m.kind === 'animTrigger' || m.kind === 'animAction' ? `${m.kind}:${m.method}`
         : 'method' in m ? `${m.kind}:${m.method}:${'name' in m ? m.name : 'action' in m ? m.action : 'filter' in m ? m.filter : ''}`
         : m.kind === 'child' || m.kind === 'find' ? `ref:${m.field}`
         : `${m.kind}:${m.field}`;

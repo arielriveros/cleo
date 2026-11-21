@@ -27,7 +27,7 @@ export type TransportResult = { local: boolean } | null;
  * Sends a hub event to other machines. `target` is the node it was dispatched at (null for a broadcast); the
  * receiving machine dispatches it at its own copy of that node.
  */
-export type EventTransport = (channel: string, name: string, args: unknown[], to: RemoteEventTarget, target: object | null) => TransportResult;
+export type EventTransport = (channel: string, name: string, args: unknown[], to: RemoteEventTarget, target: object | null, down?: boolean) => TransportResult;
 
 /**
  * Finds the transport for an event dispatched at `target` (null for a broadcast): the session of the scene that node
@@ -45,9 +45,9 @@ export function setEventTransportResolver(next: EventTransportResolver | null): 
 }
 
 /** Hand an event to its transport. `null` when there is none (offline). */
-export function sendRemote(channel: string, name: string, args: unknown[], to: RemoteEventTarget, target: object | null): TransportResult {
+export function sendRemote(channel: string, name: string, args: unknown[], to: RemoteEventTarget, target: object | null, down = false): TransportResult {
     const transport = resolver?.(target) ?? null;
-    return transport ? transport(channel, name, args, to, target) : null;
+    return transport ? transport(channel, name, args, to, target, down) : null;
 }
 
 /** One forwarding rule, as `route` made it. */

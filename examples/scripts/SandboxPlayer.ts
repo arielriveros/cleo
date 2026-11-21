@@ -1,6 +1,6 @@
 import { CharacterNode, Input, MathUtils } from 'cleo'
 import type { Animator, CameraRigNode, ColliderNode, ControllerNode, Node, TriggerName } from 'cleo'
-import { attribute, eventListener, observable } from 'cleo/decorators'
+import { animTrigger, attribute, eventListener, observable } from 'cleo/decorators'
 
 /**
  * The Sandbox player: input only. Attach to the **Character** node ("Player").
@@ -343,8 +343,6 @@ export default class SandboxPlayerNode extends CharacterNode {
     /** Seconds since getting in started, and how long its clip plays. */
     private _carTime: number = 0
     private _enterSeconds: number = 0
-    /** Getting out: whether the animator has been seen playing it. */
-    private _exitSeen: boolean = false
 
     /** The weapon the hands go to next (Equip): 0 none, 1 the pistol, 2 the rifle. */
     private _weaponWanted: number = 0
@@ -760,7 +758,7 @@ export default class SandboxPlayerNode extends CharacterNode {
         const distance = Math.hypot(this._alignStep[0], this._alignStep[2])
         this._alignTime = Math.min(this.alignMaxSeconds, this.alignSeconds * distance + 0.1)
         this._alignT = 0
-        animator.setTrigger(this.enterTrigger)
+        this._getIn()
         this._enterSeconds = info.clipLength / Math.max(0.01, info.speed)
         this._carTime = 0
         this._carPhase = 'entering'
@@ -773,11 +771,33 @@ export default class SandboxPlayerNode extends CharacterNode {
     public leaveVehicle(): boolean {
         const animator = this._animator
         if (this._carPhase !== 'seated' || !animator || !animator.triggerInfo(this.exitTrigger)) return false
-        animator.setTrigger(this.exitTrigger)
+        this._getOut()
         this._carPhase = 'exiting'
-        this._exitSeen = false
         this.seated = false
         return true
+    }
+
+    /** The animator's getting-in clip: `enterTrigger`, sent down to the animator under this character. */
+    @animTrigger()
+    private _getIn() {
+        return this.enterTrigger
+    }
+
+    /** The animator's getting-out clip: `exitTrigger`, the same way. */
+    @animTrigger()
+    private _getOut() {
+        return this.exitTrigger
+    }
+
+    /**
+     * Getting out is over once the animator has left the exit trigger's states (back where it rests): it says so
+     * with `animation:TriggerEnded`, bubbling up from the model, and the character stands up.
+     */
+    @eventListener('animation:TriggerEnded')
+    private _triggerEnded(info: { trigger?: string, layer?: string | null }) {
+        if (this._carPhase !== 'exiting' || info?.trigger !== this.exitTrigger || info.layer) return
+        const body = this.collider as ColliderNode | null
+        if (body) this._standUp(body)
     }
 
     /** In a car: no walking (no intent asked for), nothing for the animator but the car's clips. */
@@ -828,10 +848,7 @@ export default class SandboxPlayerNode extends CharacterNode {
                 this._setLocalPose(body, MathUtils.yawPoseLerp(pose, [0, 0, 0, 0], k))
             return
         }
-        // Getting out: done once the animator is back where it rests (it has left the trigger's states).
-        const playing = this._animator?.activeTrigger() === this.exitTrigger
-        if (playing) this._exitSeen = true
-        else if (this._exitSeen) this._standUp(body)
+        // Getting out: the clip carries the body; `_triggerEnded` stands it up when the animator is done.
     }
 
     /** Out of the car: on its feet in the world again, upright, its body back in the physics world, its Controller back. */

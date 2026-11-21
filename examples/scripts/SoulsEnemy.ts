@@ -1,5 +1,5 @@
 import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
-import { find, child, attribute } from 'cleo/decorators'
+import { find, child, attribute, animParam } from 'cleo/decorators'
 import type { AnimationTriggerInfo, SocketName, TriggerName } from 'cleo'
 import { clamp, num, planarDistance } from '@/Core/Scripts/SoulsMath'
 import { Swing, bladeCapsule, closeSwing, hurtboxQuery, hurtboxTargets, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
@@ -340,10 +340,14 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     this._enter(this.isBoss ? 'dormant' : 'ai')
   }
 
+  /** The speed multiplier as the animator's attack states read it: an `@animParam`, sent down on each change. */
+  @animParam('AttackSpeed')
+  private _attackSpeed: number = 1
+
   /** Set the speed multiplier: movement reads it each frame; the attacks' states through `AttackSpeed`. */
   protected _setSpeedMul(mul: number): void {
     this._speedMul = mul
-    this._animator?.setFloat?.('AttackSpeed', mul)
+    this._attackSpeed = mul
   }
 
   // =================================================================================================
@@ -658,7 +662,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     brain?.setBlackboard?.('dead', true)
     ;(this._aura as any)?.stop?.()
     if (this.dropWeaponOnDeath) this.dropWeapon()
-    this._animator?.setTrigger('Died')
+    this._fallDead()
     const gm = this._gm as any
     playSound(this, 'Enemy Death')
     gm?.onEnemyKilled?.(this)

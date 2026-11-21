@@ -186,7 +186,7 @@ export function sendEvent(qualified: string, args: unknown[], target: object | n
     const to = options.to ?? 'local';
     if (to !== 'local') {
         // Offline (no transport, or none in session) this machine is everyone, so it is delivered here.
-        const sent = sendRemote(channel.name, name, args, to, target);
+        const sent = sendRemote(channel.name, name, args, to, target, !!options.down);
         if (sent && !sent.local) return null;
     }
     const mode = options.mode ?? 'sync';
@@ -212,9 +212,18 @@ export function fireEvent(qualified: string, args: readonly unknown[], target: o
     channel.fire(name, args, target, options);
 }
 
+/**
+ * Send `qualified` DOWN from `target`: the target, then every node beneath it, depth first, then the channel's
+ * listeners. How a script commands the animators under it (`dispatchDownAt(this, 'animator:SetTrigger', ['Jump'])`).
+ */
+export function dispatchDownAt(target: object, qualified: string, args: unknown[] = [], options?: DispatchOptions): CleoEvent {
+    const [channel, name] = resolveEvent(qualified);
+    return channel.dispatchDown(target, name, args, options);
+}
+
 /** An event that arrived from another machine: dispatched here, at its node if it names one. */
-export function receiveRemoteEvent(channel: string, name: string, args: unknown[], target: object | null): CleoEvent {
-    return getChannel(channel).publish(name, args, target);
+export function receiveRemoteEvent(channel: string, name: string, args: unknown[], target: object | null, down = false): CleoEvent {
+    return getChannel(channel).publish(name, args, target, down ? { down: true } : undefined);
 }
 
 /**

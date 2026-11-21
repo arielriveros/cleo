@@ -1,5 +1,5 @@
 import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node, TriggerNode } from 'cleo'
-import { find, child, attribute } from 'cleo/decorators'
+import { find, child, attribute, animAction, eventListener } from 'cleo/decorators'
 
 /**
  * Duskwell -- a bat. Attach to a flying Character Body 2D (no gravity, through one-way platforms) whose
@@ -57,7 +57,21 @@ export default class DuskBat extends CharacterBody2DNode {
     this._home = [p[0], p[1] + this.size[1] * 0.5]
     if (this._brain) this._brain.goalPoint = [this._home[0], this._home[1], 0]
     this._bob = Math.random() * 6.28
-    this._sprite?.play('sleep', true)
+    this._clip('sleep')
+  }
+
+  /** Play `name` on the sprite from its start: `animator:PlayAction`, sent down to it. */
+  @animAction()
+  private _clip(name: string) {
+    return { clip: name, restart: true }
+  }
+
+  /** Awake once the wake-up has played out (the sprite says so with `animation:ClipFinished`): off it flies. */
+  @eventListener('animation:ClipFinished', { where: { clip: 'wakeup' } })
+  private _wokeUp() {
+    if (!this._waking || this._awake || this._dead) return
+    this._awake = true
+    this._clip('fly')
   }
 
   public get isDead(): boolean { return this._dead }
@@ -83,14 +97,14 @@ export default class DuskBat extends CharacterBody2DNode {
     if (state === 'Sleep') {
       this._awake = false
       this._waking = false
-      if (s && s.clip !== 'sleep') s.play('sleep', true)
+      if (s && s.clip !== 'sleep') this._clip('sleep')
     } else if (state === 'Wake') {
-      if (!this._waking) { this._waking = true; s?.play('wakeup', true) }
-      if (s && s.clip === 'wakeup' && s.isFinished) { this._awake = true; s.play('fly', true) }
+      // The wake-up plays once; `_wokeUp` hears it finish.
+      if (!this._waking) { this._waking = true; this._clip('wakeup') }
     } else if (state === 'Swoop') {
       if (this.swoopReady) this._startSwoop()
     } else if ((state === 'Chase' || state === 'Roost') && s && s.clip !== 'fly' && this._swoopLeft <= 0 && this._hurtLeft <= 0) {
-      s.play('fly', true)
+      this._clip('fly')
     }
     // A gentle bob, on the sprite alone so the body's path stays true.
     if (s) s.setPosition([0, this._awake ? Math.sin(this._bob) * 0.12 : 0, 0])
@@ -110,7 +124,7 @@ export default class DuskBat extends CharacterBody2DNode {
     this._swoopDir = [dx / d, dy / d]
     this._swoopLeft = 0.55
     this._cooldownLeft = this.swoopCooldown
-    this._sprite?.play('attack', true)
+    this._clip('attack')
   }
 
   /**
@@ -159,11 +173,11 @@ export default class DuskBat extends CharacterBody2DNode {
       this._dead = true
       if (this._bite) this._bite.enabled = false
       this._deadLeft = 1.4
-      this._sprite?.play('die', true)
+      this._clip('die')
       ;(this._player as any)?.collect?.('diamond', 1)
       return
     }
     this._hurtLeft = 0.35
-    this._sprite?.play('hurt', true)
+    this._clip('hurt')
   }
 }

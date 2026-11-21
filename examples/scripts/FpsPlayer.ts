@@ -1,5 +1,5 @@
 import { CameraRigNode, Game, Input, ModelNode, Node } from 'cleo'
-import { onAction, attribute, netcall } from 'cleo/decorators'
+import { onAction, attribute, netcall, animParam } from 'cleo/decorators'
 import type { Animator } from 'cleo'
 import FpsCombatantNode from '@/FPS/Scripts/FpsCombatant'
 import { WEAPONS, aimDirection, approach, clamp, combatantOf, findByVariable, findDescendant, lerp, manager, playCue } from '@/FPS/Scripts/FpsShared'
@@ -514,21 +514,28 @@ export default class FpsPlayerNode extends FpsCombatantNode {
    * A weapon's graph is built by tools/fps/characters.mjs viewmodelMachine.
    */
   private _playClip(name: string, _loop: boolean, view: ModelNode | null, _restart: boolean = false): number | undefined {
-    const anim: any = (view as any)?.animator
-    const info = anim?.triggerInfo?.(name)
-    if (!info) return undefined
-    anim.setTrigger(name)
+    const info = (view as any)?.animator?.triggerInfo?.(name)
+    if (!view || !info) return undefined
+    // That viewmodel's animator only (sent down from it): the other weapons' stay as they were.
+    view.dispatchDown('animator:SetTrigger', name)
     this._clip = name
     return info.seconds > 0 ? info.seconds : info.clipLength
   }
 
-  /** The base layer follows what the player is doing: Idle / IdleAim / Walk / WalkAim / Run, by three bools. */
+  /** The viewmodels' base layer: Idle / IdleAim / Walk / WalkAim / Run, by three bools sent down to every viewmodel. */
+  @animParam('Moving')
+  private _vmMoving: boolean = false
+  @animParam('Sprinting')
+  private _vmSprinting: boolean = false
+  @animParam('Aim')
+  private _vmAim: boolean = false
+
+  /** The base layer follows what the player is doing (only a change is sent: these are `@animParam`s). */
   private _viewmodelClip(moving: boolean): void {
-    const anim: any = (this.slot?.view as any)?.animator
-    if (!anim) return
-    anim.setBool('Moving', moving)
-    anim.setBool('Sprinting', moving && this.sprinting)
-    anim.setBool('Aim', this.ads > 0.4 && this.spec.hasAimClips)
+    if (!this.slot?.view) return
+    this._vmMoving = moving
+    this._vmSprinting = moving && this.sprinting
+    this._vmAim = this.ads > 0.4 && this.spec.hasAimClips
   }
 
   /** A weapon with no aim clip comes to the centre by shifting the whole viewmodel group. */

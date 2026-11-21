@@ -33,7 +33,8 @@ An event belongs to a **channel**, and only that channel's listeners hear it. Wr
 | Channel | What travels on it |
 |---|---|
 | `game` | What scripts send each other. The default. `GameEvents` is this channel. |
-| `animation` | What animators fire: clip markers, `StateEnter`, `StateExit`, `ActionFinished`, `ClipFinished`. |
+| `animation` | What animators fire: clip markers, `StateEnter`, `StateExit`, `ActionFinished`, `ClipFinished`, `TriggerStarted`, `TriggerEnded`. |
+| `animator` | Commands to animators, sent down from a node: `SetTrigger`, `SetParam`, `PlayAction` and the rest (see [Commanding the animator](#commanding-the-animator)). |
 | `engine` | The engine's own traffic: `SCENE_CHANGED`, `LOG`, `NODE_DIRTY` and the rest. `engineEventBus` is this channel. |
 | any other name | Made the first time it is used: `'ui:ScoreChanged'`, `'combat:Hit'`. |
 
@@ -49,6 +50,10 @@ Only the first colon separates, so `'ui:menu:open'` is `menu:open` on `ui`.
 
 An event sent with `Events.emit` is a **broadcast**: every listener on its channel hears it, wherever
 it is.
+
+An event can also be sent **down** (`this.dispatchDown`, or `{ down: true }`): it is heard at the node, then
+at every node beneath it, depth first (phase `'descend'`), then by the channel's listeners. It is how a
+character commands what it holds, such as the animators under it.
 
 An event dispatched **at a node** (`this.dispatchEvent`, or `@eventDispatch`) travels the way a click
 travels through a web page:
@@ -217,11 +222,69 @@ bubble up from there, so the character's script hears its own animator.
 | `StateEnter` / `StateExit` | The machine enters or leaves a state, on any layer | `{ state, from, to, layer, node, animator }` |
 | `ActionFinished` | A `playAction` one-shot is over: faded out, replaced or stopped | `{ clip, layer, node, animator }` |
 | `ClipFinished` | A sprite's once-clip reaches its end | `{ clip, node }` |
+| `TriggerStarted` / `TriggerEnded` | The states a trigger led into begin, and are over (the layer back in its entry state, or another trigger's) | `{ trigger, state, layer, node, animator }` |
 
 Markers are delivered **during** the animator's update, like `onAnimationEvent` callbacks.
-`StateEnter`, `StateExit`, `ActionFinished` and `ClipFinished` wait for the frame's event flush. That
-way a listener that sets a trigger or forces a state never re-enters the machine in the middle of a
-transition.
+`StateEnter`, `StateExit`, `ActionFinished`, `ClipFinished` and the trigger events wait for the frame's
+event flush. That way a listener that sets a trigger or forces a state never re-enters the machine in
+the middle of a transition.
+
+`TriggerEnded` is how a script knows a one-shot it fired is over, without polling `activeTrigger()`
+every frame:
+
+```ts
+@eventListener('animation:TriggerEnded')
+private _triggerEnded(info) { if (info.trigger === this.exitTrigger) this.standUp() }
+```
+
+## Commanding the animator
+
+A script does not reach for its character's animator to call it. It sends a command **down** from its
+own node on the `animator` channel, and every animator beneath that node obeys: the skeletal animator on
+the character's model, or an Animated Sprite. The decorators do this for you:
+
+```ts
+@animTrigger('Jump') jump() { … }                  // each call fires Jump
+@animTrigger() getIn() { return this.enterTrigger } // the trigger a field names
+@animAction('Wave') wave() { … }                   // a one-shot in a slot (a sprite: play the clip)
+@animAction() swing(n) { return { clip: 'attack' + n, restart: true } }
+@animParam('Moving') moving = false                // each new value goes to the parameter
+```
+
+- **`@animTrigger(name?)`** fires a trigger each time the method runs. With no name, the method's return
+  value names the trigger; returning nothing fires none.
+- **`@animAction(clip?, options?)`** plays a one-shot each time the method runs. With no clip, the method
+  returns the clip name, or `{ clip, ...options }`.
+- **`@animParam(name?)`** sends the field's value to a parameter whenever it changes, and once when the
+  node spawns. Set it every frame if you like: only changes are sent. A parameter the animator already
+  reads from the node (a Linked parameter) needs none of this.
+
+In all three, returning `Events.cancel` sends nothing, an async method's value is awaited first, and the
+caller still gets the method's own return value.
+
+Without a decorator, send a command yourself: `this.dispatchDown('animator:SetTrigger', 'Jump')`. Its
+`results` hold what the animators returned, for example the handle of a `PlayAction`.
+
+| Command | Arguments | Skeletal animator | Animated Sprite |
+|---|---|---|---|
+| `SetTrigger` | name | `setTrigger` | `fireTrigger` |
+| `ResetTrigger` | name | `resetTrigger` | the parameter set false |
+| `SetParam` | name, value | `setFloat` / `setBool` | `setParam` |
+| `OverrideParam` | name, value or `null` | `setParamOverride` | — |
+| `PlayAction` | clip, options | `playAction` (returns the handle) | `play(clip, options.restart)` |
+| `StopAction` | slot?, blendOut? | `stopAction` | — |
+| `ForceState` | state, blend? | `forceState` (returns whether it could) | — |
+| `FireEvent` | name | `fireEvent` (the machine's Event Actions) | — |
+| `Resume` | — | — | `resumeMachine` |
+
+A command goes to every animator under the node it is sent from. To reach just one, such as the current
+weapon's viewmodel, send it from that node: `view.dispatchDown('animator:SetTrigger', 'Reload')`.
+Reading the animator stays a read: `triggerInfo`, `activeTrigger`, `getParam` and `currentTime` answer
+questions and change nothing.
+
+Animators listen as the engine, not as scripts. A scene full of animators still has
+`hasScriptListeners()` false, and the animators' per-frame checks stay closed until a script listens to
+something.
 
 A marker named `'channel:name'`, such as `combat:contact`, is sent on that channel instead of
 `animation`.

@@ -43,7 +43,7 @@ export interface SceneNet {
      * where it is dispatched at their copy of `target` (or broadcast on its channel). Returns whether this machine
      * is one of those it is for, and so should deliver it here too.
      */
-    sendEvent?(channel: string, name: string, args: unknown[], to: NetEventTarget, target: Node | null): { local: boolean };
+    sendEvent?(channel: string, name: string, args: unknown[], to: NetEventTarget, target: Node | null, down?: boolean): { local: boolean };
 }
 
 /**

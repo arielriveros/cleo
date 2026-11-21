@@ -337,7 +337,7 @@ export default class Hero extends Node { ${wrong} }
     try {
       const head = `
 import { Node } from 'cleo'
-import { child, find, onAction, onHold, onTap, onEvent, every, onEnter, onExit, attribute, save, options, pick, eventListener, eventDispatch, observable, onClipEvent } from 'cleo/decorators'
+import { child, find, onAction, onHold, onTap, onEvent, every, onEnter, onExit, attribute, save, options, pick, eventListener, eventDispatch, observable, onClipEvent, animTrigger, animAction, animParam } from 'cleo/decorators'
 import type { ActionState } from 'cleo'
 export default class Hero extends Node {
 `;
@@ -369,6 +369,12 @@ export default class Hero extends Node {
   @observable('ui:Score') score = 0
   @onClipEvent('footstep') step(info: { clip: string }) {}
   @onClipEvent('hit', 'Swing') swing() {}
+  @animTrigger('Roll') roll() {}
+  @animTrigger() named() { return 'Roll' }
+  @animAction('Wave', { slot: 'Upper' }) wave() {}
+  @animAction() pickClip() { return { clip: 'Wave', restart: true } }
+  @animParam('Moving') moving = false
+  @animParam speed = 0
 }`);
       const ok = await typecheck();
       expect(ok.out).toBe('');
@@ -387,6 +393,8 @@ export default class Hero extends Node {
         `@onEvent('Died', { once: 'yes' }) died() {}`,
         `@eventDispatch({ name: 'X', mode: 'later' }) fire() {}`,
         `@observable(3) lives = 3`,
+        `@animParam('Moving') moving = 'yes'`,
+        `@animAction(3) wave() {}`,
       ]) {
         await writeScript('Player/Hero.ts', `${head}  ${wrong}\n}`);
         expect((await typecheck()).ok, wrong).toBe(false);

@@ -10,6 +10,12 @@ const animator = (this.findNode('Model') as ModelNode).animator
 
 An `Animator` exists on any `ModelNode` whose model is skinned.
 
+To **command** it (fire a trigger, set a parameter, play a one-shot), a script does not need to find it. It
+sends the command down from its own node with `@animTrigger`, `@animParam` or `@animAction`, or with
+`this.dispatchDown('animator:SetTrigger', 'Jump')`, and every animator under the character obeys. Reading it
+(`triggerInfo`, `activeTrigger`, `currentTime`) stays a call. See
+[Events: Commanding the animator](events.md#commanding-the-animator).
+
 ## Playing a clip directly
 
 ```ts

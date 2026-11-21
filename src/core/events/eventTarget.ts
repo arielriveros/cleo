@@ -11,9 +11,10 @@
 // A leaf: imports only within src/core/events.
 import { Emitter } from './emitter';
 
-/** What can be a target: a scene node, or anything else with a parent chain. */
+/** What can be a target: a scene node, or anything else with a parent chain (and, to be sent down, children). */
 export interface EventTargetLike {
     readonly parent: EventTargetLike | null;
+    readonly children?: readonly EventTargetLike[];
 }
 
 /** The engine's own channel: its listeners are not a script's (see {@link scriptListenerCount}). */
@@ -53,17 +54,17 @@ let scriptListeners = 0;
 /** How many listeners scripts (anything not on the engine channel) have, everywhere. */
 export function scriptListenerCount(): number { return scriptListeners; }
 
-/** A channel's own (broadcast) listeners changed by `delta`: kept in the script total. */
-export function countChannelListeners(channel: string, delta: number): void {
-    if (channel !== ENGINE) scriptListeners += delta;
+/** A channel's own (broadcast) listeners changed by `delta`: kept in the script total (a system one is not a script's). */
+export function countChannelListeners(channel: string, delta: number, system = false): void {
+    if (channel !== ENGINE && !system) scriptListeners += delta;
 }
 
-function countTarget(channel: string, name: string, delta: number): void {
+function countTarget(channel: string, name: string, delta: number, system: boolean): void {
     const c = targetCountsFor(channel);
     c.total += delta;
     const n = (c.byName.get(name) ?? 0) + delta;
     if (n === 0) c.byName.delete(name); else c.byName.set(name, n);
-    if (channel !== ENGINE) scriptListeners += delta;
+    if (channel !== ENGINE && !system) scriptListeners += delta;
 }
 
 /** How many node-target listeners `channel` has on all targets together: for `name`, or for any event. */
@@ -89,7 +90,7 @@ export function ensureTargetEmitter(target: object, channel: string): Emitter {
     }
     let emitter = byChannel.get(channel);
     if (!emitter) {
-        emitter = new Emitter((name, delta) => countTarget(channel, name, delta));
+        emitter = new Emitter((name, delta, system) => countTarget(channel, name, delta, system));
         byChannel.set(channel, emitter);
     }
     return emitter;
@@ -120,3 +121,10 @@ export function removeTargetListenersOwnedBy(target: object, owner: object): voi
 export function parentOf(target: object): object | null {
     return (target as Partial<EventTargetLike>).parent ?? null;
 }
+
+/** The children of a target (for an event sent down), or none. */
+export function childrenOf(target: object): readonly object[] {
+    return (target as Partial<EventTargetLike>).children ?? NO_CHILDREN;
+}
+
+const NO_CHILDREN: readonly object[] = Object.freeze([]);

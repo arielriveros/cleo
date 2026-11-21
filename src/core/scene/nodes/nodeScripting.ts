@@ -8,6 +8,7 @@ import { membersOfNode, scriptMembersOf, setNodeScriptMembers } from "../../scri
 import { ENGINE_CHANNEL, addTargetListener, getChannel, releaseTarget, removeChannelListenersOwnedBy } from "../../events/hub";
 import { setEventErrorReporter } from "../../events/dispatcher";
 import { ValueSubject } from "../../events/subject";
+import { ANIMATOR_CHANNEL } from "../../../animation/animatorCommands";
 
 // A listener that throws, anywhere in the event system, is reported as a script error with its event's name. The
 // engine channel's own listeners propagate instead (it does not isolate); a throw from its frame flush lands here.
@@ -486,6 +487,7 @@ export function bindScriptLife(node: Node): void {
     if (!members.length) return;
     releaseScriptLife(node);
     installObservables(node);
+    sendAnimParams(node, members);
     const subs: (() => void)[] = [];
     let timedInput = false;
     for (const m of members) {
@@ -537,32 +539,68 @@ export function releaseNodeEvents(node: Node): void {
 
 /** Each node's `@observable` fields: the subject holding each one's value. */
 const observed = new WeakMap<Node, Map<string, ValueSubject<unknown>>>();
+/** The members already watching each node's subjects (`observable:field`, `animParam:field`), so binding twice adds nothing. */
+const watching = new WeakMap<Node, Set<string>>();
+
+/** The subject behind `field` on `node`, made (and the field turned into an accessor over it) on first use. */
+function subjectOf(node: Node, field: string): ValueSubject<unknown> {
+    let fields = observed.get(node);
+    if (!fields) { fields = new Map(); observed.set(node, fields); }
+    let subject = fields.get(field);
+    if (subject) return subject;
+    subject = new ValueSubject<unknown>((node as any)[field]);
+    fields.set(field, subject);
+    const s = subject;
+    Object.defineProperty(node, field, {
+        get: () => s.value,
+        // The same value again is the usual set (a script writing its state every frame): settled right here.
+        set: (value: unknown) => { if (value !== s.value) s.set(value); },
+        enumerable: true,
+        configurable: true,
+    });
+    return subject;
+}
 
 /**
- * Turn the node's `@observable` fields into accessors over a {@link ValueSubject}, so that setting one to a new
- * value dispatches its event at the node. Idempotent: a field already observed is left alone.
+ * Turn the node's `@observable` and `@animParam` fields into accessors over a {@link ValueSubject}: setting one to a
+ * new value dispatches its event at the node (`@observable`), or sends it down to the animators beneath as
+ * `animator:SetParam` (`@animParam`). A field may be both. Idempotent: what already watches a field is left alone.
  */
 export function installObservables(node: Node): void {
-    let fields: Map<string, ValueSubject<unknown>> | undefined;
+    let seen: Set<string> | undefined;
     for (const m of membersOfNode(node)) {
-        if (m.kind !== 'observable') continue;
-        fields ??= observed.get(node);
-        if (fields?.has(m.field)) continue;
-        if (!fields) { fields = new Map(); observed.set(node, fields); }
-        const subject = new ValueSubject<unknown>((node as any)[m.field]);
-        fields.set(m.field, subject);
-        const channel = getChannel(m.channel);
-        const name = m.name;
-        // Asked on every set: when nobody listens to this event anywhere, a set costs the comparison and no more.
-        subject.subscribe((value, previous) => { if (channel.hasListeners(name)) channel.fire(name, [value, previous], node); }, false);
-        Object.defineProperty(node, m.field, {
-            get: () => subject.value,
-            // The same value again is the usual set (a script writing its state every frame): settled right here.
-            set: (value: unknown) => { if (value !== subject.value) subject.set(value); },
-            enumerable: true,
-            configurable: true,
-        });
+        if (m.kind !== 'observable' && m.kind !== 'animParam') continue;
+        const key = `${m.kind}:${m.field}`;
+        seen ??= watching.get(node);
+        if (seen?.has(key)) continue;
+        if (!seen) { seen = new Set(); watching.set(node, seen); }
+        seen.add(key);
+        const subject = subjectOf(node, m.field);
+        if (m.kind === 'observable') {
+            const channel = getChannel(m.channel);
+            const name = m.name;
+            // Asked on every set: when nobody listens to this event anywhere, a set costs the comparison and no more.
+            subject.subscribe((value, previous) => { if (channel.hasListeners(name)) channel.fire(name, [value, previous], node); }, false);
+        } else {
+            const param = m.param;
+            subject.subscribe((value) => { sendAnimParam(node, param, value); }, false);
+        }
     }
+}
+
+/** The animator channel, looked up once. */
+let animator: ReturnType<typeof getChannel> | null = null;
+
+/** Send `param = value` down from `node` to the animators beneath it. A value that is neither number nor boolean is not one. */
+function sendAnimParam(node: Node, param: string, value: unknown): void {
+    if (typeof value !== 'number' && typeof value !== 'boolean') return;
+    (animator ??= getChannel(ANIMATOR_CHANNEL)).fireDown(node, 'SetParam', [param, value]);
+}
+
+/** Every `@animParam` field's value sent down once: what a node does when it spawns, so its animators start in step. */
+function sendAnimParams(node: Node, members: readonly { kind: string }[]): void {
+    for (const m of members as readonly import('../../scripting/decorators').ScriptMember[])
+        if (m.kind === 'animParam') sendAnimParam(node, m.param, (node as any)[m.field]);
 }
 
 /** The subject behind a node's `@observable` field: subscribe to it to watch the field. Null for any other field. */

@@ -19,6 +19,6 @@ export {
     Events, CANCEL_EVENT, DEFAULT_CHANNEL, ANIMATION_CHANNEL, ENGINE_CHANNEL,
     getChannel, allChannels, splitEventName, resolveEvent, flushChannels, flushAllChannels, resetScriptChannels, hasScriptListeners,
     removeChannelListenersOwnedBy, listenOwned, sendEvent, fireEvent, discardQueuedFor, receiveRemoteEvent,
-    addTargetListener, removeTargetListener, hasTargetListener, releaseTarget, dispatchAt,
+    addTargetListener, removeTargetListener, hasTargetListener, releaseTarget, dispatchAt, dispatchDownAt,
 } from './hub';
 export type { SendOptions } from './hub';
