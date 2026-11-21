@@ -63,6 +63,9 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     // Absent in a bundle written before audio existed, which reads back as a project with no sounds.
     audioSources: (await src.json(`${BUNDLE_PATHS.librariesDir}audioSources.json`)) ?? [],
     soundSamples: (await src.json(`${BUNDLE_PATHS.librariesDir}soundSamples.json`)) ?? [],
+    // Absent in a bundle written before project folders; the importer then derives them from the payloads.
+    images: (await src.json(`${BUNDLE_PATHS.librariesDir}images.json`)) ?? undefined,
+    textures: (await src.json(`${BUNDLE_PATHS.librariesDir}textures.json`)) ?? undefined,
     // Absent when the project runs on the default bindings — see BundleLibraries.inputMap.
     inputMap: (await src.json(`${BUNDLE_PATHS.librariesDir}inputMap.json`)) ?? null,
     // Absent when the project runs on the default engine/publish options.
@@ -77,11 +80,11 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     ? (((await src.json(BUNDLE_PATHS.texturesIndex)) ?? []) as BundleTextureIndexRow[])
     : [];
 
-  // 15 fixed JSON entries are already read by the time the total is known (9, plus the two audio
-  // libraries, the three animation-authoring ones and the input map); report against the full set or the
-  // progress bar jumps backwards.
-  const total = 15 + scenePaths.length + (format === 2 ? 2 : texIndex.length);
-  let done = 15;
+  // The fixed JSON entries are already read by the time the total is known (the libraries, the image and
+  // texture records, the input map and the settings); report against the full set or the progress bar
+  // jumps backwards.
+  const total = 17 + scenePaths.length + (format === 2 ? 2 : texIndex.length);
+  let done = 17;
   src.onEntry?.(done, total);
 
   const scenes: Record<string, any> = {};
@@ -186,6 +189,9 @@ export async function bundleEntries(bundle: BundleData): Promise<BundleEntry[]> 
   // identical to what it was before input maps travelled.
   if (libraries.inputMap) entries.push(json(`${BUNDLE_PATHS.librariesDir}inputMap.json`, libraries.inputMap));
   if (libraries.projectSettings) entries.push(json(`${BUNDLE_PATHS.librariesDir}projectSettings.json`, libraries.projectSettings));
+  // Only when carried, so a bundle without the records stays exactly what it was.
+  if (libraries.images) entries.push(json(`${BUNDLE_PATHS.librariesDir}images.json`, libraries.images));
+  if (libraries.textures) entries.push(json(`${BUNDLE_PATHS.librariesDir}textures.json`, libraries.textures));
   for (const [id, data] of Object.entries(scenes)) entries.push(json(`${BUNDLE_PATHS.scenesDir}${id}.json`, data));
 
   entries.push(json(BUNDLE_PATHS.assetsIndex, index));

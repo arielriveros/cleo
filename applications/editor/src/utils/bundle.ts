@@ -18,6 +18,8 @@ import type { BoneMaskAsset } from './boneMasks'
 import type { PoseAsset } from './poseAssets'
 import type { AudioSourceAsset } from './audioSources'
 import type { SoundSampleAsset } from './soundSamples'
+import type { ImageAsset } from './images'
+import type { TextureAsset } from './textureAssets'
 import type { ChunkRef } from '@cleo/app-kit/utils/chunkBlob'
 import type { InputMap } from 'cleo'
 
@@ -84,6 +86,13 @@ export interface BundleLibraries {
    */
   audioSources?: AudioSourceAsset[]
   soundSamples?: SoundSampleAsset[]
+  /**
+   * The image and texture records, carried since project folders (a folder holds them, and a bundle read
+   * from one must hand them on). Optional, and read as absent by every older reader: a bundle without them
+   * re-derives them on import from the payload rows, as it always did (see the note on audio above).
+   */
+  images?: ImageAsset[]
+  textures?: TextureAsset[]
   /**
    * The project's input bindings, or null/absent for the engine default map.
    *
