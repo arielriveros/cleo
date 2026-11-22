@@ -1,6 +1,7 @@
 import type { BodyHandle, ConvexHull, PartShape } from './pal/types';
 import type { PhysicsWorld } from './pal/world';
 import { rotateVec } from './pal/math';
+import { YIELD_BELOW } from './water/waterColumn';
 
 /**
  * Buoyancy and water drag: Archimedes' principle, sampled, with the water's own motion.
@@ -281,8 +282,6 @@ function columnOf(v: BuoyancyVolume, x: number, z: number, out: WaterColumnSampl
     return true;
 }
 
-/** Metres the joined water may stand below a water's own surface and still be the water there. */
-const YIELD_BELOW = 0.05;
 
 /** The one water at (x, z) among `volumes` into `node` (see the header: whose water a point is in). */
 function waterAt(volumes: readonly BuoyancyVolume[], x: number, z: number, node: PatchNode): void {

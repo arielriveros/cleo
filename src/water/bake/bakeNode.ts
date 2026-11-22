@@ -5,6 +5,7 @@ import { groundRegionKey, sceneGround } from '../ground';
 import { obstaclesKey, sceneObstacles } from './obstacles';
 import type { GroundSampler } from '../waterInfo';
 import { groupReach, prepareWaterGroup, type WaterGroupOptions } from './groupSetup';
+import { ALL_LAYERS, isAllLayers } from '../../physics/collisionLayers';
 import type { WaterBakeSetup } from './shallowWater';
 
 // A Water node's bake, from its scene. A bake covers a GROUP: every water joined to the node through a
@@ -63,6 +64,20 @@ export function waterGroupBoundary(group: readonly WaterVolumeNode[]): WaterVolu
     return out;
 }
 
+/**
+ * The collision layers whose static colliders a bake of `group` meets: every layer any of its waters reacts
+ * to (WaterVolumeNode.reactsTo). The setup and the signature both ask this, so a bake made is never stale.
+ */
+export function waterGroupMask(group: readonly WaterVolumeNode[]): number {
+    let mask = 0;
+    for (const n of group) {
+        const m = n.reactsTo ?? ALL_LAYERS;
+        if (isAllLayers(m)) return ALL_LAYERS;
+        mask |= m;
+    }
+    return mask;
+}
+
 /** The world rectangle [x0, z0, x1, z1] a bake of `group` can reach. */
 export function waterGroupReach(group: readonly WaterVolumeNode[]): number[] | null {
     const bodies: ResolvedWaterShape[] = [];
@@ -81,7 +96,7 @@ export function prepareGroupBake(node: WaterVolumeNode, options: WaterGroupOptio
     const scene = node.scene;
     const ground = options.ground ?? (scene ? sceneGround(scene).sample : null);
     const reach = waterGroupReach(group);
-    const obstacles = scene && reach ? sceneObstacles((scene as any).nodes ?? [], reach) : [];
+    const obstacles = scene && reach ? sceneObstacles((scene as any).nodes ?? [], reach, waterGroupMask(group)) : [];
     const members = group.map(n => ({ body: n.resolved()!, manning: n.bedRoughness, from: n.flowsFrom, into: n.flowsInto }));
     const boundary = waterGroupBoundary(group).map(n => n.resolved()).filter((r): r is ResolvedWaterShape => !!r);
     return { setup: prepareWaterGroup(members, boundary, ground, obstacles, options), group };
@@ -121,14 +136,15 @@ export function waterGroupSignature(node: WaterVolumeNode, groundKey?: string): 
     const scene = node.scene;
     if (scene && reach) {
         const leader = group[0];
-        const rect = reach.map(r).join(',');
+        const mask = waterGroupMask(group);
+        const rect = `${reach.map(r).join(',')}|${mask}`;
         const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
         if (forgotten !== FORGET.stamp) { forgotten = FORGET.stamp; for (const n of WATERS(scene)) CONTEXT.delete(n); }
         const cached = groundKey === undefined ? CONTEXT.get(leader) : undefined;
         if (cached && cached.reach === rect && now - cached.at < 500) context = cached.value;
         else {
             const ground = groundKey ?? groundRegionKey(scene, reach);
-            context = `${ground}|${obstaclesKey(sceneObstacles((scene as any).nodes ?? [], reach))}`;
+            context = `${ground}|${obstaclesKey(sceneObstacles((scene as any).nodes ?? [], reach, mask))}`;
             if (groundKey === undefined) CONTEXT.set(leader, { at: now, reach: rect, value: context });
         }
     }

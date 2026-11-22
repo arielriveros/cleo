@@ -8,6 +8,8 @@ import { WaterVolumeNode, WATER_RIPPLE_SLOTS } from '../src/core/scene/nodes/wat
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
 import { TEST_PHYSICS } from './helpers/testPhysics';
+import { authoring } from '../src/core/eventBus';
+import { ALL_LAYERS, LAYER } from '../src/physics/collisionLayers';
 
 // The WaterVolume node: its data, the physics step that buoys through it, and the surface effects it feeds
 // a water material (ripple slots) — the last only when the material asks for them by name.
@@ -93,5 +95,115 @@ describe('WaterVolumeNode', () => {
         expect(r0[3]).toBeGreaterThan(0);
         for (let i = 0; i < WATER_RIPPLE_SLOTS; i++) expect(declared.properties.has(`ripple${i}`)).toBe(true);
         expect(other.properties.size).toBe(0);
+    });
+});
+
+// What crosses the surface, for the live waves (render/waterWaves.ts): every physics body on a layer the water
+// reacts to whose bounds cut the surface, with its motion against the water's.
+describe('WaterVolumeNode disturbances', () => {
+    /** A body as the physics hands it over: its box (half extents) round its position. */
+    function body(at: number[], half: number[], options: { v?: number[]; layer?: number; dynamic?: boolean; trigger?: boolean; asleep?: boolean } = {}) {
+        const position = { x: at[0], y: at[1], z: at[2] };
+        const v = options.v ?? [0, 0, 0];
+        return {
+            position, velocity: { x: v[0], y: v[1], z: v[2] },
+            isDynamic: options.dynamic !== false, isTrigger: !!options.trigger, isSleeping: !!options.asleep,
+            collisionResponse: true, collisionFilterGroup: options.layer ?? LAYER.DEFAULT,
+            getAabb(out: Float64Array) {
+                out[0] = position.x - half[0]; out[1] = position.y - half[1]; out[2] = position.z - half[2];
+                out[3] = position.x + half[0]; out[4] = position.y + half[1]; out[5] = position.z + half[2];
+                return out;
+            },
+        };
+    }
+    /** A still pool with its surface at y = 0, in a running scene whose physics holds `bodies`. */
+    function pool(bodies: any[], options: Record<string, unknown> = {}) {
+        const scene = new Scene();
+        const water = new WaterVolumeNode('w', { size: [20, 2, 20], waveAmplitude: 0, ...options });
+        water.setPosition([0, -1, 0]);
+        scene.addNode(water);
+        water.updateTransforms?.();
+        (scene as any).physics = { bodies };
+        // Something reads the list (the renderer does each frame): a node nobody reads gathers nothing.
+        void water.disturbances;
+        return water;
+    }
+
+    it('lists what cuts the surface, its waterline and its motion, and nothing clear of it', () => {
+        const crate = body([1, 0.1, 2], [0.5, 0.5, 0.5], { v: [0.5, -2, 0] });
+        const above = body([3, 5, 3], [0.5, 0.5, 0.5], { v: [0, -9, 0] });
+        const sunk = body([-3, -0.9, 0], [0.05, 0.05, 0.05]);
+        const ghost = body([0, 0, 0], [0.5, 0.5, 0.5], { trigger: true, v: [0, -1, 0] });
+        const asleep = body([4, 0, -4], [0.5, 0.5, 0.5], { asleep: true });
+        const water = pool([crate, above, sunk, ghost, asleep]);
+        water.update(1 / 60, 0);
+        expect(water.disturbances.length).toBe(1);
+        const d = water.disturbances[0];
+        expect([d.x, d.z]).toEqual([1, 2]);
+        expect(d.radius).toBeCloseTo(0.5, 6);
+        expect(d.share).toBeCloseTo(1, 6);
+        expect([d.vx, d.vy, d.vz]).toEqual([0.5, -2, 0]);
+    });
+
+    it('reacts only to the layers it is set to, and keeps that through a save', async () => {
+        const CHARACTER = 1 << 4, DEBRIS = 1 << 5;
+        const wader = body([0, 0, 0], [0.3, 0.9, 0.3], { v: [1.5, 0, 0], layer: CHARACTER });
+        const chip = body([2, 0, 0], [0.2, 0.2, 0.2], { v: [0, -1, 0], layer: DEBRIS });
+        const water = pool([wader, chip]);
+        expect(water.reactsTo).toBe(ALL_LAYERS);
+        water.update(1 / 60, 0);
+        expect(water.disturbances.length).toBe(2);
+        water.reactsTo = LAYER.DEFAULT | CHARACTER;
+        water.update(1 / 60, 0);
+        expect(water.disturbances.map(d => d.x)).toEqual([0]);
+        water.reactsTo = 0;
+        water.update(1 / 60, 0);
+        expect(water.disturbances.length).toBe(0);
+
+        // Every layer is the default, and is not written; anything less is.
+        expect((await new WaterVolumeNode('a').serialize() as any).waterVolume.reactsTo).toBeUndefined();
+        water.reactsTo = LAYER.DEFAULT | CHARACTER;
+        const json = JSON.parse(JSON.stringify(await water.serialize()));
+        const parent = new Node('p');
+        parseNodeJson(parent, json);
+        expect((parent.children[0] as WaterVolumeNode).reactsTo).toBe(LAYER.DEFAULT | CHARACTER);
+    });
+
+    it('takes a static body moved by its node at the speed it moved, and a still one as the bank', () => {
+        const raft = body([0, 0, 0], [1, 0.2, 1], { dynamic: false });
+        const pier = body([5, 0, 5], [0.3, 2, 0.3], { dynamic: false });
+        const water = pool([raft, pier]);
+        water.update(0.1, 0);
+        expect(water.disturbances.length).toBe(0);
+        raft.position.x = 0.2;
+        water.update(0.1, 0.1);
+        expect(water.disturbances.length).toBe(1);
+        expect(water.disturbances[0].vx).toBeCloseTo(2, 6);
+        // A jump is a respawn or a pooled collider placed anew, not a motion.
+        raft.position.x = 30;
+        water.update(0.1, 0.2);
+        expect(water.disturbances.length).toBe(0);
+    });
+
+    it('gathers nothing while nothing reads it (a headless host)', async () => {
+        const water = pool([body([0, 0, 0], [0.5, 0.5, 0.5], { v: [0, -2, 0] })]);
+        (water as any)._disturbancesRead = -Infinity;
+        water.update(1 / 60, 0);
+        expect((water as any)._disturbances.length).toBe(0);
+        void water.disturbances;
+        water.update(1 / 60, 0);
+        expect(water.disturbances.length).toBe(1);
+    });
+
+    it('lists nothing while the scene is being edited', () => {
+        const water = pool([body([0, 0, 0], [0.5, 0.5, 0.5], { v: [0, -2, 0] })]);
+        const was = authoring.enabled;
+        authoring.enabled = true;
+        try {
+            water.update(1 / 60, 0);
+            expect(water.disturbances.length).toBe(0);
+        } finally {
+            authoring.enabled = was;
+        }
     });
 });

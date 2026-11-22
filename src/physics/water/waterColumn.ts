@@ -5,6 +5,13 @@
 
 export type WaterShapeKind = 'pool' | 'lake' | 'river' | 'ocean';
 
+/**
+ * Metres the water a river joins may stand below the river's own surface and still be the water there: where
+ * a river hands over to its lake or the sea (physics: buoyancy.ts waterAt; drawing: waterInfo.ts
+ * handOverWaterInfo). A river still running down toward a lake or the sea far below it is the water there.
+ */
+export const YIELD_BELOW = 0.05;
+
 /** One sample along a resolved river: world centre-line surface point plus what the river is like there. */
 export interface RiverSample { x: number; y: number; z: number; dist: number; width: number; depth: number; speed: number; tx: number; tz: number; }
 
@@ -145,6 +152,50 @@ function shapeColumn(r: ResolvedWaterShape, x: number, z: number, col: WaterColu
     if (r.type === 'ocean' && r.endless) { col.edge = Infinity; return true; }
     col.edge = Math.min(x - r.min[0], r.max[0] - x, z - r.min[2], r.max[2] - z);
     return true;
+}
+
+/**
+ * Signed metres from (x, z) to shape `r`'s edge in plan: positive inside it (its column's `edge`), negative
+ * outside, no further out than `-reach` (a point farther than that gets `-reach`). Where {@link riverColumn} and
+ * the rest answer only inside a shape, this answers on both sides of its edge, which is what finding the edge
+ * between two grid cells needs (water/waterEdges.ts). An endless ocean is inside everywhere.
+ */
+export function shapeSignedEdge(r: ResolvedWaterShape, x: number, z: number, reach: number): number {
+    if (r.type === 'ocean' && r.endless) return Infinity;
+    if (x < r.min[0] - reach || x > r.max[0] + reach || z < r.min[2] - reach || z > r.max[2] + reach) return -reach;
+    if (r.type === 'river') {
+        const span = Math.max(1, Math.ceil(reach / r.cell));
+        const bx = Math.floor(x / r.cell), bz = Math.floor(z / r.cell);
+        let best = Infinity, bi = -1, bt = 0;
+        for (let dz = -span; dz <= span; dz++) for (let dx = -span; dx <= span; dx++) {
+            const bucket = r.grid[bucketKey(bx + dx, bz + dz)];
+            if (!bucket) continue;
+            for (const i of bucket) {
+                const a = r.samples[i], b = r.samples[i + 1];
+                closestOnSegmentXZ(x, z, a.x, a.z, b.x, b.z, _seg);
+                if (_seg[1] < best) { best = _seg[1]; bi = i; bt = _seg[0]; }
+            }
+        }
+        if (bi < 0) return -reach;
+        const a = r.samples[bi], b = r.samples[bi + 1];
+        const half = (a.width + (b.width - a.width) * bt) / 2;
+        return Math.max(-reach, half - Math.sqrt(best));
+    }
+    if (r.type === 'lake') {
+        const d = Math.sqrt(polygonEdgeDistance2XZ(x, z, r.outline));
+        return pointInPolygonXZ(x, z, r.outline) ? d : Math.max(-reach, -d);
+    }
+    // A pool's box, a bounded ocean's square.
+    const ox = Math.max(r.min[0] - x, 0, x - r.max[0]), oz = Math.max(r.min[2] - z, 0, z - r.max[2]);
+    if (ox > 0 || oz > 0) return Math.max(-reach, -Math.hypot(ox, oz));
+    return Math.min(x - r.min[0], r.max[0] - x, z - r.min[2], r.max[2] - z);
+}
+
+/** {@link shapeSignedEdge} of the nearest of `shapes` (their union): the largest. `-reach` for none. */
+export function shapesSignedEdge(shapes: readonly ResolvedWaterShape[], x: number, z: number, reach: number): number {
+    let best = -reach;
+    for (const r of shapes) { const e = shapeSignedEdge(r, x, z, reach); if (e > best) best = e; }
+    return best;
 }
 
 const _col: WaterColumn = { shape: -1, surface: 0, floor: 0, flowX: 0, flowZ: 0, edge: 0, waveFactor: 1 };

@@ -1,4 +1,5 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
+import { ALL_LAYERS, LAYER, isAllLayers } from '../../physics/collisionLayers';
 
 // What stands in the water when it is baked: every STATIC collider (a Collider with no mass, solid to the
 // solver) as authored — a rock, a pier, a weir, a wall. Read from the authored shapes, because the editor's
@@ -31,6 +32,8 @@ export interface WaterObstacle {
 /** The authored-collider fields read here (core/scene/nodes/colliderNode.ts), duck-typed. */
 interface ColliderLike {
     nodeType: string; id: string; mass: number; simulatePhysics?: boolean; enabled?: boolean;
+    /** Its collision layer (one bit); missing is Default. */
+    layer?: number;
     shapes: { type: string; offset?: number[]; rotation?: number[]; width?: number; height?: number; depth?: number; radius?: number; vertices?: number[][]; faces?: number[][] }[];
     worldTransform: mat4; worldScale: ArrayLike<number>;
 }
@@ -75,13 +78,18 @@ function localBounds(kind: WaterObstacleKind, dims: number[], verts: number[][])
     return [[-e[0], -e[1], -e[2]], [e[0], e[1], e[2]]];
 }
 
-/** The static obstacles among `nodes` (a scene's), within the world rectangle `area` ([x0, z0, x1, z1]) if given. */
-export function sceneObstacles(nodes: Iterable<unknown>, area?: readonly number[]): WaterObstacle[] {
+/**
+ * The static obstacles among `nodes` (a scene's), within the world rectangle `area` ([x0, z0, x1, z1]) if given,
+ * on the collision layers in `mask` (a Water node's Reacts to; every layer by default).
+ */
+export function sceneObstacles(nodes: Iterable<unknown>, area?: readonly number[], mask: number = ALL_LAYERS): WaterObstacle[] {
     const out: WaterObstacle[] = [];
     const q = quat.create(), sq = quat.create(), t = vec3.create(), m = mat4.create(), local = mat4.create();
+    const every = isAllLayers(mask);
     for (const raw of nodes) {
         const n = raw as ColliderLike;
         if (!n || n.nodeType !== 'collider' || n.mass > 0 || n.simulatePhysics === false || n.enabled === false) continue;
+        if (!every && !((n.layer ?? LAYER.DEFAULT) & mask)) continue;
         if (!Array.isArray(n.shapes) || !n.shapes.length) continue;
         const scale = n.worldScale;
         const sx = Math.abs(scale[0]) || 1, sy = Math.abs(scale[1]) || 1, sz = Math.abs(scale[2]) || 1;

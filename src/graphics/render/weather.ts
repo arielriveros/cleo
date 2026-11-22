@@ -62,6 +62,8 @@ export class WeatherPasses {
         this._footprint = !preview && this._shadows.shelterEnabled && this.pack.count > 0
             ? shelterFootprint(volumes, camera, this._shadows.shelterResolution, this._footprint)
             : null;
+        // The map at its size now, before the shadow passes bind it (ShadowPasses.ensureShelterTarget).
+        if (this._footprint) this._shadows.ensureShelterTarget();
         this._info[0] = this.pack.count;
         // The weather clock (scene time), what the ground's raindrops animate by.
         this._info[1] = preview ? 0 : scene.precipitation.clock;

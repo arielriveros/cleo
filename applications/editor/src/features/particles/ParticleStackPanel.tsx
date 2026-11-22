@@ -326,7 +326,9 @@ function RenderSection({ emitter, editEmitter }: {
   const render = emitter.render as unknown as Record<string, unknown>
   const flipbook = emitter.render.flipbook as unknown as Record<string, unknown>
   const visible = RENDER_PARAMS.filter(p => !p.when || p.when(render))
-  const textured = !!emitter.render.textureId
+  const sixWay = !!emitter.render.lit && emitter.render.shading === 'sixWay'
+  // A six-way effect's lightmaps are its flipbook sheets, so the flipbook rows apply to them too.
+  const textured = !!emitter.render.textureId || sixWay
   const { models } = useCleoEngine()
   return (
     // The Rendering section rather than the short "Render" line, so its table also explains the fields.
@@ -338,6 +340,8 @@ function RenderSection({ emitter, editEmitter }: {
               <ParamField spec={spec} value={render[spec.key]}
                           onChange={(v, c) => editEmitter('Edit render', e => {
                             (e.render as unknown as Record<string, unknown>)[spec.key] = v
+                            // Standard is the absence of the key, so an effect saved before shading existed stays as it was.
+                            if (spec.key === 'shading' && v === 'standard') delete (e.render as unknown as Record<string, unknown>).shading
                             // Picking a model CAPTURES its geometry into the effect; see particleMesh.ts.
                             if (spec.key === 'modelId') {
                               const model = models.find(m => m.id === v)
@@ -355,6 +359,9 @@ function RenderSection({ emitter, editEmitter }: {
             </PropertyRow>
           ))}
         </PropertyTable>
+        {sixWay && !(emitter.render.sixWayPositiveTextureId && emitter.render.sixWayNegativeTextureId) && (
+          <Hint>Set both Six-way maps: until then the effect draws with Standard shading.</Hint>
+        )}
         {emitter.render.mode === 'mesh' && emitter.render.mesh === 'model' && (
           <Hint>
             {emitter.render.meshData

@@ -18,6 +18,8 @@ import { packEmitter, simStripMask } from '../particles/particlePack';
 import { parseParticleSystem } from '../particles/particleSystemAsset';
 import { resolveSubEmitters } from '../particles/particleRuntime';
 import { precipitationSystem, type FallingKind } from '../particles/precipitation';
+import { SPRAY_LOOKS, sprayLookSystem } from '../water/spray/sprayParticles';
+import { particleDrawProgramName } from './particles/particlePrograms';
 import { parsePrecipitationSprite } from '../core/scene/nodes/weatherNode';
 import { QUALITY_TIERS, type RenderSettings, type QualityPreset } from './render/settingsTypes';
 
@@ -156,6 +158,8 @@ function addParticles(payload: any, use: ProgramUsage): void {
         } catch {
             use.names.add('particleSim');
         }
+        // A lit emitter takes the sun's shadow and every point and spot light per pixel: its draw program's lit variant.
+        if (def.render.lit) use.names.add(particleDrawProgramName(def.render.mode === 'mesh', true));
     });
 }
 
@@ -204,6 +208,8 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
         case 'decal': add('decalSurface'); add('decalResolve'); add('decalColor'); break;
         case 'waterVolume': add('water'); add('waterUnderwater'); add('waterWaveField'); add('waterWaveAdvect'); add('waterWaveStep');
             for (const p of ['Ground', 'Shift', 'Advect', 'Limit', 'Depth', 'Accelerate', 'Waves', 'Surface']) add(`waterFlow${p}`);
+            // The spray its running water throws (water/spray/): its three particle systems.
+            for (const look of SPRAY_LOOKS) addParticles({ system: sprayLookSystem(look) }, use);
             break;
         case 'fluidVolume': add('fluidVolume'); add('fluidVolumeResolve'); add('fluidVolumeComposite'); break;
         case 'volumetricFog': add('volumetricFogInject'); add('volumetricFogIntegrate'); add('volumetricFogApply'); break;

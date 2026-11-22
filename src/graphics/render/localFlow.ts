@@ -10,7 +10,7 @@ import type { FullscreenPasses } from './fullscreenPasses';
 import type { PassEncoder } from './passEncoder';
 import type { PipelineReflection } from './pipelineCache';
 import type { WaterInfo } from '../../water/waterInfo';
-import { LOCAL_FLOW_DT } from '../../water/localFlow';
+import { LOCAL_FLOW_DT, localFlowDatum } from '../../water/localFlow';
 
 /** One water in reach of the window, as the local flow reads it: its grid, the textures it is drawn from, its bed's roughness. */
 export interface LocalFlowWater { info: WaterInfo; tex0: Texture; tex1: Texture; manning: number; }
@@ -148,7 +148,9 @@ export class LocalFlowSim {
             sm.bind('waterFlowGround');
             sm.setUniform('u_window', [ox, oz, side, cells]);
             sm.setUniform('u_infoOrigin', [w.info.originX, w.info.originZ, w.info.cell, 0]);
-            sm.setUniform('u_infoSize', [w.info.nx, w.info.nz, datum, w.manning]);
+            // The grid's heights reach the GPU over its own lowest surface (render/water.ts): the datum is taken
+            // to the same base, so two waters with different bases meet without a step.
+            sm.setUniform('u_infoSize', [w.info.nx, w.info.nz, localFlowDatum(datum, w.info), w.manning]);
             sm.setUniform('u_obstacleCount', [count, 0, 0, 0]);
             if (count) sm.setUniform('u_obstacles', obstacles.subarray(0, count * 8));
             this._passes.drawFullscreenAndEnd(pass);

@@ -20,6 +20,8 @@ const feature: FeatureModule = {
         reg.nodeKind(ParticleSystemNode, K.PARTICLES);
         reg.nodeKind(ForceFieldNode, K.FORCE_FIELD);
         reg.factory(RENDER_FACTORY.particles, (...a: ConstructorParameters<typeof ParticlePasses>) => new ParticlePasses(...a));
+        // A particle system made from code by another feature (a water's spray), without importing this one.
+        reg.factory('particleSystem', (...a: ConstructorParameters<typeof ParticleSystemNode>) => new ParticleSystemNode(...a));
     },
 };
 

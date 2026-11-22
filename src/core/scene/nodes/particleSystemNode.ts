@@ -7,6 +7,7 @@ import {
     cloneParticleSystem, defaultParticleSystem, parseParticleSystem, type ParticleSystemDef,
 } from "../../../particles/particleSystemAsset";
 import { ParticleSystemRuntime, seedSalt } from "../../../particles/particleRuntime";
+import { packSpawnSources, type SpawnSource } from "../../../particles/particleSources";
 import { FULL_DETAIL, particleLodFactors, type ParticleLodState } from "../../../particles/particleLod";
 import { finiteOr } from "../../math";
 
@@ -313,6 +314,18 @@ export class ParticleSystemNode extends Node {
         if (!this._playing) { this._playing = true; this._paused = false; }
         for (const emitter of this._runtime.emitters)
             if (!emitterName || emitter.def.name === emitterName) emitter.burst(count);
+    }
+
+    /**
+     * Births at the points `sources` give this frame (world space; particles/particleSources.ts), on the
+     * emitters whose shape is engine-fed spawn points (`shape: 'sources'`), every one or only the one named:
+     * what flowing water's spray rises from. Call once a frame, before the node's update.
+     */
+    public spawnFrom(sources: readonly SpawnSource[], emitterName?: string): void {
+        if (!this._playing) { this._playing = true; this._paused = false; }
+        // A fresh table each time: the step it goes into may wait for the renderer past the next call.
+        for (const emitter of this._runtime.emitters)
+            if (!emitterName || emitter.def.name === emitterName) emitter.queueSources(packSpawnSources(sources, emitter.capacity));
     }
 
     private _startRuntime(): void {

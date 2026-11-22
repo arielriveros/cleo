@@ -2,7 +2,7 @@
   "id": "595a38f2881b9a9382adfc40b7345a3f",
   "name": "Tracer",
   "nodeJson": {
-    "id": "cba491f1439a59a65a26ff6f28ffdb1c",
+    "id": "c6b159d0e5df5e06d079046ede515d80",
     "name": "Tracer",
     "type": "node",
     "position": [0, 0, 0],
@@ -10,12 +10,12 @@
     "scale": [1, 1, 1],
     "children": [
       {
-        "id": "219dce6fd52bc3bc6fdd8e09613b8f9e",
+        "id": "01c3da75e74595c872c5a5fc55ae05a7",
         "name": "Streak",
         "type": "model",
-        "position": [0, 0, -2.5],
+        "position": [0, 0, 2.6242642402648926],
         "rotation": [0, 0, 0],
-        "scale": [0.012, 0.012, 5],
+        "scale": [0.012000000104308128, 0.012000000104308128, 5],
         "children": [],
         "variables": {
           "__materialId": {
@@ -55,8 +55,16 @@
             "baseColor": [1, 0.85, 0.5],
             "metallic": 0,
             "roughness": 0.85,
+            "reflectance": 0.5,
             "opacity": 1,
+            "alphaCutoff": 0,
             "emissiveFactor": [1, 0.78, 0.4],
+            "emissiveIntensity": 6,
+            "displacementScale": 0.05,
+            "depthSpace": "uv",
+            "invertHeight": false,
+            "clipSilhouette": false,
+            "emissiveExposureWeight": 0.1,
             "textures": {},
             "config": {
               "side": "front",
@@ -64,11 +72,12 @@
               "transparent": false,
               "castShadow": false,
               "probeable": true
-            },
-            "emissiveIntensity": 6,
-            "emissiveExposureWeight": 0.1
+            }
           }
-        }
+        },
+        "animationMappings": null,
+        "stateMachine": null,
+        "ragdoll": null
       }
     ],
     "variables": {
@@ -79,11 +88,12 @@
       }
     },
     "spawnOnStart": true,
-    "script": "import { Node } from 'cleo'\nimport { attribute } from 'cleo/decorators'\n\n/**\n * A Sandbox tracer: a glowing streak that flies from the muzzle to where the shot ended and is gone. Attach to the\n * root of the tracer's template (its streak a mesh along +Z, `trail` metres long, ending at the root); SandboxGun\n * instantiates it at the muzzle, turned along the shot, and sets `tracerLength`. The streak is shortened for a shot\n * shorter than it, and never flies past the shot's end.\n */\nexport default class SandboxTracerNode extends Node {\n    /** Set by the gun: from the muzzle to the end of the shot, m. */\n    public tracerLength: number = 0\n\n    /** How fast the streak flies, m/s. */\n    @attribute({ min: 10, max: 2000, step: 10 })\n    public speed: number = 380\n\n    /** The streak's length, m (its mesh's). */\n    @attribute({ min: 0.1, max: 20, step: 0.1 })\n    public trail: number = 5\n\n    private _flown: number = 0\n    private _start: number[] | null = null\n    private _dir: number[] = [0, 0, 1]\n\n    onUpdate(delta: number) {\n        if (!this._start) {\n            this.updateTransforms(this.parent ? this.parent.worldTransform : null)\n            const p = this.worldPosition, f = this.worldForward\n            this._start = [p[0], p[1], p[2]]\n            this._dir = [f[0], f[1], f[2]]\n            this.setScale([1, 1, Math.min(1, Math.max(0.05, this.tracerLength / Math.max(0.1, this.trail)))])\n        }\n        this._flown += this.speed * delta\n        if (this._flown >= this.tracerLength + this.trail * 0.2) { this.remove({ immediate: true }); return }\n        // The head of the streak at the root: it flies until its head reaches the end.\n        const at = Math.min(this._flown, this.tracerLength)\n        this.setWorldPosition([this._start[0] + this._dir[0] * at, this._start[1] + this._dir[1] * at, this._start[2] + this._dir[2] * at])\n    }\n}\n",
     "scriptVars": {
       "trail": 5
     }
   },
-  "scripts": {},
-  "textureIds": []
+  "textureIds": [],
+  "scripts": {
+    "c6b159d0e5df5e06d079046ede515d80": "import { Node } from 'cleo'\nimport { attribute } from 'cleo/decorators'\n\n/**\n * A Sandbox tracer: a glowing streak that flies from the muzzle to where the shot ended and is gone. Attach to the\n * root of the tracer's template (its streak a mesh along +Z, `trail` metres long, ending at the root); SandboxGun\n * instantiates it at the muzzle, turned along the shot, and sets `tracerLength`. The streak is shortened for a shot\n * shorter than it, and never flies past the shot's end.\n */\nexport default class SandboxTracerNode extends Node {\n    /** Set by the gun: from the muzzle to the end of the shot, m. */\n    public tracerLength: number = 0\n\n    /** How fast the streak flies, m/s. */\n    @attribute({ min: 10, max: 2000, step: 10 })\n    public speed: number = 380\n\n    /** The streak's length, m (its mesh's). */\n    @attribute({ min: 0.1, max: 20, step: 0.1 })\n    public trail: number = 5\n\n    private _flown: number = 0\n    private _start: number[] | null = null\n    private _dir: number[] = [0, 0, 1]\n\n    onUpdate(delta: number) {\n        if (!this._start) {\n            this.updateTransforms(this.parent ? this.parent.worldTransform : null)\n            const p = this.worldPosition, f = this.worldForward\n            this._start = [p[0], p[1], p[2]]\n            this._dir = [f[0], f[1], f[2]]\n            this.setScale([1, 1, Math.min(1, Math.max(0.05, this.tracerLength / Math.max(0.1, this.trail)))])\n        }\n        this._flown += this.speed * delta\n        if (this._flown >= this.tracerLength + this.trail * 0.2) { this.remove({ immediate: true }); return }\n        // The head of the streak at the root: it flies until its head reaches the end.\n        const at = Math.min(this._flown, this.tracerLength)\n        this.setWorldPosition([this._start[0] + this._dir[0] * at, this._start[1] + this._dir[1] * at, this._start[2] + this._dir[2] * at])\n    }\n}\n"
+  }
 }

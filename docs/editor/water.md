@@ -1,5 +1,9 @@
 # Water
 
+> **Experimental.** Water volumes are new and still changing: their settings, flow bakes and look may change in a
+> later version, and a bake may need baking again. They work as described here; the inspector, the Add grid and
+> Project ▸ Features mark them with a flask.
+
 A **Water** node is one body of water: a **River**, a **Lake**, an **Ocean** or a **Pool**. Everything
 dynamic in it floats by its mass against the water it displaces, a river's current carries it downstream,
 and the waves it rides are the waves you see. A river joins other Water nodes by naming them: a river that
@@ -62,6 +66,16 @@ The mouth is a shore to neither: no shore foam grows across it, and the lake's w
 A river that runs to the sea carries what floats all the way down: the sea takes over where its water really
 stands, at the beach, not before. Move the lake and the river's mouth follows it.
 
+The two surfaces meet as one. Over the last few metres before the mouth (half again the river's width there,
+4 to 24 m) the river takes on the surface of the water it runs into: that water's waves, its swell, the sea's
+surf and its resting height, all of them where the other water begins, so the lake's waves run up into the
+river mouth instead of crossing the river's own, and no strip of ground shows between them. The lake, pond or
+sea keeps its own waves. A river drawn on into its lake comes down to the lake's level where it crosses the
+lake's shore, not only at its last point. The sea, which lies under every point, the river's channel too, is
+drawn down and calm under a river joined to it upstream of its mouth, so its crests never show through the
+river. What floats rides the same blended surface. A river that falls into the water it joins (off a cliff,
+a metre or more above it) is a waterfall, not a mouth: it takes on nothing.
+
 Water joined this way is one system: a [flow bake](#flow-bake) simulates all of it together, so the current
 runs from a river into its lake, across it and out down the river that drains it.
 
@@ -95,7 +109,7 @@ reflects the water back outside Snell's window.
 | **Foam size** | Metres across the piece of web the foam is drawn from: its widest holes are about a seventh of that, its bubbles a hundredth. |
 | **Flow** | How far the waves, the foam and the caustics ride the current, so a river visibly runs: 1 carries them at the water's own speed. Floating bodies ride the waves where the surface draws them. |
 | **Churn** | How much fast water lightens and clouds, as churned water does: a rapid reads pale against the dark, clear pool below it, and water with foam on it is milky between the foam's strands. 0: speed does not show in the colour. |
-| **Live waves** | How tall the simulated waves on flowing water stand round the camera (see Live waves, below): the boil of fast water, the wake below every stone, waves standing below a drop. 0: none, and with no river asking for them nothing is simulated. |
+| **Live waves** | How tall the simulated waves on flowing water stand round the camera (see Live waves, below): the boil of fast water, the wake below every stone, waves standing below a drop. 0: none of the river's own. The rings and wakes of what moves through the water are simulated on any water whatever this says (see [Ripples and splashes](#ripples-and-splashes)). |
 | **Foam colour** | The colour of the foam. |
 | **Shore foam** | Metres of foam along the shore and in thin water, with surf lines running in; on an ocean, the foam of its breaking surf. |
 | **Crest foam** | Foam on breaking wave crests. |
@@ -147,14 +161,19 @@ What it simulates:
   its level. A river drawn across ground with no channel runs off downhill, and the bake says so: press
   **Carve landscape** (with **Dig deeper**, for a channel that holds more than the drawn depth) or draw the
   river where the ground runs. Only where there is no landscape under a water does its own drawn bed stand in
-  for the ground.
-- **Static colliders are obstacles.** A Collider with no mass standing out of the water is a wall the water
-  goes round; one under the surface raises the bed, and the water speeds over it. One narrower than the bake's
+  for the ground. What the simulation leaves out in that corridor (water spilling over the outside of a steep
+  bend, a sheet running down a cliff beside a cascade) is not drawn: a water draws its bake only within its drawn
+  shape, and the water it joins, and a margin past them (a cell and a half, at least a metre), and nothing floats
+  on it there either. Under a bank the surface runs on level a little under the ground, and where the ground
+  falls away from it (a lip, a ridge with a drop behind it, the side of a cascade) it ends there rather than
+  standing out over the drop.
+- **Static colliders are obstacles.** A Collider with no mass, on a layer the water **Reacts to** (see
+  [Ripples and splashes](#ripples-and-splashes)), standing out of the water is a wall the water goes round; one under the surface raises the bed, and the water speeds over it. One narrower than the bake's
   cells (a post or a pier at a draft resolution) still counts: the water through its cell is held back by its
   drag, so it piles up a little before it and runs slower behind it, though the water is not seen to part
   round it until the resolution is fine enough. The card says how many colliders the water met, and which of
   them were too narrow to see it part round. Colliders with mass (what floats or falls) are not part of the
-  bake.
+  bake. Joined waters bake together: a collider counts if any of them reacts to its layer.
 - **A river brings its own water.** A river that starts in no other water rises at its first point, with the
   water that point carries (width × depth × flow speed). From there the slope and the bed's roughness decide
   how fast and deep it runs. On steep ground a stream tumbles from step to pool instead of sheeting down: a
@@ -170,16 +189,18 @@ What it simulates:
   lip makes none; a short hard drop makes more than a long steady chute. It is carried downstream by the
   current and fades over a few seconds, so a torrent comes out streaked: white where it falls, clear in its
   pools.
-- **The banks are the ground's.** The baked surface is drawn on a little way under the dry ground beside it,
-  so the waterline is where the water meets the bank, not the outline of the bake's cells.
+- **The banks are the ground's.** The baked surface is drawn on, level, a little way under the dry ground
+  beside it, so the waterline is where the water meets the bank, not the outline of the bake's cells. Where the
+  ground falls away instead (a lip, the edge of the landscape), the water ends on a line found between the
+  cells, level to its edge: never sloping down to the ground below.
 
 When the bake is done the card says how it went: whether the water settled (what flows in is what flows
 out) and after how long; how much water left its course, and where; any hollow still filling, and where; a
 lake that stands at another level than it was drawn at; and the static colliders the water flowed round. Water that leaves its course is the thing to fix:
 the river is drawn where the ground does not hold it.
 
-Moving or editing any water of the system, the landscape under it or a static collider in it makes the bake
-stale, and every water of the system draws as drawn again until the next bake; the Console says so. Editing
+Moving or editing any water of the system, the landscape under it or a static collider in it (or unticking
+the layer one is on in **Reacts to**) makes the bake stale, and every water of the system draws as drawn again until the next bake; the Console says so. Editing
 the waves, the look or the carve settings does not.
 
 | Field | What it does |
@@ -243,8 +264,8 @@ waves are raised where a river raises them, and then left to the water:
   current, hardest where the bake found the water losing its energy, in riffles with glassy runs between.
 - **The bulk flow's turns.** Where the baked current speeds up or slows down sharply (the lip of a drop, the
   foot of one) the surface cannot follow, and a train of waves stands below.
-- **What stands in the water.** Every static collider the surface cuts is solid to the waves too: none inside
-  it, and waves that reach it are thrown back. The local flow's turns round it raise its bow wave and the
+- **What stands in the water.** Every static collider the surface cuts, on a layer the water reacts to, is
+  solid to the waves too: none inside it, and waves that reach it are thrown back. The local flow's turns round it raise its bow wave and the
   standing waves of its wake; the water boils in its lee, and foam torn from its sides trails off downstream.
 
 A wave that steepens past what water holds breaks: it is damped, and leaves foam. The foam the stones and the
@@ -259,11 +280,11 @@ What to know:
   raised. Past it, an obstacle shows only what the bake makes of it. Past it the river draws
   its formula waves and the bake's own foam, as before; the join is faded over the last few metres.
 - A lake or pool joined to a river is in the same simulation, so the river's waves and foam run out into it.
-  An ocean keeps its own waves.
+  An ocean keeps its own waves, and carries the rings of what moves through it like any other water.
 - With no flow bake the drawn river is the reference (its **Flow speed**): the local flow still parts round
   what stands in it and turns white where it breaks, but the river's own foam is the bake's to say.
 - **Floating bodies do not feel them.** Buoyancy rides the river's formula waves and the baked current, as
-  before: these, and the local flow, are for the eye. A floating body meets a post's collider, but is not
+  before: these, the local flow and the rings bodies raise are for the eye. A floating body meets a post's collider, but is not
   carried round it.
 - They run at sixty steps a second, two a frame at most: under 30 frames a second they slow down rather than
   cost more.
@@ -310,12 +331,34 @@ against them. Where a river runs into the water it flows into, a body there is i
 | **Currents** | Flowing water carries what floats downstream. Off: rivers are as still as lakes to the physics. |
 | **Buoy characters** | Off by default: a character capsule is mostly air and would be launched out of the water. |
 
-## Splashes
+## Ripples and splashes
 
-What moves through the water disturbs it.
+What moves through the water disturbs it. In Play (and Simulate), every body crossing the surface round the
+camera rings it: something dropped in throws a ring that runs outward, a floating crate rings it as it bobs, a
+character wading or a hull pushing through raises a bow wave and leaves the V of a wake, and something that
+comes in fast throws up a little foam. They are pressed into the [live waves](#live-waves), so the water itself
+carries them: they run at water's own speeds, are thrown back by what stands in it, and on a river are carried
+off downstream with the current. On still water they cross the pond for many seconds; on running water they are
+gone in a second or two. What moves with the water raises nothing: a log drifting down the river, a buoy riding
+the swell. They cover the same square round the camera as the live waves, and need the same float targets.
+
+Running water throws SPRAY: lit droplets thrown up and falling back onto it, foam bursting where it churns, and
+on tall falls a mist drifting off with the wind. The mist is white and thin and shaded by its own six-way
+lightmaps, so the side facing the sun glows and the side facing away takes the blue of the sky, and the droplets and
+foam carry normal maps, so the sun glints off them; the sun's shadow and the lamps near the water light them per
+pixel, like any [lit particle](particles.md#rendering). It comes from where the water loses its energy: a rapid's
+chutes and steps (more the harder it runs), the foot of a fall (as much as the height it drops and the water
+going over it make, and a sheer fall all down its face), the face of a rock or a pier the current runs at faster
+than a metre a second (as high as the water piles up its front), and in Play a body the current hits or one
+dropped in hard. It is there while you edit too, as the waves are. The nearest and strongest places round the
+camera spray, within a budget, so a long river costs no more than a short one.
+
+Which bodies count is the water's to say, by their collision layer ([Layers](physics.md#layers)):
 
 | Field | What it does |
 |---|---|
+| **Reacts to** | The collision layers the water reacts to. Bodies on them ripple and splash it: dynamic bodies, characters, and static ones a script or animation moves. Static colliders on them shape its flow: the posts and piers the live waves part round, and the obstacles a flow bake runs round. Untick a layer to have the water ignore it: weapon hitboxes, camera blockers, debris too small to matter. Triggers never count. Buoyancy does not ask: whatever floats, floats. Default: every layer. |
+| **Spray** | How much spray the running water throws, 0 to 2. 0 throws none. Default 1. Static colliders and bodies throw it only on the layers the water **Reacts to**. |
 | **Splash** | Template spawned at the surface where something enters the water or wades through it. |
 | **Wading splash** | Template for the footsteps of a character wading. Same as Splash when not set. |
 | **Surface model** | Legacy: a model drawing the water whose custom material declares `vec4` uniforms `ripple0` … `ripple11`, filled with rings from whatever moves through. While one is set the node draws no surface of its own, so an older scene keeps its look; clear it to switch to the Water material. |
@@ -324,4 +367,4 @@ What moves through the water disturbs it.
 
 `WaterVolumeNode` exposes the water to scripts: `waterType`, `points`, `size`, `depth`, `extent`,
 `flowsFrom` and `flowsInto` (the body; set them to edit it), `columnAt(x, z, time?)` (surface, floor and
-flow over a point, or null), `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)` and `waves()`. See [Node types](../reference/node-types.md#watervolumenode--watervolume-unreleased).
+flow over a point, or null), `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)` and `waves()`. See [Node types](../reference/node-types.md#watervolumenode--watervolume-experimental).

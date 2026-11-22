@@ -33,6 +33,16 @@ let useSimVariants = false;
 export function setParticleSimVariants(on: boolean): void { useSimVariants = on; }
 export function particleSimVariants(): boolean { return useSimVariants; }
 
+/**
+ * The draw program of a billboard or mesh emitter: the base, or its `lit` variant (`// @variant lit PARTICLE_LIT`
+ * in particleBillboard.wgsl and particleMesh.wgsl), which takes the sun's shadow and every point and spot light
+ * per pixel. A lit variant declares group 3 (the shadow cascades and the light grid): only a draw that binds it
+ * may use it.
+ */
+export function particleDrawProgramName(mesh: boolean, perPixel: boolean): string {
+    return mesh ? (perPixel ? 'particleMesh~lit' : 'particleMesh') : (perPixel ? 'particleBillboard~lit' : 'particleBillboard');
+}
+
 /** Program names in `ShaderManager`, with their imports. Registered through `programTable` (render/programs.ts). */
 export const PARTICLE_PROGRAMS: {
     readonly sim: readonly [string, ParticleProgram];

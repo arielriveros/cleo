@@ -13,8 +13,9 @@ import {
 import { activeModule, type EmitterDef } from './particleSystemAsset';
 import { validatedCustomCode } from './particleCustomCode';
 import { SIM_STRIP } from '../graphics/programVariants';
-import type { CollisionPlane } from './particleModules';
+import type { CollisionPlane, RenderSettings } from './particleModules';
 import type { SimStep } from './particleRuntime';
+import { SPAWN_SOURCE_FLOATS } from './particleSources';
 import { DEG2RAD, finiteOr, transformDirectionTuple, transformPointTuple } from '../core/math';
 
 /** Bits of `u_mask.x` — the SIM_* constants in chunks/particleSimCore.wgsl. */
@@ -44,9 +45,36 @@ export function simStripMask(simMask: number, hasParent: boolean): number {
 /** Bits of `u_drawMask.x` — the DRAW_* constants in chunks/particleDraw.wgsl. SORTED is set per frame. */
 export const DRAW = { COLOR_LIFE: 1, SIZE_LIFE: 2, COLOR_SPEED: 4, SIZE_SPEED: 8, LOCAL: 16, SORTED: 32 } as const;
 
+/**
+ * `u_surface.w` bits: the SURFACE_* constants in chunks/particleDraw.wgsl. A lit emitter's surface.
+ * NORMAL_MAP, ORM_MAP: the map is bound. PBR: a specular highlight and a reflection at all (an ORM map, metallic,
+ * or roughness under 1) -- without it a lit emitter shades as a card, half-Lambert (Lambert, softened by its
+ * translucency, once a normal map gives it relief). RAIN: a drop, not a card. SIX_WAY: baked six-way lightmaps.
+ */
+export const SURFACE = { NORMAL_MAP: 1, ORM_MAP: 2, PBR: 4, RAIN: 8, SIX_WAY: 16 } as const;
+
+/**
+ * The SURFACE bits an emitter draws with, from its render settings and which maps it really has (resolved
+ * textures): none for an unlit one. Rain is exclusive; six-way needs both maps and a billboard (a mesh has no
+ * frame to light it in) and otherwise draws Standard.
+ */
+export function surfaceFlags(render: Pick<RenderSettings, 'lit' | 'shading' | 'roughness' | 'metallic'>,
+                             maps: { normal: boolean; orm: boolean; sixWay: boolean }, mesh: boolean): number {
+    if (!render.lit) return 0;
+    if (render.shading === 'rain') return SURFACE.RAIN;
+    if (render.shading === 'sixWay' && maps.sixWay && !mesh) return SURFACE.SIX_WAY;
+    const pbr = maps.orm || (render.metallic ?? 0) > 0 || (render.roughness ?? 1) < 0.999;
+    return (maps.normal ? SURFACE.NORMAL_MAP : 0) | (maps.orm ? SURFACE.ORM_MAP : 0) | (pbr ? SURFACE.PBR : 0);
+}
+
 const SHAPE_KIND: Record<string, number> = {
     point: 0, sphere: 1, hemisphere: 2, cone: 3, box: 4, circle: 5, edge: 6,
+    // Engine-fed points (particleSources.ts): not an authoring shape, never in the editor's list.
+    sources: 7,
 };
+/** `u_shape0.x` of an emitter fed spawn points by the engine (SHAPE_SOURCES in chunks/particleSimCore.wgsl). */
+export const SHAPE_SOURCES = 7;
+const NO_SOURCES = new Float32Array(SPAWN_SOURCE_FLOATS);
 const VELOCITY_MODE: Record<string, number> = { shape: 0, direction: 1, radial: 2 };
 const COLOR_MODE: Record<string, number> = { constant: 0, between: 1, gradient: 2 };
 const ALIGNMENT: Record<string, number> = { camera: 0, velocity: 1, vertical: 2, horizontal: 3 };
@@ -279,7 +307,7 @@ export function stepUniforms(packed: PackedEmitter, step: SimStep, capacity: num
         planes.set([normal[0], normal[1], normal[2], -(normal[0] * point[0] + normal[1] * point[1] + normal[2] * point[2])], i * 4);
     });
 
-    return {
+    const out: Record<string, number[] | Float32Array> = {
         u_emitterPrev: step.prevMatrix as Float32Array,
         u_emitterCur: world as Float32Array,
         u_worldToSim: worldToSim as Float32Array,
@@ -294,5 +322,12 @@ export function stepUniforms(packed: PackedEmitter, step: SimStep, capacity: num
         u_attractor: [...fromEmitterPoint(packed.attractorPosition), packed.attractorStrength],
         u_planes: planes,
     };
+    // Only an emitter fed spawn points reads them (the block is shared: another emitter's are never read).
+    if (packed.sim.u_shape0[0] === SHAPE_SOURCES) {
+        const t = step.sources;
+        out.u_sourceInfo = [t ? t.count : 0, t ? t.total : 0, 0, 0];
+        out.u_sources = t ? t.data : NO_SOURCES;
+    }
+    return out;
 }
 

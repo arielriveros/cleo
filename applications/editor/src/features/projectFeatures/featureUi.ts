@@ -2,7 +2,7 @@
 // items, New asset entries and editor modes each one owns. A feature the project leaves out (Project ▸
 // Features) hides them; what is already in a scene stays, marked as not shipped.
 import { useMemo } from 'react'
-import { enabledFeatures, featureOfNodeType, type FeatureDef } from 'cleo'
+import { enabledFeatures, experimentalNoteOf, featureById, featureOfNodeType, type FeatureDef } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 
 /** Add menu items (sceneInspector/addCatalog.ts ids) by the feature that owns them. */
@@ -46,6 +46,14 @@ const owner = (table: Readonly<Record<string, readonly string[]>>, key: string):
 
 /** The feature an Add menu item belongs to, if one does. */
 export const featureOfAddItem = (itemId: string) => owner(FEATURE_ADD_ITEMS, itemId)
+/** The experimental feature an Add menu item belongs to (FeatureDef.experimental), if it does. */
+export const experimentalFeatureOfAddItem = (itemId: string): FeatureDef | undefined => {
+  const id = featureOfAddItem(itemId)
+  const f = id ? featureById(id) : undefined
+  return f?.experimental ? f : undefined
+}
+/** What an experimental feature's label says in a tooltip: the feature's note, led by "Experimental". */
+export const experimentalTitle = (f: FeatureDef): string => `Experimental: ${experimentalNoteOf(f)}`
 /** The feature a New asset entry belongs to, if one does. */
 export const featureOfNewAsset = (label: string) => owner(FEATURE_NEW_ASSETS, label)
 /** The feature an editor mode belongs to, if one does. */

@@ -15,6 +15,7 @@ import { evaluateCurve, type Curve } from './curves';
 import { activeModule, maxLifetime, MAX_EMITTER_CAPACITY, type EmitterDef } from './particleSystemAsset';
 import type { Burst } from './particleModules';
 import { finiteOr, seededRandom } from '../core/math';
+import type { SpawnSourceTable } from './particleSources';
 
 /** Texels per row of an emitter's state textures. */
 export const PARTICLE_TEXTURE_WIDTH = 256;
@@ -97,6 +98,11 @@ export interface SimStep {
      */
     liveStart: number;
     liveCount: number;
+    /**
+     * The points this step's first `sources.total` births are dealt out to (a SOURCES emitter fed by the
+     * engine, particleSources.ts), or none.
+     */
+    sources?: SpawnSourceTable | null;
 }
 
 /**
@@ -135,6 +141,7 @@ export class EmitterRuntime {
     private _distanceCarry = 0;
     private _burstCarry = 0;
     private _pendingBurst = 0;
+    private _pendingSources: SpawnSourceTable | null = null;
     private _pendingReset = false;
     private _random: () => number;
     private readonly _lastMatrix = mat4.create();
@@ -222,7 +229,8 @@ export class EmitterRuntime {
 
     /** Spawning, or still holding particles that have not yet reached the end of their life. */
     public get isAlive(): boolean {
-        return this._state === 'playing' || this._sinceSpawning <= this._maxLife || this._pendingBurst > 0;
+        return this._state === 'playing' || this._sinceSpawning <= this._maxLife || this._pendingBurst > 0
+            || (this._pendingSources !== null && this._pendingSources.total > 0);
     }
 
     public play(): void {
@@ -252,6 +260,14 @@ export class EmitterRuntime {
     }
 
     /**
+     * Births at engine-given points on the next step (a SOURCES emitter, particleSources.ts): its first
+     * `table.total` births, dealt out to the table's points. A later table before that step replaces this one.
+     */
+    public queueSources(table: SpawnSourceTable): void {
+        this._pendingSources = table.total > 0 ? table : null;
+    }
+
+    /**
      * Advance the clock by `dt` and say what the GPU must do for it. `matrix` is the emitter's current
      * local-to-world; `rateScale` multiplies continuous spawning (LOD, the node's spawn-rate scale), and
      * `burstScale` the stack's bursts (1 unless LOD scales bursts too; 0 silences them).
@@ -269,7 +285,10 @@ export class EmitterRuntime {
         }
         const moved = Math.hypot(matrix[12] - prev[12], matrix[13] - prev[13], matrix[14] - prev[14]);
 
-        let count = this._pendingBurst;
+        // The queued sources first: their births are the step's first ones.
+        const sources = this._pendingSources;
+        this._pendingSources = null;
+        let count = (sources ? sources.total : 0) + this._pendingBurst;
         this._pendingBurst = 0;
         if (this._state === 'playing') count += this._spawnBetween(this._time, this._time + dt, moved, rateScale, burstScale);
         this._time += dt;
@@ -288,7 +307,8 @@ export class EmitterRuntime {
         // A reset kills every slot, so that one step must reach every slot.
         const live = reset ? { start: 0, count: this.capacity } : this.liveWindow();
         return { dt, time: this._time, spawnStart, spawnCount: count, serial, prevMatrix: prev,
-                 matrix: mat4.clone(matrix), velocity, reset, liveStart: live.start, liveCount: live.count };
+                 matrix: mat4.clone(matrix), velocity, reset, liveStart: live.start, liveCount: live.count,
+                 sources: sources && sources.total <= count ? sources : null };
     }
 
     /** Particles born in the interval [t0, t1) of emitter time, delay and cycles accounted for. */

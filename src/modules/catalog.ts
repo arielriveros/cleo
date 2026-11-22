@@ -63,7 +63,18 @@ export interface FeatureDef {
      * with the Features panel.
      */
     readonly setting?: 'webgl2';
+    /**
+     * Experimental: it works and is documented, but its settings, data and look may still change between
+     * versions. Only a label (the Features panel, the Add grid, the inspector, the docs and the agent's tools
+     * show it); it switches nothing on or off.
+     */
+    readonly experimental?: boolean;
+    /** What may change, for the label's tooltip and the inspector's notice. Default: EXPERIMENTAL_NOTE. */
+    readonly experimentalNote?: string;
 }
+
+/** What an experimental feature's label says when it says nothing of its own. */
+export const EXPERIMENTAL_NOTE = 'It is new and still changing: its settings and look may change in a later version.';
 
 const wgsl = (...names: string[]) => names.map(n => `wgsl/${n}.wgsl`);
 
@@ -149,6 +160,8 @@ export const FEATURES: readonly FeatureDef[] = [
             'waterFlowGround', 'waterFlowShift', 'waterFlowAdvect', 'waterFlowLimit', 'waterFlowDepth', 'waterFlowAccelerate',
             'waterFlowWaves', 'waterFlowSurface'),
         apiNames: ['WaterVolumeNode'],
+        experimental: true,
+        experimentalNote: 'Water volumes are new and still changing: their settings, flow bakes and look may change in a later version, and a bake may need baking again.',
     },
 
     // --- Effects ---------------------------------------------------------------------------------------------
@@ -277,6 +290,22 @@ export function dependentsOf(id: string): string[] {
 /** Which feature owns a node type, if one does (every other type is core). */
 export function featureOfNodeType(type: string): FeatureDef | undefined {
     return FEATURES.find(f => f.nodeTypes?.includes(type));
+}
+
+/** Whether feature `id` is experimental (FeatureDef.experimental). */
+export function isExperimentalFeature(id: string): boolean {
+    return !!featureById(id)?.experimental;
+}
+
+/** The experimental feature a node type belongs to, if its feature is one. */
+export function experimentalFeatureOfNodeType(type: string): FeatureDef | undefined {
+    const f = featureOfNodeType(type);
+    return f?.experimental ? f : undefined;
+}
+
+/** What an experimental feature's label says (its own note, else EXPERIMENTAL_NOTE). */
+export function experimentalNoteOf(f: FeatureDef): string {
+    return f.experimentalNote ?? EXPERIMENTAL_NOTE;
 }
 
 /** A starting point for a project's features: every box stays the user's to change. */

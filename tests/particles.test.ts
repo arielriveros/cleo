@@ -684,3 +684,64 @@ describe('per-copy particle seeds', () => {
         expect(new ParticleSystemNode('torch', { system }, 'torch-a').runtime.emitters[0].seed).toBe(a.runtime.emitters[0].seed);
     });
 });
+
+describe('spawn sources: points the engine feeds an emitter each frame', () => {
+    it('packs points in order, each with its first birth, and fits a frame in half the pool', async () => {
+        const { packSpawnSources, MAX_SPAWN_SOURCES, SPAWN_SOURCE_FLOATS } = await import('../src/particles/particleSources');
+        const t = packSpawnSources([
+            { x: 1, y: 2, z: 3, vx: 0, vy: 2, vz: 0, count: 10, along: 2, across: 1, ax: 0, az: 2, spread: 0.5, jitter: 0.3, size: 2, life: 0.5 },
+            { x: 0, y: 0, z: 0, vx: 1, vy: 0, vz: 0, count: 0 },
+            { x: 5, y: 0, z: 5, vx: 0, vy: 1, vz: 0, count: 6.7 },
+        ], 1024);
+        expect(t.count).toBe(2);
+        expect(t.total).toBe(16);
+        expect(t.data.length).toBe(SPAWN_SOURCE_FLOATS);
+        expect([...t.data.slice(0, 16)]).toEqual([1, 2, 3, 2, 0, 1, 1, 0, 0, 2, 0, 0.5, expect.closeTo(0.3, 6), 2, 0.5, 0]);
+        expect(t.data[16 + 15]).toBe(10);          // the second point's first birth
+        expect([...t.data.slice(32)].every(v => v === 0)).toBe(true);
+        // A frame asking for more than half the pool is scaled down, every point alike.
+        const big = packSpawnSources(Array.from({ length: 40 }, () => ({ x: 0, y: 0, z: 0, vx: 0, vy: 1, vz: 0, count: 100 })), 1000);
+        expect(big.count).toBe(MAX_SPAWN_SOURCES);
+        expect(big.total).toBeLessThanOrEqual(500);
+        expect(big.total).toBeGreaterThan(450);
+    });
+
+    it('puts a queued table into the next step only, as its first births', async () => {
+        const { packSpawnSources } = await import('../src/particles/particleSources');
+        const rt = new EmitterRuntime(emitterWith(e => { e.capacity = 256; }));
+        rt.play();
+        const table = packSpawnSources([{ x: 0, y: 0, z: 0, vx: 0, vy: 1, vz: 0, count: 12 }], rt.capacity);
+        rt.queueSources(table);
+        expect(rt.isAlive).toBe(true);
+        const a = rt.advance(1 / 60, I);
+        expect(a.spawnCount).toBe(12);
+        expect(a.sources).toBe(table);
+        const b = rt.advance(1 / 60, I);
+        expect(b.spawnCount).toBe(0);
+        expect(b.sources ?? null).toBeNull();
+    });
+
+    it('packs a sources emitter in world space and hands its points to the simulation step', async () => {
+        const { packSpawnSources } = await import('../src/particles/particleSources');
+        const def = emitterWith(e => { e.init = [Object.assign(makeModule('shape'), { params: { ...makeModule('shape').params, shape: 'sources' } })]; });
+        const packed = packEmitter(def);
+        expect(packed.sim.u_shape0[0]).toBe(7);
+        const rt = new EmitterRuntime(def);
+        rt.play();
+        rt.queueSources(packSpawnSources([{ x: 0, y: 0, z: 0, vx: 0, vy: 1, vz: 0, count: 5 }], rt.capacity));
+        const values = stepUniforms(packed, rt.advance(1 / 60, I), rt.capacity, rt.width, [0, -9.81, 0], 1);
+        expect(values.u_sourceInfo).toEqual([1, 5, 0, 0]);
+        expect((values.u_sources as Float32Array)[9]).toBe(1);
+        // Any other emitter leaves them alone.
+        const other = stepUniforms(packEmitter(defaultEmitter()), new EmitterRuntime(defaultEmitter()).advance(1 / 60, I), 64, 64, [0, -9.81, 0], 1);
+        expect(other.u_sources).toBeUndefined();
+    });
+
+    it('declares as many source texels in the simulation shader as the packer fills', async () => {
+        const { readFileSync } = await import('fs');
+        const { MAX_SPAWN_SOURCES } = await import('../src/particles/particleSources');
+        const wgsl = readFileSync('src/graphics/shaders/wgsl/chunks/particleSimCore.wgsl', 'utf8');
+        expect(wgsl).toContain(`u_sources: array<vec4<f32>, ${MAX_SPAWN_SOURCES * 4}>`);
+        expect(wgsl).toContain(`const MAX_SPAWN_SOURCES: i32 = ${MAX_SPAWN_SOURCES};`);
+    });
+});

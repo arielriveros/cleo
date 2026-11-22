@@ -194,7 +194,10 @@ function parseRender(raw: any): RenderSettings {
         // Only when set, so an effect saved without them keeps its exact payload.
         ...(Number(raw.streakShutter) > 0 ? { streakShutter: Math.min(1, Number(raw.streakShutter)) } : {}),
         ...(Number(raw.minPixelWidth) > 0 ? { minPixelWidth: Math.min(8, Number(raw.minPixelWidth)) } : {}),
-        ...(raw.shading === 'rain' ? { shading: 'rain' as const } : {}),
+        ...(raw.shading === 'rain' || raw.shading === 'sixWay' ? { shading: raw.shading as 'rain' | 'sixWay' } : {}),
+        ...(typeof raw.sixWayPositiveTextureId === 'string' && raw.sixWayPositiveTextureId ? { sixWayPositiveTextureId: raw.sixWayPositiveTextureId } : {}),
+        ...(typeof raw.sixWayNegativeTextureId === 'string' && raw.sixWayNegativeTextureId ? { sixWayNegativeTextureId: raw.sixWayNegativeTextureId } : {}),
+        ...(Number(raw.occlusion) >= 0 && Number(raw.occlusion) < 1 && raw.occlusion !== null && raw.occlusion !== '' ? { occlusion: Number(raw.occlusion) } : {}),
     };
 }
 
@@ -283,9 +286,10 @@ export function maxLifetime(emitter: EmitterDef): number {
 export function particleSystemReferences(def: ParticleSystemDef): { textures: string[]; models: string[] } {
     const textures = new Set<string>(), models = new Set<string>();
     for (const e of def.emitters) {
-        if (e.render.textureId && !isBuiltinTextureId(e.render.textureId)) textures.add(e.render.textureId);
-        if (e.render.normalTextureId) textures.add(e.render.normalTextureId);
-        if (e.render.ormTextureId) textures.add(e.render.ormTextureId);
+        // The engine's own sprites and maps (spraySprites.ts, precipitationSprites.ts) are not assets.
+        for (const id of [e.render.textureId, e.render.normalTextureId, e.render.ormTextureId,
+                          e.render.sixWayPositiveTextureId, e.render.sixWayNegativeTextureId])
+            if (id && !isBuiltinTextureId(id)) textures.add(id);
         if (e.render.modelId) models.add(e.render.modelId);
     }
     return { textures: [...textures], models: [...models] };

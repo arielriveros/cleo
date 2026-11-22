@@ -732,6 +732,8 @@ there, so rain falls indoors.
 
 #### Water Volume
 
+> **Experimental.** Water is new and still changing; its settings and bakes may change in a later version.
+
 One body of water: a river, a lake, an ocean or a pool. A river joins other Water nodes by naming them
 (**Flows from**, **Flows into**). What is in it floats by its **mass** against the water it displaces, a
 river's current carries it downstream, and it rides the waves the wind gives the surface. The card's

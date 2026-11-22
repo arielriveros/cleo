@@ -67,7 +67,7 @@ fallback) keep their state.
 ## World
 
 - **Landscape** — sculpted terrain with painted layers, foliage and impostors.
-- **Water volumes** — water that floats bodies and ripples.
+- **Water volumes** — rivers, lakes, pools and the sea: baked flow, live waves, floating bodies and spray. *Experimental.*
 
 ## Effects
 

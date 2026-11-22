@@ -181,6 +181,8 @@ export class PhysicsBody {
     public get mass(): number { return this._desc.mass; }
     /** Moved by the simulation (not static, not kinematic). */
     public get isDynamic(): boolean { return this._desc.type ? this._desc.type === 'dynamic' : this._desc.mass > 0; }
+    /** Moved by its node or a script, not by the simulation: it pushes what it meets and is pushed by nothing. */
+    public get isKinematic(): boolean { return this._desc.type === 'kinematic'; }
     public get isTrigger(): boolean { return !!this._desc.sensor; }
     /** A character's body (see PhysicsBodyOptions.character). */
     public get isCharacter(): boolean {

@@ -53,8 +53,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let i0 = textureSampleLevel(u_info0_texture, u_info0_sampler, uvw, 0.0);
     let i1 = textureSampleLevel(u_info1_texture, u_info1_sampler, uvw, 0.0);
     let datum = u_wg.u_infoSize.z;
-    let surface = i0.x + i1.x - datum;
+    var surface = i0.x + i1.x - datum;
     var bed = i1.z - datum;
+    // Dry ground, out of the system's water (its shore distance; water/localFlow.ts localFlowReference): the
+    // drawn surface is carried on there under the banks (water/waterEdges.ts), but no water stands there, so the
+    // flow is drawn toward none.
+    if (i0.w <= 0.0) { surface = min(surface, bed - 0.01); }
     // The obstacles, at two by two samples.
     var blocked = 0.0;
     var raised = 0.0;

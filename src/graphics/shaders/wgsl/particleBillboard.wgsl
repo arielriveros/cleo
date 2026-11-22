@@ -4,6 +4,11 @@
 // index (chunks/particleDraw.wgsl), expands the quad from the vertex index, and folds a dead slot to a
 // degenerate point. That is the GPU-driven half of the design: the CPU never learns how many particles
 // are alive, and does not need to.
+//
+// The `lit` variant (PARTICLE_LIT) also takes the sun's shadow and every point and spot light per pixel; it
+// declares the shadow cascades and the light grid (group 3), so only a draw that binds them may use it.
+
+// @variant lit PARTICLE_LIT
 
 #include "./chunks/particleDraw.wgsl"
 
@@ -27,6 +32,9 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32,
     var up = u_draw.u_camUp.xyz;
     var normal = -u_draw.u_camForward.xyz;
     var offset: vec3<f32>;
+    // The texture's own right and up, for the lights (the fragment stage's frame): which way its u and v run.
+    var axisU = right;
+    var axisV = up;
     // The share of its quad a streak really covers (minPixelWidth): its alpha, scaled.
     var coverage = 1.0;
     if (alignment == 1 && look.speed > 1e-4) {
@@ -61,6 +69,8 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32,
         }
         offset = side * (corner.x * halfWidth) + axis * (corner.y * halfLength);
         normal = normalize(cross(side, axis));
+        axisU = side;
+        axisV = axis;
     } else {
         if (alignment == 2) {
             up = vec3<f32>(0.0, 1.0, 0.0);
@@ -77,6 +87,9 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32,
         let s = sin(look.rotation);
         let rotated = vec2<f32>(corner.x * c - corner.y * s, corner.x * s + corner.y * c);
         offset = (right * rotated.x + up * rotated.y) * half;
+        // u runs along (c, s) in the plane, v along (-s, c).
+        axisU = right * c + up * s;
+        axisV = right * (-s) + up * c;
     }
     let world = look.center + offset;
     out.position = u_draw.u_viewProj * vec4<f32>(world, 1.0);
@@ -84,6 +97,8 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32,
     out.color = vec4<f32>(look.color.rgb, look.color.a * coverage);
     out.normal = normal;
     out.worldPos = world;
+    out.axisU = vec4<f32>(axisU, half);
+    out.axisV = vec4<f32>(axisV, 0.0);
     applyFlipbook(&out, look, corner * 0.5 + 0.5);
     return out;
 }

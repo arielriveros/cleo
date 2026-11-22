@@ -105,6 +105,19 @@ describe('the optional features', () => {
         expect(new Scene().precipitation.constructor.name).toBe('PrecipitationRig');
     });
 
+    it('throw no spray without water, and make no spray systems without particles', () => {
+        restrictFeatures(['particles']);
+        const dry = new Scene();
+        expect(dry.waterSpray.systems).toEqual([]);
+        dry.waterSpray.update(1, 1);
+        expect(dry.waterSpray.constructor.name).not.toBe('WaterSprayRig');
+        restrictFeatures(['water']);
+        expect(new Scene().waterSpray.constructor.name).toBe('WaterSprayRig');
+        expect(featureFactory('particleSystem')).toBeUndefined();
+        restrictFeatures(null);
+        expect(featureFactory('particleSystem')).toBeTypeOf('function');
+    });
+
     it('stand in with subsystems that draw nothing and keep their settings', () => {
         const fog = createNullFog();
         fog.tileSize = 32;

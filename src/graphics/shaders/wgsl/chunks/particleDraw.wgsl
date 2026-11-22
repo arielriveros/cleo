@@ -4,6 +4,18 @@
 //
 // Two uniform blocks, one per stage — a block read from both stages is a GLSL ES link error (see
 // tests/glslProgramLinkability.test.ts).
+//
+// HOW A LIT PARTICLE TAKES LIGHT. One description of its surface (`ParticleShade`) and one response to a light
+// (`particleLightResponse`), used by the sun, the strongest local light the CPU picked, and — in the `lit`
+// build variant (PARTICLE_LIT, see particleBillboard.wgsl) — by every point and spot light the frame's cluster
+// grid holds, per pixel, with the sun's cascaded shadow and the clouds' on the sun's term. Four modes:
+//   standard  a card, half-Lambert (Lambert, softened by the translucency, once a normal map gives it relief);
+//   pbr       the same with a GGX highlight and the probe or sky reflected (an ORM map, metallic, roughness < 1);
+//   rain      a drop: the light round it and a glint where a light is behind it;
+//   six-way   baked lightmaps (src/particles/particleSources's cousin sixWaySprites.ts, a tileset's, the FX
+//             Creator's): the light's direction in the particle's own frame picks and blends three of six
+//             responses, as a lit sprite's do (spriteLit.wgsl), for smoke and mist that glow where they face a light.
+// The ambient it takes is by direction where the surface has one (a normal, a frame): the sky above, less below.
 
 #include "./particleCommon.wgsl"
 #include "./particleLut.wgsl"
@@ -43,6 +55,8 @@ struct ParticleDrawFragment {
     u_keyColor: vec4<f32>,        // lit: that light's irradiance rgb (zero when none reaches); w = pre-exposure
     u_surface: vec4<f32>,         // lit: roughness, metallic, normal strength, SURFACE_* bits
     u_viewPos: vec4<f32>,         // lit: camera xyz; w = reflections: 0 the ambient, 1 sRGB cube, 2 linear cube
+    u_ambientUp: vec4<f32>,       // lit: the fill a surface facing straight up gets (rgb); w = 1 when local lights are per pixel
+    u_lightParams: vec4<f32>,     // x = occlusion: how much of what is behind an alpha-blended particle it hides (1 ordinary); yzw unused
 };
 @group(1) @binding(1) var<uniform> u_frag: ParticleDrawFragment;
 
@@ -53,9 +67,20 @@ const SURFACE_ORM_MAP: u32    = 2u;
 const SURFACE_PBR: u32        = 4u;
 // A raindrop (render `shading: 'rain'`): the light round it and a glint, not a lit card.
 const SURFACE_RAIN: u32       = 8u;
+// Six-way lightmaps (render `shading: 'sixWay'`): the maps at bindings 10 and 12 are the positive and negative
+// lightmaps, not the normal and ORM maps.
+const SURFACE_SIX_WAY: u32    = 16u;
 const PARTICLE_PI: f32 = 3.14159265;
 /** The env cube's mip at roughness 1, as pbrForward's MAX_REFLECTION_LOD. */
 const PARTICLE_REFLECTION_LOD: f32 = 4.0;
+
+#ifdef PARTICLE_LIT
+// The `lit` variant: the sun's cascaded shadow and the cloud shadow, and the clustered point and spot lights.
+// pbrLighting first, for the SpotLight struct and the falloff the surfaces use (as spriteLit.wgsl).
+#include "./shadows.wgsl"
+#include "./pbrLighting.wgsl"
+#include "./clusteredLights.wgsl"
+#endif
 
 @group(0) @binding(0) var u_p0_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_p1_texture: texture_2d<f32>;
@@ -69,7 +94,8 @@ const PARTICLE_REFLECTION_LOD: f32 = 4.0;
 // Back-to-front slot order, written by the sort (particleSort*.wgsl): (key, slot). Read only when sorted.
 @group(0) @binding(9) var u_order_texture: texture_2d<f32>;
 // Lit emitters' surface: a tangent-space normal map and an ORM map, cut into the sprite's flipbook cells
-// (white 1x1 when absent), and the reflection cube (the probe or sky the forward path reflects).
+// (white 1x1 when absent), and the reflection cube (the probe or sky the forward path reflects). With six-way
+// shading the same two bindings hold the positive and negative lightmaps instead.
 @group(0) @binding(10) var u_normalMap_texture: texture_2d<f32>;
 @group(0) @binding(11) var u_normalMap_sampler: sampler;
 @group(0) @binding(12) var u_ormMap_texture: texture_2d<f32>;
@@ -87,6 +113,10 @@ struct ParticleVaryings {
     @location(5) normal: vec3<f32>,
     // World position, for the view vector and the normal map's frame (from its screen derivatives).
     @location(6) worldPos: vec3<f32>,
+    // A billboard's own frame, the same over the whole quad: its texture's right (xyz) and, in w, half its size
+    // (the nearest a light is taken to be, below), and its texture's up. Zero on a mesh, which has neither.
+    @location(7) @interpolate(flat) axisU: vec4<f32>,
+    @location(8) @interpolate(flat) axisV: vec4<f32>,
 };
 
 /** A particle, as the renderers see it: world space, with every over-life and by-speed module applied. */
@@ -114,6 +144,8 @@ fn deadVaryings() -> ParticleVaryings {
     out.viewDepth = 0.0;
     out.normal = vec3<f32>(0.0, 1.0, 0.0);
     out.worldPos = vec3<f32>(0.0);
+    out.axisU = vec4<f32>(0.0);
+    out.axisV = vec4<f32>(0.0);
     return out;
 }
 
@@ -252,6 +284,146 @@ fn particleTransmission(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, c: vec3<f32>, 
     return c * (t * glow / PARTICLE_PI);
 }
 
+// ---- how a lit particle takes light -----------------------------------------------------------------
+
+const SHADE_STANDARD: u32 = 0u;
+const SHADE_PBR: u32      = 1u;
+const SHADE_RAIN: u32     = 2u;
+const SHADE_SIX_WAY: u32  = 3u;
+
+/** What a lit particle is, to a light: set once per pixel by `shadeParticle`. */
+struct ParticleShade {
+    mode: u32,
+    /** The colour a light is scattered with: the particle's, times its brightness. */
+    base: vec3<f32>,
+    /** The surface normal, facing the viewer (standard and PBR). */
+    n: vec3<f32>,
+    /** Toward the viewer. */
+    V: vec3<f32>,
+    /** Half-Lambert 1, Lambert 0: what a normal map's relief is lit with. */
+    wrap: f32,
+    translucency: f32,
+    roughness: f32,
+    metallic: f32,
+    f0: vec3<f32>,
+    /** Whether its ambient is by direction (it has a normal): the sky above, less below. */
+    hemisphere: bool,
+    /** Six-way: its frame (the texture's right and up, and BACK, away from the camera) and its two lightmaps. */
+    frameU: vec3<f32>,
+    frameV: vec3<f32>,
+    frameBack: vec3<f32>,
+    pos: vec4<f32>,
+    neg: vec4<f32>,
+};
+
+/** Six-way: how much light from `l` (a unit direction toward it, in the particle's frame) the lightmaps scatter to the eye (spriteLit.wgsl `sixWayLight`). */
+fn particleSixWayLight(l: vec3<f32>, pos: vec4<f32>, neg: vec4<f32>) -> f32 {
+    let w = l * l;
+    let x = select(neg.r, pos.r, l.x > 0.0);
+    let y = select(neg.g, pos.g, l.y > 0.0);
+    let z = select(neg.b, pos.b, l.z > 0.0);
+    return w.x * x + w.y * y + w.z * z;
+}
+
+/** `d`, a world direction, in the particle's frame (right, up, back). */
+fn particleInFrame(s: ParticleShade, d: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(dot(d, s.frameU), dot(d, s.frameV), dot(d, s.frameBack));
+}
+
+/**
+ * What a light of irradiance `E` (rgb) from the unit direction `L` makes of the particle: the radiance it sends
+ * to the eye. `sun`: the sun's glint (a tighter lobe) rather than a lamp's. The same for the sun, the key light
+ * and every light of the cluster grid.
+ */
+fn particleLightResponse(s: ParticleShade, L: vec3<f32>, E: vec3<f32>, sun: bool) -> vec3<f32> {
+    if (s.mode == SHADE_RAIN) {
+        // A drop is a lens, not a diffuse surface: no Lambert term, a tight forward glint where the light is
+        // behind it and a small reflection off its face.
+        let c = clamp(dot(-s.V, L), 0.0, 1.0);
+        let glint = select(pow(c, 16.0) * 3.0 + pow(c, 3.0) * 0.25 + 0.04, pow(c, 24.0) * 2.0 + pow(c, 4.0) * 0.12 + 0.02, sun);
+        return s.base * E * (glint / PARTICLE_PI);
+    }
+    if (s.mode == SHADE_SIX_WAY) {
+        // The light in the particle's own frame picks and blends three of the six baked responses; a forward
+        // lobe adds the glow of looking through it toward the light (the back-lit core, thin at its edges).
+        let lobe = pow(clamp(dot(-s.V, L), 0.0, 1.0), 6.0);
+        let response = particleSixWayLight(particleInFrame(s, L), s.pos, s.neg) + s.translucency * 3.0 * lobe * s.pos.b;
+        return s.base * E * (response / PARTICLE_PI);
+    }
+    let d = max((dot(s.n, L) + s.wrap) / (1.0 + s.wrap), 0.0);
+    var out = s.base * (1.0 - s.metallic) * E * (d / PARTICLE_PI);
+    if (s.mode == SHADE_PBR) { out += E * particleSpecular(s.n, s.V, L, s.roughness, s.f0); }
+    // Translucency: the light through the particle (a drop lit from behind glows).
+    if (s.translucency > 0.0) { out += E * particleTransmission(s.n, s.V, L, s.base, s.translucency); }
+    return out;
+}
+
+/**
+ * The indirect light the particle takes, irradiance: the effect's fill (`u_ambient`) where the surface has no
+ * direction to it; by direction where it has one, the sky above and less below (the mean kept); and for six-way
+ * lightmaps the mean of the six responses with the sky's upward gradient run through them in the particle's frame.
+ */
+fn particleAmbient(s: ParticleShade) -> vec3<f32> {
+    let flat = u_frag.u_ambient.rgb;
+    let up = u_frag.u_ambientUp.rgb;
+    if (s.mode == SHADE_RAIN) { return flat * 1.15; }
+    if (s.mode == SHADE_SIX_WAY) {
+        let fill = (s.pos.r + s.pos.g + s.pos.b + s.neg.r + s.neg.g + s.neg.b) / 6.0;
+        let fy = particleInFrame(s, vec3<f32>(0.0, 1.0, 0.0));
+        // A sky that is `up` straight up and `2 flat - up` straight down, reflected through the six responses:
+        // each axis adds its (positive - negative) response over eight.
+        let tilt = (fy.x * (s.pos.r - s.neg.r) + fy.y * (s.pos.g - s.neg.g) + fy.z * (s.pos.b - s.neg.b)) * 0.125;
+        return max(flat * fill + (up - flat) * tilt, vec3<f32>(0.0));
+    }
+    if (s.hemisphere) {
+        let down = max(flat * 2.0 - up, vec3<f32>(0.0));
+        return mix(down, up, 0.5 + 0.5 * s.n.y);
+    }
+    return flat;
+}
+
+// The sun's visibility at the particle and the local lights it takes per pixel: nothing in the base program,
+// which has no shadow cascades or light grid bound; the `lit` variant's own.
+fn particleSunVisibility(worldPos: vec3<f32>, viewDepth: f32, fragXY: vec2<f32>) -> f32 {
+#ifdef PARTICLE_LIT
+    cleoFragCoord = fragXY;
+    // A single tap at the particle (smoke is soft), at the shadow strength the scene sets, and the clouds'.
+    let tap = shadowVisibility(worldPos, viewDepth);
+    return (1.0 - (1.0 - tap) * u_shadow.u_shadowStrength) * cleoCloudShadow(worldPos);
+#else
+    return 1.0;
+#endif
+}
+
+fn particleLocalLights(s: ParticleShade, worldPos: vec3<f32>, viewDepth: f32, fragXY: vec2<f32>, lightRadius: f32) -> vec3<f32> {
+#ifdef PARTICLE_LIT
+    var sum = vec3<f32>(0.0);
+    let cluster = cleoClusterOf(fragXY, viewDepth);
+    let first = cleoClusterOffset(cluster);
+    let count = cleoClusterCount(cluster);
+    // The light records are pre-exposed; this program's light is absolute and multiplied once at the end.
+    let k = 1.0 / max(select(1.0, u_frag.u_keyColor.w, u_frag.u_keyColor.w > 0.0), 1e-8);
+    for (var i = 0; i < count; i++) {
+        let cl = cleoLight(cleoClusterLight(first + i));
+        if (cleoLightReaches(cl.light, worldPos)) {
+            let toLight = cl.light.position - worldPos;
+            // A particle stands for a VOLUME as thick as it is wide, so a light inside it lights that volume, not
+            // the one pixel it sits on: the nearest a light is taken to be is the particle's half size. Without
+            // it a lamp at a smoke's root is a 1/d^2 spike, a white orb at night.
+            let floorRadius = max(cl.light.sourceRadius, lightRadius);
+            let d2 = max(dot(toLight, toLight), floorRadius * floorRadius);
+            let L = toLight * inverseSqrt(max(dot(toLight, toLight), 1e-8));
+            let cone = spotAttenuation(dot(-L, cl.light.direction), cl.light.coneScale, cl.light.coneOffset);
+            let E = cl.light.color * (cl.light.intensity * distanceAttenuation(d2, cl.light.invRangeSquared) * cone * k);
+            sum += particleLightResponse(s, L, E, false);
+        }
+    }
+    return sum;
+#else
+    return vec3<f32>(0.0);
+#endif
+}
+
 fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
     // Everything with an implicit or explicit derivative comes first, in uniform control flow (before any
     // discard): the sprite, the surface maps, and the frame the normal map needs.
@@ -263,18 +435,28 @@ fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
                           textureSample(u_normalMap_texture, u_normalMap_sampler, in.uvNext), in.frameBlend);
     let ormTexel = mix(textureSample(u_ormMap_texture, u_ormMap_sampler, in.uv),
                        textureSample(u_ormMap_texture, u_ormMap_sampler, in.uvNext), in.frameBlend);
+    let lit = u_frag.u_fragMask.y > 0.5;
+    let surface = u_frag.u_surface;
+    let flags = u32(surface.w + 0.5);
+    // Six-way lightmaps need the billboard's frame (a mesh has none).
+    let sixWay = lit && (flags & SURFACE_SIX_WAY) != 0u && in.axisU.w > 0.0;
     var color = in.color;
+    // Six-way: the colour atlas where the negative map says it emits (a fire inside its smoke).
+    var emission = vec3<f32>(0.0);
     if (u_frag.u_fragMask.x > 0.5) {
         let a = textureSample(u_sprite_texture, u_sprite_sampler, in.uv);
         let b = textureSample(u_sprite_texture, u_sprite_sampler, in.uvNext);
-        color = color * mix(a, b, in.frameBlend);
-    } else if (u_frag.u_ambient.w < 0.5) {
+        let sprite = mix(a, b, in.frameBlend);
+        if (sixWay) { emission = sprite.rgb * ormTexel.a * u_frag.u_fragParams.w; } else { color = color * sprite; }
+    } else if (!sixWay && u_frag.u_ambient.w < 0.5) {
         // A billboard with no texture: a soft round puff, so a fresh emitter reads as particles rather
         // than squares.
         let r = length(in.uv * 2.0 - 1.0);
         let falloff = clamp(1.0 - r * r, 0.0, 1.0);
         color.a = color.a * falloff * falloff;
     }
+    // Six-way: the positive map's alpha is the particle's coverage.
+    if (sixWay) { color.a = color.a * normalTexel.a; }
 
     // Near fade: gone by the lens, so a drop or a mote passing the camera never fills the view.
     let nearFade = u_frag.u_sunDir.w;
@@ -296,92 +478,97 @@ fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
     }
 
     var rgb = color.rgb * u_frag.u_fragParams.w;
-    let surface = u_frag.u_surface;
-    let flags = u32(surface.w + 0.5);
-    if (u_frag.u_fragMask.y > 0.5 && (flags & SURFACE_RAIN) != 0u) {
-        // A raindrop is a tiny lens: what reaches the eye through it is the light round it — mostly the
-        // sky's, bent toward the eye — so it is about as bright as the ambient it falls through: visible
-        // against a dark wood, all but lost against a bright sky, never a milky white stick. No Lambert
-        // term (a drop does not scatter sunlight diffusely), but a tight forward glint where the sun or the
-        // strongest lamp is behind it, and a small reflection of them off its face.
-        let view = normalize(u_frag.u_viewPos.xyz - in.worldPos);
-        let sunCos = clamp(dot(-view, u_frag.u_sunDir.xyz), 0.0, 1.0);
-        let keyCos = clamp(dot(-view, u_frag.u_keyDir.xyz), 0.0, 1.0);
-        let sunGlint = pow(sunCos, 24.0) * 2.0 + pow(sunCos, 4.0) * 0.12 + 0.02;
-        let keyGlint = pow(keyCos, 16.0) * 3.0 + pow(keyCos, 3.0) * 0.25 + 0.04;
-        rgb = rgb * (u_frag.u_ambient.rgb * 1.15
-                     + (u_frag.u_sunColor.rgb * sunGlint + u_frag.u_keyColor.rgb * keyGlint) * 0.31830988618);
-    } else if (u_frag.u_fragMask.y > 0.5 && (flags & SURFACE_PBR) == 0u) {
-        // Lit: the scene's light, as surfaces take it — the ambient and sky fill, then the key light and the
-        // strongest local light through the diffuse 1/π. Half-Lambert rather than Lambert: particles are
-        // thin and back-lit as often as not, so a hard term would leave half of every cloud black.
-        let n = normalize(in.normal);
-        let sunWrap = dot(n, u_frag.u_sunDir.xyz) * 0.5 + 0.5;
-        let keyWrap = dot(n, u_frag.u_keyDir.xyz) * 0.5 + 0.5;
-        let direct = (u_frag.u_sunColor.rgb * sunWrap + u_frag.u_keyColor.rgb * keyWrap) * 0.31830988618; // 1 / PI
-        let base = rgb;
-        rgb = rgb * (u_frag.u_ambient.rgb + direct);
-        // Translucency: the sun and the key light through the particle (a drop lit from behind glows).
-        let translucency = u_frag.u_sunColor.w;
-        if (translucency > 0.0) {
-            let view = normalize(u_frag.u_viewPos.xyz - in.worldPos);
-            rgb += u_frag.u_sunColor.rgb * particleTransmission(n, view, u_frag.u_sunDir.xyz, base, translucency)
-                 + u_frag.u_keyColor.rgb * particleTransmission(n, view, u_frag.u_keyDir.xyz, base, translucency);
+    if (lit) {
+        var s: ParticleShade;
+        s.mode = SHADE_STANDARD;
+        s.base = rgb;
+        s.V = normalize(u_frag.u_viewPos.xyz - in.worldPos);
+        s.n = normalize(in.normal);
+        s.wrap = 1.0;
+        s.translucency = u_frag.u_sunColor.w;
+        s.roughness = 1.0;
+        s.metallic = 0.0;
+        s.f0 = vec3<f32>(0.04);
+        s.hemisphere = false;
+        s.frameU = vec3<f32>(1.0, 0.0, 0.0);
+        s.frameV = vec3<f32>(0.0, 1.0, 0.0);
+        s.frameBack = vec3<f32>(0.0, 0.0, 1.0);
+        s.pos = vec4<f32>(1.0);
+        s.neg = vec4<f32>(1.0);
+        var ao = 1.0;
+        var reflection = vec3<f32>(0.0);
+        // The billboard's own frame: its texture's right and up, and BACK, away from the camera (a quad seen
+        // from behind shows its texture mirrored, and so does its frame).
+        var fU = in.axisU.xyz;
+        let fV = in.axisV.xyz;
+        var back = normalize(-cross(fU, fV));
+        if (in.axisU.w > 0.0 && dot(in.worldPos - u_frag.u_viewPos.xyz, back) < 0.0) { back = -back; fU = -fU; }
+        let hasNormalMap = (flags & SURFACE_NORMAL_MAP) != 0u;
+        let pbr = (flags & SURFACE_PBR) != 0u;
+        if ((flags & SURFACE_RAIN) != 0u) {
+            s.mode = SHADE_RAIN;
+        } else if (sixWay) {
+            s.mode = SHADE_SIX_WAY;
+            s.frameU = fU;
+            s.frameV = fV;
+            s.frameBack = back;
+            s.pos = normalTexel;
+            s.neg = ormTexel;
+        } else {
+            s.mode = select(SHADE_STANDARD, SHADE_PBR, pbr);
+            // A card is seen from both sides: light the side facing the viewer (a flat standard card keeps the
+            // face it is drawn with, as it always has).
+            if ((pbr || hasNormalMap) && dot(s.n, s.V) < 0.0) { s.n = -s.n; }
+            if (pbr) {
+                var roughness = surface.x;
+                var metallic = surface.y;
+                if ((flags & SURFACE_ORM_MAP) != 0u) {
+                    ao = ormTexel.r;
+                    roughness = roughness * ormTexel.g;
+                    metallic = metallic * ormTexel.b;
+                }
+                s.roughness = clamp(roughness, 0.02, 1.0);
+                s.metallic = clamp(metallic, 0.0, 1.0);
+                s.f0 = mix(vec3<f32>(0.04), rgb, s.metallic);
+            }
+            if (hasNormalMap) {
+                var t = normalTexel.xyz * 2.0 - 1.0;
+                t = vec3<f32>(t.xy * surface.z, max(t.z, 1e-3));
+                t = normalize(t);
+                if (in.axisU.w > 0.0) {
+                    // Its own frame: the map's right, its up, and out of the card toward the viewer.
+                    s.n = normalize(fU * t.x + fV * t.y + (-back) * t.z);
+                } else {
+                    s.n = particleMappedNormal(s.n, t, dpx, dpy, duvx, duvy);
+                }
+                // Relief reads in Lambert; the more it lets light through, the softer it is shaded.
+                s.wrap = clamp(s.translucency, 0.0, 1.0);
+            }
+            s.hemisphere = pbr || hasNormalMap;
+            if (pbr) {
+                // What it reflects: the cube, blurred by roughness and fading toward the ambient as it roughens
+                // (a box-filtered mip chain is no GGX prefilter). With no cube, the ambient as a sky over a
+                // darker ground, so a mirror still shows which way is up.
+                let nv = max(dot(s.n, s.V), 1e-4);
+                let R = reflect(-s.V, s.n);
+                var env = u_frag.u_ambient.rgb * mix(0.35, 1.3, smoothstep(-0.25, 0.25, R.y));
+                if (u_frag.u_viewPos.w > 0.5) {
+                    let c = textureSampleLevel(u_particleEnv_texture, u_particleEnv_sampler, R, s.roughness * PARTICLE_REFLECTION_LOD).rgb;
+                    let cube = select(pow(c, vec3<f32>(2.2)), c, u_frag.u_viewPos.w > 1.5);
+                    env = mix(env, cube, pow(1.0 - s.roughness, 4.0));
+                }
+                let dfg = particleEnvBrdf(nv, s.roughness);
+                reflection = env * (s.f0 * dfg.x + dfg.y) * ao;
+            }
         }
-    } else if (u_frag.u_fragMask.y > 0.5) {
-        // Lit with a surface: a normal map, roughness and metallic, shaded as the forward PBR path shades
-        // (GGX highlights from the key and local light, the probe or sky reflected, metals tinting both).
-        let V = normalize(u_frag.u_viewPos.xyz - in.worldPos);
-        var n = normalize(in.normal);
-        // A card is seen from both sides: light the side facing the viewer.
-        if (dot(n, V) < 0.0) { n = -n; }
-        var occlusion = 1.0;
-        var roughness = surface.x;
-        var metallic = surface.y;
-        if ((flags & SURFACE_ORM_MAP) != 0u) {
-            occlusion = ormTexel.r;
-            roughness = roughness * ormTexel.g;
-            metallic = metallic * ormTexel.b;
-        }
-        roughness = clamp(roughness, 0.02, 1.0);
-        metallic = clamp(metallic, 0.0, 1.0);
-        // Half-Lambert on the flat card, as above; Lambert once a normal map gives it real relief.
-        var wrap = 1.0;
-        if ((flags & SURFACE_NORMAL_MAP) != 0u) {
-            var t = normalTexel.xyz * 2.0 - 1.0;
-            t = vec3<f32>(t.xy * surface.z, max(t.z, 1e-3));
-            n = particleMappedNormal(n, normalize(t), dpx, dpy, duvx, duvy);
-            wrap = 0.0;
-        }
-        let nv = max(dot(n, V), 1e-4);
-        let f0 = mix(vec3<f32>(0.04), rgb, metallic);
-        let sunL = u_frag.u_sunDir.xyz;
-        let keyL = u_frag.u_keyDir.xyz;
-        let sunD = max((dot(n, sunL) + wrap) / (1.0 + wrap), 0.0);
-        let keyD = max((dot(n, keyL) + wrap) / (1.0 + wrap), 0.0);
-        let direct = (u_frag.u_sunColor.rgb * sunD + u_frag.u_keyColor.rgb * keyD) / PARTICLE_PI;
-        let diffuse = rgb * (1.0 - metallic) * (u_frag.u_ambient.rgb * occlusion + direct);
-        let highlight = u_frag.u_sunColor.rgb * particleSpecular(n, V, sunL, roughness, f0)
-                      + u_frag.u_keyColor.rgb * particleSpecular(n, V, keyL, roughness, f0);
-        // What it reflects: the cube, blurred by roughness and fading toward the ambient as it roughens
-        // (a box-filtered mip chain is no GGX prefilter). With no cube, the ambient as a sky over a darker
-        // ground, so a mirror still shows which way is up.
-        let R = reflect(-V, n);
-        var env = u_frag.u_ambient.rgb * mix(0.35, 1.3, smoothstep(-0.25, 0.25, R.y));
-        if (u_frag.u_viewPos.w > 0.5) {
-            let c = textureSampleLevel(u_particleEnv_texture, u_particleEnv_sampler, R, roughness * PARTICLE_REFLECTION_LOD).rgb;
-            let cube = select(pow(c, vec3<f32>(2.2)), c, u_frag.u_viewPos.w > 1.5);
-            env = mix(env, cube, pow(1.0 - roughness, 4.0));
-        }
-        let dfg = particleEnvBrdf(nv, roughness);
-        let reflection = env * (f0 * dfg.x + dfg.y) * occlusion;
-        rgb = diffuse + highlight + reflection;
-        let translucency = u_frag.u_sunColor.w;
-        if (translucency > 0.0) {
-            let glow = color.rgb * u_frag.u_fragParams.w;
-            rgb += u_frag.u_sunColor.rgb * particleTransmission(n, V, sunL, glow, translucency)
-                 + u_frag.u_keyColor.rgb * particleTransmission(n, V, keyL, glow, translucency);
-        }
+        // The sun (through its shadow and the clouds'), the strongest local light the CPU picked, and in the
+        // `lit` variant every light of the grid.
+        let vis = particleSunVisibility(in.worldPos, in.viewDepth, in.position.xy);
+        var lightOut = s.base * (1.0 - s.metallic) * particleAmbient(s) * ao;
+        lightOut += particleLightResponse(s, u_frag.u_sunDir.xyz, u_frag.u_sunColor.rgb * vis, true);
+        lightOut += particleLightResponse(s, u_frag.u_keyDir.xyz, u_frag.u_keyColor.rgb, false);
+        lightOut += particleLocalLights(s, in.worldPos, in.viewDepth, in.position.xy, in.axisU.w);
+        rgb = lightOut + reflection + emission;
     }
 
     // Stored pre-exposed like every source (graphics/preExposure.ts); 0 — a host that never set it —
@@ -390,8 +577,9 @@ fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
     rgb = min(rgb * preExposure, vec3<f32>(32768.0));
 
     // Premultiplied out. Alpha blends `one, one-minus-src-alpha`; additive drops the alpha term; cutout
-    // is opaque. The scene buffer's own alpha is the bloom mask and the pipelines leave it alone.
+    // is opaque. The scene buffer's own alpha is the bloom mask and the pipelines leave it alone. Occlusion
+    // below 1 adds the particle's light (premultiplied by its full alpha) while hiding less of what is behind it.
     if (blend == 1) { return vec4<f32>(rgb * color.a, 0.0); }
     if (blend == 2) { return vec4<f32>(rgb, 1.0); }
-    return vec4<f32>(rgb * color.a, color.a);
+    return vec4<f32>(rgb * color.a, color.a * u_frag.u_lightParams.x);
 }

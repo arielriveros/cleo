@@ -4,7 +4,8 @@ import path from 'node:path'
 import { ADD_ITEMS, ADD_CATEGORIES } from '../src/features/sceneInspector/addCatalog'
 import { LIBRARIES, OPENERS } from '../src/features/agentBridge/libraries'
 // The MCP server's own catalog: plain data, read here so it cannot drift from the editor's.
-import { ADD_TYPES, ALL_ADD_TYPES, ASSET_KINDS, TYPES_2D } from '../../mcp/src/catalog.mjs'
+import { ADD_TYPES, ALL_ADD_TYPES, ASSET_KINDS, EXPERIMENTAL_TYPES, TYPES_2D, addTypesText } from '../../mcp/src/catalog.mjs'
+import { experimentalFeatureOfAddItem } from '../src/features/projectFeatures/featureUi'
 
 // The agent's tools describe the editor's Add catalog and asset libraries in a module of their own
 // (applications/mcp/src/catalog.mjs), because the server answers tools/list before any editor connects.
@@ -25,6 +26,13 @@ describe('the MCP catalog matches the editor', () => {
       expect(known.has(item.category)).toBe(true)
       expect((ADD_TYPES as Record<string, string[]>)[group], `${item.id} (${item.category})`).toContain(item.id)
     }
+  })
+
+  it('lists as experimental exactly the ids whose feature the catalogue flags, and says so in the tool text', () => {
+    const flagged = ADD_ITEMS.filter(i => experimentalFeatureOfAddItem(i.id)).map(i => i.id)
+    expect([...EXPERIMENTAL_TYPES].sort()).toEqual(flagged.sort())
+    for (const id of EXPERIMENTAL_TYPES) expect(addTypesText()).toContain(id)
+    expect(addTypesText()).toMatch(/Experimental/)
   })
 
   it('marks only real ids as 2D', () => {

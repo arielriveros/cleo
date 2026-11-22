@@ -2,7 +2,8 @@
 // of the water under it. One pass per Water node in reach, each writing its own water and leaving the rest
 // as it is: the current that carries the waves (the flow bake's, or the drawn river's), how deep the water
 // is, and how much foam the bake left there (where the water loses its energy, which is where it boils).
-// Dry texels stay zero: the waves end there.
+// Dry texels stay as they are: the waves end there, unless an endless sea lies under the window (the target
+// then starts as open water) and this is its shore grid, whose dry cells are land and are written dry.
 
 #include "./chunks/fullscreen.wgsl"
 
@@ -14,7 +15,7 @@
 struct FieldUniforms {
     u_window: vec4<f32>,       // origin x, origin z (m), side (m), texels a side of THIS target
     u_infoOrigin: vec4<f32>,   // the node's grid: origin x, origin z, cell (m), -
-    u_infoSize: vec4<f32>,     // cells x, cells z, -, -
+    u_infoSize: vec4<f32>,     // cells x, cells z, 1 = an endless sea's shore grid (its land written dry), -
 };
 @group(1) @binding(0) var<uniform> u_wf: FieldUniforms;
 
@@ -27,8 +28,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (any(uvw.xy < vec2<f32>(0.0)) || any(uvw.xy > vec2<f32>(1.0))) { discard; }
     let i0 = textureSampleLevel(u_info0_texture, u_info0_sampler, uvw, 0.0);
     let i1 = textureSampleLevel(u_info1_texture, u_info1_sampler, uvw, 0.0);
-    // This node's own water only: where two meet, each writes its side.
-    if (i1.w < 0.5) { discard; }
+    // This node's own water only: where two meet, each writes its side (the drawn side: render/water.ts
+    // uploads how far inside what it draws each cell is, positive inside).
+    if (i1.w <= 0.0) {
+        if (u_wf.u_infoSize.z > 0.5) { return vec4<f32>(0.0); }
+        discard;
+    }
     let depth = max(i0.x + i1.x - i1.z, 0.0);
     return vec4<f32>(i0.y, i0.z, depth, clamp(i1.y, 0.0, 1.0));
 }

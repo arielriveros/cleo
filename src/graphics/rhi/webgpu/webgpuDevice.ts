@@ -243,7 +243,13 @@ class WebGPUTexture implements Texture {
                 private readonly _queue: GPUQueue,
                 private readonly _onDestroy: () => void,
                 private readonly _recreate: ((d: TextureDescriptor) => GPUTexture) | null = null,
-                private readonly _mips: WebGPUMipGenerator | null = null) {
+                private readonly _mips: WebGPUMipGenerator | null = null,
+                /**
+                 * Frees a GPUTexture this replaces or drops. Not at once: a command buffer still being
+                 * recorded may name it, and WebGPU refuses that buffer's submit ("Destroyed texture used in
+                 * a submit") and drops the frame. See WebGPUDevice._releaseTexture.
+                 */
+                private readonly _release: (handle: GPUTexture) => void = handle => handle.destroy()) {
         this._descriptor = descriptor;
         this.label = descriptor.label ?? 'texture';
         this.format = descriptor.format;
@@ -379,7 +385,7 @@ class WebGPUTexture implements Texture {
         // caller is about to come back with real numbers.
         if (width <= 0 || height <= 0) return;
 
-        this.handle.destroy();
+        this._release(this.handle);
         // Before the new handle exists, so anything reading it mid-flight compares unequal rather than
         // equal-to-something-destroyed.
         this.generation++;
@@ -416,7 +422,7 @@ class WebGPUTexture implements Texture {
     public destroy(): void {
         if (this._destroyed) return;
         this._destroyed = true;
-        if (this._owned) this.handle.destroy();
+        if (this._owned) this._release(this.handle);
         this._onDestroy();
     }
 }
@@ -1329,7 +1335,8 @@ export class WebGPUDevice implements Device {
         const texture = new WebGPUTexture(descriptor, handle, true, this._device.queue,
                                           () => this._textures.delete(texture),
                                           d => this._createGpuTexture(d),
-                                          this._mipGenerator);
+                                          this._mipGenerator,
+                                          gpuTexture => this._releaseTexture(gpuTexture));
         this._textures.add(texture);
         return texture;
     }
@@ -1777,7 +1784,27 @@ export class WebGPUDevice implements Device {
         if (this._recording.size === 0) {
             this.releaseUniformSlots();
             this._submissionEpoch++;
+            this._destroyReleasedTextures();
         }
+    }
+
+    /**
+     * GPUTextures dropped or replaced (a resize, a target reallocated) while an encoder was recording. One
+     * the frame's encoder already names (a shadow pass bound the weather's shelter map, then the shelter
+     * was reallocated at its size) must outlive that encoder's submit: destroyed before it, WebGPU rejects
+     * the submit and the whole frame is lost. Once no encoder is recording, nothing unsubmitted can name
+     * them, and WebGPU keeps a destroyed texture alive for the work already queued against it.
+     */
+    private readonly _releasedTextures: GPUTexture[] = [];
+
+    private _releaseTexture(handle: GPUTexture): void {
+        if (this._recording.size > 0) this._releasedTextures.push(handle);
+        else handle.destroy();
+    }
+
+    private _destroyReleasedTextures(): void {
+        for (const handle of this._releasedTextures) handle.destroy();
+        this._releasedTextures.length = 0;
     }
 
     /** See {@link Device.setTimestampCollection}. Everything it needs lives in `TimestampCollector`. */
@@ -1853,6 +1880,7 @@ export class WebGPUDevice implements Device {
     public destroy(): void {
         if (this._destroyed) return;
         this._destroyed = true;
+        this._destroyReleasedTextures();
         this._timestamps.destroy();
         for (const buffer of Array.from(this._buffers)) buffer.destroy();
         for (const texture of Array.from(this._textures)) texture.destroy();

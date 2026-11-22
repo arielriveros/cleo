@@ -1,8 +1,9 @@
-// The water volume's declared properties (see declare.ts): its waves, its buoyancy and its splashes. Its body
+// The water volume's declared properties (see declare.ts): its waves, its buoyancy, and what it reacts to (the
+// layers whose bodies ripple and splash it and whose colliders shape its flow) with its splashes. Its body
 // (the river's points, the carve), its surface and its flow bake stay the card's own. Documented in
 // docs/editor/water.md.
 
-import { TemplateName } from '../core/scripting/fieldTypes';
+import { CollisionMask, TemplateName } from '../core/scripting/fieldTypes';
 import { ModelNode } from '../core/scene/nodes/modelNode';
 import { WaterVolumeNode } from '../core/scene/nodes/waterVolumeNode';
 import { declareProperties, nodeIdAccess } from './declare';
@@ -30,7 +31,9 @@ declareProperties(WaterVolumeNode, 'Water Volume', [
         { key: 'currents', type: Boolean, divider: true },
         { key: 'affectCharacters', label: 'Buoy characters', type: Boolean },
     ] },
-    { title: 'Splashes', props: [
+    { title: 'Ripples and splashes', props: [
+        { key: 'reactsTo', label: 'Reacts to', type: CollisionMask, divider: true },
+        { key: 'spray', label: 'Spray', type: Number, min: 0, max: 2, step: 0.05, divider: true },
         { key: 'splashTemplate', label: 'Splash', type: TemplateName, divider: true },
         { key: 'wadeSplashTemplate', label: 'Wading splash', type: TemplateName, divider: true },
         { key: 'surfaceNodeId', label: 'Surface model', type: ModelNode, ...nodeIdAccess<WaterVolumeNode>('surfaceNodeId') },

@@ -19,6 +19,11 @@ export const DiceIcon = (props: IconProps) => (
   <Glyph {...props}><rect x='4' y='4' width='16' height='16' rx='3' />{pip(8.5, 8.5)}{pip(12, 12)}{pip(15.5, 15.5)}</Glyph>
 );
 
+/** An Erlenmeyer flask: experimental (a feature that works but may still change). */
+export const FlaskIcon = (props: IconProps) => (
+  <Glyph {...props}><path d='M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3' /><path d='M7 15h10' /></Glyph>
+);
+
 /** A lightning bolt: a trigger. */
 export const BoltIcon = (props: IconProps) => (
   <Glyph {...props}><path d='M13.5 2.5 5 13.5h6.5L10.5 21.5 19 10.5h-6.5z' /></Glyph>

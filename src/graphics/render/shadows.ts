@@ -1643,6 +1643,18 @@ export class ShadowPasses {
     private _shelterKey: string = '';
     private readonly _shelterCasters: ShadowCasterRecord[] = [];
 
+    /**
+     * Size the shelter map for the weather (1x1 until a volume keeps shelter). BEFORE the frame's first pass:
+     * the shadow casters bind the map (the foliage bows and stays dry by it), and reallocating it after they
+     * have destroys the texture they recorded, which WebGPU refuses at the frame's submit ("Destroyed texture
+     * used in a submit": the whole frame dropped, the first time a scene with weather drew). Returns the size.
+     */
+    public ensureShelterTarget(): number {
+        const res = Math.max(64, Math.min(4096, Math.round(this.shelterResolution)));
+        this.shelterFBO.create(res, 1, true);
+        return res;
+    }
+
     /** Below this bounding radius (metres) a model shelters nothing: a stone, a barrel's hoop, a cup. */
     public static readonly SHELTER_MIN_RADIUS = 0.5;
 
@@ -1672,8 +1684,7 @@ export class ShadowPasses {
             this.shelterFootprint = null;
             return;
         }
-        const res = Math.max(64, Math.min(4096, Math.round(this.shelterResolution)));
-        this.shelterFBO.create(res, 1, true);
+        const res = this.ensureShelterTarget();
         shelterMatrix(this.shelterMatrix, footprint);
 
         this._ensureShadowCasters(scene);

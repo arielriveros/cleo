@@ -3,6 +3,7 @@ import { FEATURES, FEATURE_GROUPS, FEATURE_PRESETS, enabledFeatures, featureById
 import { Button, SectionTitle, Toggle, cn } from '@cleo/app-kit/ui'
 import { promptDialog } from '@cleo/app-kit/feedback/dialogStore'
 import type { FeatureUsage } from '../publish/featureUsage'
+import ExperimentalTag from './ExperimentalTag'
 import { engineEstimate, formatBytes, type FeatureSizes } from './featureSizes'
 
 // The checklist of the engine's optional features (the engine's src/modules/catalog.ts), with the presets that
@@ -143,6 +144,7 @@ export default function FeaturePicker({ value, onChange, usage, sizes, physicsBa
                     <div className='flex-1 min-w-0'>
                       <div className='flex items-baseline gap-2 min-w-0'>
                         <span className={cn('text-ui truncate', on ? 'text-fg' : 'text-muted')}>{f.label}</span>
+                        {f.experimental && <ExperimentalTag feature={f} variant={compact ? 'icon' : 'pill'} />}
                         {uses.length > 0 && (
                           <span className={cn('text-ui-xs rounded px-1 shrink-0', on ? 'bg-surface-sunken text-muted' : 'bg-warning/20 text-warning')}
                             title={uses.slice(0, 12).map(u => `${u.where}: ${u.what}`).join('\n') + (uses.length > 12 ? `\n… and ${uses.length - 12} more` : '')}>

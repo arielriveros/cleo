@@ -5,11 +5,15 @@
 // everywhere and the shape lives in the alpha, so the particle's colour tints them and their mipmaps
 // never fringe dark. Every cell keeps a transparent border, so neighbouring cells never bleed in.
 //
+// A sheet is an ALPHA sheet (a sprite: white RGB, the shape in the alpha) or a DERIVED map made from another
+// sheet's cells (spraySprites.ts: a tangent-space normal map, or the two six-way lightmaps), laid out the same.
+//
 // NOT ASSETS. Their ids start with BUILTIN_SPRITE_PREFIX, which no texture asset id can (they are
 // uuids or file names): they are never registered with the TextureManager, never listed in a picker,
 // never saved, never published. The particle renderer resolves them itself.
 
 import { angularNoise, lcgRandom, smoothstep } from '../core/math';
+import { SPRAY_SPRITE_LAYOUT, deriveCell, sprayCell, type BuiltinSpriteLayout } from './spraySprites';
 
 /** What every built-in sprite id starts with. */
 export const BUILTIN_SPRITE_PREFIX = '__builtin__/';
@@ -37,12 +41,46 @@ export interface BuiltinSpriteSheet {
 export const SPRITE_BORDER = 2;
 
 /** The layout of each built-in sheet (what the precipitation builder sets the flipbook to). */
-export const BUILTIN_SPRITE_LAYOUT: Readonly<Record<string, { width: number; height: number; columns: number; rows: number; frames: number }>> = {
+export const BUILTIN_SPRITE_LAYOUT: Readonly<Record<string, BuiltinSpriteLayout>> = {
     [BUILTIN_RAIN_SPRITE]: { width: 128, height: 128, columns: 4, rows: 1, frames: 4 },
     [BUILTIN_SNOW_SPRITE]: { width: 256, height: 128, columns: 4, rows: 2, frames: 8 },
+    // Flowing water's spray, mist and foam (spraySprites.ts).
+    ...SPRAY_SPRITE_LAYOUT,
 };
 
 const cache = new Map<string, BuiltinSpriteSheet>();
+const cellCache = new Map<string, Float32Array>();
+
+/** Whether a built-in id is a derived map (a normal or six-way map) rather than a sprite. */
+export function isDerivedBuiltin(id: string): boolean {
+    const kind = BUILTIN_SPRITE_LAYOUT[id]?.kind;
+    return !!kind && kind !== 'alpha';
+}
+
+/**
+ * One cell of an alpha sheet, 0..1, its border clear: what the sprite is, and what a derived map is made from.
+ * Generated once.
+ */
+function builtinCellAlpha(id: string, cell: number): Float32Array {
+    const key = `${id}#${cell}`;
+    let alpha = cellCache.get(key);
+    if (alpha) return alpha;
+    const layout = BUILTIN_SPRITE_LAYOUT[id];
+    const cellW = layout.width / layout.columns, cellH = layout.height / layout.rows;
+    alpha = new Float32Array(cellW * cellH);
+    const rng = lcgRandom(0x5eed + cell * 7919 + (id === BUILTIN_SNOW_SPRITE ? 104729 : 0));
+    if (id === BUILTIN_RAIN_SPRITE) rainStreak(alpha, cellW, cellH, cell, rng);
+    else if (!sprayCell(id, alpha, cellW, cellH, cell, rng, SPRITE_BORDER)) snowflake(alpha, cellW, cellH, cell, rng);
+    for (let y = 0; y < cellH; y++) {
+        for (let x = 0; x < cellW; x++) {
+            const inside = x >= SPRITE_BORDER && y >= SPRITE_BORDER && x < cellW - SPRITE_BORDER && y < cellH - SPRITE_BORDER;
+            const i = y * cellW + x;
+            alpha[i] = inside ? Math.min(1, Math.max(0, alpha[i])) : 0;
+        }
+    }
+    cellCache.set(key, alpha);
+    return alpha;
+}
 
 /** The sheet for a built-in id (generated once), or null for any other id. */
 export function builtinSpriteSheet(id: string): BuiltinSpriteSheet | null {
@@ -52,26 +90,25 @@ export function builtinSpriteSheet(id: string): BuiltinSpriteSheet | null {
     if (!sheet) {
         const pixels = new Uint8ClampedArray(layout.width * layout.height * 4);
         const cellW = layout.width / layout.columns, cellH = layout.height / layout.rows;
-        const alpha = new Float32Array(cellW * cellH);
+        const derived = isDerivedBuiltin(id);
         for (let cell = 0; cell < layout.frames; cell++) {
-            alpha.fill(0);
-            const rng = lcgRandom(0x5eed + cell * 7919 + (id === BUILTIN_SNOW_SPRITE ? 104729 : 0));
-            if (id === BUILTIN_RAIN_SPRITE) rainStreak(alpha, cellW, cellH, cell, rng);
-            else snowflake(alpha, cellW, cellH, cell, rng);
+            const alpha = builtinCellAlpha(derived ? layout.of! : id, cell);
             const ox = (cell % layout.columns) * cellW, oy = Math.floor(cell / layout.columns) * cellH;
+            const bytes = derived ? deriveCell(layout, alpha, cellW, cellH) : null;
             for (let y = 0; y < cellH; y++) {
                 for (let x = 0; x < cellW; x++) {
-                    const inside = x >= SPRITE_BORDER && y >= SPRITE_BORDER && x < cellW - SPRITE_BORDER && y < cellH - SPRITE_BORDER;
-                    const a = inside ? Math.min(1, Math.max(0, alpha[y * cellW + x])) : 0;
                     const i = ((oy + y) * layout.width + ox + x) * 4;
-                    pixels[i] = 255; pixels[i + 1] = 255; pixels[i + 2] = 255;
-                    pixels[i + 3] = Math.round(a * 255);
+                    if (bytes) {
+                        const o = (y * cellW + x) * 4;
+                        pixels[i] = bytes[o]; pixels[i + 1] = bytes[o + 1]; pixels[i + 2] = bytes[o + 2]; pixels[i + 3] = bytes[o + 3];
+                    } else {
+                        pixels[i] = 255; pixels[i + 1] = 255; pixels[i + 2] = 255;
+                        pixels[i + 3] = Math.round(alpha[y * cellW + x] * 255);
+                    }
                 }
             }
         }
-        // The white RGB holds outside the cells too (the gaps between them are all border).
-        for (let i = 0; i < pixels.length; i += 4) { pixels[i] = 255; pixels[i + 1] = 255; pixels[i + 2] = 255; }
-        sheet = { ...layout, pixels };
+        sheet = { width: layout.width, height: layout.height, columns: layout.columns, rows: layout.rows, frames: layout.frames, pixels };
         cache.set(id, sheet);
     }
     return sheet;

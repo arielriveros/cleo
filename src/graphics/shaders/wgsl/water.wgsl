@@ -30,11 +30,19 @@
 //
 // LIVE WAVES: round the camera, flowing water also carries a simulation of surface waves riding its current
 // (render/waterWaves.ts, water/waveSim.ts): wave trains standing below drops, wakes off the banks, the boil
-// of fast water. Its heights lift the vertices, its slopes join the waves', its foam is the foam there, and
-// its turbulence says where the ripples lie (smooth on a boil, crowded at its edge).
+// of fast water; and on any water, the sea's too, the rings, bow waves and wakes of what moves through it.
+// Its heights lift the vertices, its slopes join the waves', its foam is the foam there, and its turbulence
+// says where the ripples lie (smooth on a boil, crowded at its edge).
 //
 // FOAM is drawn from an amount with the foam texture (water/waterTextures.ts waterFoamPixels): thick foam
 // where it lasts, textured with its bubbles; lace and loose bubbles where it is thin (foamCover).
+//
+// MOUTHS (physics/water/joins.ts): where a river runs into its lake, its pond, the sea or another river, it takes
+// on that water's surface over a band upstream of the seam (its resting height, its waves, its swell, the sea's
+// surf), all of it at the seam, so the two meet as one surface; the joined water keeps its own waves. The join
+// textures say where the band is and what the joined water is like at the seam's nearest point; its waves are the
+// join slot's (u_wvj, u_wfj). The sea under a river joined to it (it is under every point, the river's channel
+// too) reads the river's join textures: drawn down and calm under the river, all of itself at the mouth.
 //
 // No implicit derivatives (every fetch is explicit-level), so the module translates to GLSL as it is.
 
@@ -74,6 +82,13 @@ const MAX_REFLECTION_LOD: f32 = 4.0;
 // the baked one (m), the current x, z (m/s), and how much of it is the local flow's (0..1).
 @group(0) @binding(16) var u_flow_texture: texture_2d<f32>;
 @group(0) @binding(17) var u_flow_sampler: sampler;
+// A river's mouths (physics/water/joins.ts JOIN_CHANNELS), on the river's grid: seam distance, how far the joined
+// water's rest stands above the river's, its shore distance, its depth; its current (the sea: its surf's
+// travel-time gradient), the river's draw distance, the slot.
+@group(0) @binding(18) var u_joinA_texture: texture_3d<f32>;
+@group(0) @binding(19) var u_joinA_sampler: sampler;
+@group(0) @binding(20) var u_joinB_texture: texture_3d<f32>;
+@group(0) @binding(21) var u_joinB_sampler: sampler;
 
 // Vertex stage ONLY (a block read from both stages is a GLSL link error).
 struct WaterVertexUniforms {
@@ -120,7 +135,7 @@ struct WaterFragmentUniforms {
     u_fInfoOrigin: vec4<f32>,
     u_fInfoSize: vec4<f32>,
     u_fOcean: vec4<f32>,          // level, 1 = an endless ocean
-    u_misc: vec4<f32>,            // pre-exposure, how much fast water churns (lightens, clouds), 1 = camera under the surface, cells a baked surface is drawn past its wet ones
+    u_misc: vec4<f32>,            // pre-exposure, how much fast water churns (lightens, clouds), 1 = camera under the surface, -
     u_sssColor: vec4<f32>,        // subsurface scatter colour (rgb), strength
     u_sssParams: vec4<f32>,       // sharpness (power), distortion
     u_fWaves: array<vec4<f32>, 40>,
@@ -144,6 +159,38 @@ struct WaterWeatherUniforms {
 };
 @group(1) @binding(3) var<uniform> u_ww: WaterWeatherUniforms;
 
+// The water a river joins, per slot (two: what it flows from, what it flows into), and the sea under a river.
+// One block per stage (a block read from both stages is a GLSL link error); set once per river, not per tile.
+struct WaterJoinVertexUniforms {
+    u_vjOn: vec4<f32>,                  // 1 = a river with mouths, 1 = the sea under a joined river
+    u_vjBand: vec4<f32>,                // the band's length (m) per slot: x slot 0, y slot 1 (0: no such mouth)
+    u_vjGridOrigin: vec4<f32>,          // the sea under a river: the river's grid origin x, z, cell
+    u_vjGridSize: vec4<f32>,            // its cells x, z
+    u_vjUnder: vec4<f32>,               // the sea under a river: its band's length, its slot of the river's, drop (m)
+    u_vjParams: array<vec4<f32>, 2>,    // per slot: count, time (s, its wave speed applied), height scale (share in), shore fade
+    u_vjSwell: array<vec4<f32>, 2>,     // amplitude, frequency, a tall crest of its waves, 1 = an endless sea
+    u_vjFlow: array<vec4<f32>, 2>,      // how far its waves ride its current, the speed a river's waves are built for
+    u_vjSurf: array<vec4<f32>, 2>,      // its surf: frequency, amplitude, 1 = on
+    u_vjWaves: array<vec4<f32>, 80>,    // as u_waves, slot 0 then slot 1
+    u_vjWaveK: array<vec4<f32>, 80>,
+};
+@group(1) @binding(4) var<uniform> u_wvj: WaterJoinVertexUniforms;
+
+struct WaterJoinFragmentUniforms {
+    u_fjOn: vec4<f32>,
+    u_fjBand: vec4<f32>,
+    u_fjGridOrigin: vec4<f32>,
+    u_fjGridSize: vec4<f32>,
+    u_fjUnder: vec4<f32>,
+    u_fjParams: array<vec4<f32>, 2>,    // count, time, height scale, the waves' height deviation (m, at full scale)
+    u_fjSwell: array<vec4<f32>, 2>,     // -, -, a tall crest, 1 = an endless sea
+    u_fjFlow: array<vec4<f32>, 2>,      // how far its waves ride its current, the speed a river's waves are built for, shore fade
+    u_fjSurf: array<vec4<f32>, 2>,
+    u_fjWaves: array<vec4<f32>, 80>,
+    u_fjWaveK: array<vec4<f32>, 80>,
+};
+@group(1) @binding(5) var<uniform> u_wfj: WaterJoinFragmentUniforms;
+
 fn weatherCount() -> i32 { return i32(u_ww.u_weatherInfo.x); }
 fn weatherInv(i: i32) -> mat4x4<f32> { return u_ww.u_weatherInv[i]; }
 fn weatherBlend(i: i32) -> vec4<f32> { return u_ww.u_weatherBlend[i]; }
@@ -166,6 +213,25 @@ struct VertexOutput {
     /** The mesh's cell (m) there: waves shorter than it were not displaced. */
     @location(5) cell: f32,
 };
+
+// ---- mouths (physics/water/joins.ts) ------------------------------------------------------------------
+
+/** joins.ts JOIN_UNDER_BANK: metres of the river's draw distance over which the sea under it gives way. */
+const JOIN_UNDER_BANK: f32 = 0.25;
+
+/** joins.ts joinWeight: how much of the joined water a river carries `seam` metres up from the seam. */
+fn joinWeight(seam: f32, band: f32) -> f32 {
+    if (!(seam > 0.0)) { return 1.0; }
+    if (!(seam < band)) { return 0.0; }
+    let t = seam / band;
+    return 1.0 - t * t * (3.0 - 2.0 * t);
+}
+
+/** How far the sea under a river gives way to it at its banks: 0 outside what the river draws, 1 inside. */
+fn underGate(draw: f32) -> f32 {
+    let t = clamp(draw / JOIN_UNDER_BANK + 0.5, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
 
 // ---- the water info --------------------------------------------------------------------------------
 
@@ -398,19 +464,33 @@ fn wavePhase(i: i32) -> f32 {
 }
 
 
+/** Wave `i` of set `which` (0 the water's own, 1 and 2 its join slots'), for the vertex stage. */
+fn vWave(which: i32, i: i32) -> vec4<f32> {
+    if (which == 0) { return u_wv.u_waves[i]; }
+    return u_wvj.u_vjWaves[(which - 1) * MAX_WAVES + i];
+}
+fn vWaveK(which: i32, i: i32) -> vec4<f32> {
+    if (which == 0) { return u_wv.u_waveK[i]; }
+    return u_wvj.u_vjWaveK[(which - 1) * MAX_WAVES + i];
+}
+fn vWaveCount(which: i32) -> i32 {
+    if (which == 0) { return min(i32(u_wv.u_waveParams.x), MAX_WAVES); }
+    return min(i32(u_wvj.u_vjParams[which - 1].x), MAX_WAVES);
+}
+
 /**
- * The waves' height above the resting level at `p`, each weighted by what a grid of `cell` metres can draw.
- * Each wave is exp(sin - 1) less its mean; the point the next wave is read at is dragged along this one by
- * its slope, so the short waves crowd onto the long ones' crests.
+ * The waves of set `which` (vWave): their height above the resting level at `p`, each weighted by what a grid
+ * of `cell` metres can draw. Each wave is exp(sin - 1) less its mean; the point the next wave is read at is
+ * dragged along this one by its slope, so the short waves crowd onto the long ones' crests.
  */
-fn waveHeight(p0: vec2<f32>, t: f32, scale: f32, cell: f32) -> f32 {
+fn waveHeight(which: i32, p0: vec2<f32>, t: f32, scale: f32, cell: f32) -> f32 {
     var p = p0;
     var h = 0.0;
-    let count = min(i32(u_wv.u_waveParams.x), MAX_WAVES);
+    let count = vWaveCount(which);
     for (var i = 0; i < MAX_WAVES; i++) {
         if (i >= count) { break; }
-        let w = u_wv.u_waves[i];
-        let kw = u_wv.u_waveK[i];
+        let w = vWave(which, i);
+        let kw = vWaveK(which, i);
         let band = bandLimit(kw.y, cell);
         if (band <= 0.0) { break; }   // longest first: every wave after this one is shorter still
         let a = w.z * scale * band;
@@ -450,8 +530,8 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
     var current = vec2<f32>(0.0);
     let ocean = u_wv.u_vOcean.y > 0.5;
     let uvw = infoUvw(xz, u_wv.u_vInfoOrigin, u_wv.u_vInfoSize);
+    let c = clamp(uvw, vec3<f32>(0.0), vec3<f32>(1.0));
     if (u_wv.u_vInfoOrigin.w > 0.5 && (insideInfo(uvw) || !ocean)) {
-        let c = clamp(uvw, vec3<f32>(0.0), vec3<f32>(1.0));
         let i0 = textureSampleLevel(u_info0_texture, u_info0_sampler, c, 0.0);
         let i1 = textureSampleLevel(u_info1_texture, u_info1_sampler, c, 0.0);
         edge = i0.w;
@@ -486,24 +566,40 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
             current = mix(current, m.yz, clamp(m.w, 0.0, 1.0) * w);
         }
     }
+    // The sea under a river joined to it (it is under the river's channel too, where its bed is below sea
+    // level): drawn down and calm under the river, all of itself at the mouth, where its waves are read with
+    // what the river reads them with (physics: waterSurface.ts waterSpecColumn, underRivers).
+    var seaShare = 1.0;
+    if (ocean && u_wvj.u_vjOn.y > 0.5) {
+        let rc = infoUvw(xz, u_wvj.u_vjGridOrigin, u_wvj.u_vjGridSize);
+        if (insideInfo(rc)) {
+            let ja = textureSampleLevel(u_joinA_texture, u_joinA_sampler, rc, 0.0);
+            let jb = textureSampleLevel(u_joinB_texture, u_joinB_sampler, rc, 0.0);
+            let mine = abs(jb.w - u_wvj.u_vjUnder.y) < 0.5;
+            let g = underGate(jb.z);
+            seaShare = 1.0 - (1.0 - select(0.0, joinWeight(ja.x, u_wvj.u_vjUnder.x), mine)) * g;
+            if (mine && g > 0.0) { edge = mix(edge, ja.z, g); depth = mix(depth, ja.w, g); }
+        }
+    }
     // Shoaling: the waves die down toward the shore, as the CPU's waveHeight fades them, and never stand
     // taller than the water is deep allows (a wave breaks at about 0.8 of the depth; 0.4 of it is its crest).
     let fadeW = u_wv.u_waveParams.w;
     let fade = select(1.0, clamp(edge / max(fadeW, 1e-3), 0.0, 1.0), fadeW > 0.0);
     let cap = clamp(0.4 * depth / max(u_wv.u_swell.z, 1e-3), 0.0, 1.0);
     // A river's waves are its current's: scaled by how fast the water runs here, and carried along by it.
-    let scale = u_wv.u_waveParams.z * share * fade * fade * (3.0 - 2.0 * fade) * cap * flowWaveScale(length(current), u_wv.u_vFlow.y);
+    let scale = u_wv.u_waveParams.z * share * seaShare * fade * fade * (3.0 - 2.0 * fade) * cap * flowWaveScale(length(current), u_wv.u_vFlow.y);
     let t = u_wv.u_waveParams.y;
     let ride = current * u_wv.u_vFlow.x;
     var lift = 0.0;
     if (dot(ride, ride) > 1e-6) {
         let ph = flowPhases(xz, t);
-        lift = waveHeight(xz - ride * ph.a, t, scale, cell) * ph.wa + waveHeight(xz - ride * ph.b + FLOW_APART, t, scale, cell) * ph.wb;
+        lift = waveHeight(0, xz - ride * ph.a, t, scale, cell) * ph.wa + waveHeight(0, xz - ride * ph.b + FLOW_APART, t, scale, cell) * ph.wb;
     } else {
-        lift = waveHeight(xz, t, scale, cell);
+        lift = waveHeight(0, xz, t, scale, cell);
     }
     // The live waves round the camera: read over the mesh's own cell, so a coarse mesh takes their mean.
-    if (u_wv.u_vLive.w > 0.0 && !ocean) {
+    var live = 0.0;
+    if (u_wv.u_vLive.w > 0.0) {
         let luv = (xz - u_wv.u_vLive.xy) * u_wv.u_vLive.z;
         let inside = min(min(luv.x, luv.y), min(1.0 - luv.x, 1.0 - luv.y));
         if (inside > 0.0) {
@@ -512,18 +608,59 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
                   + textureSampleLevel(u_live_texture, u_live_sampler, luv + vec2<f32>(-o, o), 0.0).x
                   + textureSampleLevel(u_live_texture, u_live_sampler, luv + vec2<f32>(o, -o), 0.0).x
                   + textureSampleLevel(u_live_texture, u_live_sampler, luv + vec2<f32>(-o, -o), 0.0).x;
-            lift += 0.25 * h * u_wv.u_vLive.w * smoothstep(0.0, 0.08, inside) * fade;
+            live = 0.25 * h * u_wv.u_vLive.w * smoothstep(0.0, 0.08, inside);
         }
     }
-    var p = vec3<f32>(xz.x, surface + lift + bulk, xz.y);
+    lift += live * fade * seaShare;
     // Over the beach the surf takes over from the waves, as physics/water/surf.ts adds it to what floats.
     if (ocean) {
         let sf = surfAt(u_wv.u_vSurf, xz, t, edge, depth);
-        p.y += sf.height * bandLimit(sf.wavelength, cell);
+        lift += sf.height * bandLimit(sf.wavelength, cell) * seaShare;
     }
     if (u_wv.u_swell.x > 0.0) {
-        p.y += u_wv.u_swell.x * sin(t * u_wv.u_swell.y * PI * 2.0 + xz.x * 0.37 + xz.y * 0.29);
+        lift += u_wv.u_swell.x * sin(t * u_wv.u_swell.y * PI * 2.0 + xz.x * 0.37 + xz.y * 0.29) * seaShare;
     }
+    lift += bulk;
+    surface -= (1.0 - seaShare) * u_wvj.u_vjUnder.z * select(0.0, 1.0, ocean && u_wvj.u_vjOn.y > 0.5);
+    // A river's mouth: over the band it takes on the joined water's surface (physics: waterSurface.ts
+    // joinColumn), that water's waves read with its shore distance, depth and current at the seam.
+    if (!ocean && u_wvj.u_vjOn.x > 0.5) {
+        let ja = textureSampleLevel(u_joinA_texture, u_joinA_sampler, c, 0.0);
+        let jb = textureSampleLevel(u_joinB_texture, u_joinB_sampler, c, 0.0);
+        let slot = select(0, 1, jb.w > 0.5);
+        let wj = joinWeight(ja.x, u_wvj.u_vjBand[slot]);
+        if (wj > 0.0) {
+            let jp = u_wvj.u_vjParams[slot];
+            let js = u_wvj.u_vjSwell[slot];
+            let jf = u_wvj.u_vjFlow[slot];
+            let sea = js.w > 0.5;
+            let tCurrent = select(jb.xy, vec2<f32>(0.0), sea);
+            let tFade = select(1.0, clamp(ja.z / max(jp.w, 1e-3), 0.0, 1.0), jp.w > 0.0);
+            let tCap = clamp(0.4 * ja.w / max(js.z, 1e-3), 0.0, 1.0);
+            let tScale = jp.z * tFade * tFade * (3.0 - 2.0 * tFade) * tCap * flowWaveScale(length(tCurrent), jf.y);
+            let tt = jp.y;
+            let tRide = tCurrent * jf.x;
+            var tLift = 0.0;
+            if (dot(tRide, tRide) > 1e-6) {
+                let ph = flowPhases(xz, tt);
+                tLift = waveHeight(slot + 1, xz - tRide * ph.a, tt, tScale, cell) * ph.wa
+                      + waveHeight(slot + 1, xz - tRide * ph.b + FLOW_APART, tt, tScale, cell) * ph.wb;
+            } else {
+                tLift = waveHeight(slot + 1, xz, tt, tScale, cell);
+            }
+            tLift += live * tFade;
+            if (sea) {
+                let sf = surfAt(u_wvj.u_vjSurf[slot], xz, tt, ja.z, ja.w);
+                tLift += sf.height * bandLimit(sf.wavelength, cell);
+            } else {
+                tLift += bulk;   // the sea draws no local flow
+            }
+            if (js.x > 0.0) { tLift += js.x * sin(tt * js.y * PI * 2.0 + xz.x * 0.37 + xz.y * 0.29); }
+            surface += wj * ja.y;
+            lift = mix(lift, tLift, wj);
+        }
+    }
+    var p = vec3<f32>(xz.x, surface + lift, xz.y);
     // The skirt hangs straight down from the edge.
     p.y -= max(0.0, -position.y) * tile.w;
     out.worldPos = p;
@@ -573,23 +710,37 @@ struct Waves {
     unresolved: f32,
 };
 
+/** Wave `i` of set `which` (0 the water's own, 1 and 2 its join slots'), for the fragment stage. */
+fn fWave(which: i32, i: i32) -> vec4<f32> {
+    if (which == 0) { return u_wf.u_fWaves[i]; }
+    return u_wfj.u_fjWaves[(which - 1) * MAX_WAVES + i];
+}
+fn fWaveK(which: i32, i: i32) -> vec4<f32> {
+    if (which == 0) { return u_wf.u_fWaveK[i]; }
+    return u_wfj.u_fjWaveK[(which - 1) * MAX_WAVES + i];
+}
+fn fWaveCount(which: i32) -> i32 {
+    if (which == 0) { return min(i32(u_wf.u_fWaveParams.x), MAX_WAVES); }
+    return min(i32(u_wfj.u_fjParams[which - 1].x), MAX_WAVES);
+}
+
 /**
- * The waves at `p0` for a pixel of `footprint` metres (waveHeight, with each wave faded where the pixel no
- * longer resolves it). The slope is exact: the drag's warp is carried along as its Jacobian, so the slopes
- * of the short waves crowded onto a crest steepen as they should.
+ * The waves of set `which` (fWave) at `p0` for a pixel of `footprint` metres (waveHeight, with each wave faded
+ * where the pixel no longer resolves it). The slope is exact: the drag's warp is carried along as its
+ * Jacobian, so the slopes of the short waves crowded onto a crest steepen as they should.
  */
-fn waveStack(p0: vec2<f32>, t: f32, scale: f32, footprint: f32) -> Waves {
+fn waveStack(which: i32, p0: vec2<f32>, t: f32, scale: f32, footprint: f32) -> Waves {
     var r: Waves;
     var p = p0;
     var J = mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
     var h = 0.0;
     var g = vec2<f32>(0.0);
     var removed = 0.0;
-    let count = min(i32(u_wf.u_fWaveParams.x), MAX_WAVES);
+    let count = fWaveCount(which);
     for (var i = 0; i < MAX_WAVES; i++) {
         if (i >= count) { break; }
-        let w = u_wf.u_fWaves[i];
-        let kw = u_wf.u_fWaveK[i];
+        let w = fWave(which, i);
+        let kw = fWaveK(which, i);
         let k = kw.x;
         let lambda = kw.y;
         let band = smoothstep(2.0 * footprint, 6.0 * footprint, lambda);
@@ -798,8 +949,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var seaDepth = 1e4;
     let uvw = infoUvw(in.rest.xy, u_wf.u_fInfoOrigin, u_wf.u_fInfoSize);
     let hasInfo = u_wf.u_fInfoOrigin.w > 0.5;
+    let c = clamp(uvw, vec3<f32>(0.0), vec3<f32>(1.0));
     if (hasInfo && (insideInfo(uvw) || !ocean)) {
-        let c = clamp(uvw, vec3<f32>(0.0), vec3<f32>(1.0));
         let i0 = textureSampleLevel(u_info0_texture, u_info0_sampler, c, 0.0);
         let i1 = textureSampleLevel(u_info1_texture, u_info1_sampler, c, 0.0);
         edge = i0.w;
@@ -811,19 +962,41 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             wet = i1.w;
         }
     }
-    // A lake or river ends where its grid says it is dry. The ocean is drawn on under the land's edge, a
-    // couple of cells in: the landscape's own depth test draws its waterline, exactly, wherever it is. So is
-    // baked water, a cell past its wet ones (the bake carries its surface on under the dry ground there):
-    // its banks are then the ground's, not the outline of the bake's cells. Where the water beside it is
-    // another node's (a river's mouth in its lake), it ends at its own cells as ever.
+    // The ocean is drawn on under the land's edge, a couple of cells in: the landscape's own depth test draws
+    // its waterline, exactly, wherever it is. A lake's, a river's or a pool's grid says how far inside what it
+    // draws each point is (render/water.ts, water/waterEdges.ts): its water, and a couple of cells on under the
+    // banks, where the surface is carried on level under the ground (so the landscape draws the waterline
+    // there too); where the ground falls away, or another node's water carries on (a river's mouth in its
+    // lake), the water ends on a line found between the cells, not on their outline.
     if (ocean) {
         if (hasInfo && edge < -2.0 * u_wf.u_fInfoOrigin.z) { discard; }
-    } else {
-        let past = u_wf.u_misc.w * u_wf.u_fInfoOrigin.z;
-        if (edge < -0.01 - past || (wet < 0.5 && (past <= 0.0 || edge > 0.0))) { discard; }
+    } else if (wet <= 0.0) {
+        discard;
+    }
+    // The sea under a river joined to it (as the vertex stage): none of it under the river upstream of its
+    // mouth, its surf there read with what the river reads it with.
+    var seaShare = 1.0;
+    var underGrad = vec2<f32>(0.0);
+    var underBlend = 0.0;
+    if (ocean && u_wfj.u_fjOn.y > 0.5) {
+        let rc = infoUvw(in.rest.xy, u_wfj.u_fjGridOrigin, u_wfj.u_fjGridSize);
+        if (insideInfo(rc)) {
+            let ja = textureSampleLevel(u_joinA_texture, u_joinA_sampler, rc, 0.0);
+            let jb = textureSampleLevel(u_joinB_texture, u_joinB_sampler, rc, 0.0);
+            let mine = abs(jb.w - u_wfj.u_fjUnder.y) < 0.5;
+            let g = underGate(jb.z);
+            seaShare = 1.0 - (1.0 - select(0.0, joinWeight(ja.x, u_wfj.u_fjUnder.x), mine)) * g;
+            if (mine && g > 0.0) {
+                edge = mix(edge, ja.z, g);
+                seaDepth = mix(seaDepth, ja.w, g);
+                underGrad = jb.xy;
+                underBlend = g;
+            }
+        }
+        if (seaShare < 1e-3) { discard; }
     }
     // A skirt only fills the cracks between tiles out on open water; at the shore it would hang into view.
-    if (in.skirt > 0.0 && edge < u_wf.u_fInfoOrigin.z * 3.0) { discard; }
+    if (in.skirt > 0.0 && select(wet, edge, ocean) < u_wf.u_fInfoOrigin.z * 3.0) { discard; }
     // The local flow round the camera (render/localFlow.ts): its current is the water's own round what stands
     // in it, so the ripples and the foam part round a post and race down its sides; its lift (the pile, the
     // drawdown, the pillow and the hole) tilts the surface.
@@ -862,23 +1035,73 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let ph = flowPhases(in.rest.xy, t);
     var waves: Waves;
     if (moving) {
-        waves = waveStack(in.rest.xy - f * ph.a, t, scale, footprint);
-        let w1 = waveStack(in.rest.xy - f * ph.b + FLOW_APART, t, scale, footprint);
+        waves = waveStack(0, in.rest.xy - f * ph.a, t, scale, footprint);
+        let w1 = waveStack(0, in.rest.xy - f * ph.b + FLOW_APART, t, scale, footprint);
         waves.height = waves.height * ph.wa + w1.height * ph.wb;
         waves.slope = waves.slope * ph.wa + w1.slope * ph.wb;
         waves.squeeze = mix(waves.squeeze, w1.squeeze, ph.fade);
         waves.unresolved = mix(waves.unresolved, w1.unresolved, ph.fade);
     } else {
-        waves = waveStack(in.rest.xy, t, scale, footprint);
+        waves = waveStack(0, in.rest.xy, t, scale, footprint);
+    }
+    var waveSd = max(u_wf.u_fWaveParams.w * scale, 1e-3);
+    // A river's mouth (as the vertex stage): the joined water's waves over the band, all of them at the seam;
+    // and the sea's surf, where it is the sea a river runs into.
+    var joinW = 0.0;
+    var joinSurf: Surf;
+    joinSurf.breaking = 0.0;
+    joinSurf.phase = 0.0;
+    joinSurf.rate = 0.0;
+    var joinGrad = vec2<f32>(0.0);
+    var joinSurfOn = false;
+    if (!ocean && u_wfj.u_fjOn.x > 0.5) {
+        let ja = textureSampleLevel(u_joinA_texture, u_joinA_sampler, c, 0.0);
+        let jb = textureSampleLevel(u_joinB_texture, u_joinB_sampler, c, 0.0);
+        let slot = select(0, 1, jb.w > 0.5);
+        let wj = joinWeight(ja.x, u_wfj.u_fjBand[slot]);
+        if (wj > 0.0) {
+            let jp = u_wfj.u_fjParams[slot];
+            let js = u_wfj.u_fjSwell[slot];
+            let jf = u_wfj.u_fjFlow[slot];
+            let sea = js.w > 0.5;
+            let tCurrent = select(jb.xy, vec2<f32>(0.0), sea);
+            let tFade = select(1.0, clamp(ja.z / max(jf.z, 1e-3), 0.0, 1.0), jf.z > 0.0);
+            let tCap = clamp(0.4 * ja.w / max(js.z, 1e-3), 0.0, 1.0);
+            let tScale = jp.z * tFade * tFade * (3.0 - 2.0 * tFade) * tCap * flowWaveScale(length(tCurrent), jf.y);
+            let tt = jp.y;
+            let tf = tCurrent * jf.x;
+            var tw: Waves;
+            if (dot(tf, tf) > 1e-6) {
+                let tph = flowPhases(in.rest.xy, tt);
+                tw = waveStack(slot + 1, in.rest.xy - tf * tph.a, tt, tScale, footprint);
+                let t1 = waveStack(slot + 1, in.rest.xy - tf * tph.b + FLOW_APART, tt, tScale, footprint);
+                tw.height = tw.height * tph.wa + t1.height * tph.wb;
+                tw.slope = tw.slope * tph.wa + t1.slope * tph.wb;
+                tw.squeeze = mix(tw.squeeze, t1.squeeze, tph.fade);
+                tw.unresolved = mix(tw.unresolved, t1.unresolved, tph.fade);
+            } else {
+                tw = waveStack(slot + 1, in.rest.xy, tt, tScale, footprint);
+            }
+            waves.height = mix(waves.height, tw.height, wj);
+            waves.slope = mix(waves.slope, tw.slope, vec2<f32>(wj));
+            waves.squeeze = mix(waves.squeeze, tw.squeeze, wj);
+            waves.unresolved = mix(waves.unresolved, tw.unresolved, wj);
+            waveSd = mix(waveSd, max(jp.w * tScale, 1e-3), wj);
+            if (sea && ja.w < 1e3) {
+                joinSurf = surfAt(u_wfj.u_fjSurf[slot], in.rest.xy, tt, ja.z, ja.w);
+                joinGrad = jb.xy;
+                joinSurfOn = true;
+            }
+            joinW = wj;
+        }
     }
     // Where on the waves this is: 0 deep in a trough, 0.5 at the resting level, 1 on a tall crest.
-    let waveSd = max(u_wf.u_fWaveParams.w * scale, 1e-3);
     let crest = clamp(0.5 + waves.height / (4.0 * waveSd), 0.0, 1.0);
     var slope = in.grad + waves.slope + bulkSlope;
     // The live waves round the camera: their slopes, their foam, and the turbulence that stirs them.
     var live = vec4<f32>(0.0);
     var liveIn = 0.0;
-    if (u_wf.u_fLive.w > 0.0 && !ocean) {
+    if (u_wf.u_fLive.w > 0.0) {
         let luv = (in.rest.xy - u_wf.u_fLive.xy) * u_wf.u_fLive.z;
         let inside = min(min(luv.x, luv.y), min(1.0 - luv.x, 1.0 - luv.y));
         if (inside > 0.0) {
@@ -930,16 +1153,28 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var toShore = vec2<f32>(0.0);
     if (ocean && u_wf.u_fSurf.z > 0.5 && seaDepth < 1e3) {
         surf = surfAt(u_wf.u_fSurf, in.rest.xy, t, edge, seaDepth);
+        surf.rate *= seaShare;
+        surf.breaking *= seaShare;
         if (surf.breaking > 0.0 || surf.height != 0.0) {
             let d = u_wf.u_fInfoOrigin.z;
             let tx = (oceanTravelTime(in.rest.xy + vec2<f32>(d, 0.0)) - oceanTravelTime(in.rest.xy - vec2<f32>(d, 0.0))) / (2.0 * d);
             let tz = (oceanTravelTime(in.rest.xy + vec2<f32>(0.0, d)) - oceanTravelTime(in.rest.xy - vec2<f32>(0.0, d))) / (2.0 * d);
+            let grad = mix(vec2<f32>(tx, tz), underGrad, vec2<f32>(underBlend));
             let w = smoothstep(2.0 * footprint, 6.0 * footprint, surf.wavelength);
-            slope += surf.rate * vec2<f32>(tx, tz) * w;
-            let ss = surf.rate * length(vec2<f32>(tx, tz));
+            slope += surf.rate * grad * w;
+            let ss = surf.rate * length(grad);
             surfVariance = (1.0 - w * w) * 0.5 * ss * ss;
-            if (length(vec2<f32>(tx, tz)) > 1e-6) { toShore = -normalize(vec2<f32>(tx, tz)); }
+            if (length(grad) > 1e-6) { toShore = -normalize(grad); }
         }
+    } else if (joinSurfOn) {
+        // The surf of the sea a river runs into, over the band (its share of it).
+        surf = joinSurf;
+        surf.breaking *= joinW;
+        let w = smoothstep(2.0 * footprint, 6.0 * footprint, surf.wavelength);
+        slope += surf.rate * joinGrad * (w * joinW);
+        let ss = surf.rate * joinW * length(joinGrad);
+        surfVariance = (1.0 - w * w) * 0.5 * ss * ss;
+        if (length(joinGrad) > 1e-6) { toShore = -normalize(joinGrad); }
     }
     var N = normalize(vec3<f32>(-slope.x, 1.0, -slope.y));
     if (below) { N = -N; }
@@ -1137,7 +1372,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // (The simulation's foam settles at about a third of the bake's figure on the whole, in streaks; past
     // it the bake's own is drawn to match.)
     let churnFar = 0.66 * (1.0 - exp(-2.4 * foamBake * 0.35 * u_wf.u_foamParams.y)) * flowing;
-    let churnLive = 0.66 * (1.0 - exp(-2.4 * live.w * u_wf.u_foamParams.y)) * flowing;
+    // On still water the live foam is what moves through it throws up (a splash, a wake): drawn as it is, not
+    // as rapids foam, and not gated by the current.
+    let churnLive = mix(0.66 * (1.0 - exp(-2.4 * live.w)), 0.66 * (1.0 - exp(-2.4 * live.w * u_wf.u_foamParams.y)), flowing);
     if (amount > 0.0 || churnFar > 0.0 || churnLive > 0.0) {
         // The foam's texture drifts with the water, on the same two phases as the waves: one phase alone
         // would jump back every cycle. Each is drawn from its amount, then the two are cross-faded, so the

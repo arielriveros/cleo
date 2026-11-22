@@ -22,7 +22,7 @@ import { ShaderManager } from '../systems/shaderManager';
 import { Logger } from '../../core/logger';
 import { frameStats } from '../renderStats';
 import { LUT_ROWS, LUT_WIDTH } from '../../particles/curves';
-import { DRAW, SIM, packEmitter, simStripMask, stepUniforms, type PackedEmitter } from '../../particles/particlePack';
+import { DRAW, SIM, SURFACE, packEmitter, simStripMask, stepUniforms, surfaceFlags, type PackedEmitter } from '../../particles/particlePack';
 import { particleSimProgram } from '../programVariants';
 import { COLLIDER_FLOATS, MAX_PARTICLE_COLLIDERS, packParticleColliders, type ColliderBody } from '../../particles/particleColliders';
 import { builtinParticleMesh, interleaveParticleMesh } from '../../particles/particleMesh';
@@ -35,8 +35,8 @@ import type { Scene } from '../../core/scene/scene';
 import type { ParticleWeather } from '../render/weather';
 import { LayeredDepthFramebuffer } from '../layeredDepthFramebuffer';
 import { builtinSpriteTexture, releaseBuiltinSprites } from './builtinSprites';
-import { gatherParticleLocalLight, type ParticleLocalLight, type ParticleLocalLighting } from './particleLighting';
-import { PARTICLE_PROGRAMS, particleSimVariants, type ParticleProgram } from './particlePrograms';
+import { gatherParticleLocalLight, hemisphereFill, type ParticleLocalLight, type ParticleLocalLighting } from './particleLighting';
+import { PARTICLE_PROGRAMS, particleDrawProgramName, particleSimVariants, type ParticleProgram } from './particlePrograms';
 // Re-exported for the full engine's barrel and its tests; the core reads them from ./particlePrograms.
 export { PARTICLE_PROGRAMS, setParticleSimVariants } from './particlePrograms';
 // @ts-ignore -- WGSL modules, typed by the loader
@@ -109,6 +109,11 @@ export interface ParticleDrawFrame {
     /** Lit particles: the scene's indirect fill (scene ambient + sky light), irradiance. */
     ambient: readonly number[];
     /**
+     * Lit particles: the fill a surface facing straight up gets (the sky's irradiance over the upper hemisphere in
+     * place of its mean). Absent: `ambient`, an even sky.
+     */
+    ambientUp?: readonly number[];
+    /**
      * Lit particles: the indirect fill at a world point, the effect's bounds centre: the light probes
      * that hold it (render/probeLighting.ts), else `ambient`. Absent: `ambient` everywhere.
      */
@@ -141,15 +146,19 @@ export interface ParticleDrawFrame {
      */
     environment?: (position: vec3) => { cube: Texture; linear: boolean } | null;
     /**
+     * Lit emitters' per-pixel lighting: called for each draw of an emitter whose `lit` program variant is in use
+     * (render/particlePasses.ts), with the pass, the draw's pipeline and the bound program's name, to upload the
+     * frame's shadow and light grid values and bind group 3 (the cascades and the light data). Absent: this draw
+     * cannot bind them (a thumbnail, a capture, the 2D pass) and lit emitters take the CPU's key light and fill.
+     */
+    frameLighting?: (pass: RenderPassEncoder, pipeline: RenderPipeline, program: string) => void;
+    /**
      * Whether this draw decides what the systems DO: pauses the ones out of view (`offscreen`) and picks
      * their distance LOD. Default true. A preview pane of the editor (Renderer `_renderPreviews`) draws the
      * same systems through another camera and must leave both as the editing view set them.
      */
     measure?: boolean;
 }
-
-/** `u_surface.w` bits: the SURFACE_* constants in chunks/particleDraw.wgsl. */
-const SURFACE = { NORMAL_MAP: 1, ORM_MAP: 2, PBR: 4, RAIN: 8 } as const;
 
 /** A node's tint, its colour divided by the part of the exposure it does not take (alpha untouched). */
 const compensatedTint: [number, number, number, number] = [1, 1, 1, 1];
@@ -1146,7 +1155,10 @@ export class ParticleRenderer {
                     const instances = sorted ? emitter.runtime.capacity : emitter.liveCount;
                     if (instances === 0) continue;
                     const mesh = render.mode === 'mesh' ? this._meshFor(render) : null;
-                    const pipeline = this._drawPipeline(frame.target, render, !!mesh);
+                    // A lit emitter's draw takes the sun's shadow and every light of the grid per pixel in its `lit`
+                    // program variant, once that is compiled (until then the base program, with the CPU key light).
+                    const perPixel = !!render.lit && !!frame.frameLighting && this._litReady(!!mesh);
+                    const pipeline = this._drawPipeline(frame.target, render, !!mesh, perPixel);
                     frame.pass.setPipeline(pipeline);
 
                     // The engine's own sprites (rain, snow) are resolved here, never through the TextureManager.
@@ -1154,19 +1166,25 @@ export class ParticleRenderer {
                         ?? TextureManager.Instance.getTexture(render.textureId))) || null;
                     const spriteTex = sprite && sprite.sampledView ? sprite : this._whiteTexture;
                     const orderTex = sorted ?? this._whiteTexture;
-                    // A lit emitter's surface. PBR (a highlight, metallic) only when something asks for it,
-                    // so a plain lit emitter shades exactly as it always has.
+                    // A lit emitter's maps: the engine's own (spray, foam, mist) or a texture asset.
                     const surfaceMap = (id: string | null | undefined): Texture | null => {
-                        const t = render.lit && id ? TextureManager.Instance.getTexture(id) : null;
+                        const t = render.lit && id ? (builtinSpriteTexture(id) ?? TextureManager.Instance.getTexture(id)) : null;
                         return t && t.sampledView ? t : null;
                     };
+                    // Six-way lightmaps ride the normal and ORM bindings: both, or the emitter draws Standard.
+                    const wantsSixWay = render.shading === 'sixWay' && !mesh;
+                    const sixWayPos = wantsSixWay ? surfaceMap(render.sixWayPositiveTextureId) : null;
+                    const sixWayNeg = wantsSixWay ? surfaceMap(render.sixWayNegativeTextureId) : null;
+                    const sixWay = !!sixWayPos && !!sixWayNeg;
                     const normalMap = surfaceMap(render.normalTextureId);
                     const ormMap = surfaceMap(render.ormTextureId);
                     const roughness = render.roughness ?? 1, metallic = render.metallic ?? 0;
-                    const rainDrop = render.lit && render.shading === 'rain';
-                    const pbr = render.lit && !rainDrop && (!!normalMap || !!ormMap || metallic > 0 || roughness < 0.999);
+                    // PBR (a highlight, a reflection) only when something asks for it; a normal map alone is relief.
+                    const flags = surfaceFlags(render, { normal: !!normalMap, orm: !!ormMap, sixWay }, !!mesh);
+                    const pbr = (flags & SURFACE.PBR) !== 0;
                     const env = pbr ? envFor() : null;
-                    const normalTex = normalMap ?? this._whiteTexture, ormTex = ormMap ?? this._whiteTexture;
+                    const normalTex = sixWay ? sixWayPos! : normalMap ?? this._whiteTexture;
+                    const ormTex = sixWay ? sixWayNeg! : ormMap ?? this._whiteTexture;
                     const envTex = env?.cube ?? this._cubeFallback;
                     frame.pass.setBindGroup(0, emitter.group(
                         `d0:${pipelineId(pipeline)}:${emitter.current}:${idOf(spriteTex)}:${idOf(depth)}:${idOf(orderTex)}:${idOf(normalTex)}:${idOf(ormTex)}:${idOf(envTex)}`,
@@ -1185,7 +1203,9 @@ export class ParticleRenderer {
                             ],
                         })));
 
-                    shaders.bind(mesh ? PARTICLE_PROGRAMS.mesh[0] : PARTICLE_PROGRAMS.billboard[0]);
+                    const programName = particleDrawProgramName(!!mesh, perPixel);
+                    shaders.bind(programName);
+                    if (perPixel) frame.frameLighting!(frame.pass, pipeline, programName);
                     const packed = emitter.packed;
                     const m = node.worldTransform;
                     const scale = packed.local ? Math.cbrt(Math.abs(mat4.determinant(m))) || 1 : 1;
@@ -1207,17 +1227,21 @@ export class ParticleRenderer {
                     shaders.setUniform('u_fragParams', packed.frag.u_fragParams);
                     shaders.setUniform('u_depthParams', [frame.near, frame.far, frame.orthographic ? 1 : 0, frame.depth ? 1 : 0]);
                     shaders.setUniform('u_fragMask', [sprite ? 1 : 0, render.lit ? 1 : 0, 1 / frame.width, 1 / frame.height]);
-                    const lights = render.lit ? localFor() : NO_LOCAL;
+                    // Per pixel, the grid holds every local light: none is the CPU's key or fill.
+                    const lights = render.lit && !perPixel ? localFor() : NO_LOCAL;
                     const ambient = render.lit ? fillFor() : frame.ambient;
                     shaders.setUniform('u_ambient', [ambient[0] + lights.fill[0] / Math.PI, ambient[1] + lights.fill[1] / Math.PI,
                                                      ambient[2] + lights.fill[2] / Math.PI, mesh ? 1 : 0]);
+                    // What an up-facing surface of the effect gets: the sky above it (kept in the probe's proportion).
+                    const fillUp = render.lit ? hemisphereFill(ambient, frame.ambient, frame.ambientUp ?? frame.ambient) : frame.ambient;
+                    shaders.setUniform('u_ambientUp', [fillUp[0] + lights.fill[0] / Math.PI, fillUp[1] + lights.fill[1] / Math.PI,
+                                                       fillUp[2] + lights.fill[2] / Math.PI, perPixel ? 1 : 0]);
+                    shaders.setUniform('u_lightParams', [render.occlusion ?? 1, 0, 0, 0]);
                     shaders.setUniform('u_sunDir', [frame.sunDirection[0], frame.sunDirection[1], frame.sunDirection[2], render.nearFade ?? 0]);
                     shaders.setUniform('u_sunColor', [frame.sunColor[0], frame.sunColor[1], frame.sunColor[2], render.lit ? render.translucency ?? 0 : 0]);
                     shaders.setUniform('u_keyDir', [lights.keyDirection[0], lights.keyDirection[1], lights.keyDirection[2], 0]);
                     shaders.setUniform('u_keyColor', [lights.keyColor[0], lights.keyColor[1], lights.keyColor[2], frame.preExposure ?? 1]);
-                    shaders.setUniform('u_surface', [roughness, metallic, render.normalStrength ?? 1,
-                                                     (normalMap ? SURFACE.NORMAL_MAP : 0) | (ormMap ? SURFACE.ORM_MAP : 0) | (pbr ? SURFACE.PBR : 0)
-                                                     | (rainDrop ? SURFACE.RAIN : 0)]);
+                    shaders.setUniform('u_surface', [roughness, metallic, render.normalStrength ?? 1, flags]);
                     shaders.setUniform('u_viewPos', [frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2],
                                                      env ? (env.linear ? 2 : 1) : 0]);
                     if (mesh) {
@@ -1278,16 +1302,33 @@ export class ParticleRenderer {
         }];
     }
 
-    private _drawPipeline(target: RenderTarget, render: RenderSettings, mesh: boolean): RenderPipeline {
+    /**
+     * Whether the `lit` variant of a draw program is built and can draw: asking starts its compile (in the
+     * background where the device allows), and until it finishes ShaderManager serves the BASE program under the
+     * variant's name as a stand-in, which declares no group 3 and must not be given the lit draw.
+     */
+    private _litReady(mesh: boolean): boolean {
+        const shaders = ShaderManager.Instance;
+        try {
+            return shaders.getShader(particleDrawProgramName(mesh, true)) !== shaders.find(particleDrawProgramName(mesh, false));
+        } catch {
+            // Not shipped (a published game whose program list left it out): the base program serves.
+            return false;
+        }
+    }
+
+    private _drawPipeline(target: RenderTarget, render: RenderSettings, mesh: boolean, perPixel = false): RenderPipeline {
         const color = target.colorViews[0].texture.format;
         const depthFormat = target.depthView?.texture.format;
         // Opaque cutout meshes write depth, so they occlude each other like any solid; everything else
         // tests against the scene and leaves its depth alone.
         const writesDepth = mesh && render.blend === 'cutout';
-        const key = `${mesh ? 'mesh' : 'billboard'}|${render.blend}|${color}|${depthFormat ?? '-'}|${writesDepth}`;
+        const key = `${mesh ? 'mesh' : 'billboard'}${perPixel ? '~lit' : ''}|${render.blend}|${color}|${depthFormat ?? '-'}|${writesDepth}`;
         let pipeline = this._drawPipelines.get(key);
         if (pipeline) return pipeline;
-        const [name, program] = mesh ? PARTICLE_PROGRAMS.mesh : PARTICLE_PROGRAMS.billboard;
+        const base = mesh ? PARTICLE_PROGRAMS.mesh : PARTICLE_PROGRAMS.billboard;
+        const name = perPixel ? particleDrawProgramName(mesh, true) : base[0];
+        const program = (perPixel ? base[1].variants?.lit : base[1]) ?? base[1];
         const module = device.createShaderModule({
             label: name, program: name, stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
             source: program.wgsl, entryPoints: program.entryPoints, resources: program.resources,

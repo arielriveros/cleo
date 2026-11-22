@@ -483,7 +483,7 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
           {river && <Hint className='mt-1'>A river's waves are raised by its own current: taller and longer where it runs fast, calm where it is slow.</Hint>}
         </DeclaredSection>
         <DeclaredSection node={node} title='Buoyancy' />
-        <DeclaredSection node={node} title='Splashes' />
+        <DeclaredSection node={node} title='Ripples and splashes' />
       </div>
     </Collapsable>
     </DocScope>

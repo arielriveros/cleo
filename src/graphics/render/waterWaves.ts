@@ -9,12 +9,33 @@ import type { WaterInfo } from '../../water/waterInfo';
 import type { WaterObstacleFootprint } from '../../water/bake/obstacles';
 import { LocalFlowSim } from './localFlow';
 import {
-    WAVE_SIM_CELL, WAVE_SIM_DEPTHS, WAVE_SIM_DT, WAVE_SIM_GRAVITY, WAVE_SIM_SIZE, WAVE_SIM_TAPS, waveSimKernel,
+    WAVE_DAMPING_RUNNING, WAVE_DAMPING_STILL, WAVE_SIM_BODY_MAX, WAVE_SIM_CELL, WAVE_SIM_DEPTHS, WAVE_SIM_DT,
+    WAVE_SIM_GRAVITY, WAVE_SIM_SIZE, WAVE_SIM_TAPS, waveSimKernel, type WaveSimBody,
 } from '../../water/waveSim';
 import { LOCAL_FLOW_DT } from '../../water/localFlow';
 
-/** One water in reach of the simulated window: its grid, the two textures the surface is drawn from, its bed's Manning's n. */
-export interface WaveSimWater { info: WaterInfo; tex0: Texture; tex1: Texture; manning: number; }
+/**
+ * One water in reach of the simulated window: its grid, the two textures the surface is drawn from, its bed's
+ * Manning's n. `shore`: the grid is an endless ocean's shore grid (its dry cells are land, not the sea's).
+ */
+export interface WaveSimWater { info: WaterInfo; tex0: Texture; tex1: Texture; manning: number; shore?: boolean; }
+
+/** What the live waves are asked to do this frame, besides where and over what water. */
+export interface WaveSimFrame {
+    /** What crosses the surface in the window (bodies, against the water's own motion). */
+    bodies?: readonly WaveSimBody[];
+    /** An endless sea lies under the window: open, still, deep water wherever no water's grid covers it. */
+    sea?: boolean;
+    /**
+     * A river asks for its own waves (its Live waves above 0): the bulk flow's turns, the turbulence and the
+     * stones raise them, and the local flow runs. Off, the waves are only what the bodies raise, on the water
+     * as its grids have it.
+     */
+    river?: boolean;
+}
+
+/** Metres deep the open sea is taken as, under the window: deep water to every wave the window holds. */
+const SEA_DEPTH = 20;
 
 /** Metres a side of the simulated window. */
 export const WAVE_SIM_SIDE = WAVE_SIM_SIZE * WAVE_SIM_CELL;
@@ -88,7 +109,7 @@ export class WaterWaveSim {
      * Called again within the same frame (a second viewport pane), it leaves the waves where they are.
      */
     public update(time: number, cx: number, cz: number, fx: number, fz: number, waters: readonly WaveSimWater[], noise: Texture | null = null,
-                  obstacles: readonly WaterObstacleFootprint[] = []): void {
+                  obstacles: readonly WaterObstacleFootprint[] = [], frame: WaveSimFrame = { river: true }): void {
         this._noise = noise;
         if (!WaterWaveSim.supported) { this._live = false; return; }
         if (time === this._time && this._live) return;
@@ -107,7 +128,8 @@ export class WaterWaveSim {
             const i = w.info;
             return i.originX < ox + side && i.originX + i.nx * i.cell > ox && i.originZ < oz + side && i.originZ + i.nz * i.cell > oz;
         });
-        if (!inReach.length) { this._live = false; this._hasState = false; this._flow?.stop(); return; }
+        const sea = !!frame.sea;
+        if (!inReach.length && !sea) { this._live = false; this._hasState = false; this._flow?.stop(); return; }
         // A jump (a new scene, a camera cut, the clock set back) starts the water level. A long frame does
         // not: it is simply not caught up with, and the waves carry on from where they were.
         if (!(elapsed >= 0) || Math.abs(ox - this._origin[0]) > side / 2 || Math.abs(oz - this._origin[1]) > side / 2) {
@@ -118,13 +140,20 @@ export class WaterWaveSim {
         }
         this._origin[0] = ox; this._origin[1] = oz;
         this._packObstacles(obstacles, ox + side / 2, oz + side / 2);
+        this._packBodies(frame.bodies ?? [], ox + side / 2, oz + side / 2);
+        this._river = !!frame.river;
         this._ensureTargets();
-        this._fieldPass(inReach);
+        this._fieldPass(inReach, sea);
         const ref = this._field!.colors[0];
-        const flow = LocalFlowSim.supported ? (this._flow ??= new LocalFlowSim(this._passes, this._fullscreen)) : null;
+        // The bulk flow is simulated where a river asks for its waves; still water has no current to simulate.
+        // Its grids go in, not the sea's shore (the sea is still, and keeps its own level).
+        const grids = inReach.filter(w => !w.shore);
+        const flow = this._river && grids.length && LocalFlowSim.supported ? (this._flow ??= new LocalFlowSim(this._passes, this._fullscreen)) : null;
         if (flow) {
-            flow.prepare(ox, oz, side, FIELD_SIZE, inReach, this._obstacles, this._obstacleCount,
-                datumOf(inReach, ox + side / 2, oz + side / 2, side), ref, !this._hasState);
+            flow.prepare(ox, oz, side, FIELD_SIZE, grids, this._obstacles, this._obstacleCount,
+                datumOf(grids, ox + side / 2, oz + side / 2, side), ref, !this._hasState);
+        } else {
+            this._flow?.stop();
         }
         let steps = Math.floor(this._owed / WAVE_SIM_DT + 1e-6);
         // Even a frame too short to owe a step leaves a state to draw.
@@ -154,17 +183,26 @@ export class WaterWaveSim {
         this._kernels = [waveSimKernel(WAVE_SIM_DEPTHS[0]), waveSimKernel(WAVE_SIM_DEPTHS[1])];
     }
 
-    /** What the waves ride on: each water in reach writes its current, its depth and its foam. */
-    private _fieldPass(waters: readonly WaveSimWater[]): void {
+    /**
+     * What the waves ride on: each water in reach writes its current, its depth and its foam. Over an endless
+     * sea the window starts as open, still, deep water, and its shore grid (first) writes the land dry.
+     */
+    private _fieldPass(waters: readonly WaveSimWater[], sea: boolean): void {
         const sm = this._sm;
         const target = this._field!;
-        waters.forEach((w, i) => {
-            const pass = this._passes.beginFullscreenPass(target.renderTarget, 'water.waves.field', i === 0, [0, 0, 0, 0], false);
+        if (sea) {
+            const pass = this._passes.beginFullscreenPass(target.renderTarget, 'water.waves.sea', true, [0, 0, SEA_DEPTH, 0], false);
+            this._passes.endFullscreenPass(pass);
+        }
+        // The sea's shore first: the rivers and lakes on its land write their own water over it.
+        const ordered = [...waters.filter(w => w.shore), ...waters.filter(w => !w.shore)];
+        ordered.forEach((w, i) => {
+            const pass = this._passes.beginFullscreenPass(target.renderTarget, 'water.waves.field', i === 0 && !sea, [0, 0, 0, 0], false);
             this._fullscreen.bind(pass, 'waterWaveField', WaterWaveFieldProgram, [w.tex0, w.tex1]);
             sm.bind('waterWaveField');
             sm.setUniform('u_window', [this._origin[0], this._origin[1], WAVE_SIM_SIDE, FIELD_SIZE]);
             sm.setUniform('u_infoOrigin', [w.info.originX, w.info.originZ, w.info.cell, 0]);
-            sm.setUniform('u_infoSize', [w.info.nx, w.info.nz, 0, 0]);
+            sm.setUniform('u_infoSize', [w.info.nx, w.info.nz, w.shore ? 1 : 0, 0]);
             this._passes.drawFullscreenAndEnd(pass);
         });
     }
@@ -188,12 +226,17 @@ export class WaterWaveSim {
         sm.bind('waterWaveStep');
         sm.setUniform('u_window', window);
         sm.setUniform('u_step', [WAVE_SIM_DT, WAVE_SIM_GRAVITY / WAVE_SIM_CELL, WaterWaveSim.DAMPING, WaterWaveSim.VISCOSITY]);
-        sm.setUniform('u_force', [WaterWaveSim.BULK_FORCING, WaterWaveSim.TURBULENCE_FORCING, WaterWaveSim.FOAM_CHURN, (this._steps % 4096) * 0.37]);
+        // A river's own forcing only where one asks for its waves: without, still water and a river with its
+        // Live waves at nought carry only what moves through them.
+        const river = this._river ? 1 : 0;
+        sm.setUniform('u_force', [WaterWaveSim.BULK_FORCING * river, WaterWaveSim.TURBULENCE_FORCING * river, WaterWaveSim.FOAM_CHURN * river, (this._steps % 4096) * 0.37]);
         sm.setUniform('u_blend', [Math.tanh(BLEND_Q * WAVE_SIM_DEPTHS[0]), Math.tanh(BLEND_Q * WAVE_SIM_DEPTHS[1]), BLEND_Q, 0]);
         sm.setUniform('u_kernelShallow', WaterWaveSim._packed(shallow, this._kernelA));
         sm.setUniform('u_kernelDeep', WaterWaveSim._packed(deep, this._kernelB));
         sm.setUniform('u_obstacleCount', [this._obstacleCount, 0, 0, 0]);
         if (this._obstacleCount) sm.setUniform('u_obstacles', this._obstacles.subarray(0, this._obstacleCount * 8));
+        sm.setUniform('u_bodyCount', [this._bodyCount, WaterWaveSim.STILL_DAMPING, 0, 0]);
+        if (this._bodyCount) sm.setUniform('u_bodies', this._bodies.subarray(0, this._bodyCount * 8));
         this._passes.drawFullscreenAndEnd(pass);
 
         this._read = 1 - this._read;
@@ -205,10 +248,13 @@ export class WaterWaveSim {
     /** Steps taken in one frame at most: a frame that took longer than this is not caught up with. */
     public static MAX_STEPS = 2;
     /**
-     * Per second: how fast a wave nothing feeds dies down. A river's surface forgets in a second or two, so
-     * its waves stay near what raised them: rough over the riffles, glassy in the runs between.
+     * Per second: how fast a wave nothing feeds dies down on running water. A river's surface forgets in a
+     * second or two, so its waves stay near what raised them: rough over the riffles, glassy in the runs
+     * between. Still water forgets slowly (STILL_DAMPING): a stone's rings cross a pond. The step blends the
+     * two by the water's speed (water/waveSim.ts waveDamping).
      */
-    public static DAMPING = 0.6;
+    public static DAMPING = WAVE_DAMPING_RUNNING;
+    public static STILL_DAMPING = WAVE_DAMPING_STILL;
     /** The share of each texel's rate shared with its neighbours a step: what the grid cannot carry dies out. */
     public static VISCOSITY = 0.04;
     /** How hard the bulk flow's turns, and the stones under it, raise waves (1: the full vertical acceleration its surface asks for). */
@@ -223,6 +269,23 @@ export class WaterWaveSim {
 
     private readonly _obstacles = new Float32Array(OBSTACLE_MAX * 8);
     private _obstacleCount = 0;
+    private readonly _bodies = new Float32Array(WAVE_SIM_BODY_MAX * 8);
+    private _bodyCount = 0;
+    /** Whether a river asks for its own waves this frame (see WaveSimFrame.river). */
+    private _river = true;
+
+    /** The bodies crossing the surface in the window round (`cx`, `cz`), the nearest first, packed for the step. */
+    private _packBodies(list: readonly WaveSimBody[], cx: number, cz: number): void {
+        const half = WAVE_SIM_SIDE / 2;
+        const near = list.filter(b => b.share > 0 && Math.abs(b.x - cx) < half + 3 * b.radius && Math.abs(b.z - cz) < half + 3 * b.radius);
+        if (near.length > WAVE_SIM_BODY_MAX) near.sort((p, q) => Math.hypot(p.x - cx, p.z - cz) - Math.hypot(q.x - cx, q.z - cz));
+        const out = this._bodies;
+        const count = this._bodyCount = Math.min(near.length, WAVE_SIM_BODY_MAX);
+        for (let k = 0; k < count; k++) {
+            const b = near[k];
+            out.set([b.x, b.z, b.radius, b.share, b.vx, b.vy, b.vz, 0], k * 8);
+        }
+    }
 
     /** The obstacles that reach into the window round (`cx`, `cz`), the nearest first, packed for the step. */
     private _packObstacles(list: readonly WaterObstacleFootprint[], cx: number, cz: number): void {

@@ -376,7 +376,7 @@ export class Renderer {
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._projection, this._temporal, this._subsystems)
+        }, this._view, this._targets, this._passes, this._bindGroups, this._projection, this._temporal, this._subsystems)
             ?? createNullParticles();
         this._fog = featureFactory<(...a: ConstructorParameters<typeof VolumetricFogPasses>) => VolumetricFogPasses>(RENDER_FACTORY.volumetricFog)?.({
             get renderHeight() { return renderer._renderHeight; },

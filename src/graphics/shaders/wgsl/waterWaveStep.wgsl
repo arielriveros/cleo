@@ -30,6 +30,12 @@
 //    waves at the waves' own finer grid, as an obstruction is in iWave: nothing inside, so a wave that reaches
 //    one is thrown back; the water boils in the lee, and foam is torn from their sides and carried off in
 //    two streaks.
+//  - WHAT MOVES THROUGH IT: the bodies crossing the surface in the window (u_bodies: core/scene/nodes/
+//    waterVolumeNode.ts disturbances, on the layers the water reacts to), each a smooth bump its waterline
+//    wide, pressed down as it sinks in and raised as it rises out, raised ahead of it and drawn down behind as
+//    it moves through, against the water's own motion (water/waveSim.ts bodyWavePush, the CPU twin). The
+//    operator makes the ring of a stone, the bow wave and the V of a wake of it; the current carries them off.
+//    A body that comes in fast, or ploughs through, churns a little foam up.
 //
 // And what the waves make: FOAM, where they steepen past what a wave can hold (they break, and are damped
 // for it), added to what the rocks and the turbulence churn up where the bake found the water white. Carried
@@ -60,6 +66,10 @@ struct StepUniforms {
     // Two per obstacle: its centre x, z and long axis x, z; half its length and width, its rounding (m), and
     // metres its top lies under the surface (0: it stands out of the water).
     u_obstacles: array<vec4<f32>, 64>,
+    u_bodyCount: vec4<f32>,      // bodies in u_bodies, still water's damping (1/s), -, -
+    // Two per body: its centre x, z, waterline radius (m) and how much of it the surface cuts (0..1); its
+    // velocity against the water x, y (up), z (m/s), -.
+    u_bodies: array<vec4<f32>, 64>,
 };
 @group(1) @binding(0) var<uniform> u_ws: StepUniforms;
 
@@ -81,6 +91,15 @@ const BREAKING: f32 = 0.32;
 const OBSTACLE_MAX: i32 = 32;
 /** Per second: the foam torn from an obstacle's sides and lee in fast water. */
 const OBSTACLE_FOAM: f32 = 12.0;
+/** Bodies in u_bodies at most (water/waveSim.ts WAVE_SIM_BODY_MAX). */
+const BODY_MAX: i32 = 32;
+/** water/waveSim.ts BODY_PUSH_VERTICAL, BODY_PUSH_HORIZONTAL, BODY_SPEED_CAP, BODY_REACH. */
+const BODY_PUSH_VERTICAL: f32 = 1.6;
+const BODY_PUSH_HORIZONTAL: f32 = 1.5;
+const BODY_SPEED_CAP: f32 = 6.0;
+const BODY_REACH: f32 = 3.0;
+/** Per second, per m/s past what churns none: the foam a body throws up coming in fast or ploughing through. */
+const BODY_FOAM: f32 = 1.0;
 
 fn hash12(p: vec2<f32>) -> f32 {
     var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
@@ -190,6 +209,23 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
     stir = min(stir, 1.5);
+    // What moves through the water: pushed under each body, against the water's own motion.
+    var thrown = 0.0;
+    let bodies = min(i32(u_ws.u_bodyCount.x), BODY_MAX);
+    for (var k = 0; k < bodies; k++) {
+        let b0 = u_ws.u_bodies[2 * k];
+        let b1 = u_ws.u_bodies[2 * k + 1];
+        let wide = max(b0.z, 1.5 * cell);
+        let rel = (xz - b0.xy) / wide;
+        let d2 = dot(rel, rel);
+        if (d2 > BODY_REACH * BODY_REACH || b0.w <= 0.0) { continue; }
+        let profile = exp(-2.0 * d2) * b0.w;
+        let vy = clamp(b1.y, -BODY_SPEED_CAP, BODY_SPEED_CAP);
+        let planar = length(b1.xz);
+        let slow = select(1.0, BODY_SPEED_CAP / planar, planar > BODY_SPEED_CAP);
+        push += profile * (BODY_PUSH_VERTICAL * vy + BODY_PUSH_HORIZONTAL * dot(rel, b1.xz) * slow);
+        thrown += profile * (max(abs(vy) - 1.0, 0.0) + max(planar * slow - 1.5, 0.0));
+    }
     // Turbulence, carried with the water: renewed a little every step with noise as broad as a boil.
     let seed = u_ws.u_force.w;
     let shift = vec2<f32>(hash12(vec2<f32>(seed, 1.7)), hash12(vec2<f32>(seed, 9.2)));
@@ -223,7 +259,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let border = min(min(c.x, c.y), min(n - 1.0 - c.x, n - 1.0 - c.y));
     let sponge = 1.0 - smoothstep(4.0, 24.0, border);
     let shallow = 1.0 - smoothstep(0.03, 0.2, depth);
-    let damping = u_ws.u_step.z + 12.0 * breaking + 6.0 * sponge + 4.0 * shallow;
+    // Running water forgets its waves in a second or two; still water carries a stone's rings for many
+    // (water/waveSim.ts waveDamping).
+    let base = mix(u_ws.u_bodyCount.y, u_ws.u_step.z, smoothstep(0.1, 0.6, sqrt(speed2)));
+    let damping = base + 12.0 * breaking + 6.0 * sponge + 4.0 * shallow;
     var rate = s.y + dt * (-u_ws.u_step.y * conv + push);
     // A little of the rate is shared with its neighbours: what the grid cannot carry as a wave dies out.
     rate = mix(rate, 0.25 * (l.y + r.y + d.y + u.y), u_ws.u_step.w);
@@ -239,7 +278,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // moment); the turbulence's gusts make the rest.
     let running = smoothstep(0.2, 0.6, sqrt(speed2));
     let churn = u_ws.u_force.z * field.w * (0.05 + STONE_FOAM * max(stone, 0.0) + 0.5 * max(turbulence, 0.0) * bed) * running
-              + OBSTACLE_FOAM * shed * smoothstep(0.3, 1.2, sqrt(speed2));
+              + OBSTACLE_FOAM * shed * smoothstep(0.3, 1.2, sqrt(speed2))
+              + BODY_FOAM * thrown;
     let foam = clamp(s.w * exp(-dt / FOAM_LIFE) + dt * (churn + 1.5 * breaking), 0.0, 1.5);
     return vec4<f32>(height, rate, turbulence, foam);
 }

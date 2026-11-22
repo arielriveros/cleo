@@ -50,6 +50,25 @@ export const LOCAL_FLOW_EDGE_NUDGE = 0.1;
 export const LOCAL_FLOW_SPONGE = 10;
 /** The drag code of a solid cell (anything else is a drag, 1/m). */
 export const LOCAL_FLOW_SOLID = -1;
+
+/**
+ * The datum a water's ground pass measures its heights from (waterFlowGround.wgsl `u_infoSize.z`): the window's
+ * datum (a world height) on the base its grid's heights reach the GPU over, its lowest surface (render/water.ts
+ * uploads them less `minY`). Every water in the window then stands on the same datum, whatever its own base.
+ */
+export function localFlowDatum(datum: number, info: { minY: number }): number {
+    return datum - info.minY;
+}
+
+/**
+ * The surface the local flow is drawn toward at a point where the drawn grid reads `surface` over `bed`, `shore`
+ * metres inside the system's water (waterFlowGround.wgsl): the surface where there is water, and under the bed
+ * where there is none. The drawn surface is carried on under the banks (water/waterEdges.ts), and a flow drawn
+ * toward it there would pour water over dry ground.
+ */
+export function localFlowReference(surface: number, bed: number, shore: number): number {
+    return shore <= 0 ? Math.min(surface, bed - 0.01) : surface;
+}
 /** Manning's n from which a bed counts as a natural one (shallowWater.ts NATURAL_BED). */
 export const LOCAL_FLOW_NATURAL_BED = 0.025;
 
@@ -253,7 +272,9 @@ const THIN = 0.01;
  *  - SHEAR: the water turning on itself (its vorticity) hard as it tears past an obstacle (a bank's gentler
  *    shear makes little), in water faster than a metre a second;
  *  - a DRAG cell: water tearing past something narrower than a cell.
- * A solid cell's lift is its wet neighbours' (the surface does not cliff inside a post).
+ * A solid cell's lift is its wet neighbours' (the surface does not cliff inside a post), and so is a dry
+ * one's beside the water: the drawn surface runs on a little past the water's last cell, under the bank, and
+ * a pile against the bank would otherwise end in a ledge there.
  */
 export function localFlowOutput(s: LocalFlowState, g: LocalFlowGround): LocalFlowOutput {
     const n = s.n, m = n * n, cell = g.cell;
@@ -271,7 +292,12 @@ export function localFlowOutput(s: LocalFlowState, g: LocalFlowGround): LocalFlo
             out.lift[c] = count ? sum / count : 0;
             continue;
         }
-        if (!wet(c)) continue;
+        if (!wet(c)) {
+            let sum = 0, count = 0;
+            for (const q of [at(i - 1, j), at(i + 1, j), at(i, j - 1), at(i, j + 1)]) if (wet(q)) { sum += liftOf(q); count++; }
+            if (count) out.lift[c] = sum / count;
+            continue;
+        }
         const u = cu(i, j), w = cw(i, j);
         out.lift[c] = liftOf(c);
         out.u[c] = u; out.w[c] = w;

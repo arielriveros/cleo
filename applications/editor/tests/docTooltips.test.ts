@@ -123,6 +123,7 @@ describe('parsing the docs', () => {
     expect(normalizeKey('Slots (3)')).toBe('slots');
     expect(looseKey('Passes (CPU / GPU)')).toBe('passes');
     expect(plainText('**A** [link](x.md#y) `code` *(unreleased)*')).toBe('A link code');
+    expect(plainText('**Water volumes** *(experimental)*')).toBe('Water volumes');
   });
 
   it('narrows by scope: a section first, fields only inside a heading region', () => {

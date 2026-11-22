@@ -20,7 +20,9 @@ struct BackdropUniforms {
     /** x: opacity; y: 1 to mirror left to right; zw unused. */
     u_backdropParams: vec4<f32>,
 };
-@group(1) @binding(0) var<uniform> u_backdrop: BackdropUniforms;
+// Not `u_backdrop`: on WebGL2 the texture above becomes a sampler of that name, and a block of it too is a
+// link error ("redefinition of an interface block member name") that stopped every program building.
+@group(1) @binding(0) var<uniform> u_backdropBlock: BackdropUniforms;
 
 struct BackdropOut {
     @location(0) color: vec4<f32>,
@@ -39,17 +41,17 @@ fn fs_main(in: VertexOutput) -> BackdropOut {
     out.depth = 1.0;
     // The screen quad's uv has its origin bottom-left; the rectangle is measured from the top-left.
     let p = vec2<f32>(in.uv.x, 1.0 - in.uv.y);
-    let r = u_backdrop.u_backdropRect;
+    let r = u_backdropBlock.u_backdropRect;
     var t = (p - r.xy) / max(r.zw - r.xy, vec2<f32>(1e-6));
     if (t.x < 0.0 || t.y < 0.0 || t.x > 1.0 || t.y > 1.0) {
         out.color = vec4<f32>(0.0);
         return out;
     }
-    if (u_backdrop.u_backdropParams.y > 0.5) { t.x = 1.0 - t.x; }
+    if (u_backdropBlock.u_backdropParams.y > 0.5) { t.x = 1.0 - t.x; }
     // Uploaded the way every image is, which samples with v = 0 at the picture's top: the top-left measure
     // is the texture coordinate as it stands. Sampled at level 0 explicitly: the branch above is not
     // uniform control flow, and the picture has no mips.
     let c = textureSampleLevel(u_backdrop_texture, u_backdrop_sampler, t, 0.0);
-    out.color = vec4<f32>(srgbToLinear(c.rgb), clamp(u_backdrop.u_backdropParams.x, 0.0, 1.0));
+    out.color = vec4<f32>(srgbToLinear(c.rgb), clamp(u_backdropBlock.u_backdropParams.x, 0.0, 1.0));
     return out;
 }

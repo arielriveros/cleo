@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import path from 'path';
-import { FEATURES, FEATURE_PRESETS } from 'cleo';
+import { EXPERIMENTAL_NOTE, FEATURES, FEATURE_PRESETS, enabledFeatures, experimentalFeatureOfNodeType, experimentalNoteOf, featureById, isExperimentalFeature } from 'cleo';
 import { parseProjectSettings, DEFAULT_PROJECT_SETTINGS, LEGACY_ADDONS, PROJECT_SETTINGS_VERSION } from '../src/features/options/projectSettings';
-import { FEATURE_ADD_ITEMS, FEATURE_NEW_ASSETS, FEATURE_MODES, featureOfAddItem, projectFeatures } from '../src/features/projectFeatures/featureUi';
+import { FEATURE_ADD_ITEMS, FEATURE_NEW_ASSETS, FEATURE_MODES, experimentalFeatureOfAddItem, featureOfAddItem, projectFeatures } from '../src/features/projectFeatures/featureUi';
 import { ADD_ITEMS } from '../src/features/sceneInspector/addCatalog';
 import { toggleFeature, presetChoice } from '../src/features/projectFeatures/FeaturePicker';
 import { detectedDisabled } from '../src/features/projectFeatures/detect';
@@ -68,6 +68,33 @@ describe('where a feature shows in the editor', () => {
     expect(f.isOn(undefined)).toBe(true);
     expect(f.offFeatureOfNodeType('particleSystem')?.id).toBe('particles');
     expect(f.offFeatureOfNodeType('model')).toBeUndefined();
+  });
+});
+
+describe('experimental features', () => {
+  it('flags only water, as a label: it stays on by default and keeps its Add item', () => {
+    expect(FEATURES.filter(f => f.experimental).map(f => f.id)).toEqual(['water']);
+    expect(enabledFeatures([]).has('water')).toBe(true);
+    expect(experimentalFeatureOfAddItem('waterVolume')?.id).toBe('water');
+    expect(experimentalFeatureOfAddItem('cube')).toBeUndefined();
+    expect(experimentalFeatureOfAddItem('particleSystem')).toBeUndefined();
+    expect(experimentalFeatureOfNodeType('waterVolume')?.id).toBe('water');
+    expect(experimentalFeatureOfNodeType('particleSystem')).toBeUndefined();
+    expect(isExperimentalFeature('water')).toBe(true);
+    expect(experimentalNoteOf(featureById('water')!)).toMatch(/bake may need baking again/);
+    // A feature that says nothing of its own gets the generic note.
+    expect(experimentalNoteOf({ id: 'x', label: 'X', description: '', group: 'world', experimental: true })).toBe(EXPERIMENTAL_NOTE);
+  });
+
+  it('says so in every doc a user reads it in', () => {
+    const read = (p: string) => readFileSync(path.join(DOCS, p), 'utf8');
+    for (const f of FEATURES.filter(f => f.experimental)) {
+      const line = read('editor/project-features.md').split('\n').find(l => l.includes(`**${f.label}**`));
+      expect(line, f.label).toMatch(/Experimental/);
+    }
+    expect(read('editor/water.md')).toContain('> **Experimental.**');
+    const ref = read('reference/node-types.md').split('\n').find(l => l.startsWith('### WaterVolumeNode'));
+    expect(ref).toContain('*(experimental)*');
   });
 });
 

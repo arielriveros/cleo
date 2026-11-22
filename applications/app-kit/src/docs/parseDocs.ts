@@ -69,7 +69,8 @@ export interface DocIndex {
 // ---------------------------------------------------------------------------------------------------
 // Text helpers
 
-const UNRELEASED = /\*?\(unreleased[^)]*\)\*?/gi;
+// A status marker a doc line carries: `*(unreleased)*`, `*(experimental)*`. Left out of the plain text a lookup key is made of.
+const UNRELEASED = /\*?\((?:unreleased|experimental)[^)]*\)\*?/gi;
 
 /** Inline markdown -> plain text (links keep their text, emphasis and code spans their content). */
 export function plainText(md: string): string {

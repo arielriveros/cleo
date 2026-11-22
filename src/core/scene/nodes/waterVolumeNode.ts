@@ -2,17 +2,29 @@ import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { finiteOr } from "../../math";
 import { Logger } from "../../logger";
-import { wavesForCurrent, wavesForWind, type WaterWave } from "../../../physics/water/waves";
+import { waveReach, wavesForCurrent, wavesForWind, type WaterWave } from "../../../physics/water/waves";
 import { windFieldClock, WIND_REFERENCE_SPEED } from "../../wind/windField";
-/** What the water reads back from a body it buoyed: where it is and how it moves. */
-type FloatingBody = { position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number } };
+import { waterTime } from "../../../physics/water/waterClock";
+import { ALL_LAYERS, LAYER, isAllLayers, storedMask } from "../../../physics/collisionLayers";
+import type { PhysicsBody } from "../../../physics/physicsBody";
+/** What the water reads back from a body it buoyed: where it is and how it moves, and its collision layer. */
+type FloatingBody = { position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number }; collisionFilterGroup?: number };
 import { Node } from "./node";
+import { authoring } from "../../eventBus";
 import { WaterMaterial } from "../../../graphics/material";
 import { WATER_VOLUME_PRESETS, type WaterVolumePreset } from "./waterVolumePresets";
 import { applyPreset } from "../../presets";
 import type { BuoyancyVolume } from "../../../physics/buoyancy";
 import { buoyancyVolumeFromSpec, waterSpecColumn, type WaterFlowGrid, type WaterShoreGrid, type WaterSpec } from "../../../physics/waterSurface";
-import { buildOceanShoreInfo, type WaterInfo } from "../../../water/waterInfo";
+import { buildOceanShoreInfo, buildWaterInfo, type WaterInfo } from "../../../water/waterInfo";
+import {
+    clipMargin, clipWaterToShape, refineWaterEdges, waterJoinField, EDGE_APRON_CELLS, EDGE_BAND_CELLS,
+    type JoinSample, type WaterEdges, type WaterJoinField,
+} from "../../../water/waterEdges";
+import { obstacleSpan, sceneObstacles, type WaterObstacle } from "../../../water/bake/obstacles";
+import { shapesSignedEdge, YIELD_BELOW } from "../../../physics/water/waterColumn";
+import { JOIN_CHANNELS, JOIN_FAR, joinLength, sampleChannel, type JoinGrid, type ScalarField, type WaterJoinSpec, type WaterUnderRiver } from "../../../physics/water/joins";
+import { surfTravelTime } from "../../../physics/water/surf";
 import { sceneGround } from "../../../water/ground";
 import { waterGroupSignature } from "../../../water/bake/bakeNode";
 import { GiBakeRegistry } from "../../../graphics/render/gi/giBakeRegistry";
@@ -93,6 +105,18 @@ export interface WaterVolumeOptions {
     /** Whether character bodies are buoyed too. Off: a character capsule is mostly air and would launch. */
     affectCharacters?: boolean;
     /**
+     * The collision layers the water reacts to (a mask; -1, the default, is every layer): bodies on them ripple
+     * its surface and splash it, static colliders on them shape its flow (the live waves and the flow bake).
+     * Buoyancy does not ask: whatever floats, floats.
+     */
+    reactsTo?: number;
+    /**
+     * How much spray the flowing water throws (0..2, default 1): droplets, mist and foam where it runs fast and
+     * loses its energy (rapids), off the foot of a fall, up the face of what stands in a fast current, and off
+     * bodies its current hits (water/spray/). 0 throws none.
+     */
+    spray?: number;
+    /**
      * The model node showing the water. If its CustomMaterial declares vec4 uniforms `ripple0`..`ripple11`
      * (`[x, z, startTime, strength]`, startTime on the u_time clock), they are filled with ripples from
      * whatever moves through the water. A material without them is left alone.
@@ -120,8 +144,120 @@ const WAKE_MIN_SPEED = 0.4;
 const ENTRY_SPLASH_SPEED = 1.2;
 /** Global cap on splashes per second, so a pile of debris landing at once cannot flood the scene. */
 const MAX_SPLASHES_PER_SECOND = 8;
+/** Metres a body's waterline radius is taken as, at least and at most. */
+const DISTURBANCE_MIN_RADIUS = 0.12;
+const DISTURBANCE_MAX_RADIUS = 4;
+/** Metres above the surface a body's bottom may be and still touch it (a hull's skin, a foot's sole). */
+const DISTURBANCE_CLEARANCE = 0.05;
+/** m/s past which a static body's move between two updates is a jump (a pooled collider placed anew), not a motion. */
+const DISTURBANCE_TELEPORT_SPEED = 40;
+/** Milliseconds a node keeps gathering what crosses its surface after its list was last read (by a renderer). */
+const DISTURBANCE_WANTED_MS = 1000;
+
+/**
+ * Something crossing the water's surface this frame (WaterVolumeNode.disturbances): what the live waves round
+ * the camera are raised by (render/waterWaves.ts, water/waveSim.ts bodyWavePush).
+ */
+export interface WaterDisturbance {
+    /** World x and z of its centre (m). */
+    x: number; z: number;
+    /** Its waterline's radius (m): the disc of its footprint's area. */
+    radius: number;
+    /** 0..1: how much of it the surface cuts (1 while it spans the surface, less as it sinks under or lifts clear). */
+    share: number;
+    /** Its velocity against the water's own there (m/s): what it pushes the water with. */
+    vx: number; vy: number; vz: number;
+}
 
 interface SourceState { inWater: boolean; nextWake: number; nextSplash: number; lastVy: number; }
+
+/** A Water node's bake as drawn: its grid clipped to the water's shape, and the clip line per cell. */
+interface ClippedBake {
+    key: string;
+    info: WaterInfo;
+    clip: Float32Array;
+    signature: string;
+    /** What the clip was made against: the water's body and the water beside it. */
+    shapes: string;
+}
+
+/** Metres the sea under a joined river is drawn down past the river's waves: the local flow's draw-down, and a hand's breadth. */
+const JOIN_UNDER_LIFT = 0.8 + YIELD_BELOW;
+
+/** A river's mouths (WaterVolumeNode.waterJoin): its join field and, per slot, the water joined and the band's length. */
+export interface DrawnJoin {
+    key: string;
+    field: WaterJoinField;
+    targets: { node: WaterVolumeNode; length: number }[];
+}
+
+/** Whether a water's drawn grid `info` has its own water at world (x, z) (its nearest cell is wet). */
+function drawsAt(info: WaterInfo, x: number, z: number): boolean {
+    const ix = Math.round((x - info.originX) / info.cell), iz = Math.round((z - info.originZ) / info.cell);
+    if (ix < 0 || iz < 0 || ix >= info.nx || iz >= info.nz) return false;
+    return info.info1[(iz * info.nx + ix) * 4 + 3] > 0.5;
+}
+
+/**
+ * The water `node` draws at world (x, z), from what it is drawn with (`drawn`), as its surface reads it there
+ * (water.wgsl): its resting surface, its shore distance, an endless sea's depth over its beach and its surf's
+ * travel-time gradient, any other water's current.
+ */
+function targetAt(node: WaterVolumeNode, drawn: DrawnWater | null, x: number, z: number, out: JoinSample): void {
+    const r = node.resolved()!;
+    out.ux = 0; out.uz = 0; out.edge = JOIN_FAR; out.depth = JOIN_FAR; out.rest = r.level;
+    if (!drawn) return;
+    const g = drawn.info;
+    const ch = (data: ArrayLike<number>, stride: number, c: number, px: number, pz: number) =>
+        sampleChannel(data, stride, c, g.originX, g.originZ, g.cell, g.nx, g.nz, px, pz);
+    if (r.type === 'ocean' && r.endless) {
+        // Its shore grid where it covers the point (water.wgsl: past it the open sea), its gradient clamped.
+        const fx = (x - g.originX) / g.cell + 0.5, fz = (z - g.originZ) / g.cell + 0.5;
+        if (fx >= 0 && fz >= 0 && fx <= g.nx && fz <= g.nz) {
+            out.edge = ch(g.info0, 4, 3, x, z);
+            out.depth = Math.max(0, r.level - ch(g.info1, 4, 2, x, z));
+        }
+        const travel = (px: number, pz: number) => surfTravelTime(ch(g.info0, 4, 3, px, pz), r.level - ch(g.info1, 4, 2, px, pz));
+        const d = g.cell;
+        out.ux = (travel(x + d, z) - travel(x - d, z)) / (2 * d);
+        out.uz = (travel(x, z + d) - travel(x, z - d)) / (2 * d);
+        return;
+    }
+    const e = drawn.edges;
+    out.rest = e ? ch(e.surface, 1, 0, x, z) : ch(g.info0, 4, 0, x, z);
+    out.edge = e ? ch(e.shore, 1, 0, x, z) : ch(g.info0, 4, 3, x, z);
+    out.ux = ch(g.info0, 4, 1, x, z); out.uz = ch(g.info0, 4, 2, x, z);
+}
+
+/** A join field cropped to its bands, three cells round them (past them nothing is joined: the border holds that). */
+function cropJoin(field: WaterJoinField): JoinGrid | null {
+    let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity;
+    for (const b of field.bounds) if (b) { bx0 = Math.min(bx0, b[0]); bz0 = Math.min(bz0, b[1]); bx1 = Math.max(bx1, b[2]); bz1 = Math.max(bz1, b[3]); }
+    if (!Number.isFinite(bx0)) return null;
+    const c = field.cell, pad = 3;
+    const x0 = Math.max(0, Math.round((bx0 - field.originX) / c) - pad), x1 = Math.min(field.nx - 1, Math.round((bx1 - field.originX) / c) + pad);
+    const z0 = Math.max(0, Math.round((bz0 - field.originZ) / c) - pad), z1 = Math.min(field.nz - 1, Math.round((bz1 - field.originZ) / c) + pad);
+    const nx = x1 - x0 + 1, nz = z1 - z0 + 1;
+    if (nx < 2 || nz < 2) return null;
+    const C = JOIN_CHANNELS;
+    const data = new Float32Array(nx * nz * C);
+    for (let z = 0; z < nz; z++) data.set(field.data.subarray(((z + z0) * field.nx + x0) * C, ((z + z0) * field.nx + x1 + 1) * C), z * nx * C);
+    return { originX: field.originX + x0 * c, originZ: field.originZ + z0 * c, cell: c, nx, nz, data };
+}
+
+/** Milliseconds an unbaked grid stands while its water is being edited before it is built again. */
+const DRAWN_REBUILD_MS = 200;
+
+/**
+ * What a Water node is drawn from (WaterVolumeNode.drawnWater): its grid, where on it the water ends (none for
+ * an endless ocean's shore grid, whose waterline is the landscape's), and whether it is a bake's.
+ */
+export interface DrawnWater {
+    key: string;
+    info: WaterInfo;
+    edges: WaterEdges | null;
+    baked: boolean;
+}
 
 /** Water nodes being resolved or keyed right now: a cycle of rivers stops at the node it started from. */
 const RESOLVING = new Set<WaterVolumeNode>();
@@ -158,6 +294,8 @@ export class WaterVolumeNode extends Node {
     private _bakeId: string | null;
     private _bedRoughness: number;
     private _affectCharacters: boolean;
+    private _reactsTo: number;
+    private _spray: number;
     private _surfaceNodeId: string | null;
     private _splashTemplate: string;
     private _wadeSplashTemplate: string;
@@ -179,6 +317,10 @@ export class WaterVolumeNode extends Node {
     private _splashBudget = MAX_SPLASHES_PER_SECOND;
     /** Templates that failed to instantiate (logged once by instantiate): not asked for again. */
     private _splashFailed = new Set<string>();
+    /** What crossed the surface at the last update (see {@link disturbances}). */
+    private _disturbances: WaterDisturbance[] = [];
+    /** Kinematic bodies' positions at the last update: their velocity is how far they moved since. */
+    private _lastPositions = new Map<object, [number, number, number]>();
 
     constructor(name: string, options: WaterVolumeOptions = {}, id: string = uuidv4()) {
         super(name, 'waterVolume', id);
@@ -203,6 +345,8 @@ export class WaterVolumeNode extends Node {
         this._bakeId = typeof options.bakeId === 'string' && options.bakeId ? options.bakeId : null;
         this._bedRoughness = Math.min(0.15, Math.max(0.005, finiteOr(options.bedRoughness, 0.03)));
         this._affectCharacters = !!options.affectCharacters;
+        this._reactsTo = storedMask(Math.trunc(finiteOr(options.reactsTo, ALL_LAYERS)));
+        this._spray = Math.min(2, Math.max(0, finiteOr(options.spray, 1)));
         this._surfaceNodeId = typeof options.surfaceNodeId === 'string' && options.surfaceNodeId ? options.surfaceNodeId : null;
         this._splashTemplate = typeof options.splashTemplate === 'string' ? options.splashTemplate : '';
         this._wadeSplashTemplate = typeof options.wadeSplashTemplate === 'string' ? options.wadeSplashTemplate : '';
@@ -369,6 +513,31 @@ export class WaterVolumeNode extends Node {
     }
     public get affectCharacters(): boolean { return this._affectCharacters; }
     public set affectCharacters(v: boolean) { this._affectCharacters = !!v; this._notifyChange('component', 'affectCharacters'); }
+    /**
+     * The collision layers the water reacts to, as a mask (-1: every layer): bodies on them ripple and splash
+     * it, static colliders on them shape its flow. A bake's signature follows the colliders it keeps, so
+     * unticking a layer a collider in the water is on makes the bake stale; ticking every layer changes nothing.
+     */
+    public get reactsTo(): number { return this._reactsTo; }
+    public set reactsTo(v: number) {
+        const next = storedMask(Math.trunc(finiteOr(v, ALL_LAYERS)));
+        if (next === this._reactsTo) return;
+        this._reactsTo = next;
+        this._signature = null;
+        this._notifyChange('component', 'reactsTo');
+    }
+    /** How much spray the flowing water throws (0..2, 1 the default; see {@link WaterVolumeOptions.spray}). */
+    public get spray(): number { return this._spray; }
+    public set spray(v: number) {
+        const next = Math.min(2, Math.max(0, finiteOr(v, this._spray)));
+        if (next === this._spray) return;
+        this._spray = next;
+        this._notifyChange('component', 'spray');
+    }
+    /** Whether a body or collider on `layer` (bits) is one the water reacts to. */
+    public reactsToLayer(layer: number): boolean {
+        return isAllLayers(this._reactsTo) || (layer & this._reactsTo) !== 0;
+    }
     public get surfaceNodeId(): string | null { return this._surfaceNodeId; }
     public set surfaceNodeId(v: string | null) { this._surfaceNodeId = v || null; this._notifyChange('component', 'surfaceNodeId'); }
     public get splashTemplate(): string { return this._splashTemplate; }
@@ -552,7 +721,7 @@ export class WaterVolumeNode extends Node {
      */
     public columnAt(x: number, z: number, time?: number, out?: WaterColumn): WaterColumn | null {
         if (time === undefined) return waterColumnAt(this.resolvedShapes(), x, z, out);
-        return waterSpecColumn(this.buoyancySpec(), x, z, time, out);
+        return waterSpecColumn(this.buoyancySpec(), x, z, time, out, this._lookup);
     }
 
     /**
@@ -582,7 +751,7 @@ export class WaterVolumeNode extends Node {
 
     /** What the physics step buoys with, at physics time `time`. */
     public buoyancyVolume(time: number): BuoyancyVolume {
-        return buoyancyVolumeFromSpec(this.buoyancySpec(), time);
+        return buoyancyVolumeFromSpec(this.buoyancySpec(), time, this._lookup);
     }
 
     private _spec: { key: string; spec: WaterSpec } | null = null;
@@ -595,9 +764,13 @@ export class WaterVolumeNode extends Node {
     public buoyancySpec(): WaterSpec {
         const shore = this.oceanShoreInfo();
         const bake = this._bakeId ? `${this._bakeId}@${GiBakeRegistry.generation}` : '';
+        // Where it meets the water it joins (a river's mouths), and where rivers run into it.
+        const join = this.waterJoin();
+        const here = this._joinsHere();
         const key = [this.resolveKey(), this._density, this._linearDrag, this._angularDrag, this._affectCharacters,
             this._waveAmplitude, this._waveFrequency, this._waveSpeed, this._shoreFade, this._currents, bake,
-            shore ? this._shore!.key : '', this.flowReference(), this._flowAdvect()].join('|');
+            shore ? this._shore!.key : '', this.flowReference(), this._flowAdvect(),
+            join ? join.key : '', here.map(h => `${h.river.id}:${h.join.key}:${h.river.joinDrop()}`).join(';')].join('|');
         const waveScale = this.waveWindScale();
         if (this._spec && this._spec.key === key) { this._spec.spec.waveScale = waveScale; return this._spec.spec; }
         const box = this.worldBox();
@@ -617,7 +790,21 @@ export class WaterVolumeNode extends Node {
             flowWaves: this.flowReference(), flowAdvect: this._flowAdvect(),
             flowGrid: plainBox ? undefined : this.bakedFlowGrid() ?? undefined,
             shoreGrid: shore ? WaterVolumeNode._shoreGrid(shore) : undefined,
+            joins: join ? this._joinSpec(join) ?? undefined : undefined,
         };
+        // The sea under the rivers joined to it is drawn down (water.wgsl): physics takes it down the same.
+        const endless = shapes.length === 1 && shapes[0].type === 'ocean' && shapes[0].endless;
+        if (endless && here.length) {
+            const under: WaterUnderRiver[] = [];
+            for (const h of here) {
+                const grid = h.river._joinSpec(h.join);
+                const slot = h.join.targets.findIndex(t => t.node === this);
+                if (grid && slot >= 0) under.push({ field: grid.field, slot, length: h.join.targets[slot].length, drop: h.river.joinDrop() });
+            }
+            if (under.length) spec.underRivers = under;
+        } else if (!plainBox) {
+            spec.shoreFields = this._shoreFields(here);
+        }
         this._spec = { key, spec };
         return spec;
     }
@@ -644,6 +831,243 @@ export class WaterVolumeNode extends Node {
         this._shore = { key, info };
         return info;
     }
+
+    /**
+     * What this water is drawn from, and what physics reads where the two must agree (a river's mouth): its
+     * grid (water/waterInfo.ts) and, for a lake, pool or river, where on it the water really ends
+     * (water/waterEdges.ts). A current bake's grid when it has one, an endless ocean's shore grid, else the grid
+     * built from its body over the ground, which the water it gives way to (`handOver`) and the rivers beside
+     * it shape. Rebuilt when any of that changes, an unbaked grid at most five times a second while it is
+     * being edited (a gizmo drag). `key` says which build it is: equal keys, the same data. Null with nothing
+     * to draw.
+     */
+    public drawnWater(): DrawnWater | null {
+        const body = this.resolved();
+        if (!body) { this._drawn = null; return null; }
+        const ground = this._scene ? sceneGround(this._scene) : { sample: null, key: '', bounds: null };
+        const baked = this._bakeId ? this._clippedBake() : null;
+        const endless = body.type === 'ocean' && body.endless;
+        const key = baked ? `bake:${baked.key}`
+            : endless ? `shore:${ground.key}|${body.level}`
+            : `${this.resolveKey()}|${ground.key}|${this.besideKey()}`;
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const last = this._drawn;
+        if (last && last.key === key) return last.drawn;
+        // Being edited: the last unbaked grid stands a little longer, rather than rebuilding on every move.
+        if (!baked && !endless && last && last.drawn && !last.drawn.baked && last.drawn.info.source === 'analytic'
+            && now - last.at < DRAWN_REBUILD_MS) return last.drawn;
+        const info = baked ? baked.info
+            : endless ? this.oceanShoreInfo()
+            : buildWaterInfo(this.resolvedShapes(), ground.sample, { handOver: this.handOver(), beside: this.beside() });
+        if (!info) { this._drawn = { key, at: now, drawn: null }; return null; }
+        // A bake's edges are kept by what it is: any GI bake anywhere moves the registry on, and a grid a million
+        // cells big is not refined again for that.
+        const bakeKey = baked ? `${this._bakeId}|${baked.signature}|${baked.shapes}|${info.nx}x${info.nz}` : null;
+        const edges = info.source === 'shore' ? null
+            : bakeKey && this._bakedEdges && this._bakedEdges.key === bakeKey ? this._bakedEdges.edges
+            : this._edgesOf(info, !!baked, ground.sample, baked ? baked.clip : null);
+        if (bakeKey && edges) this._bakedEdges = { key: bakeKey, edges };
+        const drawn: DrawnWater = { key, info, edges, baked: !!baked };
+        this._drawn = { key, at: now, drawn };
+        return drawn;
+    }
+    private _drawn: { key: string; at: number; drawn: DrawnWater | null } | null = null;
+    private _bakedEdges: { key: string; edges: WaterEdges } | null = null;
+
+    /** This node's bake decoded, once per registry change (null when it has none, or it is not in the registry). */
+    private _decodedBake(): ReturnType<typeof decodeWaterBake> {
+        const id = this._bakeId;
+        if (!id) return null;
+        const cached = this._decoded;
+        if (cached && cached.id === id && cached.generation === GiBakeRegistry.generation) return cached.decoded;
+        const bytes = GiBakeRegistry.get(id);
+        const decoded = bytes ? decodeWaterBake(bytes, id) : null;
+        this._decoded = { id, generation: GiBakeRegistry.generation, decoded };
+        return decoded;
+    }
+    private _decoded: { id: string; generation: number; decoded: ReturnType<typeof decodeWaterBake> } | null = null;
+
+    /**
+     * This node's current bake as it is drawn and floated on: decoded, and on a copy clipped to the water's drawn
+     * shape and a margin (water/waterEdges.ts clipWaterToShape): the simulation ran over a corridor round a river
+     * and a basin round a lake, and what it left out there is not this water. The water this one joins counts as
+     * its shape too (a mouth is kept on both sides); the endless sea's held water is never cut. Once per bake and
+     * shape. Null without a current bake.
+     */
+    private _clippedBake(): ClippedBake | null {
+        const decoded = this._decodedBake();
+        if (!decoded || decoded.signature !== this.bakeSignature()) return null;
+        const shapes = `${this.resolveKey()}|${this.besideKey()}`;
+        const key = `${this._bakeId}|${GiBakeRegistry.generation}|${decoded.signature}|${shapes}`;
+        if (this._clipped && this._clipped.key === key) return this._clipped;
+        const src = decoded.info;
+        const info: WaterInfo = { ...src, info0: src.info0.slice(), info1: src.info1.slice() };
+        const own = this.resolvedShapes();
+        const joined = [...this.handOver(), ...this.beside()];
+        const sea = joined.some(r => r.type === 'ocean' && r.endless);
+        const bounded = joined.filter(r => !(r.type === 'ocean' && r.endless));
+        const margin = clipMargin(info.cell);
+        const reach = margin + (EDGE_APRON_CELLS + EDGE_BAND_CELLS + 2) * info.cell;
+        const keep = (x: number, z: number) => Math.max(own.length ? shapesSignedEdge(own, x, z, reach) : Infinity,
+            bounded.length ? shapesSignedEdge(bounded, x, z, reach) : -reach);
+        const clip = clipWaterToShape(info, keep, margin, !sea);
+        this._clipped = { key, info, clip, signature: decoded.signature, shapes };
+        return this._clipped;
+    }
+    private _clipped: ClippedBake | null = null;
+
+    /**
+     * Whether a static collider (on the layers this water reacts to) stands at world (x, z) as high as `level`:
+     * a dry pocket in the water there is the cell round a post, drawn over. Gathered once per edge refinement.
+     */
+    private _wallsOver(info: WaterInfo): (x: number, z: number, level: number) => boolean {
+        let list: WaterObstacle[] | null = null;
+        return (x, z, level) => {
+            if (!list) {
+                const h = info.cell / 2;
+                list = this._scene ? sceneObstacles((this._scene as any).nodes ?? [], [info.originX - h, info.originZ - h,
+                    info.originX + (info.nx - 0.5) * info.cell, info.originZ + (info.nz - 0.5) * info.cell], this._reactsTo) : [];
+            }
+            for (const o of list) {
+                const span = obstacleSpan(o, x, z);
+                if (span && span[0] <= level) return true;
+            }
+            return false;
+        };
+    }
+
+    /**
+     * Where the water ends on its grid `info` (water/waterEdges.ts): with the ground under it, the edge of its
+     * own body, and the edge of the water it gives way to or runs on into. A bake's members are cut from one
+     * field, so they meet between the same cells without being told where the other one is.
+     */
+    private _edgesOf(info: WaterInfo, baked: boolean, ground: ((x: number, z: number) => number | null) | null,
+                     clip: Float32Array | null = null): WaterEdges {
+        const reach = (EDGE_APRON_CELLS + EDGE_BAND_CELLS + 2) * info.cell;
+        const own = this.resolvedShapes();
+        const others = [...this.handOver(), ...this.beside()];
+        return refineWaterEdges(info, {
+            baked,
+            ground: ground ?? (() => null),
+            shapeEdge: own.length ? (x, z) => shapesSignedEdge(own, x, z, reach) : null,
+            otherEdge: !baked && others.length ? (x, z) => shapesSignedEdge(others, x, z, reach) : null,
+            clipEdge: clip,
+            walls: baked ? this._wallsOver(info) : null,
+        });
+    }
+
+    /**
+     * Where this river runs into the water it joins and that water takes over (physics/water/joins.ts): its
+     * join field over its drawn grid (water/waterEdges.ts waterJoinField) and, per slot, the water joined and
+     * the band's length. The surface draws the blend from it and physics floats on the same. Rebuilt when
+     * what this river or the water it joins is drawn from changes. Null for any other water, or where no
+     * mouth is found (a river falling into the sea off a cliff).
+     */
+    public waterJoin(): DrawnJoin | null {
+        if (this._water.type !== 'river') return null;
+        const drawn = this.drawnWater();
+        const r = this.resolved();
+        const targets = this.joinedNodes().filter(n => !RESOLVING.has(n) && n.resolved());
+        if (!drawn || !drawn.edges || !r || r.samples.length < 2 || !targets.length) { this._join = null; return null; }
+        const tDrawn = targets.map(t => t.drawnWater());
+        const key = `${drawn.key}#${targets.map((t, k) => `${t.id}:${tDrawn[k]?.key ?? ''}:${t.enabled ? 1 : 0}`).join(',')}`;
+        if (this._join && this._join.key === key) return this._join.join;
+        const info = drawn.info, edges = drawn.edges;
+        const n = info.nx * info.nz;
+        // Which joined water each cell this river hands over is: as it was handed over (an unbaked grid); a
+        // bake's, the joined water drawing it, else the sea it runs into (held at its level there).
+        let owner: Int8Array;
+        if (!drawn.baked && info.handedBy && info.handedBy.length === n) owner = info.handedBy;
+        else {
+            owner = new Int8Array(n).fill(-1);
+            const sea = targets.findIndex(t => { const b = t.resolved(); return !!b && b.type === 'ocean' && b.endless; });
+            for (let i = 0; i < n; i++) {
+                if (info.info1[i * 4 + 3] > 0.5 || !(info.info0[i * 4 + 3] > 0)) continue;
+                const x = i % info.nx, z = (i - x) / info.nx;
+                const wx = info.originX + x * info.cell, wz = info.originZ + z * info.cell;
+                let k = tDrawn.findIndex((d, j) => j !== sea && !!d && drawsAt(d.info, wx, wz));
+                if (k < 0) k = sea;
+                owner[i] = k;
+            }
+        }
+        const first = r.samples[0], last = r.samples[r.samples.length - 1];
+        const lengths = targets.map(t => {
+            const atStart = this._target('start') === t, atEnd = this._target('end') === t;
+            const width = Math.max(atStart ? first.width : 0, atEnd ? last.width : 0);
+            return joinLength(width, last.dist);
+        });
+        const at = (k: number, x: number, z: number, out: JoinSample) => targetAt(targets[k], tDrawn[k], x, z, out);
+        const reach = (EDGE_APRON_CELLS + EDGE_BAND_CELLS + 2) * info.cell;
+        const own = this.resolvedShapes(), others = this.handOver();
+        const field = waterJoinField(info, edges, {
+            owner, lengths, at,
+            shapeEdge: own.length ? (x, z) => shapesSignedEdge(own, x, z, reach) : null,
+            otherEdge: !drawn.baked && others.length ? (x, z) => shapesSignedEdge(others, x, z, reach) : null,
+        });
+        const join: DrawnJoin | null = field ? { key, field, targets: targets.map((node, k) => ({ node, length: lengths[k] })) } : null;
+        this._join = { key, join };
+        return join;
+    }
+    private _join: { key: string; join: DrawnJoin | null } | null = null;
+
+    /**
+     * Metres the sea is drawn down under a river joined to it, upstream of its mouth (water.wgsl, the sea under a
+     * river): past the river's waves and the local flow's draw-down, so it never pokes up through the river.
+     */
+    public joinDrop(): number {
+        return this._waveAmplitude + waveReach(this.waves(), this.waveWindScale()) + JOIN_UNDER_LIFT;
+    }
+
+    /** This river's join field as physics reads it: cropped to its bands. */
+    private _joinSpec(join: DrawnJoin): WaterJoinSpec | null {
+        const grid = cropJoin(join.field);
+        if (!grid) return null;
+        return { field: grid, rise: join.field.rise, targets: join.targets.map(t => ({ id: t.node.id, length: t.length })) };
+    }
+
+    /**
+     * Where rivers run into this water: its refined shore distance round each mouth (what the surface fades its
+     * waves by, which counts the river's water as water), so a body there rides the waves drawn.
+     */
+    private _shoreFields(joins: readonly { river: WaterVolumeNode; join: DrawnJoin }[]): ScalarField[] | undefined {
+        const drawn = this.drawnWater();
+        if (!drawn || !drawn.edges || !joins.length) return undefined;
+        const { info, edges } = drawn;
+        const out: ScalarField[] = [];
+        for (const { join } of joins) join.targets.forEach((t, k) => {
+            const b = join.field.bounds[k];
+            if (t.node !== this || !b) return;
+            const pad = 3 * info.cell + join.field.cell;
+            const x0 = Math.max(0, Math.floor((b[0] - pad - info.originX) / info.cell)), x1 = Math.min(info.nx - 1, Math.ceil((b[2] + pad - info.originX) / info.cell));
+            const z0 = Math.max(0, Math.floor((b[1] - pad - info.originZ) / info.cell)), z1 = Math.min(info.nz - 1, Math.ceil((b[3] + pad - info.originZ) / info.cell));
+            if (x1 - x0 < 1 || z1 - z0 < 1) return;
+            const nx = x1 - x0 + 1, nz = z1 - z0 + 1;
+            const data = new Float32Array(nx * nz);
+            for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) data[z * nx + x] = edges.shore[(z + z0) * info.nx + x + x0];
+            out.push({ originX: info.originX + x0 * info.cell, originZ: info.originZ + z0 * info.cell, cell: info.cell, nx, nz, data });
+        });
+        return out.length ? out : undefined;
+    }
+
+    /** The rivers joined to this water whose mouths are found, with their join fields (the renderer's sea draws under them). */
+    public joinedMouths(): { river: WaterVolumeNode; join: DrawnJoin }[] { return this._joinsHere(); }
+
+    /** The rivers joined to this water whose mouths are found, with their join fields. */
+    private _joinsHere(): { river: WaterVolumeNode; join: DrawnJoin }[] {
+        const out: { river: WaterVolumeNode; join: DrawnJoin }[] = [];
+        for (const river of this.joinedRivers()) {
+            if (!river.enabled || RESOLVING.has(river)) continue;
+            const join = river.waterJoin();
+            if (join && join.targets.some(t => t.node === this)) out.push({ river, join });
+        }
+        return out;
+    }
+
+    /** The water nodes' specs by id, as the step has them: a river's mouth reads the water it joins. */
+    private readonly _lookup = (id: string): WaterSpec | undefined => {
+        const n = (this._scene as any)?.getNodeById?.(id);
+        return n instanceof WaterVolumeNode && n.enabled && n !== this ? n.buoyancySpec() : undefined;
+    };
 
     /** The shore grid as physics reads it: metres to the shore and the bed, per cell. */
     private static _shoreGrid(info: WaterInfo): WaterShoreGrid {
@@ -682,13 +1106,15 @@ export class WaterVolumeNode extends Node {
      */
     public bakedFlowGrid(): WaterFlowGrid | null {
         if (!this._bakeId || !GiBakeRegistry.has(this._bakeId)) return null;
-        const key = `${this._bakeId}|${GiBakeRegistry.generation}|${this.bakeSignature()}`;
+        const key = `${this._bakeId}|${GiBakeRegistry.generation}|${this.bakeSignature()}|${this.resolveKey()}|${this.besideKey()}`;
         if (this._flowGrid && this._flowGrid.key === key) { this._noteStale(this._flowGrid.stale); return this._flowGrid.grid; }
-        const decoded = decodeWaterBake(GiBakeRegistry.get(this._bakeId)!, this._bakeId);
+        // The bake as it is drawn: clipped to the water's shape, so nothing floats on water that is not there.
+        const decoded = this._decodedBake();
+        const clipped = this._clippedBake();
         let grid: WaterFlowGrid | null = null;
         let speed = 0;
-        if (decoded && decoded.signature === this.bakeSignature()) {
-            const info = decoded.info;
+        if (clipped) {
+            const info = clipped.info;
             const nx = info.nx, nz = info.nz;
             const data = new Float32Array(nx * nz * 3);
             let squares = 0, cells = 0;
@@ -727,12 +1153,108 @@ export class WaterVolumeNode extends Node {
 
     public update(delta: number, time: number): void {
         super.update(delta, time);
-        if (!this._enabled) { this._submerged.clear(); return; }
+        if (!this._enabled) { this._submerged.clear(); this._clearDisturbances(); return; }
         try {
             this._surfaceActivity(delta);
         } finally {
             this._submerged.clear();
         }
+    }
+
+    /**
+     * What crossed the surface at the last update, on the layers the water {@link reactsTo}: each body's
+     * waterline and its motion against the water's own. Only while the game runs (Play, Simulate): in Edit the
+     * list is empty. The renderer's live waves are raised by it (render/waterWaves.ts).
+     *
+     * Reading it asks for it: the node gathers the list only while something reads it (within a second), so a
+     * game with nothing drawing its water (a headless host) pays nothing for it.
+     */
+    public get disturbances(): readonly WaterDisturbance[] {
+        this._disturbancesRead = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        return this._disturbances;
+    }
+    /** When {@link disturbances} was last gathered (performance.now() ms): a paused game's list goes stale. */
+    public get disturbancesAt(): number { return this._disturbancesAt; }
+    private _disturbancesAt = -Infinity;
+    private _disturbancesRead = -Infinity;
+
+    private _clearDisturbances(): void {
+        this._disturbances.length = 0;
+        this._lastPositions.clear();
+    }
+
+    private readonly _aabb = new Float64Array(6);
+
+    /**
+     * Gather {@link disturbances}: every physics body on a layer the water reacts to whose bounds cross the
+     * surface, dynamic or moved by its node (a static body that moved since the last update). Triggers and
+     * bodies that take no part in the solver are left out, and so is a sleeping body (it does not move).
+     */
+    private _gatherDisturbances(delta: number): void {
+        const out = this._disturbances;
+        out.length = 0;
+        const wallNow = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        this._disturbancesAt = wallNow;
+        const scene = this._scene as any;
+        const bodies = scene?.physics?.bodies as readonly PhysicsBody[] | undefined;
+        if (authoring.enabled || !this._reactsTo || !bodies || !bodies.length || wallNow - this._disturbancesRead > DISTURBANCE_WANTED_MS) {
+            this._lastPositions.clear();
+            return;
+        }
+        const box = this.worldBox();
+        const margin = DISTURBANCE_MAX_RADIUS;
+        const time = waterTime(WaterVolumeNode._now());
+        const col: WaterColumn = { shape: -1, surface: 0, floor: 0, flowX: 0, flowZ: 0, edge: 0, waveFactor: 1 };
+        // How far the surface can stand off its resting height (the waves and the swell, and a metre for a bake's
+        // water against the drawn shape's): what is clear of that band is not asked about the waves.
+        const band = this._waveAmplitude + waveReach(this.waves(), this.waveWindScale()) + 1;
+        const seen = new Set<object>();
+        const a = this._aabb;
+        for (const body of bodies) {
+            if (body.isTrigger || !body.collisionResponse) continue;
+            const p = body.position;
+            if (p.x < box.min[0] - margin || p.x > box.max[0] + margin || p.z < box.min[2] - margin || p.z > box.max[2] + margin
+                || p.y < box.min[1] - margin || p.y > box.max[1] + margin) continue;
+            if (!this.reactsToLayer(body.collisionFilterGroup)) continue;
+            let vx: number, vy: number, vz: number;
+            if (body.isDynamic) {
+                if (body.isSleeping) continue;
+                vx = body.velocity.x; vy = body.velocity.y; vz = body.velocity.z;
+            } else {
+                // A static body moved by its node (a platform, a boat on rails, a swung prop): its velocity is
+                // how far it went since the last update. One that has not moved is the bank, not a disturbance.
+                const last = this._lastPositions.get(body);
+                seen.add(body);
+                if (!last) { this._lastPositions.set(body, [p.x, p.y, p.z]); continue; }
+                const dt = Math.max(delta, 1e-4);
+                vx = (p.x - last[0]) / dt; vy = (p.y - last[1]) / dt; vz = (p.z - last[2]) / dt;
+                last[0] = p.x; last[1] = p.y; last[2] = p.z;
+                if (vx === 0 && vy === 0 && vz === 0) continue;
+                // A jump, not a motion: a pooled collider (the foliage's) set somewhere new, a respawn.
+                if (vx * vx + vy * vy + vz * vz > DISTURBANCE_TELEPORT_SPEED * DISTURBANCE_TELEPORT_SPEED) continue;
+            }
+            body.getAabb(a);
+            const cx = (a[0] + a[3]) / 2, cz = (a[2] + a[5]) / 2;
+            const rest = this.columnAt(cx, cz, undefined, col);
+            if (!rest || a[1] > rest.surface + band || a[4] < rest.surface - band - DISTURBANCE_MAX_RADIUS) continue;
+            const here = this.columnAt(cx, cz, time, col);
+            if (!here) continue;
+            const surface = here.surface;
+            const hx = (a[3] - a[0]) / 2, hz = (a[5] - a[2]) / 2;
+            const radius = Math.min(DISTURBANCE_MAX_RADIUS, Math.max(DISTURBANCE_MIN_RADIUS, Math.sqrt(Math.max(hx, 0) * Math.max(hz, 0))));
+            // All of it while it spans the surface; less as its bottom lifts clear or its top sinks a radius under.
+            const lifted = Math.max(0, a[1] - surface) / DISTURBANCE_CLEARANCE;
+            const sunk = Math.max(0, surface - a[4]) / radius;
+            const share = Math.max(0, 1 - lifted) * Math.max(0, 1 - sunk);
+            if (share <= 0) continue;
+            // Against the water's own motion: its current and the orbits of the waves it rides. A log carried
+            // down a river, or a buoy riding the swell, moves with the water and raises nothing.
+            vx -= here.flowX + (here.waveVX ?? 0);
+            vz -= here.flowZ + (here.waveVZ ?? 0);
+            vy -= here.waveVY ?? 0;
+            out.push({ x: cx, z: cz, radius, share, vx, vy, vz });
+        }
+        for (const key of this._lastPositions.keys()) if (!seen.has(key)) this._lastPositions.delete(key);
     }
 
     /** The clock the ripples are stamped on: the renderer's `u_time`, its render clock (`windFieldClock`). */
@@ -745,9 +1267,11 @@ export class WaterVolumeNode extends Node {
         this._splashBudget = Math.min(MAX_SPLASHES_PER_SECOND, this._splashBudget + delta * MAX_SPLASHES_PER_SECOND);
         const seen = new Set<object>();
         const col: WaterColumn = { shape: -1, surface: 0, floor: 0, flowX: 0, flowZ: 0, edge: 0, waveFactor: 1 };
+        this._gatherDisturbances(delta);
 
         // Characters wading: feet below the surface, inside the box.
         for (const c of scene.characters) {
+            if (!this.reactsToLayer(c.body?.collisionFilterGroup ?? LAYER.DEFAULT)) continue;
             const p = c.worldPosition;
             const here = this.columnAt(p[0], p[2], undefined, col);
             const depth = here ? here.surface - p[1] : -Infinity;
@@ -778,6 +1302,7 @@ export class WaterVolumeNode extends Node {
 
         // Floating (or sinking) bodies: a ring when one enters, and as it bobs.
         for (const [body, fraction] of this._submerged) {
+            if (!this.reactsToLayer(body.collisionFilterGroup ?? LAYER.DEFAULT)) continue;
             seen.add(body);
             const state = this._state(body);
             const vy = body.velocity.y;
@@ -855,7 +1380,10 @@ export class WaterVolumeNode extends Node {
                 ...(this._waterMaterialId ? { waterMaterialId: this._waterMaterialId } : {}),
                 ...(this._bakeId ? { bakeId: this._bakeId } : {}),
                 ...(this._bedRoughness !== 0.03 ? { bedRoughness: this._bedRoughness } : {}),
-                affectCharacters: this._affectCharacters, surfaceNodeId: this._surfaceNodeId,
+                affectCharacters: this._affectCharacters,
+                ...(isAllLayers(this._reactsTo) ? {} : { reactsTo: this._reactsTo }),
+                ...(this._spray !== 1 ? { spray: this._spray } : {}),
+                surfaceNodeId: this._surfaceNodeId,
                 splashTemplate: this._splashTemplate, wadeSplashTemplate: this._wadeSplashTemplate, enabled: this._enabled,
             },
         };

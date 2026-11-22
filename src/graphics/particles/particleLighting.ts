@@ -99,6 +99,47 @@ export function skyAmbient(sh: ArrayLike<number> | null, intensity: number): [nu
     return [Math.max(0, sh[0] * k), Math.max(0, sh[1] * k), Math.max(0, sh[2] * k)];
 }
 
+/**
+ * The sky light's irradiance over a surface facing the unit direction `n`, divided by pi as `skyIrradiance` returns
+ * it (chunks/pbrLighting.wgsl, Ramamoorthi and Hanrahan's nine-coefficient form, clamped at 0): the CPU mirror a
+ * lit particle's up-facing fill is taken from. `sh` is nine vec4s, in the band order of pbrLighting's `sky.sh`.
+ */
+export function skyIrradianceAt(sh: ArrayLike<number> | null, n: ArrayLike<number>, intensity: number): [number, number, number] {
+    if (!sh) return [0, 0, 0];
+    const c1 = 0.429043, c2 = 0.511664, c3 = 0.743125, c4 = 0.886227, c5 = 0.247708;
+    const x = n[0], y = n[1], z = n[2];
+    const k = intensity / Math.PI;
+    const out: [number, number, number] = [0, 0, 0];
+    for (let c = 0; c < 3; c++) {
+        const L00 = sh[c], L1m1 = sh[4 + c], L10 = sh[8 + c], L11 = sh[12 + c];
+        const L2m2 = sh[16 + c], L2m1 = sh[20 + c], L20 = sh[24 + c], L21 = sh[28 + c], L22 = sh[32 + c];
+        const e = c4 * L00
+            + 2 * c2 * (L11 * x + L1m1 * y + L10 * z)
+            + c3 * L20 * (z * z) - c5 * L20
+            + c1 * L22 * (x * x - y * y)
+            + 2 * c1 * (L2m2 * (x * y) + L21 * (x * z) + L2m1 * (y * z));
+        out[c] = Math.max(0, e) * k;
+    }
+    return out;
+}
+
+/**
+ * The fill an UP-facing surface gets at an effect, from the fill its probes give there (`fill`, an even value) and
+ * how much more the open sky lights a surface facing up than the scene's mean fill does (`ambientUp` over
+ * `ambient`, the frame's): the probe's fill kept, its proportion of sky to ground that of the sky above. A room's
+ * probe in a room keeps the room's fill; under the open sky the ceiling-facing side of smoke is brighter than its
+ * underside. Never negative.
+ */
+export function hemisphereFill(fill: ArrayLike<number>, ambient: ArrayLike<number>, ambientUp: ArrayLike<number>): [number, number, number] {
+    const lum = (c: ArrayLike<number>) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    const share = Math.min(4, Math.max(0, lum(fill) / Math.max(lum(ambient), 1e-6)));
+    return [
+        Math.max(0, fill[0] + (ambientUp[0] - ambient[0]) * share),
+        Math.max(0, fill[1] + (ambientUp[1] - ambient[1]) * share),
+        Math.max(0, fill[2] + (ambientUp[2] - ambient[2]) * share),
+    ];
+}
+
 /** A luminance for a readout: "8.0k nits", "120 nits". */
 export function formatNits(nits: number): string {
     if (!(nits > 0)) return '0 nits';

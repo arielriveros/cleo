@@ -1,4 +1,4 @@
-import { waterColumnAt, type ResolvedWaterShape, type WaterColumn } from '../physics/water/waterColumn';
+import { YIELD_BELOW, waterColumnAt, type ResolvedWaterShape, type WaterColumn } from '../physics/water/waterColumn';
 
 // The WATER INFO grid of a Water node: what the surface renderer reads per point (Unreal's Water Zone "water
 // info texture"). Built here analytically from the shapes and the landscape under them; a bake
@@ -34,6 +34,11 @@ export interface WaterInfo {
     oceanLevel: number | null;
     /** Where it came from: 'analytic' or a bake id. */
     source: string;
+    /**
+     * An unbaked grid handed over to the water it joins ({@link handOverWaterInfo}): per cell, which of the
+     * hand-over list's waters took it (its index), or -1. Absent: nothing was handed over.
+     */
+    handedBy?: Int8Array;
 }
 
 const SQRT2 = Math.SQRT2;
@@ -180,6 +185,7 @@ export function handOverWaterInfo(info: WaterInfo, handOver: readonly ResolvedWa
     const { nx, nz, cell, info0, info1 } = info;
     const n = nx * nz;
     const wet = new Uint8Array(n), handed = new Uint8Array(n), more = new Uint8Array(n);
+    const handedBy = new Int8Array(n).fill(-1);
     const col: WaterColumn = { shape: -1, surface: 0, floor: 0, flowX: 0, flowZ: 0, edge: 0, waveFactor: 1 };
     for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
         const i = z * nx + x;
@@ -187,7 +193,13 @@ export function handOverWaterInfo(info: WaterInfo, handOver: readonly ResolvedWa
         const wx = info.originX + x * cell, wz = info.originZ + z * cell;
         const g = ground ? ground(wx, wz) : null;
         const c = handOver.length ? waterColumnAt(handOver, wx, wz, col) : null;
-        if (c && (g === null || g < c.surface - 0.02)) handed[i] = 1;
+        // The water joined takes over only where this water has come down to its level, as physics decides
+        // (buoyancy.ts waterAt, YIELD_BELOW): an endless sea is under every point (and with no landscape over
+        // every ground), and a river still running down toward its lake is the water there.
+        if (c && (g === null || g < c.surface - 0.02) && (!wet[i] || info0[i * 4] <= c.surface + YIELD_BELOW)) {
+            handed[i] = 1;
+            handedBy[i] = c.shape;
+        }
         const b = !wet[i] && beside.length ? waterColumnAt(beside, wx, wz, col) : null;
         if (b && (g === null || g < b.surface - 0.02)) more[i] = 1;
     }
@@ -201,6 +213,7 @@ export function handOverWaterInfo(info: WaterInfo, handOver: readonly ResolvedWa
         if (wet[i]) { minY = Math.min(minY, info0[i * 4]); maxY = Math.max(maxY, info0[i * 4]); }
     }
     if (Number.isFinite(minY)) { info.minY = minY; info.maxY = maxY; }
+    if (handOver.length) info.handedBy = handedBy;
     tileWaterInfo(info);
 }
 

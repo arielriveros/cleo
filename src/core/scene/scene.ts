@@ -59,6 +59,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getTemplate, templateNames } from "./templates";
 import { followSocket, resolveSocketOwner } from "./socketFollow";
 import { createNullPrecipitation, type ScenePrecipitation } from "./scenePrecipitation";
+import { createNullWaterSpray, type SceneWaterSpray } from "./sceneWaterSpray";
 import type { SequenceNode } from "./nodes/sequenceNode";
 import type { Camera2DNode } from "./nodes/camera2DNode";
 import type { Room2DNode } from "./nodes/room2DNode";
@@ -403,6 +404,13 @@ export class Scene {
         featureFactory<(scene: Scene) => ScenePrecipitation>('precipitation')?.(this) ?? createNullPrecipitation();
 
     /**
+     * The spray this scene's flowing water throws (water/spray/waterSprayRig.ts): droplets, mist and foam off its
+     * rapids, falls and what stands in it; or, in a game built without water, a stand-in that throws none.
+     */
+    public readonly waterSpray: SceneWaterSpray =
+        featureFactory<(scene: Scene) => SceneWaterSpray>('waterSpray')?.(this) ?? createNullWaterSpray();
+
+    /**
      * The navigation system serving this scene (set by `CleoEngine.setScene`). Reachable from a script
      * as `scene.ai`.
      *
@@ -528,6 +536,7 @@ export class Scene {
         this.saveState.authored.clear();
         this.saveState.memoryIn = null;
         this.precipitation.dispose();
+        this.waterSpray.dispose();
 
         // Both are idempotent, and each falls back to the World it registered with, so no world argument
         // is needed here.
@@ -970,6 +979,11 @@ export class Scene {
                 authoring.derived++;
                 try { this.precipitation.update(delta, time); }
                 catch (e) { logScriptError(`Error in the precipitation`, e, 'Runtime'); }
+                finally { authoring.derived--; }
+                // The water's spray, from where the camera now is.
+                authoring.derived++;
+                try { this.waterSpray.update(delta, time); }
+                catch (e) { logScriptError(`Error in the water's spray`, e, 'Runtime'); }
                 finally { authoring.derived--; }
             }
 

@@ -1,4 +1,5 @@
-import { useProjectFeatures, featureOfAddItem } from '../projectFeatures/featureUi';
+import { useProjectFeatures, featureOfAddItem, experimentalFeatureOfAddItem, experimentalTitle } from '../projectFeatures/featureUi';
+import ExperimentalTag from '../projectFeatures/ExperimentalTag';
 import { useEffect, useMemo, useState } from 'react';
 import { SegmentedControl } from '@cleo/app-kit/ui';
 import { useCleoEngine } from '../EngineContext';
@@ -16,11 +17,13 @@ const CELL = 'flex flex-col items-center justify-start gap-1 h-[62px] p-1 rounde
 const CELL_LABEL = 'text-ui-xs leading-tight text-center break-words line-clamp-2 w-full';
 
 function AddCell({ item, locked, onAdd }: { item: AddItem, locked: boolean, onAdd: (item: AddItem) => void }) {
+  // An experimental feature's item carries a flask in its corner, and its note in the tooltip.
+  const experimental = experimentalFeatureOfAddItem(item.id);
   return (
     <button
       type='button'
-      className={CELL}
-      title={item.label}
+      className={`${CELL} ${experimental ? 'relative' : ''}`}
+      title={experimental ? `${item.label} — ${experimentalTitle(experimental)}` : item.label}
       draggable={!locked}
       onDragStart={(e) => {
         // Not also text/plain: the scene tree's reparent path falls back to it and would try to resolve
@@ -32,6 +35,7 @@ function AddCell({ item, locked, onAdd }: { item: AddItem, locked: boolean, onAd
     >
       <span className='w-[28px] h-[28px] shrink-0 pointer-events-none flex items-center justify-center'><item.icon /></span>
       <span className={CELL_LABEL}>{item.label}</span>
+      {experimental && <ExperimentalTag feature={experimental} variant='icon' className='absolute top-0.5 right-0.5 pointer-events-none' />}
     </button>
   );
 }

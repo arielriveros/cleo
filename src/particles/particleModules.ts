@@ -432,10 +432,24 @@ export interface RenderSettings {
      */
     minPixelWidth?: number;
     /**
-     * Lit: `rain` shades the particle as a drop, a tiny lens — the light round it plus a glint when the sun
-     * or a lamp is behind it — rather than a matte card lit half-Lambert. Absent: `standard`.
+     * Lit: how the particle takes light. `standard`: a card lit half-Lambert (or Lambert with a normal map), with
+     * a specular highlight when it is rough enough to have one. `rain`: a drop, a tiny lens, the light round it
+     * plus a glint when the sun or a lamp is behind it. `sixWay`: baked lightmaps (see below), the way a lit
+     * sprite takes them. Absent: `standard`.
      */
-    shading?: 'standard' | 'rain';
+    shading?: 'standard' | 'rain' | 'sixWay';
+    /**
+     * `sixWay` shading: the six lightmaps, as a tileset's (tilesets/ lit sprites): the POSITIVE map's RGB is the
+     * puff lit from its right, top and back, its alpha its coverage; the NEGATIVE map's RGB lit from its left,
+     * bottom and front, its alpha its emission. "Back" is away from the camera. Both set, or it draws Standard.
+     */
+    sixWayPositiveTextureId?: string | null;
+    sixWayNegativeTextureId?: string | null;
+    /**
+     * Alpha blending: how much of what is behind the particle it hides, 0..1 (default 1). Below 1 it adds its
+     * light without hiding as much, for a haze that should glow rather than veil. Absent: 1.
+     */
+    occlusion?: number;
 }
 
 export function defaultRenderSettings(): RenderSettings {
@@ -470,14 +484,25 @@ export const RENDER_PARAMS: ParamSpec[] = [
       hint: 'Fades particles out this close to the camera, so one passing the lens never fills the view. 0 is off.' },
     { key: 'emissive', label: 'Brightness', kind: 'float', min: 0, step: 0.1,
       hint: "Multiplies the colour's luminance (Color ▸ Intensity). Lit particles: multiplies the lit result." },
-    { key: 'lit', label: 'Lit', kind: 'bool' },
-    { key: 'normalTextureId', label: 'Normal map', kind: 'asset', assetKind: 'texture', when: p => p.lit },
-    { key: 'normalStrength', label: 'Normal strength', kind: 'float', min: 0, max: 4, step: 0.05, when: p => p.lit && !!p.normalTextureId },
-    { key: 'ormTextureId', label: 'ORM map', kind: 'asset', assetKind: 'texture', when: p => p.lit },
+    { key: 'lit', label: 'Lit', kind: 'bool',
+      hint: "Lit particles take the scene's light: the sun (and its shadows), every point and spot light, and the sky, each per pixel. Unlit ones are emissive." },
+    { key: 'shading', label: 'Shading', kind: 'enum', when: p => p.lit, options: [
+        { value: 'standard', label: 'Standard' }, { value: 'sixWay', label: 'Six-way lightmaps' }, { value: 'rain', label: 'Raindrop' }],
+      hint: 'Standard: a card, with a normal map if it has one. Six-way lightmaps: smoke and mist baked lit from six sides, so the side facing a light glows. Raindrop: a lens that glints against the light.' },
+    { key: 'sixWayPositiveTextureId', label: 'Six-way +', kind: 'asset', assetKind: 'texture', when: p => p.lit && p.shading === 'sixWay',
+      hint: 'RGB: lit from the right, top and back; alpha: coverage. Back is away from the camera. Both maps are needed; until then it draws Standard.' },
+    { key: 'sixWayNegativeTextureId', label: 'Six-way −', kind: 'asset', assetKind: 'texture', when: p => p.lit && p.shading === 'sixWay',
+      hint: 'RGB: lit from the left, bottom and front; alpha: emission (the part that glows by itself).' },
+    { key: 'normalTextureId', label: 'Normal map', kind: 'asset', assetKind: 'texture', when: p => p.lit && p.shading !== 'sixWay' },
+    { key: 'normalStrength', label: 'Normal strength', kind: 'float', min: 0, max: 4, step: 0.05, when: p => p.lit && p.shading !== 'sixWay' && !!p.normalTextureId },
+    { key: 'ormTextureId', label: 'ORM map', kind: 'asset', assetKind: 'texture', when: p => p.lit && p.shading !== 'sixWay' },
     { key: 'translucency', label: 'Translucency', kind: 'float', min: 0, max: 2, step: 0.05, when: p => p.lit,
-      hint: "Light passing through the particle, as a leaf's: it glows when the sun is behind it and looks faint from the side. 0 off, 1 a leaf." },
-    { key: 'roughness', label: 'Roughness', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.lit },
-    { key: 'metallic', label: 'Metallic', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.lit },
+      hint: "Light passing through the particle, as a leaf's: it glows when the sun is behind it and looks faint from the side. 0 off, 1 a leaf. With a normal map it also softens the shading: the lower it is, the harder the relief reads." },
+    { key: 'roughness', label: 'Roughness', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.lit && p.shading !== 'sixWay',
+      hint: 'Below 1 a lit particle gets a specular highlight and reflects the sky.' },
+    { key: 'metallic', label: 'Metallic', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.lit && p.shading !== 'sixWay' },
+    { key: 'occlusion', label: 'Occlusion', kind: 'float', min: 0, max: 1, step: 0.05, when: p => p.blend === 'alpha',
+      hint: 'How much of what is behind it a particle hides. Below 1 it adds its light without veiling the scene: a haze that glows. 1 is ordinary alpha.' },
     { key: 'sort', label: 'Sort particles', kind: 'bool', when: p => p.blend === 'alpha',
       hint: 'Back to front, on the GPU, every frame. Fixes dark fringes where alpha puffs overlap; costs a few passes.' },
     { key: 'sortingOrder', label: 'Sorting order', kind: 'int', hint: 'Higher draws later (on top). In 2D, offsets the emitter sorting band.' },

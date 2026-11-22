@@ -5,6 +5,11 @@
 // Orientation: "velocity" alignment points the mesh's +Y along the motion; every other alignment tumbles
 // it about a random axis fixed per particle (its seed), by the simulated rotation — debris and shards.
 
+// The `lit` variant (PARTICLE_LIT) takes the sun's shadow and every point and spot light per pixel, as the
+// billboards' does (particleBillboard.wgsl).
+
+// @variant lit PARTICLE_LIT
+
 #include "./chunks/particleDraw.wgsl"
 
 /** Rotate `v` about unit `axis` by `angle` (Rodrigues). */
@@ -52,6 +57,9 @@ fn vs_main(@location(0) position: vec3<f32>,
     out.color = look.color;
     out.normal = n;
     out.worldPos = world;
+    // A mesh has no texture frame to light in: its derivative frame, and the true distance to a light.
+    out.axisU = vec4<f32>(0.0);
+    out.axisV = vec4<f32>(0.0);
     applyFlipbook(&out, look, texCoord);
     return out;
 }

@@ -1,6 +1,7 @@
 import { featureById } from 'cleo'
 import { Button, DocScope, Modal, ModalFooter, ModalHeader } from '@cleo/app-kit/ui'
 import type { FeatureUsage } from '../publish/featureUsage'
+import ExperimentalTag from './ExperimentalTag'
 
 // Asked by Publish when the game uses features the project leaves out (Project ▸ Features): turn them back on
 // for good, publish without them (their nodes are dropped from the build, nothing in the project changes), or
@@ -30,7 +31,10 @@ export default function FeatureCheckModal({ uses, onAnswer }: FeatureCheckProps)
             const list = uses.get(id) ?? []
             return (
               <div key={id} className='flex flex-col gap-0.5'>
-                <div className='font-semibold text-fg'>{featureById(id)?.label ?? id}</div>
+                <div className='flex items-center gap-1.5 font-semibold text-fg'>
+                  {featureById(id)?.label ?? id}
+                  {featureById(id)?.experimental && <ExperimentalTag feature={featureById(id)!} variant='icon' />}
+                </div>
                 <ul className='text-ui-sm text-muted pl-3 list-disc'>
                   {list.slice(0, SHOWN).map((u, i) => <li key={i}><span className='text-fg'>{u.where}</span>: {u.what}</li>)}
                   {list.length > SHOWN && <li>… and {list.length - SHOWN} more</li>}

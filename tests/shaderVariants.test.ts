@@ -53,6 +53,13 @@ function used(program: Program): string[] {
     return [...names].filter(n => new RegExp(String.raw`\b${n}\b`).test(glsl.replace(/^.*\buniform\b.*$/gm, ''))).sort();
 }
 
+/**
+ * Variants that ADD bindings on purpose: the per-pixel lit particle draws declare the frame's lighting group
+ * (shadow cascades, light grid) that the base program does not, so only a draw that binds it may use them
+ * (graphics/particles/particleRenderer.ts `_litReady`). They keep every base binding and the vertex interface.
+ */
+const ADDS_BINDINGS = new Set(['lit']);
+
 describe('shader variants are drop-in replacements for their base program', () => {
     it('has variant families to check', () => {
         expect(FAMILIES.length).toBeGreaterThan(0);
@@ -60,15 +67,21 @@ describe('shader variants are drop-in replacements for their base program', () =
 
     it('declare the same bindings, blocks and vertex inputs', () => {
         for (const { name, base, variants } of FAMILIES) for (const { tag, program } of variants) {
-            expect(program.resources, `${name}~${tag} resources`).toEqual(base.resources);
-            expect(program.uniformBlocks, `${name}~${tag} uniform blocks`).toEqual(base.uniformBlocks);
+            if (ADDS_BINDINGS.has(tag)) {
+                expect(program.resources, `${name}~${tag} resources`).toEqual(expect.arrayContaining(base.resources));
+            } else {
+                expect(program.resources, `${name}~${tag} resources`).toEqual(base.resources);
+                expect(program.uniformBlocks, `${name}~${tag} uniform blocks`).toEqual(base.uniformBlocks);
+            }
             expect(program.vertexInputs, `${name}~${tag} vertex inputs`).toEqual(base.vertexInputs);
         }
     });
 
     it('still read every texture and block the base reads', () => {
-        for (const { name, base, variants } of FAMILIES) for (const { tag, program } of variants)
-            expect(used(program), `${name}~${tag}: a binding stopped being read`).toEqual(used(base));
+        for (const { name, base, variants } of FAMILIES) for (const { tag, program } of variants) {
+            if (ADDS_BINDINGS.has(tag)) expect(used(program), `${name}~${tag}: a binding stopped being read`).toEqual(expect.arrayContaining(used(base)));
+            else expect(used(program), `${name}~${tag}: a binding stopped being read`).toEqual(used(base));
+        }
     });
 
     /**
@@ -103,7 +116,9 @@ describe('shader variants are drop-in replacements for their base program', () =
 
     it('keep the vertex stage byte-identical, fragment output declarations aside', () => {
         for (const { name, base, variants } of FAMILIES) for (const { tag, program } of variants) {
-            if (VERTEX_VARIANTS.has(tag)) continue;
+            // The lit variants' vertex stage is the same code; only naga's numbering of locals shifts with the
+            // extra includes, so their vertex INTERFACE is compared below instead.
+            if (VERTEX_VARIANTS.has(tag) || ADDS_BINDINGS.has(tag)) continue;
             expect(vertexOf(program.vertex), `${name}~${tag} vertex`).toBe(vertexOf(base.vertex));
         }
     });
@@ -120,7 +135,7 @@ describe('shader variants are drop-in replacements for their base program', () =
         ].map(m => m[0]).join('\n');
         let checked = 0;
         for (const { name, base, variants } of FAMILIES) for (const { tag, program } of variants) {
-            if (!VERTEX_VARIANTS.has(tag)) continue;
+            if (!VERTEX_VARIANTS.has(tag) && !ADDS_BINDINGS.has(tag)) continue;
             expect(iface(program.vertex), `${name}~${tag} vertex interface`).toBe(iface(base.vertex));
             checked++;
         }

@@ -32,7 +32,7 @@ import type { Visibility } from './visibility';
 import type { SsilPasses } from './ssil';
 import { ShaderManager } from '../systems/shaderManager';
 import type { RenderSubsystems } from './subsystems';
-import { skyAmbient } from '../particles/particleLighting';
+import { skyAmbient, skyIrradianceAt } from '../particles/particleLighting';
 import type { ParticleLocalLight } from '../particles/particleLighting';
 import { CULL_OCCLUDED, CULL_OUTSIDE, type CullVerdict } from './cullGhosts';
 
@@ -982,11 +982,18 @@ export class LightingPasses {
         // as the sky light scales it, plus the sky light's mean irradiance. No invented floor: a scene with
         // neither is dark, for particles as for everything else.
         const ambient = this.internalAmbient(scene);
+        // What a surface facing straight up gets: the same, with the sky's irradiance over that hemisphere
+        // instead of its mean (smoke lit from above and dim underneath, not an even grey).
+        const ambientUp = [ambient[0], ambient[1], ambient[2]];
         const skyNode = scene.skyLight;
         if (skyNode && this._sys.sky.skySHValid) {
             const grade = this.cloudGrade(scene);
             const sky = skyAmbient(this._sys.sky.skySH, skyNode.intensity * grade.sky);
             ambient[0] += sky[0]; ambient[1] += sky[1]; ambient[2] += sky[2];
+            const up = skyIrradianceAt(this._sys.sky.skySH, [0, 1, 0], skyNode.intensity * grade.sky);
+            ambientUp[0] += up[0]; ambientUp[1] += up[1]; ambientUp[2] += up[2];
+        } else {
+            ambientUp[0] = ambient[0]; ambientUp[1] = ambient[1]; ambientUp[2] = ambient[2];
         }
 
         // The punctual lights as the light grid has them, less those whose whole reach was hidden this frame
@@ -1013,7 +1020,7 @@ export class LightingPasses {
             localLights.push(record);
         }
 
-        const light: FrameLight = { ambient, sunDirection, sunColor, localLights };
+        const light: FrameLight = { ambient, ambientUp, sunDirection, sunColor, localLights };
         this._frameLight = light;
         this._frameLightScene = scene;
         this._frameLightFrame = this._view.frameIndex;
@@ -1029,6 +1036,8 @@ export class LightingPasses {
 /** See {@link LightingPasses.frameLight}. */
 export interface FrameLight {
     readonly ambient: number[];
+    /** The fill a surface facing straight up gets: `ambient` with the sky's irradiance over the upper hemisphere in place of its mean. */
+    readonly ambientUp: number[];
     readonly sunDirection: number[];
     readonly sunColor: number[];
     readonly localLights: readonly ParticleLocalLight[];

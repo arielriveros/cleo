@@ -18,6 +18,12 @@ export const ADD_TYPES = {
     ui: ['uiCanvas', 'uiWorldRoot', 'uiStackColumn', 'uiStackRow', 'uiSpacer', 'uiPanel', 'uiText', 'uiImage', 'uiButton', 'uiProgressBar', 'uiSlider', 'uiToggle', 'uiTextInput'],
 };
 
+/**
+ * The Add-catalog ids whose feature is experimental (src/modules/catalog.ts FeatureDef.experimental): they work,
+ * but their settings and look may still change between versions. The editor's suite checks the list against it.
+ */
+export const EXPERIMENTAL_TYPES = ['waterVolume'];
+
 /** The types a 2D scene is built from (its physics, camera and world). 3D meshes and lights are not drawn there. */
 export const TYPES_2D = ['camera2D', 'sprite', 'animatedSprite', 'tilemap', 'characterBody2D', 'body2D', 'room2D', 'parallaxLayer', 'trigger'];
 
@@ -27,7 +33,8 @@ export const ALL_ADD_TYPES = Object.values(ADD_TYPES).flat();
 /** The `type` field's text: grouped, so an agent finds the right kind of thing without a lookup. */
 export function addTypesText() {
     return Object.entries(ADD_TYPES).map(([cat, ids]) => `${cat}: ${ids.join(', ')}`).join('; ')
-        + `. A 2D scene uses ${TYPES_2D.join(', ')}.`;
+        + `. A 2D scene uses ${TYPES_2D.join(', ')}.`
+        + ` Experimental (works, but may change between versions): ${EXPERIMENTAL_TYPES.join(', ')}.`;
 }
 
 /** The asset libraries asset_list reads, by the names it takes as `kind`. */

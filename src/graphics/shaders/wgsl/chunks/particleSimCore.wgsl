@@ -14,6 +14,9 @@
 // state textures, so no event list, no readback, and the same code on both backends.
 // Feature flags are bits of `u_mask.x`, set by src/particles/particlePack.ts. Every flag is a uniform
 // branch — no permutations, one program for every emitter.
+// SOURCES (src/particles/particleSources.ts): an emitter the engine feeds points to each frame (flowing
+// water's spray) is born at those points, the step's births dealt out to them in order, each point's spread
+// over the step on its own, at its velocity, its size and life scaled by its own.
 // WEATHER (the `weather` module, what a WeatherNode's rain and snow fall with): a particle lives only
 // where the frame's weather volumes make its kind fall, thinned to their rate, and dies under shelter —
 // the shelter map the landscape keeps dry by, so rain stops at a roof.
@@ -50,6 +53,9 @@ const MAX_PARTICLE_COLLIDERS: i32 = 12;
 
 const MAX_PARTICLE_PLANES: i32 = 4;
 const MAX_FORCE_FIELDS: i32 = 16;
+// The shape kind of an emitter fed spawn points (SHAPE_SOURCES in src/particles/particlePack.ts), and how many.
+const SHAPE_SOURCES: i32 = 7;
+const MAX_SPAWN_SOURCES: i32 = 32;
 
 struct ParticleSimUniforms {
     u_emitterPrev: mat4x4<f32>,       // emitter local -> world at the start of the step
@@ -103,6 +109,11 @@ struct ParticleSimUniforms {
     u_precipShape: array<vec4<f32>, 4>,
     u_precipShelterMatrix: mat4x4<f32>, // world -> shelter map clip (uv-producing, GL convention)
     u_precipShelterParams: vec4<f32>,   // map present 0/1, clearance (depth units), texel uv, 0
+    // Spawn sources (SHAPE_SOURCES), particleSources.ts: per point, centre xyz, half length along | axis xz,
+    // half width across, rise | velocity xyz, spread (rad, < 0: about the vertical only) | speed jitter, size,
+    // life, first index among the step's births.
+    u_sourceInfo: vec4<f32>,            // point count, births at them this step, 0, 0
+    u_sources: array<vec4<f32>, 128>,
 };
 @group(1) @binding(0) var<uniform> u_sim: ParticleSimUniforms;
 
@@ -262,6 +273,28 @@ fn transformDir(m: mat4x4<f32>, d: vec3<f32>) -> vec3<f32> {
     return (m * vec4<f32>(d, 0.0)).xyz;
 }
 
+// The spawn source the slot being born belongs to (SHAPE_SOURCES), or -1: set by `simulateSlot`.
+var<private> spawnSource: i32 = -1;
+
+fn sourceFirst(j: i32) -> f32 { return u_sim.u_sources[min(j, MAX_SPAWN_SOURCES - 1) * 4 + 3].w; }
+
+/**
+ * The spawn source birth `offset` of this step belongs to: the last point whose first index is at or before it
+ * (a binary search in selects, no early return: see the ANGLE note in `simulateSlot`), -1 past them all.
+ */
+fn sourceOf(offset: u32) -> i32 {
+    let count = i32(u_sim.u_sourceInfo.x);
+    let f = f32(offset);
+    var lo = 0;
+    var span = MAX_SPAWN_SOURCES / 2;
+    for (var k = 0; k < 5; k++) {
+        let cand = lo + span;
+        lo = select(lo, cand, cand < count && sourceFirst(cand) <= f);
+        span = span / 2;
+    }
+    return select(-1, lo, count > 0 && f < u_sim.u_sourceInfo.y);
+}
+
 // `origin` (w = 1) replaces the emitter's position for a sub-emitter's event spawn; `inherited` is the
 // velocity it carries over from the parent.
 fn spawnParticle(slot: u32, spawnIndex: u32, seed: u32, origin: vec4<f32>, inherited: vec3<f32>) -> Particle {
@@ -320,6 +353,33 @@ fn spawnParticle(slot: u32, spawnIndex: u32, seed: u32, origin: vec4<f32>, inher
     p.rotation = mix(u_sim.u_rot.x, u_sim.u_rot.y, particleRand(&rng));
     p.spin = mix(u_sim.u_rot.z, u_sim.u_rot.w, particleRand(&rng));
     p.seed = particleRand(&rng);
+
+    // Born at an engine-given point: where on it, how fast and which way, its size and life its own.
+    let src = spawnSource;
+    if (src >= 0) {
+        let s0 = u_sim.u_sources[src * 4];
+        let s1 = u_sim.u_sources[src * 4 + 1];
+        let s2 = u_sim.u_sources[src * 4 + 2];
+        let s3 = u_sim.u_sources[src * 4 + 3];
+        let a = particleRand(&rng) * 6.28318530718;
+        let rho = sqrt(particleRand(&rng));
+        let along = vec3<f32>(s1.x, 0.0, s1.y);
+        let across = vec3<f32>(-s1.y, 0.0, s1.x);
+        p.position = s0.xyz + along * (cos(a) * rho * s0.w) + across * (sin(a) * rho * s1.z)
+                   + vec3<f32>(0.0, particleRand(&rng) * s1.w, 0.0);
+        let speed0 = length(s2.xyz);
+        let d0 = select(vec3<f32>(0.0, 1.0, 0.0), s2.xyz / max(speed0, 1e-6), speed0 > 1e-6);
+        // A cone round it, or (spread < 0) a turn about the vertical only: foam on the water stays on it.
+        let turn = (particleRand(&rng) * 2.0 - 1.0) * abs(s2.w);
+        let ct = cos(turn);
+        let st = sin(turn);
+        let yawed = vec3<f32>(d0.x * ct - d0.z * st, d0.y, d0.x * st + d0.z * ct);
+        let coned = spreadDirection(d0, max(s2.w, 0.0), &rng);
+        let d = select(coned, yawed, s2.w < 0.0);
+        p.velocity = d * (speed0 * (1.0 + s3.x * (particleRand(&rng) * 2.0 - 1.0)));
+        p.size = p.size * s3.y;
+        p.lifetime = max(1e-3, p.lifetime * s3.z);
+    }
 
     let colorMode = i32(u_sim.u_colorMode.x);
     var color = u_sim.u_colorA;
@@ -810,12 +870,21 @@ fn simulateSlot(slot: u32, texel: vec2<i32>) -> Particle {
     var spawnSeed = 0u;
     var spawnOrigin = vec4<f32>(0.0);
     var spawnVelocity = vec3<f32>(0.0);
+    spawnSource = -1;
     if (offset < spawnCount) {
         born = true;
         spawnIndex = offset;
         spawnSeed = u32(u_sim.u_spawn.z) + offset;
-        // Born partway through the step: integrate only what is left of it.
-        let birth = (f32(offset) + 0.5) / max(1.0, f32(spawnCount));
+        // Born partway through the step: integrate only what is left of it. A spawn source's births are
+        // spread over the step on their own, so every point emits all through it.
+        var birth = (f32(offset) + 0.5) / max(1.0, f32(spawnCount));
+        if (i32(u_sim.u_shape0.x) == SHAPE_SOURCES) {
+            let j = sourceOf(offset);
+            let first = sourceFirst(max(j, 0));
+            let next = select(u_sim.u_sourceInfo.y, sourceFirst(j + 1), j + 1 < i32(u_sim.u_sourceInfo.x));
+            birth = select(birth, (f32(offset) - first + 0.5) / max(1.0, next - first), j >= 0);
+            spawnSource = j;
+        }
         stepDt = dt * (1.0 - birth);
     }
 

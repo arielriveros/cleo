@@ -246,7 +246,11 @@ export class PhysicsWorkerCore {
         const g = world.gravity;
         const gravity = Math.hypot(g[0], g[1], g[2]);
         const dt = substep > 0 ? substep : MAX_SUBSTEP;
-        const volumes = this._water.map(spec => buoyancyVolumeFromSpec(spec, world.time));
+        // A river's mouth reads the water it joins: the specs of this step by id.
+        const byId = new Map<string, WaterSpec>();
+        for (const spec of this._water) if (spec.id) byId.set(spec.id, spec);
+        const lookup = (id: string) => byId.get(id);
+        const volumes = this._water.map(spec => buoyancyVolumeFromSpec(spec, world.time, lookup));
         const mine: BuoyancyVolume[] = [], index: number[] = [];
         for (const h of world.bodies()) {
             // applyForce wakes a sleeping body: a frozen floater would be thawed every substep.

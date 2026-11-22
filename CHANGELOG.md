@@ -16,6 +16,76 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Lit particles take light per pixel, with normal maps and six-way lightmaps; the water mist is fixed; Water is
+  flagged Experimental.**
+  - *Per-pixel light.* A lit particle effect takes the sun's cascaded shadow (and the clouds') and every point and
+    spot light of the scene's light grid at each pixel, in a `lit` variant of the particle draw programs
+    (`particleBillboard~lit`, `particleMesh~lit`), instead of one key light and a flat fill gathered at the effect's
+    centre. A light inside a big puff makes no orb (its distance is kept a puff's radius). The 2D pass, thumbnails and
+    captures, and a lit effect until its variant has compiled, keep the old key light and fill. The sky's fill is
+    directional now: a surface facing up takes the sky above it.
+  - *Six-way lightmaps.* Render ▸ **Shading** ▸ Six-way lightmaps, with **Six-way +** and **Six-way −** maps
+    (a lit sprite's convention: RGB lit from right / top / back and from left / bottom / front, alpha coverage and
+    emission), shades smoke, mist and dust from six sides. Flipbook cells as the Texture's.
+  - *Normal maps.* A normal map alone is now relief with the half-Lambert wrap softened by **Translucency**, not a
+    switch to PBR; the highlight and reflection come from Roughness below 1, Metallic or an ORM map. The built-in
+    spray, foam and mist ids work as normal and six-way maps. Effects without the new fields save byte-identical.
+  - *Mist.* The water's mist is white, thin and six-way shaded from its own baked density, with a soft Gaussian
+    puff: no grey smoke blobs and no round outline. Droplets and foam carry normal maps.
+  - *Experimental.* The Water feature carries an Experimental flag in the feature catalogue (`experimental` on
+    `FeatureDef`), shown as a flask in the Features picker, the Add grid, the node inspector's notice, the scene
+    tree's tooltip, the agent tools and the docs. Water stays on by default and works as before.
+- **Water rings and wakes, by collision layer; smooth banks; no WebGPU error at load.**
+  - *Ripples.* In Play and Simulate, every body crossing a water's surface round the camera rings it: a crate
+    dropped in throws a ring that runs outward, a floater rings it as it bobs, a character or a hull pushing
+    through raises a bow wave and a V wake, a fast entry throws up a little foam. They are pressed into the live
+    waves (`bodyWavePush`, water/waveSim.ts, mirrored in waterWaveStep.wgsl), so the water carries them: at its
+    own wave speeds, thrown back by what stands in it, carried downstream by a river's current; still water keeps
+    them for seconds (damping by the water's speed, `waveDamping`). On lakes, pools and the sea too, not only
+    rivers; with no river asking for its own waves, only the rings are simulated and the local flow rests.
+    Measured against the water's own motion, so a log drifting downstream or a buoy riding the swell raises
+    nothing.
+  - *Reacts to.* A Water node's new **Reacts to** layer mask (Ripples and splashes card, default every layer)
+    picks the bodies that ripple and splash it and the static colliders that shape its flow: the live waves'
+    obstacles and the flow bake's. With every layer ticked nothing changes and existing bakes stay valid;
+    unticking a layer a collider in the water is on makes the bake stale. Buoyancy does not ask.
+  - *Banks.* Where a water ends is found between its grid's cells (water/waterEdges.ts): its surface carried on
+    level into the dry cells and drawn a couple of cells on under the banks, so the landscape draws the waterline,
+    and a smooth line where the ground falls away or another water carries on. No more staircase along a river
+    not square to the grid, and no surface sloping down to the ground at its edge (the bake's dry cells under the
+    ground). The shore foam's lines and the waves' shore fade follow the same smooth distance. Existing bakes
+    draw it without a rebake.
+  - *Level steps.* The local flow round the camera read each water's heights over a different base, so a lake
+    and its river in the window met in a step; and a pile against a bank ended in a 30 cm ledge. Both gone.
+  - *River mouths.* Where a river runs into a lake, a pond, the sea or another river, the two surfaces met with
+    their own waves on each: they crossed, and where the lake's trough was under the river's cut edge the ground
+    showed between them. Now over a band before the mouth (1.5 times the river's width, 4 to 24 m) the river
+    takes on the joined water's surface, its waves, swell, surf and resting height, all of it at the seam
+    (physics/water/joins.ts; the join field in water/waterEdges.ts waterJoinField, the join slots in water.wgsl);
+    the joined water keeps its own. The sea under a joined river is drawn down and calm upstream of the mouth,
+    so its crests no longer poke through. Floats ride the same blend, on the main thread and in the physics
+    worker (a river's spec looks up the water it joins among the step's specs). A river drawn on into its lake
+    reaches the lake's level where it crosses the shore, and a river into the sea with no landscape is drawn
+    again (it was handed to the sea along its whole length).
+  - *Spill.* A bake's water stood out of its banks: flat sheets stuck out sideways from the foot of a cascade,
+    level shelves out of steep banks and over lips, and the bake's own overflow (a corridor round a river) was drawn
+    where the water was never meant to be. A baked water is now drawn, and floated on, only within its drawn
+    shape, the water it joins and a margin (`clipWaterToShape`); its banks are gated on the ground at their far
+    corners and carried on from the lowest water about them, under the ground; it ends where the ground falls
+    away; small pockets are drawn over only where something hides them; the local flow no longer pours water
+    onto dry ground; and steep tiles (a cascade) keep a vertex a cell.
+  - *Spray.* Running water throws droplets, foam and mist (water/spray/): off its rapids (where it loses its
+    energy), the foot and face of its falls, the face of what stands in a fast current, and in Play off bodies the
+    current hits or ones dropped in. A new engine-fed spawn shape (particles/particleSources.ts) feeds one
+    emitter per look up to 32 points a frame, chosen round the camera within a budget; procedural spray, mist and
+    foam sprites; a **Spray** amount on the Water node (Ripples and splashes). Shown while editing too.
+  - *WebGL2.* The reference backdrop's uniform block shared its name with its texture's sampler, a link error
+    that stopped every program building on WebGL2: the editor never finished opening a project there.
+  - *WebGPU.* A texture dropped while the frame's encoder still named it (the weather's shelter map, sized after
+    the shadow passes had bound its 1x1 stand-in) cost a whole frame at load: "Destroyed texture used in a
+    submit". A replaced or dropped GPU texture is now freed once no encoder is recording, and the shelter map is
+    sized before the frame's passes.
+
 - **The desktop editor updates itself.**
   - *From GitHub Releases.* A little after it starts, and every four hours, the desktop app reads the latest
     release's `latest.yml` (electron-updater, `applications/app-kit/desktop/desktopUpdater.js`) and downloads a newer

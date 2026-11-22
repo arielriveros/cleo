@@ -976,7 +976,7 @@ the scene's `WindNode`), `collideWithOwner` (the ragdoll capsules of the charact
 `bone` (a humanoid slot such as `'chest'`, or a bone name: the held edge rides that bone instead of the
 node), `enabled`. `particlePositions` is the simulated world positions, or null at rest.
 
-### WaterVolumeNode — `'waterVolume'` *(unreleased)*
+### WaterVolumeNode — `'waterVolume'` *(experimental)*
 
 One body of water (`water/waterShapes.ts`), of one `waterType`: `river` (a spline through `points`, each
 `{ pos, width, depth, flowSpeed }`), `lake` (a level surface at the node's height inside the smooth closed
@@ -1013,8 +1013,13 @@ a bake whose signature no longer matches is dropped for the water as drawn.
 Properties: `waterType`, `points`, `size`, `depth`, `extent`, `carve`, `flowsFrom`, `flowsInto`,
 `waterBody` (all of them at once, as plain data), `density` (kg/m³, default 1000), `linearDrag`, `angularDrag` (per second at full
 submersion), `waveAmplitude`, `waveFrequency`, `windSpeed`, `fetch`, `waveDirection`, `waveScale`, `choppiness`,
-`waveSpeed`, `shoreFade`, `currents`, `waterMaterial`, `waterMaterialId`, `bakeId`, `bedRoughness`, `affectCharacters`, `surfaceNodeId`, `splashTemplate`,
-`wadeSplashTemplate`, `enabled`. Helpers: `resolved()` (the body in world space), `joinedNodes()`,
+`waveSpeed`, `shoreFade`, `currents`, `waterMaterial`, `waterMaterialId`, `bakeId`, `bedRoughness`, `affectCharacters`,
+`reactsTo` (the collision layers it reacts to, a mask, -1 every layer: bodies on them ripple and splash it, static
+colliders on them shape its flow and its bake), `spray` (0..2, default 1: the droplets, foam and mist its running
+water throws), `surfaceNodeId`, `splashTemplate`, `wadeSplashTemplate`, `enabled`.
+`disturbances` lists what crossed its surface at the last update in Play (each body's waterline centre and radius,
+how much of it the surface cuts, its velocity against the water's), what the live waves round the camera are
+raised by. Helpers: `resolved()` (the body in world space), `joinedNodes()`,
 `handOver()`, `waves()`, `flowReference()`, `bakeSignature()`, `columnAt(x, z, time?)` (resting or waved surface, floor, flow and distance to
 shore, or null), `worldBox()`, `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)`, `version` (bumped
 by every body or wave edit) and `resolveKey()` (which also changes when the water a river joins moves).

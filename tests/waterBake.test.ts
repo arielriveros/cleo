@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { shapesSignedEdge } from '../src/physics/water/waterColumn';
+import { clipMargin } from '../src/water/waterEdges';
 import { mat4, quat } from 'gl-matrix';
 import './helpers/features';
 import { Scene } from '../src/core/scene/scene';
@@ -366,6 +368,19 @@ describe('the water flow bake', { timeout: 120000 }, () => {
             expect(inlet.bakedFlowGrid()).not.toBeNull();
             expect(dry).toBe(0);
             expect(jump).toBeLessThan(0.05);
+            // Nothing floats on the bake's water outside the drawn shapes and their margin (it is clipped there,
+            // as it is drawn), though the simulation ran over a corridor round the river.
+            const grid = inlet.bakedFlowGrid()!;
+            const shapes = [inlet.resolved()!, lake.resolved()!];
+            let outside = 0, inside = 0;
+            for (let z = 0; z < grid.nz; z++) for (let x = 0; x < grid.nx; x++) {
+                if (!Number.isFinite(grid.data[(z * grid.nx + x) * 3])) continue;
+                inside++;
+                const e = shapesSignedEdge(shapes, grid.originX + x * grid.cell, grid.originZ + z * grid.cell, 100);
+                if (e < -(clipMargin(grid.cell) + 2.5 * grid.cell)) outside++;
+            }
+            expect(inside).toBeGreaterThan(0);
+            expect(outside).toBe(0);
         } finally {
             for (const id of ids) GiBakeRegistry.delete(id);
         }
@@ -430,6 +445,34 @@ describe('the water flow bake', { timeout: 120000 }, () => {
         stone.updateTransforms();
         expect(fresh(river)).not.toBe(before);
         expect(waterBakeGroup(lake).map(n => n.name)).toEqual(['river', 'lake']);
+    });
+
+    it('meets only the colliders on the layers its waters react to, and signs itself by those', () => {
+        const scene = new Scene();
+        const lake = new WaterVolumeNode('lake', { waterType: 'lake' });
+        lake.setPosition([0, -1, 40]);
+        const river = new WaterVolumeNode('river', { waterType: 'river' });
+        river.flowsInto = lake.id;
+        const stone = new ColliderNode('stone');
+        stone.shapes = [{ type: 'box', width: 1, height: 3, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] } as any];
+        const PROPS = 1 << 5;
+        stone.layer = PROPS;
+        for (const n of [lake, river, stone]) { scene.addNode(n); n.updateTransforms(); }
+        const fresh = (n: WaterVolumeNode) => { (n as any)._signature = null; forgetWaterBakeContext(); return n.bakeSignature(); };
+        const all = fresh(river);
+        expect(sceneObstacles(scene.nodes).length).toBe(1);
+        // Every layer ticked is what it always was; ticking every layer again gives the same signature back.
+        river.reactsTo = -1;
+        expect(fresh(river)).toBe(all);
+        // Neither water reacts to the stone's layer: the bake does not meet it, and its signature says so.
+        river.reactsTo = 1; lake.reactsTo = 1;
+        const without = fresh(river);
+        expect(without).not.toBe(all);
+        expect(fresh(lake)).toBe(without);
+        expect(sceneObstacles(scene.nodes, undefined, 1)).toEqual([]);
+        // One of them does: the group meets it.
+        lake.reactsTo = 1 | PROPS;
+        expect(fresh(river)).toBe(all);
     });
 
     it('signs a bake by what it was baked from, not by how often its waters were edited', () => {

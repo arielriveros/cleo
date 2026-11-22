@@ -1,6 +1,6 @@
 import { Spline3, closedSplineXZ, evaluateKeyedNumber, finiteOr, type KeyedCurve, type Vec3Tuple } from '../core/math';
 import {
-    bucketKey, closestOnSegmentXZ, pointInPolygonXZ, riverColumn, type ResolvedWaterShape, type WaterColumn,
+    bucketKey, closestOnSegmentXZ, pointInPolygonXZ, riverColumn, shapeSignedEdge, type ResolvedWaterShape, type WaterColumn,
 } from '../physics/water/waterColumn';
 
 export {
@@ -258,6 +258,42 @@ function reachInto(target: ResolvedWaterShape, x: number, z: number): [number, n
     return [bx + dx / l * REACH_INSIDE, bz + dz / l * REACH_INSIDE];
 }
 
+/**
+ * Whether world (x, z) is inside the water a river end joins: a lake, a pool, a bounded ocean or another
+ * river's banks. Never an endless sea, which every end is already in.
+ */
+function insideTarget(target: ResolvedWaterShape, x: number, z: number): boolean {
+    if (target.type === 'lake') return target.outline.length >= 6 && pointInPolygonXZ(x, z, target.outline);
+    if (target.type === 'pool' || (target.type === 'ocean' && !target.endless))
+        return x >= target.min[0] && x <= target.max[0] && z >= target.min[2] && z <= target.max[2];
+    if (target.type === 'river') return target.samples.length >= 2 && shapeSignedEdge(target, x, z, 1) > 0;
+    return false;
+}
+
+/**
+ * Where along `spline` (metres from its start) a river end that lies inside `target` crosses into it: for the
+ * end (`end`), the last crossing in; for the start, the first crossing out. Null when that end is not inside a
+ * lake, a pool, a bounded ocean or another river. Found by stepping half a metre and bisecting to a centimetre.
+ */
+function crossingInto(target: ResolvedWaterShape, spline: Spline3, total: number, end: boolean): number | null {
+    const p: Vec3Tuple = [0, 0, 0];
+    const inside = (d: number) => { spline.pointAtDistance(d, p); return insideTarget(target, p[0], p[2]); };
+    const from = end ? total : 0;
+    if (!(total > 0) || !inside(from)) return null;
+    const step = 0.5;
+    let inD = from, outD = NaN;
+    for (let d = from; end ? d >= 0 : d <= total; d += end ? -step : step) {
+        if (inside(d)) inD = d; else { outD = d; break; }
+    }
+    // Inside all the way: the whole river lies in that water.
+    if (outD !== outD) return end ? 0 : total;
+    for (let i = 0; i < 12; i++) {
+        const mid = (inD + outD) / 2;
+        if (inside(mid)) inD = mid; else outD = mid;
+    }
+    return inD;
+}
+
 function resolveRiver(body: WaterBody, frame: WaterFrame, targets: WaterTargets, out: ResolvedWaterShape): void {
     const sx = Math.abs(frame.scale[0]), sz = Math.abs(frame.scale[2]), sy = Math.abs(frame.scale[1]);
     const lateral = (sx + sz) / 2;
@@ -298,9 +334,33 @@ function resolveRiver(body: WaterBody, frame: WaterFrame, targets: WaterTargets,
     // The height between the points: a monotone curve (core/math.ts, Fritsch-Carlson), level at each end.
     // The spline through the points would overshoot, lifting the water before a drop and dipping it under
     // the lake it runs into.
-    const profile: KeyedCurve = { keys: kept.map((p, i) => ({ t: controlDist[i], v: p.pos[1] })) };
-    const count = Math.max(2, Math.min(8192, Math.ceil(total / RIVER_SPACING) + 1));
+    let keys = kept.map((p, i) => ({ t: controlDist[i], v: p.pos[1] }));
+    // An end drawn INSIDE the water it joins stands at that water's surface from where it crosses in, not only
+    // at its last point: else it is still coming down where the lake begins, and stands above it there. Only
+    // the heights change; the course, and so what a bake covers, stays as drawn.
+    const at = (d: number) => { spline.pointAtDistance(d, p); return p; };
     const p: Vec3Tuple = [0, 0, 0], t: Vec3Tuple = [0, 0, 0];
+    const endIn = targets.end ? crossingInto(targets.end, spline, total, true) : null;
+    if (endIn !== null) {
+        const before = keys.filter(k => k.t < endIn - 1e-3);
+        const cap = before.length ? before[before.length - 1].v : Infinity;
+        let q = at(endIn);
+        const vIn = Math.min(cap, levelOn(targets.end!, q[0], q[2]));
+        q = at(total);
+        keys = [...before, { t: endIn, v: vIn }, { t: total, v: Math.min(vIn, levelOn(targets.end!, q[0], q[2])) }];
+    }
+    const startOut = targets.start ? crossingInto(targets.start, spline, total, false) : null;
+    if (startOut !== null) {
+        const after = keys.filter(k => k.t > startOut + 1e-3);
+        const floorV = after.length ? after[0].v : -Infinity;
+        let q = at(startOut);
+        const vOut = Math.max(floorV, levelOn(targets.start!, q[0], q[2]));
+        q = at(0);
+        keys = [{ t: 0, v: Math.max(vOut, levelOn(targets.start!, q[0], q[2])) }, { t: startOut, v: vOut }, ...after];
+    }
+    keys = keys.filter((k, i) => i === 0 || k.t > keys[i - 1].t + 1e-6);
+    const profile: KeyedCurve = { keys };
+    const count = Math.max(2, Math.min(8192, Math.ceil(total / RIVER_SPACING) + 1));
     let seg = 0;
     let maxWidth = 0;
     for (let i = 0; i < count; i++) {

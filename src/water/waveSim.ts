@@ -35,8 +35,15 @@
 // SOLID to the waves, as an obstruction is in iWave: no wave inside it, so waves that reach it are thrown back.
 // The current piling against it and parting round it is the local flow's (water/localFlow.ts), which the waves
 // ride.
+//
+// What MOVES through the water (a body crossing the surface: something dropped in, a floating crate bobbing,
+// a character wading, a hull; core/scene/nodes/waterVolumeNode.ts disturbances) pushes the surface under it
+// (bodyWavePush): down as it sinks into it, up as it rises out, up ahead of it and down behind as it goes
+// through, all against the water's own motion. The wave operator turns that into what water does with it:
+// the ring a stone throws, the bow wave and the V of a wake. The waves then ride the current like any other,
+// so the rings a body throws into a river are carried off downstream with it.
 
-import { catmullRomWeights } from '../core/math';
+import { catmullRomWeights, clamp, smoothstep } from '../core/math';
 
 /** Texels along a side of the simulated window, and metres a texel. */
 export const WAVE_SIM_SIZE = 512;
@@ -50,6 +57,56 @@ export const WAVE_SIM_TAPS = (WAVE_SIM_REACH + 1) * (WAVE_SIM_REACH + 2) / 2;
 /** The two depths (m) a kernel is built for; the shader blends them by the water's depth at each texel. */
 export const WAVE_SIM_DEPTHS: readonly [number, number] = [0.25, 1.2];
 export const WAVE_SIM_GRAVITY = 9.81;
+
+/** Bodies the step is handed at most (waterWaveStep.wgsl BODY_MAX): the nearest the window's centre. */
+export const WAVE_SIM_BODY_MAX = 32;
+/**
+ * Per second: how fast waves die down, on still water and on running water. A river's surface forgets in a
+ * second or two, so its waves stay near what raised them; a pond carries a stone's rings for many seconds.
+ */
+export const WAVE_DAMPING_STILL = 0.12;
+export const WAVE_DAMPING_RUNNING = 0.6;
+
+/** Per second: how fast waves die down on water running at `speed` m/s (waterWaveStep.wgsl waveDamping). */
+export function waveDamping(speed: number): number {
+    return WAVE_DAMPING_STILL + (WAVE_DAMPING_RUNNING - WAVE_DAMPING_STILL) * smoothstep(0.1, 0.6, speed);
+}
+
+/** A body crossing the surface, as the step takes it (WaterVolumeNode's WaterDisturbance). */
+export interface WaveSimBody {
+    /** World x and z of its centre, and its waterline's radius (m). */
+    x: number; z: number; radius: number;
+    /** 0..1: how much of it the surface cuts. */
+    share: number;
+    /** Its velocity against the water's own (m/s). */
+    vx: number; vy: number; vz: number;
+}
+
+/** 1/s: the surface's acceleration under a body per m/s it sinks (or rises) at. */
+export const BODY_PUSH_VERTICAL = 1.6;
+/** 1/s: the surface's acceleration at a body's leading edge per m/s it moves through the water at. */
+export const BODY_PUSH_HORIZONTAL = 1.5;
+/** m/s a body's speed against the water is taken as at most: faster is a splash the grid cannot hold anyway. */
+export const BODY_SPEED_CAP = 6;
+/** Radii from a body's centre past which it pushes nothing (its profile is exp(-2 d^2): 1e-8 there). */
+export const BODY_REACH = 3;
+
+/**
+ * The surface's acceleration (m/s2) at world (`x`, `z`) from `body`, as waterWaveStep.wgsl adds it: a smooth
+ * bump the body's waterline wide (no narrower than a texel and a half), pressed down as the body sinks and
+ * raised as it rises, raised ahead of it and drawn down behind as it moves through the water.
+ */
+export function bodyWavePush(x: number, z: number, body: WaveSimBody, cell = WAVE_SIM_CELL): number {
+    const r = Math.max(body.radius, 1.5 * cell);
+    const dx = (x - body.x) / r, dz = (z - body.z) / r;
+    const d2 = dx * dx + dz * dz;
+    if (d2 > BODY_REACH * BODY_REACH || !(body.share > 0)) return 0;
+    const profile = Math.exp(-2 * d2) * body.share;
+    const vy = clamp(body.vy, -BODY_SPEED_CAP, BODY_SPEED_CAP);
+    const planar = Math.hypot(body.vx, body.vz);
+    const k = planar > BODY_SPEED_CAP ? BODY_SPEED_CAP / planar : 1;
+    return profile * (BODY_PUSH_VERTICAL * vy + BODY_PUSH_HORIZONTAL * (dx * body.vx + dz * body.vz) * k);
+}
 
 
 /** Where the weight for the offset (i, j) sits in a packed kernel. */

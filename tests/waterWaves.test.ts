@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-    createWaveSimGrid, stepWaveSim, waveKernelIndex, waveKernelSymbol, waveSimKernel,
-    WAVE_SIM_CELL, WAVE_SIM_DEPTHS, WAVE_SIM_DT, WAVE_SIM_GRAVITY, WAVE_SIM_REACH, WAVE_SIM_TAPS,
+    bodyWavePush, createWaveSimGrid, stepWaveSim, waveDamping, waveKernelIndex, waveKernelSymbol, waveSimKernel,
+    BODY_SPEED_CAP, WAVE_DAMPING_RUNNING, WAVE_DAMPING_STILL,
+    WAVE_SIM_CELL, WAVE_SIM_DEPTHS, WAVE_SIM_DT, WAVE_SIM_GRAVITY, WAVE_SIM_REACH, WAVE_SIM_TAPS, type WaveSimBody,
 } from '../src/water/waveSim';
 import { catmullRomWeights } from '../src/core/math';
 import { waterFoamPixels, WATER_FOAM_SIZE } from '../src/water/waterTextures';
@@ -243,5 +244,92 @@ describe('the water foam texture', () => {
         };
         expect(beside(1)).toBeGreaterThan(0.3);
         expect(beside(2)).toBeLessThan(0.02);
+    });
+});
+
+// What moves through the water (water/waveSim.ts bodyWavePush; waterWaveStep.wgsl adds the same push): the
+// rings a body throws, carried off by the current, and still water that keeps them.
+describe('the waves a body raises', { timeout: 60_000 }, () => {
+    const N = 100, cell = WAVE_SIM_CELL, C = N * cell / 2;
+    const kernel = waveSimKernel(WAVE_SIM_DEPTHS[1]);
+
+    /** A half-metre body dropped in at (x0, C), 3 m/s for 0.3 s, then left: the grid after each step. */
+    function drop(x0: number, flow: number, damping: number, steps: number, each: (step: number, eta: Float32Array) => void): void {
+        const grid = createWaveSimGrid(N, N, cell);
+        const force = new Float32Array(N * N);
+        const body: WaveSimBody = { x: x0, z: C, radius: 0.5, share: 1, vx: 0, vy: -3, vz: 0 };
+        for (let s = 0; s < steps; s++) {
+            force.fill(0);
+            if (s * WAVE_SIM_DT < 0.3) for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) force[z * N + x] = bodyWavePush(x * cell, z * cell, body);
+            stepWaveSim(grid, { kernel, force, flowX: flow, damping, viscosity: 0.04 });
+            each(s, grid.eta);
+        }
+    }
+
+    it('pushes only where it moves against the water: down as it sinks, up ahead of it and down behind', () => {
+        const still: WaveSimBody = { x: 0, z: 0, radius: 0.4, share: 1, vx: 0, vy: 0, vz: 0 };
+        for (const [x, z] of [[0, 0], [0.3, 0], [0, -0.5], [1, 1]]) expect(bodyWavePush(x, z, still)).toBe(0);
+        const sinking = { ...still, vy: -2 };
+        expect(bodyWavePush(0, 0, sinking)).toBeLessThan(0);
+        expect(bodyWavePush(0, 0, { ...sinking, share: 0 })).toBe(0);
+        const moving = { ...still, vx: 1.5 };
+        expect(bodyWavePush(0.3, 0, moving)).toBeGreaterThan(0);
+        expect(bodyWavePush(-0.3, 0, moving)).toBeCloseTo(-bodyWavePush(0.3, 0, moving), 10);
+        expect(bodyWavePush(0, 0.3, moving)).toBeCloseTo(0, 10);
+        // Nothing past its reach; and a splash faster than the grid can hold is taken at the cap.
+        expect(bodyWavePush(1.3, 0, moving)).toBe(0);
+        expect(bodyWavePush(0, 0, { ...still, vy: -40 })).toBe(bodyWavePush(0, 0, { ...still, vy: -BODY_SPEED_CAP }));
+    });
+
+    it('throws a ring a few centimetres high that runs outward', () => {
+        const peakAt: number[] = [];
+        let ringAt2m = 0;
+        drop(C, 0, waveDamping(0), 91, (s, eta) => {
+            if (s === 45 || s === 90) {
+                // The radius of the highest water off the centre.
+                let best = 0, r = 0;
+                for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) {
+                    const d = Math.hypot(x * cell - C, z * cell - C);
+                    if (d > 0.6 && Math.abs(eta[z * N + x]) > best) { best = Math.abs(eta[z * N + x]); r = d; }
+                }
+                peakAt.push(r);
+            }
+            for (let a = 0; a < 32; a++) {
+                const x = Math.round((C + 2 * Math.cos(a / 32 * 2 * Math.PI)) / cell), z = Math.round((C + 2 * Math.sin(a / 32 * 2 * Math.PI)) / cell);
+                ringAt2m = Math.max(ringAt2m, Math.abs(eta[z * N + x]));
+            }
+        });
+        expect(peakAt[1]).toBeGreaterThan(peakAt[0] + 0.5);
+        expect(ringAt2m).toBeGreaterThan(0.015);
+        expect(ringAt2m).toBeLessThan(0.08);
+    });
+
+    it('lets the current carry the rings off downstream', () => {
+        const drift = (flow: number, x0: number) => {
+            let cx = 0;
+            drop(x0, flow, waveDamping(0), 121, (s, eta) => {
+                if (s !== 120) return;
+                let sw = 0, sx = 0;
+                for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) { const w = eta[z * N + x] ** 2; sw += w; sx += w * x * cell; }
+                cx = sx / sw;
+            });
+            return cx - x0;
+        };
+        expect(Math.abs(drift(0, C))).toBeLessThan(0.05);
+        // Two seconds in a current of 1 m/s: about two metres on (the drop itself took the first 0.3 s).
+        const carried = drift(1, C - 3);
+        expect(carried).toBeGreaterThan(1.4);
+        expect(carried).toBeLessThan(2.2);
+    });
+
+    it('keeps them for seconds on still water, where running water forgets them', () => {
+        expect(waveDamping(0)).toBe(WAVE_DAMPING_STILL);
+        expect(waveDamping(1.5)).toBe(WAVE_DAMPING_RUNNING);
+        const energyAt4s = (damping: number) => {
+            let e = 0;
+            drop(C, 0, damping, 241, (s, eta) => { if (s === 240) for (let i = 0; i < N * N; i++) e += eta[i] * eta[i]; });
+            return e;
+        };
+        expect(energyAt4s(waveDamping(0))).toBeGreaterThan(3 * energyAt4s(waveDamping(1.5)));
     });
 });

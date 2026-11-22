@@ -10,6 +10,8 @@ import type { RenderTarget } from '../rhi/resources';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
+import type { BindGroupCache } from './bindGroups';
+import { ShaderManager } from '../systems/shaderManager';
 import type { ViewProjection } from './viewProjection';
 import type { TemporalPasses } from './temporal';
 import type { RenderSubsystems } from './subsystems';
@@ -32,6 +34,7 @@ export class ParticlePasses {
                 private readonly _view: FrameView,
                 private readonly _targets: FrameTargets,
                 private readonly _passes: PassEncoder,
+                private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
                 private readonly _temporal: TemporalPasses,
                 private readonly _sys: RenderSubsystems) {}
@@ -52,6 +55,11 @@ export class ParticlePasses {
 
     /** See RenderSettings.particleLodDistanceScale. */
     public particleLodDistanceScale: number = 1;
+    /**
+     * Whether lit particles take the sun's shadow and every point and spot light per pixel (their `lit` program
+     * variant). Off: each effect takes the CPU's one key light and a flat fill, as before.
+     */
+    public perPixelLighting = true;
     /** See RenderSettings.precipitationDensity. Handed to each scene's precipitation as it simulates. */
     public precipitationDensity: number = 1;
     private readonly _systemList: ParticleSystemNode[] = [];
@@ -76,7 +84,8 @@ export class ParticlePasses {
 
     /** Draw one system inside the 2D pass, sorted among the sprites and tiles (render/sprites2d.ts). */
     public draw2D(node: ParticleSystemNode, scene: Scene, pass: RenderPassEncoder, target: RenderTarget): void {
-        this.particles.draw([node], this.particleDrawFrame(scene, pass, target));
+        // The 2D pass binds no frame lighting group (group 3): its lit particles take the CPU key and fill.
+        this.particles.draw([node], this.particleDrawFrame(scene, pass, target, false));
     }
 
     /**
@@ -104,8 +113,12 @@ export class ParticlePasses {
         out.length = 0;
         for (const node of scene.particleSystems) out.push(node);
         const precipitation = scene.precipitation.systems;
-        if (precipitation.length > 0 && !this._host.thumbnailMode && !this._view.capturing && !this.isFlatParticleScene(scene))
+        const spray = scene.waterSpray.systems;
+        if ((precipitation.length > 0 || spray.length > 0) && !this._host.thumbnailMode && !this._view.capturing && !this.isFlatParticleScene(scene)) {
             for (const node of precipitation) out.push(node);
+            // The spray flowing water throws (Scene.waterSpray), under the same rules as the rain.
+            for (const node of spray) out.push(node);
+        }
         return out;
     }
 
@@ -157,7 +170,7 @@ export class ParticlePasses {
         if (emitters !== 'additive')
             this.particles.sort(nodes, this._passes.acquireEncoder('particles.sort'), this._view.camera.position);
         const pass = this._passes.beginFullscreenPass(target, 'particles', false, undefined, false);
-        const frame = this.particleDrawFrame(scene, pass, target);
+        const frame = this.particleDrawFrame(scene, pass, target, true);
         frame.emitters = emitters;
         this.particles.draw(nodes, frame);
         this._passes.endFullscreenPass(pass);
@@ -171,12 +184,24 @@ export class ParticlePasses {
      * `exposure` is the one the PREVIOUS frame's post chain settled on (the post chain runs after the scene
      * draw), the same one-frame lag TAA has; it only matters for an `exposureWeight` below 1.
      */
-    public particleDrawFrame(scene: Scene, pass: RenderPassEncoder, target: RenderTarget): ParticleDrawFrame {
+    public particleDrawFrame(scene: Scene, pass: RenderPassEncoder, target: RenderTarget, perPixel = false): ParticleDrawFrame {
         const camera = this._view.camera;
-        const { ambient, sunDirection, sunColor, localLights } = this._sys.lighting.frameLight(scene);
+        const { ambient, ambientUp, sunDirection, sunColor, localLights } = this._sys.lighting.frameLight(scene);
 
+        // Lit emitters take the sun's shadow and every point and spot light per pixel (their `lit` program variant) when
+        // this draw can bind the frame's lighting group: not a thumbnail or a capture, whose cascades and light grid
+        // are not the scene's, and not the 2D pass.
+        const lighting = perPixel && !this._host.thumbnailMode && !this._view.capturing
+            && this.perPixelLighting && !this._view.flat2D;
         return {
             pass, target,
+            frameLighting: lighting ? (p, pipeline, program) => {
+                // The program is bound: its shadow block and light grid block take the frame's values, and group 3
+                // (the cascades and the light data) the frame's textures, as a lit sprite's draw does.
+                this._sys.shadows.uploadShadowUniforms(program);
+                this._sys.lighting.lightGrid.uploadUniforms(ShaderManager.Instance);
+                if (this._bindGroups.declaresFrameLighting(pipeline)) p.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline, false));
+            } : undefined,
             viewProj: mat4.multiply(this._particleViewProj, this._projection.rasterProjection(camera.projectionMatrix),
                                     camera.viewMatrix),
             view: camera.viewMatrix,
@@ -186,7 +211,7 @@ export class ParticlePasses {
             // No snapshot in a thumbnail or a flat 2D frame (which takes none): no soft fade against it.
             depth: this._host.thumbnailMode || this._view.flat2D ? null : this._temporal.depthSource(),
             width: this._host.renderWidth, height: this._host.renderHeight,
-            ambient, sunDirection, sunColor, localLights,
+            ambient, ambientUp, sunDirection, sunColor, localLights,
             // The light probes' fill at an effect, as surfaces there get it (render/probeLighting.ts).
             ambientAt: position => this._sys.lighting.probeAmbientAt(scene, position as vec3, ambient, this._probeAmbient),
             // In a preview showing the editing view's culling, also what that view's frustum dropped.

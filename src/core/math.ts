@@ -1620,6 +1620,43 @@ export function closestSegmentSegment(p1: Vec3Tuple, q1: Vec3Tuple, p2: Vec3Tupl
     return { c1, c2, dist2: distSq3(c1, c2) };
 }
 
+/**
+ * How far a rounded rectangle on the plane reaches from its centre in the direction (dx, dz) (a unit vector):
+ * its long axis (ax, az) (unit), half its length `a` along it and half its width `b` across, its corners rounded
+ * by `r`. The support distance: what a flow meeting it head-on from that side first touches.
+ */
+export function roundedRectSupport(ax: number, az: number, a: number, b: number, r: number, dx: number, dz: number): number {
+    return a * Math.abs(dx * ax + dz * az) + b * Math.abs(-dx * az + dz * ax) + r;
+}
+
+/**
+ * The tangent-space (OpenGL: +X right, +Y up the image, +Z out of it) unit normal of a height field at texel
+ * (`x`, `y`) of a `w` x `h` image whose row 0 is the TOP, into `out`: central differences, clamped at the edges.
+ * `scale` turns a height step of one texel into slope. A surface rising to the right leans left (negative x); one
+ * rising toward the image's top leans down it (negative y).
+ */
+export function heightToTangentNormal(height: ArrayLike<number>, w: number, h: number, x: number, y: number, scale: number,
+                                      out: [number, number, number] = [0, 0, 1]): [number, number, number] {
+    const at = (px: number, py: number) => height[Math.min(h - 1, Math.max(0, py)) * w + Math.min(w - 1, Math.max(0, px))];
+    const dx = (at(x + 1, y) - at(x - 1, y)) * 0.5;
+    const dRow = (at(x, y + 1) - at(x, y - 1)) * 0.5;
+    const nx = -scale * dx, ny = scale * dRow;
+    const inv = 1 / Math.sqrt(nx * nx + ny * ny + 1);
+    out[0] = nx * inv; out[1] = ny * inv; out[2] = inv;
+    return out;
+}
+
+/**
+ * How much of a light survives `tau` optical depth of a scattering medium once its MULTIPLE scattering is
+ * counted (Wrenninge's octave sum): `exp(-tau)` alone is the light that never scattered, and leaves a thick
+ * cloud's shaded side black; each octave scatters a fraction of what the last absorbed. 1 at 0, falling to a
+ * floor above 0 for any thickness.
+ */
+export function multiScatter(tau: number): number {
+    const t = Math.max(0, tau);
+    return (Math.exp(-t) + 0.5 * Math.exp(-0.4 * t) + 0.25 * Math.exp(-0.16 * t)) / 1.75;
+}
+
 /** Closest point on an axis-aligned box (centred at the origin, half extents `h`) to p. */
 export function clampToBox(p: Vec3Tuple, h: Vec3Tuple): Vec3Tuple {
     return [Math.max(-h[0], Math.min(h[0], p[0])), Math.max(-h[1], Math.min(h[1], p[1])), Math.max(-h[2], Math.min(h[2], p[2]))];

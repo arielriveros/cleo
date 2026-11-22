@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-    createLocalFlow, createLocalFlowGround, footprintDistance, localFlowOutput, stepLocalFlow,
+    createLocalFlow, createLocalFlowGround, footprintDistance, localFlowDatum, localFlowOutput, localFlowReference, stepLocalFlow,
     LOCAL_FLOW_GRAVITY, LOCAL_FLOW_SOLID, type LocalFlowGround, type LocalFlowState,
 } from '../src/water/localFlow';
 
@@ -160,5 +160,41 @@ describe('the local flow', { timeout: 120_000 }, () => {
         expect(Math.max(largest(a.u), largest(a.w))).toBeLessThan(6);
         expect(Array.from(a.h)).toEqual(Array.from(b.h));
         expect(Array.from(a.u)).toEqual(Array.from(b.u));
+    });
+});
+
+describe('the local flow’s ground', () => {
+    it('stands every water in the window on one datum, whatever base its heights reach the GPU over', () => {
+        // A lake and the river draining it, their grids uploaded less their own lowest surfaces (render/water.ts);
+        // where they meet the water stands at 12.4 m in both. The ground pass reads (height - minY) - its datum.
+        const datum = 12;
+        const lake = { minY: 12.4 }, river = { minY: 3.1 };
+        const read = (worldHeight: number, info: { minY: number }) => (worldHeight - info.minY) - localFlowDatum(datum, info);
+        expect(read(12.4, lake)).toBeCloseTo(0.4, 9);
+        expect(read(12.4, river)).toBeCloseTo(0.4, 9);
+    });
+
+    it('carries the lift a little past the water’s last cell, so a pile against a bank ends in no ledge', () => {
+        const n = 8;
+        const g = createLocalFlowGround(n, 0.3);
+        for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+            const c = j * n + i;
+            // Water over the left half, a bank on the right; the water piled 5 cm over the bake's surface.
+            g.bed[c] = i < 4 ? 0 : 1;
+            g.refSurface[c] = i < 4 ? 0.5 : 0.97;
+        }
+        const s = createLocalFlow(g);
+        for (let c = 0; c < n * n; c++) s.h[c] = c % n < 4 ? 0.55 : 0;
+        const out = localFlowOutput(s, g);
+        expect(out.lift[2 * n + 3]).toBeCloseTo(0.05, 6);
+        expect(out.lift[2 * n + 4]).toBeCloseTo(0.05, 6);
+        expect(out.lift[2 * n + 6]).toBe(0);
+    });
+
+    it('draws the flow toward no water over dry ground, whatever surface the drawn grid carries there', () => {
+        // In the water: its surface. Out of it (the drawn surface carried on under a bank): under the bed.
+        expect(localFlowReference(2, 1, 0.5)).toBe(2);
+        expect(localFlowReference(2, 1, -0.2)).toBeCloseTo(0.99, 9);
+        expect(localFlowReference(0.5, 1, -0.2)).toBe(0.5);
     });
 });
