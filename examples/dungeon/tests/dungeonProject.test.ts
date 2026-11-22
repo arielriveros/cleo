@@ -6,9 +6,7 @@ import { join } from 'path';
 import { readExample } from '@tools/exampleKit/readExample.mjs';
 import { DEFAULT_CAMERA_BLOCKED_BY, LAYER } from '@engine/physics/collisionLayers';
 
-// The Dungeon example: the three-level dungeon under the valley's skull cave, built by tools/valley/build.mjs
-// (tools/valley/dungeon/) and split out of the Valley into a project of its own by tools/valley/split.ts. The
-// souls joins (scripts, clips, templates by name) are checked by dungeonSouls.test.ts; this suite checks the
+// The Dungeon example: a three-level dungeon under a skull cave, a project of its own. The souls joins (scripts, clips, templates by name) are checked by dungeonSouls.test.ts; this suite checks the
 // level: that it stands alone, its structure, colliders, fires, GI and props.
 
 const PROJECT = EXAMPLE;

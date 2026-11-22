@@ -11,8 +11,7 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | ◐ | Partial: wired up but inert out of the box, or only part of the feature is used. |
 | ✗ | Not used. |
 
-"Where" names a generator (`tools/soulsDemo/build.mjs` for the souls content, `tools/valley/` for the level), a
-script (`Souls*.ts`), or the scene.
+"Where" names a script (`Souls*.ts`), a template or asset of the project, or the scene.
 
 ## 1. Engine features
 
@@ -62,10 +61,10 @@ script (`Souls*.ts`), or the scene.
 | PBR | ✅ | All 21 materials, including the textured blood decal materials. |
 | Emissive | ✅ | Glyphs, items, bolt, bonfire ash, bloodstain. |
 | Transparency | ✅ | The fog wall. |
-| Custom shaders | ✅ | The pond water (`tools/valley/water.glsl`, compiled to WGSL at build time). |
+| Custom shaders | ✅ | The pond water, a Custom material compiled to WGSL. |
 | Cel, Blinn-Phong | ✗ | |
 | Height, parallax, displacement | ✗ | |
-| Procedurally generated textures | ✅ | The blood splat images (`tools/soulsDemo/png.mjs`). |
+| Procedurally generated textures | ✅ | The blood splat placeholder images. |
 
 ### Animation
 
@@ -105,7 +104,7 @@ script (`Souls*.ts`), or the scene.
 | Perception (field of view, range, memory) | ✅ | Every enemy brain. |
 | Blackboard | ✅ | `SoulsEnemyBrain` writes the target; the graph reads senses and builtin enemy fields. |
 | Steering | ✅ | |
-| NavMesh and pathfinding | ✅ | Baked by the generator with trunks and buildings carved out. |
+| NavMesh and pathfinding | ✅ | Baked, with trunks and buildings carved out. |
 | AI Brain assets, goal planner, fuzzy logic, flocking | ✗ | The behaviour machine is inline on each brain. |
 
 ### Particles and VFX

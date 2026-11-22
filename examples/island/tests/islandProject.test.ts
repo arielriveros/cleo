@@ -1,10 +1,8 @@
-import { EXAMPLE, REPO_ROOT, dataReady, exampleDir, exampleScript, readThisExample } from '@tools/exampleKit/testKit';
+import { EXAMPLE, dataReady, readThisExample } from '@tools/exampleKit/testKit';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { setGLContext } from '@engine/graphics/rhi/webgl2/glContext';
 import { WebGL2Device } from '@engine/graphics/rhi/webgl2/webgl2Device';
 import { setDevice } from '@engine/graphics/rhi/deviceHandle';
-import { existsSync } from 'fs';
-import { join } from 'path';
 import '@engine-tests/helpers/features';
 import { Scene } from '@engine/core/scene/scene';
 import { Node } from '@engine/core/scene/nodes/node';
@@ -12,9 +10,8 @@ import { parseNodeJson } from '@engine/core/scene/nodes/parseNodeJson';
 import { WaterVolumeNode } from '@engine/core/scene/nodes/waterVolumeNode';
 import { GiBakeRegistry } from '@engine/graphics/render/gi/giBakeRegistry';
 import { decodeWaterBake } from '@engine/water/bake/waterBakeFormat';
-import { read } from '@tools/valley/bundleOps';
 
-// The Island example's water (tools/island/build.ts): one Water node per body, the rivers joined to their
+// The Island example's water: one Water node per body, the rivers joined to their
 // lake and the sea, and every bake it ships CURRENT against the scene as the editor will load it, with the
 // landscape's saved heights and the scene's static colliders. A bake that does not match its node's
 // signature is silently dropped for the analytic flow, which is what this guards against.
@@ -39,7 +36,7 @@ beforeAll(() => {
 
 describe.skipIf(!present)('the Island example’s water', { timeout: 120_000 }, () => {
     it('ships one node per body, rivers joined, and every bake current', async () => {
-        const bundle = await read(PROJECT);
+        const { bundle } = await readThisExample(PROJECT);
         const sceneJson = (Object.values(bundle.scenes)[0] as any).scene;
         const all: any[] = [];
         const walk = (n: any) => { all.push(n); for (const c of n.children ?? []) walk(c); };

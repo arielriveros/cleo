@@ -38,8 +38,7 @@ function doc(biome: BiomeId, settings: Partial<WorldSettings>, build: (g: GraphB
 /**
  * An island in open sea, a mile and a half across and 280 m high: a massif off its centre, ridges and
  * valleys running from it to a coast of bays and headlands, and a lake in a basin on its north-east valley,
- * fed by the stream from the heights and spilling down to the sea. What the Island example is built from
- * (tools/island/).
+ * fed by the stream from the heights and spilling down to the sea. What the Island example was made from.
  */
 export function island(): WorldDoc {
   const world = doc('temperate', { size: 2048, heightScale: 320, seaLevel: 0.1, seed: 7 }, g => {

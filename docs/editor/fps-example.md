@@ -1,7 +1,8 @@
 # Firing Line (the FPS example)
 
 A first-person shooter built from templates: put a **FPS Game Manager** and some fighters in any scene and it
-plays. An example project (see `tools/fps/README.md`); scripts are `examples/firing-line/Assets/FPS/Scripts/Fps*.ts`.
+plays. An example project, edited in the desktop editor as the folder `examples/firing-line`
+([examples/README.md](../../examples/README.md)); scripts are `examples/firing-line/Assets/FPS/Scripts/Fps*.ts`.
 
 ## The scene
 
@@ -92,7 +93,7 @@ script publishes (`navMode`); the decisions are in `FpsBot.ts`.
 ## Controls
 
 Move W A S D, look with the mouse (click to capture), Fire left mouse, Aim right mouse, Reload R, Sprint
-Shift, Crouch C, Jump Space, weapons 1 2 3 or Q / E. A gamepad is bound too (`tools/fps/inputMap.mjs`).
+Shift, Crouch C, Jump Space, weapons 1 2 3 or Q / E. A gamepad is bound too (Project Settings ▸ Input).
 
 ## The viewmodel
 
@@ -107,8 +108,7 @@ controller binds them in its **Event actions** (Animator editor, Variables panel
 `FPS Muzzle Flash` template, spawned on the viewmodel's `Muzzle` where it is drawn and kept there while it lives.
 Bots have no fire clip, so `FpsBot` fires `shot.<weapon>` by name and its controller binds the same effects.
 Hit-position effects (impact, blood, tracer, bullet hole) and the player's hurt/hit/kill/empty sounds stay in
-`FpsCombatant` / `FpsPlayer`, because they depend on where a ray landed. The markers and bindings are applied by
-`tools/fps/eventActions.mjs` on every ingest.
+`FpsCombatant` / `FpsPlayer`, because they depend on where a ray landed.
 
 ## Aiming
 
@@ -127,7 +127,6 @@ realtime (a realtime probe recaptures its cube every second), and at most three 
 
 ## Updating the example
 
-The example is a project exported from the editor (see `tools/fps/README.md`). Edit it in the editor, Export,
-and run `node --max-old-space-size=12288 tools/fps/ingest.mjs <zip>`. The scripts are the one thing the repository
-owns: open the folder `examples/firing-line/` in the desktop editor (or edit its `Assets/FPS/Scripts/*.ts` in VS Code, then
-`npm run examples:sync firing-line`).
+Open the folder `examples/firing-line/` in the desktop editor and edit it there: what you save is the repository's
+change. Its scripts can be edited in VS Code too (`Assets/FPS/Scripts/*.ts`; with Cleo closed, then
+`npm run examples:sync firing-line`). See [examples/README.md](../../examples/README.md) for its data and tests.

@@ -370,10 +370,10 @@ vec4 fragment() {
         }
     });
 
-    // The Valley example's pond water (tools/valley/water.glsl): the one shipped material that uses every
-    // scene helper, with the exact uniforms it ships with.
-    it('translates the Valley water material', async () => {
-        const { WATER_SOURCE, WATER_UNIFORMS } = await import('../tools/valley/water.mjs');
+    // The water sample (docs/scripting/samples/water.glsl): a material that uses every
+    // scene helper, with the uniforms it was made with.
+    it('translates the water sample material', async () => {
+        const { WATER_SOURCE, WATER_UNIFORMS } = await import('../docs/scripting/samples/water.mjs');
         const wgsl = glslToWgsl(assembleCustomFragment('forward', WATER_SOURCE, WATER_UNIFORMS, 'vulkan'), 'fragment');
         expect(wgsl).toContain('@fragment');
         expect(wgsl).toContain('u_normalMap_t');

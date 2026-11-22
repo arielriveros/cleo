@@ -1,6 +1,6 @@
 // A tileable water normal map: a band-limited random spectrum (amplitude ~ 1/k^1.9, random phases)
 // turned into a height field by an inverse FFT, which is periodic by construction, then into slopes.
-// The JS twin of tools/valley/prepare.py `water_normal`, with a seeded PRNG instead of numpy's.
+// A seeded PRNG stands in for numpy's, so a seed always gives the same map.
 //
 // Channel convention (what the water shader reads): R and G are the surface slope along the image's
 // x and y (world x and z), stored as -dh scaled into 0..1 -- NOT the green-up convention of

@@ -333,8 +333,8 @@ describe('sequence files', () => {
     expect(() => sequenceFromText('not json')).toThrow(/Not a sequence file/)
   })
 
-  it("reads the Valley's checked-in tour back unchanged", () => {
-    const file = join(__dirname, '..', '..', '..', 'tools', 'valley', 'cinematic', 'valley-tour.sequence.json')
+  it("reads a real sequence file (the Valley's tour) back unchanged", () => {
+    const file = join(__dirname, 'fixtures', 'valley-tour.sequence.json')
     const text = readFileSync(file, 'utf8').replace(/\r\n/g, '\n')
     const seq = sequenceFromText(text)
     expect(sequenceToText(seq)).toBe(text)

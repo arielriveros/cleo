@@ -1,5 +1,5 @@
 // The World preview's water: a FORWARD, TRANSPARENT custom material for seas and lakes, grown from the
-// Valley pond's (tools/valley/water.glsl) for water that spans kilometres. Preview only: never exported.
+// water sample's (docs/scripting/samples/water.glsl) for water that spans kilometres. Preview only: never exported.
 //
 // What changes for large water:
 //   waves      four octaves of one tiling normal map at different scales and directions, the fine ones

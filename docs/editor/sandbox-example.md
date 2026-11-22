@@ -54,7 +54,8 @@ and inside it the parts merged apart for their [collision layers](#collision-lay
 feet's detail, the stairs' ramps and the pillars).
 Each is placed once.
 
-`tools/sandbox/` generates it from the clips in `build/LocomotionPack` (see `tools/sandbox/README.md`).
+It is edited in the desktop editor, as the project folder `examples/sandbox`
+([examples/README.md](../../examples/README.md)). Its clips come from a Mixamo locomotion pack.
 
 ## Playing
 
@@ -260,7 +261,7 @@ mask) so the head looks the whole way. Its axes are `LookYaw` and `LookPitch` (w
 body) and its weight is `LookWeight`, which the script raises while the character stands still.
 
 **Lean.** Three **additive** layers, **Lean Left**, **Lean Right** and **Lean Forward**, play a lean clip at the weight
-of `LeanLeft` / `LeanRight` / `LeanForward`. The generator makes the sideways clips as a runner banks: the whole body
+of `LeanLeft` / `LeanRight` / `LeanForward`. The sideways clips are made as a runner banks: the whole body
 tilts about the ground under the feet.
 
 - The hips roll 10 degrees.
@@ -288,14 +289,13 @@ Nothing sets a parameter from code, and no script names a clip or a state.
 ### Stairs
 
 The pack's four stair clips (*Ascending Stairs*, *Running Ascending Stairs*, *Descending Stairs*, *Running
-Descending Stairs*) are steep, slow stairs: about 23 cm a step, one step every 0.2 to 0.7 s. The generator reads
-each with its rise kept and checks it first: its feet must step up (or down) at least 10 cm each step, and its last
-frame must match its first. A clip that fails is left out with a warning, and its direction plays the walk blend
-on the flight instead.
+Descending Stairs*) are steep, slow stairs: about 23 cm a step, one step every 0.2 to 0.7 s. Each was read with
+its rise kept and checked first: its feet must step up (or down) at least 10 cm each step, and its last frame must
+match its first. A direction with no clip that passes plays the walk blend on the flight instead.
 
 **The descents are rebuilt.** The two descending clips fail the check. In both files the feet stay at floor height
-while the hips sink 48 cm and the knees fold, and the last frame does not match the first. The generator keeps what
-they get right and rebuilds the legs (`tools/sandbox/descent.ts`):
+while the hips sink 48 cm and the knees fold, and the last frame does not match the first. The shipped descents
+keep what they get right, with the legs rebuilt:
 
 - **Kept:** the hips stepping down, and the trunk, arms and head of a body going down stairs. Each of these is made
   to loop, its drift from first frame to last spread over the clip.
@@ -306,9 +306,8 @@ they get right and rebuilds the legs (`tools/sandbox/descent.ts`):
   treads lower, toe first.
 - **The legs:** two-bone IK sets the thighs and shins to reach those ankles, knees forward.
 
-The rebuilt clips then pass the check, and go through the same steps as the climbs. Better descending clips that
-pass the check on their own are used as they are: drop them into `build/LocomotionPack` under the same names and
-rebuild (`tools/sandbox/README.md`).
+The rebuilt clips then pass the check, and go through the same steps as the climbs. A better descending clip can
+replace one: import it in the editor and put it in the Stairs blend space in its place.
 
 How a stair clip is used:
 
@@ -319,9 +318,9 @@ How a stair clip is used:
   planted at any height. Without it, the upper foot would read as swinging and float over its tread.
 - **The knees.** The pack's walking climb splays its knees: 23 cm apart on average, over hips 16 cm apart (the flat
   walk holds them 18). Each stair clip has its legs turned about the hip-ankle line, three quarters of the way to
-  straight ahead (`alignKnees` in `tools/sandbox/legs.ts`, `STAIR_KNEE_IN`), the feet left where they were. Foot
+  straight ahead, the feet left where they were. Foot
   IK then bends the knees along that bend. Walking up a flight they come out 19 cm apart, 18 on the flat.
-- **The pace.** Each clip plays 1.25 times faster than authored (`STAIR_RATE`), one step a 30 cm tread. That sets
+- **The pace.** Each clip plays 1.25 times faster than authored, one step a 30 cm tread. That sets
   the pace: walking up 0.55 m/s, jogging up 1.25, walking down 0.8, jogging down 1.88. The script's four stair speeds
   (public) carry these numbers.
 - **One blend space, Stairs.** It is 2D: Climb (the script's `Stairs`, +1 up and -1 down) by `GroundSpeed`. Up and
@@ -358,7 +357,7 @@ The Mannequin's skeleton has foot placement: a ray per foot (on every layer but 
 the camera turns the character as it moves, and through a quick change of direction.
 
 - **When a foot plants: the clip's windows.** Every clip a locking state plays carries foot-lock windows, set by
-  the generator with **Detect**. Each foot locks from the ball of the foot coming down until the heel has lifted
+  **Detect**. Each foot locks from the ball of the foot coming down until the heel has lifted
   3 cm, and then follows the clip through the push-off. The backward diagonals (JogBL/BR and their walk and creep
   copies) keep only the middle half of each window: their crossing steps fought a longer lock. Open a clip in the Clip Player to see them as **Lock L** /
   **Lock R** rows, and drag their ends to tune a clip
@@ -510,7 +509,7 @@ reverse lights come on in reverse. Each light gives the brightness it is set to 
 so they are tuned on the lights themselves; SandboxCar's **Tail Share** sets the tail lights' glow when not
 braking. The Sandbox is set at dusk, the sun 9 degrees under the horizon, so they show.
 
-**The clips** come from `build/car` (`tools/sandbox/clips.ts` `carClips`): getting in and out have their ground travel
+**The clips** are Mixamo's: getting in and out have their ground travel
 and their yaw moved onto the Pivot joint, as root motion, and driving is held in place; each is placed so the next
 starts in the pose the last one ends in (the Mixamo driving loop sits 22 cm lower than the end of getting in). The
 clips sit the hips about 20 cm higher than this car's cushion, so getting in lowers them the rest of the way as it
@@ -519,7 +518,7 @@ from the clips' root motion, so the seated hips land on the cushion, the driver'
 That is 18 cm further back than the clips' hands reach the steering wheel from, so the hands fall short of it.
 
 **The model** is "Dirty car" by 3D Error 404 (CC-BY-4.0, Sketchfab), scaled to 0.83 of its own size, 5 m long: as
-tight round a seated driver as it goes, the head just under the roof (`tools/sandbox/car.ts` `CAR_FIT`). It is
+tight round a seated driver as it goes, the head just under the roof. It is
 mirrored to left-hand drive, since the Mixamo clips get in on the driver's left.
 
 What the car does not do yet: the doors do not open (the character passes through the door), the hands do not
@@ -586,16 +585,16 @@ chest takes most of the yaw and part of the pitch, the arms the rest (the rifle 
 the pistol about the eye), the head following the sights. Their weight is the aim's (`aimSeconds`, 0.15 s) times
 the weapon's. Aiming, the Look layer is off: the aim turns the head.
 
-**How the hands hold them.** The poses are first worked out at build time (`tools/sandbox/weapons/poses.ts`): the
+**How the hands hold them.** The poses were worked out ahead of time: the
 weapon is placed, and both arms are solved onto it by two-bone IK, each elbow where its wrist bends least, kept
 down, and the forearms taking most of the wrists' twist. The right hand closes round each grip as the Mixamo **Pro
-Rifle Pack**'s does round its rifle's in its `idle aiming` (read by `tools/sandbox/prepare.mjs` from
-`build/fps_prepared/pack`), where the rifle is aimed level from fist to fist; the left hand round the rifle's
+Rifle Pack**'s does round its rifle's in its `idle aiming`, where the rifle is aimed level from fist to fist; the
+left hand round the rifle's
 handguard as the pack's does, and round the pistol's grip hand as the grip hand mirrored, free to roll round the
 bore. The fingers are the pack's. Held so, the wrists bend 3 to 25 degrees, as the pack's own holds do.
 
 **The models** are "Low-Poly G40" and "Low-Poly M4a1" by TastyTony (CC-BY-4.0, Sketchfab), read at their rest pose
-(`tools/sandbox/weapons/models.ts`) and scaled to the real weapons' lengths: 24 cm (a Glock 40) and 84 cm (an
+and scaled to the real weapons' lengths: 24 cm (a Glock 40) and 84 cm (an
 M4A1 with its stock out).
 
 ### Firing
@@ -678,14 +677,13 @@ The Character moves the body, so every clip's ground travel is taken out. The en
 yaw out of the hips. That tilts any clip whose pelvis twists while it bends (the hard landing, the stop, the jump):
 the bend stays about the twisted axis and reads as a sideways lean.
 
-So the generator leaves the rotation as authored and removes only the travel. Its build fails if a held clip leans
-sideways differently from its source (`--report` prints it).
+So the shipped clips keep the rotation as authored, with only the travel removed.
 
 ## Adding clips
 
-Jog is the pack's running set. Drop a better clip into `build/LocomotionPack`, point its role in
-`tools/sandbox/clips.ts` at it, and rebuild. Every speed, phase, cut, rate, plant and threshold is measured off the
-clips, not typed in.
+Jog is the pack's running set. A better clip goes in through the editor: import it into the project, take its ground
+travel out as above, set its foot-lock windows (**Detect**), and put it in its blend space or state in place of the one
+it replaces.
 
 ## Limits
 

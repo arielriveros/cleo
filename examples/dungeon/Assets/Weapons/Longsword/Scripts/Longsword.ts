@@ -5,7 +5,7 @@ import SoulsWeaponNode from '@/Weapons/Base Weapon/Scripts/SoulsWeapon'
 /**
  * Hollow Keep — the Longsword: a two-handed blade, quick for its reach. The "Longsword" template (a variant
  * of "Weapon") carries this script, its mesh and its Light1-3 / Heavy moves, whose clips were made in the
- * Motion Creator (tools/soulsDemo/longsword/). Only the numbers differ from the base weapon, so this class
+ * Motion Creator. Only the numbers differ from the base weapon, so this class
  * is nothing but defaults.
  */
 export default class SoulsLongswordNode extends SoulsWeaponNode {

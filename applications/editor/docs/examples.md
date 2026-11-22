@@ -5,7 +5,8 @@ of their own: their existing projects are untouched. This is what a first-time v
 instead of an empty list.
 
 The examples themselves are **project folders in the repository**, `examples/<slug>/`, edited in the desktop
-editor like any project folder (see [examples/README.md](../../../examples/README.md)). What the gallery installs
+editor like any project folder and nowhere else: no tool generates them (see
+[examples/README.md](../../../examples/README.md)). What the gallery installs
 is a **bundle built from each folder**, in `applications/editor/public/examples/<slug>/`. That folder is build
 output and never committed. It is static content shipped next to the app: there is no server, no API and no CDN,
 which is also why examples work offline in the desktop build.
@@ -17,21 +18,20 @@ npm run examples:fetch      # the examples' binary data, from the repository's e
 npm run examples:bundle     # every example folder -> its gallery bundle, and index.json
 ```
 
-`editor:dev`, `desktop:dev` and `editor:build` run the same build through `tools/ensureExamples.mjs`. It rebuilds
-only the examples whose folder changed (a stamp of the folder's files and of the tools that pack it). An example
+`editor:dev`, `desktop:dev` and `editor:build` run the same build through `tools/ensureExamples.mjs`. It first brings
+each example's data lock up to its folder (`examples:lock`, no network), so data an edit stored is the example's, then
+rebuilds only the examples whose folder changed (a stamp of the folder's files and of the tools that pack it). An example
 whose data has not been fetched is left out with a hint: the dev start goes on. A release build sets
 `CLEO_EXAMPLES_REQUIRED=1`, which makes a missing example an error, so the desktop installer always carries all of
 them.
 
 ## Adding an example
 
-1. Build the project, in the desktop editor as a project folder or anywhere and exported as a `.zip`.
-2. Put it in `examples/<slug>/`: copy the project folder there, or import a zip with
-   `npm --prefix applications/editor run examples:add -- path/to/MyGame.cleoproj.zip --slug my-game`. The tooling
-   files come from `node tools/examples/scaffold.mjs <slug>`.
-3. Write `examples/<slug>/example.json`: `name`, `description`, `order` (the gallery's sort key), `createdAt`.
-4. `npm run examples:publish <slug>` puts its binary data in the release and writes its `data.lock.json`.
-5. Commit the folder.
+1. In the desktop editor, create a new project with its location set to `examples/<slug>`, and build it there.
+2. `npm run examples:add -- <slug> --description "…" [--order <n>]` writes `example.json` (the card: `name`,
+   `description`, `order`, the gallery's sort key, and `createdAt`), the repository's tooling files, a README, the
+   two shared tests, and its `data.lock.json`.
+3. Commit the folder, and `npm run examples:publish <slug>` puts its binary data in the release.
 
 ## What is in a gallery bundle
 

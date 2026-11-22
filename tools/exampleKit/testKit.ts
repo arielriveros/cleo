@@ -52,3 +52,24 @@ export function scriptFiles(dir: string = EXAMPLE): Map<string, string> {
   if (dir && fs.existsSync(path.join(dir, 'Assets'))) walk(path.join(dir, 'Assets'))
   return new Map([...out].sort((a, b) => a[0].localeCompare(b[0])))
 }
+
+/**
+ * The node a field's stored `$nodePath` leads to from `from`, in a scene's JSON tree (`..` up, a name down, `name#2`
+ * the third of that name), as the engine resolves it at runtime; or null.
+ */
+export function jsonNodeAtPath(root: any, from: any, nodePath: string): any {
+  const parent = new Map<any, any>()
+  const walk = (n: any) => { for (const c of n?.children ?? []) { parent.set(c, n); walk(c) } }
+  walk(root)
+  let n = from
+  for (const part of nodePath.split('/')) {
+    if (!n) return null
+    if (part === '' || part === '.') continue
+    if (part === '..') { n = parent.get(n) ?? null; continue }
+    const hash = part.lastIndexOf('#')
+    const [name, index] = hash > 0 && /^\d+$/.test(part.slice(hash + 1)) ? [part.slice(0, hash), Number(part.slice(hash + 1))] : [part, 0]
+    let k = 0
+    n = (n.children ?? []).find((c: any) => c?.name === name && k++ === index) ?? null
+  }
+  return n
+}

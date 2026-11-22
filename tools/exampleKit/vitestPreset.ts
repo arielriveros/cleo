@@ -14,6 +14,9 @@
 //
 // example.json "tests" says what else an example's suites need: `physicsSuites`, the files that run again on
 // every other physics backend (as the root's PHYSICS_SUITES do), and `heapMb`.
+//
+// Before an example's tests run, its data lock is brought up to the folder (lockSetup.ts), so the data an edit in
+// the desktop editor stored is what its tests check.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -77,13 +80,18 @@ export function exampleProjects(dir: string): any[] {
       hookTimeout: 180_000,
       include: test.include,
       exclude: ['node_modules/**', '.cleo/**', ...(test.exclude ?? [])],
+      globalSetup: test.globalSetup ?? [],
     },
   }))
 
   // The host suites measure real time (tick budgets, sockets): CLEO_TEST_HOST=0 leaves them out (CI's engine job, whose
   // runners are too busy for their budgets; the host's own suites never ran in CI either).
   const hostSuites = process.env.CLEO_TEST_HOST !== '0'
-  const projects = [base(`example:${slug}`, { include: ['tests/**/*.test.ts'], exclude: ['tests/net/**', ...(hostSuites ? [] : ['tests/host/**'])] })]
+  // The main project locks the example's data first (lockSetup.ts): an edit's new data is in the lock it tests.
+  const projects = [base(`example:${slug}`, {
+    include: ['tests/**/*.test.ts'], exclude: ['tests/net/**', ...(hostSuites ? [] : ['tests/host/**'])],
+    globalSetup: [at('tools', 'exampleKit', 'lockSetup.ts')],
+  })]
   for (const backend of tests.physicsSuites?.length ? OTHER_BACKENDS : []) {
     projects.push(base(`example:${slug} on ${backend}`, {
       include: tests.physicsSuites!.map(s => `tests/${s}.test.ts`),

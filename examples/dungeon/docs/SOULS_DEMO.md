@@ -7,8 +7,8 @@ procedural stubs. The level is real content — a medieval dungeon structure, ch
 torches and fire pits, cages, bookcases and racked weapons. This document covers how the game works and how
 to replace each placeholder with final art from inside the editor, without touching a script.
 
-The souls content (characters, weapons, enemies, bonfire, UI) is authored by `tools/soulsDemo/build.mjs`;
-the level around it by `tools/valley/build.mjs` (`tools/valley/dungeon/`). The game used to be played on
+The souls content (characters, weapons, enemies, bonfire, UI) and the level around it are edited in the desktop
+editor, as the project folder `examples/dungeon` ([examples/README.md](../../README.md)). The game used to be played on
 the outdoor valley too, with the dungeon under its skull cave; the valley now ships as its own example, as
 scenery. Before that the souls content shipped as a walled blockout level called *Hollow Keep*.
 
@@ -24,7 +24,7 @@ scenery. Before that the souls content shipped as a walled blockout level called
 - [10. UI widgets](#10-ui-widgets)
 - [11. Step-by-step swap procedures](#11-step-by-step-swap-procedures)
 - [12. Tuning reference](#12-tuning-reference)
-- [13. Regenerating the example, tests, limitations](#13-regenerating-the-example-tests-limitations)
+- [13. Editing the example, tests, limitations](#13-editing-the-example-tests-limitations)
 
 ---
 
@@ -400,27 +400,19 @@ while it is locked on, while any enemy is engaged with it (`SoulsEnemy.engagedWi
 - the enemy swings, the knight's two combos and the warden's leap;
 - the battle cry, the enemy death, and the sword run.
 
-`tools/soulsDemo/importClips.mjs` retargets them onto the mannequin, holds them in place and writes
-`tools/soulsDemo/soulsClips.json`, which is committed. Each clip takes the name of the placeholder it
-replaces, and the generator drops that placeholder.
+They were retargeted onto the mannequin and held in place, each under the name of the placeholder it
+replaced.
 
 Their `hit` / `hitEnd` / `combo` / `recover` markers are measured from the right hand's speed: each
-swing's fastest moment gets a short window around it. Pin any time the measurement gets wrong in
-`MARKER_OVERRIDES`.
+swing's fastest moment gets a short window around it. A time the measurement got wrong is moved by hand, on
+the clip in the editor.
 
 The downloads are slow next to a souls swing, so the moves play them faster with `playSpeed` 1.15–1.6.
-The generator derives the moves' fallback timings, their `lungeStart` and their tracking from the markers.
+The moves' fallback timings, their `lungeStart` and their tracking follow the markers.
 
-**The Longsword's clips are made in the Motion Creator.** They are the documents in
-`tools/soulsDemo/longsword/*.motion.json`. Open one in Cleo Creator ▸ Motion ▸ **Open…**, edit it,
-**Download**, and put the `.motion.json` back. Then run:
-
-```
-npx vite-node --config applications/creator/vitest.config.ts tools/soulsDemo/longsword.ts bake
-```
-
-This bakes them with the Creator's own baker into `tools/soulsDemo/longswordClips.json`. `longsword.ts author`
-rewrites the documents from the choreography in that file, overwriting edits made in the Creator.
+**The Longsword's clips were made in the Motion Creator.** To change one, make the motion again in Cleo Creator ▸
+Motion, bake it into the project (the Creator syncs it to the open project), and put it on the Longsword's move in
+place of the old clip, its `hit` / `hitEnd` / `combo` / `recover` events set on the clip.
 
 **The light combo is one clip.** `Souls_LS_Combo` holds all three attacks back to back:
 - each ends on a `next` event;
@@ -507,8 +499,8 @@ attach with **Attach to socket ▸ Nearest character above ▸ RightHand**. A ne
 socket names; see §11.4.
 
 While attached, the weapon node's transform is driven every frame. **Adjust the grip on its `Mesh` child**,
-whose position and rotation are relative to the hand. The generator computed the placeholder grips
-so the blade points forward and down at idle. Socket scale ignores the bone's scale, which is why each
+whose position and rotation are relative to the hand. The placeholder grips are set so the blade points forward
+and down at idle. Socket scale ignores the bone's scale, which is why each
 enemy's weapon is sized in its `Mesh` child rather than inherited from the scaled body.
 
 ## 8. Sound cues
@@ -618,18 +610,17 @@ the decal alone), `bloodDropsTemplate`, `bloodDropsOffset` (0.9 m: how far along
 spatter's centre lies), `maxBloodDecals` (24; the oldest is removed first, so a long fight never piles up
 decals), `bloodReferenceDamage`.
 
-**The Dungeon's blood** is the FX Creator's liquid simulations (`tools/valley/creatorFx.mjs`), flipbooks
+**The Dungeon's blood** is the FX Creator's liquid simulations, flipbooks
 only, no particles. `Blood Spray` is the Blood Burst bake on a **lit** animated sprite: its Surface maps
 (the albedo atlas, a normal and an ORM map) are its tileset's, so the scene's light shades the wet blood
 -- dark in the dungeon, glossy under a torch -- and it plays once at the contact point (0.8 m across at
 `bloodReferenceDamage`). `Blood Drops` is the Blood Spatter bake's floor decal at three quarters of the
 bake's size (about 1.0 × 0.9 m), its GameManagers' `bloodDropsOffset` scaled with it (0.675 m), starting
-from the frame before the blood reaches the floor (its `flipbookStart`, read from the atlas by the
-build). The `Bloodstain`'s pool is the Blood Pool bake's. Each decal is an animated colour, normal and ORM
+from the frame before the blood reaches the floor (its `flipbookStart`). The `Bloodstain`'s pool is the Blood Pool bake's. Each decal is an animated colour, normal and ORM
 atlas (wet and glossy) with its flipbook. Open the same presets in the Creator's FX mode (Medium: Liquid)
 to make your own.
 
-**Swapping the art.** The splat images are generated placeholders (`tools/soulsDemo/png.mjs`) on the
+**Swapping the art.** The splat images are placeholders on the
 `Blood Drops (placeholder)` material under `Assets ▸ Materials ▸ Effects`.
 Assign your own texture as the material's base colour: RGB is the colour (multiplied by the base
 colour), **alpha is the coverage**. A decal shows its texture once, so leave a transparent margin and
@@ -916,26 +907,21 @@ The graph reads the enemy through **builtin** parameters (its own fields and get
 carries out the state: it draws the attack in Attack, circles and back-pedals facing you in Strafe and
 Retreat, and plays reactions. Editing a brain asset updates every enemy of that type.
 
-## 13. Regenerating the example, tests, limitations
+## 13. Editing the example, tests, limitations
 
-The example folder `applications/editor/public/examples/dungeon/` is **generated** with the Valley's (see
-`tools/valley/README.md` for the source art it needs, and for `split.ts`, which makes the two projects):
+The example is the project folder `examples/dungeon/`, edited in the desktop editor (**Project ▸ Open Folder…**):
+what you save is the repository's change ([examples/README.md](../../README.md) covers its data and publishing).
 
 ```
-node --max-old-space-size=12288 tools/valley/build.mjs   # rebuild (deterministic; re-runs are byte-identical)
-npm run examples:bundle dungeon                            # rebuild its gallery bundle
-npx vitest run tests/soulsDemo tests/dungeon             # rules + generated-project checks
+npm run examples:fetch dungeon        # its binary data, once
+cd examples/dungeon && npm test       # its tests, after an edit
+npm run examples:bundle dungeon       # its gallery bundle (editor:dev and editor:build do this too)
 ```
 
-- `tools/soulsDemo/build.mjs` holds the templates, UI, materials and effects; `tools/valley/` the level.
-- `tools/soulsDemo/seed/` is the mannequin, its material, textures and locomotion field the characters
-  are built from.
-- `placeholderClips.mjs` holds the procedural stub animations, posed in character space.
-- `inputMap.mjs` holds the bindings.
-- Your art swaps happen in **your imported project**, not here. Edit the generator only to change what
-  the example ships with.
+- Your own art swaps happen in **your installed copy** of the example; change the example itself only to change
+  what it ships with.
 - `tests/dungeonSouls.test.ts` checks every name-based join: clips and their events, templates,
-  sounds, widgets, input actions, sockets and child order. Run it after changing the generator.
+  sounds, widgets, input actions, sockets and child order. Run it after renaming anything in the editor.
 
 **Known limitations:**
 - **Placeholder clips are crude.** They exist for timing and events. The roll is an in-place somersault.

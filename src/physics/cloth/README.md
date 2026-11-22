@@ -160,7 +160,7 @@ non-metallic material — swing with the body.
    - Leaving play re-uploads the bind range.
 4. **Updates.** The scene steps skinned cloth with the `ClothNode`s (`ModelNode.stepSkinnedCloth`).
 
-**Keeping it off the armour.** Two things, both computed by the generator (`tools/exampleKit/clothFit.mjs`):
+**Keeping it off the armour.** Two things, both computed from the mesh:
 - **A backstop.** Each particle has an outward direction, radial from its dominant joint's bone (else away
   from the nearest fitted capsule), and may sink no farther than one uniform `backstop` (2 cm) behind
   where the skin holds it, along that direction.
@@ -191,8 +191,7 @@ mostly by hip, spine and leg bones are candidates; gloves, sleeves and the hood 
 **Authoring.** The model tab's **Cloth** section paints the weights on the mesh (editor:
 `features/models/ClothPaintSection.tsx`, `ClothBrush.tsx`, `ClothWeightOverlay.tsx`; the pure half is
 `clothPaint.ts`: paint, erase, smooth, fill a piece or a material, twins always painted together) and
-sets the simulation settings, with a Preview that sways the model. `tools/exampleKit/clothFit.mjs` can still
-compute a starting point from a mesh. The Valley example no longer ships any cloth (its knight and flags
+sets the simulation settings, with a Preview that sways the model. The Valley example no longer ships any cloth (its knight and flags
 were removed 2026-10-31); the figures below were measured on them.
 
 **Cost.** The knight's cloth is 1576 vertices (skirt, the hoop round the thighs, the belt loops, knee pieces; fewer particles after welding) at 10 substeps. Measured on

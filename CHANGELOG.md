@@ -50,25 +50,29 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     patches on the desktop, a version check on the web, itch.io and Steam) is `docs/design/game-updates.md`.
 - **The examples are project folders.**
   - *Edit an example as a project.* Each shipped example is a Cleo project folder in `examples/<slug>/` (Valley, Dungeon,
-    Firing Line, Duskwell, Island, Sandbox). Open it in the desktop editor and what you save is the repository's
-    diff. Opening one and changing nothing writes nothing, so a checkout stays clean (`npm run test:example-folders`
+    Firing Line, Duskwell, Island, Sandbox), edited in the desktop editor and nowhere else: open it with Open Folder
+    and what you save is the repository's diff. Opening one and changing nothing writes nothing, so a checkout stays clean (`npm run test:example-folders`
     checks that in the real desktop app). Its scripts are `.ts` files beside the assets that use them; the shared
     `examples/scripts/` folder is gone.
   - *Binary data in a release, not in git.* Meshes, clips, textures, sounds and bakes are listed in each folder's
     `data.lock.json` and kept as packs in the `example-data` release: `npm run examples:fetch` downloads them,
     `npm run examples:publish` uploads only the packs that changed, `npm run examples:check` stops a commit whose
-    text names data no release holds. The gallery bundles are built from the folders (`npm run examples:bundle`,
+    text names data no release holds. The lock follows the folder: `npm test` (and every gallery build) first locks
+    the data an edit stored and drops what nothing references any more, with no network (`npm run examples:lock`),
+    telling an edit made here from a lock pulled from elsewhere; a new pack stays local until it is published, and
+    CI refuses it until then. The gallery bundles are built from the folders (`npm run examples:bundle`,
     and on every `editor:dev`, `desktop:dev` and `editor:build`) and are no longer committed.
   - *Each example's tests are its own.* `npm test` inside an example folder runs its suites, including the engine,
     editor and host tests that use it as their fixture; the root `npm test` runs them all. Every example is checked
-    to be exactly what the editor's folder codec writes, its scripts' fields to match their sources, and its
-    templates and colliders to follow the editor's rules.
+    to read and write back through the editor's folder codec unchanged, to hold nothing the editor would rewrite on
+    opening it, and its scripts' fields to match their sources.
   - *`cleo/testing` plays a whole project.* `openProject()` loads a project's main scene headless, the way a
     published game loads it (models and their animators, templates, scripts, physics, AI), and steps it;
     `readProject()` gives the project as data. Its `fakeInput` presses reach `@onAction` methods too.
-  - *The generators write folders.* The Sandbox, Duskwell and Island generators, the Firing Line ingest, the Valley
-    and Dungeon patch tools and the GI baker write the example folders; a rerun on unchanged inputs changes
-    nothing.
+  - *No more generators.* The tools that built or patched the examples (the Sandbox, Duskwell and Island builds,
+    the Firing Line ingest, the Valley and Dungeon tools, the souls-demo builder, the headless GI baker) are gone, so
+    nothing overwrites an edit made in the editor. A new example is a project made in the desktop editor at
+    `examples/<slug>`, then `npm run examples:add <slug>`.
 - **Forks in the animator graph.**
   - *A junction, not a state.* A fork takes ways in and hands them on to its ways out. A transition into a fork fires
     only when one of the fork's ways out holds, and goes straight on, in the same frame, to the first that does. A

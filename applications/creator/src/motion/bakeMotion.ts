@@ -29,7 +29,7 @@ export interface BakedClip {
   channels: { samplerIndex: number; targetNodeIndex: number; targetPath: 'rotation' | 'translation' }[];
   /**
    * Clip events. The Motion Creator never authors any (they are set on the clip in the editor); a tool
-   * that bakes motions for a game may add its own (tools/soulsDemo/longsword.ts).
+   * that bakes motions for a game may add its own.
    */
   events?: { time: number; name: string }[];
 }

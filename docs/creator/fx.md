@@ -519,9 +519,8 @@ animated atlases (give the decal the block's flipbook).
 The game never runs the simulation: it plays the bake. A fire becomes a flipbook on a camera-facing
 sprite (an **Animated Sprite**, or a particle system's **Render** module, at the sidecar's columns, rows and
 FPS); a liquid's floor becomes a [Decal](../editor/node-inspector.md#decal) playing its decal flipbook
-once and holding the settled pool. The Valley and Dungeon examples' flames, blood and splashes are made this way:
-`tools/valley/creatorFx.mjs` names each one's Creator preset, seed and few overrides, and the Valley build
-bakes them headless with the same solver, renderer and exporter as **Export flipbook**.
+once and holding the settled pool. The Valley and Dungeon examples' flames, blood and splashes are made this way,
+each from a Creator preset, a seed and a few overrides, baked with **Export flipbook**.
 
 ![The Valley's bonfire effect, side by side: live in the FX Creator (left) and in the Valley, in the editor, as its baked flipbook on an additive sprite over the bonfire's logs (right)](../media/fx-creator-vs-engine-fire.gif)
 

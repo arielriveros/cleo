@@ -1,15 +1,16 @@
-// The shipped examples as Cleo project folders (examples/<slug>/), read and written from Node.
+// The shipped examples as Cleo project folders (examples/<slug>/), read (and, by examples:sync and examples:add,
+// written) from Node. An example is edited in the desktop editor; these helpers are how the tests, the gallery and
+// the data tools see what it wrote.
 //
 // A folder is what the desktop editor opens and writes (applications/editor/src/utils/folder/): project.cleo,
 // Assets/ with a .meta beside every asset, Blobs/ for the large payloads, Baked/ for GI bakes. These helpers run
-// the editor's own codec over it, so a tool or a test gets the same `BundleData` an import would, and a generator
-// writes exactly the files the editor would.
+// the editor's own codec over it, so a tool or a test gets the same `BundleData` an import would, and a tool that
+// writes one writes exactly the files the editor would.
 //
-// Two rules the codec leaves to its callers, kept here:
-//   - Script sources are stored ONCE, as the .ts file. The bundles also carried a copy on every scene and template
-//     node that runs a script (the generators' `attach`), and the editor never saves those copies, so a folder
-//     leaves them out: written without them, read back with them filled in from the library. A .ts edited in
-//     VS Code is then what every reader runs.
+// The rules the codec leaves to its callers, kept here:
+//   - Script sources are stored ONCE, as the .ts file. A bundle may also carry a copy on every scene node that runs
+//     a script, and the editor never saves those copies, so a folder leaves them out: written without them, read
+//     back with them filled in from the library. A .ts edited in VS Code is then what every reader runs.
 //   - A folder's binary data (Blobs/, Baked/, image and audio files) may not be on disk yet: the examples keep it
 //     in a release, listed in data.lock.json (tools/examples/data.mjs). Reading a folder whose data is missing
 //     fails with the command that fetches it, instead of silently dropping the assets.
@@ -21,7 +22,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import crypto from 'crypto'
-import { ROOT, bundleModules, folderModules } from './editorModules.mjs'
+import { ROOT, folderModules } from './editorModules.mjs'
 import { normalizeForEditor } from './editorNormalize.mjs'
 
 export { ROOT }
@@ -120,7 +121,6 @@ export function readSnapshot(dir) {
 // ---------------------------------------------------------------------------------------------------
 
 export const lf = (s) => (typeof s === 'string' ? s.replace(/\r\n?/g, '\n') : s)
-const DEFAULT_CLASS = /export\s+default\s+(?:abstract\s+)?class\s+(\w+)/
 
 /** Point every copy of a script's source at the library's (see scriptCopies.ts). Returns how many changed. */
 export const settleScriptCopies = (bundle, opts) => folderModules().settleScriptCopies(bundle, opts)
@@ -131,30 +131,6 @@ export function lfScripts(bundle) {
   for (const s of bundle.libraries?.scripts ?? []) {
     const next = lf(s.source)
     if (next !== s.source) { s.source = next; changed++ }
-  }
-  return changed
-}
-
-/**
- * Re-stamp each scene's `assetHashes` (the asset versions it was saved against) from the library as it is now
- * (`from`'s, by default the bundle's own), for the keys the scene already records. A stale hash makes the editor
- * re-instantiate the scene's templates when it opens, which would rewrite the scene. Returns how many changed.
- */
-export function restampAssetHashes(bundle, from = bundle) {
-  const { hashAsset, ASSET_HASH_VERSION } = folderModules()
-  const LIBS = { material: 'materials', model: 'models', template: 'templates', terrainMaterial: 'terrainMaterials', script: 'scripts', tileset: 'tilesets', aiBrain: 'aiBrains' }
-  const records = new Map()
-  for (const [kind, lib] of Object.entries(LIBS)) for (const r of from.libraries?.[lib] ?? []) records.set(`${kind}:${r.id}`, r)
-  let changed = 0
-  for (const s of Object.values(bundle.scenes ?? {})) {
-    if (!s?.assetHashes) continue
-    for (const key of Object.keys(s.assetHashes)) {
-      const r = records.get(key)
-      if (!r) continue
-      const h = hashAsset(r)
-      if (s.assetHashes[key] !== h) { s.assetHashes[key] = h; changed++ }
-    }
-    if (s.assetHashVersion !== ASSET_HASH_VERSION) { s.assetHashVersion = ASSET_HASH_VERSION; changed++ }
   }
   return changed
 }
@@ -191,14 +167,15 @@ export class FolderReadError extends Error {}
 export async function readExampleFolder(dir, { strict = true } = {}) {
   const missing = missingData(dir)
   if (missing.length)
-    throw new FolderReadError(`${path.basename(dir)}: ${missing.length} data file(s) missing (${missing[0]}). Run: npm run examples:fetch ${path.basename(dir)}`)
+    throw new FolderReadError(`${path.basename(dir)}: ${missing.length} data file(s) missing (${missing[0]}). Run: npm run examples:fetch ${path.basename(dir)} (or, after an edit, npm run examples:lock ${path.basename(dir)})`)
   const { folderToBundle } = folderModules()
   const read = await folderToBundle(readSnapshot(dir))
   if (strict && read.blocked.length)
     throw new FolderReadError(`${path.basename(dir)}: ${read.blocked.length} file(s) cannot be read: ${read.blocked.slice(0, 3).map(b => `${b.rel} (${b.message})`).join('; ')}`)
   if (strict && read.fixes.size)
     throw new FolderReadError(`${path.basename(dir)}: ${read.fixes.size} file(s) the editor would rewrite on open: ${[...read.fixes.keys()].slice(0, 3).join(', ')}`)
-  settleScriptCopies(read.bundle, { fill: true })
+  // The scene nodes' copies, put back; the templates' are read as the folder holds them (a writer refreshes them).
+  settleScriptCopies(read.bundle, { fill: true, templates: false })
   return { bundle: read.bundle, project: read.project, refs: read.refs, entries: read.entries }
 }
 
@@ -227,7 +204,7 @@ const sameBytes = (file, bytes) => {
 
 /**
  * Write `bundle` (`readBundle`'s shape) to the folder project `dir`, as the desktop editor would store it.
- * MUTATES `bundle` (script copies dropped, sources in LF, hashes re-stamped, payloads moved out).
+ * MUTATES `bundle` (script copies dropped, sources in LF, payloads moved out).
  *
  * Keeps the uid (and the name, unless `name` is given) of an existing project.cleo. Writes only files whose
  * bytes differ, and deletes what the project no longer has, but only inside the folders a project owns
@@ -250,21 +227,16 @@ export async function writeExampleFolder(dir, bundle, { name, uid, force = false
   lfScripts(bundle)
   // What the editor would write back on opening the folder, done now (or a checkout opened in Cleo is dirty).
   normalizeForEditor(bundle)
-  settleScriptCopies(bundle, { fill: false })
-  restampAssetHashes(bundle)
+  keepScenesCurrent(bundle, () => settleScriptCopies(bundle, { fill: false }))
+  // Otherwise scene asset hashes are left as they are: a scene whose script or template changed since it was saved
+  // keeps the old hash, so the editor brings its nodes up to the asset when it opens it, as after any edit.
 
-  let { snapshot, notes } = await bundleToFolder(bundle, { uid: finalUid, name: finalName })
+  const { snapshot, notes } = await bundleToFolder(bundle, { uid: finalUid, name: finalName })
   const realNotes = notes.filter(n => !/no saved data/.test(n.message))
   if (realNotes.length) throw new Error(`${path.basename(dir)}: ${realNotes.map(n => `${n.rel ?? ''} ${n.message}`).join('; ')}`)
 
-  // The folder must read back cleanly before anything is written. And a scene records each asset's hash as the
-  // editor will compute it from the folder, which is not always what this bundle held: a short buffer is stored
-  // as JSON text, where a -0 comes back 0 (and a stale hash makes the editor rebuild the scene on open).
-  let check = await folderToBundle({ files: snapshot.files, dirs: snapshot.dirs, blobs: snapshot.blobs })
-  if (!check.blocked.length && !check.fixes.size && restampAssetHashes(bundle, check.bundle)) {
-    ({ snapshot } = await bundleToFolder(bundle, { uid: finalUid, name: finalName }))
-    check = await folderToBundle({ files: snapshot.files, dirs: snapshot.dirs, blobs: snapshot.blobs })
-  }
+  // The folder must read back cleanly before anything is written.
+  const check = await folderToBundle({ files: snapshot.files, dirs: snapshot.dirs, blobs: snapshot.blobs })
   if (check.blocked.length || check.fixes.size)
     throw new Error(`${path.basename(dir)}: the folder would not read back cleanly (${check.blocked.length} blocked, ${check.fixes.size} fixes)`)
 
@@ -300,6 +272,26 @@ export async function writeExampleFolder(dir, bundle, { name, uid, force = false
   return stats
 }
 
+/**
+ * Run `refresh` (which may only rewrite templates' copies of their scripts' sources, a cache of the library's) and
+ * keep each scene that was current with a template current with it: refreshing a copy changes the template's hash,
+ * and a stale hash makes the editor rebuild the template's instances in the scene on open.
+ */
+function keepScenesCurrent(bundle, refresh) {
+  const { hashAsset } = folderModules()
+  const templates = bundle.libraries?.templates ?? []
+  const before = new Map(templates.map(t => [t.id, hashAsset(t)]))
+  refresh()
+  for (const t of templates) {
+    const was = before.get(t.id), now = hashAsset(t)
+    if (was === now) continue
+    for (const scene of Object.values(bundle.scenes ?? {})) {
+      const key = `template:${t.id}`
+      if (scene?.assetHashes?.[key] === was) scene.assetHashes[key] = now
+    }
+  }
+}
+
 /** Remove the empty directories under `top` that the project does not keep (deepest first). */
 function pruneEmpty(dir, top, wanted) {
   const dirs = []
@@ -311,51 +303,9 @@ function pruneEmpty(dir, top, wanted) {
   }
 }
 
-/**
- * A generator's last step: the format-1 tree it wrote to `staging` (readBundle reads either format), changed by
- * `mutate` and given `giBakes`, written to the folder `dir`. Replaces `packFormat2(OUT)`.
- */
-export async function writeExampleFromStaging(staging, dir, { giBakes, mutate, ...opts } = {}) {
-  const { readBundle } = bundleModules()
-  const { folderSource } = await import('./readExample.mjs')
-  const { packFormat2 } = await import('./packFormat2.mjs')
-  // Through bundle format 2 first, as every example was before it became a folder: format 1 holds geometry as
-  // plain numbers, format 2 hands it back typed, and the folder codec writes the two differently. Packed, a
-  // generator's output is the same folder the editor (which holds typed geometry) would write.
-  await packFormat2(staging, { giBakes, mutate })
-  const { bundle } = await readBundle(folderSource(staging))
-  return writeExampleFolder(dir, bundle, opts)
-}
-
-function toArrayBuffer(bytes) {
-  if (bytes instanceof ArrayBuffer) return bytes
-  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
-  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)
-}
-
 // ---------------------------------------------------------------------------------------------------
 // Pieces
 // ---------------------------------------------------------------------------------------------------
-
-/** The GI bakes in a folder's Baked/, by id. */
-export function readBakes(dir) {
-  const { bakeIdOfRel } = folderModules()
-  const files = []
-  walk(dir, 'Baked', files)
-  return files.map(rel => ({ id: bakeIdOfRel(rel), bytes: copyBytes(fs.readFileSync(path.join(dir, ...rel.split('/')))) })).filter(b => b.id !== null)
-}
-
-/** Write GI bakes into Baked/ (only those given; the rest stay). */
-export function writeBakes(dir, bakes) {
-  const { bakeRel } = folderModules()
-  for (const b of bakes) {
-    const file = path.join(dir, ...bakeRel(b.id).split('/'))
-    const bytes = b.bytes instanceof Uint8Array ? b.bytes : new Uint8Array(b.bytes)
-    if (sameBytes(file, bytes)) continue
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, bytes)
-  }
-}
 
 /** The file a script asset at explorer path `vfsPath` ('/Level/Scripts/Manager.script') is, in folder `dir`. */
 export function scriptFile(dir, vfsPath) {
@@ -366,15 +316,3 @@ export function scriptFile(dir, vfsPath) {
 /** The source of the script at explorer path `vfsPath` in folder `dir`, LF. */
 export const scriptSourceAt = (dir, vfsPath) => lf(fs.readFileSync(scriptFile(dir, vfsPath), 'utf8'))
 
-/** The explorer path of every script in a folder: class name -> path ('/Level/Scripts/Manager.script'). */
-export function scriptsByClass(dir) {
-  const { vfsPathOfRel } = folderModules()
-  const files = []
-  walk(dir, 'Assets', files)
-  const out = new Map()
-  for (const rel of files.filter(r => r.endsWith('.ts') && !r.endsWith('.d.ts'))) {
-    const cls = DEFAULT_CLASS.exec(fs.readFileSync(path.join(dir, ...rel.split('/')), 'utf8'))?.[1]
-    if (cls) out.set(cls, vfsPathOfRel(rel, 'script'))
-  }
-  return out
-}

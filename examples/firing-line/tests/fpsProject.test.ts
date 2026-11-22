@@ -4,9 +4,8 @@ import { join } from 'path';
 import { Node } from 'cleo';
 import { parseNodeJson } from '@engine/core/scene/nodes/parseNodeJson';
 import { dataReady, readThisExample } from '@tools/exampleKit/testKit';
-// The Firing Line example (examples/firing-line, edited in the editor as a project folder; tools/fps/ingest.mjs brings in
-// a project exported out of the editor). A node shape the engine does not know fails only when the editor opens
-// a project exported out of the editor). A node shape the engine does not know fails only when the editor opens
+// The Firing Line example (examples/firing-line, edited in the desktop editor as a project folder). A node shape
+// the engine does not know fails only when the editor opens
 // the scene (a light of a type it does not have, a field under the wrong key), so this parses the scene and every
 // template with the engine's own parser, and checks the joins between the assets that nothing else would notice.
 

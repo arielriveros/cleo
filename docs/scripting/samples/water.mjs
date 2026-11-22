@@ -1,6 +1,6 @@
-// The Valley's water material: its GLSL (water.glsl) and the uniforms it declares, with the values the
-// pond ships with. Shared by the generator (build.mjs) and tests/valleyWater.test.ts, so the material
-// the example carries is exactly the one the tests translate.
+// A water material for the Custom material type: its GLSL (water.glsl) and the uniforms it declares, with the
+// values the Valley's pond was made with. The sample docs/scripting/rendering.md points at, and what
+// tests/customShaderDialects.test.ts translates to WGSL, so the sample stays one the engine can compile.
 
 import fs from 'fs'
 import path from 'path'

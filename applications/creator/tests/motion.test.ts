@@ -437,62 +437,6 @@ describe('two-handed holds', () => {
   });
 });
 
-describe('the Valley Longsword motions (tools/soulsDemo/longsword)', () => {
-  it('bake on the souls mannequin with the hands on the hilt, and the tool\'s event table inside the clip', async () => {
-    const { readFileSync, readdirSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    const { LONGSWORD_EVENTS, withEvents } = await import('../../../tools/soulsDemo/longsword');
-    const root = join(__dirname, '..', '..', '..', 'tools', 'soulsDemo');
-    const models = JSON.parse(readFileSync(join(root, 'seed', 'models.json'), 'utf8'));
-    const r = buildRig(models[0].nodeJson.children[0].model.skin);
-    const files = readdirSync(join(root, 'longsword')).filter(f => f.endsWith('.motion.json'));
-    expect(files.length).toBeGreaterThanOrEqual(4);
-    expect(files).toContain('Souls_LS_Combo.motion.json');
-    const baked = JSON.parse(readFileSync(join(root, 'longswordClips.json'), 'utf8')) as { name: string; events: { time: number; name: string }[] }[];
-    const R = r.bySlot.get('hand.R')!, L = r.bySlot.get('hand.L')!;
-    for (const f of files) {
-      const raw = readFileSync(join(root, 'longsword', f), 'utf8');
-      // The motions carry no events: the game's are the tool's (LONGSWORD_EVENTS), added after the bake.
-      expect(raw).not.toMatch(/"event"/);
-      const d = motionFromFile(JSON.parse(raw))!;
-      expect(bakeMotion(r, d).events).toBeUndefined();
-      const clip = withEvents(d, bakeMotion(r, d));
-      const end = clip.samplers[0].input.at(-1)!;
-      expect(clip.samplers.every(s => s.output.every(Number.isFinite))).toBe(true);
-      for (const e of clip.events ?? []) expect(e.time).toBeLessThanOrEqual(end);
-      // longswordClips.json (what the build reads) is this table's output.
-      expect(baked.find(c => c.name === d.name)?.events).toEqual(clip.events);
-      if (LONGSWORD_EVENTS[d.name]) expect(clip.events!.length).toBe(Object.values(LONGSWORD_EVENTS[d.name]).flat().length);
-      if (!d.loop) {
-        // Each attack (a combo's segments, between its `next` events): hit, then hitEnd, then combo and recover.
-        const ev = clip.events ?? [];
-        const cuts = [0, ...ev.filter(e => e.name === 'next').map(e => e.time), end + 1];
-        for (let k = 0; k + 1 < cuts.length; k++) {
-          const seg = ev.filter(e => e.time > cuts[k] - 1e-6 && e.time < cuts[k + 1] - 1e-6 && e.name !== 'next');
-          const at = (n: string) => seg.find(e => e.name === n)?.time ?? NaN;
-          expect(at('hit'), `${d.name} attack ${k + 1}`).toBeLessThan(at('hitEnd'));
-          expect(at('hitEnd')).toBeLessThanOrEqual(at('combo'));
-          expect(at('recover')).toBeGreaterThanOrEqual(at('combo'));
-        }
-      }
-      if (d.name === 'Souls_LS_Combo') {
-        // The attacks step: the body ends the combo well forward, and a foot leaves the ground on the way.
-        const hipsZ = (t: number) => modelPose(r.bones, poseLocals(r, poseFromClip(r, clip as any, t))).pos[r.hips][2];
-        expect(hipsZ(end) - hipsZ(0)).toBeGreaterThan(0.7);
-        const footL = r.bySlot.get('foot.L')!;
-        const lifts = Array.from({ length: Math.ceil(end * 15) }, (_, k) => modelPose(r.bones, poseLocals(r, poseFromClip(r, clip as any, k / 15))).pos[footL][1]);
-        expect(Math.max(...lifts) - Math.min(...lifts)).toBeGreaterThan(0.05);
-      }
-      const grip = d.poses[0].ik!.handL!.grip!;
-      for (let t = 0; t <= end; t += 1 / 15) {
-        const m = modelPose(r.bones, poseLocals(r, poseFromClip(r, clip as any, t)));
-        const want = vec3.add(vec3.create(), m.pos[R], vec3.transformQuat(vec3.create(), grip.offset as unknown as vec3, m.rot[R]));
-        expect(vec3.distance(m.pos[L], want), `${d.name} at ${t.toFixed(2)} s`).toBeLessThan(0.02);
-      }
-    }
-  }, 60000);
-});
-
 describe('elbow and knee poles', () => {
   it('bends the elbow toward its pole', () => {
     const idx = (n: string) => rig.byName.get(`mixamorig:${n}`)!;

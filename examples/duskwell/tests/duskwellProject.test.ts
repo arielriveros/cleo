@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { dataReady, readThisExample } from '@tools/exampleKit/testKit';
 import { layerByName } from '@engine/physics/collisionLayers';
-import { COLS, ROWS, GRID, ROOMS, roomBounds } from '@tools/duskwell/level';
 // The whole engine: it registers itself as the scripts' 'cleo' module, so the demo's scripts run headless.
 import { Scene, CleoEngine, ControllerNode, AISystem, NavGraph2D, parseNavGraph2D, EDGE_JUMP, setGameHost, SaveGame, setSaveStore, createMemorySaveStore, parseRuntimeScene, resetSaveSession } from 'cleo';
 import type { CharacterBody2DNode } from 'cleo';
@@ -9,7 +8,7 @@ import { fakeInput } from '@engine-tests/helpers/fakeInput';
 import { injectSaveFields } from '@editor/features/publish/buildGameData';
 import type { FakeInput } from '@engine-tests/helpers/fakeInput';
 
-// The Duskwell example: the 2D metroidvania slice built by tools/duskwell/build.ts on the flat 2D frame,
+// The Duskwell example: a 2D metroidvania slice on the flat 2D frame,
 // the 2D physics and the sprite clips. Most of what can go wrong with it does not fail loudly -- a scene
 // not marked 2D draws through the 3D frame, a tilemap with its 3D colliders on builds a box per rock
 // cell, a script id that resolves to nothing leaves the player standing, a pit a plain jump clears
@@ -138,23 +137,6 @@ describe.skipIf(!present)('the Duskwell example project', { timeout: 60_000 }, (
         expect(by('DuskBat')).toEqual(['Bat 1', 'Bat 2']);
         expect(by('DuskHud')).toEqual(['HUD']);
         expect(by('DuskPickup')).toContain('Dash Relic');
-    });
-
-    it('covers every open cell of the map with exactly one room', () => {
-        const rooms = nodes().filter(n => n.type === 'room2D');
-        expect(rooms.map(r => r.name)).toEqual(ROOMS.map(r => r.name));
-        const rects = rooms.map(r => {
-            const [w, h] = r.room2D.size, [x, y] = r.position;
-            return [x - w / 2, y - h / 2, x + w / 2, y + h / 2];
-        });
-        // The rooms in the scene are the level's, cell for cell.
-        ROOMS.forEach((room, i) => expect(rects[i]).toEqual(roomBounds(room)));
-        for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-            if (GRID[r][c] === '#') continue;
-            const x = c + 0.5, y = ROWS - r - 0.5;
-            const holding = rects.filter(b => x > b[0] && x < b[2] && y > b[1] && y < b[3]);
-            expect(holding.length, `cell (${c}, ${r})`).toBe(1);
-        }
     });
 
     it('lands the player on the floor, walks it, and hops it onto the step', () => {

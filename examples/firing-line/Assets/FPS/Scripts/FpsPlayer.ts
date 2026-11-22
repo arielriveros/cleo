@@ -511,7 +511,6 @@ export default class FpsPlayerNode extends FpsCombatantNode {
   /**
    * Fire the one-shot `name` on a viewmodel's animator (its Actions layer state of that name; a second fire while
    * it plays restarts it) and return how long it lasts in seconds, or undefined when the weapon has no such clip.
-   * A weapon's graph is built by tools/fps/characters.mjs viewmodelMachine.
    */
   private _playClip(name: string, _loop: boolean, view: ModelNode | null, _restart: boolean = false): number | undefined {
     const info = (view as any)?.animator?.triggerInfo?.(name)

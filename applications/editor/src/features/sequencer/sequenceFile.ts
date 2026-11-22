@@ -2,8 +2,7 @@ import { parseSequence } from 'cleo'
 import type { SequenceData } from 'cleo'
 
 // A sequence as a file: `<name>.sequence.json`, the SequenceData exactly as the node carries it, two-space
-// JSON with a trailing newline. That is the format the Valley's checked-in tour is in
-// (tools/valley/cinematic/valley-tour.sequence.json), so a tour tweaked in the editor exports straight over it.
+// JSON with a trailing newline, so a checked-in sequence file reads as a short diff when it is exported again.
 
 export const SEQUENCE_FILE_SUFFIX = '.sequence.json'
 

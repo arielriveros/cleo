@@ -4,7 +4,9 @@
 //
 //   node tools/examples/gallery.mjs [slug…] [--force]
 //
-// An example whose data is not all on disk (npm run examples:fetch) is left out of the gallery, with a hint;
+// Each example's data lock is brought up to its folder first (tools/examples/data.mjs `lock`, no network), so what
+// an edit in the desktop editor stored is in it. An example whose data is not all on disk (npm run examples:fetch)
+// is left out of the gallery, with a hint;
 // with CLEO_EXAMPLES_REQUIRED=1 (release builds) that is an error instead. An example whose folder has not
 // changed since its bundle was built is skipped: a stamp of the tools that build it and of every file it reads.
 // Each example builds in a child process of its own, with a large heap (the biggest are several hundred MB).
@@ -16,14 +18,15 @@ import { spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { ROOT, EXAMPLES_DIR, listExamples, missingData, projectFiles, readExampleFolder } from '../exampleKit/folder.mjs'
 import { GALLERY_DIR, regenerateIndex } from '../exampleKit/galleryIndex.mjs'
+import { lock, lockSummary } from './data.mjs'
 
 const SELF = fileURLToPath(import.meta.url)
 const STAMP = '.build.json'
 
 /** The sources whose change rebuilds every example's bundle. */
 const TOOL_SOURCES = [
-  'tools/examples/gallery.mjs', 'tools/exampleKit/folder.mjs', 'tools/exampleKit/editorModules.mjs',
-  'tools/exampleKit/packFormat2.mjs', 'tools/exampleKit/tsLoader.mjs',
+  'tools/examples/gallery.mjs', 'tools/examples/bundleWriter.mjs', 'tools/exampleKit/folder.mjs',
+  'tools/exampleKit/editorModules.mjs', 'tools/exampleKit/tsLoader.mjs',
   'applications/editor/src/utils/folder/projectCodec.ts', 'applications/editor/src/utils/folder/codec.ts',
   'applications/editor/src/utils/folder/layout.ts', 'applications/editor/src/utils/payloads.ts',
   'applications/editor/src/utils/bundle.ts', 'applications/editor/src/utils/bundleRead.ts',
@@ -53,7 +56,7 @@ async function buildOne(slug) {
   const { bundle } = await readExampleFolder(dir)
   // A folder implies no dates (they are not committed); the gallery's are the example's.
   bundle.manifest.createdAt = example.createdAt ?? 0
-  const { writeBundleFolder } = await import('../exampleKit/packFormat2.mjs')
+  const { writeBundleFolder } = await import('./bundleWriter.mjs')
   fs.rmSync(out, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
   await writeBundleFolder(out, bundle)
   const meta = { name: example.name ?? bundle.manifest.projectName ?? slug, description: example.description ?? '', order: example.order ?? 0, createdAt: example.createdAt ?? 0 }
@@ -71,6 +74,10 @@ export async function buildGallery({ slugs, force = false, required = process.en
   const result = { built: [], skipped: [], missing: [] }
   for (const { slug, dir } of examples) {
     const out = path.join(GALLERY_DIR, slug)
+    // The lock first, as npm test does: data an edit in the editor stored (or let go of) is the example's.
+    const locked = lock(slug, dir)
+    const line = lockSummary(slug, locked)
+    if (line) log(`  ${line}`)
     const missing = missingData(dir)
     if (missing.length) {
       if (required) throw new Error(`${slug}: ${missing.length} data file(s) missing; run npm run examples:fetch`)

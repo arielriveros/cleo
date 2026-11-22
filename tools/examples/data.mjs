@@ -12,10 +12,18 @@
 //     commit still fetches.
 //
 //   npm run examples:fetch   [slug…] [--from <dir>] [--force]   download what is missing (verified by sha256)
+//   npm run examples:lock    [slug…] [--take]                   lock the data an edit added or changed (no network)
 //   npm run examples:status  [slug…]                            what differs from the locks
 //   npm run examples:check   [slug…] [--remote]                 text-only consistency (tests and CI run it)
-//   npm run examples:publish <slug…> [--dry-run] [--to <dir>]   write the lock, upload the missing packs
+//   npm run examples:publish <slug…> [--dry-run] [--to <dir>]   upload the packs not uploaded yet, fill the lock
 //   npm run examples:prune   [--yes]                            list (and with --yes delete) unreferenced packs
+//
+// An example is edited in the desktop editor, which writes its data straight into the folder. `lock` (which each
+// example's npm test runs first) brings the lock up to the folder: what the text references is locked, what nothing
+// references any more leaves, and a bucket whose files changed gets a new pack, not uploaded yet (no sha in the lock).
+// It tells an edit made here from a lock that changed elsewhere (a pull) by what this machine last saw the two agree
+// on (.cleo/local/data.json): only the first is taken in, the second is fetched. A pack not uploaded yet passes the
+// local check and fails `check --remote` (CI) until `publish` uploads it.
 //
 // publish and prune change the GitHub release: they need `gh auth login`, or GITHUB_TOKEN with contents:write.
 // fetch needs nothing (the repository is public).
@@ -126,32 +134,183 @@ export function unpack(bytes) {
   return out
 }
 
-/**
- * The lock an example's data on disk implies, and the packs it needs (name -> members). `previous` keeps its
- * bucket count (so the pack names of unchanged buckets stay) and its pack records where nothing changed.
- */
-export function computeLock(slug, dir, previous = readLockFile(dir), repo = previous?.repo ?? repoSlug()) {
-  const files = {}
-  let total = 0
-  for (const rel of dataFilesOnDisk(dir)) {
-    const bytes = fs.readFileSync(fileOf(dir, rel))
-    files[rel] = [sha256(bytes), bytes.length]
-    total += bytes.length
+// ---------------------------------------------------------------------------------------------------
+// What the text references, and what this machine last saw
+// ---------------------------------------------------------------------------------------------------
+
+const TEXT_ROOTS = ['Assets', 'Derived', 'ProjectSettings']
+
+/** Every text file under the folder's asset roots (posix rels). */
+function textFiles(dir) {
+  const out = []
+  const walk = (rel) => {
+    const abs = path.join(dir, rel)
+    if (!fs.existsSync(abs)) return
+    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
+      if (e.name.startsWith('.')) continue
+      const r = `${rel}/${e.name}`
+      if (e.isDirectory()) walk(r)
+      else if (e.isFile() && !isDataFile(dir, r)) out.push(r)
+    }
   }
-  let buckets = previous?.buckets
-  if (!buckets) { buckets = 1; while (buckets < 16 && total / buckets > PACK_TARGET) buckets *= 2 }
-  for (const v of Object.values(files)) v.push(bucketOf(v[0], buckets))
+  for (const top of TEXT_ROOTS) walk(top)
+  return out.sort()
+}
+
+/**
+ * The data the folder's text names: the blobs its records reference, the image, sound and LOD-image files a meta
+ * stands beside, and of the bakes `bakes` (Baked/ rels), those whose id a scene or template names.
+ */
+export function referencedData(dir, bakes = []) {
+  const { bakeIdOfRel } = folderModules()
+  const blobs = new Set(), files = new Set(), named = new Set()
+  const ids = bakes.map(rel => [rel, bakeIdOfRel(rel)]).filter(([, id]) => id)
+  for (const rel of textFiles(dir)) {
+    const content = fs.readFileSync(fileOf(dir, rel), 'utf8')
+    for (const m of content.matchAll(/"h":\s*"([0-9a-f]{64})"/g)) blobs.add(`Blobs/${m[1].slice(0, 2)}/${m[1]}.bin`)
+    if (rel.endsWith('.meta') && isDataFile(dir, rel.slice(0, -5))) files.add(rel.slice(0, -5))
+    for (const [bake, id] of ids) if (!named.has(bake) && content.includes(`"${id}"`)) named.add(bake)
+  }
+  return { blobs, files, bakes: named }
+}
+
+const LOCAL_FILE = ['.cleo', 'local', 'data.json']
+
+/**
+ * What this machine keeps of an example's data (never committed: .cleo/ is ignored): `base`, each file's sha when
+ * its lock entry and its file last agreed here, and `hashes`, a cache of file hashes by size and mtime.
+ */
+function readLocal(dir) {
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(dir, ...LOCAL_FILE), 'utf8'))
+    return { base: v.base ?? {}, hashes: v.hashes ?? {} }
+  } catch { return { base: {}, hashes: {} } }
+}
+
+function writeLocal(dir, local) {
+  const file = path.join(dir, ...LOCAL_FILE)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(local))
+}
+
+/** A data file's sha256 and size, from the cache when its size and mtime have not moved. */
+function hashOf(dir, rel, local) {
+  const file = fileOf(dir, rel)
+  const st = fs.statSync(file)
+  const cached = local.hashes[rel]
+  if (cached && cached[0] === st.size && cached[1] === st.mtimeMs) return { sha: cached[2], size: st.size }
+  const sha = sha256(fs.readFileSync(file))
+  local.hashes[rel] = [st.size, st.mtimeMs, sha]
+  return { sha, size: st.size }
+}
+
+/** The buckets for a first lock: enough that a pack stays near PACK_TARGET. */
+function bucketsFor(total) {
+  let buckets = 1
+  while (buckets < 16 && total / buckets > PACK_TARGET) buckets *= 2
+  return buckets
+}
+
+/** The packs `files` (rel -> [sha, size, bucket]) needs: unchanged buckets keep their record, others are new. */
+function packsFor(slug, files, buckets, previous) {
   const byBucket = membersByBucket(files, buckets)
   const previousPacks = new Map((previous?.packs ?? []).map(p => [p[0], p]))
+  const release = previous?.packs?.at(-1)?.[1] ?? RELEASE
   const packs = []
-  const needed = new Map()
+  const members = new Map()
   for (const b of [...byBucket.keys()].sort((x, y) => x - y)) {
-    const members = byBucket.get(b)
-    const name = packName(slug, b, members)
-    needed.set(name, { bucket: b, members })
-    packs.push(previousPacks.get(name) ?? [name, previous?.packs?.[0]?.[1] ?? RELEASE, null, null])
+    const name = packName(slug, b, byBucket.get(b))
+    members.set(name, byBucket.get(b))
+    packs.push(previousPacks.get(name) ?? [name, release, null, null])
   }
-  return { lock: { cleoData: 1, repo, buckets, packs, files }, needed }
+  return { packs, members }
+}
+
+/** The packs of a lock not uploaded yet (no sha). */
+export const pendingPacks = (lock) => (lock?.packs ?? []).filter(p => !p[2]).map(p => p[0])
+
+/**
+ * Bring an example's lock up to its folder, with no network. For each data file, between the lock (L), the file
+ * on disk (D) and what this machine last saw the two agree on (B):
+ *
+ *   L = D                 in step
+ *   L != D, B = L         changed here (a re-bake, an image replaced): D is locked
+ *   L != D, B = D         the lock changed elsewhere (a pull): L stays, `examples:fetch` brings it
+ *   L != D, otherwise     both changed: L stays, reported (`take` locks D)
+ *   L, no D               not fetched (L stays), or gone when nothing references it any more
+ *   D, no L               added here (locked) when the text references it; an unreferenced file is an orphan
+ *                         (blobs an edit let go of, a bake of a volume since deleted) and stays out
+ *
+ * What the text references: a record's blob refs, a meta's data file, a bake whose id a scene or template names.
+ * A derived file without a meta cannot be told either way: it is kept when this machine has not seen it go.
+ *
+ * Returns the lock, whether it changed (written unless `dryRun`), and what happened, file by file.
+ */
+export function lock(slug, dir, { take = false, dryRun = false, repo } = {}) {
+  const previous = readLockFile(dir)
+  const local = readLocal(dir)
+  const onDisk = new Set(dataFilesOnDisk(dir))
+  const bakes = [...new Set([...Object.keys(previous?.files ?? {}), ...onDisk])].filter(rel => rel.startsWith('Baked/'))
+  const refs = referencedData(dir, bakes)
+  // true / false: the text names it or not; null: cannot tell (a derived file without a meta).
+  const referenced = (rel) => rel.startsWith('Blobs/') ? refs.blobs.has(rel) : rel.startsWith('Baked/') ? refs.bakes.has(rel)
+    : rel.startsWith('Assets/') ? refs.files.has(rel) : (refs.files.has(rel) || null)
+  const report = { added: [], removed: [], updated: [], elsewhere: [], conflicts: [], orphans: [], unknown: [] }
+  const files = {}
+  const disk = new Map()
+  const rels = new Set([...Object.keys(previous?.files ?? {}), ...onDisk, ...refs.blobs, ...refs.files])
+  for (const rel of [...rels].sort()) {
+    const L = previous?.files?.[rel]
+    const D = onDisk.has(rel) ? hashOf(dir, rel, local) : null
+    if (D) disk.set(rel, D)
+    const B = local.base[rel]
+    const ref = referenced(rel)
+    if (L && D) {
+      if (D.sha === L[0]) files[rel] = [L[0], L[1]]
+      else if (take || B === L[0]) { files[rel] = [D.sha, D.size]; report.updated.push(rel) }
+      else { files[rel] = [L[0], L[1]]; (B === D.sha ? report.elsewhere : report.conflicts).push(rel) }
+    } else if (L) {
+      if (ref === false || (ref === null && B === L[0])) report.removed.push(rel)
+      else files[rel] = [L[0], L[1]]
+    } else if (D) {
+      if (ref === false || (ref === null && B === D.sha && !take)) report.orphans.push(rel)
+      else { files[rel] = [D.sha, D.size]; report.added.push(rel) }
+    } else report.unknown.push(rel)
+  }
+
+  const total = Object.values(files).reduce((n, [, size]) => n + size, 0)
+  const buckets = previous?.buckets ?? bucketsFor(total)
+  for (const v of Object.values(files)) v.push(bucketOf(v[0], buckets))
+  const { packs } = packsFor(slug, files, buckets, previous)
+  const next = { cleoData: 1, repo: previous?.repo ?? repo ?? repoSlug(), buckets, packs, files }
+  const changed = !previous || lockText(previous) !== lockText(next)
+  if (!dryRun) {
+    if (changed) fs.writeFileSync(path.join(dir, LOCK_FILE), lockText(next))
+    syncIgnores(dir)
+    // What agrees now is the next run's base; a file gone from both leaves it.
+    for (const [rel, v] of Object.entries(files)) if (disk.get(rel)?.sha === v[0]) local.base[rel] = v[0]
+    for (const rel of Object.keys(local.base)) if (!files[rel] && !onDisk.has(rel)) delete local.base[rel]
+    for (const rel of Object.keys(local.hashes)) if (!onDisk.has(rel)) delete local.hashes[rel]
+    writeLocal(dir, local)
+  }
+  return { lock: next, changed, pending: pendingPacks(next), ...report }
+}
+
+/** One line on what `lock` did, or null when it changed nothing and has nothing to say. */
+export function lockSummary(slug, r) {
+  const parts = [
+    r.added.length && `${r.added.length} added`, r.updated.length && `${r.updated.length} changed`,
+    r.removed.length && `${r.removed.length} removed`,
+  ].filter(Boolean)
+  const notes = [
+    r.elsewhere.length && `${r.elsewhere.length} newer in the lock than on disk (npm run examples:fetch ${slug})`,
+    r.conflicts.length && `${r.conflicts.length} changed both here and in the lock (npm run examples:lock -- --take ${slug} keeps yours)`,
+    r.unknown.length && `${r.unknown.length} referenced but nowhere: ${r.unknown.slice(0, 3).join(', ')}`,
+  ].filter(Boolean)
+  if (!r.changed && !notes.length) return null
+  const pending = r.pending.length ? `; ${r.pending.length} pack(s) to upload (npm run examples:publish ${slug})` : ''
+  const what = parts.length ? `data locked: ${parts.join(', ')}${pending}` : r.changed ? `lock written${pending}` : 'lock unchanged'
+  return `${slug}: ${what}${notes.length ? `; ${notes.join('; ')}` : ''}`
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -253,43 +412,53 @@ async function uploadPack(repo, release, releaseId, file) {
 
 /** Missing / modified / unlisted data of one example, against its lock. */
 export function status(dir) {
-  const lock = readLockFile(dir)
-  const out = { locked: !!lock, missing: [], modified: [], unlisted: [] }
+  const theLock = readLockFile(dir)
+  const local = readLocal(dir)
+  const out = { locked: !!theLock, missing: [], modified: [], unlisted: [] }
   const onDisk = new Set(dataFilesOnDisk(dir))
-  for (const [rel, [sha, size]] of Object.entries(lock?.files ?? {})) {
+  for (const [rel, [sha, size]] of Object.entries(theLock?.files ?? {})) {
     if (!onDisk.has(rel)) { out.missing.push(rel); continue }
-    const file = fileOf(dir, rel)
-    if (fs.statSync(file).size !== size || sha256(fs.readFileSync(file)) !== sha) out.modified.push(rel)
+    const d = hashOf(dir, rel, local)
+    if (d.size !== size || d.sha !== sha) out.modified.push(rel)
   }
-  for (const rel of onDisk) if (!lock?.files?.[rel]) out.unlisted.push(rel)
+  for (const rel of onDisk) if (!theLock?.files?.[rel]) out.unlisted.push(rel)
+  writeLocal(dir, local)
   return out
 }
 
 /** Download every missing data file of the example in `dir`. Returns how many were written. */
 export async function fetchExample(slug, dir, { from, force = false } = {}) {
-  const lock = readLockFile(dir)
-  if (!lock) return { written: 0, skipped: 'no lock' }
+  const theLock = readLockFile(dir)
+  if (!theLock) return { written: 0, skipped: 'no lock' }
+  const local = readLocal(dir)
   const wanted = new Map() // pack -> [rel, sha][]
-  const packOfBucket = new Map(lock.packs.map(p => [Number(p[0].split('.').at(-3)), p]))
+  const packOfBucket = new Map(theLock.packs.map(p => [Number(p[0].split('.').at(-3)), p]))
   let modified = 0
-  for (const [rel, [sha, size, bucket]] of Object.entries(lock.files)) {
-    const file = fileOf(dir, rel)
-    if (fs.existsSync(file)) {
-      if (fs.statSync(file).size === size && sha256(fs.readFileSync(file)) === sha) continue
-      if (!force) { modified++; continue }
+  const unpublished = []
+  for (const [rel, [sha, size, bucket]] of Object.entries(theLock.files)) {
+    if (fs.existsSync(fileOf(dir, rel))) {
+      const d = hashOf(dir, rel, local)
+      if (d.size === size && d.sha === sha) { local.base[rel] = sha; continue }
+      // Changed here since it last matched the lock: an edit, kept (examples:lock takes it in).
+      if (!force && local.base[rel] !== d.sha) { modified++; continue }
     }
     const pack = packOfBucket.get(bucket)
     if (!pack) throw new Error(`${slug}: ${rel} is in bucket ${bucket}, which no pack holds`)
+    if (!pack[2]) { unpublished.push(rel); continue }
     if (!wanted.has(pack)) wanted.set(pack, [])
     wanted.get(pack).push([rel, sha])
   }
-  if (modified) log(`  ${slug}: ${modified} data file(s) differ from the lock and were left alone (--force to replace)`)
+  if (modified) log(`  ${slug}: ${modified} data file(s) changed here were left alone (--force replaces them with the lock's)`)
+  if (unpublished.length) {
+    writeLocal(dir, local)
+    throw new Error(`${slug}: ${unpublished.length} data file(s) are in packs never uploaded (added on another machine, not published yet): ${unpublished.slice(0, 3).join(', ')}`)
+  }
   let written = 0
   const queue = [...wanted]
   const worker = async () => {
     for (let job = queue.shift(); job; job = queue.shift()) {
       const [pack, files] = job
-      const members = unpack(await fetchPack(lock.repo, pack, from))
+      const members = unpack(await fetchPack(theLock.repo, pack, from))
       for (const [rel, sha] of files) {
         const bytes = members.get(sha)
         if (!bytes || sha256(bytes) !== sha) throw new Error(`${slug}: ${pack[0]} has no intact ${rel}`)
@@ -301,6 +470,8 @@ export async function fetchExample(slug, dir, { from, force = false } = {}) {
     }
   }
   await Promise.all([worker(), worker(), worker(), worker()])
+  for (const [, files] of wanted) for (const [rel, sha] of files) local.base[rel] = sha
+  writeLocal(dir, local)
   return { written }
 }
 
@@ -308,8 +479,8 @@ export async function fetchExample(slug, dir, { from, force = false } = {}) {
 export function check(slug, dir) {
   const isDataRel = (rel) => isDataFile(dir, rel)
   const problems = []
-  const lock = readLockFile(dir)
-  if (!lock) return [`${slug}: no ${LOCK_FILE} (run npm run examples:publish ${slug})`]
+  const theLock = readLockFile(dir)
+  if (!theLock) return [`${slug}: no ${LOCK_FILE} (run npm run examples:lock ${slug})`]
   const relDir = path.relative(ROOT, dir).split(path.sep).join('/')
   // No data file is tracked by git, and no text file is swallowed by an ignore rule.
   let tracked = []
@@ -337,35 +508,35 @@ export function check(slug, dir) {
   if (data.length && fs.existsSync(path.join(ROOT, '.git'))) {
     const r = spawnSync('git', ['check-ignore', '--stdin', '-z'], { cwd: ROOT, input: data.map(t => `${relDir}/${t}`).join('\0'), encoding: 'utf8' })
     const ignored = new Set((r.stdout ?? '').split('\0').filter(Boolean).map(f => f.slice(relDir.length + 1)))
-    for (const rel of data) if (!ignored.has(rel)) problems.push(`${slug}: ${rel} is data but not ignored by git (npm run examples:publish ${slug} lists it)`)
+    for (const rel of data) if (!ignored.has(rel)) problems.push(`${slug}: ${rel} is data but not ignored by git (npm run examples:lock ${slug} lists it)`)
   }
   // Every blob the text references, and every image or sound a meta names, is locked.
-  const locked = lock.files ?? {}
+  const locked = theLock.files ?? {}
   for (const rel of text) {
     if (!rel.startsWith('Assets/') && !rel.startsWith('Derived/')) continue
     const content = fs.readFileSync(path.join(dir, ...rel.split('/')), 'utf8')
     for (const m of content.matchAll(/"h":\s*"([0-9a-f]{64})"/g)) {
       const blob = `Blobs/${m[1].slice(0, 2)}/${m[1]}.bin`
-      if (!locked[blob]) problems.push(`${slug}: ${rel} references ${blob}, which is not in the lock`)
+      if (!locked[blob]) problems.push(`${slug}: ${rel} references ${blob}, which is not in the lock (npm run examples:lock ${slug})`)
     }
     if (rel.endsWith('.meta')) {
       const asset = rel.slice(0, -5)
-      if (isDataRel(asset) && !locked[asset]) problems.push(`${slug}: ${asset} has a meta but is not in the lock`)
+      if (isDataRel(asset) && !locked[asset]) problems.push(`${slug}: ${asset} has a meta but is not in the lock (npm run examples:lock ${slug})`)
     }
   }
-  // Every locked file's bucket has a pack.
-  const buckets = new Set(lock.packs.map(p => Number(p[0].split('.').at(-3))))
+  // Every locked file's bucket has a pack (uploaded or not: `check --remote` is what refuses one not uploaded).
+  const buckets = new Set(theLock.packs.map(p => Number(p[0].split('.').at(-3))))
   for (const [rel, v] of Object.entries(locked)) if (!buckets.has(v[2])) problems.push(`${slug}: ${rel} is in bucket ${v[2]}, which no pack holds`)
-  for (const p of lock.packs) if (!p[2]) problems.push(`${slug}: pack ${p[0]} was never published`)
   return [...new Set(problems)]
 }
 
 /** Whether every pack of an example exists in its release (one request each). */
 export async function checkRemote(slug, dir) {
-  const lock = readLockFile(dir)
+  const theLock = readLockFile(dir)
   const problems = []
-  for (const [name, release, , size] of lock?.packs ?? []) {
-    const res = await fetch(downloadUrl(lock.repo, release, name), { method: 'HEAD', redirect: 'follow' })
+  for (const [name, release, sha, size] of theLock?.packs ?? []) {
+    if (!sha) { problems.push(`${slug}: ${name} is not uploaded yet (npm run examples:publish ${slug})`); continue }
+    const res = await fetch(downloadUrl(theLock.repo, release, name), { method: 'HEAD', redirect: 'follow' })
     if (!res.ok) problems.push(`${slug}: ${name} is not in the ${release} release (HTTP ${res.status})`)
     else if (size && Number(res.headers.get('content-length')) !== size) problems.push(`${slug}: ${name} in the release has the wrong size`)
   }
@@ -373,45 +544,61 @@ export async function checkRemote(slug, dir) {
 }
 
 /**
- * Write the example's lock from its data on disk, and put the packs it needs where they belong: in the release
- * (or the local directory `to`). Only packs the release lacks are uploaded. The lock is written last.
+ * Lock the example's data (`lock`), then put each pack where it belongs: in the release, or the local directory `to`.
+ * A pack is built from the files on disk when it has never been uploaded (no sha in the lock) or its destination
+ * lacks it; nothing else is uploaded. The lock, with each new pack's sha and size, is written last.
  */
 export async function publish(slug, dir, { dryRun = false, to } = {}) {
-  const previous = readLockFile(dir)
-  const { lock, needed } = computeLock(slug, dir, previous, previous?.repo ?? (() => { try { return repoSlug() } catch (e) { if (to) return 'local/local'; throw e } })())
-  const shaToRel = new Map(Object.entries(lock.files).map(([rel, [sha]]) => [sha, rel]))
-  const readFast = (sha) => fs.readFileSync(fileOf(dir, shaToRel.get(sha)))
+  const repo = (() => { try { return repoSlug() } catch (e) { if (to) return 'local/local'; throw e } })
+  const locked = lock(slug, dir, { dryRun, repo: readLockFile(dir)?.repo ?? repo() })
+  if (locked.conflicts.length || locked.elsewhere.length || locked.unknown.length)
+    throw new Error(lockSummary(slug, locked) ?? `${slug}: the lock does not match the folder`)
+  const theLock = locked.lock
+  const { members } = packsFor(slug, theLock.files, theLock.buckets, theLock)
+  const shaToRel = new Map(Object.entries(theLock.files).map(([rel, [sha]]) => [sha, rel]))
+  const read = (sha) => {
+    const bytes = fs.readFileSync(fileOf(dir, shaToRel.get(sha)))
+    if (sha256(bytes) !== sha) throw new Error(`${slug}: ${shaToRel.get(sha)} is not what the lock says`)
+    return bytes
+  }
+  let remote = null
+  if (!to && !dryRun) {
+    const release = theLock.packs.at(-1)?.[1] ?? RELEASE
+    remote = await releaseAssets(theLock.repo, release)
+    if (!remote) { await createRelease(theLock.repo, release); remote = await releaseAssets(theLock.repo, release) }
+  }
+  const there = (name) => to ? fs.existsSync(path.join(to, name)) : !!remote?.assets.has(name)
   fs.mkdirSync(CACHE, { recursive: true })
-  for (const pack of lock.packs) {
-    const { members } = needed.get(pack[0])
-    const file = path.join(CACHE, pack[0])
-    const bytes = fs.existsSync(file) ? fs.readFileSync(file) : packBytes(members, readFast)
-    if (!fs.existsSync(file)) fs.writeFileSync(file, bytes)
+  let uploaded = 0
+  for (const pack of theLock.packs) {
+    const [name, release] = pack
+    if (pack[2] && there(name)) continue
+    if (dryRun) { uploaded++; continue }
+    const file = path.join(CACHE, name)
+    let bytes = fs.existsSync(file) ? fs.readFileSync(file) : null
+    if (!bytes || (pack[2] && sha256(bytes) !== pack[2])) {
+      for (const [sha] of members.get(name)) if (!shaToRel.has(sha) || !fs.existsSync(fileOf(dir, shaToRel.get(sha))))
+        throw new Error(`${slug}: ${name} needs data that is not on disk (npm run examples:fetch ${slug})`)
+      bytes = packBytes(members.get(name), read)
+      fs.writeFileSync(file, bytes)
+    }
     pack[2] = sha256(bytes)
     pack[3] = bytes.length
-  }
-  let uploaded = 0
-  if (to) {
-    fs.mkdirSync(to, { recursive: true })
-    for (const [name] of lock.packs) if (!fs.existsSync(path.join(to, name))) { fs.copyFileSync(path.join(CACHE, name), path.join(to, name)); uploaded++ }
-  } else if (!dryRun) {
-    const release = lock.packs[0]?.[1] ?? RELEASE
-    let rel = await releaseAssets(lock.repo, release)
-    if (!rel) { await createRelease(lock.repo, release); rel = await releaseAssets(lock.repo, release) }
-    for (const [name, , , size] of lock.packs) {
-      const there = rel.assets.get(name)
-      if (there && there.size === size) continue
-      if (there) throw new Error(`${name} is in the release with a different size: delete it there first`)
-      log(`  uploading ${name} (${(size / 1048576).toFixed(1)} MB)`)
-      await uploadPack(lock.repo, release, rel.id, path.join(CACHE, name))
-      uploaded++
+    if (to) {
+      fs.mkdirSync(to, { recursive: true })
+      fs.copyFileSync(file, path.join(to, name))
+    } else {
+      const have = remote.assets.get(name)
+      if (have && have.size !== bytes.length) throw new Error(`${name} is in the release with a different size: delete it there first`)
+      if (!have) {
+        log(`  uploading ${name} (${(bytes.length / 1048576).toFixed(1)} MB)`)
+        await uploadPack(theLock.repo, release, remote.id, file)
+      }
     }
+    uploaded++
   }
-  if (!dryRun || to) {
-    fs.writeFileSync(path.join(dir, LOCK_FILE), lockText(lock))
-    syncIgnores(dir)
-  }
-  return { lock, uploaded, packs: lock.packs.length }
+  if (!dryRun) fs.writeFileSync(path.join(dir, LOCK_FILE), lockText(theLock))
+  return { lock: theLock, uploaded, packs: theLock.packs.length }
 }
 
 const IGNORE_BEGIN = '# Data files whose names say nothing of what they are (kept by npm run examples:publish):'
@@ -460,6 +647,13 @@ async function main([command, ...args]) {
       const r = await fetchExample(slug, dir, { from: from && path.resolve(from), force: args.includes('--force') })
       log(`${slug}: ${r.skipped ?? `${r.written} file(s) written`}`)
     }
+  } else if (command === 'lock') {
+    for (const { slug, dir } of examples) {
+      const r = lock(slug, dir, { take: args.includes('--take') })
+      log(lockSummary(slug, r) ?? `${slug}: lock up to date${r.pending.length ? ` (${r.pending.length} pack(s) to upload: npm run examples:publish ${slug})` : ''}`)
+      if (r.orphans.length) log(`  ${r.orphans.length} data file(s) nothing references (left out of the lock): ${r.orphans.slice(0, 3).join(', ')}`)
+      if (r.conflicts.length || r.unknown.length) process.exitCode = 1
+    }
   } else if (command === 'status') {
     let dirty = false
     for (const { slug, dir } of examples) {
@@ -475,6 +669,10 @@ async function main([command, ...args]) {
     for (const { slug, dir } of examples) {
       problems.push(...check(slug, dir))
       if (args.includes('--remote')) problems.push(...await checkRemote(slug, dir))
+      else {
+        const pending = pendingPacks(readLockFile(dir))
+        if (pending.length) log(`${slug}: ${pending.length} pack(s) not uploaded yet (npm run examples:publish ${slug}; CI refuses them)`)
+      }
     }
     for (const p of problems) log(p)
     log(problems.length ? `${problems.length} problem(s)` : `${examples.length} example(s) consistent`)
@@ -489,7 +687,7 @@ async function main([command, ...args]) {
   } else if (command === 'prune') {
     await prune(args.includes('--yes'))
   } else {
-    log('usage: node tools/examples/data.mjs <fetch|status|check|publish|prune> [slug…] [options]')
+    log('usage: node tools/examples/data.mjs <fetch|lock|status|check|publish|prune> [slug…] [options]')
     process.exitCode = 1
   }
 }

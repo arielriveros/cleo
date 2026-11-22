@@ -94,8 +94,8 @@ The JPEGs were saved with Pillow at quality 88 and 1280 px wide.
       set **Output** to **Floor decal** for the spatter, and crop the right panel, `1261,70,339,810`.
 
 8. **Creator vs engine, side by side:**
-   1. **Creator side.** The Valley's exact params: `normaliseFx({ ...preset.params, ...item.params, seed })` for
-      the `CREATOR_FX` item (`tools/valley/creatorFx.mjs`, as `genFx.ts` builds them), dispatched into the
+   1. **Creator side.** The effect's exact params: `normaliseFx({ ...preset.params, ...params, seed })`, from the
+      preset and overrides the effect was made with, dispatched into the
       workspace's params state (the hook, found through React's fibers from `#root`, whose state has `medium`,
       `regionSize` and `blueCore`; `queue.dispatch(params)`). Frame with the orbit handle; `/record` 4 s.
    2. **Engine side.** Navigate to `/`, re-import the Valley (step 1) so it carries the latest bake, then

@@ -12,7 +12,8 @@ Each folder here is a Cleo project folder, the same kind the desktop editor crea
 | `island/` | Island: a World Creator island with lakes and rivers |
 | `sandbox/` | Sandbox: ALS-style locomotion, a car and two guns |
 
-A folder IS the example. The editor's Examples gallery installs a bundle built from it, and its tests are its own.
+A folder IS the example, and it is edited in the Cleo desktop app and nowhere else: no tool generates or patches
+it. The editor's Examples gallery installs a bundle built from the folder, and its tests are its own.
 
 ## What is in git, and what is not
 
@@ -35,32 +36,46 @@ npm run examples:status           # what differs from the locks: missing, change
 Without its data, an example's tests skip and the gallery leaves it out. The text-only checks
 (`npm run examples:check`) still run.
 
-## Changing an example
+## Editing an example
 
 1. `npm run examples:fetch <slug>`.
-2. Open the folder in the Cleo desktop app (**Project ▸ Open Folder…**) and edit it there. What you save is
-   what git sees. Close the project in Cleo before running a tool that writes the folder.
-3. Scripts can be edited in VS Code too: they are `Assets/**/*.ts`. After editing one outside Cleo, run
-   `npm run examples:sync <slug>`, which re-reads the fields the script declares into its `.meta`.
+2. Open the folder in the Cleo desktop app (**Project ▸ Open Folder…** on `examples/<slug>`) and edit it there.
+   Cleo writes every change straight into the folder: what you save is what git sees. Opening it and changing
+   nothing writes nothing.
+3. Scripts can be edited in VS Code too: they are `Assets/**/*.ts`. Cleo takes an edit in while the project is
+   open. After editing one with Cleo closed, `npm run examples:sync <slug>` re-reads the fields the script
+   declares into its `.meta`.
 4. `npm test` inside the folder runs its tests, and `npm run typecheck` checks its scripts (after `npm run build`
    at the root). The root `npm test` runs every example's tests too.
-5. If the data changed (a new texture, a moved mesh, a new bake), `npm run examples:publish <slug>` uploads the
-   packs that are new to the release and rewrites `data.lock.json`. It needs `gh auth login` or a `GITHUB_TOKEN`
-   with contents: write. Unchanged packs keep their names and are never uploaded again.
-6. Commit the folder's text and its `data.lock.json` together. `npm run examples:check` fails when the text
-   references data the lock does not list. CI checks that every pack the locks name is in the release.
+5. Commit the folder's text and its `data.lock.json` together.
+6. If the edit stored new data (a new texture or mesh, a re-bake), upload it: `npm run examples:publish <slug>`
+   sends the packs the lock lists as not uploaded yet. It needs `gh auth login` or a `GITHUB_TOKEN` with
+   contents: write. Unchanged packs keep their names and are never uploaded again.
 
-Some examples are also written by generators, which write the same folder:
+### The data lock follows the folder
 
-| Example | Generator |
-|---|---|
-| Sandbox | `tools/sandbox/build.ts` |
-| Duskwell | `tools/duskwell/build.ts` |
-| Island | `tools/island/build.ts` (from the Valley's folder) |
-| Valley, Dungeon | patched in place by the tools in `tools/valley/` |
-| Firing Line | `tools/fps/ingest.mjs` brings in a project exported as a zip |
+`npm test` (and every gallery build) first brings the example's lock up to its folder, with no network
+(`npm run examples:lock <slug>` does the same by hand):
 
-Rerunning a generator on an unchanged input leaves `git status` clean.
+- data the text now references is locked;
+- data nothing references any more (blobs an edit let go of, a bake of a deleted volume) leaves the lock;
+- a bucket whose files changed gets a new pack, not uploaded yet.
+
+It tells an edit made here from a lock that changed elsewhere: after a pull that brought a newer lock, the old file
+on disk is left for `examples:fetch` to replace, never locked over the pulled one. A file changed both here and in
+the lock is reported; `npm run examples:lock -- --take <slug>` keeps yours.
+
+A pack not uploaded yet passes the local checks. CI (`examples:check --remote`) refuses it, so publish before
+pushing.
+
+## Adding an example
+
+1. In the Cleo desktop app, create a new project with its location set to `examples/<slug>`.
+2. `npm run examples:add -- <slug> --description "…"` writes what the repository keeps around it: `example.json`
+   (the gallery card), the tooling (`package.json`, `tsconfig.json`, `vitest.config.mjs`, `.gitignore`, and a
+   `.gitattributes` that keeps the data out of Git LFS), a README, `tests/project.test.ts` and `tests/boots.test.ts`,
+   and its data lock.
+3. Build it in Cleo, `npm test` in the folder, commit it, and `npm run examples:publish <slug>`.
 
 ## Tests
 
@@ -77,12 +92,13 @@ game.input.setMove(0, 1)
 game.step(2)
 ```
 
-Every example also runs `tests/project.test.ts`, which checks four things:
+Every example also runs `tests/project.test.ts`, which checks what the editor's own writes keep true:
 
-- the folder is exactly what the editor's folder codec writes;
-- its scripts' fields match their sources;
+- every text file is LF;
 - its lock covers its text;
-- its templates and colliders follow the rules the editor relies on.
+- its scripts' fields match their sources;
+- it holds nothing the editor would write back on opening it;
+- read and written back through the editor's folder codec, it is the same bytes.
 
 `npm run test:example-folders` checks the same promise in the real desktop app: a copy of each example (Duskwell and
 Sandbox by default, `E2E_EXAMPLES=valley,dungeon` for others) opens with Open Folder, and opening it writes nothing;

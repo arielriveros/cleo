@@ -9,8 +9,9 @@ import { resolve } from 'node:path';
  * material in every project stops binding on WebGPU until its inspector is opened (the Valley's Pond Water
  * vanishes). New shared WGSL goes in a chunk of its own (chunks/shIrradiance.wgsl, chunks/areaLights.wgsl).
  *
- * If a change here is truly needed: update these hashes, regenerate the Valley (tools/valley/build.mjs
- * restamps its compiledWgsl), and tell users their own custom materials need their inspector opened once.
+ * If a change here is truly needed: update these hashes, open the examples with custom materials in the desktop
+ * editor so their compiledWgsl is stamped again, and tell users their own custom materials need their inspector
+ * opened once.
  */
 const FROZEN: Record<string, string> = {
     'chunks/pbrLighting.wgsl': 'ce051619af387f2b',

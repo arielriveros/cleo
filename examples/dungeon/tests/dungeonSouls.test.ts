@@ -19,12 +19,11 @@ import { LAYER } from '@/Core/Scripts/SoulsHitbox';
 /** Text with its line endings as LF. */
 const lf = (s: string) => s.replace(/\r\n/g, '\n');
 
-// The Dungeon example was AUTHORED BY CODE (tools/valley/build.mjs, on the souls content of
-// tools/soulsDemo/build.mjs; split out of the Valley by tools/valley/split.ts) and is wired together by NAME:
+// The Dungeon example is wired together by NAME:
 // scripts find nodes with findNode('HUD'), moves name their clips, spawns name their templates, sounds
 // are played by node name. Every one of those joins fails silently — a missing clip is a warning and a
-// frozen pose, a missing sound is simply quiet. This suite reads the generated folder and checks each
-// join, so a rename in the generator or a script breaks a test instead of the demo.
+// frozen pose, a missing sound is simply quiet. This suite reads the folder and checks each join, so a
+// rename in the editor or a script breaks a test instead of the demo.
 //
 // It is also the safety net for the ASSET SWAP the example exists for (SOULS_DEMO.md): after replacing
 // a clip, re-running the generator and this suite says whether every reference still resolves.
@@ -152,7 +151,7 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         for (const w of ['Continue', 'New Game']) expect(title.has(w), w).toBe(true);
     });
 
-    // ----- saving (SaveGame; tools/valley/saves.ts puts it in the shipped bundle) ----------------------
+    // ----- saving (SaveGame) -----------------------------------------------------------------------------
 
     it('keeps what a bonfire save needs: the @save fields, a Saved bloodstain, the title menu', () => {
         const scriptByClass = (cls: string) => library('scripts').find((s: any) => s.source.includes(`export default class ${cls}`));
@@ -967,7 +966,7 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         for (const t of templates()) expect(hashes[assetHashKey('template', t.id)], t.name).toBe(hashAsset(t));
     });
 
-    // The generator writes UI payloads by hand (tools/exampleKit/bundle.mjs uiNode), so each is compared
+    // The UI payloads were first written by hand, so each is compared
     // against what the class itself would produce. A key the parser has since renamed shows up here
     // rather than as a blank screen.
     const UI_CASES: [string, () => any][] = [
@@ -987,7 +986,7 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         });
     }
 
-    // Baked by the generator (tools/navBakeHeadless.mjs) from the walkable area its reachability check found. Without a bake every
+    // Baked from the walkable area. Without a bake every
     // `path` goal falls back to a straight line and enemies walk into walls and trees.
     // The dungeon's three levels are separate islands of the navmesh (its stairs are box ramps the bake does
     // not join), so a spawn is reached from the player on the entry level only; below and above, the enemies

@@ -317,9 +317,8 @@ visible, or the browser slows it down.
 ## Export and import
 
 **Export** saves the sequence as `<name>.sequence.json`, and **Import** replaces the asset's timeline with one
-(an undoable edit, saved with the asset). The Valley's tour is kept in that format in
-`tools/valley/cinematic/valley-tour.sequence.json`, so a tour retimed here exports straight over it, and
-`tools/valley/applyCinematic.ts` puts it into the example as the `Valley Tour.sequence` asset.
+(an undoable edit, saved with the asset). The file is indented JSON, so a sequence kept in git reads as a short
+diff each time it is exported again.
 
 ## See also
 

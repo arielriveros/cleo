@@ -9,10 +9,50 @@
 //
 //   npm run examples:sync [slug…]       write back every example whose script fields are stale
 
+import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { loadScriptReflector } from './bundle.mjs'
+import { transform } from 'sucrase'
 import { ROOT } from './editorModules.mjs'
+
+/**
+ * Load `parseScriptVariables` out of `applications/editor/src/utils/scripts.ts`.
+ *
+ * The module imports `Node` from the engine barrel — a value import that would drag in the renderer and
+ * a GL context we do not have — and `cryptoRandomId` from a sibling. Neither is used by the reflector,
+ * so both are stubbed; the property types it does use come from their own engine module. Sucrase emits CommonJS, which a tiny `require` shim then satisfies.
+ */
+export function loadScriptReflector(root) {
+  const file = path.join(root, 'applications', 'editor', 'src', 'utils', 'scripts.ts')
+  const code = transform(fs.readFileSync(file, 'utf8'), {
+    transforms: ['typescript', 'imports'],
+    filePath: file,
+  }).code
+
+  // The property types it reads annotations with are the engine's own (src/core/properties/types.ts), a module
+  // with no imports of its own: loaded the same way, so the tools reflect exactly as the editor does.
+  const typesFile = path.join(root, 'src', 'core', 'properties', 'types.ts')
+  const types = { exports: {} }
+  new Function('require', 'module', 'exports', transform(fs.readFileSync(typesFile, 'utf8'), { transforms: ['typescript', 'imports'], filePath: typesFile }).code)(
+    (name) => { throw new Error(`types.ts reached for a module: ${name}`) }, types, types.exports)
+  const stubs = {
+    cleo: { Node: class {}, ...types.exports, storedValueFits: () => true },
+    './ids': { cryptoRandomId: () => 'stub' },
+  }
+  const module = { exports: {} }
+  const require = (name) => {
+    if (name in stubs) return stubs[name]
+    throw new Error(`scripts.ts reached for an unstubbed module: ${name}`)
+  }
+  new Function('require', 'module', 'exports', code)(require, module, module.exports)
+
+  const parse = module.exports.parseScriptVariables
+  if (typeof parse !== 'function') throw new Error('parseScriptVariables did not load out of scripts.ts')
+  // The version of the rules it reflects under: a script asset stamped with an older one is re-derived when the
+  // editor opens the project (SCRIPT_REFLECT_VERSION).
+  parse.version = module.exports.SCRIPT_REFLECT_VERSION
+  return parse
+}
 
 let reflector = null
 const reflect = (source) => (reflector ??= loadScriptReflector(ROOT))(source)
@@ -75,8 +115,10 @@ export function syncScripts(bundle) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   // Loaded here, not at the top: folder.mjs writes through editorNormalize.mjs, which runs syncScripts.
   const { listExamples, readExampleFolder, writeExampleFolder } = await import('./folder.mjs')
+  const { lock } = await import('../examples/data.mjs')
   const only = process.argv.slice(2)
   for (const { slug, dir } of listExamples().filter(e => !only.length || only.includes(e.slug))) {
+    lock(slug, dir)   // the data an edit stored, so the folder reads whole
     const { bundle } = await readExampleFolder(dir)
     const changed = syncScripts(bundle)
     if (!changed.length) { console.log(`${slug}: script fields up to date`); continue }

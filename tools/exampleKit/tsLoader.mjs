@@ -1,13 +1,12 @@
 // Running the project's own TypeScript inside these Node tools.
 //
-// The example generators author a project in the editor's on-disk shapes, and the importers apply the
-// engine's retarget maths. Both are the kind of thing that fails SILENTLY when a second copy drifts: a
-// skeleton stored with `nodeParents` as entry pairs instead of a Map retargets against nothing and reports
-// no error; a VFS entry with the wrong virtual extension is simply never classified.
+// The example tools read and write projects in the editor's on-disk shapes (its folder codec, its bundle reader
+// and writer). That is the kind of thing that fails SILENTLY when a second copy drifts: a VFS entry with the wrong
+// virtual extension is simply never classified, a record keyed differently is simply never found.
 //
 // So rather than restating those rules here, the modules that hold them are transpiled and run. Only pure
 // ones are eligible — anything reaching the `cleo` barrel would drag in a renderer and a GL context that
-// does not exist in Node. `loadScriptReflector` in bundle.mjs is the same trick with a hand-written stub;
+// does not exist in Node. `loadScriptReflector` in syncScripts.mjs is the same trick with a hand-written stub;
 // this is that generalised.
 
 import fs from 'fs'

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
-import { EXAMPLE, REPO_ROOT, dataReady, readThisExample } from '@tools/exampleKit/testKit';
+import { EXAMPLE, dataReady, readThisExample } from '@tools/exampleKit/testKit';
 import { mat4, quat, vec3 } from 'gl-matrix';
 // The whole engine: it registers itself as the scripts' 'cleo' module, so the example's script runs headless.
 import { Scene, CleoEngine, PhysicsSystem, Animator, Logger, NODE_BUILTINS, MathUtils } from 'cleo';
@@ -20,7 +20,7 @@ import { reembedPoses } from '@editor/utils/animationControllers';
 import { registerTemplates, clearTemplates } from '@engine/core/scene/templates';
 import { Events } from '@engine/core/events';
 
-// The Sandbox example: a mannequin with ALS-style locomotion built from the engine's own tools (tools/sandbox).
+// The Sandbox example: a mannequin with ALS-style locomotion built from the engine's own tools.
 // Almost everything that can go wrong with it is silent: a parameter bound to a field that does not exist reads
 // its default forever, a turn clip whose root motion tilts the capsule tips the character over, a landing gated
 // on the wrong flag fires at take-off. So this suite reads the bundle and PLAYS it, headless: the real Collider,
@@ -133,7 +133,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(layerOf('Large Crate')).toBe(LAYER.DEFAULT);
     });
 
-    /** The flights of stairs (tools/sandbox/level.ts): where to set off from, the riser, the step count. */
+    /** The flights of stairs: where to set off from, the riser, the step count. */
     const FLIGHTS = [
         // Left of the barrel lying at the foot of the 15 cm flight.
         { name: '15 cm', x: -5.95, rise: 0.15, steps: 10 },
@@ -1260,30 +1260,6 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         p.rigs[0].setOrbit(40, 12);
         p.run(2.5);
         expect(p.trace.some(s => /^Turn/.test(s)), `turns once the camera swings: ${p.trace.join(' ')}`).toBe(true);
-    });
-
-    it('holds every clip in place without tilting it sideways', async () => {
-        const prepared = join(REPO_ROOT, 'build', 'sandbox_prepared', 'clips');
-        if (!existsSync(prepared)) return;   // the source clips are local (build/ is not in git)
-        const { bodyRoll, clipSeconds } = await import('@tools/sandbox/measure');
-        const { bakeInPlace } = await import('@engine/animation/clipEdit');
-        const stored = rig().skin;
-        const skin = loadSkin(stored, (a: number[]) => mat4.clone(a as any));
-        const clips = new Map(library('animations').map(a => [a.name, a.clips[0]]));
-        const source = (file: string) => JSON.parse(readFileSync(join(prepared, `${file}.json`), 'utf8')).clip;
-        const lean = (clip: any, from: any, offset: number) => {
-            const T = clipSeconds(clip), n = Math.round(T * 30);
-            const times = Array.from({ length: n + 1 }, (_, k) => T * k / n);
-            const a = bodyRoll(skin, clip, times), b = bodyRoll(skin, from, times.map(t => t + offset));
-            return Math.max(...times.map((_, k) => Math.abs((a[k] - a[0]) - (b[k] - b[0]))));
-        };
-        const { measure } = await import('@tools/sandbox/measure');
-        // A landing clip is kept from its touchdown on.
-        const touchdown = (file: string) => measure(skin, source(file)).air[0].to;
-        for (const [name, file, offset] of [['Stop', 'Run To Stop', 0], ['LandHard', 'Hard Landing', touchdown('Hard Landing')], ['LandSoft', 'Falling To Landing', touchdown('Falling To Landing')], ['Start', 'Idle To Sprint', 0]] as const)
-            expect(lean(clips.get(name), source(file), offset), name).toBeLessThan(3);
-        // The check sees the fault it guards against: the engine's in-place bake tilts the hard landing.
-        expect(lean(bakeInPlace(source('Hard Landing'), skin, { strip: 'xz' }), source('Hard Landing'), 0)).toBeGreaterThan(10);
     });
 
     it('frames over the shoulder at rest, and eases out to third person while sprinting', () => {

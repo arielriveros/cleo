@@ -141,7 +141,8 @@ vec3  cleoSceneColor(vec2 uv)      // the opaque scene's colour there, linear HD
 
 The colour is copied only on frames where a visible transparent material's source names
 `cleoSceneColor` / `u_sceneColor`. An opaque material has no such snapshot (`cleoHasScene()` is
-false). `tools/valley/water.glsl` is a complete example.
+false). [`samples/water.glsl`](samples/water.glsl) is a complete example, with its uniforms in
+[`samples/water.mjs`](samples/water.mjs).
 
 A transparent surface can also reflect what is on screen:
 

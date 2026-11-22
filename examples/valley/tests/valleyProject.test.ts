@@ -1,26 +1,19 @@
-import { EXAMPLE, REPO_ROOT, dataReady, exampleDir, exampleScript, readThisExample } from '@tools/exampleKit/testKit';
+import { EXAMPLE, dataReady, exampleScript, jsonNodeAtPath, readThisExample } from '@tools/exampleKit/testKit';
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
 import '@engine-tests/helpers/features';
 import { defaultMaskResolution } from '@engine/terrain/terrainLayerStack';
 import { MAX_INSTANCES } from '@engine/terrain/foliage';
-import { decodePng } from '@engine/terrain/heightmapIO';
-import { readExample } from '@tools/exampleKit/readExample.mjs';
-import { jsonNodeAtPath } from '@tools/exampleKit/nodeFields.mjs';
 
 /** Text with its line endings as LF. */
 const lf = (s: string) => s.replace(/\r\n/g, '\n');
 
-// The Valley example: the generated landscape (tools/valley/build.mjs) as scenery, its gameplay split off
-// into the Dungeon example (tools/valley/split.ts; dungeonProject.test.ts, dungeonSouls.test.ts). This suite
-// checks the valley itself — the landscape blob, its material and trail mask, the pre-baked foliage, the
+// The Valley example: a landscape as scenery, its gameplay in the Dungeon example (dungeonProject.test.ts,
+// dungeonSouls.test.ts). This suite checks the valley itself — the landscape blob, its material and trail mask, the pre-baked foliage, the
 // buildings — none of which fails loudly: a mask at the wrong resolution is resampled with a warning, a
 // foliage layer whose key matches no rule is orphaned, a building on the wrong y floats. And that none of
 // the game it used to be is left in it.
 
 const PROJECT = EXAMPLE;
-const HEIGHTMAP = join(REPO_ROOT, 'build', 'valley_height_4097_16bit.png');
 const present = dataReady(PROJECT);
 
 // Read through the editor's own bundle reader: the example is checked in as format 2, whose JSON holds
@@ -105,15 +98,6 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(Math.abs(heightAt(0, -130.09) - 4.59)).toBeLessThan(0.02);
     });
 
-    it.skipIf(!existsSync(HEIGHTMAP))('keeps the heightmap within a centimetre', async () => {
-        const img = await decodePng(new Uint8Array(readFileSync(HEIGHTMAP)));
-        const h = heights();
-        for (const [r, c] of [[0, 0], [1024, 1024], [2048, 2048], [700, 1500], [1900, 33]]) {
-            const fine = -0.84 + img.data[(r * 2) * 4097 + c * 2] * 430.35;
-            expect(Math.abs(h[r * 2049 + c] - fine), `${r},${c}`).toBeLessThan(0.01);
-        }
-    });
-
     it('carries its mask at the resolution the engine gives this landscape (no resample on load)', () => {
         const s = terrain().layerStack;
         expect(s.layerFormat).toBe(2);
@@ -169,16 +153,6 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const entry = entries.find((e: any) => e.assetId === snow.id || e.id === snow.id);
         expect(entry, 'a vfs entry for Snow').toBeDefined();
         expect(JSON.stringify(entry)).toContain('/Environment/Landscape/Materials');
-    });
-
-    it('gives the Rock slot weathered rock\'s roughness, above the screen-space reflections\' cut-off', () => {
-        // build/valley_prepared/rock_arm.jpg's green, remapped by prepare.py (ROCK_ROUGHNESS): the map replaces
-        // the scalar in the shader, so only the shipped texture can say it. Checked where the source is present.
-        const arm = join(REPO_ROOT, 'build', 'valley_prepared', 'rock_arm.jpg');
-        if (!existsSync(arm)) return;
-        const src = readFileSync(join(REPO_ROOT, 'tools', 'valley', 'prepare.py'), 'utf8');
-        expect(src).toMatch(/ROCK_ROUGHNESS = \(0\.45, 0\.65\)/);
-        expect(src).toContain('terrain("rock", "rock_05_1k", "rock_05", roughness=ROCK_ROUGHNESS)');
     });
 
     it('paints the trail along the roads and nowhere far from them', () => {
@@ -416,7 +390,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(sails.script).toContain('class ValleyWindmillNode');
     });
 
-    it('places the buildings as LOD groups whose levels are the asset’s, decimated (lods.mjs)', () => {
+    it('places the buildings as LOD groups whose levels are the asset’s, decimated', () => {
         const models = library('models');
         const tris = (n: any) => allNodes(n).reduce((t, x) => t + (x.type === 'model' ? x.model.geometry.indices.length / 3 : 0), 0);
         for (const { lod: b } of buildings()) {
@@ -548,7 +522,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         for (const p of probes) expect(p.relightDegrees, p.name).toBe(4);
     });
 
-    it('keys its day, never scripts it: a looping Day Cycle sequence, and no time-of-day node', async () => {
+    it('keys its day, never scripts it: a looping Day Cycle sequence, and no time-of-day node', () => {
         expect(nodes().some(n => n.name === 'Time of Day')).toBe(false);
         expect(library('scripts').some((s: any) => /DayNight|hour/.test(s.name))).toBe(false);
         const day = nodes().find(n => n.type === 'sequence' && n.name === 'Day Cycle');
@@ -573,10 +547,6 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const menuNode = allNodes(root).find(n => n.type === 'uiRoot' && n.name === 'Start Menu');
         expect(jsonNodeAtPath(root, menuNode, menuNode.scriptVars.day.$nodePath)?.id).toBe(day.id);
         expect(menu.source).toContain('this.day?.pause()');
-        // Noon is high in the south, midnight under the horizon.
-        const { sunElevation } = await import('@tools/valley/cinematic/dayPath');
-        expect(sunElevation(12)).toBeGreaterThan(50);
-        expect(sunElevation(0)).toBeLessThan(-20);
     });
 
     it('burns the campfire on the 2.7 s bonfire loop, already alight', () => {
@@ -668,7 +638,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
     });
 
     it('leaves the puddles to the weather: no puddle decals, nor their material', () => {
-        // The Weather volume fills the ground's own low, flat spots with water as it rains (tools/valley/valleyFixes.ts).
+        // The Weather volume fills the ground's own low, flat spots with water as it rains.
         expect(nodes().some(n => n.name === 'Puddles')).toBe(false);
         expect(nodes().some(n => n.type === 'decal')).toBe(false);
         expect(library('materials').some((m: any) => m.name === 'Water Puddle Decal')).toBe(false);
@@ -724,7 +694,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(scene().config.render.toneMapper).toBe('agxPunchy');
     });
 
-    // ---- the start menu and the cinematic tour (tools/valley/cinematic.ts) ----------------------------
+    // ---- the start menu and the cinematic tour -------------------------------------------------------
 
     const tourNode = () => nodes().find(n => n.type === 'sequence' && n.name === 'Valley Tour');
 
@@ -749,65 +719,6 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
     });
 
-    it('lights the storm from the director and splashes the pond from a spawn track', async () => {
-        const { when, before } = await import('@tools/valley/cinematic/tour');
-        const tour = tourNode();
-        // The director: the library's Tour Director, its source the example script's, with the method the track calls.
-        const script = library('scripts').find((s: any) => s.id === tour.variables.__scriptId.value);
-        expect(script.name).toBe('Tour Director');
-        expect(tour.script).toBe(script.source);
-        expect(lf(script.source)).toBe(lf(exampleScript('/Cinematic/Scripts/Tour Director.script')));
-        const lightning = tour.sequence.tracks.find((t: any) => t.type === 'script');
-        expect(lightning.slot).toBeUndefined();
-        expect(lightning.sections).toHaveLength(1);
-        const strike = lightning.sections[0];
-        expect(strike.method).toBe('lightning');
-        expect(script.source).toContain(`${strike.method}(ctx`);
-        expect(strike.start).toBeGreaterThan(when('storm'));
-        expect(strike.end).toBeLessThan(before('storm'));
-        // What it flashes: a point light the GI and the probes never see, unshadowed, dark until a strike.
-        const light = nodes().find(n => n.name === 'Lightning');
-        expect(light).toMatchObject({ type: 'light', lightType: 'point', castShadows: false, bake: false });
-        expect(light.light.intensity).toBe(0);
-        expect(script.source).toContain(`public flash: LightNode | null = null`);
-        const root = scene().scene;
-        const director = allNodes(root).find(n => n.id === tour.id);
-        expect(jsonNodeAtPath(root, director, director.scriptVars.flash.$nodePath)?.id).toBe(light.id);
-        // The pond's own splash effect, on its water, as the camera comes over it.
-        const splashes = tour.sequence.tracks.find((t: any) => t.type === 'spawn');
-        const pond = pondSurface();
-        const template = library('templates').find((t: any) => t.name === 'Water Splash');
-        expect(template).toBeDefined();
-        expect(splashes.sections.length).toBeGreaterThanOrEqual(3);
-        for (const s of splashes.sections) {
-            expect(s.template).toBe(template.name);
-            expect(s.position[1]).toBeCloseTo(pond.position[1], 2);
-            expect(Math.hypot(s.position[0] - pond.position[0], s.position[2] - pond.position[2])).toBeLessThan(8);
-            expect(s.start).toBeGreaterThanOrEqual(when('pond'));
-            expect(s.end).toBeLessThan(when('pond', 6));
-        }
-    });
-
-    it('ships the tour from its checked-in sequence file, every slot bound', async () => {
-        const seq = tourNode().sequence;
-        const file = JSON.parse(readFileSync(join(REPO_ROOT, 'tools', 'valley', 'cinematic', 'valley-tour.sequence.json'), 'utf8'));
-        expect(seq).toEqual(file);
-        const byId = new Map(nodes().map(n => [n.id, n]));
-        for (const slot of seq.slots) expect(byId.has(tourNode().bindings[slot.id]), slot.name).toBe(true);
-        const camera = byId.get(tourNode().bindings.camera);
-        // A plain camera (a rig would overwrite it), off until the tour cuts to it, with the valley's reach.
-        expect(camera.type).toBe('camera');
-        expect(camera.active).toBe(false);
-        expect(camera.camera.far).toBeGreaterThanOrEqual(2000);
-        // The day is keyed on the sun itself, not through a clock node.
-        expect(byId.get(tourNode().bindings.sun).name).toBe('Sun');
-        expect(seq.slots.some((s: any) => s.name === 'Time of Day')).toBe(false);
-        expect(seq.tracks.filter((t: any) => t.slot === 'sun').map((t: any) => t.path).sort()).toEqual(['light.color', 'light.intensity', 'rotation']);
-        // The sequence parses whole: nothing dropped as malformed.
-        const { parseSequence } = await import('@engine/sequencer/parse');
-        expect(parseSequence(seq).tracks.length).toBe(seq.tracks.length);
-    });
-
     it('keeps the tour as a sequence asset the Valley Tour node links and plays a copy of', () => {
         const tour = tourNode();
         const asset = library('sequences').find((q: any) => q.id === tour.sequenceId);
@@ -821,150 +732,4 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(manifest().sceneMetas.find((m: any) => m.name === 'Valley').refs.sequenceIds).toContain(asset.id);
     });
 
-    it('flies the tour past every part of the valley, clear of the ground and inside the Long House', async () => {
-        const { Spline3 } = await import('@engine/core/math');
-        const { SECTIONS, INTERIOR_SHOTS } = await import('@tools/valley/cinematic/tour');
-        const { quat, vec3 } = await import('gl-matrix');
-        // The afternoon interior and the candlelit one, both inside the Long House.
-        expect(INTERIOR_SHOTS).toEqual(['shot:interior', 'shot:candles']);
-        const path = tourNode().sequence.tracks.find((t: any) => t.type === 'path');
-        const samples: { shot: string, p: number[] }[] = [];
-        for (const section of path.sections) {
-            const spline = new Spline3(section.points);
-            for (let i = 0; i <= 400; i++) samples.push({ shot: section.id, p: spline.pointAt(i / 400) });
-        }
-        for (const s of SECTIONS) {
-            const nearest = Math.min(...samples.map(({ p }) => Math.hypot(p[0] - s.x, p[2] - s.z)));
-            expect(nearest, s.name).toBeLessThan(30);
-        }
-        // Above the ground (and the pond's surface), everywhere but inside the house.
-        const water = pondSurface();
-        for (const { shot, p } of samples) {
-            if (INTERIOR_SHOTS.includes(shot)) continue;
-            let floor = heightAt(p[0], p[2]);
-            if (Math.hypot(p[0] - water.position[0], p[2] - water.position[2]) < 10.5) floor = Math.max(floor, water.position[1]);
-            expect(p[1] - floor, `${shot} at ${p.map(v => v.toFixed(1))}`).toBeGreaterThan(0.7);
-        }
-        // Inside the Long House: within its interior exposure box (the room, inside the walls), at standing height.
-        const room = nodes().find(n => n.type === 'exposureVolume' && n.name === 'Long House Interior Exposure');
-        expect(room).toBeDefined();
-        const q = quat.invert(quat.create(), quat.fromEuler(quat.create(), room.rotation[0], room.rotation[1], room.rotation[2]));
-        const half = room.exposureVolume.size.map((v: number) => v / 2);
-        for (const { shot, p } of samples) {
-            if (!INTERIOR_SHOTS.includes(shot)) continue;
-            const local = vec3.transformQuat(vec3.create(), vec3.fromValues(p[0] - room.position[0], p[1] - room.position[1], p[2] - room.position[2]), q);
-            for (let c = 0; c < 3; c++) expect(Math.abs(local[c]), `interior axis ${c} at ${p.map(v => v.toFixed(1))}`).toBeLessThan(half[c] - 0.5);
-        }
-    });
-
-    it('drives the weather, the wind, the clouds, the foliage and the pond from the tour, and keeps free mode dry', async () => {
-        const { parseSequence } = await import('@engine/sequencer/parse');
-        const { sequencePresetsFor } = await import('@engine/sequencer/presetRegistry');
-        const { GRASS_LAYERS, TREE_LAYERS } = await import('@tools/valley/cinematic/tour');
-        const seq = parseSequence(tourNode().sequence);
-        const byId = new Map(nodes().map(n => [n.id, n]));
-        const bound = (slot: string) => byId.get(tourNode().bindings[slot]);
-        // One unbounded Weather, dry and still until the tour keys it, snowing with the library's Snow.
-        const weather = nodes().filter(n => n.type === 'weather');
-        expect(weather.map(n => n.name)).toEqual(['Weather']);
-        const w = weather[0].weather;
-        expect(w).toMatchObject({ precipitation: 'mixed', precipitationRate: 0, wetness: 0, snow: 0, puddles: 0, size: [0, 0, 0], shelter: true });
-        expect(w.snowMaterialId).toBe(library('materials').find((m: any) => m.name === 'Snow').id);
-        expect(w.snowMaterial?.type).toBe('pbr');
-        expect(bound('weather')).toBe(weather[0]);
-        // Time x2 is a time-lapse: the wind, clouds and water follow it.
-        expect(scene().config.render.effectsFollowTimeScale).toBe(true);
-        // Every Preset section names a preset its node has; the chain walks the weather.
-        for (const t of seq.tracks.filter(t => t.type === 'preset') as any[]) {
-            const list = sequencePresetsFor(bound(t.slot).type)!;
-            for (const s of t.sections) expect(list.some(p => p.id === s.preset), `${t.id}: ${s.preset}`).toBe(true);
-        }
-        const clouds = (seq.tracks.find(t => t.id === 'clouds-presets') as any).sections.map((s: any) => s.preset);
-        expect(clouds).toEqual(['clear', 'partlyCloudy', 'overcast', 'rainy', 'stormy', 'overcast', 'partlyCloudy', 'clear']);
-        // The weather's keys, in the order the user asked for: rain, a storm, rain into snow, a melt, drying.
-        const keys = (path: string) => (seq.tracks.find(t => t.id === `weather-${path}`) as any).sections[0].curve.keys;
-        const at = (path: string, t: number) => { const k = keys(path); let v = k[0].v; for (const x of k) if (x.t <= t) v = x.v; return v; };
-        const { when } = await import('@tools/valley/cinematic/tour');
-        expect(at('precipitationRate', when('storm', 20))).toBe(1);
-        expect(at('precipitationSnowShare', when('melt'))).toBe(1);
-        expect(at('snow', when('melt', 2))).toBeCloseTo(0.8, 6);
-        expect(at('wetness', when('clearing'))).toBeCloseTo(0.9, 6);
-        expect(at('snow', 0)).toBeGreaterThan(0);
-        // The foliage tracks name layers the landscape has.
-        const layerNames = new Set(landscape().terrain.foliage.map((l: any) => l.name));
-        for (const name of [...GRASS_LAYERS, ...TREE_LAYERS]) expect(layerNames.has(name), name).toBe(true);
-        expect(bound('landscape').type).toBe('landscape');
-        // The pond's calm is a field its node has; the overcast greys the sun's own keyed colour at the storm.
-        expect(bound('pond').waterVolume.waterMaterial.look.detailStrength).toBeGreaterThan(0.25);
-        const sunColor = (seq.tracks.find(t => t.id === 'sun-color') as any).sections[0].curve.keys;
-        const colorAt = (t: number) => { let v = sunColor[0].v; for (const k of sunColor) if (k.t <= t) v = k.v; return v as number[]; };
-        const warmth = (c: number[]) => c[0] - c[2];
-        expect(warmth(colorAt(when('storm', 20)))).toBeLessThan(warmth(colorAt(when('valley', 5))));
-        // It ends on the Cleo logo and wordmark: a texture the project ships, and the loading screen's font.
-        const logo = bound('logo'), wordmark = bound('wordmark');
-        expect(logo.type).toBe('uiImage');
-        expect(new Set(read('textures', 'index.json').map((t: any) => t.id)).has(logo.ui.textureId)).toBe(true);
-        expect(new Set(manifest().sceneMetas[0].refs.textureIds).has(logo.ui.textureId)).toBe(true);
-        expect(wordmark.ui).toMatchObject({ text: 'CLEO ENGINE', fontFamily: 'Consolas, monaco, monospace', fontWeight: 600, letterSpacing: 0.3 });
-        // The sails follow the wind, on every level of detail.
-        const sails = nodes().filter(n => n.name === 'Sails');
-        expect(sails.length).toBe(3);
-        for (const s of sails) expect(s.script).toContain('public followWind: boolean = true');
-    });
-
-    it('keeps the tour clear of every wall it passes: measured against the buildings\' own triangles', async () => {
-        const { Spline3, closestOnTriangle } = await import('@engine/core/math');
-        const { mat4, quat, vec3 } = await import('gl-matrix');
-        const { INTERIOR_SHOTS } = await import('@tools/valley/cinematic/tour');
-        // World-space triangles of each building's most detailed level, composed down its node chain (the
-        // Static Collision frame, the lodGroup, the level).
-        const local = (n: any) => mat4.fromRotationTranslationScale(mat4.create(),
-            quat.fromEuler(quat.create(), ...((n.rotation ?? [0, 0, 0]) as [number, number, number])), n.position ?? [0, 0, 0], n.scale ?? [1, 1, 1]);
-        const houses = buildings().map(({ collider, lod }) => {
-            const tris: Float64Array[] = [];
-            const walk = (n: any, parent: any) => {
-                const world = mat4.multiply(mat4.create(), parent, local(n));
-                if (n.type === 'model') {
-                    const { positions: P, indices: I } = n.model.geometry, v = vec3.create();
-                    for (let i = 0; i < I.length; i += 3) {
-                        const t = new Float64Array(9);
-                        for (let k = 0; k < 3; k++) { vec3.transformMat4(v, [P[I[i + k] * 3], P[I[i + k] * 3 + 1], P[I[i + k] * 3 + 2]], world); t.set(v, k * 3); }
-                        tris.push(t);
-                    }
-                }
-                for (const c of n.children ?? []) walk(c, world);
-            };
-            walk(lod.children[0], mat4.multiply(mat4.create(), local(collider), local(lod)));
-            const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
-            for (const t of tris) for (let k = 0; k < 9; k++) { min[k % 3] = Math.min(min[k % 3], t[k]); max[k % 3] = Math.max(max[k % 3], t[k]); }
-            return { name: lod.name, tris, min, max };
-        });
-        expect(houses.map((b: any) => b.name).sort()).toEqual(['Granary', 'Long House', 'Old House', 'Windmill']);
-        /** Distance from p to the nearest triangle, or `cap` when none is nearer. */
-        const clearance = (p: number[], tris: Float64Array[], cap: number) => {
-            let best = cap;
-            for (const t of tris) {
-                if (p[0] < Math.min(t[0], t[3], t[6]) - best || p[0] > Math.max(t[0], t[3], t[6]) + best) continue;
-                if (p[2] < Math.min(t[2], t[5], t[8]) - best || p[2] > Math.max(t[2], t[5], t[8]) + best) continue;
-                if (p[1] < Math.min(t[1], t[4], t[7]) - best || p[1] > Math.max(t[1], t[4], t[7]) + best) continue;
-                const q = closestOnTriangle(p, t.subarray(0, 3), t.subarray(3, 6), t.subarray(6, 9));
-                best = Math.min(best, Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]));
-            }
-            return best;
-        };
-        const path = tourNode().sequence.tracks.find((t: any) => t.type === 'path');
-        for (const section of path.sections) {
-            const spline = new Spline3(section.points);
-            // Inside the Long House the aisle allows about 1.4 m either side; outside, nothing comes close.
-            const inside = INTERIOR_SHOTS.includes(section.id), need = inside ? 1.0 : 1.5;
-            for (let i = 0; i <= 400; i++) {
-                const p = spline.pointAt(i / 400);
-                for (const b of houses) {
-                    if ([0, 1, 2].some(c => p[c] < b.min[c] - need || p[c] > b.max[c] + need)) continue;
-                    const d = clearance(p, b.tris, need + 0.01);
-                    expect(d, `${section.id} at ${p.map((v: number) => v.toFixed(2))} from the ${b.name}`).toBeGreaterThan(need);
-                }
-            }
-        }
-    });
 });

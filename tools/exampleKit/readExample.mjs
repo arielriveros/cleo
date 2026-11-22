@@ -2,8 +2,8 @@
 // or a bundle in either format (what the gallery serves from applications/editor/public/examples/<slug>/).
 //
 // Bundle format 2 keeps no payload in the JSON — geometry, terrain blobs and textures sit in `assets.bin` behind
-// markers — and a folder keeps them in Blobs/, so code that inspects an example (the generators and their tests)
-// cannot just JSON.parse the files. This runs the editor's own reader over either, which inflates every payload
+// markers — and a folder keeps them in Blobs/, so code that inspects an example (its tests, the gallery) cannot
+// just JSON.parse the files. This runs the editor's own reader over either, which inflates every payload
 // back into the original JSON, and offers the result under the familiar bundle paths.
 
 import fs from 'fs'

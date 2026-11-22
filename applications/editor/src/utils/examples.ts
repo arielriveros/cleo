@@ -5,9 +5,9 @@ import { applyBundleAsNewProject } from './bundleImport';
 import { confirmDiscard } from '../features/unloadGuard';
 import { parseJsonBuffer } from '../workers/workerClient';
 
-// Example projects that ship with the editor: a project bundle exported and then UNZIPPED into a folder
-// under `applications/editor/public/examples/<slug>/` (see applications/editor/tools/add-example.mjs), served as static files with
-// no server, API or CDN involved.
+// Example projects that ship with the editor: a project bundle in a folder under
+// `applications/editor/public/examples/<slug>/`, built from the repository's example project folder examples/<slug>/
+// (tools/examples/gallery.mjs), served as static files with no server, API or CDN involved.
 //
 // The folder is not listable over HTTP and does not need to be: the library filenames are fixed,
 // `manifest.sceneMetas` names every scene file, and `textures/index.json` names every texture payload.

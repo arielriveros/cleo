@@ -128,8 +128,8 @@ describe('bundle layout round trip', () => {
 });
 
 /**
- * Split a format-2 archive's blob into `n` part files the way tools/exampleKit/packFormat2.mjs does for a
- * checked-in example (git hosts cap one file at 100 MB), recording the sizes in the index.
+ * Split a format-2 archive's blob into `n` part files the way tools/examples/bundleWriter.mjs does for a
+ * gallery example (git hosts cap one file at 100 MB), recording the sizes in the index.
  */
 function splitBlob(archive: Archive, n: number): number[] {
   const blob = new Uint8Array(archive.get(BUNDLE_PATHS.assets) as ArrayBuffer);
