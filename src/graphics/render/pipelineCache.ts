@@ -9,6 +9,7 @@ import { modelVertexLayout, instanceMatrixLayout, boneLayouts, screenQuadLayout,
 import { ShaderManager } from '../systems/shaderManager';
 import { EXTRA_LOGICAL_NAMES, type ShadowFilter } from '../programVariants';
 import { serializeRecipe, recordStall, shaderOptimizerStats } from '../shaderOptimizer';
+import { shaderActivity } from '../shaderActivity';
 import type { PipelineRecipe } from '../shaderOptimizer';
 import type { FrameView } from './frameView';
 import type { PassEncoder } from './passEncoder';
@@ -435,8 +436,11 @@ export class PipelineCache {
         };
         this._pending.add(key);
         const start = performance.now();
+        // Shown by the editor's progress popup while it builds (shaderActivity.ts).
+        const activity = shaderActivity.begin({ program, builtFor, kind: 'pipeline' });
         device.createRenderPipelineAsync!(this._describe(recipe, vertexModule, module)).then((pipeline) => {
             this._pending.delete(key);
+            shaderActivity.end(activity);
             if (this._byKey.has(key)) return;
             this._byKey.set(key, pipeline);
             shaderOptimizerStats.pipelinesDeferred++;
@@ -444,6 +448,7 @@ export class PipelineCache {
             if (ms > 1000) Logger.info(`[shaders] pipeline '${program}' built off the main thread in ${(ms / 1000).toFixed(1)} s`, 'Renderer');
         }, (e) => {
             this._pending.delete(key);
+            shaderActivity.end(activity);
             this._asyncFailed.add(key);
             Logger.warn(`[shaders] could not build pipeline '${program}' off the main thread (built at once instead): ${e}`, 'Renderer');
         });
@@ -561,6 +566,8 @@ export class PipelineCache {
         const create = device.createRenderPipelineAsync?.bind(device);
         if (!create) return 0;
         let done = 0, warmed = 0;
+        // Its count, for the editor's progress popup (shaderActivity.ts).
+        shaderActivity.setWarm(0, recipes.length);
         const job = async (r: PipelineRecipe) => {
             try {
                 const built = this._recipePipeline(r, create);
@@ -574,18 +581,26 @@ export class PipelineCache {
             } catch (e) {
                 Logger.warn(`[shaders] could not warm pipeline '${r.program}': ${e}`, 'Renderer');
             } finally {
-                onProgress?.(++done, recipes.length);
+                // Counted apart from the call: `onProgress?.(++done)` skips its arguments when there is no
+                // `onProgress`, which is how the editor warms, and the count never moved.
+                done++;
+                onProgress?.(done, recipes.length);
+                shaderActivity.setWarm(done, recipes.length);
             }
         };
-        // A few at a time, a frame apart: making each one's shader module parses and validates its WGSL on the
-        // GPU process's main thread, and sixty started at once held a frame up for most of a second.
-        const jobs: Promise<void>[] = [];
-        for (let i = 0; i < recipes.length; i++) {
-            jobs.push(job(recipes[i]));
-            if ((i + 1) % PipelineCache.WARM_BATCH === 0 && i + 1 < recipes.length)
-                await new Promise(resolve => setTimeout(resolve, PipelineCache.WARM_GAP_MS));
+        try {
+            // A few at a time, a frame apart: making each one's shader module parses and validates its WGSL on the
+            // GPU process's main thread, and sixty started at once held a frame up for most of a second.
+            const jobs: Promise<void>[] = [];
+            for (let i = 0; i < recipes.length; i++) {
+                jobs.push(job(recipes[i]));
+                if ((i + 1) % PipelineCache.WARM_BATCH === 0 && i + 1 < recipes.length)
+                    await new Promise(resolve => setTimeout(resolve, PipelineCache.WARM_GAP_MS));
+            }
+            await Promise.all(jobs);
+        } finally {
+            shaderActivity.setWarm(null);
         }
-        await Promise.all(jobs);
         shaderOptimizerStats.pipelinesWarmed += warmed;
         return warmed;
     }

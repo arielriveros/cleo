@@ -208,6 +208,22 @@ float lit = d < 0.9999 ? cleoSunShadow(p, normal) : 1.0;
 It is 1 everywhere when no sun casts shadows. Opt-in like the helpers above: only a screen material
 whose source names `cleoSunShadow` gets the shadow library and `u_view`.
 
+### Motion in a screen material
+
+A **screen** material can read the engine's velocity buffer, the one TAA and motion blur use:
+
+```glsl
+vec2  cleoVelocity(vec2 uv)        // how far the surface there moved across the screen since last frame, uv units
+vec2  cleoObjectVelocity(vec2 uv)  // the same with the camera's part taken out: how the thing itself moved
+float cleoVelocityDt()             // seconds between the two frames: divide by it for a speed
+```
+
+Skinned models move bone by bone in it, so a running figure's arms and legs each have their own
+motion. `cleoObjectVelocity` is what a follow camera needs: the figure barely moves on screen, but it
+reads as moving, and the world sliding past as still. Both are zero on the first frame. A material
+naming either helper makes the renderer draw the buffer even with TAA and motion blur off; only such a
+material gets it, so no other material's WGSL changes.
+
 On WebGPU, a published game has no GLSL translator: a custom material renders from the WGSL saved
 with it (`compiledWgsl`), which the material inspector writes when it compiles the shader, and which is
 ignored if the source or the engine prelude changed since (`compiledWgslHash`). Play in the editor

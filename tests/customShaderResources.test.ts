@@ -86,6 +86,47 @@ describe('customShaderResources — screen, sun shadow', () => {
     });
 });
 
+// The velocity buffer, opt-in the same way: a screen material naming cleoVelocity / cleoObjectVelocity gets it as
+// a third engine sampler, so its own samplers move one pair along -- in the resource list and the prelude alike.
+describe('customShaderResources — screen, velocity', () => {
+    const moving = 'vec4 fragment() { return vec4(cleoObjectVelocity(fragTexCoord), 0.0, 1.0); }';
+    const both = 'vec4 fragment() { vec3 p = vec3(0.0); return vec4(cleoVelocity(fragTexCoord), cleoSunShadow(p, vec3(0.0, 1.0, 0.0)), 1.0); }';
+    const paper = [{ name: 'paper', type: 'sampler2D', value: null }] as any[];
+
+    it('puts u_velocity after the depth and the user samplers after it', () => {
+        const group0 = customShaderResources('screen', paper, moving).filter(r => r.group === 0);
+        expect(group0.map(r => `${r.binding}:${r.kind}:${r.glslName}`)).toEqual([
+            '0:texture:u_screenTexture', '1:sampler:u_screenTexture', '2:texture:u_depth', '3:sampler:u_depth',
+            '4:texture:u_velocity', '5:sampler:u_velocity', '6:texture:u_paper', '7:sampler:u_paper',
+        ]);
+    });
+
+    it('declares the sampler and the camera matrices in both dialects, and leaves other materials alone', async () => {
+        const { assembleCustomFragment } = await import('../src/graphics/systems/customShaders');
+        for (const dialect of ['es300', 'vulkan'] as const) {
+            const src = assembleCustomFragment('screen', moving, paper, dialect);
+            expect(src).toMatch(/u_velocity/);
+            expect(src).toMatch(/u_uvPrevViewProj/);
+            expect(src).toMatch(/vec2 cleoObjectVelocity\(vec2 uv\)/);
+        }
+        const vk = assembleCustomFragment('screen', moving, paper, 'vulkan');
+        expect(vk).toMatch(/layout\(set = 0, binding = 4\) uniform texture2D u_velocity_t;/);
+        expect(vk).toMatch(/layout\(set = 0, binding = 6\) uniform texture2D u_paper_t;/);
+        const shadowOnly = 'vec4 fragment() { vec3 p = vec3(0.0); return vec4(cleoSunShadow(p, vec3(0.0, 1.0, 0.0))); }';
+        expect(assembleCustomFragment('screen', shadowOnly, [], 'vulkan')).not.toMatch(/u_velocity|u_uvViewProj/);
+    });
+
+    it('combines with the sun shadow: both libraries, both groups', async () => {
+        const { assembleCustomFragment } = await import('../src/graphics/systems/customShaders');
+        const res = customShaderResources('screen', [], both);
+        expect(res.some(r => r.glslName === 'u_velocity')).toBe(true);
+        expect(res.some(r => r.group === 3 && r.glslName === 'u_shadowCascades')).toBe(true);
+        const vk = assembleCustomFragment('screen', both, [], 'vulkan');
+        expect(vk).toMatch(/float cleoSunShadow/);
+        expect(vk).toMatch(/vec2 cleoVelocity/);
+    });
+});
+
 describe('usedResources', () => {
     // WebGPU's automatic layout drops every binding the entry points never reach. Listing one anyway made
     // the group invalid ("binding index 7 not present") and blacked out the frame: the Valley's water

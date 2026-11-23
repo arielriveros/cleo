@@ -394,6 +394,9 @@ export {
     shaderOptimizerStats, MaterialSync, DrawSortKeys, ProgramCompileQueue, parseRecipes, serializeRecipe,
 } from "./graphics/shaderOptimizer";
 export type { ShaderOptimizerStats, PipelineRecipe } from "./graphics/shaderOptimizer";
+// Background shader builds as they happen, for the editor's progress popup.
+export { shaderActivity } from "./graphics/shaderActivity";
+export type { ShaderActivity, ShaderBuild } from "./graphics/shaderActivity";
 // A published game's shader library: which program needs which module, and the library the player installs.
 export { programModules } from "./graphics/render/programs";
 export { installShaderLibrary, shadersAreLibraryHandles } from "./graphics/shaderLibrary";

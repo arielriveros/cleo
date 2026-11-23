@@ -144,7 +144,9 @@ shallow-water equations over the ground until the water settles, and every water
 what was found: where the water really stands and how high, currents that bend with the banks and round a
 rock, wakes and eddies behind it, water speeding over a shallow bar and piling up before a narrows, and foam
 where it tumbles, trailing off downstream. Floating bodies ride the baked water too: its surface and its
-currents carry them. The bake runs in the background while the editor keeps drawing; **Cancel** stops it.
+currents carry them. The bake runs in the background while the editor keeps drawing, and goes on when you
+select something else: its card in the [progress window](interface.md#progress-and-notifications) shows how
+far it has got. **Cancel**, there or on the water's card, stops it; opening another project stops it too.
 Without a bake each water draws as it was drawn. The bake is saved with the project and published with the
 game.
 

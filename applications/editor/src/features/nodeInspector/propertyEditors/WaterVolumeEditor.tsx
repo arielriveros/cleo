@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useState, useSyncExternalStore } from 'react'
 import {
   ModelNode, WaterVolumeNode, WATER_VOLUME_PRESETS, WATER_BODY_TYPES, normaliseWaterPoint, minWaterPoints, carveWater,
-  WaterMaterial, WATER_LOOK_PRESETS, DEFAULT_WATER_LOOK, encodeWaterBake, decodeWaterBake,
-  newWaterBakeId, GiBakeRegistry, Logger, prepareGroupBake, waterBakeGroup, waterGroupReach, waterGroupSignature, forgetWaterBakeContext, bakeable,
-  type LandscapeNode, type WaterLook, type WaterLookPreset, type WaterBakeReport,
+  WaterMaterial, WATER_LOOK_PRESETS, DEFAULT_WATER_LOOK, decodeWaterBake,
+  GiBakeRegistry, waterBakeGroup, waterGroupReach, bakeable,
+  type LandscapeNode, type WaterLook, type WaterLookPreset,
   type WaterVolumePreset, type WaterBody, type WaterBodyType, type WaterPoint,
 } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
@@ -16,13 +16,11 @@ import { useCleoEngine } from '../../EngineContext'
 import { useHistory } from '../../HistoryContext'
 import MaterialPicker, { liveMaterial } from '../../terrainMaterials/MaterialPicker'
 import { buildMaterialAsset } from '../../../utils/materials'
-import { saveGiBake } from '../../../utils/giBakeStore'
+import { BAKE_REPORTS, reportLines, startWaterBake, waterBakeJobOf, waterBakeJobs } from '../../water/waterBakeJobs'
 import { WaterVolumeIcon } from '../sectionIcons'
-import { runWaterBake } from '../../../workers/waterBakeClient'
 import {
   WATER_SHAPES_EDITED, setWaterShapeSelection, useWaterShapeSelection,
 } from '../../gizmo/waterSelection'
-import { onProjectClose } from '../../../utils/projectLifecycle'
 import { DeclaredSection } from '../../properties/DeclaredSections'
 
 // The Water inspector. A Water node is ONE body of water — a river, a lake, an ocean or a pool — that buoys
@@ -309,11 +307,6 @@ function WaterSurface({ node, changed }: { node: WaterVolumeNode; changed: () =>
 
 const BAKE_RESOLUTIONS = [{ value: 256, label: 'Draft (256)' }, { value: 512, label: 'Standard (512)' }, { value: 768, label: 'Fine (768)' }, { value: 1024, label: 'Finest (1024, slow)' }]
 
-/** How each bake made this session went, by bake id: what the card says under the button. */
-const BAKE_REPORTS = new Map<string, WaterBakeReport>()
-// Keyed by the closed project's bakes.
-onProjectClose(() => BAKE_REPORTS.clear())
-
 /** Whether a node's bake is drawn: none, current, stale (the water or the ground round it changed), or missing. */
 function bakeStatus(node: WaterVolumeNode): 'none' | 'current' | 'stale' | 'missing' {
   const id = node.bakeId
@@ -322,87 +315,22 @@ function bakeStatus(node: WaterVolumeNode): 'none' | 'current' | 'stale' | 'miss
   return !decoded ? 'missing' : decoded.signature === node.bakeSignature() ? 'current' : 'stale'
 }
 
-const at = (p: [number, number]) => `${Math.round(p[0])}, ${Math.round(p[1])}`
-
-/** A bake's report in plain words: whether it settled, and what the water did that it was not drawn to do. */
-function reportLines(report: WaterBakeReport, group: readonly WaterVolumeNode[]): { text: string; warn: boolean }[] {
-  const lines: { text: string; warn: boolean }[] = []
-  const flow = `${report.inflow.toFixed(1)} m\u00b3/s in, ${(report.outflow + report.lost).toFixed(1)} out`
-  if (report.settled) lines.push({ text: `Settled after ${Math.round(report.seconds)} s of flow (${flow}).`, warn: false })
-  else {
-    const where = report.fillingAt && report.filling > 0 ? ` Water was still gathering near ${at(report.fillingAt)}: a hollow on its way that is a lake; add one there, or fill it in.` : ''
-    lines.push({ text: `Not settled after ${Math.round(report.seconds)} s of flow (${flow}).${where}`, warn: true })
-  }
-  if (report.lost > 0.02 * Math.max(report.inflow, 1e-6)) {
-    const share = Math.round(100 * report.lost / Math.max(report.inflow, 1e-6))
-    lines.push({
-      text: `${Math.min(100, share)}% of the water left the course it was drawn on${report.lostAt ? `, most near ${at(report.lostAt)}` : ''}: the ground has no channel for it there. Carve one, or draw the river where the ground runs.`,
-      warn: true,
-    })
-  }
-  const met = report.obstacles
-  if (met && met.count > 0) {
-    const them = met.count === 1 ? 'it' : 'them'
-    let text = `Flowed round ${met.count} static collider${met.count === 1 ? '' : 's'} standing in the water.`
-    if (met.narrow > 0) text += ` ${met.narrow === met.count ? (met.count === 1 ? 'It is' : 'They are') : `${met.narrow} of ${them} ${met.narrow === 1 ? 'is' : 'are'}`} narrower than two cells at this resolution: the water is held back by ${met.narrow === 1 ? 'its' : 'their'} drag, but not seen to part round ${met.narrow === 1 ? 'it' : 'them'}. Raise the resolution to see that.`
-    lines.push({ text, warn: false })
-  }
-  for (const l of report.levels) {
-    if (Math.abs(l.level - l.drawn) < 0.05) continue
-    const name = group.find(n => n.id === l.id)?.name ?? 'A lake'
-    lines.push({ text: `${name} stands at ${l.level.toFixed(2)} m, not the ${l.drawn.toFixed(2)} m it was drawn at: that is where its outlet lets it.`, warn: false })
-  }
-  return lines
-}
-
 /**
  * The flow bake: the shallow-water equations run over this water and everything joined to it as one system,
  * over the ground under it and round the static colliders in it, until what flows in is what flows out
  * (water/bake/), in a worker. Each water's settled heights, currents and foam are stored as its bake, which
- * the surface then draws and physics carries floating bodies on.
+ * the surface then draws and physics carries floating bodies on. The bake itself is a job of its own
+ * (features/water/waterBakeJobs.ts): it goes on with this card closed, its card in the progress popup.
  */
-function WaterBake({ node, changed }: { node: WaterVolumeNode; changed: () => void }) {
+function WaterBake({ node, changed, emitChanged }: { node: WaterVolumeNode; changed: () => void; emitChanged: () => void }) {
   const [res, setRes] = useState(512)
-  const [progress, setProgress] = useState<{ fraction: number; seconds: number } | null>(null)
-  const cancelRef = useRef<(() => void) | null>(null)
-  const stopRef = useRef(false)
-  useEffect(() => () => { stopRef.current = true; cancelRef.current?.() }, [])
+  const job = waterBakeJobOf(useSyncExternalStore(waterBakeJobs.subscribe, waterBakeJobs.getSnapshot), node)
+  const progress = job ? { fraction: job.fraction, seconds: job.seconds } : null
   const group = waterBakeGroup(node)
   const status = bakeStatus(node)
   const canBake = bakeable(node)
-  const bake = async () => {
-    if (progress !== null || !group.length) return
-    stopRef.current = false
-    let prepared
-    try { prepared = prepareGroupBake(node, { maxRes: res }) }
-    catch (e) { Logger.warn(`Water "${node.name}": ${String((e as Error).message ?? e)}`, 'Water'); return }
-    // Signed with what it is baked from, read now.
-    forgetWaterBakeContext()
-    const signature = waterGroupSignature(node)
-    setProgress({ fraction: 0, seconds: 0 })
-    const run = runWaterBake(prepared.setup, (fraction, seconds) => setProgress({ fraction, seconds }))
-    cancelRef.current = run.cancel
-    let output = null
-    try { output = await run.result }
-    catch (e) { Logger.warn(`Water "${node.name}" bake failed: ${String((e as Error).message ?? e)}`, 'Water') }
-    cancelRef.current = null
-    if (output && !stopRef.current) {
-      for (const m of output.members) {
-        const n = prepared.group.find(g => g.id === m.id)
-        if (!n) continue
-        const bakeId = newWaterBakeId()
-        m.info.source = bakeId
-        await saveGiBake(bakeId, encodeWaterBake(m.info, signature), n.bakeId)
-        n.bakeId = bakeId
-        BAKE_REPORTS.set(bakeId, output.report)
-      }
-      const lines = reportLines(output.report, prepared.group)
-      const say = lines.some(l => l.warn) ? Logger.warn : Logger.info
-      say.call(Logger, `Water baked (${prepared.group.map(n => n.name).join(', ')}): ${prepared.setup.nx} x ${prepared.setup.nz} cells. ${lines.map(l => l.text).join(' ')}`, 'Water')
-    }
-    setProgress(null)
-    changed()
-  }
+  // Not this card's `changed`: the bake may land after the card has gone.
+  const bake = () => { if (!job && group.length) startWaterBake(node, res, emitChanged) }
   const others = group.filter(n => n !== node)
   const report = node.bakeId ? BAKE_REPORTS.get(node.bakeId) : undefined
   // A river narrower than a few cells cannot carry a current the bake can see.
@@ -430,7 +358,7 @@ function WaterBake({ node, changed }: { node: WaterVolumeNode; changed: () => vo
             ? <Button size='sm' onClick={bake} title='Simulate this water and everything joined to it over the landscape and round the static colliders in it, until what flows in is what flows out, and draw each with its settled heights, currents and foam.'>
                 {others.length ? `Bake flow (${group.length} waters)` : 'Bake flow'}
               </Button>
-            : <Button size='sm' onClick={() => { stopRef.current = true; cancelRef.current?.() }} title='Stop the bake; every water keeps what it drew before.'>
+            : <Button size='sm' onClick={() => job?.cancel()} title='Stop the bake; every water keeps what it drew before.'>
                 Cancel ({Math.round(progress.seconds)} s of flow simulated)
               </Button>}
           {node.bakeId && progress === null && <Button size='sm' variant='ghost' onClick={() => { node.bakeId = null; changed() }}
@@ -477,7 +405,7 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
 
         <WaterSurface node={node} changed={changed} />
 
-        <WaterBake node={node} changed={changed} />
+        <WaterBake node={node} changed={changed} emitChanged={() => eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node })} />
 
         <DeclaredSection node={node} title='Waves'>
           {river && <Hint className='mt-1'>A river's waves are raised by its own current: taller and longer where it runs fast, calm where it is slow.</Hint>}

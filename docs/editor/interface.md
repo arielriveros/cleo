@@ -257,10 +257,25 @@ want to see without watching the console.
 
 ## Progress and notifications
 
-Long operations — importing, publishing, exporting, saving, refreshing thumbnails — report into a
+Long operations — importing, publishing, exporting, saving, refreshing thumbnails, bakes — report into a
 single floating progress window as a stack of step cards (running, paused, done, failed). An import
 that is waiting on you shows as **paused**, which is how you tell "stalled on a decision" from
 "still working". Shorter notices appear as toasts.
+
+The bakes there:
+
+- **Baking water flow**: the flow bake of a water and the waters joined to it. It keeps running when you
+  select something else; cancel it from its card.
+- **Capturing GI**: each GI Volume still capturing its probes, with how many are done.
+- **Baking light probes**: the probe being captured, relit after a light changed, or filtered.
+- **Baking nav mesh**, **Baking impostor**, **Saving GI bake**: one card each, while they run.
+
+**Compiling shaders** lists the shaders being built in the background:
+- a material, the water or a screen effect seen for the first time, which shows up once its shader is
+  ready;
+- the shaders the project used last session, rebuilt as it opens, with their count.
+
+Work over in under half a second shows no card.
 
 ## Play mode
 

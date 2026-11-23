@@ -22,6 +22,9 @@ import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 import { ModelDraw } from './modelDraw';
+import { CustomMaterial } from '../material';
+import { usesVelocity } from '../systems/customShaders';
+import { renderNow } from './renderClock';
 import type { RenderSubsystems } from './subsystems';
 
 /** What TemporalPasses reads from the renderer that owns it: its own state, not another subsystem's. */
@@ -312,15 +315,49 @@ export class TemporalPasses {
      * reconstruct from whatever frame last filled it.
      */
     public produceVelocity(): void {
-        if (this._host.thumbnailMode || !this._view.hasPrevViewProj) return;
+        if (this._host.thumbnailMode) return;
+        // The time this frame's velocity spans, for readers that want a speed rather than a per-frame step
+        // (screen materials, `cleoVelocityDt`). Taken every frame, drawn or not, so it is always the frame's
+        // own; a second view in the same frame (a preview pane) reads as no time at all and is ignored.
+        const now = renderNow();
+        if (this._lastVelocityClock > 0) {
+            const dt = (now - this._lastVelocityClock) * 0.001;
+            if (dt > 1e-3) this.velocityDt = Math.min(dt, 0.25);
+        }
+        this._lastVelocityClock = now;
+        if (!this._view.hasPrevViewProj) return;
         // The debug channel is a reader too: without it, selecting 'velocity' with motion blur off
-        // would show a stale buffer rather than this frame's motion.
+        // would show a stale buffer rather than this frame's motion. So is a screen material that reads it.
         const wanted = this._view.taaJitterActive || this.motionBlurWillRun
-                       || this._sys.debugViews.debugView === 'velocity';
+                       || this._sys.debugViews.debugView === 'velocity'
+                       || this._screenMaterialsReadVelocity();
         if (!wanted || !this._passes.beginPass('velocity')) return;
 
         this._velocityPass();
         this.velocityProducedThisFrame = true;
+    }
+
+    /** Seconds between this frame and the last, as {@link produceVelocity} measured them. */
+    public velocityDt: number = 1 / 60;
+    private _lastVelocityClock = 0;
+
+    /** Whether the active camera runs a screen material that reads the velocity buffer (`cleoVelocity`). */
+    private _screenMaterialsReadVelocity(): boolean {
+        const materials = this._view.scene?.activeCamera?.screenMaterials;
+        if (!materials) return false;
+        for (const m of materials)
+            if (m instanceof CustomMaterial && m.renderMode === 'screen' && usesVelocity(m.fragmentSource)) return true;
+        return false;
+    }
+
+    /**
+     * What a screen material reading the velocity buffer needs beside it: the two uv-producing, unjittered
+     * view-projections the camera half of the buffer was worked out with (so `cleoObjectVelocity` can take
+     * that half back out), whether the buffer holds this frame, and the time it spans.
+     */
+    public screenVelocityInputs(): { uvViewProj: mat4; uvPrevViewProj: mat4; valid: boolean; dt: number } {
+        return { uvViewProj: this._uvViewProjScratch, uvPrevViewProj: this._uvPrevViewProjScratch,
+                 valid: this.velocityProducedThisFrame, dt: this.velocityDt };
     }
 
     /**

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { GIVolumeNode, GiBakeRegistry, Logger, newGiBakeId } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { Button, Hint } from '@cleo/app-kit/ui'
+import { startTask } from '@cleo/app-kit/feedback/progressStore'
 import { useCleoEngine } from '../../EngineContext'
 import { GiVolumeIcon } from '../sectionIcons'
 import { saveGiBake } from '../../../utils/giBakeStore'
@@ -43,17 +44,27 @@ export default function GIVolumeEditor(props: { node: GIVolumeNode }) {
     const scene = instance?.scene
     if (!renderer || !scene) return
     setSaving(true)
+    const task = startTask({ title: `Saving GI bake — ${props.node.name}`, steps: [{ name: props.node.name, status: 'running', detail: 'Reading the probes back' }], indeterminate: true })
     try {
       const bytes = await renderer.gi.exportBake(props.node, scene)
-      if (!bytes) { Logger.warn(`${props.node.name}: the capture is not complete yet`, 'Editor'); return }
+      if (!bytes) {
+        Logger.warn(`${props.node.name}: the capture is not complete yet`, 'Editor')
+        task.setStep(0, { status: 'skipped', detail: 'The capture is not complete yet' })
+        return
+      }
+      task.setStep(0, { detail: 'Storing it with the project' })
       const id = newGiBakeId()
       await saveGiBake(id, bytes, props.node.bakeId)
       props.node.bakeId = id
       eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node })
-      Logger.info(`Saved the GI bake of ${props.node.name} (${(bytes.byteLength / 1048576).toFixed(1)} MB)`, 'Editor')
+      const size = `${(bytes.byteLength / 1048576).toFixed(1)} MB`
+      Logger.info(`Saved the GI bake of ${props.node.name} (${size})`, 'Editor')
+      task.setStep(0, { status: 'done', detail: size })
     } catch (e) {
       Logger.warn(`Saving the GI bake of ${props.node.name} failed: ${e}`, 'Editor')
+      task.setStep(0, { status: 'failed', error: String(e) })
     } finally {
+      task.finish()
       setSaving(false)
     }
   }

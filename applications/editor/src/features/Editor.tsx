@@ -7,6 +7,7 @@ import StaleDependencyBanner from './StaleDependencyBanner';
 import DockLayout from "./layout/DockLayout";
 import ModelImportModal from "./models/ModelImportModal";
 import ProgressWindow from "@cleo/app-kit/feedback/ProgressWindow";
+import BackgroundWorkReporter from "./backgroundWork/BackgroundWorkReporter";
 import AnimationImportModal from "./animation/AnimationImportModal";
 import RigPickerModal from "./animation/RigPickerModal";
 import UnsavedSceneModal from "./dialogs/UnsavedSceneModal";
@@ -121,9 +122,11 @@ function Shell() {
       </div>
       {/* Global mesh-import review modal — overlays the whole editor while an import awaits the user. */}
       <ModelImportModal />
-      {/* The editor's one progress surface — import, publish, export, save, thumbnail refresh all report
+      {/* The editor's one progress surface — import, publish, export, save, thumbnail refresh, bakes all report
           here. A floating card stack, not a modal, so it can stay up underneath the review modal. */}
       <ProgressWindow />
+      {/* ...and the engine's own background work: shader builds, GI captures, light probe bakes. */}
+      <BackgroundWorkReporter />
       {/* Global animation-import review modal (compatibility vs the skeleton). */}
       <RigPickerModal />
       <AnimationImportModal />

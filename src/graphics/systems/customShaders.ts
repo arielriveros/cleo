@@ -2,6 +2,7 @@ import { device } from '../rhi/deviceHandle';
 import type { ShaderProgram, ShaderProgramDescriptor } from '../rhi/shaderProgram';
 import { authoring } from '../../core/eventBus';
 import { shaderOptimizerStats, recordStall } from '../shaderOptimizer/stats';
+import { shaderActivity } from '../shaderActivity';
 import { shaderStats } from '../shaderStats';
 import { ShaderManager } from './shaderManager';
 import { Logger } from '../../core/logger';
@@ -803,7 +804,7 @@ void main() { fragColor = fragment() + _cleoInterface(); }
 
 /**
  * The input `cleoSunShadow` reads beyond the shadow library's own block: the view matrix, whose depth
- * picks the cascade. OPT-IN, as the forward reflection helper is — see {@link SCREEN_SHADOW_INTERFACE}.
+ * picks the cascade. OPT-IN, as the forward reflection helper is — see `screenInterfaceFor`.
  */
 const SCREEN_SHADOW_UNIFORMS: ValueDecl[] = [
     { name: 'u_view', type: 'mat4', comment: 'world -> view; its depth picks the shadow cascade (cleoSunShadow)' },
@@ -846,32 +847,93 @@ float cleoSunShadow(vec3 worldPos, vec3 N) {
 }
 `;
 
+/** The engine's velocity buffer, for a screen material that calls `cleoVelocity` / `cleoObjectVelocity`. */
+const SCREEN_VELOCITY_SAMPLER: SamplerDecl = {
+    name: 'u_velocity', type: 'sampler2D',
+    comment: "screen-space motion since last frame, uv units (camera + objects; read through cleoVelocity)",
+};
+
+const SCREEN_VELOCITY_UNIFORMS: ValueDecl[] = [
+    { name: 'u_uvViewProj', type: 'mat4', comment: 'world -> clip, unjittered, uv-producing (cleoObjectVelocity)' },
+    { name: 'u_uvPrevViewProj', type: 'mat4', comment: "last frame's u_uvViewProj (cleoObjectVelocity)" },
+    { name: 'u_velocityValid', type: 'float', comment: '1 when the velocity buffer holds this frame (cleoVelocity)' },
+    { name: 'u_velocityDt', type: 'float', comment: 'seconds between the two frames the velocity spans (cleoVelocityDt)' },
+];
+
+const SCREEN_VELOCITY_BODY = `
 /**
- * The screen prelude plus the sun's shadow map, for a screen material whose source calls `cleoSunShadow`.
+ * How far the surface at a screen uv moved across the screen since last frame, in uv units -- the engine's own
+ * velocity buffer, the one TAA and motion blur read: the camera's motion and every object's together, skinned
+ * models bone by bone. Zero when the buffer was not drawn this frame (its first frame).
+ */
+vec2 cleoVelocity(vec2 uv) {
+    return u_velocityValid > 0.5 ? textureLod(u_velocity, uv, 0.0).xy : vec2(0.0);
+}
+
+/**
+ * The same with the CAMERA's part taken out: how the thing itself moved, so a figure the camera follows still
+ * reads as moving and the world sliding past it as still. The camera's part is where the surface's world point
+ * would have sat last frame had it not moved, worked out exactly as the velocity buffer works it out.
+ */
+vec2 cleoObjectVelocity(vec2 uv) {
+    vec2 v = cleoVelocity(uv);
+    float d = min(textureLod(u_depth, uv, 0.0).r, 0.999999);
+    vec3 w = reconstructWorldPos(uv, d);
+    vec4 c = u_uvViewProj * vec4(w, 1.0);
+    vec4 p = u_uvPrevViewProj * vec4(w, 1.0);
+    return v - ((c.xy / c.w) * 0.5 - (p.xy / p.w) * 0.5);
+}
+
+/** Seconds between the two frames a velocity spans: divide by it for a speed in uv units per second. */
+float cleoVelocityDt() { return max(u_velocityDt, 1e-4); }
+`;
+
+/** Whether a screen material's source reads the engine's velocity buffer (`cleoVelocity`, `cleoObjectVelocity`). */
+export function usesVelocity(fragmentSource: string): boolean {
+    return /\bcleo(?:Object)?Velocity\b/.test(fragmentSource);
+}
+
+const screenBody = (dialect: ShaderDialect) =>
+    typeof SCREEN_INTERFACE.body === 'string' ? SCREEN_INTERFACE.body : SCREEN_INTERFACE.body(dialect);
+
+/**
+ * The screen prelude plus the helpers a material's source names: the sun's shadow map (`cleoSunShadow`), the
+ * velocity buffer (`cleoVelocity` / `cleoObjectVelocity`), both, or neither.
  *
  * OPT-IN for the reason {@link FORWARD_REFLECTION_INTERFACE} is: `compiledWgslHash` covers the whole
  * assembled prelude, and a published game renders a custom material on WebGPU only from WGSL whose hash
- * still matches. Pasting the shadow library into every screen material would have invalidated the stored
- * translation of each one already saved. A material that never names the helper assembles as it always has.
+ * still matches. Pasting either library into every screen material would have invalidated the stored
+ * translation of each one already saved. A material that never names a helper assembles as it always has.
  *
- * The library's block lands at group 1 binding 2 (chunks/shadows.wgsl) beside the screen engine block at
- * binding 0, and its maps in group 3, which the screen pass binds only for these materials.
+ * The shadow library's block lands at group 1 binding 2 (chunks/shadows.wgsl) beside the screen engine block
+ * at binding 0, and its maps in group 3, which the screen pass binds only for these materials. The velocity
+ * buffer is an engine sampler after `u_depth`, so the user's samplers move one pair along for such a material
+ * -- the resource list and the prelude are generated from this one interface, so they move together.
  */
-const SCREEN_SHADOW_INTERFACE: PreludeInterface = {
-    ...SCREEN_INTERFACE,
-    uniforms: [...SCREEN_INTERFACE.uniforms, ...SCREEN_SHADOW_UNIFORMS],
-    body: (dialect) => (typeof SCREEN_INTERFACE.body === 'string' ? SCREEN_INTERFACE.body : SCREEN_INTERFACE.body(dialect))
-                     + SCREEN_SHADOW_BODY(dialect),
-};
+const screenInterfaces = new Map<string, PreludeInterface>();
+function screenInterfaceFor(fragmentSource: string): PreludeInterface {
+    const shadow = usesSunShadow(fragmentSource);
+    const velocity = usesVelocity(fragmentSource);
+    if (!shadow && !velocity) return SCREEN_INTERFACE;
+    const key = `${shadow ? 1 : 0}${velocity ? 1 : 0}`;
+    let iface = screenInterfaces.get(key);
+    if (!iface) {
+        iface = {
+            ...SCREEN_INTERFACE,
+            samplers: velocity ? [...SCREEN_INTERFACE.samplers, SCREEN_VELOCITY_SAMPLER] : SCREEN_INTERFACE.samplers,
+            uniforms: [...SCREEN_INTERFACE.uniforms, ...(shadow ? SCREEN_SHADOW_UNIFORMS : []),
+                       ...(velocity ? SCREEN_VELOCITY_UNIFORMS : [])],
+            body: (dialect) => screenBody(dialect) + (shadow ? SCREEN_SHADOW_BODY(dialect) : '')
+                             + (velocity ? SCREEN_VELOCITY_BODY : ''),
+        };
+        screenInterfaces.set(key, iface);
+    }
+    return iface;
+}
 
 /** Whether a screen material's source reads the sun's shadow map (`cleoSunShadow`). */
 export function usesSunShadow(fragmentSource: string): boolean {
     return /\bcleoSunShadow\b/.test(fragmentSource);
-}
-
-/** The screen interface a material's source asks for: the plain one, or with the sun's shadow map. */
-function screenInterfaceFor(fragmentSource: string): PreludeInterface {
-    return usesSunShadow(fragmentSource) ? SCREEN_SHADOW_INTERFACE : SCREEN_INTERFACE;
 }
 
 const GLSL_TYPE: Record<string, string> = {
@@ -918,7 +980,7 @@ export function screenShaderResources(uniforms: CustomUniform[], fragmentSource:
  */
 export function customShaderResources(mode: CustomRenderMode, uniforms: CustomUniform[],
                                       fragmentSource: string = ''): ShaderResource[] {
-    const engine = mode === 'screen' ? SCREEN_INTERFACE.samplers
+    const engine = mode === 'screen' ? screenInterfaceFor(fragmentSource).samplers
                  : mode === 'forward' ? FORWARD_ENGINE_SAMPLERS
                  : [];                       // deferred: no engine samplers, see DEFERRED_INTERFACE
     const out: ShaderResource[] = [];
@@ -1140,7 +1202,7 @@ function releaseKey(key: string): void {
     customWgsl.delete(key);
     errors.delete(key);
     // A compile still in flight is abandoned; its stand-in (an engine program) is never disposed below.
-    pendingCompiles.delete(key);
+    settleCompile(key);
 
     // Only free the program if this key was its last registration and it is not a shared fallback.
     if (shader && !isFallback(shader) && !ShaderManager.Instance.isRegistered(shader))
@@ -1220,6 +1282,15 @@ function fallbackShader(mode: CustomRenderMode): ShaderProgram | null {
 
 /** Custom programs submitted for a background compile and not yet finished, by key. */
 const pendingCompiles = new Map<string, ShaderProgramDescriptor>();
+/** Each pending compile's entry in the shader activity feed (the editor's progress popup), by key. */
+const pendingActivity = new Map<string, number>();
+
+/** A background compile is over (done, failed or abandoned): off the activity feed. */
+function settleCompile(key: string): void {
+    pendingCompiles.delete(key);
+    const activity = pendingActivity.get(key);
+    if (activity !== undefined) { shaderActivity.end(activity); pendingActivity.delete(key); }
+}
 
 /**
  * Idempotently compile and register the program for `mat.type`, falling back to magenta under the same
@@ -1267,6 +1338,7 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
         if (!authoring.enabled && !shaderStats.blockingCompiles && device.prepareShaderProgram) {
             device.prepareShaderProgram(descriptor);
             pendingCompiles.set(key, descriptor);
+            pendingActivity.set(key, shaderActivity.begin({ program: key, builtFor: key, kind: 'program' }));
             if (!ShaderManager.Instance.find(key)) {
                 const standIn = standInFor(mat.renderMode);
                 if (standIn) ShaderManager.Instance.addShader(key, standIn);
@@ -1276,7 +1348,7 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
     if (pendingCompiles.has(key)) {
         // A movie (blockingCompiles) waits for it here instead of drawing a frame without it.
         if (!shaderStats.blockingCompiles && device.isShaderProgramReady && !device.isShaderProgramReady(descriptor)) return false;
-        pendingCompiles.delete(key);
+        settleCompile(key);
     }
 
     const started = performance.now();

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavMeshNode, bakeNavMesh } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { startTask } from '@cleo/app-kit/feedback/progressStore'
 import { useCleoEngine } from '../../EngineContext'
 import {
   Button, DocScope, PropertyRow, PropertyTable, Slider, Toggle, cn,
@@ -43,6 +44,8 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
 
   const bake = () => {
     setBaking(true)
+    // Its card in the progress popup, opened before the deferral below so it paints before the bake runs.
+    const task = startTask({ title: `Baking nav mesh — ${props.node.name}`, steps: [{ name: props.node.name, status: 'running', detail: 'Gathering the walkable ground' }], indeterminate: true })
     // Deferred a frame so the button can paint its disabled state first: the bake is synchronous and
     // would otherwise block the very paint it is meant to show.
     setTimeout(() => {
@@ -72,8 +75,13 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
           ms: performance.now() - started,
           bounded: props.node.bounded,
         })
+        task.setStep(0, { status: 'done', detail: `${result.regions} region${result.regions === 1 ? '' : 's'}, ${result.walkableTriangles} walkable triangles, ${Math.round(performance.now() - started)} ms` })
         eventEmitter.emit('SCENE_CHANGED')
+      } catch (e) {
+        task.setStep(0, { status: 'failed', error: String((e as Error)?.message ?? e) })
+        throw e
       } finally {
+        task.finish()
         setBaking(false)
       }
     }, 0)

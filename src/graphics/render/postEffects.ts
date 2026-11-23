@@ -9,7 +9,7 @@ import { RenderPass } from '../gpuProfiler';
 import { CustomMaterial } from '../material';
 import { ADDITIVE_BLEND } from '../rhi/types';
 import type { RenderPipeline, RenderTarget } from '../rhi/resources';
-import { customShaderModules, screenShaderResources, screenUserSamplerNames, usesSunShadow } from '../systems/customShaders';
+import { customShaderModules, screenShaderResources, screenUserSamplerNames, usesSunShadow, usesVelocity } from '../systems/customShaders';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { PresentProgram, OutlinePostProgram, BloomProgram, BloomDownsampleProgram, BloomUpsampleProgram, ComposerProgram, DofCocProgram, DofGatherProgram, DofCompositeProgram, LensFlareProgram, LensFlareCompositeProgram, FxaaProgram, VignetteProgram, FilmGrainProgram, ChromaticAberrationProgram } from './programs';
@@ -336,8 +336,11 @@ export class PostEffects {
             const id = mat.textures.get(name.replace(/^u_/, ''));
             return (id ? TextureManager.Instance.getTexture(id) : null) ?? fallback;
         });
+        // A material reading the velocity buffer (`cleoVelocity`) has it as a third engine sampler, before its own.
+        const velocity = usesVelocity(mat.fragmentSource);
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            source.colors[0], this._targets.sceneDepth.depth, ...userTextures,
+            source.colors[0], this._targets.sceneDepth.depth,
+            ...(velocity ? [this._targets.velocity.colors[0]] : []), ...userTextures,
         ]));
         this._shaderManager.setUniform('u_resolution', [this._host.renderWidth, this._host.renderHeight]);
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
@@ -352,6 +355,15 @@ export class PostEffects {
             this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
             this._sys.shadows.uploadShadowUniforms(mat.type);
             pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline, false));
+        }
+        // ...and one reading the velocity buffer gets what `cleoObjectVelocity` takes the camera's part back
+        // out with, whether the buffer holds this frame, and the time it spans.
+        if (velocity) {
+            const v = this._temporal.screenVelocityInputs();
+            this._shaderManager.setUniform('u_uvViewProj', v.uvViewProj);
+            this._shaderManager.setUniform('u_uvPrevViewProj', v.uvPrevViewProj);
+            this._shaderManager.setUniform('u_velocityValid', v.valid ? 1 : 0);
+            this._shaderManager.setUniform('u_velocityDt', v.dt);
         }
         this._materials.applyCustom(mat);   // u_time, u_viewPos + user VALUE uniforms only
         this._passes.drawFullscreenAndEnd(pass);

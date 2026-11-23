@@ -4436,6 +4436,30 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    * a hand-set distance is left alone.
    */
   const bakeFoliageImpostor = async (rule: TerrainFoliageRule): Promise<string | null> => {
+    const modelId = (rule as any).modelId as string | undefined;
+    const asset = modelId ? modelsRef.current.find(m => m.id === modelId) : undefined;
+    if (!instanceRef.current || !asset) return null;
+    // Its card in the progress popup: rendering the views takes a while for a large model.
+    const octahedral = (rule.impostorKind ?? 'octahedral') === 'octahedral';
+    const task = startTask({
+      title: `Baking impostor — ${asset.name}`,
+      steps: [{ name: asset.name, status: 'running', detail: octahedral ? 'Rendering it from every side' : 'Rendering its card' }],
+      indeterminate: true,
+    });
+    try {
+      const id = await bakeFoliageImpostorNow(rule);
+      task.setStep(0, id ? { status: 'done', detail: octahedral ? 'Octahedral impostor' : 'Billboard card' }
+                         : { status: 'failed', error: 'Nothing could be rendered from this model' });
+      return id;
+    } catch (e) {
+      task.setStep(0, { status: 'failed', error: String((e as Error)?.message ?? e) });
+      throw e;
+    } finally {
+      task.finish();
+    }
+  };
+
+  const bakeFoliageImpostorNow = async (rule: TerrainFoliageRule): Promise<string | null> => {
     const engine = instanceRef.current;
     const modelId = (rule as any).modelId as string | undefined;
     if (!engine || !modelId) return null;
