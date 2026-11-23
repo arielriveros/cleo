@@ -1,7 +1,7 @@
 import { Button, DocScope, Modal, ModalFooter, ModalHeader, Toggle } from '@cleo/app-kit/ui'
 import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
 import { openDocs } from '@cleo/app-kit/docs/viewer/docsViewerStore'
-import { BookIcon } from '@cleo/app-kit/ui'
+import { BookIcon, FlaskIcon } from '@cleo/app-kit/ui'
 import { useCleoEngine } from '../EngineContext'
 import { BUILT_IN_ADDONS } from './registry'
 import { addonOffPrompt, dependentsOf, missingRequirements, withAddon, withoutAddon } from './dependencies'
@@ -44,6 +44,12 @@ export default function AddonsModal({ onClose }: { onClose: () => void }) {
                   <div className='flex items-baseline gap-2'>
                     <span className='text-ui font-semibold text-fg'>{addon.name}</span>
                     <span className='text-ui-xs text-dim'>{addon.version} · {addon.author}</span>
+                    {addon.experimental && (
+                      <span className='inline-flex items-center gap-0.5 text-ui-xs rounded px-1 shrink-0 bg-warning/15 text-warning'
+                        title='Experimental: it works, but may change in a later version.'>
+                        <span className='inline-flex w-3 h-3'><FlaskIcon /></span>Experimental
+                      </span>
+                    )}
                   </div>
                   <div className='text-ui-sm text-muted'>{addon.description}</div>
                   {missing.length > 0 && <div className='text-ui-xs text-dim'>Needs the {missing.map(m => m.name).join(' and ')} addon.</div>}

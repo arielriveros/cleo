@@ -62,15 +62,26 @@ same Claude Code you would run in a terminal yourself, with the Cleo tools alrea
   node. It can also show you what it did: it takes screenshots of the viewport as part of its changes.
 - **It knows the engine.** Before writing a script, Claude looks up the engine API it needs (classes,
   methods, their documentation) straight from the engine, so its scripts use what the engine really has.
+- **New lines.** Enter sends what you typed. Shift+Enter or Shift+Space starts a new line instead, as in a
+  chat box.
 - **Copy and paste.** Select text and press Ctrl+C to copy it; without a selection, Ctrl+C is Claude Code's
   own interrupt. Ctrl+V pastes. Every other key, such as Esc, goes to Claude Code.
-- **It keeps running.** Closing the panel, switching tabs or reloading the editor leaves the session
-  running: the screen comes back as it was, and Claude can go on working on the project while the panel is
-  closed. It stops 15 minutes after the last editor window closes.
-- **The header** names what the session is about, once Claude Code has given it a title, and its dot is
-  green while Claude Code runs. Hover over the title for the version and where it started. **New session**
-  (+) ends the running session and starts a fresh one; **Stop** ends it and keeps the conversation. When
-  Claude Code exits, **New session** and **Continue last** (its most recent conversation) start it again.
+- **It keeps running.** Closing the panel, switching tabs, reloading the editor or opening another project
+  leaves the session running: the screen comes back as it was, and Claude can go on working while the panel
+  is closed. (A project with the Claude Code addon off stops it.) It stops 15 minutes after the last editor
+  window closes.
+- **It carries on.** When the agent host itself starts again (the editor's dev server was restarted, or the
+  computer), the panel picks its conversation back up instead of starting a blank one. Only a turn that was
+  under way is lost.
+- **The header** names the conversation, once Claude Code has given it a title, and its dot is green while
+  Claude Code runs. Hover over the title for the version and where it started. **New session** (+) ends the
+  running session and starts a fresh one; **Stop** ends it and keeps the conversation. When Claude Code
+  exits, **New session** and **Continue last** (the conversation the panel was on) start it again.
+- **Earlier conversations.** Click the title for the conversations Claude Code saved for the folder it runs
+  in, the most recent first, with a search box. Each one shows where it was started (this panel, a
+  terminal, VS Code) and when it was last used. Pick one to carry on with it: the running session ends, its
+  own conversation stays saved, and Claude Code starts again on the one you picked. A conversation open in
+  another Claude Code right now is greyed: close it there first.
 - **Text size.** Ctrl+wheel over the terminal makes its text bigger or smaller; the panel remembers it.
 
 ## The Agent chip

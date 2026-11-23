@@ -14,12 +14,17 @@ export interface AgentInput {
   hold?: number
   move?: number[]
   wheel?: number
+  /** Put the cursor at [x, y] (canvas CSS pixels, Y down) at `at`, before any press. It stays there. */
+  cursor?: number[]
+  /** Glide the cursor from `cursor` to [x, y] over `hold`; with a button that is a drag. Needs `cursor`. */
+  to?: number[]
 }
 
 export type InputStep =
   | { t: number; kind: 'keydown' | 'keyup'; code: string }
   | { t: number; kind: 'mousedown' | 'mouseup'; button: number }
   | { t: number; kind: 'mousemove'; dx: number; dy: number }
+  | { t: number; kind: 'mouseto'; x: number; y: number }
   | { t: number; kind: 'wheel'; dy: number }
 
 /** MouseEvent.button for each of the sampler's buttons (DeviceSampler maps them back by index). */
@@ -50,7 +55,7 @@ export function resolveAction(map: InputMap, name: string): { key?: string; mous
 }
 
 /** The order of steps that share a moment: let go first, so a release and a re-press at t both happen. */
-const RANK: Record<InputStep['kind'], number> = { keyup: 0, mouseup: 0, keydown: 1, mousedown: 1, mousemove: 2, wheel: 2 }
+const RANK: Record<InputStep['kind'], number> = { keyup: 0, mouseup: 0, mouseto: 1, keydown: 2, mousedown: 2, mousemove: 3, wheel: 3 }
 
 /**
  * Every DOM event the inputs make, in time order. An `action` becomes its binding (resolveAction); a key or
@@ -71,7 +76,19 @@ export function planInput(events: readonly AgentInput[], map: InputMap): InputSt
       mouse = bound.mouse
     }
     if (key && mouse) throw new Error(`${what}: give one of key, action or mouse.`)
-    if (!key && !mouse && !e.move && e.wheel === undefined) throw new Error(`${what}: says nothing to press, move or scroll.`)
+    if (!key && !mouse && !e.move && e.wheel === undefined && !e.cursor) throw new Error(`${what}: says nothing to press, move or scroll.`)
+    if (e.cursor && e.cursor.length !== 2) throw new Error(`${what}: cursor is [x, y] in canvas pixels.`)
+    if (e.to && (e.to.length !== 2 || !e.cursor)) throw new Error(`${what}: to is [x, y] and needs cursor, where the glide starts.`)
+    if (e.cursor) {
+      steps.push({ t: e.at, kind: 'mouseto', x: e.cursor[0], y: e.cursor[1] })
+      if (e.to) {
+        const n = Math.max(1, Math.round(hold / MOVE_STEP))
+        for (let s = 1; s <= n; s++) {
+          const f = s / n
+          steps.push({ t: e.at + hold * f, kind: 'mouseto', x: e.cursor[0] + (e.to[0] - e.cursor[0]) * f, y: e.cursor[1] + (e.to[1] - e.cursor[1]) * f })
+        }
+      }
+    }
     if (key) {
       if (!/^[A-Z][A-Za-z0-9]+$/.test(key))
         throw new Error(`${what}: "${key}" is not a KeyboardEvent.code (e.g. "KeyW", "Space", "ArrowUp", "ShiftLeft", "Digit1").`)

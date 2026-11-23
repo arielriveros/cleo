@@ -18,7 +18,7 @@ asking.
   open project: Claude Code in the editor, in a terminal or in an IDE, or Claude Desktop. While it is on, the
   **Agent** chip in the menu bar shows the link. Turning it off closes the link, so no agent can reach the
   project. See [AI agent link](ai-agent-link.md).
-- **Claude Code** — a Claude Code terminal beside the editor, working on the open project through the MCP
+- **Claude Code** *(experimental)* — a Claude Code terminal beside the editor, working on the open project through the MCP
   server. It needs the **MCP server** addon. Turning it off ends its running session; the agent link stays
   up for other agents.
 

@@ -9,7 +9,7 @@ import { JOINED_DIVIDER_CLASS, JOINED_GROUP_CLASS } from '@cleo/app-kit/ui/Segme
 import { tokenHex } from '@cleo/app-kit/utils/cssTokens'
 import { clamp } from '@cleo/app-kit/utils/math'
 import { panelActions, panelStore } from './panelStore'
-import { terminalActions, terminalKeyAction, terminalStore, type TerminalSink } from './terminalStore'
+import { NEWLINE, terminalActions, terminalKeyAction, terminalStore, type TerminalSink } from './terminalStore'
 import { ChatIcon, ContinueIcon, NewChatIcon } from './chatIcons'
 
 // Claude Code itself, in a terminal in the Claude panel. The agent host runs the user's own `claude` CLI in a
@@ -115,6 +115,14 @@ function terminalIn(container: HTMLElement): Terminal {
   t.onTitleChange(title => terminalActions.setTitle(title))
   t.attachCustomKeyEventHandler(e => {
     const action = terminalKeyAction(e, t.hasSelection())
+    // A new line in Claude Code's prompt. Cancelling the keydown also stops the keypress and input events
+    // the browser would follow it with, which xterm would send as a plain Enter or space.
+    if (action === 'newline') {
+      e.preventDefault()
+      terminalActions.input(NEWLINE)
+      return false
+    }
+    if (action === 'swallow') { e.preventDefault(); return false }
     if (action === 'copy') {
       const text = t.getSelection()
       if (text) void navigator.clipboard?.writeText(text).catch(() => {})
@@ -240,6 +248,9 @@ export default function ClaudeCodeView() {
   }
 
   const stopped = !notice && s && !s.running
+  // A host that follows conversations says whether the last one is saved; an older one continues the folder's
+  // latest (--continue), whatever it is.
+  const canContinue = s?.resumable !== false
   const segment = 'flex items-center gap-1.5 px-2.5 h-[24px] text-ui hover:bg-control disabled:opacity-50 disabled:cursor-default'
   return (
     <div className='flex-1 min-h-0 flex flex-col'>
@@ -259,8 +270,9 @@ export default function ClaudeCodeView() {
               title='Start a fresh Claude Code session'>
               <span className='w-3.5 h-3.5'><NewChatIcon /></span>New session
             </button>
-            <button type='button' className={cn(segment, JOINED_DIVIDER_CLASS, 'text-fg')} onClick={() => terminalActions.start(true)}
-              title='claude --continue: pick up the most recent conversation in this folder'>
+            <button type='button' className={cn(segment, JOINED_DIVIDER_CLASS, 'text-fg')} onClick={() => terminalActions.start({ resume: true })}
+              disabled={!canContinue}
+              title={canContinue ? 'Pick up the conversation this panel was on' : 'Nothing was said in the last session, so there is nothing to pick up'}>
               <span className='w-3.5 h-3.5'><ContinueIcon /></span>Continue last
             </button>
           </div>

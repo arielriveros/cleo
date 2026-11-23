@@ -257,6 +257,7 @@ export { GamepadSampler } from "./input/gamepadSampler";
 export { InputSystem } from "./input/inputSystem";
 export type { ActionListener, RebindFilter, Unsubscribe } from "./input/inputSystem";
 export { Input } from "./input/inputApi";
+export type { MouseApi, MousePickOptions, MousePhysicsPickOptions } from "./input/mouseApi";
 export type {
     ActionChange, DeviceSnapshot, GamepadReading, PointerReading, ResolveResult, ResolveState,
 } from "./input/resolveActions";

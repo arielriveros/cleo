@@ -6,7 +6,7 @@ import { agentBridge } from '../agentBridge/bridgeClient'
 // back as a snapshot. Output is a stream, not React state, so it goes straight to the one terminal
 // (ClaudeCodeView registers it as the sink); only the session's state goes through the store.
 
-export interface TerminalProblem { code: 'not-installed' | 'no-claude' | 'start-failed'; message: string }
+export interface TerminalProblem { code: 'not-installed' | 'no-claude' | 'start-failed' | 'resume-failed'; message: string }
 
 export interface TerminalState {
   available: boolean
@@ -21,7 +21,36 @@ export interface TerminalState {
   cwd: string
   claude: { path: string; version: string | null } | null
   windowsBuild: number | null
+  // From a host that follows conversations (the `sessions` capability, cleo-mcp 0.6.1); left out by older ones.
+  /** The conversation the session is on, or was on when it ended: Claude Code's session id. */
+  sessionId?: string | null
+  /** Whether that conversation is saved, so Continue last can pick it up. */
+  resumable?: boolean
+  /** Claude Code is working on a turn, not waiting for the user. */
+  busy?: boolean
+  /** The terminal title Claude Code set last (the header's title after a reload). */
+  title?: string | null
 }
+
+/** A conversation Claude Code saved for the folder it runs in, as the picker lists it. */
+export interface Conversation {
+  id: string
+  /** Its /rename name, else the title Claude Code wrote for it, else its first prompt. */
+  title: string
+  prompt: string | null
+  modifiedAt: number
+  createdAt: number | null
+  /** Where it was started: 'cli' (a terminal, this panel included), 'claude-vscode', ... */
+  entrypoint: string | null
+  branch: string | null
+  /** Started in this panel. */
+  hosted: boolean
+  /** Open in another Claude Code right now (that process), so it cannot be picked up here. */
+  livePid: number | null
+}
+
+/** How a session starts: a fresh conversation, the last one (`true`), or a saved one by id. */
+export type StartHow = { resume?: true | string }
 
 /**
  * - `idle`: no link to a host yet.
@@ -37,9 +66,11 @@ export interface TerminalSnapshot {
   /**
    * What the session is about, from the title Claude Code gives its terminal (a short summary of the task
    * once it has one), or null while it has none: the panel's header shows it, as an IDE shows a chat's title.
-   * Kept by the page, so a reload forgets it until Claude Code next sets one.
+   * The host keeps the last one, so a reload shows it again.
    */
   title: string | null
+  /** The title of the conversation picked in the header, shown until Claude Code titles the session itself. */
+  picked: string | null
 }
 
 /** Where output goes: the editor's one terminal. */
@@ -51,12 +82,19 @@ export interface TerminalSink {
   configure(state: TerminalState): void
 }
 
-let state: TerminalSnapshot = { link: 'idle', term: null, title: null }
+let state: TerminalSnapshot = { link: 'idle', term: null, title: null, picked: null }
 const listeners = new Set<() => void>()
 let sink: TerminalSink | null = null
 let attachedLink = -1
-/** A fresh host starts Claude Code by itself, once per page: after that, starting is the user's call. */
-let autoStarted = false
+/**
+ * A host that has not run a session yet starts Claude Code by itself, once per link: the page just loaded, or
+ * the host started again under it (the dev server restarted). It carries on with the conversation the panel
+ * was on. Once a session ran, starting is the user's call (a session they stopped stays stopped).
+ */
+let autoStartedLink = -1
+/** Conversation lists asked of the host, by request. */
+const listRequests = new Map<number, (ev: any) => void>()
+let nextListRequest = 1
 
 function set(patch: Partial<TerminalSnapshot>) {
   state = { ...state, ...patch }
@@ -73,7 +111,8 @@ function onEvent(ev: any) {
     case 'snapshot': {
       const term = ev.state as TerminalState
       if (sink) { sink.configure(term); sink.reset(String(ev.data ?? '')) }
-      set({ link: 'ready', term })
+      // The xterm title is not part of the screen: the host's copy of it names the session after a reload.
+      set({ link: 'ready', term, ...(term.title !== undefined ? { title: term.title ? sessionTitle(term.title) : null } : {}) })
       maybeAutoStart(term)
       return
     }
@@ -85,15 +124,37 @@ function onEvent(ev: any) {
       set({ term: term as TerminalState })
       return
     }
+    case 'sessions': {
+      const done = listRequests.get(ev.reqId)
+      listRequests.delete(ev.reqId)
+      done?.(ev)
+      return
+    }
     default:
       return
   }
 }
 
+/** The host follows conversations (lists them, resumes by id, remembers the last). */
+function hostHasSessions(): boolean {
+  return agentBridge.getSnapshot().capabilities.includes('sessions')
+}
+
 function maybeAutoStart(term: TerminalState) {
-  if (autoStarted || !sink || term.running || term.started || !term.available) return
-  autoStarted = true
-  terminalActions.start()
+  if (!sink || term.running || term.started || !term.available) return
+  const link = agentBridge.getSnapshot().link
+  if (link === autoStartedLink) return
+  autoStartedLink = link
+  // `auto`: the conversation the panel was on if the host can pick it up, else a fresh one. An older host
+  // ignores it and starts a fresh one (its `resume` would be --continue: the folder's latest conversation,
+  // which may belong to another program).
+  sendStart({ auto: true })
+}
+
+function sendStart(extra: Record<string, unknown>) {
+  const size = sink?.size() ?? { cols: 100, rows: 30 }
+  if (state.title !== null) set({ title: null })
+  agentBridge.sendTerm('start', { cols: size.cols, rows: size.rows, ...extra })
 }
 
 function attach() {
@@ -120,10 +181,41 @@ export const terminalActions = {
     // A fresh snapshot each time it is shown: what streamed while it was away was not drawn.
     if (next) { attachedLink = -1; attach() }
   },
-  start(resume = false) {
-    const size = sink?.size() ?? { cols: 100, rows: 30 }
-    if (state.title !== null) set({ title: null })
-    agentBridge.sendTerm('start', { cols: size.cols, rows: size.rows, resume })
+  /** Start Claude Code: a fresh conversation, the last one (`resume: true`), or a saved one by id. */
+  start(how: StartHow = {}) {
+    if (how.resume === undefined && state.picked !== null) set({ picked: null })
+    sendStart(how.resume === undefined ? {} : { resume: how.resume })
+  },
+  /**
+   * Carry on with a saved conversation (the header's picker), or a fresh one with null: the running session
+   * ends first, its own conversation saved as it went.
+   */
+  open(conversation: Pick<Conversation, 'id' | 'title'> | null) {
+    terminalActions.restart(conversation ? { resume: conversation.id } : {})
+    set({ picked: conversation?.title ?? null })
+  },
+  /**
+   * The conversations Claude Code saved for the folder it runs in, the most recent first. `error` says why
+   * there are none to show when the host could not list them.
+   */
+  listConversations(): Promise<{ conversations: Conversation[]; error: string | null }> {
+    if (!hostHasSessions()) return Promise.resolve({ conversations: [], error: OUTDATED_HOST })
+    const reqId = nextListRequest++
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        listRequests.delete(reqId)
+        resolve({ conversations: [], error: 'The agent host did not answer.' })
+      }, 15_000)
+      listRequests.set(reqId, ev => {
+        clearTimeout(timer)
+        resolve({ conversations: Array.isArray(ev.sessions) ? ev.sessions : [], error: ev.error ? String(ev.error) : null })
+      })
+      if (!agentBridge.sendTerm('sessions', { reqId })) {
+        clearTimeout(timer)
+        listRequests.delete(reqId)
+        resolve({ conversations: [], error: 'Not linked to the agent host.' })
+      }
+    })
   },
   /** The terminal's title changed (an OSC sequence in Claude Code's output). */
   setTitle(raw: string) {
@@ -137,15 +229,24 @@ export const terminalActions = {
     agentBridge.sendTerm('resize', { cols, rows })
   },
   stop() { agentBridge.sendTerm('stop') },
-  /** Stop the running session and start a fresh one. */
-  restart() {
-    if (!state.term?.running) { terminalActions.start(); return }
+  /** Stop the running session and start another: a fresh one unless `how` says otherwise. */
+  restart(how: StartHow = {}) {
+    if (!state.term?.running) { terminalActions.start(how); return }
     const off = terminalStore.subscribe(() => {
-      if (state.term && !state.term.running) { off(); terminalActions.start() }
+      if (state.term && !state.term.running) { off(); terminalActions.start(how) }
     })
     terminalActions.stop()
   },
 }
+
+/** Why a host cannot list conversations: it predates them (cleo-mcp before 0.6.1). */
+export const OUTDATED_HOST = 'The agent host running now is older than this editor and cannot list conversations. Reload the editor to update it: Claude Code starts again with it, and its conversation can then be picked up here.'
+
+/**
+ * What Claude Code takes as a new line in its prompt, rather than sending it: a line feed (Ctrl+J). Shift+Enter
+ * and Shift+Space send it; plain Enter sends the prompt.
+ */
+export const NEWLINE = '\n'
 
 /**
  * A session title from a terminal title, or null when it names no task. Claude Code titles its terminal
@@ -162,12 +263,18 @@ export function sessionTitle(raw: string): string | null {
 /**
  * What a key does in the terminal before xterm sees it: the editor's copy and paste habits (Ctrl+C copies
  * when there is a selection, otherwise it is the program's interrupt; Ctrl+V pastes through the browser so
- * it arrives as one bracketed paste), and everything else goes to the program.
+ * it arrives as one bracketed paste), a new line in the prompt on Shift+Enter or Shift+Space (as in a chat
+ * box; xterm would send Shift+Enter as a plain Enter, which sends the prompt), and everything else goes to
+ * the program. `swallow`: the keypress that follows a key already handled, which would type it again.
  */
-export function terminalKeyAction(e: Pick<KeyboardEvent, 'type' | 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>, hasSelection: boolean): 'copy' | 'paste' | 'pass' {
-  if (e.type !== 'keydown' || e.altKey) return 'pass'
+export function terminalKeyAction(e: Pick<KeyboardEvent, 'type' | 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>, hasSelection: boolean): 'copy' | 'paste' | 'newline' | 'swallow' | 'pass' {
   const mod = e.ctrlKey || e.metaKey
   const key = e.key.toLowerCase()
+  if (e.shiftKey && !mod && !e.altKey && (key === 'enter' || key === ' ')) {
+    if (e.type === 'keydown') return 'newline'
+    if (e.type === 'keypress') return 'swallow'
+  }
+  if (e.type !== 'keydown' || e.altKey) return 'pass'
   if (mod && key === 'c' && (hasSelection || e.shiftKey)) return 'copy'
   if (mod && key === 'v') return 'paste'
   if (e.shiftKey && !mod && key === 'insert') return 'paste'

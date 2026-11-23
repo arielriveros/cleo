@@ -100,6 +100,52 @@ Input.isMapEnabled('Gameplay')
 Input.enabledMaps                 // readonly
 ```
 
+## The mouse as a cursor
+
+Actions suit verbs (`Fire`, `Look`). A game that wants the **cursor** — point-and-click, click-to-move,
+a strategy or 2D game — reads `Input.mouse`, which is independent of the action map:
+
+```ts
+Input.mouse.x / .y / .position      // canvas CSS pixels, Y down
+Input.mouse.nx / .ny                // the same, 0..1
+Input.mouse.deltaX / .deltaY        // movement this frame (the only motion while captured)
+Input.mouse.wheelX / .wheelY        // scroll this frame
+Input.mouse.overCanvas              // the cursor is over the game
+Input.mouse.overUI                  // ...over an interactive Game UI node
+
+Input.mouse.down(button?)           // held        — 'left' (default) | 'middle' | 'right' | 'back' | 'forward'
+Input.mouse.pressed(button?)        // went down this frame (a press + release in one frame still reports)
+Input.mouse.released(button?)       // came up this frame
+Input.mouse.heldSeconds(button?)
+
+Input.mouse.setCursor('crosshair')  // any CSS cursor; '' = default. hide() / show() for a custom cursor
+Input.mouse.capture() / release() / locked    // the same pointer lock as Input.captureMouse()
+```
+
+Under capture there is no cursor: `x`/`y` keep the last position and `deltaX`/`deltaY` are what to read.
+
+In the world, through the scene's active camera:
+
+```ts
+Input.mouse.ray()                   // the world ray through the cursor, or null
+Input.mouse.pick({ maxDistance?, filter?, precise? })   // nearest renderable node → RaycastHit | null
+Input.mouse.pickPhysics({ layerMask?, ignore?, maxDistance? })   // first collider (terrain too) → point, normal, node
+Input.mouse.groundPoint(y = 0)      // where the cursor meets the horizontal plane at y → vec3 | null
+Input.mouse.worldPoint2D()          // a 2D game's world point [x, y] (the z = 0 plane)
+```
+
+```ts
+onUpdate() {
+  if (Input.mouse.pressed('left') && !Input.mouse.overUI) {
+    const hit = Input.mouse.pickPhysics()
+    if (hit) this.agent.moveTo(hit.point)
+  }
+}
+```
+
+`pick` finds render geometry the way the editor does and skips UI, terrain and tilemaps; use `pickPhysics`
+(or `groundPoint`) for the ground.
+
 ## Mouse capture
 
 ```ts

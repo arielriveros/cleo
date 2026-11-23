@@ -51,18 +51,19 @@ export function AddonHost({ children }: { children: ReactNode }) {
     for (const [id, mod] of [...modules.current]) {
       if (want.has(id)) continue
       modules.current.delete(id)
-      Promise.resolve(mod.deactivate?.()).catch(e => Logger.warn(`The ${id} addon did not stop cleanly: ${e?.message ?? e}`, 'Addons'))
+      Promise.resolve(mod.deactivate?.('off')).catch(e => Logger.warn(`The ${id} addon did not stop cleanly: ${e?.message ?? e}`, 'Addons'))
       setActive(prev => { const { [id]: _gone, ...rest } = prev; return rest })
     }
   }, [enabled, projectSettingsReady, setProjectSettings])
 
-  // The project closing (another one opening in this window, features/projects/projectSwitch.ts): every addon
-  // it started stops, and one still loading stays off when it lands.
+  // The project closing (another one opening in this window, features/projects/projectSwitch.ts), or this
+  // module hot-updated in a dev server: every addon it started stops, and one still loading stays off when it
+  // lands.
   useEffect(() => () => {
     wanted.current = new Set()
     for (const [id, mod] of [...modules.current]) {
       modules.current.delete(id)
-      Promise.resolve(mod.deactivate?.()).catch(e => Logger.warn(`The ${id} addon did not stop cleanly: ${e?.message ?? e}`, 'Addons'))
+      Promise.resolve(mod.deactivate?.('unload')).catch(e => Logger.warn(`The ${id} addon did not stop cleanly: ${e?.message ?? e}`, 'Addons'))
     }
   }, [])
 

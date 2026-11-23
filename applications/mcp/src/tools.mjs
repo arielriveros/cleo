@@ -376,6 +376,8 @@ export function toolDefinitions(bridge, opts = {}) {
         hold: z.number().min(0).max(60).optional().describe('Seconds held (default 0.1).'),
         move: z.array(z.number()).length(2).optional().describe('Mouse movement [dx, dy] in pixels, spread over hold.'),
         wheel: z.number().optional(),
+        cursor: z.array(z.number()).length(2).optional().describe('Put the mouse cursor at [x, y] in canvas pixels (Y down, 0,0 = top-left) at `at`, before any press, and leave it there. For games that read Input.mouse: click = {"at":1,"cursor":[640,360],"mouse":"left"}.'),
+        to: z.array(z.number()).length(2).optional().describe('Glide the cursor from `cursor` to [x, y] over hold; with a mouse button that is a drag. Needs cursor.'),
     });
 
     relay('play_control', 'play.control', {

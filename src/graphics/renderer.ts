@@ -2148,6 +2148,10 @@ export class Renderer {
                 // header gives: a skipped material pass would leave the next stage reading a buffer
                 // nothing had written.
                 if (!this._passEnabled['screenMaterials']) continue;
+                // Its pipeline, built off the main thread the first time (PostEffects.screenMaterialPipeline):
+                // compiled on the spot, a large screen shader froze the window -- and Play -- for as long as
+                // the driver took. Until it is ready the stage is left out, like one that did not build.
+                if (!this._post.screenMaterialPipeline(material, true)) continue;
                 const from = src, to = flip();
                 graph.addPass({
                     id: entry.effect, scope: 'screenMaterials', reads: [from], writes: [to],

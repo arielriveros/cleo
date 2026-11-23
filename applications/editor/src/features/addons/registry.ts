@@ -23,6 +23,7 @@ export const BUILT_IN_ADDONS: readonly AddonManifest[] = [
     author: 'Cleo',
     docPage: 'editor/ai-agent-link',
     defaultOn: true,
+    experimental: true,
     confirmDisable: 'Turning Claude Code off ends its running session.',
     requires: ['mcp-server'],
     load: () => import('../agentChat/addon').then(m => m.default),

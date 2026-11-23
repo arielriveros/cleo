@@ -17,6 +17,7 @@ import { InputSystem } from "./inputSystem";
 import type { ActionListener, Unsubscribe } from "./inputSystem";
 import type { ActionState } from "./actionMap";
 import type { DeviceKind } from "./inputSources";
+import { mouse } from "./mouseApi";
 
 export const Input = {
     /**
@@ -122,6 +123,12 @@ export const Input = {
     get isMouseCaptured(): boolean {
         return InputSystem.instance.isPointerLocked;
     },
+
+    /**
+     * The mouse as a cursor — position, button edges, wheel, what is under it and where it lands in the
+     * world. Not bound to actions: see `mouseApi.ts`.
+     */
+    mouse,
 
     /** The authored input map — action names, bindings, on-screen controls. Read-only at runtime. */
     get map() {

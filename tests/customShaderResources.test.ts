@@ -29,6 +29,63 @@ describe('customShaderResources — forward', () => {
     });
 });
 
+// A screen material reads the sun's shadow map only when its source calls `cleoSunShadow`. The opt-in is
+// what keeps every screen material saved before it hashing exactly as it did: a prelude that changed for
+// all of them would have stranded their stored WGSL, and published games would stop drawing them.
+describe('customShaderResources — screen, sun shadow', () => {
+    const plain = 'vec4 fragment() { return texture(u_screenTexture, fragTexCoord); }';
+    const shadowed = 'vec4 fragment() { vec3 p = vec3(0.0); return vec4(cleoSunShadow(p, vec3(0.0, 1.0, 0.0))); }';
+
+    it('gives a plain screen material no group 3 and no shadow library', async () => {
+        const { assembleCustomFragment } = await import('../src/graphics/systems/customShaders');
+        expect(customShaderResources('screen', [], plain).some(r => r.group === 3)).toBe(false);
+        for (const dialect of ['es300', 'vulkan'] as const) {
+            const src = assembleCustomFragment('screen', plain, [], dialect);
+            expect(src).not.toMatch(/directionalShadow|u_view\b|cleoFragCoord/);
+        }
+    });
+
+    it('gives a material calling cleoSunShadow the sun cascades in group 3, and only those', () => {
+        // WebGPU's layout holds what the entry point reaches: the cascade texture and its comparison
+        // sampler. Listing the spot and point atlases too made a six-entry group against a two-entry
+        // layout -- an invalid group and a black frame.
+        const res = customShaderResources('screen', [], shadowed);
+        const group3 = res.filter(r => r.group === 3);
+        expect(group3.map(r => `${r.binding}:${r.kind}:${r.glslName}`))
+            .toEqual(['0:texture:u_shadowCascades', '1:sampler:u_shadowCascades']);
+        const keys = res.map(r => `${r.group}/${r.binding}`);
+        expect(new Set(keys).size).toBe(keys.length);
+    });
+
+    it('assembles the library and u_view in both dialects', async () => {
+        const { assembleCustomFragment } = await import('../src/graphics/systems/customShaders');
+        const es = assembleCustomFragment('screen', shadowed, [], 'es300');
+        expect(es).toMatch(/uniform mat4 u_view;/);
+        expect(es).toMatch(/float cleoSunShadow\(vec3 worldPos, vec3 N\)/);
+        const vk = assembleCustomFragment('screen', shadowed, [], 'vulkan');
+        // The library's block beside the screen engine block (binding 0), its maps in group 3.
+        expect(vk).toMatch(/layout\(std140, set = 1, binding = 2\) uniform/);
+        expect(vk).toMatch(/layout\(set = 3, binding = 0\) uniform texture2DArray u_shadowCascades_t;/);
+        expect(vk).toMatch(/layout\(set = 1, binding = 0\) uniform CleoEngineUniforms \{[^}]*mat4 u_view;/);
+    });
+
+    // The lighting's directionalShadow keeps both filters behind a runtime switch, runs one twice to blend
+    // cascades and adds the clouds' noise. Pasted into the pencil-sketch screen material it took 71 s to compile
+    // in the desktop editor's Chromium (Electron 31), and the GPU process gave up: the device was lost and Play
+    // froze. The helper reads one cascade with four taps and must stay that light.
+    it('keeps cleoSunShadow to one cascade and four taps: no filter loops, no cascade blend, no clouds', async () => {
+        const { assembleCustomFragment } = await import('../src/graphics/systems/customShaders');
+        for (const dialect of ['es300', 'vulkan'] as const) {
+            const src = assembleCustomFragment('screen', shadowed, [], dialect);
+            const start = src.indexOf('float cleoSunShadow(vec3 worldPos, vec3 N) {');
+            expect(start).toBeGreaterThan(-1);
+            const body = src.slice(start, src.indexOf('\n}\n', start));
+            expect(body).not.toMatch(/directionalShadow|cleoCascadeVisibility|cleoCloudShadow|\bfor\s*\(/);
+            expect(body.match(/cleoCascadeTap\(/g)?.length).toBe(4);
+        }
+    });
+});
+
 describe('usedResources', () => {
     // WebGPU's automatic layout drops every binding the entry points never reach. Listing one anyway made
     // the group invalid ("binding index 7 not present") and blacked out the frame: the Valley's water

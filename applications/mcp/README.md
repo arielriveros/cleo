@@ -71,6 +71,15 @@ For Claude Desktop, put the same command in `claude_desktop_config.json` under `
     server but outlives it (`src/env.mjs`).
   - The session keeps running with the panel closed. It is stopped once no editor has been connected for
     `CLEO_AGENT_HOST_IDLE_MS`, since its own MCP server would otherwise keep the host up for good.
+  - **Conversations** (`src/claudeSessions.mjs`). A fresh session gets an id the host chose
+    (`--session-id`); the host then follows Claude Code's record of the process
+    (`<config>/sessions/<pid>.json`, which /clear and /resume rewrite) and remembers the conversation in
+    `~/.cleo/claude-code-session.json`. A host that starts again is asked by the editor to carry on
+    (`start {auto}` → `--resume <id>`), so a dev-server restart or a reboot does not lose the panel's
+    conversation. The `sessions` op lists the conversations Claude Code saved for the folder it runs in
+    (`<config>/projects/<folder>/*.jsonl`: title, first prompt, where it was started, whether another
+    Claude Code has it open) for the panel's picker, which resumes one with `start {resume: id}`. These are
+    Claude Code's own files, read and never written; the host advertises the `sessions` capability.
 - **Versions.** The host's version is in the discovery file. A stdio server or a dev server that finds an
   OLDER host running replaces it (`ensureHost({ replaceOutdated })`), never a newer one. The MCP server of a
   session the host runs itself (`CLEO_HOSTED_BY`) never replaces it: that would kill its own terminal.

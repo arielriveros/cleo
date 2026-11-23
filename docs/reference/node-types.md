@@ -962,7 +962,7 @@ fraction of the wind it blocks (a shelter). The first 8 such fields count; parti
 first, so foliage, particles and the CPU see the same ones. The Wind presets (`gustCorridor`,
 `whirlwind`, `windBlast`, `windEddies`, `windShelter`) set it.
 
-### ClothNode — `'cloth'` *(unreleased)*
+### ClothNode — `'cloth'` *(unreleased, experimental)*
 
 A rectangular cloth panel simulated on the CPU (XPBD): a cape, a banner, a flag. A `ModelNode` underneath,
 so it draws, shadows and takes a material like one; its mesh is rebuilt from its options and never saved.

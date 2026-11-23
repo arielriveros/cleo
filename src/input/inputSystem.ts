@@ -20,7 +20,7 @@ import {
 } from "./actionMap";
 import type { ActionState, InputActionMap, InputMap } from "./actionMap";
 import { GAMEPAD_AXES, GAMEPAD_BUTTONS } from "./inputSources";
-import type { BindingSource, DeviceKind } from "./inputSources";
+import type { BindingSource, DeviceKind, MouseButton } from "./inputSources";
 import { DeviceSampler } from "./deviceSampler";
 import { GamepadSampler } from "./gamepadSampler";
 import { createResolveState, resolveFrame } from "./resolveActions";
@@ -364,6 +364,14 @@ export class InputSystem {
     public requestPointerLock(): void { this._device.requestPointerLock(); }
     public releasePointerLock(): void { this._device.releasePointerLock(); }
     public get isPointerLocked(): boolean { return this._device.isPointerLocked; }
+
+    /** The device snapshot of this frame — what `Input.mouse` reads. */
+    public get deviceSnapshot(): DeviceSnapshot { return this._device.snapshot; }
+    /** The element the mouse is bound to (the game canvas), or null before `initialize`. */
+    public get canvas(): HTMLElement | null { return this._device.canvas; }
+    public mouseHeldSeconds(button: MouseButton): number { return this._device.heldSeconds(button); }
+    public setCursor(css: string): void { this._device.setCursor(css); }
+    public get cursor(): string { return this._device.cursor; }
 
     /** Lay the on-screen controls out for a viewport of this size. Called on resize and on map change. */
     public layoutVirtualControls(width: number, height: number): void {

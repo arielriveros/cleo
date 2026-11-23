@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useRef, useEffect, useMemo } from 
 import { EventBusContext } from "./EventBusContext";
 import { EngineHostProvider, type EngineHost } from "@cleo/app-kit/engine/EngineHost";
 import { stepViewCamera2D, stepViewCamera3D, type ViewCameraPrefs } from "@cleo/app-kit/engine/viewCamera";
+import { ensureWgslTranslator } from "@cleo/app-kit/engine/wgslTranslator";
 import { SelectionContext, type SelectionContextValue } from "./SelectionContext";
 import { PlaybackContext, type PlaybackContextValue } from "./PlaybackContext";
 import {
@@ -6621,6 +6622,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // nothing is. Set here and undone on 'stop' — left on, every field in the editor lost W A S D Q E,
         // Enter, Escape and the arrows for the rest of the session after the first Play.
         InputSystem.instance.preventDefault = !simulate;
+        // Every run starts with the default cursor, whatever a previous run's script set (Input.mouse.hide).
+        InputSystem.instance.setCursor('');
         if (simulate) {
           // Nobody is possessed: the editor camera keeps the keyboard and mouse, the game's controls
           // stay down (so the player character just stands there), and a click never grabs the pointer.
@@ -6695,6 +6698,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         escapeSubRef.current = null;
         // Drop anything the game left held before the editor camera takes the keyboard back.
         InputSystem.instance.resetState();
+        // A game that hid or restyled the cursor (Input.mouse.hide / setCursor) must not leave it so in the editor.
+        InputSystem.instance.setCursor('');
         InputSystem.instance.enableMap('EditorCamera');
         InputSystem.instance.disableMap('Gameplay');
       }
@@ -7035,6 +7040,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (fromSave) beginSaveSessionFrom(fromSave);
     // The script editor's error marks are about the last run.
     clearRuntimeErrors();
+    // A camera's screen materials are first built when Play looks through it. On WebGPU each needs WGSL: the
+    // translation saved with the material -- which an engine change to the screen prelude leaves stale -- or
+    // the live translator, which otherwise loads only with the material inspector. Without either the effect
+    // silently does not draw, so load the translator here when there is one to build.
+    if ([...editorSceneRef.current.nodes].some(n => n instanceof CameraNode && n.screenMaterials.length > 0))
+      await ensureWgslTranslator();
     const savedSceneId = fromSave && fromSave.scene.id !== openSceneIdRef.current
       ? projectMetaRef.current?.scenes.find(s => s.id === fromSave.scene.id || s.name === fromSave.scene.name)?.id
       : undefined;

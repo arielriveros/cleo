@@ -22,7 +22,7 @@ export const ADD_TYPES = {
  * The Add-catalog ids whose feature is experimental (src/modules/catalog.ts FeatureDef.experimental): they work,
  * but their settings and look may still change between versions. The editor's suite checks the list against it.
  */
-export const EXPERIMENTAL_TYPES = ['waterVolume'];
+export const EXPERIMENTAL_TYPES = ['waterVolume', 'cloth'];
 
 /** The types a 2D scene is built from (its physics, camera and world). 3D meshes and lights are not drawn there. */
 export const TYPES_2D = ['camera2D', 'sprite', 'animatedSprite', 'tilemap', 'characterBody2D', 'body2D', 'room2D', 'parallaxLayer', 'trigger'];

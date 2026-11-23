@@ -89,6 +89,13 @@ export class DeviceSampler {
     private _wheelY = 0;
     private _normX = 0;
     private _normY = 0;
+    private _pxX = 0;
+    private _pxY = 0;
+    /** Buttons that went down / came up this frame (cleared in endFrame), and seconds each has been held. */
+    private readonly _pressed = new Set<MouseButton>();
+    private readonly _released = new Set<MouseButton>();
+    private readonly _held = new Map<MouseButton, number>();
+    private _cursor = '';
 
     /** Touch samples accumulated since the last frame, in arrival order. */
     private _samples: PointerSample[] = [];
@@ -161,6 +168,7 @@ export class DeviceSampler {
 
     /** Detach every listener and forget all held state. Total, unlike the old `clear()`. */
     public dispose(): void {
+        this.setCursor('');
         this._abort?.abort();
         this._abort = null;
         this._canvas = null;
@@ -172,6 +180,9 @@ export class DeviceSampler {
     public resetState(): void {
         this._keys.clear();
         this._mouseButtons.clear();
+        this._pressed.clear();
+        this._released.clear();
+        this._held.clear();
         this._deltaX = this._deltaY = this._wheelX = this._wheelY = 0;
         this._samples = [];
         this._gestureState = createGestureState();
@@ -179,6 +190,17 @@ export class DeviceSampler {
     }
 
     public get canvas(): HTMLElement | null { return this._canvas; }
+
+    /** Seconds a mouse button has been held as of the last sample, or 0. */
+    public heldSeconds(button: MouseButton): number { return this._held.get(button) ?? 0; }
+
+    /** Set the CSS cursor over the canvas ('' restores the default). */
+    public setCursor(css: string): void {
+        this._cursor = css;
+        const canvas = this._canvas;
+        if (canvas) canvas.style.cursor = css;
+    }
+    public get cursor(): string { return this._cursor; }
     /** The most recent snapshot. Rebuilt by {@link sample}; read by the editor's device monitor. */
     public get snapshot(): DeviceSnapshot { return this._snapshot; }
     public get isPointerLocked(): boolean { return this._pointerLocked; }
@@ -209,13 +231,19 @@ export class DeviceSampler {
 
         this._samples = [];
 
+        for (const button of this._mouseButtons) this._held.set(button, (this._held.get(button) ?? 0) + dt);
+        for (const button of [...this._held.keys()]) if (!this._mouseButtons.has(button)) this._held.delete(button);
+
         this._snapshot = {
             keys: this._keys,
             mouseButtons: this._mouseButtons,
+            mousePressed: this._pressed,
+            mouseReleased: this._released,
             pointer: {
                 deltaX: this._deltaX, deltaY: this._deltaY,
                 wheelX: this._wheelX, wheelY: this._wheelY,
                 x: this._normX, y: this._normY,
+                px: this._pxX, py: this._pxY,
             },
             pointerLocked: this._pointerLocked,
             pointerOverCanvas: this._pointerOverCanvas,
@@ -232,6 +260,8 @@ export class DeviceSampler {
      * frame is visible during this frame" true.
      */
     public endFrame(): void {
+        this._pressed.clear();
+        this._released.clear();
         this._deltaX = 0;
         this._deltaY = 0;
         this._wheelX = 0;
@@ -341,7 +371,7 @@ export class DeviceSampler {
 
     private _onMouseDown = (event: MouseEvent): void => {
         const button = MOUSE_BUTTONS[event.button];
-        if (button) this._mouseButtons.add(button);
+        if (button) { if (!this._mouseButtons.has(button)) this._pressed.add(button); this._mouseButtons.add(button); }
         this._updatePosition(event);
         if (this.pointerLockOnClick && event.button === 0) this.requestPointerLock();
         if (this.preventDefault) {
@@ -356,7 +386,7 @@ export class DeviceSampler {
 
     private _onMouseUp = (event: MouseEvent): void => {
         const button = MOUSE_BUTTONS[event.button];
-        if (button) this._mouseButtons.delete(button);
+        if (button) { if (this._mouseButtons.delete(button)) this._released.add(button); }
     };
 
     private _onMouseMove = (event: MouseEvent): void => {
@@ -440,5 +470,7 @@ export class DeviceSampler {
         if (rect.width <= 0 || rect.height <= 0) return;
         this._normX = (clientX - rect.left) / rect.width;
         this._normY = (clientY - rect.top) / rect.height;
+        this._pxX = clientX - rect.left;
+        this._pxY = clientY - rect.top;
     }
 }

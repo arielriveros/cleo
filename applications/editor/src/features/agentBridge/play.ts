@@ -45,7 +45,15 @@ class InputDriver {
   private keys = new Set<string>()
   private buttons = new Set<number>()
   private next = 0
-  constructor(private steps: InputStep[], private canvas: HTMLCanvasElement) {}
+  /** Where the cursor is, in canvas pixels; the canvas centre until a `cursor` input moves it. */
+  private x: number
+  private y: number
+  private entered = false
+  constructor(private steps: InputStep[], private canvas: HTMLCanvasElement) {
+    const rect = canvas.getBoundingClientRect()
+    this.x = rect.width / 2
+    this.y = rect.height / 2
+  }
 
   /** Dispatch every step due by `t` seconds. */
   advance(t: number) {
@@ -56,7 +64,12 @@ class InputDriver {
 
   private dispatch(s: InputStep) {
     const rect = this.canvas.getBoundingClientRect()
-    const at = { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, bubbles: true, cancelable: true }
+    const at = { clientX: rect.left + this.x, clientY: rect.top + this.y, bubbles: true, cancelable: true }
+    // The sampler learns the cursor is over the canvas from mouseenter, which no synthetic move sends.
+    if (!this.entered && s.kind.startsWith('mouse')) {
+      this.entered = true
+      this.canvas.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }))
+    }
     switch (s.kind) {
       case 'keydown':
       case 'keyup':
@@ -71,6 +84,13 @@ class InputDriver {
         this.buttons.delete(s.button)
         window.dispatchEvent(new MouseEvent('mouseup', { ...at, button: s.button }))
         break
+      case 'mouseto': {
+        const dx = s.x - this.x, dy = s.y - this.y
+        this.x = s.x
+        this.y = s.y
+        this.canvas.dispatchEvent(new MouseEvent('mousemove', { ...at, clientX: rect.left + s.x, clientY: rect.top + s.y, movementX: dx, movementY: dy } as MouseEventInit))
+        break
+      }
       case 'mousemove':
         this.canvas.dispatchEvent(new MouseEvent('mousemove', { ...at, movementX: s.dx, movementY: s.dy } as MouseEventInit))
         break
@@ -86,6 +106,8 @@ class InputDriver {
     for (const button of this.buttons) window.dispatchEvent(new MouseEvent('mouseup', { button, bubbles: true }))
     this.keys.clear()
     this.buttons.clear()
+    if (this.entered) this.canvas.dispatchEvent(new MouseEvent('mouseleave', { bubbles: false }))
+    this.entered = false
     this.next = this.steps.length
   }
 }

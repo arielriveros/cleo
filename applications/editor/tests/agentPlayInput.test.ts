@@ -45,6 +45,18 @@ describe('play input', () => {
     expect(planEnd(steps)).toBe(2)
   })
 
+  it('puts the cursor first, then presses, and glides a drag from cursor to to', () => {
+    const click = planInput([{ at: 1, cursor: [640, 360], mouse: 'left' }], map)
+    expect(click.map(s => s.kind)).toEqual(['mouseto', 'mousedown', 'mouseup'])
+    expect(click[0]).toMatchObject({ t: 1, x: 640, y: 360 })
+    const drag = planInput([{ at: 0, cursor: [0, 0], to: [90, 30], mouse: 'left', hold: 0.1 }], map)
+    const to = drag.filter(s => s.kind === 'mouseto') as { x: number; y: number }[]
+    expect(to[0]).toMatchObject({ x: 0, y: 0 })
+    expect(to.at(-1)).toMatchObject({ x: 90, y: 30 })
+    expect(drag.map(s => s.kind).indexOf('mousedown')).toBeGreaterThan(0)
+    expect(() => planInput([{ at: 0, to: [1, 1], mouse: 'left' }], map)).toThrow(/needs cursor/)
+  })
+
   it('spreads mouse movement over its hold, and a button with it is a drag', () => {
     const steps = planInput([{ at: 0, mouse: 'right', move: [90, -30], hold: 0.1 }], map)
     const moves = steps.filter(s => s.kind === 'mousemove') as { dx: number; dy: number }[]

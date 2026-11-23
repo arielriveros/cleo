@@ -8,8 +8,8 @@ import { Framebuffer } from '../framebuffer';
 import { RenderPass } from '../gpuProfiler';
 import { CustomMaterial } from '../material';
 import { ADDITIVE_BLEND } from '../rhi/types';
-import type { RenderTarget } from '../rhi/resources';
-import { customShaderModules, screenShaderResources, screenUserSamplerNames } from '../systems/customShaders';
+import type { RenderPipeline, RenderTarget } from '../rhi/resources';
+import { customShaderModules, screenShaderResources, screenUserSamplerNames, usesSunShadow } from '../systems/customShaders';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { PresentProgram, OutlinePostProgram, BloomProgram, BloomDownsampleProgram, BloomUpsampleProgram, ComposerProgram, DofCocProgram, DofGatherProgram, DofCompositeProgram, LensFlareProgram, LensFlareCompositeProgram, FxaaProgram, VignetteProgram, FilmGrainProgram, ChromaticAberrationProgram } from './programs';
@@ -297,20 +297,35 @@ export class PostEffects {
      * `customShaderResources` derives group 0 from the same interface description the prelude is
      * generated from.
      */
+    /**
+     * The pipeline a screen material draws with. `defer`: on WebGPU a pipeline it lacks is built off the main
+     * thread (PipelineCache.getOrDefer) and this answers null until it is ready -- the renderer leaves the
+     * stage out of the chain meanwhile. A screen material is one large fragment shader compiled the first time
+     * its camera is looked through, which is Play: built on the spot, the pencil-sketch material held the
+     * window for 21 s in the desktop editor's Chromium (Electron 31), Play's first frame with it.
+     */
+    public screenMaterialPipeline(mat: CustomMaterial, defer: boolean): RenderPipeline | null {
+        // The WGSL, when there is any. On WebGL2 there is none and none is needed — the program
+        // is already linked and `_pipelines.get` reaches it by name. `entryPoints.fragment` is
+        // `main` because that is what naga calls the entry it generates, not `fs_main`.
+        const wgsl = customShaderModules(mat);
+        const reflection = {
+            resources: screenShaderResources(mat.uniforms, mat.fragmentSource),
+            ...(wgsl ? { wgsl: wgsl.fragment, entryPoints: { fragment: 'main' },
+                         vertexWgsl: { wgsl: wgsl.vertex, entryPoint: wgsl.vertexEntry } } : {}),
+        };
+        const options = { vertex: 'model', builtFor: mat.type } as const;
+        return defer ? this._pipelines.getOrDefer(mat.type, reflection, options)
+                     : this._pipelines.get(mat.type, reflection, options);
+    }
+
     public screenMaterialPass(scene: Scene, mat: CustomMaterial,
                                 source: Framebuffer, target: Framebuffer): void {
         const sun = this._sys.sky.sunScreenInfo(scene);
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'screenMaterial',
                                                false, undefined, false);
-        // The WGSL, when there is any. On WebGL2 there is none and none is needed — the program
-        // is already linked and `_pipelines.get` reaches it by name. `entryPoints.fragment` is
-        // `main` because that is what naga calls the entry it generates, not `fs_main`.
-        const wgsl = customShaderModules(mat);
-        const pipeline = this._pipelines.get(mat.type, {
-            resources: screenShaderResources(mat.uniforms),
-            ...(wgsl ? { wgsl: wgsl.fragment, entryPoints: { fragment: 'main' },
-                         vertexWgsl: { wgsl: wgsl.vertex, entryPoint: wgsl.vertexEntry } } : {}),
-        }, { vertex: 'model', builtFor: mat.type });
+        // Ready by now: the renderer adds this pass only once `screenMaterialPipeline` has one.
+        const pipeline = this.screenMaterialPipeline(mat, false)!;
         pass.setPipeline(pipeline);
         this._shaderManager.bind(mat.type);
         // Group 0 is the two engine samplers followed by the user's, in declaration order — the
@@ -330,6 +345,14 @@ export class PostEffects {
         this._shaderManager.setUniform('u_sunUV', sun.uv);
         this._shaderManager.setUniform('u_sunVisible', sun.visible);
         this._shaderManager.setUniform('u_exposure', displayExposure(this._view)); // lets a pass invert the final present resolve
+        // A material reading the sun's shadow map (`cleoSunShadow`) gets the cascades as the god rays do:
+        // the shadow block, the view matrix that picks a cascade, and group 3 with the sun's maps alone.
+        // Only that one -- the others' layouts have no group 3, and binding it anyway would be an error.
+        if (usesSunShadow(mat.fragmentSource)) {
+            this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+            this._sys.shadows.uploadShadowUniforms(mat.type);
+            pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline, false));
+        }
         this._materials.applyCustom(mat);   // u_time, u_viewPos + user VALUE uniforms only
         this._passes.drawFullscreenAndEnd(pass);
     }

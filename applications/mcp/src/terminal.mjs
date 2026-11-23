@@ -13,17 +13,27 @@
 //
 // Wire protocol, on the editor's bridge socket (bridge.mjs):
 //   editor -> host   {type:'term', op:'attach'}                       the screen as a snapshot, then live output
-//   editor -> host   {type:'term', op:'start', cols, rows, resume?}   start Claude Code (resume: --continue)
+//   editor -> host   {type:'term', op:'start', cols, rows, resume?, auto?}   start Claude Code (see start())
 //   editor -> host   {type:'term', op:'input', data} | {op:'resize', cols, rows} | {op:'stop'}
+//   editor -> host   {type:'term', op:'sessions', reqId}               the saved conversations, for the picker
 //   host -> editor   {type:'term-event', event: {kind:'snapshot', data, state} | {kind:'output', data}
-//                                                | {kind:'state', ...state}}
+//                                                | {kind:'state', ...state}
+//                                                | {kind:'sessions', reqId, sessions, error?}}
+//
+// The conversation a session is on is followed (claudeSessions.mjs) and remembered in the host's data folder,
+// so a host that starts again (the editor's dev server restarted, the machine rebooted) picks the panel's
+// conversation back up instead of opening a blank one.
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { withoutClaudeSession } from './env.mjs';
+import {
+    SESSION_ID, claudeConfigDir, isClaudeProcess, isSaved, listConversations, liveSessions, openElsewhere, processRecord,
+} from './claudeSessions.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MCP_ENTRY = path.join(HERE, 'index.mjs');
@@ -35,6 +45,10 @@ const SCROLLBACK = 10000;
 /** Output is batched this long before it goes to the editor: a redraw arrives as many small writes. */
 const FLUSH_MS = 8;
 const IS_WIN = process.platform === 'win32';
+/** How often the running session's record is read: it names the conversation (/clear moves to a new one). */
+const SESSION_POLL_MS = 1500;
+/** The panel's own conversations remembered for the picker (the newest). */
+const HOSTED_KEPT = 300;
 
 /**
  * Appended to Claude Code's own system prompt (an ordinary CLI flag). Kept free of characters cmd.exe
@@ -95,10 +109,10 @@ export function claudeCommand(claude, args) {
 }
 
 /**
- * @typedef {{ code: 'not-installed' | 'no-claude' | 'start-failed', message: string }} Problem
+ * @typedef {{ code: 'not-installed' | 'no-claude' | 'start-failed' | 'resume-failed', message: string }} Problem
  * @typedef {{ available: boolean, problem: Problem | null, running: boolean, pid: number | null, started: boolean,
  *   exitCode: number | null, cols: number, rows: number, cwd: string, claude: { path: string, version: string | null } | null,
- *   windowsBuild: number | null }} TerminalState
+ *   windowsBuild: number | null, sessionId: string | null, resumable: boolean, busy: boolean, title: string | null }} TerminalState
  * @typedef {{ spawn: (file: string, args: string[] | string, opts: object) => any }} PtyModule
  * @typedef {{ pty: PtyModule, Terminal: any, SerializeAddon: any }} TerminalModules
  */
@@ -107,8 +121,9 @@ export class TerminalManager {
     /**
      * @param {{ bridge: import('./bridge.mjs').EditorBridge, dataDir: string, discoveryFile: string,
      *   log?: (m: string) => void, cwd?: string, env?: NodeJS.ProcessEnv, modules?: TerminalModules,
-     *   claudePath?: string }} opts
-     *   `modules` and `claudePath` replace the real node-pty / xterm and the PATH lookup (tests).
+     *   claudePath?: string, claudeDir?: string }} opts
+     *   `modules`, `claudePath` and `claudeDir` replace the real node-pty / xterm, the PATH lookup and
+     *   Claude Code's configuration folder (tests).
      */
     constructor(opts) {
         this.bridge = opts.bridge;
@@ -144,6 +159,22 @@ export class TerminalManager {
         this.held = null;
         /** @type {Promise<void>} snapshots one at a time */
         this.snapshots = Promise.resolve();
+        /** Claude Code's configuration folder: its per-process records and saved conversations. */
+        this.claudeDir = opts.claudeDir ?? claudeConfigDir(this.env);
+        this.sessionFile = path.join(this.dataDir, 'claude-code-session.json');
+        /** @type {string | null} the conversation the session is on, or was on when it ended */
+        this.sessionId = null;
+        /** @type {Set<string>} the conversations this panel ran, oldest first, for the picker */
+        this.hosted = new Set();
+        this.loadSession();
+        /** @type {number | null} the process whose record names the conversation (Claude Code's own pid) */
+        this.recordPid = null;
+        /** Claude Code is working on a turn (its record says busy), not waiting for the user. */
+        this.busy = false;
+        /** @type {string | null} the terminal title Claude Code set last: the editor's header after a reload */
+        this.title = null;
+        /** @type {NodeJS.Timeout | null} */
+        this.sessionTimer = null;
         this.bridge.on('term', msg => {
             this.onMessage(msg).catch(err => this.log(`terminal: ${err?.stack ?? err}`));
         });
@@ -207,6 +238,10 @@ export class TerminalManager {
             claude: this.claudePath ? { path: this.claudePath, version: this.claudeVersion } : null,
             // The editor's terminal adapts to a ConPTY (its reflow and wrapping differ): xterm's windowsPty.
             windowsBuild: IS_WIN ? Number(os.release().split('.')[2]) || null : null,
+            sessionId: this.sessionId,
+            resumable: isSaved(this.claudeDir, this.cwd, this.sessionId),
+            busy: !!this.proc && this.busy,
+            title: this.title,
         };
     }
 
@@ -214,10 +249,11 @@ export class TerminalManager {
     async onMessage(msg) {
         switch (msg?.op) {
             case 'attach': await this.snapshot(); return;
-            case 'start': this.start({ cols: msg.cols, rows: msg.rows, resume: !!msg.resume }); return;
+            case 'start': this.start({ cols: msg.cols, rows: msg.rows, resume: msg.resume, auto: !!msg.auto }); return;
             case 'input': if (this.proc && typeof msg.data === 'string') this.proc.write(msg.data); return;
             case 'resize': this.resize(msg.cols, msg.rows); return;
             case 'stop': this.stop('stopped from the editor'); return;
+            case 'sessions': await this.sendSessions(msg.reqId); return;
             default: return;
         }
     }
@@ -263,7 +299,15 @@ export class TerminalManager {
         this.send({ kind: 'output', data });
     }
 
-    /** @param {{ cols?: unknown, rows?: unknown, resume?: boolean }} opts */
+    /**
+     * Start Claude Code, on a fresh conversation unless told otherwise:
+     * - `resume: true`: the conversation the panel was last on (Continue last);
+     * - `resume: '<session id>'`: that saved conversation (the picker);
+     * - `auto`: the last one if it can be picked up, else a fresh one. The editor asks this of a host that
+     *   has not run a session yet, so a host that started again carries on where the panel was.
+     * A conversation open in another Claude Code is not picked up: two programs would write it at once.
+     * @param {{ cols?: unknown, rows?: unknown, resume?: unknown, auto?: boolean }} opts
+     */
     start(opts = {}) {
         if (this.proc) { this.sendState(); return; }
         if (this.modules && (!this.claudePath || this.problem?.code === 'no-claude')) this.locateClaude();
@@ -271,13 +315,30 @@ export class TerminalManager {
         this.cols = size(opts.cols, 20, 500, this.cols);
         this.rows = size(opts.rows, 5, 300, this.rows);
 
+        const asked = typeof opts.resume === 'string' || opts.resume === true;
+        const wanted = typeof opts.resume === 'string' ? opts.resume : asked || opts.auto ? this.sessionId : null;
+        let resumeId = /** @type {string | null} */ (null);
+        if (wanted) {
+            const elsewhere = SESSION_ID.test(wanted) ? openElsewhere(this.claudeDir, wanted) : null;
+            const why = !isSaved(this.claudeDir, this.cwd, wanted) ? 'That conversation is not saved, so it cannot be picked up.'
+                : elsewhere ? `That conversation is open in another Claude Code (process ${elsewhere.pid}): close it there first.`
+                : null;
+            if (!why) resumeId = wanted;
+            else if (asked) { this.refuse(why); return; }
+        } else if (asked) {
+            this.refuse('There is no earlier conversation to pick up.');
+            return;
+        }
+        const sessionId = resumeId ?? crypto.randomUUID();
+
         this.mirror?.dispose();
         this.mirror = new this.modules.Terminal({ cols: this.cols, rows: this.rows, scrollback: SCROLLBACK, allowProposedApi: true });
         this.serializer = new this.modules.SerializeAddon();
         this.mirror.loadAddon(this.serializer);
 
         const args = ['--mcp-config', this.writeMcpConfig(), '--allowedTools', ALLOWED_TOOLS, '--append-system-prompt', TERMINAL_PROMPT];
-        if (opts.resume) args.push('--continue');
+        // An id the host chose for a fresh one: it knows which conversation the session is on from the start.
+        args.push(resumeId ? '--resume' : '--session-id', sessionId);
         const { file, args: argv } = claudeCommand(this.claudePath, args);
         const env = {
             ...withoutClaudeSession(this.env),
@@ -298,12 +359,19 @@ export class TerminalManager {
         this.exitCode = null;
         this.problem = null;
         this.pending = '';
+        this.busy = false;
+        this.title = null;
+        this.recordPid = null;
+        this.mirror.onTitleChange?.((/** @type {string} */ t) => { this.title = t; });
+        this.onSession(sessionId);
+        this.watchSession(proc);
         this.log(`Claude Code started (pid ${proc.pid}, ${this.cols}x${this.rows}) in ${this.cwd}: ${args.filter(a => a !== TERMINAL_PROMPT).join(' ')}`);
         proc.onData((/** @type {string} */ d) => { if (this.proc === proc) this.onOutput(d); });
         proc.onExit((/** @type {{ exitCode: number }} */ e) => {
             releaseExited(proc);
             if (this.proc !== proc) return;
             this.flush();
+            this.unwatchSession();
             this.proc = null;
             this.exitCode = e?.exitCode ?? null;
             this.log(`Claude Code exited (code ${this.exitCode})`);
@@ -332,6 +400,7 @@ export class TerminalManager {
 
     dispose() {
         this.stop('the agent host is shutting down');
+        this.unwatchSession();
         this.proc = null;
         this.mirror?.dispose();
         this.mirror = null;
@@ -350,6 +419,80 @@ export class TerminalManager {
     }
 
     sendState() { this.send({ kind: 'state', ...this.state() }); }
+
+    /** A start that cannot go ahead: said in the state, nothing started. @param {string} message */
+    refuse(message) {
+        this.problem = { code: 'resume-failed', message };
+        this.log(`not started: ${message}`);
+        this.sendState();
+    }
+
+    /** Follow the running session's record: /clear and /resume move it to another conversation. @param {any} proc */
+    watchSession(proc) {
+        this.unwatchSession();
+        this.sessionTimer = setInterval(() => { if (this.proc === proc) this.readRecord(proc); }, SESSION_POLL_MS);
+        this.sessionTimer.unref?.();
+    }
+
+    unwatchSession() {
+        if (this.sessionTimer) { clearInterval(this.sessionTimer); this.sessionTimer = null; }
+    }
+
+    /**
+     * Read the session's record. It is filed under Claude Code's pid, which is the terminal's own process
+     * unless claude runs through a shim (cmd.exe): then the record naming the conversation the host gave it
+     * is found once, and followed by its pid from then on.
+     * @param {any} proc
+     */
+    readRecord(proc) {
+        let record = processRecord(this.claudeDir, this.recordPid ?? proc.pid);
+        if (!record && this.recordPid === null && this.sessionId) {
+            const found = liveSessions(this.claudeDir).get(this.sessionId);
+            if (found && isClaudeProcess(found.pid)) record = found;
+        }
+        if (!record) return;
+        this.recordPid = record.pid;
+        const busy = record.status === 'busy';
+        const moved = record.sessionId !== this.sessionId && SESSION_ID.test(record.sessionId);
+        if (moved) this.onSession(record.sessionId);
+        if (moved || busy !== this.busy) { this.busy = busy; this.sendState(); }
+    }
+
+    /** The session is on conversation `id` now: remembered, so a host that starts again picks it up. @param {string} id */
+    onSession(id) {
+        this.sessionId = id;
+        this.hosted.delete(id);
+        this.hosted.add(id);
+        while (this.hosted.size > HOSTED_KEPT) this.hosted.delete(/** @type {string} */ (this.hosted.values().next().value));
+        try {
+            fs.writeFileSync(this.sessionFile, JSON.stringify({ cwd: this.cwd, sessionId: id, hosted: [...this.hosted] }, null, 2));
+        } catch (err) {
+            this.log(`could not remember the conversation: ${/** @type {any} */ (err)?.message ?? err}`);
+        }
+    }
+
+    /** What an earlier host remembered, when it ran Claude Code in the same folder. */
+    loadSession() {
+        try {
+            const saved = JSON.parse(fs.readFileSync(this.sessionFile, 'utf8'));
+            if (!saved || !samePath(String(saved.cwd ?? ''), this.cwd)) return;
+            if (Array.isArray(saved.hosted)) for (const id of saved.hosted) if (SESSION_ID.test(String(id))) this.hosted.add(String(id));
+            if (SESSION_ID.test(String(saved.sessionId ?? ''))) this.sessionId = String(saved.sessionId);
+        } catch { /* none yet */ }
+    }
+
+    /** The saved conversations of the folder Claude Code runs in, for the editor's picker. @param {unknown} reqId */
+    async sendSessions(reqId) {
+        try {
+            const sessions = await listConversations({
+                configDir: this.claudeDir, cwd: this.cwd, hosted: this.hosted,
+                ownPid: this.proc ? (this.recordPid ?? this.proc.pid) : null,
+            });
+            this.send({ kind: 'sessions', reqId, sessions });
+        } catch (err) {
+            this.send({ kind: 'sessions', reqId, sessions: [], error: String(/** @type {any} */ (err)?.message ?? err) });
+        }
+    }
 
     /** @param {object} event */
     send(event) { this.bridge.sendToEditor({ type: 'term-event', event }); }
@@ -375,6 +518,13 @@ function releaseExited(proc) {
     try { proc.kill(); } catch { /* gone */ }
 }
 const released = new WeakSet();
+
+/** @param {string} a @param {string} b */
+function samePath(a, b) {
+    if (!a || !b) return false;
+    const [pa, pb] = [path.resolve(a), path.resolve(b)];
+    return IS_WIN ? pa.toLowerCase() === pb.toLowerCase() : pa === pb;
+}
 
 /** @param {unknown} v @param {number} min @param {number} max @param {number} fallback */
 function size(v, min, max, fallback) {

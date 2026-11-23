@@ -801,6 +801,79 @@ const SCREEN_EPILOGUE = `
 void main() { fragColor = fragment() + _cleoInterface(); }
 `;
 
+/**
+ * The input `cleoSunShadow` reads beyond the shadow library's own block: the view matrix, whose depth
+ * picks the cascade. OPT-IN, as the forward reflection helper is — see {@link SCREEN_SHADOW_INTERFACE}.
+ */
+const SCREEN_SHADOW_UNIFORMS: ValueDecl[] = [
+    { name: 'u_view', type: 'mat4', comment: 'world -> view; its depth picks the shadow cascade (cleoSunShadow)' },
+];
+
+const SCREEN_SHADOW_BODY = (dialect: ShaderDialect) => `
+${dialect === 'vulkan' ? vulkanShadowLibrary() : SHADOWS_SRC}
+
+/**
+ * How much of the sun reaches a world position: 1 lit, 0 in its shadow -- the engine's own cascaded shadow
+ * map, so it is exact at any distance and for casters off screen, which nothing a screen pass can work out
+ * from the depth buffer is. N is the surface normal there; it biases the lookup off the surface, as the
+ * lighting does. 1 everywhere when no sun casts shadows.
+ *
+ * Deliberately NOT directionalShadow. That one keeps both filters (the 3x3 grid and the 16-tap disk) behind
+ * a runtime switch, runs one of them twice to blend cascades, and adds the clouds' noise field: dozens of
+ * taps and loops the driver unrolls into a screen shader that is large already. The pencil-sketch screen
+ * material took 71 s to compile in the desktop editor's Chromium, and the GPU process gave up: the device was
+ * lost and Play froze. This reads ONE cascade with four hardware-filtered taps, a soft footprint of about
+ * four texels: plenty under a screen effect. No cascade blend and no cloud shadows.
+ */
+float cleoSunShadow(vec3 worldPos, vec3 N) {
+    if (u_shadow.u_shadowsEnabled == 0 || u_shadow.u_cascadeCount <= 0) return 1.0;
+    float viewDepth = -(u_view * vec4(worldPos, 1.0)).z;
+    float fade = cleoShadowFade(viewDepth);
+    if (fade <= 0.0) return 1.0;
+    int layer = cleoCascadeCovering(viewDepth, worldPos);
+    float share = cleoNormalOffsetShare(N, cleoCascadeToLight(layer));
+    vec3 p = worldPos + N * (u_shadow.u_shadowNormalBias * cleoTexelSize(layer) * share);
+    vec4 ls = cleoCascadeMatrix(layer) * vec4(p, 1.0);
+    vec3 proj = ls.xyz / ls.w * 0.5 + 0.5;
+    if (proj.x < 0.0 || proj.x > 1.0 || proj.y < 0.0 || proj.y > 1.0 || proj.z > 1.0) return 1.0;
+    float refDepth = proj.z - u_shadow.u_shadowDepthBias * cleoDepthScale(layer);
+    vec2 o = u_shadow.u_shadowTexel * (0.5 * max(u_shadow.u_shadowFilterRadius, 1.0));
+    float vis = 0.25 * (cleoCascadeTap(proj.xy + vec2(-o.x, -o.y), layer, refDepth)
+                      + cleoCascadeTap(proj.xy + vec2( o.x, -o.y), layer, refDepth)
+                      + cleoCascadeTap(proj.xy + vec2(-o.x,  o.y), layer, refDepth)
+                      + cleoCascadeTap(proj.xy + vec2( o.x,  o.y), layer, refDepth));
+    return 1.0 - (1.0 - vis) * u_shadow.u_shadowStrength * fade;
+}
+`;
+
+/**
+ * The screen prelude plus the sun's shadow map, for a screen material whose source calls `cleoSunShadow`.
+ *
+ * OPT-IN for the reason {@link FORWARD_REFLECTION_INTERFACE} is: `compiledWgslHash` covers the whole
+ * assembled prelude, and a published game renders a custom material on WebGPU only from WGSL whose hash
+ * still matches. Pasting the shadow library into every screen material would have invalidated the stored
+ * translation of each one already saved. A material that never names the helper assembles as it always has.
+ *
+ * The library's block lands at group 1 binding 2 (chunks/shadows.wgsl) beside the screen engine block at
+ * binding 0, and its maps in group 3, which the screen pass binds only for these materials.
+ */
+const SCREEN_SHADOW_INTERFACE: PreludeInterface = {
+    ...SCREEN_INTERFACE,
+    uniforms: [...SCREEN_INTERFACE.uniforms, ...SCREEN_SHADOW_UNIFORMS],
+    body: (dialect) => (typeof SCREEN_INTERFACE.body === 'string' ? SCREEN_INTERFACE.body : SCREEN_INTERFACE.body(dialect))
+                     + SCREEN_SHADOW_BODY(dialect),
+};
+
+/** Whether a screen material's source reads the sun's shadow map (`cleoSunShadow`). */
+export function usesSunShadow(fragmentSource: string): boolean {
+    return /\bcleoSunShadow\b/.test(fragmentSource);
+}
+
+/** The screen interface a material's source asks for: the plain one, or with the sun's shadow map. */
+function screenInterfaceFor(fragmentSource: string): PreludeInterface {
+    return usesSunShadow(fragmentSource) ? SCREEN_SHADOW_INTERFACE : SCREEN_INTERFACE;
+}
+
 const GLSL_TYPE: Record<string, string> = {
     float: 'float', vec2: 'vec2', vec3: 'vec3', vec4: 'vec4',
     int: 'int', bool: 'bool', sampler2D: 'sampler2D', samplerCube: 'samplerCube',
@@ -833,16 +906,18 @@ const WGSL_TEXTURE: Record<SamplerType, string> = {
 };
 
 /** A screen-mode custom program's group 0. An alias for `customShaderResources('screen', …)`. */
-export function screenShaderResources(uniforms: CustomUniform[]): ShaderResource[] {
-    return customShaderResources('screen', uniforms);
+export function screenShaderResources(uniforms: CustomUniform[], fragmentSource: string = ''): ShaderResource[] {
+    return customShaderResources('screen', uniforms, fragmentSource);
 }
 
 /**
  * A custom program's bind-group layout. Group 0 is the engine samplers then the user's, walking
  * bindings by twos exactly as `declareSamplers` does — the two are derived from one list on purpose.
- * Group 3 is the shadow textures, forward mode only, taken from `shadowsChunk.wgsl`'s own reflection.
+ * Group 3 is the shadow textures, taken from `shadowsChunk.wgsl`'s own reflection: every forward
+ * material, and a screen material whose source reads the sun's shadow map (`cleoSunShadow`).
  */
-export function customShaderResources(mode: CustomRenderMode, uniforms: CustomUniform[]): ShaderResource[] {
+export function customShaderResources(mode: CustomRenderMode, uniforms: CustomUniform[],
+                                      fragmentSource: string = ''): ShaderResource[] {
     const engine = mode === 'screen' ? SCREEN_INTERFACE.samplers
                  : mode === 'forward' ? FORWARD_ENGINE_SAMPLERS
                  : [];                       // deferred: no engine samplers, see DEFERRED_INTERFACE
@@ -875,6 +950,14 @@ export function customShaderResources(mode: CustomRenderMode, uniforms: CustomUn
             out.push({ group: r.group, binding: r.binding + 1, name: r.name.replace('_texture', '_sampler'),
                        kind: 'sampler', type: 'sampler', glslName: r.glslName });
         }
+    }
+    // The sun's cascades and nothing else of group 3: `cleoSunShadow` reads only those. The library also
+    // declares the spot and point atlases, and naga keeps the functions that read them, but WebGPU's layout
+    // has only what the entry point reaches -- listing them made the group six entries against a layout of
+    // two, an invalid group, and a black frame.
+    if (mode === 'screen' && usesSunShadow(fragmentSource)) {
+        for (const r of ShadowsChunk.resources)
+            if (r.group === 3 && r.glslName === 'u_shadowCascades' && (r.kind === 'texture' || r.kind === 'sampler')) out.push(r);
     }
     return out;
 }
@@ -927,7 +1010,7 @@ export function assembleCustomFragment(
 ): string {
     // All three modes go through the interface generator now, so one description produces both dialects
     // and there is no second copy of any prelude to drift.
-    const iface = renderMode === 'screen' ? SCREEN_INTERFACE
+    const iface = renderMode === 'screen' ? screenInterfaceFor(fragmentSource)
                 : renderMode === 'deferred' ? DEFERRED_INTERFACE
                 : forwardInterfaceFor(fragmentSource);
     const epilogue = renderMode === 'screen' ? SCREEN_EPILOGUE
@@ -1289,7 +1372,7 @@ function webgpuHalf(mat: CustomMaterial, key: string): { wgsl?: string;
     const base = mat.renderMode === 'screen' ? ScreenProgram
                : mat.renderMode === 'deferred' ? GeometryPBRProgram : PBRProgram;
 
-    const iface = mat.renderMode === 'screen' ? SCREEN_INTERFACE
+    const iface = mat.renderMode === 'screen' ? screenInterfaceFor(mat.fragmentSource)
                 : mat.renderMode === 'deferred' ? DEFERRED_INTERFACE : FORWARD_INTERFACE;
     const vulkan = assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms, 'vulkan');
     // A live translator (the editor) wins. Without one — every published game — the WGSL the material
@@ -1357,7 +1440,7 @@ export function customPipelineReflection(mat: CustomMaterial, mode: CustomRender
     const slot = reflectionSlots.get(mat);
     if (slot && slot.entry === entry && slot.mode === mode && slot.type === mat.type && slot.uniforms === mat.uniforms)
         return slot.reflection;
-    const resources = customShaderResources(mode, mat.uniforms);
+    const resources = customShaderResources(mode, mat.uniforms, mat.fragmentSource);
     const used = mode === 'forward' ? usedResources(resources, entry?.fragment, entry?.vertex) : resources;
     const reflection: PipelineReflection = {
         // With translated WGSL the vertex module is the base program's, which reads the per-object table:
@@ -1416,15 +1499,30 @@ export function customWgslHash(renderMode: CustomRenderMode, fragmentSource: str
 export function hasWgslTranslator(): boolean { return translator !== null; }
 
 /**
- * Compile a custom material's source, and translate it to WGSL when a translator is installed. The two
- * verdicts stay separate: `ok`/`error` is the authoritative GL compile, while `wgslError` is a
- * portability WARNING about a material that renders correctly today.
+ * Compile a custom material's source, and translate it to WGSL when a translator is installed. On WebGL2
+ * the two verdicts stay separate: `ok`/`error` is the authoritative GL compile, while `wgslError` is a
+ * portability WARNING about a material that renders correctly today. On WebGPU the translation IS the
+ * compile: its failure is `error`.
  */
 export function tryCompileCustom(
     renderMode: CustomRenderMode,
     fragmentSource: string,
     uniforms: CustomUniform[],
 ): { ok: boolean; error?: string; wgsl?: string; wgslError?: string } {
+    // A WGSL device builds a program only from WGSL with its build-time layout, so a GLSL probe there refuses
+    // EVERY shader ("WebGPU needs the build-time vertex inputs…"): the inspector showed that as the compile
+    // error, and the material never took the edit or stored its WGSL. There the verdict is the translation --
+    // naga validates the module it emits -- and a shader that does not translate does not run at all.
+    if (device.capabilities.conventions.runtimeShaderLanguage === 'wgsl') {
+        // Nothing to judge it with yet: the live build reports, as it would for a material loaded from disk.
+        if (!translator) return { ok: true };
+        try {
+            return { ok: true, wgsl: translator(assembleCustomFragment(renderMode, fragmentSource, uniforms, 'vulkan')) };
+        } catch (e: any) {
+            return { ok: false, error: String(e?.message ?? e) };
+        }
+    }
+
     // Built and thrown away: the question is only whether it compiles. The device owns cleanup on the
     // failing path now (see `createShaderProgram`), so there is nothing to dispose when it throws.
     let result: { ok: boolean; error?: string };

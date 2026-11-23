@@ -209,6 +209,8 @@ export const FEATURES: readonly FeatureDef[] = [
         description: 'Simulated capes, banners and flags.',
         nodeTypes: ['cloth'],
         apiNames: ['ClothNode'],
+        experimental: true,
+        experimentalNote: 'Cloth is new and still changing: its settings, collision and look may change in a later version.',
     },
     {
         id: 'vehicles', label: 'Vehicles', group: 'simulation',

@@ -72,8 +72,8 @@ describe('where a feature shows in the editor', () => {
 });
 
 describe('experimental features', () => {
-  it('flags only water, as a label: it stays on by default and keeps its Add item', () => {
-    expect(FEATURES.filter(f => f.experimental).map(f => f.id)).toEqual(['water']);
+  it('flags only water and cloth, as a label: they stay on by default and keep their Add items', () => {
+    expect(FEATURES.filter(f => f.experimental).map(f => f.id)).toEqual(['water', 'cloth']);
     expect(enabledFeatures([]).has('water')).toBe(true);
     expect(experimentalFeatureOfAddItem('waterVolume')?.id).toBe('water');
     expect(experimentalFeatureOfAddItem('cube')).toBeUndefined();

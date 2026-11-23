@@ -45,7 +45,7 @@ async function main() {
         token: crypto.randomBytes(24).toString('base64url'),
         allowedOrigins: (process.env.CLEO_MCP_ALLOWED_ORIGINS ?? '').split(',').map(s => s.trim()).filter(Boolean),
         serverInfo: { name: 'cleo-agent-host', version: PKG.version },
-        capabilities: ['terminal'],
+        capabilities: ['terminal', 'sessions'],
         log,
     });
     // Ready before the editor can connect: its first attach must find the terminal's state.

@@ -31,6 +31,26 @@ export const ContinueIcon = (p: P) => (
   <Glyph {...p}><path d='M4.5 12a7.5 7.5 0 1 0 2.2-5.3' /><path d='M4 3.5v4.5h4.5' /><path d='M12 8v4.2l2.8 1.8' /></Glyph>
 )
 
+/** A chevron pointing down: the header's conversation picker opens below it. */
+export const ChevronDownIcon = (p: P) => (
+  <Glyph {...p}><path d='M6.5 9.5 12 15l5.5-5.5' /></Glyph>
+)
+
+/** A prompt and a cursor: a conversation started in a terminal. */
+export const TerminalIcon = (p: P) => (
+  <Glyph {...p}><rect x='3' y='4.5' width='18' height='15' rx='2' /><path d='m7 9.5 3 2.5-3 2.5' /><path d='M12.5 15h4.5' /></Glyph>
+)
+
+/** Angle brackets: a conversation started in an IDE (VS Code). */
+export const IdeIcon = (p: P) => (
+  <Glyph {...p}><path d='m8.5 7-5 5 5 5' /><path d='m15.5 7 5 5-5 5' /><path d='m13.5 5-3 14' /></Glyph>
+)
+
+/** A tick: the conversation the session is on. */
+export const CurrentIcon = (p: P) => (
+  <Glyph {...p}><path d='m5 12.5 4.5 4.5L19 7.5' /></Glyph>
+)
+
 /** A square in a ring: stop the running session. */
 export const StopSessionIcon = (p: P) => (
   <Glyph {...p}><circle cx='12' cy='12' r='8.5' /><rect x='9' y='9' width='6' height='6' rx='1' fill='currentColor' stroke='none' /></Glyph>

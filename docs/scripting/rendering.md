@@ -183,9 +183,40 @@ vec3 glow = u_glowColor * u_glowStrength * cleoPreExposure();
 Without it such a term reads darker the darker the scene, by whole stops. Like the reflection helper,
 it is opt-in: only a material that names it gets it, so no saved material's WGSL changes.
 
+### The sun's shadow in a screen material
+
+A **screen** material can ask where the sun's shadow falls:
+
+```glsl
+float cleoSunShadow(vec3 worldPos, vec3 N)   // 1 lit, 0 in the sun's shadow
+```
+
+It reads the engine's own cascaded shadow map, so it is exact at any distance and for casters that are
+off screen, which nothing worked out from the depth buffer can be. It is a lighter read than the
+lighting's: one cascade with four filtered taps (a soft edge about four shadow-map texels wide), no blend
+between cascades and no cloud shadows. A screen shader is large already, and the lighting's full lookup
+made one take over a minute to compile in the desktop editor, long enough for the GPU to give up.
+Rebuild the point from the depth and give it the surface's normal (any normal works; the right one
+keeps the lookup off the surface):
+
+```glsl
+float d = texture(u_depth, fragTexCoord).r;
+vec3 p = reconstructWorldPos(fragTexCoord, d);
+float lit = d < 0.9999 ? cleoSunShadow(p, normal) : 1.0;
+```
+
+It is 1 everywhere when no sun casts shadows. Opt-in like the helpers above: only a screen material
+whose source names `cleoSunShadow` gets the shadow library and `u_view`.
+
 On WebGPU, a published game has no GLSL translator: a custom material renders from the WGSL saved
 with it (`compiledWgsl`), which the material inspector writes when it compiles the shader, and which is
-ignored if the source or the engine prelude changed since (`compiledWgslHash`).
+ignored if the source or the engine prelude changed since (`compiledWgslHash`). Play in the editor
+translates a camera's screen materials afresh, so they draw there either way; open the material once to
+save a current translation before publishing.
+
+A screen material's shader is built when a camera first shows it, which for a game camera is Play. On
+WebGPU that build happens in the background: the game starts at once, and the effect appears when its
+shader is ready (a few seconds for a large one, longer the first time on an older GPU driver).
 
 > A custom material's `type` is a **content hash of its shader source**, so it changes on every
 > edit. That is why post-chain entries reference screen materials **by index**

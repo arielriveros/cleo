@@ -49,7 +49,7 @@ test('an op passes unknown fields through, so the editor names them; every other
 
 test('play_control takes input and watch, and its timeout covers the input', () => {
     const play = schema(tool('play_control'));
-    const args = { action: 'play', input: [{ at: 0.2, key: 'KeyW', hold: 3 }, { at: 1, action: 'Jump' }, { at: 1, mouse: 'left', move: [40, 0] }], watch: ['/Player', { node: 'Enemy', props: ['health'] }], stopAfter: true };
+    const args = { action: 'play', input: [{ at: 0.2, key: 'KeyW', hold: 3 }, { at: 1, action: 'Jump' }, { at: 1, mouse: 'left', move: [40, 0] }, { at: 2, cursor: [640, 360], to: [700, 400], mouse: 'left' }], watch: ['/Player', { node: 'Enemy', props: ['health'] }], stopAfter: true };
     assert.ok(play.safeParse(args).success);
     assert.equal(play.safeParse({ action: 'play', input: [{ at: 0, keys: 'W' }] }).success, false);
     assert.ok(runLengthSeconds(args) >= 3.5);

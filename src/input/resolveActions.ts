@@ -54,6 +54,9 @@ export interface PointerReading {
     /** Position inside the canvas, normalized 0..1. Meaningless while pointer-locked. */
     x: number;
     y: number;
+    /** The same position in canvas CSS pixels, Y down. Meaningless while pointer-locked. */
+    px: number;
+    py: number;
 }
 
 /**
@@ -64,6 +67,9 @@ export interface DeviceSnapshot {
     /** `KeyboardEvent.code` values currently down. A raw code set — no whitelist filters it. */
     keys: ReadonlySet<string>;
     mouseButtons: ReadonlySet<MouseButton>;
+    /** Buttons that went down / came up since the last frame ended. A click inside one frame is in both. */
+    mousePressed: ReadonlySet<MouseButton>;
+    mouseReleased: ReadonlySet<MouseButton>;
     pointer: PointerReading;
     pointerLocked: boolean;
     pointerOverCanvas: boolean;
@@ -78,7 +84,9 @@ export function createDeviceSnapshot(): DeviceSnapshot {
     return {
         keys: new Set<string>(),
         mouseButtons: new Set<MouseButton>(),
-        pointer: { deltaX: 0, deltaY: 0, wheelX: 0, wheelY: 0, x: 0, y: 0 },
+        mousePressed: new Set<MouseButton>(),
+        mouseReleased: new Set<MouseButton>(),
+        pointer: { deltaX: 0, deltaY: 0, wheelX: 0, wheelY: 0, x: 0, y: 0, px: 0, py: 0 },
         pointerLocked: false,
         pointerOverCanvas: false,
         gamepads: [],

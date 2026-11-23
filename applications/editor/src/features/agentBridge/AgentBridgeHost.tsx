@@ -6,6 +6,10 @@ import { agentBridge } from './bridgeClient'
 import { CONCURRENT_METHODS, projectInfo, runCommand, type BridgeHost } from './commands'
 import { attachAgentLogs } from './agentLogs'
 import { keepAgentHost } from './agentHost'
+import { activeAddons } from '../addons/dependencies'
+
+/** The Claude Code addon (addons/registry.ts), whose session this link stops in a project that has it off. */
+const CLAUDE_CODE_ADDON = 'claude-code'
 
 /**
  * Hands the agent bridge (bridgeClient.ts) the editor to act on. Renders nothing. Mounted by the MCP server
@@ -42,6 +46,24 @@ export default function AgentBridgeHost() {
     const release = keepAgentHost()
     return () => { release(); agentBridge.setHost(null); agentBridge.stop() }
   }, [])
+
+  // A Claude Code session outlives the project it was started in (the agent host runs it, and the Claude Code
+  // addon leaves it running when a project closes, so the next one's panel carries on). A project with that
+  // addon off must not have it working on it unseen: once linked, it is stopped. Its conversation stays saved.
+  const { projectSettings, projectSettingsReady } = engine
+  const claudeCodeOn = activeAddons(projectSettings.addons.enabled).some(a => a.id === CLAUDE_CODE_ADDON)
+  useEffect(() => {
+    if (!projectSettingsReady || claudeCodeOn) return
+    let stoppedOn = -1
+    const stopOnLink = () => {
+      const b = agentBridge.getSnapshot()
+      if (b.state !== 'connected' || b.link === stoppedOn || !b.capabilities.includes('terminal')) return
+      stoppedOn = b.link
+      agentBridge.sendTerm('stop')
+    }
+    stopOnLink()
+    return agentBridge.subscribe(stopOnLink)
+  }, [projectSettingsReady, claudeCodeOn])
 
   return null
 }

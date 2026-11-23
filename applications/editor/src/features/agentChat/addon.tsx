@@ -14,10 +14,12 @@ const addon: AddonModule = {
       topbarRight: AgentChatToggle,
     },
   }),
-  // Turned off while it runs: end the Claude session before the panel goes. The agent link stays up with the
-  // MCP server addon.
-  deactivate: () => {
-    if (terminalStore.getSnapshot().term?.running) terminalActions.stop()
+  // Turned off: end the Claude session before the panel goes (the agent link stays up with the MCP server addon).
+  // A project closing leaves it running: Claude Code lives in the agent host, not the page, so the next
+  // project's panel shows the same session. A next project with this addon off has it stopped by the agent link
+  // (agentBridge/AgentBridgeHost.tsx).
+  deactivate: reason => {
+    if (reason === 'off' && terminalStore.getSnapshot().term?.running) terminalActions.stop()
   },
 }
 

@@ -31,14 +31,23 @@ export interface AddonContext {
   saveSettings(next: unknown): void
 }
 
+/**
+ * Why an addon is stopped:
+ * - `off`: turned off in Project ▸ Addons (or an addon it requires was);
+ * - `unload`: the project is closing (another one opening in this window), or the editor's own code was
+ *   reloaded under it (a dev-server hot update). It is activated again when the next project has it on.
+ */
+export type AddonStopReason = 'off' | 'unload'
+
 /** An addon's module: what turning it on and off does. */
 export interface AddonModule {
   activate(context: AddonContext): AddonContributions | Promise<AddonContributions>
   /**
-   * Turning it off in a running session: end what it started (a session, a connection). Its slots are
-   * unmounted after this returns.
+   * Stopping it: end what it started (a session, a connection). On `unload`, something that outlives the page
+   * (Claude Code in the agent host) may keep running for the next project. Its slots are unmounted after
+   * this returns.
    */
-  deactivate?(): void | Promise<void>
+  deactivate?(reason: AddonStopReason): void | Promise<void>
 }
 
 /** An addon as the editor lists it, before it is loaded. */
@@ -52,6 +61,8 @@ export interface AddonManifest {
   readonly docPage: string
   /** On in a new project unless the new-project dialog says otherwise. */
   readonly defaultOn: boolean
+  /** Experimental: it works, but its behaviour may still change between versions. Only a label in Project ▸ Addons. */
+  readonly experimental?: boolean
   /** Asked before turning it off while it runs, when that ends something the user would notice. */
   readonly confirmDisable?: string
   /**

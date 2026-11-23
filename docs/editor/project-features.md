@@ -82,7 +82,7 @@ fallback) keep their state.
 
 ## Simulation
 
-- **Cloth** — simulated capes, banners and flags.
+- **Cloth** — simulated capes, banners and flags. *Experimental.*
 
 ## Gameplay
 

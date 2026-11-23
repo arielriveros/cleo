@@ -128,6 +128,8 @@ See [Decorators](../scripting/decorators.md).
 Types: `KeyCode`, `MouseButton`, `PointerAxis`, `GamepadButton`, `GamepadAxis`, `TouchGesture`,
 `BindingSource`, `ModifierSource`, `DeviceKind`, `StateFlag`.
 
+**Mouse cursor:** `Input.mouse` (types `MouseApi`, `MousePickOptions`, `MousePhysicsPickOptions`).
+
 **Model:** `ACTION_KINDS`, `ACTION_PHASES`, `COMPOSITE_PARTS`, `PROCESSOR_KINDS`,
 `DEFAULT_PRESS_POINT`, `DEFAULT_TOUCH_CONFIG`, `DEFAULT_INPUT_MAP`, `IDLE_STATE`, `idleState`,
 `defaultProcessor`, `cloneInputMap`, `isDefaultInputMap`, `parseInputMap`, and the `normalize*`

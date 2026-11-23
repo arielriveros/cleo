@@ -4,6 +4,7 @@ import { cn } from '@cleo/app-kit/ui/cn'
 import { CloseIcon } from '@cleo/app-kit/ui/icons'
 import { JOINED_DIVIDER_CLASS, JOINED_GROUP_CLASS } from '@cleo/app-kit/ui/SegmentedControl'
 import ClaudeCodeView from './ClaudeCodeView'
+import ConversationPicker from './ConversationPicker'
 import { panelActions, panelStore, PANEL_MIN_WIDTH } from './panelStore'
 import { terminalActions, terminalStore } from './terminalStore'
 import { ClaudeIcon, NewChatIcon, StopSessionIcon } from './chatIcons'
@@ -27,12 +28,12 @@ export default function AgentChatPanel() {
   const dot = s.link === 'error' ? 'bg-danger' : !ready ? 'bg-dim animate-pulse' : term?.running ? 'bg-success-fg' : 'bg-dim'
   const state = s.link === 'error' ? (s.linkError ?? 'No agent host') : !ready ? 'Connecting to the agent host' : term?.running ? 'Running' : 'Not running'
   const about = [
-    t.title ? `${t.title}\n` : null,
+    (t.title ?? t.picked) ? `${t.title ?? t.picked}\n` : null,
     `${term?.claude?.version ? `Claude Code ${term.claude.version}` : 'Claude Code'}: ${state.toLowerCase()}`,
     term?.claude?.path ?? null,
     term?.cwd ? `Started in ${term.cwd}` : null,
     'It signs in on its own: /login to sign in or switch accounts, /status to see which one it uses.',
-    'Ctrl+wheel over the terminal zooms its text.',
+    'Shift+Enter or Shift+Space starts a new line; Enter sends. Ctrl+wheel over the terminal zooms its text.',
   ].filter(Boolean).join('\n')
 
   const onResizeStart = (e: React.PointerEvent) => {
@@ -50,10 +51,7 @@ export default function AgentChatPanel() {
 
       <div className='flex items-center gap-2 h-[32px] pl-2.5 pr-1.5 border-b border-border-subtle bg-surface-sunken shrink-0'>
         <span className='w-4 h-4 shrink-0'><ClaudeIcon /></span>
-        <div className='min-w-0 flex items-baseline gap-1.5 cursor-default' title={about}>
-          <span className='font-semibold text-fg truncate'>{t.title ?? 'Claude Code'}</span>
-          {t.title && <span className='text-ui-xs text-dim shrink-0'>Claude Code</span>}
-        </div>
+        <ConversationPicker about={about} />
         <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', dot)} title={state} />
         <div className='ml-auto flex items-center gap-1 shrink-0'>
           <div className={JOINED_GROUP_CLASS}>
@@ -61,7 +59,7 @@ export default function AgentChatPanel() {
               disabled={t.link !== 'ready' || !term?.available} onClick={() => terminalActions.restart()}>
               <span className='w-3.5 h-3.5'><NewChatIcon /></span>
             </button>
-            <button type='button' className={cn(ITEM, JOINED_DIVIDER_CLASS)} title='Stop Claude Code (the conversation is kept: Continue last picks it up)'
+            <button type='button' className={cn(ITEM, JOINED_DIVIDER_CLASS)} title='Stop Claude Code (the conversation is kept: Continue last, or the title, picks it up)'
               disabled={!term?.running} onClick={() => terminalActions.stop()}>
               <span className='w-3.5 h-3.5'><StopSessionIcon /></span>
             </button>

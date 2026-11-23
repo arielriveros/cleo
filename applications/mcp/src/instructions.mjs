@@ -30,6 +30,7 @@ Engine conventions
 - 2D scenes (dimension 2D): units, not metres (16 art pixels each), on the XY plane, +Y up. Build with camera2D, sprite/animatedSprite (assets:{tileset}), tilemap, body2D (props size), characterBody2D, room2D, parallaxLayer; a Trigger is a props size/offset box. 3D meshes and lights are not drawn there. Tilemaps collide on layer 1. Details: engine_api {"doc":"editor/tilemap-2d.md"}.
 - Animation one-shots play by action NAME (animator.playAction('Attack')); scripts never play clips directly.
 - Prefer existing templates and models (asset_list) over primitives; makeTemplate turns a built object into a reusable one.
+- play_control input can drive the mouse as a cursor for games that read Input.mouse: {"at":1,"cursor":[640,360],"mouse":"left"} clicks at canvas pixel (640,360); add "to":[x,y] to drag. Input.mouse (position, pressed/released, pickPhysics, groundPoint, worldPoint2D) is in engine_api.
 - play_control always plays in the editor; a game in its own window is only stopped or paused from here.
 
 Engine API: before writing a script, look the API up with engine_api instead of reading whole doc files: {"query":"play animation action"} finds classes, members and doc sections; {"symbol":"Animator.playAction"} gives the signature and doc; {"doc":"scripting/node-api.md#transform"} reads one docs section. Whole docs are resources under cleo://docs/, working examples under cleo://examples/ (each example project's scripts, under <slug>/Assets/).`;
