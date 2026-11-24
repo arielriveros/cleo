@@ -277,6 +277,20 @@ The bakes there:
 
 Work over in under half a second shows no card.
 
+Opening a project, or a scene in it, holds its loading screen on **Compiling shaders** until every shader
+the scene can draw with is built, wherever the camera is:
+- every material and its level-of-detail meshes, the water and the particles, including what is off
+  screen or past a draw distance;
+- custom materials;
+- the screen materials of every camera, including the game camera that only Play looks through;
+- at startup, the engine's own shaders first, in the same count.
+
+Nothing should then pop in late or stall the first time it comes into view. A cold start on Windows can
+take a minute or more on this step. Its row counts the builds and shows how long the slowest one has been
+running. The step gives up after five minutes and leaves anything unfinished to build as it is drawn.
+While the loading screen counts the shaders, the **Compiling shaders** card stays out of the progress
+window, since the step is already counting the same builds.
+
 ## Play mode
 
 **Play** switches to the scene tab and runs a live copy of the scene. **Pause** freezes it. **Stop**

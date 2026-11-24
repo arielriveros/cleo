@@ -161,6 +161,13 @@ export interface AnimationState {
      */
     startTime?: number;
     /**
+     * Stop motion: show this state's clip (or every clip of its blend space) as `fps` held poses a second of
+     * game time, whatever its playback speed. Unset or 0 plays smooth. Only the SAMPLING steps: the clip's
+     * clock, its events, exit time, root-motion travel, cross-fades, blend weights, layers and foot IK all
+     * stay continuous, so the character still travels smoothly while its pose holds.
+     */
+    fps?: number;
+    /**
      * On a LAYER: collect the clip's ground-plane root travel for {@link Animator.consumeRootMotion} instead
      * of moving anything. The root bone is held over the start spot (its height and tumble stay in the
      * pose), and a script moves the body by the travel — a roll that covers exactly the ground the dive does,
@@ -996,6 +1003,28 @@ const DOMINANT_SWITCH_MARGIN = 0.05;
 // sustained thrashing runs at the frame rate.
 const PING_PONG_FLIPS_PER_SEC = 6;
 
+// Stop motion (AnimationState.fps): slack on the frame clock, so five 1/60 s frames reach a 1/12 s one
+// despite the rounding of their sum.
+const FRAME_EPSILON = 1e-6;
+
+/**
+ * A stop-motion frame clock (game seconds into its held frame) with the frames it has reached taken off,
+ * or -1 when it has reached none. A hitch longer than a frame drops the whole frames it spans: the pose
+ * jumps to the present once, rather than bursting through every frame it missed.
+ */
+function takeFrame(clock: number, fps: number): number {
+    const period = 1 / fps;
+    if (!(clock + FRAME_EPSILON >= period)) return -1;
+    return Math.max(0, clock - period * Math.floor((clock + FRAME_EPSILON) / period));
+}
+
+/** A state's stop-motion rate (AnimationState.fps), 0 for smooth. A pose state has no clock to step. */
+function stateFps(state: AnimationState): number {
+    if (state.pose && !state.field) return 0;
+    const fps = state.fps;
+    return typeof fps === 'number' && Number.isFinite(fps) && fps > 0 ? fps : 0;
+}
+
 /** Skeletal animation playback: clips, cross-fades, the state machine, blend fields, ragdoll and foot IK. */
 export class Animator {
     private _currentAnimation: Animation | null = null;
@@ -1089,6 +1118,26 @@ export class Animator {
     private _previousAnimation: Animation | null = null;
     private _previousBones: Map<string, Bone> = new Map();
     private _previousTime: number = 0;
+
+    // ---- Stop motion (AnimationState.fps) ----
+    // A stepped state samples its clips at a HELD time, snapshotted from the continuous clock on each tick
+    // of a frame clock that runs on game time. Everything that reads the clock itself (events, exit time,
+    // root travel, sync phase) keeps the continuous value; only the pose sampling reads the held one.
+    /** The current state's frame rate; 0 = smooth (sample the live clock). */
+    private _fps: number = 0;
+    /** Game seconds since the last held frame. Not reset on a state change: the character keeps one beat. */
+    private _frameClock: number = 0;
+    /** Clip time / field phase of the frame on screen (meaningful while `_fps > 0`). */
+    private _heldTime: number = 0;
+    private _heldFieldPhase: number = 0;
+    /** A frame was taken in this `_advance`, so a synced layer re-snapshots at the phase it follows. */
+    private _tickedThisFrame: boolean = false;
+    /** The same, for the outgoing side of a cross-fade: it keeps stepping at its own state's rate. */
+    private _previousFps: number = 0;
+    private _previousFrameClock: number = 0;
+    private _previousHeldTime: number = 0;
+    private _previousHeldFieldPhase: number = 0;
+
     private _blendTime: number = 0.3; // Default blend time in seconds
     private _currentBlendTime: number = 0;
     private _isBlending: boolean = false;
@@ -1322,6 +1371,7 @@ export class Animator {
             this._previousBones = new Map(this._bones);
             this._capturePreviousField();
             this._capturePreviousRootPin();
+            this._capturePreviousFrames();
             this._previousTime = this._currentTime;
             // Read BEFORE _playing/_loop are overwritten: a finished clip must hold its final pose under
             // the cross-fade, not restart.
@@ -1340,6 +1390,8 @@ export class Animator {
 
         this._clearField();
         this._syncedBlend = false;
+        // Smooth unless a state says otherwise: `_enterState` sets the state's own rate right after.
+        this._fps = 0;
 
         this._currentAnimation = animation;
         this._currentTime = 0;
@@ -1499,6 +1551,7 @@ export class Animator {
             // A synced hand-over from a blend space: the two run on one phase through the cross-fade.
             this._syncedBlend = startPhase !== undefined && this._previousFieldEntries !== null;
             this._capturePreviousRootPin();
+            this._capturePreviousFrames();
             this._previousTime = this._currentTime;
             this._previousAdvancing = this._playing;
             this._previousLoop = this._loop;
@@ -1544,6 +1597,8 @@ export class Animator {
         this._playing = true;
         this._loopsPlayed = 0;
         this._loopLimit = 0;
+        // Smooth unless a state says otherwise, as in `_playClip`.
+        this._fps = 0;
 
         this._refreshFieldWeights();
         // After the refresh: the weighted duration is only known once the entries exist.
@@ -1897,7 +1952,7 @@ export class Animator {
         this._fieldDef = field;
         this._refreshFieldWeights();
         if (this._fieldEntries) {
-            this._poseFieldAt(this._fieldEntries, this._fieldPhase);
+            this._poseFieldAt(this._fieldEntries, this._samplePhase);
             this._recomputePose();
         }
     }
@@ -1910,7 +1965,7 @@ export class Animator {
         this._refreshFieldWeights();
         // Re-pose immediately so a paused editor preview responds to the probe without needing a tick.
         if (this._fieldEntries) {
-            this._poseFieldAt(this._fieldEntries, this._fieldPhase);
+            this._poseFieldAt(this._fieldEntries, this._samplePhase);
             this._recomputePose();
         }
     }
@@ -2063,15 +2118,19 @@ export class Animator {
         if (entries) {
             this._fieldPhase = phase;
             this._currentTime = phase * this._fieldDuration(entries);
+            // A stepped layer takes the followed phase as its frame only on its own beat.
+            if (this._tickedThisFrame) this._holdCurrentFrame();
             // A synced cross-fade inside the layer moves both of its sides on the one phase.
             if (this._isBlending && this._syncedBlend && this._previousFieldEntries) this._previousFieldPhase = phase;
             if (pose) {
-                this._poseFieldAt(entries, phase);
-                if (this._isBlending && this._previousFieldEntries) this._poseFieldAt(this._previousFieldEntries, this._previousFieldPhase);
+                this._poseFieldAt(entries, this._samplePhase);
+                if (this._isBlending && this._previousFieldEntries) this._poseFieldAt(this._previousFieldEntries,
+                    this._previousFps > 0 ? this._previousHeldFieldPhase : this._previousFieldPhase);
             }
         } else {
             this._currentTime = phase * this._getAnimationDuration();
-            if (pose) for (const bone of this._bones.values()) bone.update(this._currentTime);
+            if (this._tickedThisFrame) this._holdCurrentFrame();
+            if (pose) { const t = this._sampleTime; for (const bone of this._bones.values()) bone.update(t); }
         }
     }
 
@@ -2180,6 +2239,7 @@ export class Animator {
     }
 
     private _advance(deltaTime: number): void {
+        this._tickedThisFrame = false;
 
         // Above every early return: a finished clip sets _playing false, and freezing the clock a
         // minDwell gate waits on would lock the machine in that state permanently.
@@ -2285,6 +2345,10 @@ export class Animator {
             }
         }
 
+        // Stop motion: on the beat, the clock's time becomes the frame on screen. A clip that finished just now
+        // shows its last key, whatever the beat (`_playing` was true above, so false here means just now).
+        this._tickFrame(deltaTime, !this._playing);
+
         // A field's `_currentTime` is not monotonic — the weighted duration moves — so both phases are
         // projected through the SAME duration before the markers are compared.
         if (this._fieldEntries) {
@@ -2294,12 +2358,13 @@ export class Animator {
         }
 
         // Update all bones with current animation time — unless the LOD skips this frame's pose, in which
-        // case only what gameplay reads (time, events above, root motion below) moves on.
+        // case only what gameplay reads (time, events above, root motion below) moves on. A stepped state
+        // samples its held frame, every posed frame: a blend-space clip fading in between beats must be posed too.
         const pose = !this._skipPose;
         if (this._fieldEntries) {
-            if (pose) this._poseFieldAt(this._fieldEntries, this._fieldPhase);
+            if (pose) this._poseFieldAt(this._fieldEntries, this._samplePhase);
         } else {
-            if (pose) for (const bone of this._bones.values()) bone.update(this._currentTime);
+            if (pose) { const t = this._sampleTime; for (const bone of this._bones.values()) bone.update(t); }
             // After the pose loop: it drives the character, then pins the root bone to the locked reference.
             // Every frame: root motion samples the root bone on its own, and it is what moves the character.
             if (this._rootMotionActive) this._applyRootMotion(prevTime, this._currentTime, duration, looped);
@@ -2316,8 +2381,10 @@ export class Animator {
                     this._previousFieldPhase = this._previousLoop ? this._previousFieldPhase % 1 : 1;
                 }
             }
+            this._tickPreviousFrame(deltaTime);
             // The outgoing field keeps its snapshot weights; the live probe must not steer it.
-            if (pose) this._poseFieldAt(this._previousFieldEntries, this._previousFieldPhase);
+            if (pose) this._poseFieldAt(this._previousFieldEntries,
+                this._previousFps > 0 ? this._previousHeldFieldPhase : this._previousFieldPhase);
         } else if (this._isBlending && this._previousAnimation) {
             if (this._previousAdvancing) {
                 const previousDuration = this._getPreviousAnimationDuration();
@@ -2327,9 +2394,11 @@ export class Animator {
                     this._previousTime = this._previousLoop ? this._previousTime % previousDuration : previousDuration;
                 }
             }
+            this._tickPreviousFrame(deltaTime);
             // Not advancing means the clip finished before the blend began; it holds its last pose.
             if (pose) {
-                for (const bone of this._previousBones.values()) bone.update(this._previousTime);
+                const t = this._previousFps > 0 ? this._previousHeldTime : this._previousTime;
+                for (const bone of this._previousBones.values()) bone.update(t);
                 // The re-sample above overwrote the outgoing clip's root pin; put it back.
                 this._pinPreviousRoot();
             }
@@ -2568,10 +2637,12 @@ export class Animator {
         vec3.transformQuat(deltaT, deltaT, this._rootParentRot);   // model space; consumeRootMotion places it
         vec3.add(this._rootDelta, this._rootDelta, deltaT);
 
-        // Pin the horizontal position to the start; keep the clip's own rotation and height.
-        const t = vec3.clone(cur.t);
+        // Pin the horizontal position to the start; keep the clip's own rotation and height -- the HELD frame's,
+        // when the state steps, or the hips would turn smoothly under a body that holds still.
+        const shown = this._fps > 0 ? bone.sampleTR(this._heldTime) : cur;
+        const t = vec3.clone(shown.t);
         for (let a = 0; a < 3; a++) if (a !== up) t[a] = this._rootRefT[a];
-        const pinned = mat4.fromRotationTranslationScale(mat4.create(), cur.r, t, this._rootRefS);
+        const pinned = mat4.fromRotationTranslationScale(mat4.create(), shown.r, t, this._rootRefS);
         bone.setLocalTransform(pinned);
         void curTime;
     }
@@ -2600,6 +2671,7 @@ export class Animator {
         this._previousFieldEntries = null;
         this._prevRootBoneName = null;
         this._previousAdvancing = false;
+        this._previousFps = 0;   // a frozen pose has no clip left to step
         this._isBlending = true;
         this._syncedBlend = false;
     }
@@ -2613,6 +2685,52 @@ export class Animator {
         quat.copy(this._prevRootRefR, this._rootRefR);
         vec3.copy(this._prevRootRefS, this._rootRefS);
     }
+
+    // The current state's stop-motion frames as the outgoing side's: under the cross-fade it keeps stepping at its
+    // own rate, on the same beat (the clock is copied, not restarted), so both sides change pose together.
+    private _capturePreviousFrames(): void {
+        this._previousFps = this._fps;
+        this._previousFrameClock = this._frameClock;
+        this._previousHeldTime = this._heldTime;
+        this._previousHeldFieldPhase = this._heldFieldPhase;
+    }
+
+    /**
+     * Run the stop-motion frame clock by `deltaTime` game seconds and, on the beat, take the frame now on the
+     * continuous clock as the held one. `force` takes it whatever the clock says (a clip that just finished
+     * ends on its last key). Smooth (`_fps` 0): nothing to hold.
+     */
+    private _tickFrame(deltaTime: number, force: boolean): void {
+        if (!(this._fps > 0)) { this._frameClock = 0; return; }
+        this._frameClock += Math.max(0, deltaTime);
+        const left = takeFrame(this._frameClock, this._fps);
+        if (left >= 0) this._frameClock = left;
+        else if (!force) return;
+        this._heldTime = this._currentTime;
+        this._heldFieldPhase = this._fieldPhase;
+        this._tickedThisFrame = true;
+    }
+
+    /** {@link _tickFrame} for the outgoing side of a cross-fade, on its own state's rate. */
+    private _tickPreviousFrame(deltaTime: number): void {
+        if (!(this._previousFps > 0)) return;
+        this._previousFrameClock += Math.max(0, deltaTime);
+        const left = takeFrame(this._previousFrameClock, this._previousFps);
+        if (left < 0) return;
+        this._previousFrameClock = left;
+        this._previousHeldTime = this._previousTime;
+        this._previousHeldFieldPhase = this._previousFieldPhase;
+    }
+
+    /** Take the frame on the continuous clock as the held one now: a state's first frame, a scrub, an edit. */
+    private _holdCurrentFrame(): void {
+        this._heldTime = this._currentTime;
+        this._heldFieldPhase = this._fieldPhase;
+    }
+
+    /** The clip time / field phase to SAMPLE at: the held frame when the state steps, the live clock otherwise. */
+    private get _sampleTime(): number { return this._fps > 0 ? this._heldTime : this._currentTime; }
+    private get _samplePhase(): number { return this._fps > 0 ? this._heldFieldPhase : this._fieldPhase; }
 
     // Lock the outgoing clip's root bone to its reference, exactly as `_applyRootMotion` does for the
     // current clip.
@@ -3617,10 +3735,24 @@ export class Animator {
             // current weighted duration.
             this._fieldPhase = duration > 0 ? this._currentTime / duration : 0;
             this._prevFieldPhase = this._fieldPhase;   // a scrub is not playback; it must not fire events
-            this._poseFieldAt(this._fieldEntries, this._fieldPhase);
+        }
+        if (this._fps > 0) {
+            // A stepped state scrubs through its frames: the ones playback from the start would show at this
+            // speed, each `speed / fps` clip seconds apart, and the last key at the end, as playback ends on it.
+            // The clock restarts on the frame shown.
+            const step = this._speed > 0 ? this._speed / this._fps : 0;
+            this._heldTime = step > 0 && this._currentTime < duration
+                ? Math.min(duration, Math.floor(this._currentTime / step + FRAME_EPSILON) * step)
+                : this._currentTime;
+            this._heldFieldPhase = duration > 0 ? this._heldTime / duration : 0;
+            this._frameClock = 0;
+        }
+        if (this._fieldEntries) {
+            this._poseFieldAt(this._fieldEntries, this._samplePhase);
         } else {
+            const t = this._sampleTime;
             for (const bone of this._bones.values()) {
-                bone.update(this._currentTime);
+                bone.update(t);
             }
         }
         this._recomputePose();
@@ -3740,6 +3872,9 @@ export class Animator {
         this._stateMachine = sm;
         this._paramValues.clear();
         this._currentStateName = null;
+        // A new machine starts smooth and on a fresh beat; its entry state sets its own rate.
+        this._fps = 0;
+        this._frameClock = 0;
         // Anything cached belongs to the old machine. This is also what makes an editor field edit take.
         this._fieldBoneCache.clear();
         this._clearField();
@@ -3800,6 +3935,12 @@ export class Animator {
         const state = this._stateMachine?.states.find(s => s.name === this._currentStateName);
         if (!state) return;
         if (this._isOverlay && (state.pose || state.field || state.clipName)) this._steadyTarget = clamp(state.meshSpace ?? 0, 0, 1);
+        // An edited frame rate shows at once, from the frame on the clock now.
+        const fps = stateFps(state);
+        if (fps !== this._fps && (state.field || state.clipName || state.pose)) {
+            this._fps = fps;
+            this._holdCurrentFrame();
+        }
         if (state.pose) {
             const clip = this._poseClipOf(state.pose, state.pose.name ?? state.name);
             if (clip === this._currentAnimation) return;
@@ -3809,7 +3950,7 @@ export class Animator {
         } else if (state.field && this._fieldDef && state.field !== this._fieldDef) {
             this._fieldDef = state.field;
             this._refreshFieldWeights();
-            if (this._fieldEntries) this._poseFieldAt(this._fieldEntries, this._fieldPhase);
+            if (this._fieldEntries) this._poseFieldAt(this._fieldEntries, this._samplePhase);
         }
     }
 
@@ -4004,6 +4145,9 @@ export class Animator {
             this._loopsPlayed = 0;
             this._speed = state.speed ?? 1.0;
             this._applyStateSpeed(state);
+            // Stop motion: the state's first frame is the one it starts on (a carried phase included).
+            this._fps = stateFps(state);
+            this._holdCurrentFrame();
             return;
         }
 
@@ -4071,6 +4215,11 @@ export class Animator {
         this._loopsPlayed = 0;
         this._speed = state.speed ?? 1.0;
         this._applyStateSpeed(state);
+        // Stop motion: the state's first frame is the one it starts on (`startTime` or a carried phase included).
+        if (this._currentAnimation) {
+            this._fps = stateFps(state);
+            this._holdCurrentFrame();
+        }
     }
 
     private _warnMissingLayerClip(state: AnimationState): void {

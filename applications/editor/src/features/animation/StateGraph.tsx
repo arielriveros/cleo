@@ -178,6 +178,8 @@ export default function StateGraph() {
     const field = s.fieldId ? fieldOf(s.fieldId) : undefined
     const playsField = !!s.fieldId
     const playsPose = !playsField && !!(s.poseRef || s.pose)
+    // Stop motion (AnimationState.fps); a pose has no clock to step.
+    const stepped = !playsPose && typeof s.fps === 'number' && s.fps > 0
     // The ⊞ badge is what distinguishes a blend state from a clip state; the name alone does not.
     const what = playsField ? (field?.name || '(missing field)')
       : playsPose ? `pose: ${s.pose?.name ?? 'pose'}`
@@ -195,11 +197,13 @@ export default function StateGraph() {
       // looks right in a preview (which always runs at rate 1) and wrong in Play, so it has to be
       // legible without selecting the node. Highlighted on a field state, where it multiplies an
       // already speed-matched blend.
-      badge: `${s.loop ? '↻' : '→'} ×${s.speedParam ?? s.speed}${s.speedScaleParam ? `·${s.speedScaleParam}` : ''}`,
+      badge: `${s.loop ? '↻' : '→'} ×${s.speedParam ?? s.speed}${s.speedScaleParam ? `·${s.speedScaleParam}` : ''}`
+        + (stepped ? ` · ${s.fps} fps` : ''),
       badgeTitle: (s.speedParam
         ? `Playback rate read from the "${s.speedParam}" parameter`
         : 'Fixed playback rate')
-        + (s.speedScaleParam ? `, times the "${s.speedScaleParam}" parameter` : ''),
+        + (s.speedScaleParam ? `, times the "${s.speedScaleParam}" parameter` : '')
+        + (stepped ? `; stop motion at ${s.fps} poses a second` : ''),
       badgeTone: s.speedParam && playsField ? 'warning' : 'dim',
       // The triggers that enter it directly — a state a script plays by name needs no edge.
       chips: (s.triggers ?? []).filter(e => e.trigger).map(e => e.trigger),

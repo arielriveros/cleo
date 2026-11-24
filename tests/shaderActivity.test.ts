@@ -31,6 +31,19 @@ describe('the shader activity feed', () => {
         off();
     });
 
+    it('counts every build begun and ended, so a wait can tell what started and finished since it began', () => {
+        const before = shaderActivity.counts();
+        const a = shaderActivity.begin({ program: 'pbr', kind: 'pipeline' });
+        const b = shaderActivity.begin({ program: 'custom:1', kind: 'program' });
+        shaderActivity.end(a);
+        shaderActivity.end(a); // an id ended twice counts once
+        shaderActivity.end(999); // unknown: not counted
+        const mid = shaderActivity.counts();
+        expect([mid.begun - before.begun, mid.ended - before.ended]).toEqual([2, 1]);
+        shaderActivity.end(b);
+        expect(shaderActivity.counts().ended - before.ended).toBe(2);
+    });
+
     it('carries the warm-up count, and drops it once over', () => {
         shaderActivity.setWarm(0, 40);
         shaderActivity.setWarm(10, 40);

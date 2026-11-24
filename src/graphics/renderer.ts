@@ -21,7 +21,9 @@ import { MAX_CASCADES, MAX_POINT_SHADOWS, SHADOW_BIAS_VERSION, migrateShadowBias
 
 import { Texture } from './texture';
 import { CustomMaterial } from './material';
-import { ensureCustomShader, customShaderReady } from './systems/customShaders';
+import { ensureCustomShader, customShaderReady, pendingCustomCompiles } from './systems/customShaders';
+import { shaderActivity } from './shaderActivity';
+import { awaitShaders, type SweepFrames, type ShaderWaitResult } from './render/shaderSweep';
 import { TexturePacker } from './systems/texturePacker';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats } from './renderStats';
@@ -102,6 +104,50 @@ import { createDevice } from './rhi/createDevice';
 import { setDevice, device } from './rhi/deviceHandle';
 import { jitterMatrix } from './utils/taaJitter';
 import { isCamera2D } from "../core/scene/nodes/nodeType";
+
+/** What {@link Renderer.prepareShaders} waited for. */
+export interface ShaderPreparation {
+    /** Builds that finished while it waited: pipelines built off the main thread, programs compiled in the background. */
+    readonly built: number;
+    /** Still building when it stopped early (its time limit, or the signal). 0 when everything is in. */
+    readonly remaining: number;
+    /** Frames it drew the scene in, culled by nothing. 0 when none could be drawn (a hidden viewport). */
+    readonly frames: number;
+    /** Whether it stopped at its time limit rather than with everything built. */
+    readonly timedOut: boolean;
+    readonly seconds: number;
+}
+
+/** Options of {@link Renderer.prepareShaders}. */
+export interface PrepareShadersOptions {
+    /** Builds finished of builds started so far, the warm-up of remembered recipes included. Both grow. */
+    onProgress?: (done: number, total: number) => void;
+    /** Stop waiting (the project closing). Resolves with what was still building. */
+    signal?: AbortSignal;
+    /** Stop waiting after this long, in ms (default 5 minutes): a driver that never answers must not hold a load. */
+    timeoutMs?: number;
+}
+
+/** A shader sweep in progress (Renderer.prepareShaders): the scene its frames draw, and how many it still wants. */
+interface ShaderSweep extends SweepFrames {
+    readonly scene: Scene;
+}
+
+/** Every custom material `scene` can draw with: on its models, its landscapes, and every 3D camera's screen materials. */
+function customMaterialsOf(scene: Scene): CustomMaterial[] {
+    const found = new Set<CustomMaterial>();
+    for (const node of scene.modelsExceptTerrain)
+        for (const mat of node.model.materials) if (mat instanceof CustomMaterial) found.add(mat);
+    for (const landscape of scene.landscapes) {
+        const mat = landscape.terrain.material;
+        if (mat instanceof CustomMaterial) found.add(mat);
+    }
+    // Every camera's, not the active one's: the game camera's effects are what Play looks through first.
+    for (const camera of scene.cameras)
+        for (const mat of camera.screenMaterials)
+            if (mat instanceof CustomMaterial && mat.renderMode === 'screen') found.add(mat);
+    return [...found];
+}
 
 interface RendererConfig {
     clearColor?: number[];
@@ -784,6 +830,12 @@ export class Renderer {
 
     /** Draw one frame. */
     public render(scene: Scene): void {
+        // A shader sweep (prepareShaders) draws ITS scene on the frames it asks for, whichever scene is showing:
+        // the editor sweeps the open scene while a restored asset tab is in front.
+        // Never a kept frame (a thumbnail or cover capture, a movie frame): those draw the scene they were given.
+        const sweep = this._shaderSweep && this._shaderSweep.wanted > 0 && !this._capture.presentTarget && !this._movie.active
+            ? this._shaderSweep : null;
+        if (sweep) scene = sweep.scene;
         // Set active camera
         if (!scene.activeCamera) return;
         // A canvas with no area — the viewport panel hidden behind another tab, collapsed, or not laid
@@ -825,14 +877,73 @@ export class Renderer {
         if (isCamera2D(active)) active.fitView(this._renderWidth, this._renderHeight);
         if (this._view.flat2D && !flat) this.invalidateTemporalHistory();
         this._view.flat2D = flat;
+        // A sweep frame culls nothing, so every material the scene can draw asks for its pipeline.
+        const culling = this._visibility.frustumCulling;
+        if (sweep) {
+            this._visibility.frustumCulling = false;
+            this._visibility.sweeping = true;
+        }
         try {
             if (flat) this._renderFrame2D(scene);
             else this._renderFrame(scene);
         } finally {
+            if (sweep) {
+                this._visibility.frustumCulling = culling;
+                this._visibility.endSweepFrame(scene);
+                sweep.wanted--;
+                sweep.rendered++;
+            }
             // `finally`, because `_renderFrame` can throw: an encoder left open would leak every pass
             // recorded into it and the next frame would start on a stale one.
             this._passes.flushFrameEncoder();
         }
+    }
+
+    /** The shader sweep in progress, if any (see `prepareShaders`). */
+    private _shaderSweep: ShaderSweep | null = null;
+
+    /**
+     * Build every shader `scene` can draw with before it is shown, and resolve once all of it is in: the editor
+     * holds its loading screen on this, so nothing pops in or stalls the first time it is seen.
+     *
+     *  - Every custom material on its models and landscapes, and EVERY 3D camera's screen materials (the game
+     *    camera's, which nothing looks through until Play), compiled in the background where the device can.
+     *  - The screen materials' pipelines, started at once: no frame would ask for them yet.
+     *  - A few frames of the scene drawn with nothing culled (no frustum or occlusion test, every LOD level,
+     *    nothing a draw distance hides), so every material, water body and particle system off screen asks for
+     *    its pipeline too. On WebGPU those are built off the main thread (PipelineCache.getOrDefer).
+     *  - Any warm-up of remembered recipes still under way (`warmPipelines`).
+     *
+     * It resolves when nothing is building and one more such frame, drawn with all of it in, starts nothing
+     * new. Builds that compile on the spot are done when their frame is. A viewport that draws no frame for a
+     * few seconds (hidden) leaves the frames out and waits for the rest.
+     */
+    public async prepareShaders(scene: Scene, options: PrepareShadersOptions = {}): Promise<ShaderPreparation> {
+        const t0 = performance.now(); // wall-clock: how long the build took, for the log
+        const customs = customMaterialsOf(scene);
+        const screens = customs.filter(m => m.renderMode === 'screen');
+        const sweep: ShaderSweep = { scene, wanted: 0, rendered: 0 };
+        this._shaderSweep = sweep;
+        let result: ShaderWaitResult;
+        try {
+            result = await awaitShaders({
+                poll: () => {
+                    // Each call starts a custom program's compile or, once it is in, registers it.
+                    for (const mat of customs) ensureCustomShader(mat, { background: true });
+                    for (const mat of screens) if (customShaderReady(mat)) this._post.screenMaterialPipeline(mat, 'prefetch');
+                },
+                building: () => this._pipelines.pendingBuilds + pendingCustomCompiles() > 0 || this._pipelines.warming,
+                counts: () => shaderActivity.counts(),
+                warm: () => shaderActivity.snapshot().warm,
+            }, sweep, { onProgress: options.onProgress, signal: options.signal, timeoutMs: options.timeoutMs });
+        } finally {
+            if (this._shaderSweep === sweep) this._shaderSweep = null;
+        }
+        const remaining = this._pipelines.pendingBuilds + pendingCustomCompiles();
+        const seconds = (performance.now() - t0) / 1000; // wall-clock: as above
+        if (result.timedOut) Logger.warn(`[shaders] still building ${remaining} after ${seconds.toFixed(0)} s; the rest builds as it is drawn`, 'Renderer');
+        else if (result.built) Logger.info(`[shaders] the scene's shaders are built (${result.built} in ${seconds.toFixed(1)} s)`, 'Renderer');
+        return { built: result.built, remaining, frames: sweep.rendered, timedOut: result.timedOut, seconds };
     }
 
     private _renderFrame(scene: Scene): void {
@@ -2151,7 +2262,7 @@ export class Renderer {
                 // Its pipeline, built off the main thread the first time (PostEffects.screenMaterialPipeline):
                 // compiled on the spot, a large screen shader froze the window -- and Play -- for as long as
                 // the driver took. Until it is ready the stage is left out, like one that did not build.
-                if (!this._post.screenMaterialPipeline(material, true)) continue;
+                if (!this._post.screenMaterialPipeline(material, 'defer')) continue;
                 const from = src, to = flip();
                 graph.addPass({
                     id: entry.effect, scope: 'screenMaterials', reads: [from], writes: [to],

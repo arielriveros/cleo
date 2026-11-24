@@ -304,7 +304,17 @@ export class PostEffects {
      * its camera is looked through, which is Play: built on the spot, the pencil-sketch material held the
      * window for 21 s in the desktop editor's Chromium (Electron 31), Play's first frame with it.
      */
-    public screenMaterialPipeline(mat: CustomMaterial, defer: boolean): RenderPipeline | null {
+    /**
+     * A screen material's pipeline. `now` builds it on the spot (the pass, which only runs once it exists);
+     * `defer` builds a missing one off the main thread and answers null meanwhile (the frame deciding whether
+     * the pass runs); `prefetch` starts it whatever the frame's deferral says (Renderer.prepareShaders, for a
+     * camera nothing looks through yet).
+     *
+     * `defer` and `prefetch` run before the pass is open, so they name the target it will draw into: a chain
+     * buffer's shape (`chainTarget`). Without it the key took the formats of whatever pass ran last, and the
+     * pass then missed the pipeline built for it and compiled another on the spot.
+     */
+    public screenMaterialPipeline(mat: CustomMaterial, mode: 'now' | 'defer' | 'prefetch'): RenderPipeline | null {
         // The WGSL, when there is any. On WebGL2 there is none and none is needed — the program
         // is already linked and `_pipelines.get` reaches it by name. `entryPoints.fragment` is
         // `main` because that is what naga calls the entry it generates, not `fs_main`.
@@ -314,10 +324,26 @@ export class PostEffects {
             ...(wgsl ? { wgsl: wgsl.fragment, entryPoints: { fragment: 'main' },
                          vertexWgsl: { wgsl: wgsl.vertex, entryPoint: wgsl.vertexEntry } } : {}),
         };
-        const options = { vertex: 'model', builtFor: mat.type } as const;
-        return defer ? this._pipelines.getOrDefer(mat.type, reflection, options)
-                     : this._pipelines.get(mat.type, reflection, options);
+        if (mode === 'now') return this._pipelines.get(mat.type, reflection, { vertex: 'model', builtFor: mat.type });
+        const options = { vertex: 'model', builtFor: mat.type, target: this._chainTarget() } as const;
+        return mode === 'defer' ? this._pipelines.getOrDefer(mat.type, reflection, options)
+                                : this._pipelines.prefetch(mat.type, reflection, options);
     }
+
+    /**
+     * A render target shaped like the post chain's buffers (`_buildPostGraph`'s `hdr`: one `rgba16float` colour,
+     * no depth, through the same float fallback the pool's buffers take), for a pipeline built before its pass
+     * opens. 1x1: only its formats are read.
+     */
+    private _chainTarget(): RenderTarget {
+        if (!this._chainShape) {
+            this._chainShape = new Framebuffer({ usage: 'color', colorAttachments: 1, depth: false,
+                                                 colorTextureOptions: { mipMap: false, format: 'rgba16float' } });
+            this._chainShape.create(1, 1);
+        }
+        return this._chainShape.renderTarget;
+    }
+    private _chainShape: Framebuffer | null = null;
 
     public screenMaterialPass(scene: Scene, mat: CustomMaterial,
                                 source: Framebuffer, target: Framebuffer): void {
@@ -325,7 +351,7 @@ export class PostEffects {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'screenMaterial',
                                                false, undefined, false);
         // Ready by now: the renderer adds this pass only once `screenMaterialPipeline` has one.
-        const pipeline = this.screenMaterialPipeline(mat, false)!;
+        const pipeline = this.screenMaterialPipeline(mat, 'now')!;
         pass.setPipeline(pipeline);
         this._shaderManager.bind(mat.type);
         // Group 0 is the two engine samplers followed by the user's, in declaration order — the

@@ -127,3 +127,81 @@ describe('a pipeline a draw finds missing', () => {
         expect(f.sync).toBe(0);
     });
 });
+
+// Renderer.prepareShaders builds what a scene can draw before the editor shows it: pipelines no frame asks for
+// yet (a game camera's screen materials), and a warm-up it has to wait for to the end.
+describe('a pipeline built ahead of its draw', () => {
+    it('is built off the main thread whatever the frame deferral says, and found by the draw that wants it', async () => {
+        const f = fakeDevice();
+        const { cache } = setup();
+        cache.deferMisses = false;   // between frames, or a kept frame's value: prefetch does not read it
+        expect(cache.prefetch('screen', reflection, state)).toBeNull();
+        expect([f.sync, f.async.length, cache.pendingBuilds]).toEqual([0, 1, 1]);
+        f.async[0].resolve({ label: 'screen', async: true });
+        await settle();
+        expect(cache.get('screen', reflection, state)).toEqual({ label: 'screen', async: true });
+        expect(f.sync).toBe(0);
+    });
+
+    it('is built at once on WebGL2, and inside a capture', () => {
+        const f = fakeDevice(false);
+        const { cache, view } = setup();
+        expect(cache.prefetch('screen', reflection, state)).toMatchObject({ sync: true });
+        fakeDevice();
+        (view as unknown as { capturing: boolean }).capturing = true;
+        expect(cache.prefetch('water', reflection, state)).toMatchObject({ sync: true });
+        expect(f.async.length).toBe(0);
+    });
+
+    it('keys on the target it names, not the pass that ran last: the pass drawing into that shape finds it', async () => {
+        const f = fakeDevice();
+        const host: PipelineCacheHost = { variants: false, filter: () => 0, physicalOf: (n) => n, descriptorFor: () => null };
+        const view = { cubeFace: false, capturing: false } as unknown as FrameView;
+        // The last pass drew into the scene buffer, which has depth; the screen material draws into a chain buffer.
+        const scene = { colorViews: [{ texture: { format: 'rgba16float' } }], depthView: { texture: { format: 'depth24plus' } } };
+        const chainShape = { colorViews: [{ texture: { format: 'rgba16float' } }] };
+        const chain = { colorViews: [{ texture: { format: 'rgba16float' } }] };
+        const passes = { target: scene } as unknown as PassEncoder;
+        const cache = new PipelineCache(host, view, passes, []);
+        const screenState: PipelineOptions = { vertex: 'model', builtFor: 'customScreen:1' };
+        expect(cache.prefetch('customScreen:1', reflection, { ...screenState, target: chainShape as never })).toBeNull();
+        f.async[0].resolve({ label: 'customScreen:1', async: true });
+        await settle();
+        (passes as unknown as { target: unknown }).target = chain;   // the pass opens on a chain buffer
+        expect(cache.get('customScreen:1', reflection, screenState)).toEqual({ label: 'customScreen:1', async: true });
+        expect(f.sync).toBe(0);
+    });
+
+    it('says a warm-up is under way until its last batch is built, though nothing is building between batches', async () => {
+        const f = fakeDevice();
+        const host: PipelineCacheHost = {
+            variants: false, filter: () => 0, physicalOf: (n) => n,
+            descriptorFor: () => ({ resources: [], wgsl: reflection.wgsl } as never),
+        };
+        vi.spyOn(ShaderManager.Instance, 'find').mockReturnValue({} as never);
+        const view = { cubeFace: false, capturing: false } as unknown as FrameView;
+        const passes = { target: { colorViews: [{ texture: { format: 'rgba16float' } }], depthView: null } } as unknown as PassEncoder;
+        const cache = new PipelineCache(host, view, passes, []);
+        const recipe = (program: string) => ({
+            program, cullMode: 'back' as const, targets: 1, topology: 'triangle-list' as const, vertex: false as const,
+            builtFor: null, cubeFace: false, colorFormats: ['rgba16float'], blend: null, depthStencil: DEPTH_WRITE,
+        });
+        const batch = PipelineCache.WARM_BATCH;
+        PipelineCache.WARM_BATCH = 1;
+        try {
+            expect(cache.warming).toBe(false);
+            const warming = cache.warm(undefined, [recipe('a'), recipe('b')]);
+            expect(cache.warming).toBe(true);
+            f.async[0].resolve({ label: 'a' });
+            await settle();
+            // 'a' is in and 'b' not started yet: nothing building, yet the warm-up is not over.
+            expect([cache.pendingBuilds, cache.warming]).toEqual([0, true]);
+            await new Promise(r => setTimeout(r, PipelineCache.WARM_GAP_MS + 10));
+            f.async[1].resolve({ label: 'b' });
+            expect(await warming).toBe(2);
+            expect(cache.warming).toBe(false);
+        } finally {
+            PipelineCache.WARM_BATCH = batch;
+        }
+    });
+});

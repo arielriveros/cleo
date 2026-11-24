@@ -673,8 +673,29 @@ export class Visibility {
     // way back, like the LOD groups). Visibility flags are rewritten only on a transition.
     public updateModelLOD(scene: Scene): void {
         const eye = this._view.lodEye;
+        if (this.sweeping) {
+            // A shader sweep's frame (Renderer.prepareShaders): every level and everything a draw distance would
+            // hide is drawn, so the materials of each get built. The group puts its active level back after
+            // the frame (`endSweepFrame`); a draw-distance node is judged afresh by the next frame's call below.
+            for (const group of scene.lodGroups) group.showAllLevels(true);
+            for (const node of scene.drawDistanceNodes) node.setDrawCulled(false);
+            return;
+        }
         for (const group of scene.lodGroups) group.updateLod(eye);
         for (const node of scene.drawDistanceNodes) node.updateDrawCull(eye);
+    }
+
+    /**
+     * A frame that culls nothing: no frustum or occlusion test, every LOD level, nothing a draw distance hides.
+     * Set by Renderer.prepareShaders for the frames it sweeps, which exist to have every material the scene can
+     * draw ask for its pipeline. Cleared with {@link endSweepFrame}.
+     */
+    public sweeping = false;
+
+    /** After a sweep frame: each LOD group shows its active level again. */
+    public endSweepFrame(scene: Scene): void {
+        this.sweeping = false;
+        for (const group of scene.lodGroups) group.showAllLevels(false);
     }
 
     /** Squared distance from point `p` to the closest point of the AABB [min, max] (0 if inside). */

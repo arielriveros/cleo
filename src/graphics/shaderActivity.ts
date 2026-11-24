@@ -33,6 +33,9 @@ let warm: ShaderActivity['warm'] = null;
 let snapshot: ShaderActivity = { active: [], warm: null };
 const listeners = new Set<() => void>();
 let nextId = 1;
+/** Builds begun and ended since the page loaded: what a wait for "everything built" counts against. */
+let begun = 0;
+let ended = 0;
 
 function publish(): void {
     snapshot = { active: [...builds.values()], warm };
@@ -45,12 +48,20 @@ export const shaderActivity = {
         const id = nextId++;
         const started = performance.now(); // wall-clock: how long the driver has been compiling, not game time
         builds.set(id, { id, program: build.program, builtFor: build.builtFor ?? null, kind: build.kind, started });
+        begun++;
         publish();
         return id;
     },
     /** It finished (or failed: the builder logs why). Unknown ids are ignored. */
     end(id: number): void {
-        if (builds.delete(id)) publish();
+        if (builds.delete(id)) { ended++; publish(); }
+    },
+    /**
+     * How many builds have begun and ended so far, ever. Two readings a while apart say what started and
+     * finished between them (Renderer.prepareShaders counts its progress this way).
+     */
+    counts(): { readonly begun: number; readonly ended: number } {
+        return { begun, ended };
     },
     /** The warm-up's progress, or null once it is over. */
     setWarm(done: number | null, total = 0): void {
@@ -70,6 +81,8 @@ export const shaderActivity = {
     reset(): void {
         builds.clear();
         warm = null;
+        begun = 0;
+        ended = 0;
         publish();
     },
 };

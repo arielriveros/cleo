@@ -28,6 +28,16 @@ export class LodGroupNode extends Node {
     }
 
     /**
+     * Show every level at once (true), or go back to the active one (false). For a frame that draws everything
+     * the group can show, so each level's materials are built before the camera first comes near or goes far
+     * (Renderer.prepareShaders); never left on.
+     */
+    public showAllLevels(all: boolean): void {
+        if (all) for (const child of this._children) child.setLodVisible(true);
+        else this._applyActiveLod();
+    }
+
+    /**
      * Pick the level from the camera's distance to the *surface* of the group's bounding sphere.
      * Thresholds carry ×0.9 hysteresis: coarsen and cull immediately, refine only once inside it.
      */

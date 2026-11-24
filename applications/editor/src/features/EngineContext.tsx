@@ -18,6 +18,7 @@ import { useStableActions } from "@cleo/app-kit/utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
 import { savePipelineRecipes, warmProjectPipelines } from "../utils/pipelineWarmup";
+import { ensureTranslatorFor, prepareSceneShaders, engineShaderProgress, type CountedShaders } from "../utils/sceneShaders";
 import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, setMovieRender, engineEventBus, parseRuntimeScene, setSaveStore, resetSaveSession, beginSaveSessionFrom } from "cleo";
 import type { SaveDocument } from "cleo";
 import { playSaveStore, type PlaySavesConfig } from "./saves/playSaves";
@@ -1013,6 +1014,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   /** Boot restore has finished (pruned + active tab hydrated) — until then the session must not be re-saved. */
   const tabsRestoreDoneRef = useRef(false);
   const bootTabsDoneRef = useRef(false);
+  /** Stops the open scene's shader build being waited on (utils/sceneShaders.ts) when this project closes. */
+  const shaderPrepAbortRef = useRef(new AbortController());
+  /** The engine's own programs the startup's shaders step counted, before the scene's join the same count. */
+  const engineShadersRef = useRef<CountedShaders>({ done: 0, total: 0 });
 
   /**
    * Put a freshly built tab into the strip — the tail every `enter*Editor` ends with. With `adoptTabId` the
@@ -2562,12 +2567,22 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     applyActiveTab(active);
     tabsRestoreDoneRef.current = true;
     tabsStep.done(`${kept.length} tab${kept.length === 1 ? '' : 's'}`);
+
+    // Last: every shader the open scene can draw with, built while the splash is still up (custom materials and
+    // every camera's screen materials too), with the scene re-linked against the libraries and the tabs back. The
+    // renderer draws the open scene for it even when a restored asset tab is in front. The same step and count as
+    // the engine's own programs at startup: one "Compiling shaders" from the first shader to the last.
+    void prepareSceneShaders(instanceRef.current?.renderer, editorSceneRef.current,
+                             bootLoadRef.current.step('shaders'), shaderPrepAbortRef.current.signal,
+                             engineShadersRef.current);
   }, [assetsLoaded, isSceneReady]);
 
   /**
    * Close the startup splash once every boot step has settled (done, failed or skipped) — not at
    * `isSceneReady`, which comes before the libraries, the resync and the tab restore. A watchdog
-   * closes it regardless after a minute, naming what never finished, so the editor cannot be stuck.
+   * closes it regardless after a minute in which nothing moved, naming what never finished, so the editor
+   * cannot be stuck. A minute WITHOUT PROGRESS, not a minute in all: compiling a project's shaders can take
+   * several on a cold start, and that step reports as it goes (utils/sceneShaders.ts).
    */
   useEffect(() => {
     const boot = bootLoadRef.current;
@@ -2576,16 +2591,25 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (!load || load.id !== boot.id) return false;
       return load.steps.every(s => s.status === 'done' || s.status === 'failed' || s.status === 'skipped');
     };
-    const check = () => { if (settled()) boot.finish(); };
+    let watchdog = 0;
+    const arm = () => {
+      window.clearTimeout(watchdog);
+      watchdog = window.setTimeout(() => {
+        const load = currentLoad();
+        if (!load || load.id !== boot.id) return;
+        const stuck = load.steps.filter(s => s.status === 'pending' || s.status === 'running').map(s => s.label);
+        if (stuck.length) Logger.warn(`Startup splash closed after a minute without progress; still loading: ${stuck.join(', ')}`, 'Editor');
+        boot.finish();
+      }, 60_000);
+    };
+    const check = () => {
+      // Another load on screen (a scene opened later): the startup's is over, and so is its watchdog.
+      const load = currentLoad();
+      if (!load || load.id !== boot.id) { window.clearTimeout(watchdog); return; }
+      if (settled()) boot.finish(); else arm();
+    };
     const unsubscribe = subscribeLoad(check);
     check();
-    const watchdog = window.setTimeout(() => {
-      const load = currentLoad();
-      if (!load || load.id !== boot.id) return;
-      const stuck = load.steps.filter(s => s.status === 'pending' || s.status === 'running').map(s => s.label);
-      if (stuck.length) Logger.warn(`Startup splash closed after 60 s; still loading: ${stuck.join(', ')}`, 'Editor');
-      boot.finish();
-    }, 60_000);
     return () => { unsubscribe(); window.clearTimeout(watchdog); };
   }, []);
 
@@ -6152,6 +6176,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       { id: 'parse', label: 'Building nodes', weight: 4 },
       { id: 'resync', label: 'Linking assets', weight: 3 },
       { id: 'finish', label: 'Finishing', weight: 1 },
+      { id: 'shaders', label: 'Compiling shaders', weight: 4 },
     ], 'overlay', { showAfterMs: 150 });
     try {
       // Load the target before tearing anything down, so a failed read aborts cleanly. A scene whose blob
@@ -6224,6 +6249,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setViewDimension(dimensionOfScene(sceneId));
       requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
       load.step('finish').done();
+      // Every shader the scene can draw with, before the overlay lifts, as a project's first scene does.
+      await prepareSceneShaders(instanceRef.current?.renderer, scene, load.step('shaders'), shaderPrepAbortRef.current.signal);
       Logger.info(`Opened scene "${entry.name}"`, 'Editor');
       return true;
     } finally {
@@ -6329,9 +6356,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // The open scene's dimension, for the renderer (Scene.dimension), from the project's record.
     editorSceneRef.current.dimension = dimensionOfScene(meta.openSceneId);
     scenesLoadedRef.current = true;
+    // Before the scene first draws: on WebGPU its custom materials need the GLSL -> WGSL translator, or each
+    // registers without its WGSL and draws nothing until the material inspector loads naga.
+    await ensureTranslatorFor(instanceRef.current?.renderer, editorSceneRef.current);
     sceneStep.done(meta.scenes.find(s => s.id === meta!.openSceneId)?.name ?? '');
-    // WebGPU: the pipelines this project needed last time, built in the background now (utils/pipelineWarmup.ts),
-    // so the first look at a material does not wait seconds for its shader to compile.
+    // WebGPU: the pipelines this project needed last time, started now (utils/pipelineWarmup.ts) so they build
+    // while the libraries and tabs load. The scene's shader step (prepareSceneShaders) waits for the last of them.
     void warmProjectPipelines(instanceRef.current?.renderer);
   };
 
@@ -6340,6 +6370,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // window unmounts this one and mounts the next, which acquires the same engine. `alive` stops a load
       // still under way when that happens, and the cleanup gives the engine back.
       let alive = true;
+      // A fresh signal for this run: StrictMode's rehearsal unmount aborted the last one.
+      if (shaderPrepAbortRef.current.signal.aborted) shaderPrepAbortRef.current = new AbortController();
       // Logs bypass this bridge: the console panel's store subscribes to CleoEngine.eventEmitter
       // directly (features/logger/logStore.ts), so it also catches everything logged before mount.
       const bridge = (e: unknown) => { eventEmitter.current.emit('SCENE_CHANGED', e) };
@@ -6356,7 +6388,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
               physicsBackend: physicsBackendOverride() ?? (stored ?? projectSettingsRef.current).engine.physicsBackend,
               onProgress: (phase, done, total) => {
                 if (phase === 'device') { if (done < total) boot.step('device').start(); else boot.step('device').done(editorEngine()?.renderer.backend ?? ''); }
-                else if (phase === 'shaders') { if (done < total) boot.step('shaders').progress(done, total); else boot.step('shaders').done(); }
+                // Not done at the last program: the scene's shaders join this count once the scene is in.
+                else if (phase === 'shaders') engineShadersRef.current = engineShaderProgress(boot.step('shaders'), done, total);
               },
             });
           } catch (e) {
@@ -6437,6 +6470,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       window.addEventListener('pagehide', rememberPipelines);
       return () => {
         alive = false;
+        // A shader build still being waited on belongs to this project's scene.
+        shaderPrepAbortRef.current.abort();
         window.removeEventListener('pagehide', rememberPipelines);
         // Before the next project opens: the active project is still this one.
         rememberPipelines();

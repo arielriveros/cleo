@@ -1165,6 +1165,12 @@ const customWgsl = new Map<string, { fragment: string; vertex: string; vertexEnt
 // Keys this DEVICE cannot build a program for at all, not even the magenta fallback — so nothing may
 // try to bind one. Distinct from `failed`, where magenta IS standing in.
 const unbuildable = new Set<string>();
+/**
+ * Keys that found NO WGSL on a WebGPU device: no translator yet, and no stored translation of exactly their
+ * source. Retried once a translator is installed (`setWgslTranslator`), which the editor loads on demand: built
+ * before it, a material stayed unbuildable, drawing nothing, until its source next changed.
+ */
+const missingWgsl = new Set<string>();
 /** One log line per (mode, reason), not one per material per frame. */
 const unbuildableReported = new Set<string>();
 
@@ -1199,6 +1205,7 @@ function releaseKey(key: string): void {
     registered.delete(key);
     failed.delete(key);
     unbuildable.delete(key);
+    missingWgsl.delete(key);
     customWgsl.delete(key);
     errors.delete(key);
     // A compile still in flight is abandoned; its stand-in (an engine program) is never disposed below.
@@ -1292,11 +1299,20 @@ function settleCompile(key: string): void {
     if (activity !== undefined) { shaderActivity.end(activity); pendingActivity.delete(key); }
 }
 
+/** Custom programs still compiling in the background (see `ensureCustomShader`'s `background`). */
+export function pendingCustomCompiles(): number {
+    return pendingCompiles.size;
+}
+
 /**
  * Idempotently compile and register the program for `mat.type`, falling back to magenta under the same
  * key so the draw paths never throw. Safe to call every frame; returns whether the user shader compiled.
+ *
+ * `background` compiles it in the background even while authoring, where the device can (WebGL2's parallel
+ * compile): for work done before anything is drawn (Renderer.prepareShaders), which keeps calling until it
+ * is in. Once a background compile is under way, every call waits for it rather than building it again.
  */
-export function ensureCustomShader(mat: CustomMaterial): boolean {
+export function ensureCustomShader(mat: CustomMaterial, options?: { background?: boolean }): boolean {
     const key = mat.type as string;
 
     // Track which key this material is using. A change means its previous key lost a user — and since
@@ -1328,14 +1344,19 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
     // the synchronous build as before.
     let descriptor = pendingCompiles.get(key);
     if (!descriptor) {
+        // The WebGPU half. Absent on WebGL2, and on WebGPU with no translator installed. A source naga cannot
+        // translate fails like one that does not compile -- it used to throw out of here, and with it out of
+        // the frame drawing the material (or the shader preparation polling it).
+        let webgpu: ReturnType<typeof webgpuHalf>;
+        try { webgpu = webgpuHalf(mat, key); }
+        catch (e: any) { return failCustomShader(mat, key, e); }
         descriptor = {
             label: key,
             vertex: vertexSource(mat.renderMode),
             fragment: assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms),
-            // The WebGPU half. Absent on WebGL2, and on WebGPU with no translator installed.
-            ...webgpuHalf(mat, key),
+            ...webgpu,
         };
-        if (!authoring.enabled && !shaderStats.blockingCompiles && device.prepareShaderProgram) {
+        if ((!authoring.enabled || options?.background) && !shaderStats.blockingCompiles && device.prepareShaderProgram) {
             device.prepareShaderProgram(descriptor);
             pendingCompiles.set(key, descriptor);
             pendingActivity.set(key, shaderActivity.begin({ program: key, builtFor: key, kind: 'program' }));
@@ -1363,22 +1384,31 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
         errors.delete(key);
         return true;
     } catch (e: any) {
-        errors.set(key, annotateCompileError(String(e?.message ?? e), mat.fragmentSource));
-        const magenta = fallbackShader(mat.renderMode);
-        if (!magenta) {
-            unbuildable.add(key);
-            // The key stays OUT of `registered`, so the draw paths skip it — but `getShader` must still
-            // answer, because `ModelNode.initializeModel` reads its ATTRIBUTES to pack the mesh.
-            // The stand-in's vertex source IS this material's, so the attribute set is exact.
-            const standIn = standInFor(mat.renderMode);
-            if (standIn) ShaderManager.Instance.addShader(key, standIn);
-            return false;
-        }
-        ShaderManager.Instance.addShader(key, magenta);
-        registered.add(key);
-        failed.add(key);
+        return failCustomShader(mat, key, e);
+    }
+}
+
+/**
+ * `mat`'s program could not be built (`error`, from the compiler or the WGSL translation): remember why, and
+ * register the magenta fallback under its key -- or, where the device cannot build even that, a stand-in for
+ * its attributes only, the key left unbuildable so the draw paths skip it. Answers false, as ensureCustomShader does.
+ */
+function failCustomShader(mat: CustomMaterial, key: string, error: any): false {
+    errors.set(key, annotateCompileError(String(error?.message ?? error), mat.fragmentSource));
+    const magenta = fallbackShader(mat.renderMode);
+    if (!magenta) {
+        unbuildable.add(key);
+        // The key stays OUT of `registered`, so the draw paths skip it — but `getShader` must still
+        // answer, because `ModelNode.initializeModel` reads its ATTRIBUTES to pack the mesh.
+        // The stand-in's vertex source IS this material's, so the attribute set is exact.
+        const standIn = standInFor(mat.renderMode);
+        if (standIn) ShaderManager.Instance.addShader(key, standIn);
         return false;
     }
+    ShaderManager.Instance.addShader(key, magenta);
+    registered.add(key);
+    failed.add(key);
+    return false;
 }
 
 /**
@@ -1453,7 +1483,8 @@ function webgpuHalf(mat: CustomMaterial, key: string): { wgsl?: string;
     // invalidates a stored translation instead of binding it wrong.
     const raw = translator ? translator(vulkan)
               : mat.compiledWgsl && mat.compiledWgslHash === cyrb53(vulkan) ? mat.compiledWgsl : null;
-    if (!raw) return {};
+    if (!raw) { missingWgsl.add(key); return {}; }
+    missingWgsl.delete(key);
     const wgsl = retypeDepthTextures(raw, iface.samplers.filter(s => s.depth).map(s => s.name));
     customWgsl.set(key, { fragment: wgsl, vertex: base.wgsl,
                           vertexEntry: base.entryPoints.vertex ?? 'vs_main' });
@@ -1557,7 +1588,18 @@ export type WgslTranslator = (glsl: string) => string;
 let translator: WgslTranslator | null = null;
 
 /** Install (or clear, with null) the GLSL -> WGSL translator. Called by the editor once naga is ready. */
-export function setWgslTranslator(next: WgslTranslator | null): void { translator = next; }
+export function setWgslTranslator(next: WgslTranslator | null): void {
+    translator = next;
+    if (!next) return;
+    // What could not be built for want of WGSL is built on its next ensureCustomShader, translated this time.
+    for (const key of missingWgsl) {
+        unbuildable.delete(key);
+        failed.delete(key);
+        registered.delete(key);
+        errors.delete(key);
+    }
+    missingWgsl.clear();
+}
 
 /**
  * The key a stored `compiledWgsl` is valid for: a hash of the Vulkan GLSL it was translated from, so it

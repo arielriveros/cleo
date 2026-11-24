@@ -310,10 +310,32 @@ export class PipelineCache {
     /** Pipelines being built off the main thread right now. */
     public get pendingBuilds(): number { return this._pending.size; }
 
+    /**
+     * Whether a {@link warm} is still under way. Not the same as pending builds: it starts its recipes a few
+     * at a time, a frame apart, so between two batches nothing may be building while more is still to come.
+     */
+    public get warming(): boolean { return this._warmsRunning > 0; }
+    private _warmsRunning = 0;
+
+    /**
+     * Start building a pipeline ahead of the draw that will want it: off the main thread wherever the device
+     * can (WebGPU), whatever {@link deferMisses} says, and at once elsewhere (on WebGL2 a pipeline is a state
+     * bundle over an already-linked program). Null while it builds. The same key as {@link get}, so the draw
+     * finds it. For work done before anything is drawn (Renderer.prepareShaders), never inside a capture.
+     */
+    public prefetch(program: string, reflection: PipelineReflection, options: PipelineOptions = {}): RenderPipeline | null {
+        return this._lookup(program, reflection, options, this._asyncBuilds() && !this._view.capturing);
+    }
+
     /** Whether a miss may be built off the main thread this draw (see {@link deferMisses}). */
     private _deferring(): boolean {
-        return this.deferMisses && !this._view.capturing && !!device
-            && device.capabilities.conventions.pipelineCreationCompiles && typeof device.createRenderPipelineAsync === 'function';
+        return this.deferMisses && !this._view.capturing && this._asyncBuilds();
+    }
+
+    /** Whether this device compiles at pipeline creation and can do it off the main thread (WebGPU). */
+    private _asyncBuilds(): boolean {
+        return !!device && device.capabilities.conventions.pipelineCreationCompiles
+            && typeof device.createRenderPipelineAsync === 'function';
     }
 
     /** `get`'s body: null only when `defer` and the pipeline is being built off the main thread. */
@@ -566,6 +588,7 @@ export class PipelineCache {
         const create = device.createRenderPipelineAsync?.bind(device);
         if (!create) return 0;
         let done = 0, warmed = 0;
+        this._warmsRunning++;
         // Its count, for the editor's progress popup (shaderActivity.ts).
         shaderActivity.setWarm(0, recipes.length);
         const job = async (r: PipelineRecipe) => {
@@ -599,6 +622,7 @@ export class PipelineCache {
             }
             await Promise.all(jobs);
         } finally {
+            this._warmsRunning--;
             shaderActivity.setWarm(null);
         }
         shaderOptimizerStats.pipelinesWarmed += warmed;

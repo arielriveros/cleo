@@ -9,7 +9,10 @@ import { beginLoadWithHandoff, continueLoad, handoffFromCurrent, saveHandoff, ty
 export const BOOT_STEPS: LoadStepSpec[] = [
   { id: 'project', label: 'Project storage', weight: 1 },
   { id: 'device', label: 'Graphics device', weight: 2 },
-  { id: 'shaders', label: 'Compiling shaders', weight: 6 },
+  // ONE count for every shader the load builds: the engine's own programs as the device comes up, then everything
+  // the open scene draws with, its custom materials and every camera's screen materials included
+  // (utils/sceneShaders.ts). Running from the first to the last, with the loading between them.
+  { id: 'shaders', label: 'Compiling shaders', weight: 10 },
   { id: 'textures', label: 'Textures', weight: 4 },
   { id: 'audio', label: 'Audio', weight: 1 },
   { id: 'libraries', label: 'Asset libraries', weight: 2 },
@@ -30,9 +33,10 @@ export function beginBootLoad(): LoadHandle {
 
 /**
  * Another project opening in the running editor (features/projects/projectSwitch.ts): the startup's steps but
- * the device and the shaders, which stay, and the storage step the switch has already done.
+ * the device, which stays, and the storage step the switch has already done. The shaders step stays: the
+ * engine's programs are built already, but the next project's scene has shaders of its own.
  */
-export const SWITCH_STEPS: LoadStepSpec[] = BOOT_STEPS.filter(s => s.id !== 'project' && s.id !== 'device' && s.id !== 'shaders')
+export const SWITCH_STEPS: LoadStepSpec[] = BOOT_STEPS.filter(s => s.id !== 'project' && s.id !== 'device')
 
 /**
  * Start the load the next project's EngineContext reports into, just before it mounts. What the load on screen

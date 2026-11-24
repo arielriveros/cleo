@@ -1561,6 +1561,13 @@ export class Scene {
         return this._sequences;
     }
 
+    /** Every 3D camera ({@link CameraNode}) in the scene, active or not, in traversal order. */
+    public get cameras(): ReadonlySet<CameraNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._cameras;
+    }
+
     /** Every 2D game camera ({@link Camera2DNode}) in the scene. */
     public get cameras2D(): Set<Camera2DNode> {
         if (this._dirty)

@@ -16,6 +16,29 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **A project opens with its scene's shaders already built, custom ones included.**
+  - The loading screen's **Compiling shaders** step now holds a project or a scene opening until every shader
+    the scene can draw with is built. That covers:
+    - custom materials;
+    - every camera's screen materials, including the game camera that only Play looks through;
+    - what is off screen, through frames drawn with nothing culled (every LOD level, nothing a draw distance
+      hides);
+    - the warm-up of the shaders the project used last session.
+  - At startup it is one count, from the engine's own shaders to the scene's last one. A project switch has the
+    step too. While a loading screen counts shaders, the progress window's **Compiling shaders** card stays away.
+  - On WebGPU these build off the main thread, and the step counts them. Engine: `Renderer.prepareShaders(scene)`.
+  - The startup watchdog now closes the splash after a minute with no progress, not after a minute in all.
+  - Fix: a screen material's pipeline was built for the formats of whichever pass ran before it, so its pass
+    missed it and compiled another on the spot. It is now built for the shape of the post chain's buffers.
+  - Fix: on WebGPU, a custom material first drawn before the GLSL-to-WGSL translator loaded stayed unbuildable,
+    drawing nothing until its source changed. It is now built once the translator is in. The editor also loads
+    the translator before a scene with custom materials first draws.
+- **Animator states can play as stop motion.** A state's **Frames** (`AnimationState.fps`, in the state machine
+  editor) holds its clip, or every clip of its blend space together, as that many poses a second of game time,
+  whatever its speed; empty plays smooth. Only the sampling steps: the clip's events, exit time and root motion,
+  cross-fades, blend weights, layers and foot placement stay continuous, so a character animated on twos still
+  travels and turns smoothly. The beat carries on from state to state, and the outgoing clip of a cross-fade
+  keeps stepping on it. The graph shows a stepped state's rate on its badge. Player contract 51.
 - **Lit particles take light per pixel, with normal maps and six-way lightmaps; the water mist is fixed; Water is
   flagged Experimental.**
   - *Per-pixel light.* A lit particle effect takes the sun's cascaded shadow (and the clouds') and every point and

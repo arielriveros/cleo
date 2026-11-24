@@ -626,8 +626,11 @@ Its sections, in order:
     pipeline has it built **off the main thread** and is drawn once it is ready: it shows up a moment
     late rather than freezing the window. Captures, bakes, thumbnails and movie frames build what they
     draw first, so nothing they keep goes missing.
-  - The editor remembers the pipelines each project built (on this machine) and builds them in the
-    background as the project opens, so after the first session the late ones are rare.
+  - The editor remembers the pipelines each project built on this machine. It builds them as the project
+    opens and holds the loading screen until they are done.
+  - It also holds the loading screen for every pipeline the open scene can draw with: custom materials,
+    every camera's screen materials, and what is off screen. To find them it draws a few frames that cull
+    nothing. Even on a first session, nothing should arrive late.
 - **Memory** — texture count and megabytes, estimated GPU memory, and the JS heap (Chromium only).
   *GPU est.* is computed from each texture's requested format and mip chain, so it estimates texture
   memory, not total VRAM.

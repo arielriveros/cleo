@@ -479,6 +479,20 @@ function SelectedState() {
           <span className='text-ui-xs text-dim'>s</span>
         </div>
       )}
+      {/* Stop motion: the state's clips held at this many poses a second. Empty plays smooth. */}
+      {!playsPose && (
+        <div className='flex items-center gap-1'>
+          <span className='text-ui-xs text-muted w-[42px] shrink-0'
+            title={'Stop motion: show this state’s clip (every clip of a blend space, together) as this many held poses a '
+              + 'second of game time, whatever its speed. Empty plays smooth. Only the poses step: the clip’s events, exit '
+              + 'time and root motion, cross-fades, blend weights, layers and foot placement stay smooth, so the character '
+              + 'still travels smoothly.'}>Frames</span>
+          <OptionalNumberInput className={cn(tight, 'w-[56px]')} step='1' min='1' max='60' placeholder='smooth'
+            value={s.fps}
+            onChange={v => setState(i, { fps: v === undefined || !(v > 0) ? undefined : Math.min(60, Math.max(1, Math.round(v))) })} />
+          <span className='text-ui-xs text-dim'>fps</span>
+        </div>
+      )}
       {activeLayer > 0 && !playsField && !playsPose && (
         <Toggle label='extract root travel' checked={!!s.extractRootMotion} className='text-ui-xs'
           onChange={c => setState(i, { extractRootMotion: c || undefined })} />
