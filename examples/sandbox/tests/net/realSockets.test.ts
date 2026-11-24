@@ -79,6 +79,9 @@ describe('NetSync over real sockets', () => {
         }, 16);
         try {
             await wait(1500); // possessed, landed, clocks synced
+            // The steadiness below is measured from here: the joins before it load each peer's copy of the Sandbox in
+            // this same process, which stalls the host's clock for whole seconds -- the test's doing, not the host's.
+            const before = runtime.stats();
             for (const p of peers) expect(p.commands.pawnId).not.toBe('');
             const start = peers.map((p) => vec3.clone(characters.get(p.session.peerId)!.position as vec3));
             driving = true;
@@ -97,9 +100,11 @@ describe('NetSync over real sockets', () => {
             }
             // A real-time host on a busy machine (the suite runs files in parallel) may skip a few ticks rather than
             // fall behind; that is the ticker's design. Not many: none alone, ~8 % with the whole host suite (several
-            // files run real hosts at once) beside it.
+            // files run real hosts at once) beside it. Counted over the driving only: the Sandbox has grown, and
+            // loading two more copies of it beside the host while it ticks cost ~40 skipped ticks before anyone moved.
             const st = runtime.stats();
-            expect(st.skipped).toBeLessThan(Math.max(5, st.ticks * 0.15));
+            const ticks = st.ticks - before.ticks, skipped = st.skipped - before.skipped;
+            expect(skipped).toBeLessThan(Math.max(5, ticks * 0.15));
         } finally {
             clearInterval(frame);
             for (const p of peers) p.session.leave();

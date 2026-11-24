@@ -9,7 +9,7 @@ import { RenderPass } from '../gpuProfiler';
 import { CustomMaterial } from '../material';
 import { ADDITIVE_BLEND } from '../rhi/types';
 import type { RenderPipeline, RenderTarget } from '../rhi/resources';
-import { customShaderModules, screenShaderResources, screenUserSamplerNames, usesSunShadow, usesVelocity } from '../systems/customShaders';
+import { customShaderModules, screenShaderResources, screenUserSamplers, usesSunShadow, usesVelocity } from '../systems/customShaders';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { PresentProgram, OutlinePostProgram, BloomProgram, BloomDownsampleProgram, BloomUpsampleProgram, ComposerProgram, DofCocProgram, DofGatherProgram, DofCompositeProgram, LensFlareProgram, LensFlareCompositeProgram, FxaaProgram, VignetteProgram, FilmGrainProgram, ChromaticAberrationProgram } from './programs';
@@ -356,12 +356,11 @@ export class PostEffects {
         this._shaderManager.bind(mat.type);
         // Group 0 is the two engine samplers followed by the user's, in declaration order — the
         // order `screenShaderResources` and the prelude both use. A user sampler with no texture
-        // assigned gets the shared fallback, because a bind group cannot leave a binding empty.
+        // assigned gets the shared fallback of its dimension, because a bind group cannot leave a binding
+        // empty; a cubemap one binds the cube wrapped from its panorama.
         const fallback = TextureManager.Instance.getTexture('Null') ?? this._bindGroups.fallbackTexture;
-        const userTextures = screenUserSamplerNames(mat.uniforms).map((name: string) => {
-            const id = mat.textures.get(name.replace(/^u_/, ''));
-            return (id ? TextureManager.Instance.getTexture(id) : null) ?? fallback;
-        });
+        const userTextures = screenUserSamplers(mat.uniforms).map(({ name, type }) =>
+            this._bindGroups.userSamplerTexture(type, mat.textures.get(name.replace(/^u_/, '')), fallback));
         // A material reading the velocity buffer (`cleoVelocity`) has it as a third engine sampler, before its own.
         const velocity = usesVelocity(mat.fragmentSource);
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [

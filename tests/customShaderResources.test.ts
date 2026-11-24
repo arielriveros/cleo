@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { customShaderResources } from '../src/graphics/systems/customShaders';
+import { customShaderResources, screenShaderResources, screenUserSamplers, usedResources } from '../src/graphics/systems/customShaders';
 import ClusteredLightsChunk from '../src/graphics/shaders/wgsl/clusteredLightsChunk.wgsl';
 
 // A forward custom material's bind-group layout must carry everything its prelude samples. The light
@@ -146,5 +146,82 @@ describe('usedResources', () => {
         ] as any[];
         expect(usedResources(res, wgsl).map(r => r.binding + ':' + r.group)).toEqual(['6:3', '0:0']);
         expect(usedResources(res)).toBe(res);   // no WGSL (WebGL2): untouched
+    });
+});
+
+// The screen pass binds its user samplers by these, after its engine ones: each needs the binding's TYPE,
+// because a cubemap uniform takes a cube (its panorama wrapped) and a 2D texture in that slot is refused.
+describe('screenUserSamplers', () => {
+    const uniforms = [
+        { name: 'strength', type: 'float', value: 1 },
+        { name: 'lut', type: 'sampler2D', value: null },
+        { name: 'sky', type: 'samplerCube', value: null },
+    ] as any[];
+
+    it('names each user sampler with the WGSL texture type its binding declares, in declaration order', () => {
+        expect(screenUserSamplers(uniforms)).toEqual([
+            { name: 'u_lut', type: 'texture_2d<f32>' },
+            { name: 'u_sky', type: 'texture_cube<f32>' },
+        ]);
+    });
+
+    it('matches the layout the screen program declares', () => {
+        const declared = screenShaderResources(uniforms).filter(r => r.kind === 'texture');
+        for (const s of screenUserSamplers(uniforms))
+            expect(declared.find(r => r.glslName === s.name)?.type).toBe(s.type);
+    });
+});
+
+// What WebGPU's automatic layout keeps is what the ENTRY POINT reaches, not what the module mentions: naga keeps
+// every prelude function, called or not, so a mention is no use at all. Counting mentions kept the sun's cascades
+// for every forward material, whether or not it called shadowCalculation(), and the layout of one that did not had
+// no binding 0 -- "binding index 0 not present", the frame's command buffer invalid, the viewport black.
+describe('usedResources — what the entry point reaches', () => {
+    const res = [
+        { group: 3, binding: 0, name: 'a', kind: 'texture', type: 't', glslName: 'u_shadowCascades' },
+        { group: 3, binding: 2, name: 'b', kind: 'texture', type: 't', glslName: 'u_spotShadows' },
+        { group: 3, binding: 6, name: 'c', kind: 'texture', type: 't', glslName: 'u_lightData' },
+    ] as any[];
+    const decls = `
+@group(3) @binding(0) var cascades_t: texture_depth_2d_array;
+@group(3) @binding(2) var spots_t: texture_depth_2d_array;
+@group(3) @binding(6) var lights_t: texture_2d<f32>;`;
+    const bindings = (out: any[]) => out.map(r => r.binding);
+
+    it('drops what only an uncalled function names, and keeps what a call chain reaches', () => {
+        const wgsl = `${decls}
+fn shadowCalculation() -> f32 { return f32(textureNumLayers(cascades_t)); }
+fn spotVisibility() -> f32 { return f32(textureNumLayers(spots_t)); }
+fn light() -> vec4<f32> { return textureLoad(lights_t, vec2<i32>(0), 0) * spotVisibility(); }
+@fragment fn main() -> @location(0) vec4<f32> { return light(); }`;
+        expect(bindings(usedResources(res, wgsl))).toEqual([2, 6]);
+    });
+
+    it('walks from the named entry only, so another entry point in the module adds nothing', () => {
+        // A forward material's vertex stage is the whole PBR module, whose fs_main reads everything.
+        const wgsl = `${decls}
+@vertex fn vs_main() -> @builtin(position) vec4<f32> { return vec4<f32>(0.0); }
+@fragment fn fs_main() -> @location(0) vec4<f32> { return textureLoad(lights_t, vec2<i32>(0), 0) * f32(textureNumLayers(cascades_t)); }`;
+        expect(bindings(usedResources(res, { wgsl, entry: 'vs_main' }))).toEqual([]);
+        expect(bindings(usedResources(res, wgsl))).toEqual([0, 6]);   // no entry named: every entry point
+    });
+
+    it('takes a resource any stage reaches', () => {
+        const fragment = `${decls}\n@fragment fn main() -> @location(0) vec4<f32> { return textureLoad(lights_t, vec2<i32>(0), 0); }`;
+        const vertex = `@group(3) @binding(0) var c: texture_depth_2d_array;\n@vertex fn vs() -> @builtin(position) vec4<f32> { return vec4<f32>(f32(textureNumLayers(c))); }`;
+        expect(bindings(usedResources(res, { wgsl: fragment, entry: 'main' }, { wgsl: vertex, entry: 'vs' }))).toEqual([0, 6]);
+    });
+
+    it('is not misled by comments', () => {
+        const wgsl = `${decls}
+// fn main() { cascades_t } -- a brace in a comment {
+/* @fragment fn decoy() -> @location(0) vec4<f32> { textureNumLayers(spots_t); } */
+@fragment fn main() -> @location(0) vec4<f32> { /* } */ return textureLoad(lights_t, vec2<i32>(0), 0); }`;
+        expect(bindings(usedResources(res, wgsl))).toEqual([6]);
+    });
+
+    it('keeps everything mentioned when it cannot find the entry point to walk from', () => {
+        const wgsl = `${decls}\nfn helper() -> f32 { return f32(textureNumLayers(cascades_t)); }`;
+        expect(bindings(usedResources(res, { wgsl, entry: 'main' }))).toEqual([0]);
     });
 });

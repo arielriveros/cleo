@@ -145,6 +145,8 @@ import IrradianceProgram from '../shaders/wgsl/irradiance.wgsl';
 import PrefilterProgram from '../shaders/wgsl/prefilter.wgsl';
 import PrefilterOctProgram from '../shaders/wgsl/prefilterOct.wgsl';
 import BRDFProgram from '../shaders/wgsl/brdf.wgsl';
+// A custom material's cubemap uniform, wrapped from a 2:1 panorama (render/panoramaCubes.ts).
+import PanoramaCubeProgram from '../shaders/wgsl/panoramaCube.wgsl';
 // A movie's sample accumulation (render/movieCapture.ts).
 import MovieAccumulateProgram from '../shaders/wgsl/movieAccumulate.wgsl';
 // Unlit sprites, many to a draw (render/sprites2d.ts).
@@ -173,7 +175,7 @@ export {
     GeometryFoliageBillboardProgram, GeometryFoliageImpostorProgram, OcclusionBoxProgram, ShadowMapImpostorProgram,
     GeometryBasicProgram, GeometryBasicSkinnedProgram, DeferredLightingProgram, SsilProgram,
     SsilTemporalProgram, SsilBlurProgram, SsilHistoryProgram, IrradianceProgram,
-    PrefilterProgram, PrefilterOctProgram, BRDFProgram, SpriteLitProgram, SsrProgram,
+    PrefilterProgram, PrefilterOctProgram, BRDFProgram, PanoramaCubeProgram, SpriteLitProgram, SsrProgram,
     SsrResolveProgram, SsrTemporalProgram, LocalExposureLumProgram, LocalExposureDownProgram,
     VolumetricFogInjectProgram, VolumetricFogIntegrateProgram, VolumetricFogApplyProgram,
     GiReduceProgram, GiVisibilityProgram, GiRadianceProgram, GiIntegrateProgram, GiResolveProgram,
@@ -379,6 +381,8 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['waterFlowSurface',             WaterFlowSurfaceProgram],
         // An animator's reference video behind the scene, in the editor overlay layer (render/editorOverlays.ts). APPENDED.
         ['referenceBackdrop',            ReferenceBackdropProgram],
+        // A custom material's cubemap uniform, wrapped from a 2:1 panorama (render/panoramaCubes.ts). APPENDED.
+        ['panoramaCube',                 PanoramaCubeProgram],
     ];
 }
 

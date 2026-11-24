@@ -170,6 +170,7 @@ export class RenderStats {
         addFbo(this._ssr.traceFBO ?? undefined); addFbo(this._ssr.resolveFBO ?? undefined);
         for (const f of this._ssr.history.targets) addFbo(f);
         for (const cube of this._sky.skyReflectionCubes) if (cube) bytes += cube.byteSize;
+        for (const cube of this._sky.panoramas.textures) bytes += cube.byteSize;
         addFbo(this._sky.brdfFBO); addFbo(this._post.outlineMaskFBO); addFbo(this._targets.overlay);
         addFbo(this._debugViews.overdrawFBO ?? undefined);
         addFbo(this._targets.velocity); addFbo(this._temporal.velocityTileFBO); addFbo(this._temporal.velocityNeighborFBO);

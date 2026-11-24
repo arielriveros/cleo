@@ -57,6 +57,20 @@ describe('programsFor', () => {
         expect(programsFor(pom)).toContain('pbrGeometry~pom');
     });
 
+    it('builds the panorama wrap only for a custom material with a cubemap uniform', () => {
+        const custom = (uniforms: object[]) => ({ type: 'custom_1', customMaterial: true, uniforms });
+        const plain = createProgramUsage();
+        usageFromSceneJson({ type: 'model', model: { material: custom([{ name: 'tint', type: 'vec3' }]) } }, plain);
+        expect(programsFor(plain)).not.toContain('panoramaCube');
+        const mesh = createProgramUsage();
+        usageFromSceneJson({ type: 'model', model: { material: custom([{ name: 'sky', type: 'samplerCube' }]) } }, mesh);
+        expect(programsFor(mesh)).toContain('panoramaCube');
+        // A camera's screen material, nested anywhere in the tree.
+        const screen = createProgramUsage();
+        usageFromSceneJson({ type: 'node', children: [{ type: 'camera', screenMaterials: [custom([{ name: 'sky', type: 'samplerCube' }])] }] }, screen);
+        expect(programsFor(screen)).toContain('panoramaCube');
+    });
+
     it('follows the quality tier where settings are silent', () => {
         const use = createProgramUsage();
         usageFromRenderSettings({ quality: 'ultra' }, use);

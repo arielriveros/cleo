@@ -59,6 +59,8 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     giRescale: 'feature',
     giStateStamp: 'feature',
     giProbeOverlay: 'editor',
+    // A custom material's cubemap uniform, wrapped from its panorama (render/panoramaCubes.ts).
+    panoramaCube: 'feature',
     taaResolve: 'feature', taaSharpen: 'feature', fxaa: 'feature',
     motionBlurVelocity: 'feature', motionBlurTileMax: 'feature', motionBlurNeighborMax: 'feature', motionBlur: 'feature',
     objectVelocity: 'feature', objectVelocitySkinned: 'feature', objectVelocityBasicSkinned: 'feature',
@@ -98,6 +100,14 @@ function materialsOf(model: any): any[] {
     return out;
 }
 
+/**
+ * Whether a serialized custom material declares a cubemap uniform: its panorama is wrapped onto a cube
+ * at runtime (render/panoramaCubes.ts), through the `panoramaCube` program.
+ */
+function declaresCubemap(m: any): boolean {
+    return Array.isArray(m?.uniforms) && m.uniforms.some((u: any) => u?.type === 'samplerCube');
+}
+
 /** The serialized form of the parallax test in `usesParallax` (programVariants.ts). */
 function marches(m: any): boolean {
     return m?.type === 'pbr' && !!m.textures?.displacementMap && m.uvProjection !== 'triplanar';
@@ -116,6 +126,7 @@ function addModel(model: any, use: ProgramUsage, shadows: boolean): void {
         if (m?.customMaterial || type.startsWith('custom')) {
             // Compiled at runtime from its own source; the stand-ins it falls back to are the PBR pair.
             add(skinned ? 'pbrSkinned' : 'pbr'); add(skinned ? 'pbrGeometrySkinned' : 'pbrGeometry');
+            if (declaresCubemap(m)) add('panoramaCube');
             continue;
         }
         const base = FORWARD[type] ?? 'pbr';
@@ -243,6 +254,8 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
             break;
         }
     }
+    // A camera's screen materials are custom materials too, and can sample a cubemap.
+    if (Array.isArray(node.screenMaterials) && node.screenMaterials.some(declaresCubemap)) add('panoramaCube');
     for (const child of Array.isArray(node.children) ? node.children : []) usageFromSceneJson(child, use, shadows);
 }
 

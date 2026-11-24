@@ -126,6 +126,15 @@ const custom = mesh.model.material as CustomMaterial
 custom.properties.set('dissolve', this.dissolveAmount)
 ```
 
+A texture or cubemap uniform takes a texture id in `textures`, under the same bare name. A `samplerCube`
+names a 2 : 1 equirectangular **panorama**, which the engine wraps onto a mipmapped cube the first frame
+it draws, and rebuilds when that texture changes:
+
+```ts
+custom.textures.set('noise', noiseTextureId)   // sampler2D u_noise
+custom.textures.set('sky', panoramaTextureId)  // samplerCube u_sky
+```
+
 ### Seeing the scene behind a transparent material
 
 A **transparent forward** material (`config.transparent: true`) can read the opaque scene behind it,

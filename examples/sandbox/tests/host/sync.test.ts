@@ -21,8 +21,11 @@ beforeAll(async () => {
     const manifest = await manifestOf(bin);
     // A prop: a template whose root is a dynamic collider with no character in it (the Sandbox's crates).
     const types = (n: any): string[] => [n.type, ...(n.children ?? []).flatMap(types)];
-    // (Not a vehicle: the Sandbox's Car is a dynamic collider too.)
-    crateTemplate = manifest.templates.find((t: any) => t.node.type === 'collider' && t.node.collider?.mass > 0 && !types(t.node).includes('character') && !types(t.node).includes('vehicle')).name;
+    // (Not a vehicle: the Sandbox's Car is a dynamic collider too.) The Small Crate BY NAME among them: the first
+    // prop the manifest lists is a Ball now, and 200 balls never settle -- they rolled on at up to 1 cm/s, so
+    // "at rest" cost ~1.2 KB a tick and the resting copies sat behind the host.
+    const props = manifest.templates.filter((t: any) => t.node.type === 'collider' && t.node.collider?.mass > 0 && !types(t.node).includes('character') && !types(t.node).includes('vehicle'));
+    crateTemplate = (props.find((t: any) => t.name === 'Small Crate') ?? props[0]).name;
 }, 120_000);
 
 describe('NetSync phase 3: a peer follows the host', () => {

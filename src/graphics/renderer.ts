@@ -21,6 +21,7 @@ import { MAX_CASCADES, MAX_POINT_SHADOWS, SHADOW_BIAS_VERSION, migrateShadowBias
 
 import { Texture } from './texture';
 import { CustomMaterial } from './material';
+import type { Material } from './material';
 import { ensureCustomShader, customShaderReady, pendingCustomCompiles } from './systems/customShaders';
 import { shaderActivity } from './shaderActivity';
 import { awaitShaders, type SweepFrames, type ShaderWaitResult } from './render/shaderSweep';
@@ -1341,7 +1342,8 @@ export class Renderer {
         // Per submesh material — a merged model's second range has its own maps to channel-pack. Not the
         // landscape chunks: their terrain material's layers are synced per landscape just below
         // (`sync` has nothing to do for a 'terrain' material).
-        for (const node of scene.modelsExceptTerrain) for (const mat of node.model.materials) packer.sync(mat, this._view.frameIndex);
+        for (const node of scene.modelsExceptTerrain)
+            for (const mat of node.model.materials) { packer.sync(mat, this._view.frameIndex); this._ensurePanoramaCubes(mat); }
         // Each landscape draws its snow with the snowing weather volume's material that reaches it, baked
         // as one more layer of its surface arrays (render/weatherPack.ts `snowForLandscape`).
         for (const node of scene.landscapes) {
@@ -1358,7 +1360,7 @@ export class Renderer {
                 if (layer.kind !== 'mesh') continue;
                 for (const level of layer.levels)
                     for (const model of level.models)
-                        for (const mat of model.materials) packer.sync(mat, this._view.frameIndex);
+                        for (const mat of model.materials) { packer.sync(mat, this._view.frameIndex); this._ensurePanoramaCubes(mat); }
             }
         // Billboard cards and baked impostors are bound by texture, not material, so their edge padding
         // is requested here, where no pass is open. Their alpha IS the cutout (0.5 in the shader), and
@@ -1374,6 +1376,24 @@ export class Renderer {
         // Decals sample the same packed ORM map a mesh wearing their material would.
         for (const decal of scene.decals) if (decal.material) packer.sync(decal.material, this._view.frameIndex);
         packer.sweep(this._view.frameIndex);
+        // The other custom materials a frame can draw: a landscape's own, and the active camera's screen passes.
+        for (const node of scene.landscapes) this._ensurePanoramaCubes(node.terrain.material);
+        const screenMats = scene.activeCamera?.screenMaterials;
+        if (screenMats) for (const mat of screenMats) this._ensurePanoramaCubes(mat);
+        this._sky.panoramas.sweep(this._view.frameIndex);
+    }
+
+    /**
+     * Wrap the panorama each of a custom material's cubemap uniforms names onto its cube, before any
+     * pass binds the material (render/panoramaCubes.ts). Nothing to do for any other material.
+     */
+    private _ensurePanoramaCubes(mat: Material): void {
+        if (!(mat instanceof CustomMaterial)) return;
+        for (const u of mat.uniforms) {
+            if (u.type !== 'samplerCube') continue;
+            const id = mat.textures.get(u.name);
+            if (id) this._sky.panoramas.ensure(id, this._view.frameIndex);
+        }
     }
 
     // ---------------------------------------------------------------------------------------------

@@ -389,8 +389,25 @@ uniform list (name, type, default), and a forward / deferred / screen render mod
 Uniform types: `float`, `vec2`, `vec3`, `vec4`, `int`, `bool`, `sampler2D`, `samplerCube`.
 
 **Uniforms** — the material's declared uniforms, each a name, a type and a value. A uniform is
-`u_<name>` in the shader; a sampler binds the texture you pick, and a scalar or vector uploads its
-value every frame. Adding, removing or retyping one recompiles the shader.
+`u_<name>` in the shader, and a scalar or vector uploads its value every frame. Adding, removing or
+retyping one recompiles the shader.
+
+A texture (`sampler2D`) or cubemap (`samplerCube`) uniform shows the same texture slot as a
+material's maps: **Select** from the project's textures, upload one, drop one from Assets, or ✕ to
+clear it. Picking a texture is a value change and does not recompile.
+
+A **cubemap** uniform takes a **2 : 1 equirectangular panorama**. The engine wraps it onto a cube the
+first frame the material draws:
+
+- Each face is a quarter of the image's width, rounded up to a power of two, at most 1024.
+- The middle of the image faces −Z, its top is straight up, and its left and right edges meet behind,
+  at +Z.
+- The cube has a full mip chain, so `textureLod(u_sky, R, roughness * 4.0)` reads a blurrier
+  reflection.
+- Replacing or re-importing the image rebuilds the cube.
+
+The slot's caption turns into a warning when the bound image is not 2 : 1. Another shape still wraps,
+but stretched.
 
 **Screen** mode makes the material a fullscreen post-processing pass, ordered within a camera's
 post chain. Screen materials run for the **active camera only**.

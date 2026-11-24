@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { assembleCustomFragment, customSeedTemplate, retypeDepthTextures, vulkanUnsupportedReason } from '../src/graphics/systems/customShaders';
+import { assembleCustomFragment, customSeedTemplate, customShaderResources, retypeDepthTextures, usedResources, vulkanUnsupportedReason } from '../src/graphics/systems/customShaders';
+import { PBRProgram } from '../src/graphics/render/programs';
 import type { CustomUniform } from '../src/graphics/material';
 
 /**
@@ -517,5 +518,26 @@ void surface(inout Surface s) {
         const es = assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }', []);
         expect(es).toMatch(/uniform\s+highp\s+sampler2DArrayShadow\s+u_shadowCascades;/);
         expect(es).toContain('layout(std140) uniform');
+    });
+});
+
+// The bindings a forward material's pipeline is reflected with must be the ones WebGPU's automatic layout has,
+// which is what each stage's ENTRY POINT reaches. Measured live on Dawn: an unlit forward material's layout of
+// group 3 is bindings 2-6 (the light loop reaches the spot and point maps), with no cascades, because nothing
+// calls shadowCalculation(); naming binding 0 anyway invalidated every frame. Run on naga's real output.
+describe('a forward material reflected for WebGPU', () => {
+    const group3 = (body: string) => {
+        const fragment = glslToWgsl(assembleCustomFragment('forward', body, [], 'vulkan'), 'fragment');
+        const vertex = { wgsl: (PBRProgram as any).wgsl as string, entry: (PBRProgram as any).entryPoints.vertex as string };
+        return usedResources(customShaderResources('forward', []), { wgsl: fragment, entry: 'main' }, vertex)
+            .filter(r => r.group === 3).map(r => r.binding);
+    };
+
+    it('leaves out the sun cascades of a material that never asks for its shadow', () => {
+        expect(group3('vec4 fragment() { return vec4(1.0, 0.5, 0.2, 1.0); }')).toEqual([2, 3, 4, 5, 6]);
+    });
+
+    it('keeps them for one that calls shadowCalculation()', () => {
+        expect(group3('vec4 fragment() { return vec4(vec3(1.0 - shadowCalculation()), 1.0); }')).toEqual([0, 1, 2, 3, 4, 5, 6]);
     });
 });

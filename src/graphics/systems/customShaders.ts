@@ -1024,35 +1024,109 @@ export function customShaderResources(mode: CustomRenderMode, uniforms: CustomUn
     return out;
 }
 
+/** One WGSL module and, optionally, the entry point the pipeline runs from it. */
+export type WgslStage = string | { wgsl: string | null | undefined; entry?: string } | null | undefined
+
 /**
  * Keep only the resources the translated WGSL really USES. A pipeline built without an explicit layout
- * gets an automatic one, and WebGPU leaves out of it every binding the entry points never reach -- so a
+ * gets an automatic one, and WebGPU leaves out of it every binding its entry points never REACH -- so a
  * resource the reflection lists but the shader ignores (the light-data sampler beside a `textureLoad`,
- * the spot and point shadow maps of a surface that only takes the sun) is a binding the bind group then
- * names and the layout lacks: "binding index 7 not present", the group invalid, and every frame's
+ * the sun's cascades of a surface that never calls `shadowCalculation()`) is a binding the bind group
+ * then names and the layout lacks: "binding index 0 not present", the group invalid, and every frame's
  * command buffer with it -- a black viewport.
  *
+ * REACHED, not mentioned. naga keeps every function of the prelude, called or not, so the cascades are
+ * named in `shadowCalculation` whether or not the material calls it. This used to count mentions, and
+ * every forward material that never asked for the sun's shadow blacked out the WebGPU frame. It now walks
+ * the call graph from each stage's entry point: the named one, or every `@vertex`/`@fragment`/`@compute`
+ * function when none is named (a forward material's vertex stage is the whole PBR module, whose own
+ * `fs_main` reads every lighting resource, so that stage must name its entry). A module whose entry it
+ * cannot find falls back to counting mentions, which keeps more, never less.
+ *
  * Matched by (group, binding) against the WGSL's own declarations, never by name, so naga's renaming
- * cannot desynchronise it. A resource with no declaration at all is kept: the caller knows best.
+ * cannot desynchronise it. A resource no stage declares is kept: the caller knows best.
  */
-export function usedResources(resources: ShaderResource[], ...wgsl: (string | null | undefined)[]): ShaderResource[] {
-    const sources = wgsl.filter((w): w is string => !!w)
-    if (!sources.length) return resources
-    const text = sources.join('\n')
-    const varAt = new Map<string, string>()
-    const decl = /@group\((\d+)\)\s*@binding\((\d+)\)\s*var(?:<[^>]*>)?\s+([A-Za-z_]\w*)/g
-    for (let m = decl.exec(text); m; m = decl.exec(text)) varAt.set(`${m[1]}:${m[2]}`, m[3])
+export function usedResources(resources: ShaderResource[], ...stages: WgslStage[]): ShaderResource[] {
+    const modules = stages
+        .map(s => typeof s === 'string' ? { wgsl: s, entry: undefined } : s ?? null)
+        .filter((m): m is { wgsl: string; entry?: string } => !!m?.wgsl)
+    if (!modules.length) return resources
+    const declared = new Set<string>()
+    const used = new Set<string>()
+    for (const m of modules) usedBindings(m.wgsl, m.entry, declared, used)
     return resources.filter(r => {
-        const name = varAt.get(`${r.group}:${r.binding}`)
-        if (!name) return true
-        const uses = text.match(new RegExp(`\\b${name}\\b`, 'g'))?.length ?? 0
-        return uses > 1
+        const key = `${r.group}:${r.binding}`
+        return !declared.has(key) || used.has(key)
     })
 }
 
-/** The user samplers a screen material declares, in the order the prelude and the bind group use. */
-export function screenUserSamplerNames(uniforms: CustomUniform[]): string[] {
-    return userSamplerDecls(uniforms).map(s => s.name);
+const WGSL_COMMENTS = /\/\*[\s\S]*?\*\/|\/\/[^\n]*/g
+const WGSL_BINDING = /@group\((\d+)\)\s*@binding\((\d+)\)\s*var(?:<[^>]*>)?\s+([A-Za-z_]\w*)/g
+const WGSL_FN = /\bfn\s+([A-Za-z_]\w*)\s*\(/g
+const WGSL_ENTRY = /@(?:vertex|fragment|compute)\b(?:\s*@\w+(?:\([^)]*\))?)*\s*fn\s+([A-Za-z_]\w*)/g
+const WGSL_CALL = /\b([A-Za-z_]\w*)\s*\(/g
+const WGSL_IDENT = /\b[A-Za-z_]\w*\b/g
+
+/**
+ * Add one module's bindings to `declared`, and those its entry point reaches to `used`, both as
+ * `group:binding`. WGSL has no string literals, so once comments are gone every brace is code.
+ */
+function usedBindings(wgsl: string, entry: string | undefined, declared: Set<string>, used: Set<string>): void {
+    const text = wgsl.replace(WGSL_COMMENTS, ' ')
+    const keyOf = new Map<string, string>()
+    for (const m of text.matchAll(WGSL_BINDING)) {
+        const key = `${m[1]}:${m[2]}`
+        declared.add(key)
+        keyOf.set(m[3], key)
+    }
+    if (!keyOf.size) return
+
+    // Every function's body, by name: from the first brace after its parameter list to its match.
+    const bodies = new Map<string, string>()
+    for (const m of text.matchAll(WGSL_FN)) {
+        const open = text.indexOf('{', m.index! + m[0].length)
+        if (open < 0) continue
+        let depth = 0, end = open
+        for (; end < text.length; end++) {
+            const c = text.charCodeAt(end)
+            if (c === 123) depth++                          // {
+            else if (c === 125 && --depth === 0) break      // }
+        }
+        bodies.set(m[1], text.slice(open, end + 1))
+    }
+    const roots = entry ? (bodies.has(entry) ? [entry] : [])
+                        : [...text.matchAll(WGSL_ENTRY)].map(m => m[1]).filter(name => bodies.has(name))
+    if (!roots.length) {
+        // Nothing to walk from: a declaration plus at least one mention counts as a use.
+        const mentions = new Map<string, number>()
+        for (const ident of text.matchAll(WGSL_IDENT))
+            if (keyOf.has(ident[0])) mentions.set(ident[0], (mentions.get(ident[0]) ?? 0) + 1)
+        for (const [name, key] of keyOf) if ((mentions.get(name) ?? 0) > 1) used.add(key)
+        return
+    }
+
+    const reached = new Set<string>()
+    const stack = [...roots]
+    while (stack.length) {
+        const name = stack.pop()!
+        if (reached.has(name)) continue
+        reached.add(name)
+        for (const call of bodies.get(name)!.matchAll(WGSL_CALL))
+            if (bodies.has(call[1]) && !reached.has(call[1])) stack.push(call[1])
+    }
+    for (const name of reached)
+        for (const ident of bodies.get(name)!.matchAll(WGSL_IDENT)) {
+            const key = keyOf.get(ident[0])
+            if (key) used.add(key)
+        }
+}
+
+/**
+ * The user samplers a screen material declares, in the order the prelude and the bind group use: each
+ * one's `u_` name and the WGSL texture type its binding declares (a cube for `samplerCube`).
+ */
+export function screenUserSamplers(uniforms: CustomUniform[]): { name: string; type: string }[] {
+    return userSamplerDecls(uniforms).map(s => ({ name: s.name, type: WGSL_TEXTURE[s.type] }));
 }
 
 /**
@@ -1530,7 +1604,7 @@ const reflectionSlots = new WeakMap<CustomMaterial, ReflectionSlot>();
 /**
  * The reflection a custom material's mesh pipeline is fetched with: its resources, and the translated
  * WGSL when there is one. Kept per material and rebuilt only when an input changes, because building it
- * is not cheap: the forward resources go through {@link usedResources}, a regex pass over the whole
+ * is not cheap: the forward resources go through {@link usedResources}, a call-graph walk over the whole
  * translated WGSL (some 300 KB with the engine's vertex module) — 2.5 ms, which the pond paid on every
  * draw. The same object back also lets the caller memoize the pipeline by identity.
  *
@@ -1544,7 +1618,11 @@ export function customPipelineReflection(mat: CustomMaterial, mode: CustomRender
     if (slot && slot.entry === entry && slot.mode === mode && slot.type === mat.type && slot.uniforms === mat.uniforms)
         return slot.reflection;
     const resources = customShaderResources(mode, mat.uniforms, mat.fragmentSource);
-    const used = mode === 'forward' ? usedResources(resources, entry?.fragment, entry?.vertex) : resources;
+    // Each stage from the entry point the pipeline runs: the vertex module is the whole base program, whose
+    // own fragment entry reads every lighting resource there is.
+    const used = mode === 'forward'
+        ? usedResources(resources, { wgsl: entry?.fragment, entry: 'main' }, { wgsl: entry?.vertex, entry: entry?.vertexEntry })
+        : resources;
     const reflection: PipelineReflection = {
         // With translated WGSL the vertex module is the base program's, which reads the per-object table:
         // its group 2 is this pipeline's too. (WebGL2's hand-written custom vertex stage keeps u_model.)

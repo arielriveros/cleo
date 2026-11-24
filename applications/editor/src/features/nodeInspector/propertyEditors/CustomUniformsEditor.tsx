@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 import { CustomMaterial, TextureManager } from 'cleo'
 import type { CustomUniform, CustomUniformType } from 'cleo'
 import { useEventBus } from '../../EventBusContext'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { NumberInput, TextInput, Toggle, Select, VectorInput, ColorInput, TypeSelect, Button, Hint, cn, labelClass } from '@cleo/app-kit/ui'
+import { NumberInput, TextInput, Toggle, VectorInput, ColorInput, TypeSelect, Button, Hint, cn, labelClass } from '@cleo/app-kit/ui'
+import TextureSlotPicker from '../../texture/TextureSlotPicker'
 import { UniformsIcon } from '../sectionIcons'
 
 const TYPES: CustomUniformType[] = ['float', 'vec2', 'vec3', 'vec4', 'int', 'bool', 'sampler2D', 'samplerCube']
@@ -22,9 +23,27 @@ function defaultValue(type: CustomUniformType): any {
 }
 
 /**
+ * Under a cubemap uniform's tile: it takes a 2:1 equirectangular panorama, which the engine wraps onto a
+ * cube (render/panoramaCubes.ts). A bound image of another shape still wraps, stretched, so it says so.
+ */
+function PanoramaCaption({ id }: { id: string | null }) {
+  const texture = id ? TextureManager.Instance.getTexture(id) : undefined
+  const w = texture?.width ?? 0, h = texture?.height ?? 0
+  const aspect = h > 0 ? w / h : 2
+  const off = w > 0 && (aspect < 1.9 || aspect > 2.1)
+  return (
+    <span className={cn('max-w-[120px] text-ui-2xs', off ? 'text-warning' : 'text-dim')}
+      title='A cubemap uniform takes a 2 : 1 equirectangular panorama, wrapped onto a cube when it is bound'>
+      {off ? `${w} × ${h}, not 2 : 1` : '2 : 1 panorama'}
+    </span>
+  )
+}
+
+/**
  * Editor for a custom material's user uniforms (name / GLSL type / default). Scalar/vector values are
- * written to `material.properties` (bare name); sampler values to `material.textures`. Structural edits
- * (add/remove/retype) change the assembled shader → `onChange(true)` recompiles; value edits `onChange(false)`.
+ * written to `material.properties` (bare name); sampler values to `material.textures`, through the same
+ * texture slot a material's maps use. Structural edits (add/remove/retype) change the assembled shader →
+ * `onChange(true)` recompiles; value edits `onChange(false)`.
  */
 export default function CustomUniformsEditor(props: { material: CustomMaterial, onChange: (structural: boolean) => void }) {
   const eventEmitter = useEventBus()
@@ -32,17 +51,15 @@ export default function CustomUniformsEditor(props: { material: CustomMaterial, 
   const [list, setList] = useState<CustomUniform[]>([])
   const [newName, setNewName] = useState('')
   const [newType, setNewType] = useState<CustomUniformType>('float')
-  const [texIds, setTexIds] = useState<string[]>([])
+  // A bound texture's size lands after it decodes: the panorama caption re-reads it then.
+  const [, bump] = useReducer((n: number) => n + 1, 0)
 
   const sync = () => setList(mat.uniforms.map(u => ({ ...u })))
   useEffect(() => { sync() }, [props.material])
 
   useEffect(() => {
-    const refresh = () => setTexIds(Array.from(TextureManager.Instance.textures.keys())
-      .filter(k => !(k.includes('__editor__') || k.includes('__debug__'))))
-    refresh()
-    eventEmitter.on('TEXTURES_CHANGED', refresh)
-    return () => { eventEmitter.off('TEXTURES_CHANGED', refresh) }
+    eventEmitter.on('TEXTURES_CHANGED', bump)
+    return () => { eventEmitter.off('TEXTURES_CHANGED', bump) }
   }, [eventEmitter])
 
   const validName = (n: string) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(n)
@@ -88,8 +105,8 @@ export default function CustomUniformsEditor(props: { material: CustomMaterial, 
     props.onChange(false)
   }
 
-  const setTexture = (name: string, texId: string) => {
-    if (texId === 'None') mat.textures.delete(name)
+  const setTexture = (name: string, texId: string | null) => {
+    if (!texId) mat.textures.delete(name)
     else mat.textures.set(name, texId)
     sync()
     props.onChange(false)
@@ -103,12 +120,14 @@ export default function CustomUniformsEditor(props: { material: CustomMaterial, 
     if (u.type === 'bool')
       return <Toggle checked={!!val} onChange={b => setValue(u.name, b)} />
     if (isSampler(u.type)) {
-      const cur = mat.textures.get(u.name) ?? 'None'
+      // The tile a material's maps use: Select, Upload, drop from Assets, ✕ to clear.
+      const id = mat.textures.get(u.name) ?? null
+      const cube = u.type === 'samplerCube'
       return (
-        <Select className='w-full' value={cur} onChange={e => setTexture(u.name, e.target.value)}>
-          <option value='None'>None</option>
-          {texIds.map(id => <option key={id} value={id}>{id}</option>)}
-        </Select>
+        <div className='flex flex-col items-start gap-1'>
+          <TextureSlotPicker value={id} fit={cube ? 'contain' : 'cover'} onChange={next => setTexture(u.name, next)} />
+          {cube && <PanoramaCaption id={id} />}
+        </div>
       )
     }
     // vecN — component fields, plus a color swatch for vec3 (values treated as 0..1 RGB).
@@ -131,7 +150,7 @@ export default function CustomUniformsEditor(props: { material: CustomMaterial, 
       <div className='w-full p-2'>
         {list.length === 0 && <Hint className='mb-2'>No uniforms yet.</Hint>}
         {list.map(u => (
-          <div key={u.name} className='flex items-center gap-1.5 mb-2'>
+          <div key={u.name} className={cn('flex gap-1.5 mb-2', isSampler(u.type) ? 'items-start' : 'items-center')}>
             <span className={cn(labelClass, 'w-[26%] truncate')} title={u.name}>{u.name}</span>
             <TypeSelect value={u.type} options={TYPES} onChange={t => changeType(u.name, t)} />
             <div className='flex-1 min-w-0'>{renderValue(u)}</div>

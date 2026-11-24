@@ -21,7 +21,8 @@ import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { DirectionalLight, REFERENCE_ILLUMINANCE } from '../lighting';
 import type { CloudSubsystem } from './featureSubsystems';
-import { BRDFProgram, PrefilterProgram, SkyProjectProgram, SkyAtmosphereProgram, SkyFogProgram, SkyboxProgram } from './programs';
+import { BRDFProgram, PanoramaCubeProgram, PrefilterProgram, SkyProjectProgram, SkyAtmosphereProgram, SkyFogProgram, SkyboxProgram } from './programs';
+import { PanoramaCubes } from './panoramaCubes';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -166,6 +167,8 @@ export class SkyPasses {
         // aliasing it exists to prevent. `allocateCube` throws on the mismatch.
         this._bindGroups.fallbackCube = new Texture({ target: 'cubemap', mipMap: false });
         this._bindGroups.fallbackCube.createCubemapTarget(1, 1);
+        // What a custom material's cubemap uniform binds: the cube wrapped from its panorama.
+        this._bindGroups.panoramas = this.panoramas;
 
         // White rather than black: a material with no base colour map multiplies by this, and black
         // would render every untextured object invisible rather than merely unmapped.
@@ -235,6 +238,20 @@ export class SkyPasses {
 
     /** GGX samples per texel for a light probe's prefiltered cube. */
     public static readonly PREFILTER_SAMPLES = 1024;
+
+    // ---- Panorama cubes ----------------------------------------------------------------------------
+    // A custom material's `samplerCube` uniform names a 2:1 panorama from the texture library; this is
+    // the cube it is wrapped onto, built where no pass is open (Renderer._ensurePackedTextures).
+
+    /** The cubes wrapped from panoramas, by texture id. */
+    public readonly panoramas = new PanoramaCubes((source, target, size) => this.bakePanoramaCube(source, target, size));
+
+    /** Wrap the 2:1 panorama `source` onto all six faces of `target`, then build its mips. */
+    public bakePanoramaCube(source: Texture, target: Texture, size: number): void {
+        this.convolveCubeFaces('panoramaCube', PanoramaCubeProgram, source, target, 0, size);
+        this._passes.generateMipsAfterRender(target);
+        this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
+    }
 
     // ---- Sky reflection ----------------------------------------------------------------------------
     // The last tier of the reflection fallback: what a glossy surface reflects where no light probe

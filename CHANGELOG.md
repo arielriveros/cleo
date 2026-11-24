@@ -16,6 +16,21 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **A custom material's texture and cubemap uniforms take the same texture slot as a material's maps.** The
+  Uniforms list's dropdown is replaced by the 96 px tile with Select, Upload, drag-drop from Assets and ✕. A
+  **cubemap** uniform (`samplerCube`) takes a 2 : 1 equirectangular panorama from the project's textures, which
+  the engine wraps onto a mipmapped cube the first frame it is drawn: a face is a quarter of the image's width, at
+  most 1024. The cube is rebuilt when the image changes, so `textureLod(u_sky, R, roughness * n)` reads a blurrier
+  reflection. The tile's caption warns when the bound image is not 2 : 1. Engine: `render/panoramaCubes.ts`, the
+  `panoramaCube` program.
+  - Fix: a cubemap uniform was bound a 2D texture, the one picked or the 2D fallback when none was. WebGPU
+    refuses that bind group, so the material drew nothing even with the uniform empty, and WebGL2 sampled black.
+    Screen materials did the same. Player contract 52.
+  - Fix: on WebGPU, a forward custom material that never called `shadowCalculation()` blacked out the whole
+    viewport. Its bind group named the sun's shadow map, which the shader's pipeline left out because nothing
+    reached it: the engine counted every mention of a resource in the translated WGSL, and the prelude
+    mentions the shadow maps whether the material calls it or not. It now counts what each stage's entry
+    point reaches, as WebGPU does, and binds the spot and point shadow maps without the sun's.
 - **A project opens with its scene's shaders already built, custom ones included.**
   - The loading screen's **Compiling shaders** step now holds a project or a scene opening until every shader
     the scene can draw with is built. That covers:

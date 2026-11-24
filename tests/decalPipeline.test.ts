@@ -170,7 +170,7 @@ describe('the programs', () => {
                                               'pixelUpscale', 'water', 'waterUnderwater', 'waterWaveField',
                                               'waterWaveAdvect', 'waterWaveStep', 'waterFlowGround', 'waterFlowShift',
                                               'waterFlowAdvect', 'waterFlowLimit', 'waterFlowDepth', 'waterFlowAccelerate',
-                                              'waterFlowWaves', 'waterFlowSurface', 'referenceBackdrop']);
+                                              'waterFlowWaves', 'waterFlowSurface', 'referenceBackdrop', 'panoramaCube']);
     });
 
     it('read every map through the flipbook cells, inset per cell so no neighbouring frame bleeds in', () => {

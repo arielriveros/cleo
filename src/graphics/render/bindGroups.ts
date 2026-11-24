@@ -26,7 +26,11 @@ interface LastGroup {
 
 /** What a pipeline's group 3 declares: either half of the frame-lighting group, and the bindings it has. */
 interface LightingFacts {
+    /** The sun's cascades. */
     readonly shadows: boolean;
+    /** The spot and point shadow atlases, apart from the cascades: a custom surface can reach them alone. */
+    readonly spotShadows: boolean;
+    readonly pointShadows: boolean;
     readonly lightGrid: boolean;
     /** The weather's shelter map (chunks/terrainWeather.wgsl), binding 8. */
     readonly weather: boolean;
@@ -56,6 +60,12 @@ export class BindGroupCache {
 
     /** 1x1 white 2D texture, bound wherever a material declares a map it does not have. */
     public fallbackTexture!: Texture;
+
+    /**
+     * The cubes a custom material's cubemap uniforms bind, wrapped from the panoramas they name
+     * (render/panoramaCubes.ts). Set with {@link fallbackCube}; null until then, which binds the fallback.
+     */
+    public panoramas: { cube(id: string): Texture | null } | null = null;
 
     /**
      * The same, as a one-layer 2D ARRAY: a `texture_2d_array` binding cannot take the plain fallback —
@@ -331,11 +341,21 @@ export class BindGroupCache {
                 textures.push(this._targets.refraction?.colors[0] ?? this.fallbackTexture);
                 continue;
             }
-            const id = material.textures.get(resource.glslName.replace(/^u_/, ''));
-            const texture = id ? TextureManager.Instance.getTexture(id) : null;
-            textures.push(texture ?? this.fallbackTexture);
+            textures.push(this.userSamplerTexture(resource.type, material.textures.get(resource.glslName.replace(/^u_/, ''))));
         }
         return this.textureGroup(pipeline, 0, textures, bindings, material);
+    }
+
+    /**
+     * What a custom material's own sampler uniform binds, by the binding's WGSL type. A 2D one binds the
+     * texture it names. A CUBE binds the cube wrapped from the panorama it names: never the 2D texture
+     * itself, nor the 2D fallback, because a 2D view in a `texture_cube` slot is refused outright —
+     * WebGPU rejects the bind group, WebGL2 samples black — and a cube uniform did exactly that, even
+     * with nothing assigned, before the wrapping existed.
+     */
+    public userSamplerTexture(wgslType: string, id: string | undefined, fallback2D: Texture = this.fallbackTexture): Texture {
+        if (wgslType.startsWith('texture_cube')) return (id ? this.panoramas?.cube(id) : null) ?? this.fallbackCube;
+        return (id ? TextureManager.Instance.getTexture(id) : null) ?? fallback2D;
     }
 
     /**
@@ -390,7 +410,7 @@ export class BindGroupCache {
     /** Does this program declare group 3 at all, in any part? */
     public declaresFrameLighting(pipeline: RenderPipeline): boolean {
         const facts = this._factsOf(pipeline);
-        return facts.shadows || facts.lightGrid || facts.weather;
+        return facts.shadows || facts.spotShadows || facts.pointShadows || facts.lightGrid || facts.weather;
     }
 
     /**
@@ -407,6 +427,8 @@ export class BindGroupCache {
             const group3 = pipeline.resources.filter(r => r.group === 3);
             facts = {
                 shadows: group3.some(r => r.glslName === 'u_shadowCascades'),
+                spotShadows: group3.some(r => r.glslName === 'u_spotShadows'),
+                pointShadows: group3.some(r => r.glslName === 'u_pointShadows'),
                 lightGrid: group3.some(r => r.glslName === 'u_lightData'),
                 weather: group3.some(r => r.glslName === 'u_weatherShelter'),
                 bindings: new Set(group3.map(r => r.binding)),
@@ -438,14 +460,17 @@ export class BindGroupCache {
         // which drops every resource the shader never reaches: a lit custom surface (the Valley's water)
         // that samples the sun's cascades but never a spot or point shadow has no binding 2 or 4, and
         // naming them anyway made the whole group -- and every frame's command buffer -- invalid.
+        //
+        // Each map on its own, not the punctual pair only beside the cascades: a custom forward surface that
+        // never calls `shadowCalculation()` reaches the spot and point maps (through the prelude's light
+        // loop) and not the cascades, and leaving the pair out with them left the group short of two
+        // entries its layout has -- invalid, and every frame black.
         const facts = this._factsOf(pipeline);
         const declared = facts.bindings;
-        if (facts.shadows) {
-            if (declared.has(0)) { textures.push(this._host.shadowCascades()); bindings.push(0); }
-            if (withPunctual) {
-                if (declared.has(2)) { textures.push(this._host.spotShadows()); bindings.push(2); }
-                if (declared.has(4)) { textures.push(this._host.pointShadows()); bindings.push(4); }
-            }
+        if (facts.shadows && declared.has(0)) { textures.push(this._host.shadowCascades()); bindings.push(0); }
+        if (withPunctual) {
+            if (facts.spotShadows && declared.has(2)) { textures.push(this._host.spotShadows()); bindings.push(2); }
+            if (facts.pointShadows && declared.has(4)) { textures.push(this._host.pointShadows()); bindings.push(4); }
         }
         // One texture and no sampler beside it — the light data is only ever `textureLoad`ed.
         if (facts.lightGrid && declared.has(6)) { textures.push(this._host.lightGrid()); bindings.push(6); }

@@ -42,7 +42,8 @@ describe('customPipelineReflection', () => {
         expect(entry).toBeDefined();
         const first = customPipelineReflection(m, 'forward');
         for (let i = 0; i < 5; i++) expect(customPipelineReflection(m, 'forward')).toBe(first);
-        const expected = usedResources(customShaderResources('forward', m.uniforms), entry.fragment, entry.vertex);
+        const expected = usedResources(customShaderResources('forward', m.uniforms),
+            { wgsl: entry.fragment, entry: 'main' }, { wgsl: entry.vertex, entry: entry.vertexEntry });
         expect(first.resources.slice(0, expected.length)).toEqual(expected);
         // The vertex module is the base program's, which reads the per-object table at group 2.
         expect(first.resources.slice(expected.length)).toEqual(
@@ -64,10 +65,16 @@ describe('customPipelineReflection', () => {
     });
 
     it('rebuilds when the uniforms array is replaced', () => {
+        // A translation that samples the mask, at the binding the reflection gives it: only a binding the entry
+        // point reaches is in a WebGPU layout, so one no stage samples would be (rightly) left out.
+        const uniforms = [{ name: 'tint', type: 'vec3', value: [1, 0, 0] }, { name: 'mask', type: 'sampler2D', value: null }] as never[];
+        const mask = customShaderResources('forward', uniforms).find(r => r.glslName === 'u_mask' && r.kind === 'texture')!;
+        setWgslTranslator(() => `@group(0) @binding(${mask.binding}) var u_mask_t: texture_2d<f32>;
+@fragment fn main() -> @location(0) vec4<f32> { return textureLoad(u_mask_t, vec2<i32>(0), 0); }`);
         const m = material();
         ensureCustomShader(m);
         const before = customPipelineReflection(m, 'forward');
-        m.uniforms = [...m.uniforms, { name: 'mask', type: 'sampler2D', value: null } as never];
+        m.uniforms = [...m.uniforms, uniforms[1]];
         const after = customPipelineReflection(m, 'forward');
         expect(after).not.toBe(before);
         expect(after.resources.some(r => r.glslName === 'u_mask')).toBe(true);

@@ -16,7 +16,8 @@ function fakeBrowser() {
         listeners.set(key, [...(listeners.get(key) ?? []), fn]);
     };
     const fire = (target: string, type: string, event: any = {}) => { for (const fn of listeners.get(`${target}:${type}`) ?? []) fn(event); };
-    const canvas: any = { addEventListener: on('canvas'), requestPointerLock: vi.fn(), getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 }) };
+    // `style`: the sampler sets the canvas's cursor (Input.mouse) and clears it on dispose.
+    const canvas: any = { addEventListener: on('canvas'), requestPointerLock: vi.fn(), getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 }), style: {} };
     const document: any = {
         addEventListener: on('document'), pointerLockElement: null, fullscreenElement: null, activeElement: null,
         exitPointerLock: vi.fn(() => { document.pointerLockElement = null; fire('document', 'pointerlockchange'); }),

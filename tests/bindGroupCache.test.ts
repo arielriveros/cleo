@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { setDevice } from '../src/graphics/rhi/deviceHandle';
 import { BindGroupCache } from '../src/graphics/render/bindGroups';
+import { TextureManager } from '../src/graphics/systems/textureManager';
 import type { FrameTargets } from '../src/graphics/render/frameTargets';
 import type { Texture } from '../src/graphics/texture';
 import type { RenderPipeline } from '../src/graphics/rhi/resources';
@@ -67,6 +68,19 @@ describe('the frame-lighting group', () => {
         // Never named for a program that does not declare it.
         c.frameLightingGroup(pipeline('pbr', [{ name: 'u_shadowCascades', binding: 0 }]));
         expect(created[2].entries.map(e => e.binding)).toEqual([0]);
+    });
+
+    it('binds the spot and point maps of a program that reaches them without the cascades', () => {
+        // An unlit custom forward surface: the prelude's light loop reaches the punctual maps, nothing calls
+        // shadowCalculation(), and the automatic layout has 2, 4 and 6 but no 0. Leaving the pair out with the
+        // cascades left the group two entries short of its layout: invalid, and the frame black.
+        const unlit = pipeline('custom_x', [{ name: 'u_spotShadows', binding: 2 }, { name: 'u_pointShadows', binding: 4 },
+                                            { name: 'u_lightData', binding: 6 }]);
+        const c = cache();
+        expect(c.declaresFrameLighting(unlit)).toBe(true);
+        c.frameLightingGroup(unlit);
+        expect(created[0].entries.map(e => [e.binding, (e.textureView as { name: string }).name]))
+            .toEqual([[2, 'spots'], [4, 'points'], [6, 'grid']]);
     });
 
     it('leaves the punctual atlases out when the caller says so', () => {
@@ -177,5 +191,65 @@ describe('the object-table group', () => {
         const grown = texture('grown');
         expect(c.objectDataGroup(a, grown)).not.toBe(first);
         expect(created.length).toBe(3);
+    });
+});
+
+// A custom material's own samplers: a cubemap one binds a CUBE, its panorama wrapped (render/panoramaCubes.ts),
+// or the fallback cube; a 2D view in a texture_cube slot is a refused bind group on WebGPU, black on WebGL2.
+describe("a custom material's group", () => {
+    const customPipeline = () => ({
+        label: 'custom_abc',
+        resources: [
+            { group: 0, binding: 0, glslName: 'u_envMap', kind: 'texture', type: 'texture_cube<f32>' },
+            { group: 0, binding: 2, glslName: 'u_albedo', kind: 'texture', type: 'texture_2d<f32>' },
+            { group: 0, binding: 4, glslName: 'u_sky', kind: 'texture', type: 'texture_cube<f32>' },
+        ],
+        layoutForGroup: () => ({}),
+    }) as unknown as RenderPipeline;
+    const names = () => created.at(-1)!.entries.map(e => [e.binding, (e.textureView as { name: string }).name]);
+
+    let library: Map<string, Texture>;
+    beforeEach(() => {
+        library = new Map();
+        vi.spyOn(TextureManager.Instance, 'getTexture').mockImplementation((id: string) => library.get(id));
+    });
+    afterEach(() => { vi.restoreAllMocks(); });
+
+    function customCache() {
+        const c = cache();
+        c.fallbackTexture = texture('white');
+        c.fallbackCube = texture('blackCube');
+        return c;
+    }
+
+    it('binds the fallback cube for an empty cubemap uniform, never the 2D one', () => {
+        const c = customCache();
+        const material = { textures: new Map<string, string>() } as any;
+        c.customGroup(customPipeline(), material, texture('env'));
+        expect(names()).toEqual([[0, 'env'], [2, 'white'], [4, 'blackCube']]);
+    });
+
+    it("binds the cube wrapped from the uniform's panorama once there is one, and never the panorama itself", () => {
+        const c = customCache();
+        library.set('brick', texture('brick'));
+        library.set('dusk', texture('dusk'));
+        const material = { textures: new Map([['albedo', 'brick'], ['sky', 'dusk']]) } as any;
+        const cubes = new Map<string, Texture>();
+        c.panoramas = { cube: (id: string) => cubes.get(id) ?? null };
+
+        // Not wrapped yet (the panorama is still decoding): the fallback cube, not the 2D panorama.
+        c.customGroup(customPipeline(), material, null);
+        expect(names()).toEqual([[0, 'blackCube'], [2, 'brick'], [4, 'blackCube']]);
+
+        cubes.set('dusk', texture('duskCube'));
+        c.customGroup(customPipeline(), material, null);
+        expect(names()).toEqual([[0, 'blackCube'], [2, 'brick'], [4, 'duskCube']]);
+    });
+
+    it("resolves a screen pass sampler by its type, with the caller's own 2D fallback", () => {
+        const c = customCache();
+        const placeholder = texture('Null');
+        expect(c.userSamplerTexture('texture_2d<f32>', undefined, placeholder)).toBe(placeholder);
+        expect(c.userSamplerTexture('texture_cube<f32>', 'missing', placeholder)).toBe(c.fallbackCube);
     });
 });
