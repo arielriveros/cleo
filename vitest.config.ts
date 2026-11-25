@@ -19,7 +19,7 @@ import { exampleDirs, exampleProjects } from './tools/exampleKit/vitestPreset';
 /** Engine suites that also run on every other physics backend (see the "engine on <backend>" projects). */
 const PHYSICS_SUITES = [
     'characterGround', 'physicsOverlap', 'physicsTriggerOverlap', 'terrainCollider', 'foliageColliderPose', 'waterVolumeNode',
-    'characterLightBodies', 'characterSlopeHold', 'vehicleNodes', 'vehiclePresets', 'colliderSuspend',
+    'characterLightBodies', 'characterSlopeHold', 'characterCrouch', 'vehicleNodes', 'vehiclePresets', 'colliderSuspend',
 ];
 /** The backends besides cannon that the engine suites run on. */
 const OTHER_BACKENDS = ['rapier', 'jolt'];

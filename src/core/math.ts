@@ -286,6 +286,39 @@ export function yawFromDirection(x: number, z: number): number {
 }
 
 /**
+ * The unit direction a yaw and a pitch (degrees) face: a node's forward (+Z) turned by them, positive pitch DOWN, as
+ * a camera rig's `yaw` / `pitch` read. The inverse of {@link aimFromDirection}. Written into `out`.
+ */
+export function directionFromAim(out: number[] | vec3, yawDeg: number, pitchDeg: number): number[] | vec3 {
+    const y = yawDeg * DEG2RAD, p = pitchDeg * DEG2RAD;
+    const c = Math.cos(p);
+    out[0] = Math.sin(y) * c;
+    out[1] = -Math.sin(p);
+    out[2] = Math.cos(y) * c;
+    return out;
+}
+
+/**
+ * A unit direction at most `coneDeg` degrees off `dir` (unit), spread evenly over the cone's disc: a shot's spread.
+ * `random` draws in [0, 1) (Math.random by default; a seeded one makes it repeatable). Written into `out`.
+ */
+export function randomInCone(out: number[] | vec3, dir: ArrayLike<number>, coneDeg: number, random: () => number = Math.random): number[] | vec3 {
+    const angle = Math.sqrt(random()) * coneDeg * DEG2RAD;
+    const roll = random() * Math.PI * 2;
+    // Two directions square to `dir`.
+    const ux = Math.abs(dir[1]) > 0.95 ? 1 : 0, uy = Math.abs(dir[1]) > 0.95 ? 0 : 1;
+    let rx = dir[1] * 0 - dir[2] * uy, ry = dir[2] * ux - dir[0] * 0, rz = dir[0] * uy - dir[1] * ux;
+    const rl = Math.hypot(rx, ry, rz) || 1;
+    rx /= rl; ry /= rl; rz /= rl;
+    const vx = ry * dir[2] - rz * dir[1], vy = rz * dir[0] - rx * dir[2], vz = rx * dir[1] - ry * dir[0];
+    const s = Math.sin(angle), c = Math.cos(angle), a = Math.cos(roll) * s, b = Math.sin(roll) * s;
+    const x = dir[0] * c + rx * a + vx * b, y = dir[1] * c + ry * a + vy * b, z = dir[2] * c + rz * a + vz * b;
+    const l = Math.hypot(x, y, z) || 1;
+    out[0] = x / l; out[1] = y / l; out[2] = z / l;
+    return out;
+}
+
+/**
  * Yaw/pitch that make a node's forward (+Z, per `Node.worldForward`) point along `direction`, which
  * need not be normalized. forward = (cos(p)*sin(y), -sin(p), cos(p)*cos(y)), so positive pitch is DOWN.
  */

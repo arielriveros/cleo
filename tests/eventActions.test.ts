@@ -14,13 +14,9 @@ import {
 // Event Actions: what a clip event does, as data on the machine. The clip says when, the machine says what.
 
 class Sound extends Node {
-    plays = 0;
-    playing = false;
-    mode = 'spatial'; sampleId: string | null = 's'; volume = 1; loopMode = 'inherit';
-    distanceModel = 'inverse'; refDistance = 1; maxDistance = 100; rolloffFactor = 1;
-    constructor(name: string, _options: Record<string, unknown> = {}) { super(name, 'sound'); }
-    play() { this.plays++; this.playing = true; }
-    get isPlaying() { return this.playing; }
+    plays: (Record<string, unknown> | undefined)[] = [];
+    constructor(name: string) { super(name, 'sound'); }
+    play(options?: Record<string, unknown>) { this.plays.push(options); }
 }
 
 class Particles extends Node {
@@ -102,16 +98,14 @@ describe('resolveTarget', () => {
 });
 
 describe('runEventActions', () => {
-    it('plays a sound, overlapping an earlier one up to a cap', () => {
+    it('plays a sound as its node overlaps, or restarts it with overlap off', () => {
         const { owner, shot } = tree();
-        runEventActions(owner, [{ kind: 'sound', target: 'Sounds/Shot' }]);
-        expect(shot.plays).toBe(1);
         for (let i = 0; i < 12; i++) runEventActions(owner, [{ kind: 'sound', target: 'Sounds/Shot' }]);
-        // The first plays on the cue; the rest ring on spares, at most six of them, then restart the cue.
-        const spares = shot.parent!.children.filter(c => c.name === 'Shot (overlap)');
-        expect(spares).toHaveLength(6);
+        // Every shot is the node's own play: its Voices decide how they overlap, and no spare copies are made.
+        expect(shot.plays).toEqual(new Array(12).fill(undefined));
+        expect(shot.parent!.children).toEqual([shot]);
         runEventActions(owner, [{ kind: 'sound', target: 'Sounds/Shot', overlap: false }]);
-        expect(shot.plays).toBeGreaterThan(1);
+        expect(shot.plays[12]).toEqual({ restart: true });
     });
 
     it('drives a particle system', () => {
@@ -189,7 +183,7 @@ describe('runEventActions', () => {
     it('survives a missing target and runs the rest', () => {
         const { owner, shot } = tree();
         runEventActions(owner, [{ kind: 'sound', target: 'Nothing/Here' }, { kind: 'sound', target: 'Sounds/Shot' }]);
-        expect(shot.plays).toBe(1);
+        expect(shot.plays).toHaveLength(1);
     });
 });
 
@@ -264,9 +258,9 @@ describe('Animator event actions', () => {
     it('runs the bound actions when fired, with no onAnimationEvent listener at all', () => {
         const { animator, shot, frame } = rig(bind);
         frame();
-        expect(shot.plays).toBe(0);
+        expect(shot.plays).toHaveLength(0);
         animator.fireEvent('shot');
-        expect(shot.plays).toBe(1);
+        expect(shot.plays).toHaveLength(1);
     });
 
     it('fires a marker at time 0 when a clip starts, and again when it restarts', () => {
@@ -274,12 +268,12 @@ describe('Animator event actions', () => {
         frame();
         animator.setTrigger('Fire' as any);
         frame();
-        expect(shot.plays).toBe(1);
+        expect(shot.plays).toHaveLength(1);
         frame(0.1);
-        expect(shot.plays).toBe(1);
+        expect(shot.plays).toHaveLength(1);
         animator.setTrigger('Fire' as any);
         frame();
-        expect(shot.plays).toBe(2);
+        expect(shot.plays).toHaveLength(2);
     });
 
     it('runs actions once for a layer\'s event, and still tells a listener', () => {
@@ -290,7 +284,7 @@ describe('Animator event actions', () => {
         animator.setTrigger('Fire' as any);
         frame();
         frame(0.3);
-        expect(shot.plays).toBe(1);
+        expect(shot.plays).toHaveLength(1);
         expect(heard).toEqual(['shot', 'mid']);
     });
 

@@ -12,9 +12,14 @@ does. It can:
 - jump, fall, and land soft or hard, a hard landing crouching where it came down, or rolling if it is still running;
 - climb a flight of stairs at a stair pace, one step a tread, with stair clips that hand over in step with the walk;
 - stand on a stair ramp or a slope without sliding down it;
+- crouch and walk crouched in eight directions, its capsule shorter, standing up only where there is room
+  (see [Crouching](#crouching));
 - get into a car by its door, drive it, and get out again (see [The car](#the-car));
-- carry a pistol or a rifle at the low ready, aim it where the camera looks and fire it, walking, jogging and running
-  with it, its shots raycasts that push what they hit (see [The weapons](#the-weapons)).
+- carry Firing Line's pistol, AK-47 rifle and SAPS-12 shotgun at the low ready, aim them where the camera looks,
+  fire and reload them, walking, jogging and running with them, their shots raycasts that push what they hit (see
+  [The weapons](#the-weapons));
+- switch to first person and back: Firing Line's viewmodels and its shooter's mechanics, the body still casting its
+  shadow (see [First person](#first-person)).
 
 Everything that is the character is one **Player** template, placed once; the sky is the **Environment** template,
 the course the **Course** template, and the car the **Car** template.
@@ -29,7 +34,7 @@ and the light over the platforms' tops where the GI Volume ends.
 dusk, **3** night (the d-pad's left, up and right on a pad). A setup is where the sun is; the sky, the clouds, the
 moon, the Sky Light, the GI Volume and the Light Probe follow it, and the eye adapts. How dark the dusk and the
 night look is the project's exposure compensation curve, set once in the render settings rather than by the
-script. The **HUD** in the top left corner says which setup is on and lists the keys. The setup is the script's
+script. The scene's **HUD** (its Controls panel, top left) says which setup is on and lists the keys. The setup is the script's
 `setup` field, an `@observable` one: setting it sends the event `sandbox:LightSetup`, which the HUD line answers.
 Another script can follow the light the same way, with `@onEvent('sandbox:LightSetup')` (see
 [Events](../scripting/events.md)).
@@ -47,7 +52,9 @@ It uses only what the engine has:
 - one script on the Character, which handles input and writes the values the animator reads.
 
 The character is one template, **Player** (`/Characters/Mannequin/Player.tpl`): the Collider, the Character and
-its script, the Camera Rig and its script, the Mannequin and the Controller. The level is two more:
+its script, the Camera Rig and its script, the Mannequin, the Controller, and its own **HUD** (a screen canvas: the
+crosshair, the ammunition and the reload, so every copy of the Player brings and drives its own). The level is two
+more:
 **Environment** (`/Level/Environment.tpl`: the sun, the sky atmosphere and the sky light) and **Course**
 (`/Level/Course.tpl`: the merged Static Collision collider with every piece of the course, placed under that name,
 and inside it the parts merged apart for their [collision layers](#collision-layers-stairs-bumps-and-pillars): the
@@ -66,12 +73,14 @@ It is edited in the desktop editor, as the project folder `examples/sandbox`
 | Sprint (any direction, facing it) | hold Left Shift | hold A |
 | Jump | Space | X |
 | Look | the mouse (click the view to capture it) | right stick (twice the engine default's rate) |
-| Zoom | the wheel | |
 | Get into the car, or out of it | E, by the driver's door | Y |
 | Day, dusk, night | 1, 2, 3 | d-pad left, up, right |
-| Next weapon (pistol, rifle, none) | Q | RB |
+| Next weapon (pistol, rifle, shotgun, none) | Q, or the wheel (back: the last one) | RB |
 | Aim | hold the right mouse button | hold LT |
 | Fire | the left mouse button (hold for the rifle) | RT |
+| Reload | R | B |
+| Crouch, or stand up | C | right stick click |
+| First person, or third | V | d-pad down |
 
 In the car, the **Drive** action drives and steers: W forward, S brakes, then reverses, A and D steer; on a gamepad
 the right trigger drives on and the left one brakes, then reverses (both analog), and the left stick steers (its up
@@ -462,6 +471,9 @@ switches it.
 - **Aiming** (its script's `aiming`): `aimArm` 1.25 m back and `aimShoulderOffset` 0.6 m to the right, in over
   `aimSeconds` (0.25 s), on top of whichever of the two framings it is in.
 
+- **Crouched** (the Character's `crouched`): it orbits `crouchDrop` (0.45 m) lower, over `crouchSeconds` (0.25 s).
+- **First person** (the script's `firstPerson`): see [First person](#first-person).
+
 It eases the arm, the socket offset and the pivot height, and never touches where the camera looks: yaw and pitch
 are the Controller's. The six framing distances are `public`, so each copy of the template can frame its own
 character; `switchSeconds`, `sprintHold` and `aimSeconds` are `private`. Under pointer lock the
@@ -527,126 +539,200 @@ the wheel with the steering, and the seated feet go through the floor (no leg IK
 
 ## The weapons
 
-A pistol and a rifle, carried in the right hand: **Q** takes out the pistol, then the rifle, then puts it away (RB
-on a pad), and holding the **right mouse button** aims it (LT). Aiming, the character faces the camera and
-strafes, turns in place as soon as the camera is 45 degrees round (`aimTurnThreshold`), and the camera moves in
-over the shoulder. Sprinting lowers the weapon (and lets go of the pistol with the left hand); getting into the car
-puts it away.
+Three weapons, Firing Line's: its pistol, its AK-47 rifle and its SAPS-12 shotgun, carried in the right hand.
+**Q** (RB on a pad) takes out the pistol, then the rifle, then the shotgun, then puts it away; the mouse wheel goes
+the same way round, or back. Holding the **right mouse button** aims it (LT). Aiming, the character faces the
+camera and strafes, turns in place as soon as the camera is 45 degrees round (`aimTurnThreshold`), and the camera
+moves in over the shoulder. Sprinting lowers the weapon (and lets go of the pistol with the left hand); getting into
+the car puts it away. In first person they are Firing Line's viewmodels instead (see [First person](#first-person)):
+the same weapons, the same magazines.
 
 ```
 Player
+├─ Camera Rig
+│  └─ Camera
+│     └─ Viewmodels       first person: the Pistol, AK-47 and SAPS-12 Viewmodels, each with its Muzzle
 ├─ ...
 ├─ Mannequin
-└─ Weapons
-   ├─ Pistol Grip   on the Mannequin's Pistol Grip socket: the Pistol model, and its Muzzle
-   └─ Rifle Grip    on the Rifle Grip socket: the Rifle model, and its Muzzle
+├─ Weapons
+│  ├─ Pistol Grip         on the Mannequin's Pistol Grip socket: the Pistol model, and its Muzzle
+│  ├─ Rifle Grip          on the Rifle Grip socket: the Rifle model, and its Muzzle
+│  └─ Shotgun Grip        on the Shotgun Grip socket: the Shotgun model, and its Muzzle
+├─ Sounds                 ShotPistol, ShotRifle, ShotShotgun
+└─ HUD                    the Player's own screen canvas: Crosshair (a dot and four ticks), Ammunition, Reloading
 ```
 
-**On the hand.** Each weapon hangs on a socket of its own on the right hand (`Pistol Grip`, `Rifle Grip`, on the
-Mannequin rig, shown with their weapon in the animation editors). The socket's frame is the weapon's: its grip at the
-origin, its bore along +Z. Under it, the weapon's model sits at the origin, and a **Muzzle** node marks the end of
-its bore, for whatever fires it. The script shows the one in the hands and hides the other.
+**On the hand.** Each weapon hangs on a socket of its own on the right hand (`Pistol Grip`, `Rifle Grip`,
+`Shotgun Grip`, on the Mannequin rig, shown with their weapon in the animation editors). The socket's frame is the
+weapon's: its grip at the origin, its bore along +Z. Under it, the weapon's model sits at the origin, and a
+**Muzzle** node marks the end of its bore, for whatever fires it. The script shows the one in the hands and hides
+the others.
+
+**The models.** The third person's weapons are Firing Line's viewmodels' own: each one's weapon parts (not the
+arms, not the shotgun's ejected shell), as its viewmodel's Idle clip holds them, laid out in weapon space. The grip
+is the middle of the part the viewmodel's right fist closes round, on the weapon's midplane; the bore is the
+weapon's own (its rig's weapon bone). They wear the viewmodels' materials, which cast shadows (a viewmodel never
+does, whatever its material says). The pistol is 27 cm long, the AK-47 87 cm, the SAPS-12 84 cm.
 
 **The poses.** Everything about how each weapon is held is a POSE, in a Pose asset per weapon (**Pistol Poses**,
-**Rifle Poses**, in `/Characters/Mannequin/Animation/Weapons`), editable in the editor (see
+**Rifle Poses**, **Shotgun Poses**, in `/Characters/Mannequin/Animation/Weapons`), editable in the editor (see
 [Editing a pose](animation.md#editing-a-pose)):
 
 - **Carry**, **Aim** and **Sprint**: the stances, the spine, the head, both arms and the fingers.
+- **Reload**: the weapon brought up in front of the chest and canted, the magazine toward the left hand, the left
+  hand at the magazine (the shotgun's: at its loading port), the head down to it.
 - **Aim Left 45 Up 30** and the rest, 25 in all: the aim's directions, each a [variant](animation.md#variants) of
   **Aim** that stores only what it changes from it (the upper spine, the head, the arms).
 
 Edit **Aim** and every aim direction moves with it; edit one direction and only it changes. Edit **Carry** and the
-weapon is carried that way at every gait and on the stairs.
+weapon is carried that way at every gait and on the stairs. The rifle's and the shotgun's left hand is where Firing
+Line's viewmodel holds each weapon: the AK-47's handguard; on the shotgun, as far toward its pump as the
+Mannequin's arm reaches in every aim direction.
 
-**The layers.** Each weapon has an override layer, **Pistol** and **Rifle**, which holds the spine, the head and the
-arms (the pistol's left arm is on a layer of its own, **Pistol Support**, so it can let go at a sprint). Its weight
-is the script's (`pistolWeight`, `rifleWeight`): one at a time, faded out and in over `equipSeconds` (0.3 s).
+**The layers.** Each weapon has an override layer, **Pistol**, **Rifle** and **Shotgun**, which holds the spine,
+the head and the arms (the pistol's left arm is on a layer of its own, **Pistol Support**, so it can let go at a
+sprint). Its weight is the script's (`pistolWeight`, `rifleWeight`, `shotgunWeight`): one at a time, faded out and
+in over `equipSeconds` (0.3 s).
 
-- **Carry** is a blend space of the poses over the base layer's walk axes (**Pistol Carry**, **Rifle Carry**): the
-  Carry pose wherever the walk plays a clip and standing, the Sprint pose where it sprints, so the weapon goes down
-  as the legs speed up. **Aim** holds the Aim pose.
-- Both are **Steady** (see [Steady holds](animation.md#steady-holds)): the chest keeps the pose's own turn over the
-  hips, whatever the legs do, walking, running or on a flight of stairs, so one pose is the whole hold. Carrying,
-  at 0.5, it keeps half the hips' sway and lean into a run (about 9 degrees of sway at a jog); aiming, at 0.85,
-  nearly none (under 3), so the weapon stays on target. The legs are never touched, so foot placement and foot
-  locking work as they do unarmed.
-- **Hand IK** keeps the left hand on the weapon (the **Rifle** layer's, and **Pistol Support**'s): it goes where
-  the pose has it relative to the right hand, whatever the aim layer above does to the right arm, and however the
-  poses are edited. The pistol's lets go with the support layer at a sprint.
-- **The stances.** Carrying: the rifle low across the body, its muzzle ahead to the left (the rifle pack's idle);
-  the pistol at the low ready, two-handed with the arms out and its muzzle 45 degrees down. Aiming: the rifle
-  shouldered, the head down on the stock and the sights at the eye; the pistol pushed out under the eye. At a
-  sprint: the rifle across the chest (the rifle pack's sprint carry), the pistol one-handed by the thigh.
+- **Carry** is a blend space of the poses over the base layer's walk axes (**Pistol Carry**, **Rifle Carry**,
+  **Shotgun Carry**): the Carry pose wherever the walk plays a clip and standing, the Sprint pose where it sprints,
+  so the weapon goes down as the legs speed up. **Aim** holds the Aim pose. **Reload** holds the Reload pose while
+  the script reloads (its `reloading`, the animator's **Reloading**).
+- Carry, Aim and Reload are **Steady** (see [Steady holds](animation.md#steady-holds)): the chest keeps the pose's
+  own turn over the hips, whatever the legs do, walking, running or on a flight of stairs, so one pose is the whole
+  hold. Carrying, at 0.5, it keeps half the hips' sway and lean into a run (about 9 degrees of sway at a jog);
+  aiming, at 0.85, nearly none (under 3), so the weapon stays on target. The legs are never touched, so foot
+  placement and foot locking work as they do unarmed.
+- **Hand IK** keeps the left hand on the weapon (the **Rifle** and **Shotgun** layers', and **Pistol Support**'s):
+  it goes where the pose has it relative to the right hand, whatever the aim layer above does to the right arm,
+  and however the poses are edited. The pistol's lets go with the support layer at a sprint.
 
-**The aim.** **Pistol Aim** and **Rifle Aim** are additive layers like the **Look** layer: each a blend space of the
-25 aim directions (**Pistol Aim Offset**, **Rifle Aim Offset**) over the aim's yaw off the body (`aimYaw`, -90 to
-90) and its pitch (`aimPitch`, -60 to 60, the camera's own). Each adds what its direction changes from **Aim**: the
-chest takes most of the yaw and part of the pitch, the arms the rest (the rifle turning about the shoulder pocket,
-the pistol about the eye), the head following the sights. Their weight is the aim's (`aimSeconds`, 0.15 s) times
-the weapon's. Aiming, the Look layer is off: the aim turns the head.
-
-**How the hands hold them.** The poses were worked out ahead of time: the
-weapon is placed, and both arms are solved onto it by two-bone IK, each elbow where its wrist bends least, kept
-down, and the forearms taking most of the wrists' twist. The right hand closes round each grip as the Mixamo **Pro
-Rifle Pack**'s does round its rifle's in its `idle aiming`, where the rifle is aimed level from fist to fist; the
-left hand round the rifle's
-handguard as the pack's does, and round the pistol's grip hand as the grip hand mirrored, free to roll round the
-bore. The fingers are the pack's. Held so, the wrists bend 3 to 25 degrees, as the pack's own holds do.
-
-**The models** are "Low-Poly G40" and "Low-Poly M4a1" by TastyTony (CC-BY-4.0, Sketchfab), read at their rest pose
-and scaled to the real weapons' lengths: 24 cm (a Glock 40) and 84 cm (an
-M4A1 with its stock out).
+**The aim.** **Pistol Aim**, **Rifle Aim** and **Shotgun Aim** are additive layers like the **Look** layer: each a
+blend space of the 25 aim directions (**Pistol Aim Offset**, **Rifle Aim Offset**, **Shotgun Aim Offset**) over
+the aim's yaw off the body (`aimYaw`, -90 to 90) and its pitch (`aimPitch`, -60 to 60, the camera's own). Each adds
+what its direction changes from **Aim**: the chest takes most of the yaw and part of the pitch, the arms the rest,
+the head following the sights. Their weight is the aim's (`aimSeconds`, 0.15 s) times the weapon's. Aiming, the
+Look layer is off: the aim turns the head.
 
 ### Firing
 
-**The trigger.** Fire (the left mouse button, RT) shoots the weapon in the hands. The pistol fires once a pull, up to
-420 rounds a minute; the rifle fires while the trigger is held, at 700. Fired from the hip, the weapon comes up first
-(it aims), and stays up `fireAimHold` (0.6 s) after the last shot: a pull made while it comes up fires as soon as it
-is up (`pullBuffer`, 0.35 s). A sprint, the car and a weapon going in or out of the hands hold fire.
+**The weapons' numbers are Firing Line's** (its `FpsShared` table), set on each holder's SandboxGun in the Player
+template:
 
-**A shot is two raycasts** (`examples/sandbox/Assets/Weapons/Scripts/SandboxGun.ts`, on each weapon's grip holder):
+| | Pistol | AK-47 | SAPS-12 |
+|---|---|---|---|
+| Rounds a minute | 380, a pull each | 600, held | 76, a pull each, pumped |
+| Magazine, reserve | 12, 84 | 30, 150 | 6, 36 |
+| Pellets | 1 | 1 | 9 |
+| Spread from the hip, aimed (degrees) | 1.6, 0.25 | 2.6, 0.4 | 4.2, 2.6 |
+| Recoil up, aside (degrees) | 1.5, 0.45 | 1.1, 0.5 | 4.2, 0.9 |
+| Reach (m) | 140 | 220 | 60 |
 
-1. From the camera through the crosshair, the middle of the screen, up to `range` (200 m): what the player aims at.
+**The trigger.** Fire (the left mouse button, RT) shoots the weapon in the hands, a round off its magazine a shot.
+Fired from the hip in third person, the weapon comes up first (it aims), and stays up `fireAimHold` (0.6 s) after
+the last shot: a pull made while it comes up fires as soon as it is up (`pullBuffer`, 0.35 s). A sprint, a reload,
+the car and a weapon coming into the hands hold fire.
+
+**Ammunition.** Each gun keeps its magazine and its reserve (`ammo`, `reserve`), so a weapon put away and taken out
+again is as it was left. **R** (B on a pad) reloads, and so does a pull on an empty magazine: the Reload pose is held
+for the gun's `reloadSeconds` (in first person, the viewmodel's reload clips), and near its end the magazine fills
+from the reserve. Out of the reserve, the weapon is dry until the scene starts again: the Sandbox has no pickups yet.
+The Player's HUD (its own canvas, in the Player template) shows them: **Ammunition**, bottom right, the magazine, the
+reserve and the weapon's name; **Reloading** under the crosshair while it reloads. The script finds them under its
+own node (`@child('HUD/Ammo')`), never the scene's, so a second Player drives its own.
+
+**A shot is a raycast per pellet** (`examples/sandbox/Assets/Weapons/Scripts/SandboxGun.ts`, on each weapon's grip
+holder), each its own way inside the spread. In third person a pellet is two raycasts:
+
+1. From the camera through the crosshair, the middle of the screen, up to the weapon's reach: what the player aims
+   at.
 2. From the Muzzle to that point: what the bullet meets on its way there. A corner the camera sees past but the gun
    does not stops the shot.
 
-Neither meets the shooter's own body, the trigger zones or the **Stair Ramp** layer (`passThroughLayers`: the ramps
-are there to be walked on, not seen), so a shot hits the steps.
+In first person the camera's alone, as Firing Line fires. None meets the shooter's own body, the trigger zones or
+the **Stair Ramp** layer (`passThroughLayers`: the ramps are there to be walked on, not seen), so a shot hits the
+steps.
 
 **What a hit does.** A dynamic body hit takes an `impulse` along the shot at the point it was hit (14 N·s from the
-pistol, 12 from the rifle, a few times a real bullet's), so a crate shoves and tips, a barrel rolls, a ball flies;
-no hit speeds anything up by more than `maxPushSpeed` (2.5 m/s), so a 3 kg ball is not shot off the course. Every hit
-sprays sparks and dust (**Bullet Impact**) and leaves a hole (**Bullet Hole**, a decal that fades after 40 s), which
-moves with the body it is on. The shot draws a **Tracer** from the muzzle and a **Muzzle Flash** (particles and a
-point light). These four are templates in `/Weapons/Effects`, each with its own script (`SandboxShotFx`,
-`SandboxBulletHole`, `SandboxTracer`); the flash and the impact are the Firing Line's effects. Their glows (the flash,
-the sparks) take only a tenth of the camera's exposure (`exposureWeight` 0.1): the Sandbox goes from day to night,
-and a glow tuned for one blazes white in the other. Their smoke and dust are lit, and exposed like the scene. Each gun keeps its last
-`maxHoles` (60) holes.
+pistol, 18 from the AK-47, 27 shared by the shotgun's pellets, a few times a real bullet's), so a crate shoves and
+tips, a barrel rolls, a ball flies; no hit speeds anything up by more than `maxPushSpeed` (2.5 m/s), so a 3 kg ball
+is not shot off the course. Every hit sprays sparks and dust (**Bullet Impact**) and leaves a hole (**Bullet
+Hole**, a decal that fades after 40 s), which moves with the body it is on. The shot draws a **Tracer** from the
+muzzle and, in third person, a **Muzzle Flash** (particles and a point light) and the weapon's shot (its cue in the
+Player's **Sounds**); in first person the viewmodel's fire clip does both, through its animator's Event Actions.
+Each shot cue has 16 [voices](audio.md#overlap) (a new shot steals the quietest), half a semitone of random pitch
+and a tenth of random volume, so a held AK-47 rings on without cutting its 4.5 s shot short or repeating one sound.
+These four are templates in `/Weapons/Effects`, each with its own script (`SandboxShotFx`, `SandboxBulletHole`,
+`SandboxTracer`); the flash and the impact are the Firing Line's effects. Their glows (the flash, the sparks) take
+only a tenth of the camera's exposure (`exposureWeight` 0.1): the Sandbox goes from day to night, and a glow tuned
+for one blazes white in the other. Their smoke and dust are lit, and exposed like the scene. Each gun keeps its last
+`maxHoles` (60) holes. Firing Line has one shot recorded: the three weapons fire it.
 
-**Spread** is a cone round the crosshair: 0.3 degrees aimed and 2.2 from the hip for the pistol (0.25 and 2.8 for
-the rifle), wider at a run (`moveSpread`) and wider the longer it fires (`bloomPerShot`, up to `bloomMax`, settling
-at `bloomRecovery` degrees a second). The HUD's **Crosshair** shows it: a dot and four ticks, as far out as the shot
-spreads, shown with a weapon out and brighter aimed.
+**Spread** is Firing Line's: a cone round the crosshair, from the hip spread to the aimed one as the weapon aims,
+half again moving (2.2 times at a sprint), 0.7 times crouched, 2.5 times in the air, and wider the longer it fires
+(bloom: an eighth of the hip spread a shot, up to 1.6 times it, settling at 5 degrees a second). The Player's HUD's
+**Crosshair** shows it: a dot and four ticks, as far out as the shot spreads, shown with a weapon out and brighter
+aimed (in first person, gone down the sights of a weapon with sights to look down).
 
-**Recoil.** Each shot kicks the camera up (`recoilPitch`: 1.6 degrees the pistol, 0.9 the rifle) and a little aside
-(`recoilYaw`); 70% of the pitch comes back (SandboxPlayer's `recoilRecovery`, at `recoilRecoverySpeed`), so a held
-rifle climbs slowly. The weapon kicks up in the hands too (the gun's `kick`, through the aim blend space's pitch),
-settling at `kickRecovery`.
+**Recoil.** Each shot kicks the camera up and a little aside (the weapon's recoil, a quarter less crouched and a
+third less down the sights) and shakes it (the shotgun hard); 70% of the pitch comes back (`recoilRecovery`), faster
+the more is left, so a held AK-47 climbs. The weapon kicks up in the hands too in third person (the gun's `kick`,
+through the aim blend space's pitch), settling at `kickRecovery`.
 
 **Every shot is an event.** The gun tells each shot as `weapon:Shot`, dispatched at its grip:
-`{ gun, hit, recoil }`. It bubbles up to the character holding it, where SandboxPlayer's
-`@eventListener('weapon:Shot')` applies the recoil. A script anywhere can hear every shot with
+`{ gun, hit, hits, recoil }` (`hits`: every pellet's). It bubbles up to the character holding it, where
+SandboxPlayer's `@eventListener('weapon:Shot')` applies the recoil. A script anywhere can hear every shot with
 `@onEvent('weapon:Shot')`, for a hit marker, a sound or a score, without the gun knowing about it. The weapon in
 the hands is the player's `weapon` field. Setting it sends `weapon:Equipped` (the weapon, and the one before),
 which shows that weapon's model in the hand. See [Events](../scripting/events.md).
 
-Each gun's numbers are its script's attributes, set on its holder (`Pistol Grip`, `Rifle Grip`) in the Player
-template.
+What the weapons do not do yet: nothing in the Sandbox takes damage (each gun's `damage` is kept for the game modes
+to come), no draw or holster animation in third person (the arms move straight into the hold and the weapon appears
+in the hand), and the hold is the same whichever way the character moves (only the legs walk sideways or back).
 
-What the weapons do not do yet: no reloading or ammunition, no sound, no hit reactions beyond the push (nothing in the
-Sandbox takes damage), no draw or holster animation (the arms move straight into the hold and the weapon appears in
-the hand), and the hold is the same whichever way the character moves (only the legs walk sideways or back).
+## First person
+
+**V** (the d-pad's down on a pad) switches to first person and back. The Camera Rig folds in to the character's
+eyes over `viewSeconds` (0.3 s): no arm, no shoulder offset, `eyeHeight` over the feet (`eyeStand` 1.62 m, or
+`eyeCrouch` 1.1 m crouched, eased), no follow damping and no collision (the camera is inside the capsule), the pitch
+free to 85 degrees up and down, and Firing Line's lens: 78 degrees, 5 more at a sprint.
+
+**The body** stays: once the camera is in at the head, the Mannequin and the weapon in its hands are drawn into the
+shadows alone ([`Node.shadowOnly`](../scripting/node-api.md#shadow-only)). No camera sees them, but they keep
+animating and their shadow stays on the ground. The body faces the camera at once, standing still too (no turn in
+place), and sprints only ahead (within `sprintAngle`, 50 degrees). In the car it is third person whatever you
+chose: the car's camera sees the driver.
+
+**The viewmodels** are Firing Line's: the arms and each weapon, with their own clips and animators (Idle, Walk, Run,
+IdleAim, WalkAim, and the one-shots Equip, Fire, AimFire, Reload, and the shotgun's Pump, ReloadStart and ReloadEnd),
+in `/Weapons/Viewmodels`. They hang under the camera, drawn as viewmodels: through a 58 degree lens
+(`viewmodelFov`), and pulled clear of a wall in front of the camera (`viewmodelReach`). The one of the weapon in the
+hands shows; its animator is told whether the body moves, sprints or aims (Moving, Sprinting, Aim), and the script
+fires its one-shots: Equip as it comes up (it fires once that is over), Fire or AimFire a shot, the shotgun's Pump
+after, Reload (the shotgun's three in turn, the shells loaded near the end of the middle one).
+
+**Aiming down the sights** (hold Aim): the lens narrows to the weapon's (`aimFov`: 62 degrees the pistol and the
+shotgun, 52 the AK-47), the mouse slows to `adsSensitivity` (0.55) of itself, the body walks at the weapon's
+`aimMove`, the background softens with depth of field focused where the crosshair points (the weapon, nearer than
+`dofNearCutoff`, stays sharp), and the crosshair goes for the sights. The shotgun has no aim clips: its whole
+viewmodel comes in to the sights instead (`aimOffset`).
+
+## Crouching
+
+**C** (the right stick's click) crouches, and again stands up: the Controller's **Crouch** action with
+`crouchToggle` on. A sprint or a jump stands it up too. The Character shortens its capsule to its
+`crouchCapsuleHeight` (1.2 m), feet kept, and moves at `crouchSpeed` of its jog (1.5 m/s); it stands back up only
+where the full capsule fits, so under something low it stays down until it walks out, and a jump there is dropped
+(see [Crouching](../scripting/characters-and-controllers.md#crouching)). The animator reads the Character's
+`crouched` (**Crouching**).
+
+The clips are Firing Line's Mixamo rifle-pack crouch: an idle, the walk in eight directions and two quarter turns,
+retargeted onto the Mannequin as its own clips, each with its foot-lock windows. **Crouch Locomotion** is their blend
+space over the walk's axes, at each clip's own pace; the base layer's **Crouch** plays it, and **CrouchTurn90L** and
+**CrouchTurn90R** turn in place (their turn on the Pivot, as root motion). They are the **Crouching** group: Idle,
+Locomotion and Stairs crouch when Crouching comes on, and Crouch stands up into Idle when it goes off. With a weapon
+out, the weapon's layer holds the spine and the arms over the crouching legs. Unarmed, the arms are the rifle pack's
+too: they hold no weapon, but stay as if they did.
 
 ## Things to push
 

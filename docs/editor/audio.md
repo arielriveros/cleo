@@ -83,6 +83,25 @@ settings is drawn from the same formulae the audio engine uses, so what is plott
 | **Max** | Linear falls silent here; the other models only clamp at it. |
 | **Rolloff** | How steeply it falls off. 0 is no attenuation at all. |
 
+### Overlap
+
+What happens when an emitter is played again while it still sounds: a gun's shots, footsteps, impacts.
+With one voice (the default) a play restarts the sound; with more, each play rings on over the others,
+so a rapid-fire gun whose shot has a long tail is one Sound node with enough voices. Press **▶ Play**
+again while it sounds to hear them layer; the hint beside it counts the voices going.
+
+| Setting | Meaning |
+|---|---|
+| **Voices** | How many plays can sound at once, 1 to 32. 1: a new play restarts the sound. |
+| **When full** | With every voice busy, a new play **steals** the oldest, the quietest (its volume times how loud the sample is where it has got to, and its distance) or the farthest from the listener, fading it out in 30 ms so the cut does not click; or **Skip new** keeps them all and drops the play. |
+| **Stay put** | Spatial: each voice stays where it was played (a shot rings where it was fired) instead of following the emitter. **Steal farthest** needs it, since voices that follow the emitter are all as far away. |
+| **Pitch ±** | Each play's pitch moves by a random amount up to this many semitones, either way, so repeats do not sound like one sample. 0.5 is subtle. |
+| **Volume ±** | Each play is quieter by a random share up to this (never louder). |
+| **Retrigger** | Seconds: a play this soon after the last one is ignored, against stacked footsteps or a double trigger. |
+
+A script plays it the same way (`sound.play()`); `sound.play({ restart: true })` stops every voice for the
+new one, and a sequence's audio track always plays its sound that way, without the random pitch and volume.
+
 Sound emitters show an icon in the viewport when **Editor icons** is on in the debug eye menu. A
 spatial emitter's falloff sphere (drawn at **Max**) appears only while that emitter is
 selected.

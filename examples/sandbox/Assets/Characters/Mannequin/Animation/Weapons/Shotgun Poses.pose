@@ -1,0 +1,2169 @@
+{
+  "id": "d283ae955a766095c016bccc7abf990b",
+  "name": "Shotgun Poses",
+  "rigId": "1ca1de6215e2febc1b4ec0cb651189eb",
+  "poses": [
+    {
+      "id": "b0ba17d428302a4a2a88f6e4ed5687a4",
+      "name": "Carry",
+      "bones": [
+        {
+          "name": "mixamorig1:Hips",
+          "rotation": [-0.033729, -0.045873, -0.026675, 0.998021]
+        },
+        {
+          "name": "mixamorig1:Spine",
+          "rotation": [0.047521, -0.026345, 0.022284, 0.998274]
+        },
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.018089, -0.018841, 0.012063, 0.999586]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.012581, -0.004811, 0.013853, 0.999813]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.027464, 0.068891, 0.005937, 0.997228]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.049657, -0.001935, 0.00443, 0.998755]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.009825, -0.224645, -0.151976, 0.962466]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.342613, 0.078826, 0.221822, 0.909504]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [0.153486, -0.758376, 0.466931, 0.428116]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.138518, -0.508703, -0.203086, 0.8251]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb1",
+          "rotation": [0.111358, 0.078224, -0.010685, 0.990639]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb2",
+          "rotation": [-0.066057, 0.005941, -0.099052, 0.992869]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb3",
+          "rotation": [-0.15092, -0.075999, 0.079679, 0.982394]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex1",
+          "rotation": [0.154789, 0.090919, -0.022104, 0.983507]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex2",
+          "rotation": [0.187791, -0.002097, -0.01718, 0.982056]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex3",
+          "rotation": [0.257343, -0.019759, 0.023591, 0.96583]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle1",
+          "rotation": [0.124337, 0.098369, 0.032904, 0.986803]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle2",
+          "rotation": [0.345263, 0.005902, -0.026837, 0.938104]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle3",
+          "rotation": [0.397076, -0.002256, -0.044035, 0.916726]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing1",
+          "rotation": [0.033342, 0.026906, 0.022397, 0.998831]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing2",
+          "rotation": [0.59209, 0.033071, -0.035795, 0.804397]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing3",
+          "rotation": [0.288247, 0.023296, -0.0813, 0.953814]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky1",
+          "rotation": [-0.037271, -0.064057, 0.078836, 0.994129]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky2",
+          "rotation": [0.396941, 0.00138, -0.045031, 0.916738]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky3",
+          "rotation": [0.261116, 0.000578, -0.030305, 0.964832]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.010051, 0.209589, 0.195365, 0.958021]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.33558, -0.242687, -0.048259, 0.908934]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.024543, 0.177028, -0.77528, 0.605806]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.155467, 0.236029, 0.050681, 0.957889]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb1",
+          "rotation": [0.036394, -0.20061, -0.011289, 0.97893]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb2",
+          "rotation": [-0.072723, -0.001663, 0.184165, 0.9802]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb3",
+          "rotation": [-0.068355, 0.036936, 0.242005, 0.967159]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex1",
+          "rotation": [0.007766, -0.000851, 0.037727, 0.999258]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex2",
+          "rotation": [0.058534, -0.000315, 0.008684, 0.998248]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex3",
+          "rotation": [0.289692, -0.000004, 0.02868, 0.95669]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle1",
+          "rotation": [-0.01199, -0.037012, 0.058919, 0.997504]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle2",
+          "rotation": [0.734117, -0.004869, 0.064036, 0.675979]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle3",
+          "rotation": [0.602738, 0.001473, 0.047417, 0.796528]
+        },
+        {
+          "name": "mixamorig1:RightHandRing1",
+          "rotation": [0.02829, 0.106254, 0.02134, 0.993707]
+        },
+        {
+          "name": "mixamorig1:RightHandRing2",
+          "rotation": [0.811282, -0.003239, 0.074369, 0.579896]
+        },
+        {
+          "name": "mixamorig1:RightHandRing3",
+          "rotation": [0.669453, 0.002872, 0.056647, 0.740686]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky1",
+          "rotation": [-0.035587, 0.137511, -0.002562, 0.989857]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky2",
+          "rotation": [0.687856, -0.002978, 0.051144, 0.724037]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky3",
+          "rotation": [0.639856, 0.000672, 0.043725, 0.76725]
+        }
+      ]
+    },
+    {
+      "id": "7f864aecabe844d0fe85080988a6764f",
+      "name": "Aim",
+      "bones": [
+        {
+          "name": "mixamorig1:Hips",
+          "rotation": [-0.033729, -0.045873, -0.026675, 0.998021]
+        },
+        {
+          "name": "mixamorig1:Spine",
+          "rotation": [0.069354, -0.062342, 0.022916, 0.995379]
+        },
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.028349, -0.037244, 0.011126, 0.998842]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.015825, -0.01105, 0.013685, 0.99972]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.115239, 0.02498, 0.019317, 0.992836]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.148173, 0.042033, 0.017859, 0.987906]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.029156, -0.262318, -0.113151, 0.957881]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.211354, 0.019238, 0.375049, 0.902384]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.437875, 0.759138, -0.097051, 0.471759]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.201382, 0.347436, -0.259453, 0.878304]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb1",
+          "rotation": [0.111358, 0.078224, -0.010685, 0.990639]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb2",
+          "rotation": [-0.066057, 0.005941, -0.099052, 0.992869]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb3",
+          "rotation": [-0.15092, -0.075999, 0.079679, 0.982394]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex1",
+          "rotation": [0.154789, 0.090919, -0.022104, 0.983507]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex2",
+          "rotation": [0.187791, -0.002097, -0.01718, 0.982056]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex3",
+          "rotation": [0.257343, -0.019759, 0.023591, 0.96583]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle1",
+          "rotation": [0.124337, 0.098369, 0.032904, 0.986803]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle2",
+          "rotation": [0.345263, 0.005902, -0.026837, 0.938104]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle3",
+          "rotation": [0.397076, -0.002256, -0.044035, 0.916726]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing1",
+          "rotation": [0.033342, 0.026906, 0.022397, 0.998831]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing2",
+          "rotation": [0.59209, 0.033071, -0.035795, 0.804397]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing3",
+          "rotation": [0.288247, 0.023296, -0.0813, 0.953814]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky1",
+          "rotation": [-0.037271, -0.064057, 0.078836, 0.994129]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky2",
+          "rotation": [0.396941, 0.00138, -0.045031, 0.916738]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky3",
+          "rotation": [0.261116, 0.000578, -0.030305, 0.964832]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.018088, 0.232086, 0.223919, 0.946398]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.671651, -0.193816, -0.12109, 0.704739]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.283938, -0.046159, -0.87713, 0.384566]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [-0.060156, 0.044742, 0.26977, 0.960002]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb1",
+          "rotation": [0.036394, -0.20061, -0.011289, 0.97893]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb2",
+          "rotation": [-0.072723, -0.001663, 0.184165, 0.9802]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb3",
+          "rotation": [-0.068355, 0.036936, 0.242005, 0.967159]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex1",
+          "rotation": [0.007766, -0.000851, 0.037727, 0.999258]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex2",
+          "rotation": [0.058534, -0.000315, 0.008684, 0.998248]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex3",
+          "rotation": [0.289692, -0.000004, 0.02868, 0.95669]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle1",
+          "rotation": [-0.01199, -0.037012, 0.058919, 0.997504]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle2",
+          "rotation": [0.734117, -0.004869, 0.064036, 0.675979]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle3",
+          "rotation": [0.602738, 0.001473, 0.047417, 0.796528]
+        },
+        {
+          "name": "mixamorig1:RightHandRing1",
+          "rotation": [0.02829, 0.106254, 0.02134, 0.993707]
+        },
+        {
+          "name": "mixamorig1:RightHandRing2",
+          "rotation": [0.811282, -0.003239, 0.074369, 0.579896]
+        },
+        {
+          "name": "mixamorig1:RightHandRing3",
+          "rotation": [0.669453, 0.002872, 0.056647, 0.740686]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky1",
+          "rotation": [-0.035587, 0.137511, -0.002562, 0.989857]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky2",
+          "rotation": [0.687856, -0.002978, 0.051144, 0.724037]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky3",
+          "rotation": [0.639856, 0.000672, 0.043725, 0.76725]
+        }
+      ]
+    },
+    {
+      "id": "7f0c7331e584852947caa6356d2b5751",
+      "name": "Sprint",
+      "bones": [
+        {
+          "name": "mixamorig1:Hips",
+          "rotation": [-0.033729, -0.045873, -0.026675, 0.998021]
+        },
+        {
+          "name": "mixamorig1:Spine",
+          "rotation": [0.03071, 0.015059, 0.024021, 0.999126]
+        },
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.010458, 0.002045, 0.014449, 0.999839]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.010236, 0.002237, 0.014492, 0.99984]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.049709, -0.0022, 0.00382, 0.998754]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.049657, -0.001935, 0.00443, 0.998755]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.003599, -0.216599, -0.185784, 0.958413]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.557522, 0.107992, 0.117979, 0.814609]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [0.142895, -0.601624, 0.687587, 0.380597]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.021301, -0.491244, -0.149796, 0.85778]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb1",
+          "rotation": [0.111358, 0.078224, -0.010685, 0.990639]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb2",
+          "rotation": [-0.066057, 0.005941, -0.099052, 0.992869]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb3",
+          "rotation": [-0.15092, -0.075999, 0.079679, 0.982394]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex1",
+          "rotation": [0.154789, 0.090919, -0.022104, 0.983507]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex2",
+          "rotation": [0.187791, -0.002097, -0.01718, 0.982056]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex3",
+          "rotation": [0.257343, -0.019759, 0.023591, 0.96583]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle1",
+          "rotation": [0.124337, 0.098369, 0.032904, 0.986803]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle2",
+          "rotation": [0.345263, 0.005902, -0.026837, 0.938104]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle3",
+          "rotation": [0.397076, -0.002256, -0.044035, 0.916726]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing1",
+          "rotation": [0.033342, 0.026906, 0.022397, 0.998831]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing2",
+          "rotation": [0.59209, 0.033071, -0.035795, 0.804397]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing3",
+          "rotation": [0.288247, 0.023296, -0.0813, 0.953814]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky1",
+          "rotation": [-0.037271, -0.064057, 0.078836, 0.994129]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky2",
+          "rotation": [0.396941, 0.00138, -0.045031, 0.916738]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky3",
+          "rotation": [0.261116, 0.000578, -0.030305, 0.964832]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.000946, 0.185978, 0.175863, 0.966687]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.226981, -0.289746, 0.112212, 0.923003]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [0.054381, 0.186997, -0.855771, 0.479302]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.174587, 0.277815, 0.094924, 0.939855]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb1",
+          "rotation": [0.036394, -0.20061, -0.011289, 0.97893]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb2",
+          "rotation": [-0.072723, -0.001663, 0.184165, 0.9802]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb3",
+          "rotation": [-0.068355, 0.036936, 0.242005, 0.967159]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex1",
+          "rotation": [0.007766, -0.000851, 0.037727, 0.999258]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex2",
+          "rotation": [0.058534, -0.000315, 0.008684, 0.998248]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex3",
+          "rotation": [0.289692, -0.000004, 0.02868, 0.95669]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle1",
+          "rotation": [-0.01199, -0.037012, 0.058919, 0.997504]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle2",
+          "rotation": [0.734117, -0.004869, 0.064036, 0.675979]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle3",
+          "rotation": [0.602738, 0.001473, 0.047417, 0.796528]
+        },
+        {
+          "name": "mixamorig1:RightHandRing1",
+          "rotation": [0.02829, 0.106254, 0.02134, 0.993707]
+        },
+        {
+          "name": "mixamorig1:RightHandRing2",
+          "rotation": [0.811282, -0.003239, 0.074369, 0.579896]
+        },
+        {
+          "name": "mixamorig1:RightHandRing3",
+          "rotation": [0.669453, 0.002872, 0.056647, 0.740686]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky1",
+          "rotation": [-0.035587, 0.137511, -0.002562, 0.989857]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky2",
+          "rotation": [0.687856, -0.002978, 0.051144, 0.724037]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky3",
+          "rotation": [0.639856, 0.000672, 0.043725, 0.76725]
+        }
+      ]
+    },
+    {
+      "id": "c8a344b6774a21ac53336dadecf85eb0",
+      "name": "Reload",
+      "bones": [
+        {
+          "name": "mixamorig1:Hips",
+          "rotation": [-0.033729, -0.045873, -0.026675, 0.998021]
+        },
+        {
+          "name": "mixamorig1:Spine",
+          "rotation": [0.047521, -0.026345, 0.022284, 0.998274]
+        },
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.018089, -0.018841, 0.012063, 0.999586]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.012581, -0.004811, 0.013853, 0.999813]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.113729, 0.063911, -0.004585, 0.991443]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.170573, -0.010897, -0.000598, 0.985285]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.009825, -0.224645, -0.151976, 0.962466]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.252751, 0.091811, 0.035426, 0.962514]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [0.703695, -0.191531, 0.513583, 0.452065]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.332203, -0.411373, 0.280533, 0.801071]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb1",
+          "rotation": [0.111358, 0.078224, -0.010685, 0.990639]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb2",
+          "rotation": [-0.066057, 0.005941, -0.099052, 0.992869]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb3",
+          "rotation": [-0.15092, -0.075999, 0.079679, 0.982394]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex1",
+          "rotation": [0.154789, 0.090919, -0.022104, 0.983507]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex2",
+          "rotation": [0.187791, -0.002097, -0.01718, 0.982056]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex3",
+          "rotation": [0.257343, -0.019759, 0.023591, 0.96583]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle1",
+          "rotation": [0.124337, 0.098369, 0.032904, 0.986803]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle2",
+          "rotation": [0.345263, 0.005902, -0.026837, 0.938104]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle3",
+          "rotation": [0.397076, -0.002256, -0.044035, 0.916726]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing1",
+          "rotation": [0.033342, 0.026906, 0.022397, 0.998831]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing2",
+          "rotation": [0.59209, 0.033071, -0.035795, 0.804397]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing3",
+          "rotation": [0.288247, 0.023296, -0.0813, 0.953814]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky1",
+          "rotation": [-0.037271, -0.064057, 0.078836, 0.994129]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky2",
+          "rotation": [0.396941, 0.00138, -0.045031, 0.916738]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky3",
+          "rotation": [0.261116, 0.000578, -0.030305, 0.964832]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.010051, 0.209589, 0.195365, 0.958021]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.23007, -0.260766, 0.074751, 0.934602]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [0.231688, -0.161796, -0.648948, 0.706406]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [-0.148988, 0.587265, -0.516341, 0.605239]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb1",
+          "rotation": [0.036394, -0.20061, -0.011289, 0.97893]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb2",
+          "rotation": [-0.072723, -0.001663, 0.184165, 0.9802]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb3",
+          "rotation": [-0.068355, 0.036936, 0.242005, 0.967159]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex1",
+          "rotation": [0.007766, -0.000851, 0.037727, 0.999258]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex2",
+          "rotation": [0.058534, -0.000315, 0.008684, 0.998248]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex3",
+          "rotation": [0.289692, -0.000004, 0.02868, 0.95669]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle1",
+          "rotation": [-0.01199, -0.037012, 0.058919, 0.997504]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle2",
+          "rotation": [0.734117, -0.004869, 0.064036, 0.675979]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle3",
+          "rotation": [0.602738, 0.001473, 0.047417, 0.796528]
+        },
+        {
+          "name": "mixamorig1:RightHandRing1",
+          "rotation": [0.02829, 0.106254, 0.02134, 0.993707]
+        },
+        {
+          "name": "mixamorig1:RightHandRing2",
+          "rotation": [0.811282, -0.003239, 0.074369, 0.579896]
+        },
+        {
+          "name": "mixamorig1:RightHandRing3",
+          "rotation": [0.669453, 0.002872, 0.056647, 0.740686]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky1",
+          "rotation": [-0.035587, 0.137511, -0.002562, 0.989857]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky2",
+          "rotation": [0.687856, -0.002978, 0.051144, 0.724037]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky3",
+          "rotation": [0.639856, 0.000672, 0.043725, 0.76725]
+        }
+      ]
+    },
+    {
+      "id": "eccd21639b6c701273d0d8e116391036",
+      "name": "Aim Right 90 Up 60",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [-0.09952797989629561, -0.30128293914371473, -0.060447987790081946, 0.9463978088366528]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [-0.10982297906779712, -0.3016749425009124, -0.03552899322819231, 0.946397819617066]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [-0.13337898855068142, -0.041109996471097504, -0.0006139999472939368, 0.9902119149997178]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [-0.20152193980046829, -0.052779984233327956, 0.008758997383473282, 0.978021707840998]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.10440498663135996, -0.11701898501618807, 0.058458992514560326, 0.985894873760113]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [-0.1726629843894386, -0.20381109423897864, 0.1544591784654063, 0.9512049694333153]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.0208879293593286, 0.14687066887498793, -0.3023666498016839, 0.9415769273506012]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.0475369448392821, -0.2813896437075139, -0.1235874776727121, 0.9504137218348662]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.09023801273650985, 0.09853801390800117, 0.008603001214257815, 0.9909961398726735]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.16795706002097777, 0.262495093805001, -0.07966202846794794, 0.9468583383684095]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.0034840009630564073, 0.11816703266403111, -0.027697007656077157, 0.9926012743773638]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.06576097931620242, 0.025646991933252896, 0.04345698633147623, 0.9965586865524457]
+        }
+      ]
+    },
+    {
+      "id": "e3bada3551b5d5357cd13024ed53da1c",
+      "name": "Aim Right 90 Up 30",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [-0.04923298466269683, -0.3062279046023668, -0.038835987901620746, 0.9498907040853445]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [-0.058157998714766394, -0.30662799322382794, -0.017436999614659745, 0.9498909790083594]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [-0.06886500221380326, -0.05567800178988075, -0.00026600000855110857, 0.9960710320206961]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [-0.10658300623745087, -0.07569300442970614, 0.02232700130662082, 0.9911670580050803]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.08471296781945567, -0.12701295175064653, 0.015803993996419415, 0.9881506246238825]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [-0.08879293399173104, -0.13825450324609403, 0.1484790776831508, 0.975169457425568]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [0.0322871280873272, 0.2240931580511789, -0.3390484280511291, 0.9131188100737934]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.04928179937375358, -0.27991116297928653, -0.16562981782595362, 0.9443451744658887]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.06465703132019684, 0.08391304064790629, 0.0280860136050087, 0.9939764814872941]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.10435297139998492, 0.1356809628139236, -0.04193698850633114, 0.9843487302195806]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.022538999426844532, 0.17857199545900354, -0.06016499847003428, 0.9818269750326314]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.065888010997863, 0.0023050003847449266, 0.04326000722085284, 0.9968861663977605]
+        }
+      ]
+    },
+    {
+      "id": "36eff3f78cb3b23a2a5a478690eee96c",
+      "name": "Aim Right 90",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.0012329992880984718, -0.3085468218531387, -0.016998990185227873, 0.9510564508848913]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [-0.006251996965412699, -0.30895285004081086, 0.0007139996534396481, 0.9510565383772405]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [-0.0029619991582799437, -0.06268298218719143, 0.0021779993810714716, 0.9980267163877944]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [-0.008721999545928389, -0.08689199547635938, 0.03507299817408223, 0.9955619481705485]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.06313799316578614, -0.1209769869051491, -0.014175998465554559, 0.9905438927810585]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [-0.014263145733203197, -0.034944565110750676, 0.0605432548444316, 0.9974517303287693]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.044526827249264954, 0.28535922223491494, -0.28143547920147516, 0.9150855408032819]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.06864647680007273, -0.2623536800510524, -0.0812243276667483, 0.9590937474416626]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.03893101217166606, 0.06964302177368523, 0.048400015132121894, 0.9956363112827544]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.008152997585119209, -0.005874998259852192, 0.0012659996250166485, 0.9999487038197377]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.039469992220840265, 0.22482595568894428, -0.08380298348322975, 0.9699858088250307]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.05394902230150539, -0.01969000813947694, 0.015029006212706846, 0.9982364126520519]
+        }
+      ]
+    },
+    {
+      "id": "eae305c5c3c7e42d70d081df68f134e1",
+      "name": "Aim Right 90 Down 30",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.05168899587689817, -0.30823797541262826, 0.004982999602518595, 0.9498909242295787]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.045706984591721025, -0.3086468959520625, 0.01885899364244572, 0.9498906797824069]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.06331500298599892, -0.06176400291285221, 0.004346000204961721, 0.9960710469757078]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.0902540063790631, -0.08697400614723597, 0.04333100306259207, 0.9911670700546997]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.034379011439789865, -0.10843203608130816, -0.04970001653793178, 0.9922653301813049]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.07819276101146452, 0.06812711038754464, -0.042891014534942415, 0.9936825196348231]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.08438075466991686, 0.3285083800524974, -0.225180437711304, 0.9133761015861784]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.016652272942897207, -0.32090180301780113, -0.08983718545497837, 0.9426950804662594]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.012425000593026682, 0.054546002603398994, 0.06867900327794586, 0.9960690475408828]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.028586005494659568, -0.18239303505868065, 0.05153100990503401, 0.9814581886510039]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.043971980950418564, 0.20540391101473152, -0.09912895705526345, 0.9726505786274349]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [-0.05419802464132722, -0.04038001835892084, -0.0064650029393368245, 0.997692453604469]
+        }
+      ]
+    },
+    {
+      "id": "4a074ae4dce47c16dbd31c68bc92496b",
+      "name": "Aim Right 90 Down 60",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.10195198655166729, -0.30529695972873855, 0.02702999643451396, 0.9463978751620843]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.09753097793508171, -0.30570393083907893, 0.03693299164446557, 0.9463977858917212]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.12891597886293787, -0.053347991253064074, 0.0038959993612120054, 0.9902118376448805]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.18842094531214745, -0.0777309774391312, 0.043919987252533, 0.9780217161360842]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.01064599546437573, -0.08465196393484266, -0.06576997197933424, 0.9941805764389003]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.08568712385777846, 0.13341584853601104, -0.2070403500713008, 0.9653974423038166]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.14079967888557418, 0.44788379158804437, -0.07119306216978753, 0.8800608544625339]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.019330794109990123, -0.3441555868491885, -0.0003123549648321752, 0.9387135638063103]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [0.015525999270728313, 0.03683499826982333, 0.08711499590812166, 0.9953959532452579]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.08418601874667123, -0.35337407868987875, 0.10108702251021229, 0.9261862062445567]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.045488981081204964, 0.17433992749230076, -0.10011995836026816, 0.9785255930327582]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [-0.144234944813485, -0.052114980060004645, -0.05029098075789497, 0.986889622400806]
+        }
+      ]
+    },
+    {
+      "id": "a69d17b028e0c53c61225c679e05b647",
+      "name": "Aim Right 45 Up 60",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [-0.10471598454219402, -0.15346597734589118, -0.01859499725507179, 0.9824138549795159]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [-0.10888198763536222, -0.15166998277635774, -0.001969999776286837, 0.9824138884370852]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [-0.12648098895390977, -0.017068998509296156, 0.019064998334977504, 0.991638913396211]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [-0.19109505324014028, -0.009208002565400508, 0.024590006850912116, 0.981220273373403]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.10112500654794551, -0.110830007176354, 0.059102003826913996, 0.98691306390361]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [-0.1389727410146242, -0.17084957134740494, 0.12106122843681327, 0.9679055636758473]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.10881802549170912, 0.0746273513691349, -0.27105514193457, 0.9534770609650468]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.05853296543922596, -0.2734578434550659, -0.07960771434962857, 0.9567953342412487]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.09140297478662998, 0.10841797009306965, 0.02289199368527871, 0.9896297270121619]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.10407004096322509, 0.24310209568792104, -0.0715440281605936, 0.9617443785542029]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.005846001854290708, 0.0859200272529348, -0.011076003513192633, 0.9962233159916256]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.06046000833734505, 0.03402300469172164, 0.01394500192299504, 0.997493137552817]
+        }
+      ]
+    },
+    {
+      "id": "e53e8fe4f8c596c2822e435cfd96d931",
+      "name": "Aim Right 45 Up 30",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [-0.05212098528491886, -0.15547995610404988, -0.013642996148234835, 0.9863687215229969]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [-0.056114986384626114, -0.15468396246849334, -0.0008049998046801061, 0.9863687606739244]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [-0.06438697901812196, -0.026100991494432138, 0.009572996880433652, 0.9975376749309546]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [-0.09866196186099276, -0.029243988695372806, 0.021323991756946027, 0.9944626155781195]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.08059298790613656, -0.11136898328786024, 0.02437399634241401, 0.990205851408731]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [-0.08102367989124196, -0.0681336635482713, 0.02373476397181676, 0.99409739370324]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.1476264733936167, 0.14602274289876954, -0.20010595521351826, 0.9575183494835852]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.04175676978468821, -0.2867165702710693, -0.027070563033556018, 0.9567220939887349]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.06533200039849255, 0.09303900056749136, 0.0419660002559716, 0.9926300060545468]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.07016103052896534, 0.1146390498825567, -0.03465201507803066, 0.9903204309152519]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.01961900343712221, 0.13558202375309142, -0.0427680074926776, 0.9896481733799425]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.060783029954158053, 0.015590007682827844, 0.027091013350576558, 0.9976614916521936]
+        }
+      ]
+    },
+    {
+      "id": "d6639e5b85788b059813553790ae9cb8",
+      "name": "Aim Right 45",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.0006240002461179184, -0.1561960616067847, -0.008605003393981805, 0.9876883895636377]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [-0.003165001078483793, -0.15640205329447798, 0.00036100012301189667, 0.9876883365578212]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [-0.0014819993429238691, -0.03135698609720913, 0.0010889995171687544, 0.999506556847377]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [-0.004365999486497307, -0.04349399488449758, 0.017555997935168984, 0.9988898825165722]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.05686402152812555, -0.10789604084831589, -0.011722004437828627, 0.9924653757370414]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.0006057221767740966, 0.02293556362018397, -0.049725296624783005, 0.9984993680006244]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.16031710344438055, 0.2056857129438122, -0.16202126945770776, 0.951704219848432]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.013790749012330928, -0.3120324374769436, -0.03068482685371787, 0.9494756524549925]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.03901000062969944, 0.07604400122750232, 0.058808000949278724, 0.9946040160548982]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.006024001415622499, -0.025773006056579797, 0.006845001608555009, 0.9996262349091939]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.03513499974578067, 0.18269399867811761, -0.06938299949797919, 0.9800889929085662]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.06012098047120569, -0.003039999012532476, 0.01824699407292107, 0.9980196758183114]
+        }
+      ]
+    },
+    {
+      "id": "726ca365a42a807ef022505327231792",
+      "name": "Aim Right 45 Down 30",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.05336498665632691, -0.15561696108868403, -0.003495999125841259, 0.9863687533629628]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.04981098998445547, -0.15682196846765314, 0.0015239996935678874, 0.9863688016698587]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.061610977967117266, -0.03264998832394181, -0.007530997306817948, 0.9975376432676346]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.09048796802712278, -0.05217998156280683, 0.011541995921769195, 0.9944626486181216]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.03120600394785622, -0.09616001216515585, -0.042879005424601886, 0.9939521257443944]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.08082963347465391, 0.11041262489769084, -0.13358863961404605, 0.9815445471203147]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.17725258445499728, 0.25789489079950473, -0.12585412275114666, 0.9413992173302861]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.00867974990181773, -0.32946039991153875, -0.03234864145127618, 0.9435751545203106]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.012165003047370141, 0.057012014281682406, 0.07318401833281844, 0.9956132494041371]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.018962009122255128, -0.18881909083720444, 0.05288502544196063, 0.9804034716531057]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.043312008465809314, 0.18446103605494213, -0.09159801790384194, 0.9776031910833161]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [-0.010487002473123879, -0.022266005250936968, 0.011386002685132943, 0.9996322357407988]
+        }
+      ]
+    },
+    {
+      "id": "297618f066b62459df1504b2b6c49f1f",
+      "name": "Aim Right 45 Down 60",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.10594397444033062, -0.15374096290899786, 0.0016699995971017874, 0.9824137629863227]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.10265697380774373, -0.15594096021268275, 0.002680999315960536, 0.9824137493435495]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.12424798371127675, -0.030185996042661457, -0.017423997715740186, 0.9916388699976402]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.18453704130880588, -0.05612301256319388, 0.0017800003984549202, 0.981220219647152]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.007355998012144767, -0.07669397927452852, -0.06339998286704457, 0.9950097311125865]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.10582085732636567, 0.16626012153820888, -0.2508185153100717, 0.9477603022486564]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.18823252395852896, 0.3766513303880622, -0.04220583686045218, 0.9060468859700439]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.03181709244490873, -0.34433267563421627, 0.00705214585997314, 0.9382819130504986]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [0.015331006193635772, 0.035193014217769436, 0.0840790339674321, 0.9957194022647455]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.04683600706640653, -0.36055705439923, 0.10144801530602114, 0.9260201397137621]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.04874898746334635, 0.1657549573732175, -0.10405297324096043, 0.9794497481173895]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [-0.09635499687983255, -0.03786299877392039, -0.014078999544093845, 0.9945269677952283]
+        }
+      ]
+    },
+    {
+      "id": "17b92b16f1a21ef820020139e4c606c4",
+      "name": "Aim Up 60",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [-0.10204598949288622, -0.0016519998299026695, 0.02258499767454714, 0.9945218975995552]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [-0.10007599223580459, 0.002094999837463631, 0.03010899766405374, 0.9945219228420087]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [-0.1190399619292407, 0.006965997772169782, 0.03859298765738562, 0.9921146827068935]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [-0.17976303867116836, 0.034296007377860795, 0.04026000866085477, 0.9822872113125946]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.0983030451096066, -0.10444004792577352, 0.06070402785605281, 0.9877974532835627]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [-0.12750774043872604, -0.14512070641331892, 0.0859455032549957, 0.9773920028159403]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.16938660634442942, 0.020787896217130335, -0.24122853559987872, 0.9553454006663356]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.05335604795291418, -0.2830066962549826, -0.050988671866059695, 0.9562742793587108]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.09204500931702642, 0.11802101194638251, 0.03761700380768737, 0.9880201000098697]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.0472279901881028, 0.21927795444369402, -0.06250998701317646, 0.97251179795486]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.00746500046759272, 0.05289700331336259, 0.00509700031926589, 0.9985590625477446]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.05248700135828487, 0.042228001092797326, -0.012583000325629097, 0.9976490258176606]
+        }
+      ]
+    },
+    {
+      "id": "f13c2d9177c9d4b0768749a3be7914a3",
+      "name": "Aim Up 30",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [-0.05109297633522055, -0.0008269996169578473, 0.011307994762465972, 0.9986295374638657]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [-0.050106976340117695, 0.0010489995046756623, 0.015074992881778479, 0.9986295284597309]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [-0.059637981926771944, 0.003489998942359462, 0.01933499414055025, 0.9980266975490533]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [-0.09028199774547799, 0.017223999569882287, 0.02021999949506617, 0.9955619751388266]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.0752500177918906, -0.09966902356544773, 0.027016006387584238, 0.9918032344990091]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [-0.07457206044879636, -0.028526846174748464, -0.056101114514853355, 0.9952275577966752]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.22175439005300032, 0.08160979015545886, -0.12647185390059082, 0.9634156438495023]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.0012408425681047237, -0.3197980130295399, 0.0037778620316091444, 0.9474773975829447]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.06483598634956256, 0.10144597864176873, 0.05665998807092067, 0.9911077913341697]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.04050400542863055, 0.09164901228344295, -0.027027003622348444, 0.9946001333032811]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.01749100455009305, 0.09221002398742661, -0.026005006764917387, 0.9952462589024003]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.056032997094521066, 0.028841998504455887, 0.01407799927001357, 0.9979129482552213]
+        }
+      ]
+    },
+    {
+      "id": "282ed03793d46cdbffa41b90b9322690",
+      "name": "Aim Centre",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.052070006502372666, -0.09152501142941538, -0.0035580004443142455, 0.9944341241824551]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [-0.005583076286751502, 0.0634589108352923, -0.15230961555530204, 0.9862776368265534]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.2483478998569141, 0.14102989755339143, -0.06492314180629373, 0.9561479353587184]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.010325774474972278, -0.32057208806195914, 0.03540309394684631, 0.9465059617752434]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.03783798723026797, 0.08155997247477817, 0.06988997641322017, 0.9934946647110064]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.02923001323302919, -0.046905021234869504, 0.011665005280988263, 0.9984034519978124]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.029070003784551404, 0.12483801625235033, -0.057116007435790685, 0.9901051288993198]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.04355400811572397, 0.013425002501574924, 0.03258800607235186, 0.9984291860443165]
+        }
+      ]
+    },
+    {
+      "id": "765a31934900cf28e2eb9dbb08eb06c3",
+      "name": "Aim Down 30",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.051092976335220544, 0.0008269996169578474, -0.011307994762465972, 0.9986295374638657]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.050106976340117716, -0.0010489995046756647, -0.01507499288177848, 0.998629528459731]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.059637981926771985, -0.003489998942359467, -0.019334994140550253, 0.9980266975490533]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.09028199774547799, -0.017223999569882284, -0.02021999949506617, 0.9955619751388267]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.026820012949818426, -0.08306004010484404, -0.03726101799117019, 0.9954864806623016]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.09255152043727118, 0.15049763437882027, -0.2030405163311539, 0.9630987627648094]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.24830558244133055, 0.18028009071667578, -0.06415148089893577, 0.9495936047163189]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.02373605405002655, -0.33195749850891143, 0.002380525046862339, 0.9429926574594]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.011279000678933797, 0.05896500354936894, 0.07791200468987435, 0.9951510599026223]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.008468997961076304, -0.19703095256450837, 0.05469498683210143, 0.9788337643443313]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.04273400341515212, 0.16205701295102984, -0.08483100677939741, 0.982199078493916]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.031850002254693595, -0.004042000286137245, 0.028535002020021415, 0.9990770707256674]
+        }
+      ]
+    },
+    {
+      "id": "677a017af2b1e78b7b2bb83e3375ebbe",
+      "name": "Aim Down 60",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.10204598949288625, 0.0016519998299026767, -0.022584997674547126, 0.9945218975995553]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.10007599223580459, -0.0020949998374636333, -0.03010899766405372, 0.9945219228420086]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.11903996192924067, -0.006965997772169782, -0.038592987657385634, 0.9921146827068935]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.17976303867116833, -0.03429600737786078, -0.04026000866085477, 0.9822872113125946]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.003282001329760542, -0.06845802773697354, -0.06206102514511553, 0.9957164034320077]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.12501027854749133, 0.19623280107042207, -0.28692001036679415, 0.9292696194822326]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.2247412620284063, 0.3166301419597336, -0.019542815073173087, 0.9213331627177295]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.049938906228992934, -0.3527508230260338, 0.00296080324733567, 0.9343790430779354]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [0.014694996051109754, 0.03394199087899068, 0.08093697825033484, 0.9960327323426341]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.038512002663297726, -0.36097202496302133, 0.1012010069985558, 0.9262690640561393]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.05252601277881882, 0.17738404315497092, -0.1075040261541739, 0.9768412376513378]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [-0.019080008365078182, -0.023318010223107588, 0.00922500404443635, 0.9995034382033928]
+        }
+      ]
+    },
+    {
+      "id": "2fce071047340ef5e145dbc8336aecc3",
+      "name": "Aim Left 45 Up 60",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [-0.09177897557068854, 0.15028495999783095, 0.06208298347503303, 0.9824137385055667]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [-0.08381998665887669, 0.15570397521753446, 0.05994599045875713, 0.9824138436350954]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [-0.11106398378676975, 0.030970995478823444, 0.05794799154069487, 0.9916388552395788]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [-0.16755303427113363, 0.07763201587877655, 0.055733011399575594, 0.9812202006978192]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.09531896416241149, -0.09151396559299747, 0.0684849742513324, 0.9888626282119488]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [-0.14745385771328962, -0.12029877766474198, 0.01210888760731681, 0.9816511288531945]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.23674874328277273, -0.014755778031504142, -0.1813670974539132, 0.9543784760407453]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.05585798389067631, -0.2744625304489692, 0.026380201860776106, 0.9596115307586723]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.09211797661447285, 0.1273389676730971, 0.052838986586032435, 0.9861577496490948]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.003623001357294402, 0.1924190720864515, -0.05289801981732115, 0.9798793670947258]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.008672003784840513, 0.019282008415509037, 0.020879009112509773, 0.9995584362508776]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.04309701452908348, 0.05043101700155949, -0.036256012222810115, 0.9971383361603183]
+        }
+      ]
+    },
+    {
+      "id": "dd9951040d39e4cd809c8fc2dc65c9f1",
+      "name": "Aim Left 45 Up 30",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [-0.046271985737241, 0.15388695256627777, 0.035418989082541034, 0.9863686959642259]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [-0.040378989125071534, 0.15670395779626076, 0.029834991964796297, 0.9863687343497287]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [-0.05462298000662741, 0.03306598789702398, 0.029010989381254543, 0.997537634876354]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [-0.081463967706264, 0.06360897478429423, 0.01901699246133288, 0.9944626057776981]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.0703410254553666, -0.08796303183250746, 0.03038601099624356, 0.9931723594142443]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [-0.062428035536927245, 0.004755125413709868, -0.11612447100348652, 0.9912594193224398]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.28085311903842175, 0.008162551453933561, -0.07946964122590908, 0.9564201348798431]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.03239768827537754, -0.33795575043393533, 0.0215307822164851, 0.9403577648747274]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.06301997655124791, 0.10899995944281221, 0.07219497313737457, 0.9894116318553362]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.014845001956794055, 0.06705800883925202, -0.01913400252214868, 0.9974551314795568]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.01618900086674291, 0.048516002597498296, -0.010008000535818299, 0.9986410534662448]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.051932977186860824, 0.042133981491367586, 0.0039399982692359635, 0.9977535617064129]
+        }
+      ]
+    },
+    {
+      "id": "2d4aedee17b3ac1d3ab6e22438bee4e4",
+      "name": "Aim Left 45",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [-0.0006240002461179147, 0.15619606160678465, 0.008605003393981804, 0.9876883895636376]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.003165001078483801, 0.15640205329447796, -0.00036100012301189493, 0.9876883365578212]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.001481999342923883, 0.031356986097209126, -0.001088999517168756, 0.9995065568473769]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.004365999486497364, 0.04349399488449759, -0.01755599793516898, 0.9988898825165723]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.045264000921801384, -0.07838700159635124, -0.0019340000393858882, 0.9958930202813615]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.030267623429281135, 0.11068672229019702, -0.20210339282495565, 0.9726183933533427]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.3110168364677164, 0.03533262569451183, -0.03450146716124129, 0.9491205306803068]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.03656528248232378, -0.33436899832874395, 0.03495670915383494, 0.9410836209172672]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.03531000675265103, 0.08602301645095727, 0.08154701559497123, 0.9923221897707214]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.030127013791577586, -0.064993029752581, 0.016614007605578737, 0.9972924565416426]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.02643601286629163, 0.08041103913570044, -0.044734021771852386, 0.9954064844599747]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.05238601032630518, 0.0305950060308729, 0.03816600752326518, 0.9974281966125668]
+        }
+      ]
+    },
+    {
+      "id": "4d5c685398e904d537bdc6b74459f124",
+      "name": "Aim Left 45 Down 30",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.04502798947594696, 0.15720996325649864, -0.0182799957275542, 0.9863687694634522]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.0466829840464664, 0.15480294709734027, -0.030554989558078536, 0.9863686629164579]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.057398981271461647, 0.0256849916193225, -0.031051989868141037, 0.9975376745164779]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.08963696996928949, 0.01781499403151481, -0.05188298261785478, 0.9944626668292064]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.021243994158178587, -0.0692179809659577, -0.032894990954306355, 0.996832725883997]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.10352165126917048, 0.18832861029369447, -0.2669136766889514, 0.939453400366264]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.302373252496313, 0.1141362838238529, -0.012919059040582211, 0.9462433211405976]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.045059218952434824, -0.34113931141628107, 0.021377361490119297, 0.9386887904995685]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.009758996831415262, 0.06034098040828244, 0.08276597312725849, 0.9946926770397527]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.027457006125246753, -0.20740904626985238, 0.05599801249231792, 0.9762642177899273]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.03964301559669521, 0.1204620473932119, -0.08009103151010057, 0.988687388977873]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.04897902446821248, 0.014876007431534517, 0.05519702757451005, 0.9971624981476079]
+        }
+      ]
+    },
+    {
+      "id": "736d9920efd7b8884c66a6d7f6a4e341",
+      "name": "Aim Left 45 Down 60",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.09055098099652034, 0.15692196706757477, -0.045156990523129166, 0.9824137938257508]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.09004598034760203, 0.15190696684653593, -0.060655986761923325, 0.9824137855896884]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.11329698565173078, 0.016283997937745782, -0.05958999245334508, 0.991638874415886]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.1741110252340868, -0.012301001782796611, -0.0821040118994174, 0.9812201422092267]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.0011129996236731833, -0.05846998023016282, -0.05582098112584097, 0.996726662987336]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.11316836346093057, 0.2099700499235771, -0.3383108458127207, 0.9103028458991803]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.26031598876023654, 0.29542391257182643, 0.02985181707359764, 0.9187323695690377]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.04637038010956251, -0.3441918882116794, 0.041894819705779136, 0.9368172479302426]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [0.013646997920559307, 0.03310499495567643, 0.07777298814945846, 0.9963278481860502]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.01639799583230239, -0.3641949074365983, 0.09970797465832415, 0.9258247646933336]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.05201398059811265, 0.1534729427526078, -0.11262595798906139, 0.9803346343225052]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.016277007170649907, -0.0058080025586492905, 0.05036302218685519, 0.9985814399136667]
+        }
+      ]
+    },
+    {
+      "id": "7cb463eae825e2a694e3af1c15da99b4",
+      "name": "Aim Left 90 Up 60",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [-0.07398298105407071, 0.29847392356531516, 0.09884897468626357, 0.9463977576417614]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [-0.06033798933387355, 0.3052369460423541, 0.08672298466971916, 0.9463978327024307]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [-0.10256199307060432, 0.05491699628964311, 0.07710699479042027, 0.9902119330983135]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [-0.1544909581606099, 0.12070096731164781, 0.07097398077875816, 0.9780217351312115]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.09305100526994385, -0.08464300479375662, 0.07148600404860996, 0.9894780560390913]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [-0.1531786796184843, -0.10515708076319229, -0.030858756791764856, 0.982102854901139]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.2696379665224108, -0.05110257445851358, -0.1487334728702269, 0.9500327615094822]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.032399007171736396, -0.29374458172978074, 0.041693623194335866, 0.9544244688940087]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.08931898317025079, 0.13301397493711017, 0.06695498738414164, 0.9848078144395748]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.05099997901552742, 0.16477193220287228, -0.043220982216276675, 0.9840635950967845]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.009457002590944815, -0.018167004977233198, 0.03866601059336705, 0.9990422737086483]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.032090000239247, 0.05958000044419869, -0.058942000439442026, 0.9959650074254173]
+        }
+      ]
+    },
+    {
+      "id": "76ad32032acc4f72a324f75c2e05ac52",
+      "name": "Aim Left 90 Up 30",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [-0.03767899825992737, 0.3048199859229561, 0.05807099731819429, 0.9498909561326119]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [-0.027075992245612922, 0.30841291167255946, 0.04308098766188692, 0.9498907279575088]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [-0.04934699973436512, 0.06259599966304573, 0.03858999979227003, 0.99607099463815]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [-0.07222500747128013, 0.10980601135882855, 0.017719001832933373, 0.9911671025307905]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.06525296676804282, -0.07024696422470533, 0.039387979940534064, 0.9946134934643636]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [-0.09185381934698822, 0.030540014144746806, -0.22877027086060836, 0.9686559485068851]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.3293265269751455, -0.022279670350656033, 0.00862225767484958, 0.943913826359241]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.07141491108637517, -0.3539334001272407, 0.07486700484546883, 0.9295299835585532]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.059691008378320067, 0.11551601621400243, 0.0885980124357508, 0.9875441386131862]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.015588992228406002, 0.04645897683876558, -0.013485993276815931, 0.9987075021134745]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.01241500024916904, -0.010525000211236809, 0.0041270000828289135, 0.9998590200671708]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.024717987819608926, 0.05534597272692266, 0.005777997152751115, 0.9981445081399603]
+        }
+      ]
+    },
+    {
+      "id": "06e397d5ec7b0187639a409ee0d279cb",
+      "name": "Aim Left 90",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [-0.0012329992880984757, 0.30854682185313875, 0.016998990185227877, 0.9510564508848913]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.00625200291141777, 0.30895314387256106, -0.0007140003324939664, 0.9510564428856899]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.0029619991582799433, 0.06268298218719143, -0.0021779993810714725, 0.9980267163877943]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.008722999469789935, 0.08689199471844404, -0.03507299786815803, 0.9955619394867605]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.038670004675474524, -0.06043800730737849, 0.00478900057902374, 0.9974111205939936]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.022408033370880837, 0.14697105383681464, -0.297183910501637, 0.9431750170108941]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.36081223544943025, -0.013043564373207351, 0.03830366145126385, 0.9317602833872316]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.07185960499857862, -0.3498895886647519, 0.06712860960453496, 0.9316153834528608]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.03131501337834024, 0.08923903812453154, 0.09364704000770975, 0.991103423417313]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.03253099021866474, -0.0836269748552541, 0.021647993490936362, 0.9957307006062271]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.024589010875414537, 0.035342015631335225, -0.03357401484937043, 0.9985084416279002]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.0622879779271066, 0.047914983020442344, 0.04485798410374633, 0.9958976470853071]
+        }
+      ]
+    },
+    {
+      "id": "17da87d5b63a43eac6abb5fcebce43d1",
+      "name": "Aim Left 90 Down 30",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.03522299807754644, 0.30964498309973215, -0.02421799867819378, 0.9498909481554285]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.039527998226912386, 0.30686198623524574, -0.044501998003796166, 0.9498909573912173]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.05489699957161125, 0.054845999572009224, -0.042670999667016846, 0.9960709922271601]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.08855400428207329, 0.05286000255607192, -0.08337800403178519, 0.9911670479283794]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.014495996497673441, -0.05473098677663944, -0.02984399278949823, 0.9979497588888807]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.13546745384043016, 0.23364908295081133, -0.30609068574342735, 0.9128883650739308]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.3533458275036341, 0.018609806400377554, 0.006443722377687762, 0.9352854536094486]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.04104108844517663, -0.3331739358058185, 0.03299828360111722, 0.9413935791358873]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.007614998126733541, 0.06108198497401679, 0.08763797844132287, 0.9942487554178191]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.08880404607949899, -0.2126111103217014, 0.054772028420637796, 0.9715505041274862]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.03283198462659101, 0.05657597350858956, -0.07754696368903058, 0.9948405341710032]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.040785014184235094, 0.03533801228987373, 0.09065303152736225, 0.9944193458397175]
+        }
+      ]
+    },
+    {
+      "id": "2b26e25cc735761100c448d068f6332a",
+      "name": "Aim Left 90 Down 60",
+      "baseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7f864aecabe844d0fe85080988a6764f"
+      },
+      "bones": [
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.07155799592462915, 0.3081059824527487, -0.06542999627363098, 0.9463979461007458]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.0726299837455204, 0.3021419323810964, -0.08812698027731623, 0.9463977881976183]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.10702598653495446, 0.03954099502530819, -0.08038898988618144, 0.9902118754204617]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.1675919655215598, 0.009809997981804031, -0.12365297456106163, 0.9780217987930632]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [0.0048440010516642325, -0.049323010708347347, -0.05672101231450181, 0.997159216489771]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.1573235485302995, 0.2532794964339213, -0.3538193321982703, 0.8865160336546564]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [-0.29825264175986094, 0.20594291773752335, 0.0204399223116, 0.9317805996547233]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [0.04169736522717797, -0.3371614374943587, 0.029218487365006356, 0.9400690266123811]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [0.01222299893047544, 0.03268999713959261, 0.07466299346691371, 0.9965979127966899]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [-0.1163759600792704, -0.361747875908743, 0.09469696751586806, 0.9201236843677263]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.04454699395947258, 0.09069598770171566, -0.11996198373327607, 0.9876228660793361]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.009416000166710283, 0.01553500027504719, 0.10579500187310058, 0.994222017602701]
+        }
+      ]
+    }
+  ]
+}

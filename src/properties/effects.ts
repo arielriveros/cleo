@@ -22,6 +22,16 @@ declareProperties(SoundNode, 'Sound', [
         { key: 'maxDistance', label: 'Max', type: Number, min: 0.02, step: 1, divider: true },
         { key: 'rolloffFactor', label: 'Rolloff', type: Number, min: 0, max: 10, step: 0.1 },
     ] },
+    // The Overlap card: how this emitter's plays share time (its own card, like Falloff).
+    { title: 'Overlap', props: [
+        { key: 'voices', type: Integer, min: 1, max: 32, step: 1, divider: true },
+        { key: 'whenFull', label: 'When full', when: n => n.voices > 1, divider: true,
+          type: Choice(['oldest', 'quietest', 'farthest', 'skip'], ['Steal oldest', 'Steal quietest', 'Steal farthest', 'Skip new']) },
+        { key: 'voicesStayPut', label: 'Stay put', type: Boolean, when: n => n.voices > 1 && n.mode === 'spatial', divider: true },
+        { key: 'pitchVariation', label: 'Pitch ±', type: Number, min: 0, max: 12, step: 0.1, readout: v => `${v.toFixed(1)} st`, divider: true },
+        { key: 'volumeVariation', label: 'Volume ±', type: Number, min: 0, max: 1, step: 0.01, divider: true },
+        { key: 'retrigger', label: 'Retrigger', type: Number, min: 0, max: 5, step: 0.01, readout: v => `${v.toFixed(2)} s` },
+    ] },
 ], { docs: 'editor/audio', section: 'sound-nodes' });
 
 // Documented with the particle editor ("In a scene"), next to the asset this node plays.

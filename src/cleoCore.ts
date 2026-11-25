@@ -107,7 +107,7 @@ export { TerrainOccluder } from "./graphics/occlusion/terrainOccluder";
 export type { SkyLightOptions } from "./core/scene/nodes/skyLightNode";
 export { CameraNode } from "./core/scene/nodes/cameraNode";
 export { SoundNode } from "./core/scene/nodes/soundNode";
-export type { SoundMode, SoundNodeOptions, LoopMode } from "./core/scene/nodes/soundNode";
+export type { SoundMode, SoundNodeOptions, LoopMode, WhenFull, SoundPlayOptions } from "./core/scene/nodes/soundNode";
 // The audio stack. `AudioManager` is the registry a SoundNode resolves its sample through, and the same
 // shape as TextureManager on purpose — the editor's asset reconciler, byte store and packer are written
 // against that surface.

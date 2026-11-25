@@ -1446,7 +1446,7 @@ const GI_SIGNATURE_GROUND_STEP = 2;
  * `authored` asks of the authored visibility alone, ignoring LOD and draw-distance culls (the signature).
  */
 function inCapture(node: ModelNode, authored: boolean = false): boolean {
-    if (!(authored ? node.authoredVisible : node.visible)) return false;
+    if (!(authored ? node.authoredVisible : node.visible) || node.shadowOnly) return false;
     if (isEditorOnlyNode(node)) return false;
     if (node.name.startsWith('__editor__') || node.name.startsWith('__debug__')) return false;
     if (node.model instanceof AnimatedModel) return false;

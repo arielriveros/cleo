@@ -12620,7 +12620,11 @@
                   "distanceModel": "inverse",
                   "refDistance": 1,
                   "maxDistance": 100,
-                  "rolloffFactor": 1
+                  "rolloffFactor": 1,
+                  "voices": 16,
+                  "whenFull": "quietest",
+                  "pitchVariation": 0.5,
+                  "volumeVariation": 0.1
                 }
               },
               {

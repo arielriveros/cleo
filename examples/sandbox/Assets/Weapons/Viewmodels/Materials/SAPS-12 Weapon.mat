@@ -1,0 +1,33 @@
+{
+  "id": "db0bf88dfbeaf384c94ad77505f69138",
+  "name": "SAPS-12 Weapon",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "b4a0c77634c13ece38081fec5660bd9a",
+      "metallicRoughnessTexture": "4e405ac3b2e7d201f0f8314a138ba332",
+      "occlusionMap": "4e405ac3b2e7d201f0f8314a138ba332",
+      "normalMap": "06490e0130fb6196e5b7c24d41d915a9"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "b4a0c77634c13ece38081fec5660bd9a",
+    "4e405ac3b2e7d201f0f8314a138ba332",
+    "06490e0130fb6196e5b7c24d41d915a9"
+  ],
+  "thumbnail": ""
+}

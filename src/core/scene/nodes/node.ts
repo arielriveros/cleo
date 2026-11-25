@@ -202,6 +202,9 @@ export class Node {
 
   protected _viewmodel = false;
 
+  // See shadowOnly: drawn into shadow maps alone.
+  protected _shadowOnly = false;
+
   // See SocketAttachment. Read by the scene's late socket pass.
   protected _socketAttachment: SocketAttachment | null = null;
 
@@ -1126,6 +1129,7 @@ export class Node {
       ...(this._cleoSave?.saved ? { saved: true } : {}),
       ...(this._motionBlur !== 'full' ? { motionBlur: this._motionBlur } : {}),
       ...(this._viewmodel ? { viewmodel: true } : {}),
+      ...(this._shadowOnly ? { shadowOnly: true } : {}),
       ...(this._drawDistance > 0 ? { drawDistance: this._drawDistance } : {}),
       ...(this._socketAttachment ? { socketAttachment: { ...this._socketAttachment } } : {}),
       ...(await this._serializePayload()),
@@ -1243,6 +1247,7 @@ export class Node {
     // see a Collider further up a subtree being parsed: ColliderNode.parse counts itself in.)
     if (asksLooseSeeThrough(json) && Node._colliderParseDepth === 0 && !parent.collider) Node._warnLooseSeeThrough(json.name);
     if (json.viewmodel === true) node._viewmodel = true;
+    if (json.shadowOnly === true) node._shadowOnly = true;
     if (typeof json.drawDistance === 'number' && json.drawDistance > 0) node._drawDistance = json.drawDistance;
 
     if (json.socketAttachment && typeof json.socketAttachment.socket === 'string') {
@@ -1614,6 +1619,20 @@ export class Node {
     this._viewmodel = !!value;
     for (const child of this._children) child.viewmodel = value;
     this._notifyChange('component', 'viewmodel', prev, this._viewmodel);
+  }
+
+  /**
+   * Whether this node is drawn ONLY into shadow maps (default false): no camera sees it, nor a reflection probe
+   * or a capture, but it still casts its shadow, for the sun and the spot and point lights alike. A first-person
+   * player's own body: gone from the eye it would fill, its shadow still on the ground. Unlike hiding it
+   * ({@link visible}), it keeps animating and casting. Fans out to descendants like {@link viewmodel}.
+   */
+  public get shadowOnly(): boolean { return this._shadowOnly; }
+  public set shadowOnly(value: boolean) {
+    const prev = this._shadowOnly;
+    this._shadowOnly = !!value;
+    for (const child of this._children) child.shadowOnly = value;
+    if (prev !== this._shadowOnly) this._notifyChange('component', 'shadowOnly', prev, this._shadowOnly);
   }
 
   /** The socket this node is pinned to, or null. See {@link SocketAttachment}. */

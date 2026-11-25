@@ -125,7 +125,8 @@ export class ForwardPass {
         const gizmoNodes: ModelNode[] = [];
         const helperNodes: ModelNode[] = [];
         for (const node of scene.models) {
-            if (!node.visible) continue;
+            // A shadow-only node (Node.shadowOnly) casts in the shadow passes and is seen by no camera.
+            if (!node.visible || node.shadowOnly) continue;
             // Editor chrome leaves the scene here, before anything else looks at it. Two queues, and
             // the split is depth state rather than content: a gizmo is drawn through geometry (compare
             // 'always'), a helper wireframe is occluded by it. Both land in the overlay buffer, which
@@ -343,7 +344,8 @@ export class ForwardPass {
         // First pass: sort every visible model into a queue, so the whole batch can go through one RHI
         // render pass. The queue is appended to in traversal order, which is the draw order.
         for (const node of scene.models) {
-            if (!node.visible) continue;
+            // A shadow-only node (Node.shadowOnly) casts in the shadow passes and is seen by no camera.
+            if (!node.visible || node.shadowOnly) continue;
 
             // Editor chrome first, and before the selection branch — the same split the deferred
             // pipeline makes in `renderForwardOverlay`. It leaves the scene here for the overlay
@@ -366,7 +368,7 @@ export class ForwardPass {
         // The selected objects draw normally, right after the opaque ones and regardless of culling or
         // transparency (the outline itself is drawn by the mask pass below). Appended to the same queue
         // rather than run as a second pass, which is what they were: same order, one pass.
-        for (const node of selectedNodes) if (node.visible) opaqueDrawQueue.push(node);
+        for (const node of selectedNodes) if (node.visible && !node.shadowOnly) opaqueDrawQueue.push(node);
 
         this.forwardDepthWrite = true;
         this._runForwardQueue('forwardOpaque', opaqueDrawQueue);

@@ -104,7 +104,22 @@
           "min": 0,
           "max": 4,
           "step": 0.05,
-          "tooltip": "How high over the character's feet the camera orbits (m)."
+          "tooltip": "How high over the character's feet the camera orbits (m), and how much lower crouched."
+        }
+      },
+      {
+        "name": "crouchDrop",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.45,
+        "hidden": false,
+        "attribute": {
+          "group": "Framing",
+          "min": 0,
+          "max": 2,
+          "step": 0.05
         }
       },
       {
@@ -156,6 +171,70 @@
         }
       },
       {
+        "name": "viewSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.3,
+        "hidden": false,
+        "attribute": {
+          "group": "Switch",
+          "min": 0,
+          "max": 2,
+          "step": 0.05,
+          "tooltip": "Seconds the switch to first person (and back) takes."
+        }
+      },
+      {
+        "name": "crouchSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.25,
+        "hidden": false,
+        "attribute": {
+          "group": "Switch",
+          "min": 0,
+          "max": 2,
+          "step": 0.05,
+          "tooltip": "Seconds the orbit takes to drop for a crouch, and to come back up."
+        }
+      },
+      {
+        "name": "thirdPersonFov",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 60,
+        "hidden": false,
+        "attribute": {
+          "group": "Switch",
+          "min": 20,
+          "max": 120,
+          "step": 1,
+          "tooltip": "The field of view in third person (degrees)."
+        }
+      },
+      {
+        "name": "firstPersonPitch",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 85,
+        "hidden": false,
+        "attribute": {
+          "group": "Switch",
+          "min": 30,
+          "max": 89,
+          "step": 1,
+          "tooltip": "First person: the pitch's reach, degrees up and down."
+        }
+      },
+      {
         "name": "_sinceSprint",
         "type": {
           "kind": "number"
@@ -189,6 +268,42 @@
         },
         "access": "private",
         "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_fpMix",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_crouchMix",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_authored",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "firstPersonMix",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
         "hidden": true
       }
     ],

@@ -106,6 +106,8 @@ The shot, reload, equip and death effects are not in the scripts. The weapon cli
 `Fire` / `AimFire`, `reload` on the reload clip, `equip` on `Equip`; `death` on the bot death clips) and each
 controller binds them in its **Event actions** (Animator editor, Variables panel): the weapon's sound and the
 `FPS Muzzle Flash` template, spawned on the viewmodel's `Muzzle` where it is drawn and kept there while it lives.
+The player's `ShotPistol` cue overlaps itself on its own: 16 [voices](audio.md#overlap), a little random pitch
+and volume.
 Bots have no fire clip, so `FpsBot` fires `shot.<weapon>` by name and its controller binds the same effects.
 Hit-position effects (impact, blood, tracer, bullet hole) and the player's hurt/hit/kill/empty sounds stay in
 `FpsCombatant` / `FpsPlayer`, because they depend on where a ray landed.

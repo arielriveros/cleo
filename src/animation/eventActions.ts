@@ -19,7 +19,7 @@ import type { Scene } from '../core/scene/scene';
  */
 
 export type EventAction =
-    | { kind: 'sound'; target: string; /** Overlap an earlier shot of the same sound (default) instead of restarting it. */ overlap?: boolean }
+    | { kind: 'sound'; target: string; /** Play as the node's Voices allow (default), or (false) restart it, every voice stopped. */ overlap?: boolean }
     | { kind: 'particles'; target: string; mode: 'play' | 'burst' | 'stop'; count?: number; emitter?: string }
     | { kind: 'light'; target: string; /** Peak lumens. */ intensity: number; /** Seconds to fade to nothing. */ seconds: number; /** Fade curve exponent (2 = quick falloff). */ falloff?: number }
     | {
@@ -127,25 +127,13 @@ export function resolveTarget(owner: Node, path: string): Node | null {
 // Runners
 // ---------------------------------------------------------------------------------------------------
 
-/** Spare emitters per sound, so a new shot rings over the tail of the last one instead of cutting it off. */
-const MAX_OVERLAP = 6;
-const overlaps = new WeakMap<object, any[]>();
-
+/**
+ * Play a sound node. How plays overlap is the node's own (its Voices, When full, variation and retrigger); `overlap`
+ * off restarts it instead, every voice stopped for the new one.
+ */
 function playSound(cue: any, overlap: boolean): void {
     if (typeof cue.play !== 'function') return;
-    if (!overlap || !cue.isPlaying) { cue.play(); return; }
-    let pool = overlaps.get(cue);
-    if (!pool) { pool = []; overlaps.set(cue, pool); }
-    let spare = pool.find(s => !s.isPlaying);
-    if (!spare && pool.length < MAX_OVERLAP && cue.parent) {
-        spare = new (cue.constructor as any)(cue.name + ' (overlap)', {
-            mode: cue.mode, sampleId: cue.sampleId ?? undefined, volume: cue.volume, loopMode: cue.loopMode, playOnStart: false,
-            distanceModel: cue.distanceModel, refDistance: cue.refDistance, maxDistance: cue.maxDistance, rolloffFactor: cue.rolloffFactor,
-        });
-        cue.parent.addChild(spare);
-        pool.push(spare);
-    }
-    (spare ?? cue).play();
+    if (overlap) cue.play(); else cue.play({ restart: true });
 }
 
 /**

@@ -550,6 +550,188 @@
       ]
     },
     {
+      "id": "1a2877d723c117d21c4a0efb89646798",
+      "name": "Reload",
+      "bones": [
+        {
+          "name": "mixamorig1:Hips",
+          "rotation": [-0.033729, -0.045873, -0.026675, 0.998021]
+        },
+        {
+          "name": "mixamorig1:Spine",
+          "rotation": [0.051566, 0.015677, 0.022414, 0.998295]
+        },
+        {
+          "name": "mixamorig1:Spine1",
+          "rotation": [0.020911, 0.002004, 0.013833, 0.999684]
+        },
+        {
+          "name": "mixamorig1:Spine2",
+          "rotation": [0.013719, 0.002119, 0.014303, 0.999801]
+        },
+        {
+          "name": "mixamorig1:Neck",
+          "rotation": [0.101764, -0.005087, 0.001143, 0.994795]
+        },
+        {
+          "name": "mixamorig1:Head",
+          "rotation": [0.170573, -0.010897, -0.000598, 0.985285]
+        },
+        {
+          "name": "mixamorig1:LeftShoulder",
+          "rotation": [-0.008024, -0.234689, -0.225515, 0.945516]
+        },
+        {
+          "name": "mixamorig1:LeftArm",
+          "rotation": [0.482664, 0.131956, 0.032604, 0.865194]
+        },
+        {
+          "name": "mixamorig1:LeftForeArm",
+          "rotation": [0.183193, 0.009764, 0.54835, 0.815878]
+        },
+        {
+          "name": "mixamorig1:LeftHand",
+          "rotation": [-0.558871, 0.264429, 0.310385, 0.722082]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb1",
+          "rotation": [0.111358, 0.078224, -0.010685, 0.990639]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb2",
+          "rotation": [-0.066057, 0.005941, -0.099052, 0.992869]
+        },
+        {
+          "name": "mixamorig1:LeftHandThumb3",
+          "rotation": [-0.15092, -0.075999, 0.079679, 0.982394]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex1",
+          "rotation": [0.154789, 0.090919, -0.022104, 0.983507]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex2",
+          "rotation": [0.187791, -0.002097, -0.01718, 0.982056]
+        },
+        {
+          "name": "mixamorig1:LeftHandIndex3",
+          "rotation": [0.257343, -0.019759, 0.023591, 0.96583]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle1",
+          "rotation": [0.124337, 0.098369, 0.032904, 0.986803]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle2",
+          "rotation": [0.345263, 0.005902, -0.026837, 0.938104]
+        },
+        {
+          "name": "mixamorig1:LeftHandMiddle3",
+          "rotation": [0.397076, -0.002256, -0.044035, 0.916726]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing1",
+          "rotation": [0.033342, 0.026906, 0.022397, 0.998831]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing2",
+          "rotation": [0.59209, 0.033071, -0.035795, 0.804397]
+        },
+        {
+          "name": "mixamorig1:LeftHandRing3",
+          "rotation": [0.288247, 0.023296, -0.0813, 0.953814]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky1",
+          "rotation": [-0.037271, -0.064057, 0.078836, 0.994129]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky2",
+          "rotation": [0.396941, 0.00138, -0.045031, 0.916738]
+        },
+        {
+          "name": "mixamorig1:LeftHandPinky3",
+          "rotation": [0.261116, 0.000578, -0.030305, 0.964832]
+        },
+        {
+          "name": "mixamorig1:RightShoulder",
+          "rotation": [-0.008933, 0.212111, 0.226668, 0.950553]
+        },
+        {
+          "name": "mixamorig1:RightArm",
+          "rotation": [0.60451, -0.245239, -0.06524, 0.755096]
+        },
+        {
+          "name": "mixamorig1:RightForeArm",
+          "rotation": [-0.298618, 0.150611, -0.563767, 0.755189]
+        },
+        {
+          "name": "mixamorig1:RightHand",
+          "rotation": [0.132237, 0.507461, -0.428815, 0.735605]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb1",
+          "rotation": [0.036394, -0.20061, -0.011289, 0.97893]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb2",
+          "rotation": [-0.072723, -0.001663, 0.184165, 0.9802]
+        },
+        {
+          "name": "mixamorig1:RightHandThumb3",
+          "rotation": [-0.068355, 0.036936, 0.242005, 0.967159]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex1",
+          "rotation": [0.007766, -0.000851, 0.037727, 0.999258]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex2",
+          "rotation": [0.058534, -0.000315, 0.008684, 0.998248]
+        },
+        {
+          "name": "mixamorig1:RightHandIndex3",
+          "rotation": [0.289692, -0.000004, 0.02868, 0.95669]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle1",
+          "rotation": [-0.01199, -0.037012, 0.058919, 0.997504]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle2",
+          "rotation": [0.734117, -0.004869, 0.064036, 0.675979]
+        },
+        {
+          "name": "mixamorig1:RightHandMiddle3",
+          "rotation": [0.602738, 0.001473, 0.047417, 0.796528]
+        },
+        {
+          "name": "mixamorig1:RightHandRing1",
+          "rotation": [0.02829, 0.106254, 0.02134, 0.993707]
+        },
+        {
+          "name": "mixamorig1:RightHandRing2",
+          "rotation": [0.811282, -0.003239, 0.074369, 0.579896]
+        },
+        {
+          "name": "mixamorig1:RightHandRing3",
+          "rotation": [0.669453, 0.002872, 0.056647, 0.740686]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky1",
+          "rotation": [-0.035587, 0.137511, -0.002562, 0.989857]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky2",
+          "rotation": [0.687856, -0.002978, 0.051144, 0.724037]
+        },
+        {
+          "name": "mixamorig1:RightHandPinky3",
+          "rotation": [0.639856, 0.000672, 0.043725, 0.76725]
+        }
+      ]
+    },
+    {
       "id": "5ca5e0a8fba0442f4724ef8bfd655885",
       "name": "Aim Right 90 Up 60",
       "baseRef": {

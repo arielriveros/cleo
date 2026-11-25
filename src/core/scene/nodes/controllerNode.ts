@@ -165,6 +165,13 @@ export class ControllerNode extends Node {
     public jumpAction: string = 'Jump';
     public sprintAction: string = 'Sprint';
     public crouchAction: string = '';
+    /**
+     * Crouch on a press, stand on the next (a sprint or a jump stands it up too), instead of crouching while the
+     * Crouch action is held.
+     */
+    public crouchToggle: boolean = false;
+    /** The toggled crouch (see {@link crouchToggle}). Runtime only. */
+    private _crouchToggled = false;
 
     // ----- aim -------------------------------------------------------------------------------------
     /**
@@ -428,6 +435,7 @@ export class ControllerNode extends Node {
         if (raw === this._possessed && raw?.id === this._possessedId) return this;
 
         this._detach();
+        this._crouchToggled = false;
         if (raw && raw.controller && raw.controller !== this && !this._warnedStolen) {
             this._warnedStolen = true;
             Logger.warn(
@@ -443,6 +451,8 @@ export class ControllerNode extends Node {
     }
 
     public release(): this {
+        // A toggled crouch belongs to this possession: whoever is possessed next starts standing.
+        this._crouchToggled = false;
         this._detach();
         this._possessed = null;
         this._possessedId = null;
@@ -686,7 +696,15 @@ export class ControllerNode extends Node {
         this._reading.jump = this.jumpAction ? input.started(this.jumpAction) : false;
         this._reading.jumpHeld = this.jumpAction ? input.pressed(this.jumpAction) : false;
         this._reading.sprint = this.sprintAction ? input.pressed(this.sprintAction) : false;
-        this._reading.crouch = this.crouchAction ? input.pressed(this.crouchAction) : false;
+        if (!this.crouchToggle) {
+            this._reading.crouch = this.crouchAction ? input.pressed(this.crouchAction) : false;
+            return;
+        }
+        if (this.crouchAction && input.started(this.crouchAction)) this._crouchToggled = !this._crouchToggled;
+        // As in most shooters: setting off at a sprint, or jumping, stands a toggled crouch up.
+        const moving = move[0] !== 0 || move[1] !== 0;
+        if (this._reading.jump || (this._reading.sprint && moving)) this._crouchToggled = false;
+        this._reading.crouch = this._crouchToggled;
     }
 
     // ----- perception -------------------------------------------------------------------------------
@@ -1846,6 +1864,8 @@ export class ControllerNode extends Node {
             jumpAction: this.jumpAction,
             sprintAction: this.sprintAction,
             crouchAction: this.crouchAction,
+            // Written only when on, so every scene saved before it reads back the same.
+            ...(this.crouchToggle ? { crouchToggle: true } : {}),
 
             aimSource: this.aimSource,
             driveAimTarget: this.driveAimTarget,
@@ -1899,6 +1919,7 @@ export class ControllerNode extends Node {
         node.jumpAction = str(json.jumpAction, node.jumpAction);
         node.sprintAction = str(json.sprintAction, node.sprintAction);
         node.crouchAction = str(json.crouchAction, node.crouchAction);
+        node.crouchToggle = json.crouchToggle === true;
 
         if ((AIM_SOURCES as readonly string[]).includes(json.aimSource)) node.aimSource = json.aimSource;
         node.driveAimTarget = typeof json.driveAimTarget === 'boolean'

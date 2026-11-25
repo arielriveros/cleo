@@ -113,6 +113,12 @@ export function reinstantiate(
   // `instantiateModelAsset` overwrites the clone's `variables` wholesale, taking the placement's
   // `__scriptId`, `__templateId` and every authored variable with it.
   const variables = new Map(inst.variables)
+  // The placement's own name and place among its siblings. A model copy comes back named after the root of
+  // the asset's tree ('Pistol', where the copy was placed and found by scripts as 'Pistol Viewmodel'), and
+  // last among its siblings. A template's name is the template's unless the placement overrides it, which
+  // `applyOverrides` restores, so only a MODEL rebuild keeps the old name here.
+  const name = inst.name
+  const index = parent.children.indexOf(inst)
   // Where every node of the old copy sat, so references to it from elsewhere can follow the rebuild.
   const oldIds = idsByPath(inst)
   // A placement's own collider is not rebuilt: a model asset carries no physics, so a placed copy that
@@ -130,6 +136,8 @@ export function reinstantiate(
   const newId = make(parent)
   const newNode = scene.getNodeById(newId)
   if (newNode) {
+    if (assetShape) newNode.name = name
+    if (index >= 0) parent.moveChildTo(newNode, index)
     newNode.setPosition(pos).setRotation(rot).setScale(scl)
     newNode.spawnOnStart = spawnOnStart
     newNode.saved = saved

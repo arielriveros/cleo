@@ -50,6 +50,10 @@ declareProperties(CharacterNode, 'Character', [
         { key: 'jumpBufferSeconds', label: 'Buffer', type: Number, min: 0, max: 0.5, step: 0.01 },
         { key: 'jumpLockoutSeconds', label: 'Lockout', type: Number, min: 0, max: 1, step: 0.01 },
     ] },
+    { title: 'Crouch', props: [
+        { key: 'crouchCapsuleHeight', label: 'Height', type: Number, min: 0, max: 3, step: 0.01 },
+        { key: 'crouchSpeed', label: 'Crouch speed', type: Number, min: 0, max: 1, step: 0.01, when: n => n.crouchCapsuleHeight > 0 },
+    ] },
     { title: 'Advanced', props: [
         { key: 'driveWhenUnpossessed', label: 'Drive without a Controller', type: Boolean },
     ] },
@@ -86,6 +90,7 @@ declareProperties(ControllerNode, 'Controller', [
         { key: 'jumpAction', label: 'Jump', type: ActionName },
         { key: 'sprintAction', label: 'Sprint', type: ActionName },
         { key: 'crouchAction', label: 'Crouch', type: ActionName },
+        { key: 'crouchToggle', label: 'Crouch toggles', type: Boolean, when: n => !!n.crouchAction },
     ] },
     { title: 'Aim', props: [
         { key: 'aimSource', label: 'Basis', type: Choice(['possessed', 'node', 'world'], ['Camera rig under the pawn', 'A specific node', 'World']) },

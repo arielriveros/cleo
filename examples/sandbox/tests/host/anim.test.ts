@@ -18,8 +18,10 @@ const subtree = (root: Node): Node[] => [root, ...root.children.flatMap(subtree)
 /** B's character (the Character node) on the host, and as A sees it. */
 const bOnHost = () => subtree(players.get(b.session.peerId)!).find((n) => n.nodeType === 'character')!;
 const bOnA = () => a.scene.getNodeById(bOnHost().id)!;
-const hostAnimator = (): Animator => animatorsOf(bOnHost())[0];
-const seenAnimator = (): Animator => animatorsOf(bOnA())[0];
+/** The Mannequin's animator: the one that walks (the first-person viewmodels under the camera have their own). */
+const body = (animators: Animator[]): Animator => animators.find((x) => x.getStateMachine()?.states.some((s) => s.name === 'Locomotion'))!;
+const hostAnimator = (): Animator => body(animatorsOf(bOnHost()));
+const seenAnimator = (): Animator => body(animatorsOf(bOnA()));
 
 beforeAll(async () => {
     const bin = await packExampleGame(EXAMPLE);

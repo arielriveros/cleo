@@ -1,0 +1,35 @@
+{
+  "cleo": 1,
+  "guid": "78dc0596f88aae25df5ee2a3065d03e3",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "78dc0596f88aae25df5ee2a3065d03e3",
+    "name": "SAPS-12 Case ARM.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "wrapU": "repeat",
+      "wrapV": "repeat",
+      "wrapW": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "minFilter": "linear",
+      "magFilter": "linear",
+      "anisotropy": 1,
+      "precision": "low",
+      "format": "rgba8unorm",
+      "target": "texture2D"
+    }
+  }
+}

@@ -16,6 +16,34 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **The Sandbox gets Firing Line's shooter: three weapons, first or third person, crouching.**
+  - Firing Line's pistol, AK-47 and SAPS-12 shotgun replace the Low-Poly G40 and M4A1. The third person holds the
+    viewmodels' own weapon meshes, cut out at their Idle frame into weapon space, on the Pistol, Rifle and new
+    Shotgun Grip sockets. The rifle's and the shotgun's left hand moved onto their handguard and pump, every pose
+    re-solved. New: Shotgun Poses, the Shotgun Carry and Aim Offset blend spaces, the Shotgun and Shotgun Aim
+    layers, and a Reload pose and state on every weapon layer.
+  - Firing Line's mechanics in both views: its weapon table (rate, magazine and reserve, the shotgun's nine pellets,
+    spread and bloom, recoil and its recovery, reach), reloads (R, or a pull on an empty magazine), and the HUD's
+    ammunition. The reserve is limited, as in Firing Line.
+  - V switches to first person: the camera at the eyes, Firing Line's viewmodels, clips and lens, aiming down the
+    sights with depth of field, the viewmodel kept out of walls. The body is drawn into the shadows alone and faces
+    the camera.
+  - C toggles a crouch: Firing Line's rifle-pack crouch clips retargeted onto the Mannequin (idle, the 8-way walk,
+    two turns on the Pivot), a Crouch Locomotion blend space, a Crouching group, and a shorter capsule.
+  - Engine: `Node.shadowOnly`, drawn into the shadow maps and by no camera, probe or capture (inspector: Shadow
+    only). The Character crouches with `crouchCapsuleHeight` / `crouchSpeed`: its Collider's capsule is shortened
+    feet-first in one collider rebuild (`ColliderNode.reshape`, `PhysicsBody.setColliders`, every backend and the
+    worker). It stands only where the standing capsule fits, and it publishes `crouched`. The Controller gains
+    `crouchToggle`. `MathUtils.directionFromAim` and `MathUtils.randomInCone` are new. Player contract 53.
+- **A Sound node sets how its plays overlap.** Its new **Overlap** card: **Voices** (how many plays sound at
+  once, 1 to 32; 1, the default, restarts it as before), **When full** (steal the oldest, the quietest or the
+  farthest voice, faded out in 30 ms, or skip the new play), **Stay put** (a spatial voice stays where it was
+  played), **Pitch ±** and **Volume ±** (random per play) and **Retrigger** (a minimum time between plays). The
+  animator's sound event action and Firing Line's `playCue` no longer clone up to six spare sound nodes, which cut a
+  shot short once seven were ringing: the Sandbox's AK-47 now rings on at 600 rounds a minute, its shot cues with
+  16 voices, and the third person's shots overlap too. `play({ restart: true })` stops every voice for the new one
+  (a sequence's audio track plays that way). Fixed on the way: a sample's fade-out could leave a voice faded but
+  never stopped when another voice's fade ended first, and setting a Sound node's volume dropped a sequence's fade.
 - **A custom material's texture and cubemap uniforms take the same texture slot as a material's maps.** The
   Uniforms list's dropdown is replaced by the 96 px tile with Select, Upload, drag-drop from Assets and ✕. A
   **cubemap** uniform (`samplerCube`) takes a 2 : 1 equirectangular panorama from the project's textures, which
@@ -1287,6 +1315,11 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Fixes & refactors
 
+- **A placed model keeps its name when its asset changes.** Rebuilt from an edited asset (on save, or on the next
+  open), a placed copy came back named after the root of the asset's tree and last among its siblings. The
+  Sandbox's viewmodels, placed as `Pistol Viewmodel`, `AK-47 Viewmodel` and `SAPS-12 Viewmodel`, became `Pistol`,
+  `AK-47` and `SAPS-12`; the player script, finding none, hid none, and all three showed in first person and in
+  third. The copy now keeps its own name and its place.
 - **A model's place in the library stays out of its file.** In a folder project every `.model` file the editor
   wrote carried the model's position in the library (`order`), so adding or reordering a model rewrote the others,
   and a reorder made every scene that places them rebuild those models on open. The position now stays in the

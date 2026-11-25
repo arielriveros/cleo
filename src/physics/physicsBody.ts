@@ -227,6 +227,17 @@ export class PhysicsBody {
         return this;
     }
 
+    /**
+     * Replace every collider at once, in ONE rebuild of the body in its world (or before it is in one), with the
+     * mass placed by the same rule as before (see PhysicsBodyOptions.centerOfMass). A crouching Character's capsule
+     * is shortened this way: removing and adding shapes one by one would leave the body without any for a moment.
+     */
+    public setColliders(colliders: readonly ColliderDesc[]): this {
+        this._desc.colliders = [...colliders];
+        if (this._world) this._world.setColliders(this._handle, this._desc.colliders, this._desc.centerOfMass);
+        return this;
+    }
+
     /** @internal Replace every collider. */
     protected _setColliders(colliders: ColliderDesc[]): void {
         this._desc.colliders = colliders;

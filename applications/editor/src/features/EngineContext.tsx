@@ -4253,6 +4253,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // is right for where the user put the copy and wrong for a change the MODEL made to its root
         // transform — the two share one slot — so the difference is re-applied on top afterwards.
         const baseTrs = readModelBaseTrs(inst);
+        // The placement's own name and place among its siblings: the copy comes back named after the root of
+        // the asset's tree, and last (see reinstantiate in sceneResync.ts).
+        const name = inst.name;
+        const index = parent.children.indexOf(inst);
         const wasSelected = inst.id === selectedNode;
         // What the user added inside this copy (a sprite on the tip, a light) is not the asset's: carried
         // over to the rebuilt copy rather than thrown away with it. See foreignChildren.ts.
@@ -4271,6 +4275,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const newId = instantiateModelAsset(asset, parent, materialsRef.current, modelsRef.current, animationsRef.current);
         const newNode = scene.getNodeById(newId);
         if (newNode) {
+          newNode.name = name;
+          if (index >= 0) parent.moveChildTo(newNode, index);
           newNode.setPosition(pos).setRotation(rot).setScale(scl);
           newNode.spawnOnStart = spawnOnStart;
           newNode.saved = saved;

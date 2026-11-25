@@ -2,21 +2,16 @@
   "id": "cff74fd3ba284bef822bc97fe751259f",
   "name": "Pistol",
   "thumbnail": "",
-  "textureIds": [],
+  "textureIds": [
+    "880ad90c3a8471539dc565c21a347e21",
+    "aa64235601ef8da0e0e3dae6ffe374ac",
+    "5073b8b9c1e71bc77274e26734456daf"
+  ],
   "materialIds": [
-    "9f5e61c7ead73d4b8e2f452404c5b7b1",
-    "62c3e9c2e1336b3a2c94783320b5a53a",
-    "90eb6a53cc29feb91f4cac159a2a7ac1",
-    "4a45faad5d37b112667d74173f7b933b",
-    "419e0a9238b6a69b1a60cfc9be8112bc",
-    "4b0ce748026c87982e761391a28bc28b",
-    "af79c2b1810dc7afbef563e280ea5950",
-    "9cd50a3815efd0537c8d7d4188e30a05",
-    "dcd06ab4b7372dcd1a5573caa50581c4",
-    "9e831d31c1ff9e572a4ab810ab49a922"
+    "3c9ebb84b31ae857e661c45292798cc4"
   ],
   "nodeJson": {
-    "id": "becb6a5c450a53dd03524a835a0ceddc",
+    "id": "8a32e82eb1e0cb9c0a87b3bea9cb2194",
     "name": "Pistol",
     "type": "model",
     "position": [0, 0, 0],
@@ -27,12 +22,12 @@
     "variables": {
       "__materialId": {
         "type": "string",
-        "value": "9f5e61c7ead73d4b8e2f452404c5b7b1",
+        "value": "3c9ebb84b31ae857e661c45292798cc4",
         "access": "public"
       },
       "__materialIds": {
         "type": "string",
-        "value": "[\"9f5e61c7ead73d4b8e2f452404c5b7b1\",\"62c3e9c2e1336b3a2c94783320b5a53a\",\"90eb6a53cc29feb91f4cac159a2a7ac1\",\"4a45faad5d37b112667d74173f7b933b\",\"419e0a9238b6a69b1a60cfc9be8112bc\",\"4b0ce748026c87982e761391a28bc28b\",\"af79c2b1810dc7afbef563e280ea5950\",\"9cd50a3815efd0537c8d7d4188e30a05\",\"dcd06ab4b7372dcd1a5573caa50581c4\",\"9e831d31c1ff9e572a4ab810ab49a922\"]",
+        "value": "[\"3c9ebb84b31ae857e661c45292798cc4\"]",
         "access": "public"
       }
     },
@@ -40,24 +35,24 @@
       "geometry": {
         "$geo": {
           "positions": {
-            "h": "1cd4489f8ca9b70b688ec26ab6bc10dafe8657d1e93fd471752955e7eda4dd5f",
-            "l": 61752
+            "h": "3e56e1915ab2a476859f9209b1d579431dd774000b33cd0f5749cfb88ed5348f",
+            "l": 53484
           },
           "normals": {
-            "h": "cf84f0c705d8addebd6b1dc0df6115c545b256066bc3a9aac4788a7844e9d1cd",
-            "l": 61752
+            "h": "4677e683948f8ddfb3d589c4ec7bd1cedb9ed06f7741ed1d5340bda7017b5864",
+            "l": 53484
           },
           "empty": [
             "tangents",
             "bitangents"
           ],
           "texCoords": {
-            "h": "49969c300627b3137f0c0cf67ce925c7f3c36351bbea4d08785fb3128b7fb583",
-            "l": 41168
+            "h": "0a515a8a3f2364448699e01e5800705901e5b85874ed2a4b6a02406de8e7cedd",
+            "l": 35656
           },
           "indices": {
-            "h": "1cd02fa2bea1c0fd886fc4f0688f7fcc2080e36d8062a2e0993a4b8dd9e02c8a",
-            "l": 13974,
+            "h": "be2f0737631e2b6585ab7795a2cd66c14d507be5feee1894f7ecdc42d89e5f5f",
+            "l": 26472,
             "bits": 16
           },
           "typed": true
@@ -65,14 +60,21 @@
       },
       "material": {
         "type": "pbr",
-        "baseColor": [1, 0.59, 0.35],
-        "metallic": 0,
-        "roughness": 0.85,
+        "baseColor": [1, 1, 1],
+        "metallic": 1,
+        "roughness": 1,
+        "reflectance": 0.5,
         "opacity": 1,
         "emissiveFactor": [0, 0, 0],
-        "textures": {},
+        "emissiveIntensity": 1,
+        "textures": {
+          "baseColorTexture": "880ad90c3a8471539dc565c21a347e21",
+          "metallicRoughnessTexture": "aa64235601ef8da0e0e3dae6ffe374ac",
+          "occlusionMap": "aa64235601ef8da0e0e3dae6ffe374ac",
+          "normalMap": "5073b8b9c1e71bc77274e26734456daf"
+        },
         "config": {
-          "side": "front",
+          "side": "double",
           "wireframe": false,
           "transparent": false,
           "castShadow": true,
@@ -82,158 +84,21 @@
       "materials": [
         {
           "type": "pbr",
-          "baseColor": [1, 0.59, 0.35],
-          "metallic": 0,
-          "roughness": 0.85,
+          "baseColor": [1, 1, 1],
+          "metallic": 1,
+          "roughness": 1,
+          "reflectance": 0.5,
           "opacity": 1,
           "emissiveFactor": [0, 0, 0],
-          "textures": {},
+          "emissiveIntensity": 1,
+          "textures": {
+            "baseColorTexture": "880ad90c3a8471539dc565c21a347e21",
+            "metallicRoughnessTexture": "aa64235601ef8da0e0e3dae6ffe374ac",
+            "occlusionMap": "aa64235601ef8da0e0e3dae6ffe374ac",
+            "normalMap": "5073b8b9c1e71bc77274e26734456daf"
+          },
           "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.06, 0.06, 0.06],
-          "metallic": 0,
-          "roughness": 0.85,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.11, 0.11, 0.11],
-          "metallic": 0,
-          "roughness": 0.85,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.12, 0.11, 0.11],
-          "metallic": 0,
-          "roughness": 0.85,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.05, 0.05, 0.05],
-          "metallic": 0,
-          "roughness": 0.85,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.5, 0.5, 0.5],
-          "metallic": 0,
-          "roughness": 0.85,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.07, 0.07, 0.07],
-          "metallic": 0,
-          "roughness": 0.85,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.12, 0.09, 0.06],
-          "metallic": 0,
-          "roughness": 0.85,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.27, 0.17, 0.08],
-          "metallic": 0,
-          "roughness": 0.5,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.16, 0.08, 0.06],
-          "metallic": 0,
-          "roughness": 0,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
+            "side": "double",
             "wireframe": false,
             "transparent": false,
             "castShadow": true,
@@ -244,43 +109,7 @@
       "submeshes": [
         {
           "start": 0,
-          "count": 2358
-        },
-        {
-          "start": 2358,
-          "count": 1584
-        },
-        {
-          "start": 3942,
-          "count": 96
-        },
-        {
-          "start": 4038,
-          "count": 84
-        },
-        {
-          "start": 4122,
-          "count": 1917
-        },
-        {
-          "start": 6039,
-          "count": 180
-        },
-        {
-          "start": 6219,
-          "count": 204
-        },
-        {
-          "start": 6423,
-          "count": 48
-        },
-        {
-          "start": 6471,
-          "count": 360
-        },
-        {
-          "start": 6831,
-          "count": 156
+          "count": 13236
         }
       ]
     }

@@ -408,3 +408,38 @@ describe('solveLinear and image-plane lines', () => {
         expect(far[0]).toBeCloseTo(10000, 6);
     });
 });
+
+describe('directionFromAim and randomInCone', () => {
+    it('faces where the yaw and pitch of a camera rig look: the inverse of aimFromDirection', () => {
+        for (const [yaw, pitch] of [[0, 0], [90, 0], [-135, 30], [45, -60]]) {
+            const d = M.directionFromAim([0, 0, 0], yaw, pitch) as number[];
+            expect(Math.hypot(d[0], d[1], d[2])).toBeCloseTo(1, 10);
+            const back = M.aimFromDirection(vec3.fromValues(d[0], d[1], d[2]));
+            expect(back.yaw).toBeCloseTo(yaw, 4);
+            expect(back.pitch).toBeCloseTo(pitch, 4);
+        }
+        // +Z ahead at 0, positive pitch DOWN.
+        const down = M.directionFromAim([0, 0, 0], 0, 30) as number[];
+        expect(down[1]).toBeLessThan(0);
+        expect(down[2]).toBeGreaterThan(0);
+    });
+
+    it('spreads directions over the cone, never past it, evenly over its disc', () => {
+        let seed = 7;
+        const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+        for (const dir of [[0, 0, 1], [0, 1, 0], [0.6, -0.8, 0]]) {
+            let outer = 0;
+            for (let k = 0; k < 2000; k++) {
+                const d = M.randomInCone([0, 0, 0], dir, 4, random) as number[];
+                expect(Math.hypot(d[0], d[1], d[2])).toBeCloseTo(1, 10);
+                const angle = Math.acos(Math.min(1, d[0] * dir[0] + d[1] * dir[1] + d[2] * dir[2])) * 180 / Math.PI;
+                expect(angle).toBeLessThanOrEqual(4 + 1e-9);
+                if (angle > 4 / Math.SQRT2) outer++;
+            }
+            // Even over the disc: half its area lies outside 1/sqrt(2) of its radius.
+            expect(outer / 2000).toBeGreaterThan(0.45);
+            expect(outer / 2000).toBeLessThan(0.55);
+        }
+        expect(M.randomInCone([0, 0, 0], [0, 0, 1], 0)).toEqual([0, 0, 1]);
+    });
+});

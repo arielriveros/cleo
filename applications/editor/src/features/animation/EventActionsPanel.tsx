@@ -121,6 +121,7 @@ function ActionRow({ action, paths, templates, onChange, onRemove }: {
         <>
           <div className='flex items-center gap-1'>{label('Sound')}{pick(KIND_OF_TARGET.sound, action.target, v => onChange({ ...action, target: v }), 'The sound node, by path, found below this character then each parent')}</div>
           <Toggle label='overlap' className='text-ui-xs' checked={action.overlap !== false}
+            title="On: plays overlap as the sound node's Voices allow. Off: every play restarts it"
             onChange={c => onChange({ ...action, ...(c ? { overlap: undefined } : { overlap: false }) })} />
         </>
       )}

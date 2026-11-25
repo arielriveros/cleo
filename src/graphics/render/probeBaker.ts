@@ -453,7 +453,7 @@ export class ProbeBaker {
 
 /** What a probe capture draws: visible, opaque, real scene geometry a material has not opted out. */
 function inCapture(node: ModelNode): boolean {
-    if (!node.visible) return false;
+    if (!node.visible || node.shadowOnly) return false;
     if (isEditorOnlyNode(node)) return false;
     // The wider "hidden from the tree" set a capture has always left out, preview props included.
     if (node.name.startsWith('__editor__') || node.name.startsWith('__debug__')) return false;

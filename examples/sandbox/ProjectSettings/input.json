@@ -521,6 +521,66 @@
           ]
         },
         {
+          "name": "Reload",
+          "kind": "button",
+          "bindings": [
+            {
+              "id": "reload:r",
+              "source": {
+                "device": "key",
+                "code": "KeyR"
+              }
+            },
+            {
+              "id": "reload:pad",
+              "source": {
+                "device": "gamepad",
+                "button": "b"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crouch",
+          "kind": "button",
+          "bindings": [
+            {
+              "id": "crouch:c",
+              "source": {
+                "device": "key",
+                "code": "KeyC"
+              }
+            },
+            {
+              "id": "crouch:pad",
+              "source": {
+                "device": "gamepad",
+                "button": "rightStick"
+              }
+            }
+          ]
+        },
+        {
+          "name": "View",
+          "kind": "button",
+          "bindings": [
+            {
+              "id": "view:v",
+              "source": {
+                "device": "key",
+                "code": "KeyV"
+              }
+            },
+            {
+              "id": "view:pad",
+              "source": {
+                "device": "gamepad",
+                "button": "dpadDown"
+              }
+            }
+          ]
+        },
+        {
           "name": "Day",
           "kind": "button",
           "bindings": [

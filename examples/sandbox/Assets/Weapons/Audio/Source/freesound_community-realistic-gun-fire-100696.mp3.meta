@@ -1,0 +1,20 @@
+{
+  "cleo": 1,
+  "guid": "freesound_community-realistic-gun-fire-100696.mp3",
+  "kind": "audioSource",
+  "created": 1794170289650,
+  "record": {
+    "id": "freesound_community-realistic-gun-fire-100696.mp3",
+    "name": "freesound_community-realistic-gun-fire-100696.mp3",
+    "mime": "audio/mpeg",
+    "duration": 0,
+    "sampleRate": 0,
+    "channels": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1794170289570
+  },
+  "importer": {
+    "mime": "audio/mpeg"
+  }
+}

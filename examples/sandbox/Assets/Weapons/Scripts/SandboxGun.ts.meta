@@ -13,6 +13,19 @@
     "kind": "class",
     "variables": [
       {
+        "name": "displayName",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "Pistol",
+        "hidden": false,
+        "attribute": {
+          "group": "Weapon",
+          "tooltip": "The weapon's name, on the HUD."
+        }
+      },
+      {
         "name": "auto",
         "type": {
           "kind": "boolean"
@@ -22,7 +35,7 @@
         "hidden": false,
         "attribute": {
           "group": "Firing",
-          "tooltip": "Holding the trigger keeps firing (a rifle); a pistol fires once per pull."
+          "tooltip": "Holding the trigger keeps firing (a rifle); a pistol or the shotgun fires once per pull."
         }
       },
       {
@@ -31,13 +44,29 @@
           "kind": "number"
         },
         "access": "public",
-        "default": 420,
+        "default": 380,
         "hidden": false,
         "attribute": {
           "group": "Firing",
           "min": 30,
           "max": 1500,
-          "step": 10
+          "step": 1
+        }
+      },
+      {
+        "name": "pellets",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": false,
+        "attribute": {
+          "group": "Firing",
+          "min": 1,
+          "max": 24,
+          "step": 1,
+          "tooltip": "Pellets a shot fires, each its own way inside the spread: 1, but for a shotgun."
         }
       },
       {
@@ -46,7 +75,7 @@
           "kind": "number"
         },
         "access": "public",
-        "default": 200,
+        "default": 140,
         "hidden": false,
         "attribute": {
           "group": "Firing",
@@ -69,7 +98,7 @@
           "min": 0,
           "max": 500,
           "step": 0.5,
-          "tooltip": "The push a hit gives a dynamic body, newton-seconds: far more than a real bullet's (a rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a ball is not shot away."
+          "tooltip": "The push a shot gives a dynamic body, newton-seconds (shared by its pellets): far more than a real bullet's (a rifle's carries about 4), so a shot crate shoves. No body is sped up by more than `maxPushSpeed` by one hit, so a ball is not shot away."
         }
       },
       {
@@ -88,19 +117,66 @@
         }
       },
       {
-        "name": "aimSpread",
+        "name": "damage",
         "type": {
           "kind": "number"
         },
         "access": "public",
-        "default": 0.3,
+        "default": 26,
         "hidden": false,
         "attribute": {
-          "group": "Spread",
+          "group": "Firing",
           "min": 0,
-          "max": 20,
+          "max": 500,
+          "step": 1,
+          "tooltip": "Damage a pellet deals at close range (nothing in the Sandbox takes it yet: kept for game modes)."
+        }
+      },
+      {
+        "name": "pullBuffer",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.35,
+        "hidden": false,
+        "attribute": {
+          "group": "Firing",
+          "min": 0,
+          "max": 1,
           "step": 0.05,
-          "tooltip": "Spread, degrees from the crosshair at most: aimed, from the hip, and the extra at a run."
+          "tooltip": "A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon as it can, if that is within this many seconds."
+        }
+      },
+      {
+        "name": "magazine",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 12,
+        "hidden": false,
+        "attribute": {
+          "group": "Ammunition",
+          "min": 1,
+          "max": 200,
+          "step": 1,
+          "tooltip": "Rounds a magazine holds, and the rounds carried besides it."
+        }
+      },
+      {
+        "name": "reserveRounds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 84,
+        "hidden": false,
+        "attribute": {
+          "group": "Ammunition",
+          "min": 0,
+          "max": 2000,
+          "step": 1
         }
       },
       {
@@ -109,74 +185,29 @@
           "kind": "number"
         },
         "access": "public",
-        "default": 2.2,
+        "default": 1.6,
         "hidden": false,
         "attribute": {
           "group": "Spread",
           "min": 0,
           "max": 20,
-          "step": 0.05
-        }
-      },
-      {
-        "name": "moveSpread",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 2.5,
-        "hidden": false,
-        "attribute": {
-          "group": "Spread",
-          "min": 0,
-          "max": 20,
-          "step": 0.05
-        }
-      },
-      {
-        "name": "bloomPerShot",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0.5,
-        "hidden": false,
-        "attribute": {
-          "group": "Spread",
-          "min": 0,
-          "max": 10,
           "step": 0.05,
-          "tooltip": "Bloom: each shot widens the spread by this, up to `bloomMax`, settling at `bloomRecovery` degrees a second."
+          "tooltip": "Spread, degrees from the crosshair at most: from the hip, and aimed."
         }
       },
       {
-        "name": "bloomMax",
+        "name": "aimSpread",
         "type": {
           "kind": "number"
         },
         "access": "public",
-        "default": 2.5,
+        "default": 0.25,
         "hidden": false,
         "attribute": {
           "group": "Spread",
           "min": 0,
           "max": 20,
-          "step": 0.1
-        }
-      },
-      {
-        "name": "bloomRecovery",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 8,
-        "hidden": false,
-        "attribute": {
-          "group": "Spread",
-          "min": 0,
-          "max": 50,
-          "step": 0.5
+          "step": 0.05
         }
       },
       {
@@ -185,14 +216,14 @@
           "kind": "number"
         },
         "access": "public",
-        "default": 1.6,
+        "default": 1.5,
         "hidden": false,
         "attribute": {
           "group": "Recoil",
           "min": 0,
           "max": 20,
           "step": 0.05,
-          "tooltip": "The camera's kick per shot, degrees: up, and up to this either way."
+          "tooltip": "The camera's kick per shot, degrees: up, and up to this either way; and how hard the camera shakes (0..1)."
         }
       },
       {
@@ -201,7 +232,7 @@
           "kind": "number"
         },
         "access": "public",
-        "default": 0.4,
+        "default": 0.45,
         "hidden": false,
         "attribute": {
           "group": "Recoil",
@@ -211,19 +242,122 @@
         }
       },
       {
+        "name": "shake",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.04,
+        "hidden": false,
+        "attribute": {
+          "group": "Recoil",
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        }
+      },
+      {
         "name": "kick",
         "type": {
           "kind": "number"
         },
         "access": "public",
-        "default": 6,
+        "default": 7,
         "hidden": false,
         "attribute": {
           "group": "Recoil",
           "min": 0,
           "max": 30,
           "step": 0.5,
-          "tooltip": "The weapon's own kick in the hands per shot, degrees up (the aim settles it back)."
+          "tooltip": "The weapon's own kick in the hands per shot, degrees up (third person: the aim settles it back)."
+        }
+      },
+      {
+        "name": "reloadSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 2.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Timing",
+          "min": 0.1,
+          "max": 10,
+          "step": 0.05,
+          "tooltip": "Seconds a reload and the weapon coming into the hands take where no clip says (third person)."
+        }
+      },
+      {
+        "name": "equipSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {
+          "group": "Timing",
+          "min": 0.1,
+          "max": 5,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "aimFov",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 62,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 10,
+          "max": 120,
+          "step": 1,
+          "tooltip": "First person, aimed: the field of view (degrees), the share of the walk it moves at, and whether its viewmodel has aim clips."
+        }
+      },
+      {
+        "name": "aimMove",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0.7,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 0.1,
+          "max": 1,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "aimClips",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": true,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person"
+        }
+      },
+      {
+        "name": "aimOffset",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "public",
+        "default": [0, 0.012, 0],
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "tooltip": "First person, aimed without aim clips: how far the viewmodel comes in to the sights (m: left, up, forward)."
         }
       },
       {
@@ -242,23 +376,7 @@
         "hidden": false,
         "attribute": {
           "group": "Hits",
-          "tooltip": "Collision layers a shot passes through, by name, comma separated."
-        }
-      },
-      {
-        "name": "pullBuffer",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 0.35,
-        "hidden": false,
-        "attribute": {
-          "group": "Firing",
-          "min": 0,
-          "max": 1,
-          "step": 0.05,
-          "tooltip": "A pull that comes while the gun cannot fire yet (still coming up from the hip, or between two shots) fires as soon as it can, if that is within this many seconds."
+          "tooltip": "Collision layers a shot passes through, by name."
         }
       },
       {
@@ -330,6 +448,37 @@
         }
       },
       {
+        "name": "shotSound",
+        "type": {
+          "kind": "string"
+        },
+        "access": "public",
+        "default": "ShotPistol",
+        "hidden": false,
+        "attribute": {
+          "group": "Effects",
+          "tooltip": "The shot's cue in the holder's `Sounds` group (third person; in first person the fire clip plays it)."
+        }
+      },
+      {
+        "name": "ammo",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 12,
+        "hidden": true
+      },
+      {
+        "name": "reserve",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 84,
+        "hidden": true
+      },
+      {
         "name": "shots",
         "type": {
           "kind": "number"
@@ -345,6 +494,15 @@
         },
         "access": "public",
         "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "dry",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
         "hidden": true
       },
       {
@@ -412,6 +570,16 @@
         },
         "access": "private",
         "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_dir",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 0],
         "hidden": true
       }
     ],

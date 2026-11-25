@@ -1,0 +1,33 @@
+{
+  "id": "f195dfa3599454f37bc2ff758680cba0",
+  "name": "AK-47 Material.000",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "7f52f31ae3774a6671320d18acd590d9",
+      "metallicRoughnessTexture": "a13d482458670e23d0c854270416585d",
+      "occlusionMap": "a13d482458670e23d0c854270416585d",
+      "normalMap": "b41058e0fc2b48723b5e52e553e3936a"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "7f52f31ae3774a6671320d18acd590d9",
+    "a13d482458670e23d0c854270416585d",
+    "b41058e0fc2b48723b5e52e553e3936a"
+  ],
+  "thumbnail": ""
+}

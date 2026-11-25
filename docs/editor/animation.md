@@ -579,8 +579,8 @@ A marker says WHEN; the animator says WHAT. In the Parameters panel's **Event ac
 **Event**, pick its name from the markers the animator's clips carry (or type a new one), and give it
 actions:
 
-- **Play sound** — a sound node, found by name below the character and then below its parents. A new
-  shot rings over the last one; turn **overlap** off to restart it.
+- **Play sound** — a sound node, found by name below the character and then below its parents. Shots
+  overlap as the node's [Voices](audio.md#overlap) allow; turn **overlap** off to restart it instead.
 - **Particles** — burst, start or stop a particle system node.
 - **Flash light** — flash a light node you authored at intensity 0: a peak in lumens and the seconds it
   takes to fade.

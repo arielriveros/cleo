@@ -14,7 +14,7 @@ describe.skipIf(!dataReady())('state groups on the Sandbox animator', () => {
     const sm: AnimationStateMachine = find(scene).stateMachine
     const top = graphPlan(sm, null)
     expect(top.states.sort()).toEqual(['Idle', 'Locomotion', 'Stairs', 'Start'])
-    expect(top.groups.map(g => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car'])
+    expect(top.groups.map(g => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car', 'Crouching'])
     // Its forks are its groups': each drawn inside its group, the group standing for it outside.
     expect(top.forks).toEqual([])
     expect(top.groups.flatMap(g => g.forks)).toEqual(['Pick Turn', 'Pick Stop', 'Settle', 'Pick Run Turn', 'Take Off'])

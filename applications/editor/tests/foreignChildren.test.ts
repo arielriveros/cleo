@@ -89,4 +89,45 @@ describe('scene resync keeps nodes added inside a placed model', () => {
       expect(fires[0].parent?.parent?.getVariable(MODEL_ID_VAR)).toBe(model.id)
     } finally { scene.dispose() }
   })
+
+  // The Sandbox's viewmodels: the asset 'Pistol Viewmodel' has a tree whose root is 'Pistol'; the Player places
+  // it as 'Pistol Viewmodel', first of three, and its script finds it by that name. A rebuild on open renamed it
+  // 'Pistol' and moved it last, and the script, finding none, never hid any of the three.
+  it('keeps the placed copy\'s own name and its place among its siblings', () => {
+    const model = {
+      id: 'model-pistol-vm', name: 'Pistol Viewmodel',
+      nodeJson: { id: 'm-root', name: 'Pistol', type: 'node', children: [{ id: 'm-muzzle', name: 'Muzzle', type: 'node', children: [] }] },
+    } as unknown as ModelAsset
+    const copy = (id: string, name: string, modelId?: string) => ({
+      id, name, type: 'node',
+      variables: modelId ? { [MODEL_ID_VAR]: { type: 'string', value: modelId } } : {},
+      children: [{ id: `${id}-muzzle`, name: 'Muzzle', type: 'node', children: [] }],
+    })
+    const template: Template = {
+      id: 'tpl-player', name: 'Player',
+      nodeJson: {
+        id: 't-root', name: 'Player', type: 'node',
+        children: [{
+          id: 't-vms', name: 'Viewmodels', type: 'node',
+          children: [copy('t-pistol', 'Pistol Viewmodel', model.id), copy('t-ak', 'AK-47 Viewmodel'), copy('t-saps', 'SAPS-12 Viewmodel')],
+        }],
+      },
+      scripts: {},
+    } as any
+    const scene = new Scene()
+    try {
+      const m = maps()
+      instantiateTemplate(template, scene.root, m)
+      const group = Array.from(scene.nodes).find(n => n.name === 'Viewmodels')!
+      const before = group.children[0].id
+      const libs = { materials: [], models: [model], templates: [template], terrainMaterials: [], scripts: [], tilesets: [], aiBrains: [] } as any
+      const saved = { [assetHashKey('template', template.id)]: hashAsset(template) }
+      expect(resyncScene(scene, m, libs, saved, ASSET_HASH_VERSION)).toBe(true)
+
+      expect(group.children.map(c => c.name)).toEqual(['Pistol Viewmodel', 'AK-47 Viewmodel', 'SAPS-12 Viewmodel'])
+      // It was rebuilt: a fresh node, still the asset's copy.
+      expect(group.children[0].id).not.toBe(before)
+      expect(group.children[0].getVariable(MODEL_ID_VAR)).toBe(model.id)
+    } finally { scene.dispose() }
+  })
 })

@@ -227,6 +227,18 @@ from a script while a ray ahead of the camera hits something close, and ease it 
 the screen-space effects see the nearer point it was drawn at. It never casts a shadow; velocity is its own animation only, so TAA and motion blur do not smear it. Reference:
 `examples/firing-line/Assets/FPS/Scripts/FpsPlayer.ts` (`_viewmodelClearance`).
 
+## Shadow only
+
+```ts
+get shadowOnly: boolean ; set shadowOnly(v)      // fans out to children; saved when true
+```
+
+A shadow-only node is drawn into the shadow maps and nowhere else: no camera sees it, nor a reflection probe or
+a capture, but it casts its shadow for the sun and for spot and point lights as before. It is still visible
+(`visible` stays true), so it keeps animating and casting. A first-person player sets it on its own body while
+the camera is at its eyes: the body is gone from the view it would fill, and its shadow stays on the ground.
+Reference: `examples/sandbox/Assets/Characters/Mannequin/Scripts/SandboxCamera.ts`.
+
 ## Draw distance
 
 ```ts

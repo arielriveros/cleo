@@ -5,7 +5,7 @@ import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import {
   Button, DocScope, NumberInput, PresetMenu, PropertyRow, PropertyTable, SegmentedControl, Select, Slider, Toggle, Hint,
 } from '@cleo/app-kit/ui'
-import { SoundIcon, FalloffIcon } from '../sectionIcons'
+import { SoundIcon, FalloffIcon, VoicesIcon } from '../sectionIcons'
 import { useEventBus } from '../../EventBusContext'
 import { DeclaredSection, useNodeTick } from '../../properties/DeclaredSections'
 import SoundSampleSlot from './SoundSampleSlot'
@@ -62,9 +62,16 @@ export default function SoundEditor(props: { node: SoundNode }) {
             <Button size='sm' variant='subtle' onClick={() => transport(() => props.node.play())} title='Audition this emitter'>▶ Play</Button>
             <Button size='sm' variant='subtle' onClick={() => transport(() => props.node.stop())} title='Stop'>■ Stop</Button>
             <Hint>
-              {props.node.isPlaying ? 'Playing' : 'Stopped'}
+              {playingHint(props.node)}
             </Hint>
           </div>
+        </div>
+      </Collapsable>
+
+      {/* How this emitter's plays share time: ▶ Play again while it sounds to hear them layer. */}
+      <Collapsable title='Overlap' icon={<VoicesIcon />} persistKey='soundOverlap'>
+        <div className='p-2 flex flex-col gap-2'>
+          <DeclaredSection node={props.node} title='Overlap' bare />
         </div>
       </Collapsable>
 
@@ -85,6 +92,13 @@ export default function SoundEditor(props: { node: SoundNode }) {
       )}
     </DocScope>
   )
+}
+
+/** 'Stopped', 'Playing', or with more than one voice going, how many. */
+function playingHint(node: SoundNode): string {
+  if (!node.isPlaying) return 'Stopped'
+  const n = node.activeVoices
+  return n > 1 ? `Playing · ${n} voices` : 'Playing'
 }
 
 /**

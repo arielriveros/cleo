@@ -232,11 +232,12 @@ A pawn: it turns a control intent into velocity and facing. It does not read inp
 | `moveDir: number` | Strafe angle in degrees relative to facing. `0` ahead, **`-90` right**, **`+90` left**, `±180` back. |
 | `isJumping: boolean` | True from take-off until the feet land. |
 | `turnRequest: number` | Turn-in-place clip selector: `0` none, `±1` 90°, `±2` 180°. **Opposite sign to `moveDir`** — it is a selector, not an angle. |
+| `crouched: boolean` | True while it crouches: its capsule is `crouchCapsuleHeight` tall. |
 
 **Tuning:** `walkSpeed = 1.5`, `runSpeed = 4`, `jumpSpeed = 4`, `turnSpeed = 540`,
 `turnThreshold = 90`, `turnReleaseAngle = 10`, `directionSmoothing = 0.12`, `acceleration = 0`,
 `turnFriction = 0`, `moveDirSource` (`'input' | 'velocity'`, default `'input'`), `airControl = 1`, `slopeLimit = 45` (degrees: the steepest ground it stands on without sliding; `0` off), `coyoteSeconds = 0.12`, `jumpBufferSeconds = 0.15`, `jumpLockoutSeconds = 0.15`,
-`facingMode` (`'aim' | 'velocity' | 'none'`), `driveWhenUnpossessed = false`.
+`facingMode` (`'aim' | 'velocity' | 'none'`), `crouchCapsuleHeight = 0` (metres: the capsule's height while crouching; `0` never crouches), `crouchSpeed = 0.5`, `driveWhenUnpossessed = false`.
 
 ```ts
 get intent: Readonly<ControlIntent>
@@ -269,7 +270,7 @@ fuzzyValue(name: string): number
 
 Key properties: `controlSource` (`'player' | 'ai' | 'none'`), the action names
 `moveAction = 'Move'` / `lookAction = 'Look'` / `jumpAction = 'Jump'` / `sprintAction = 'Sprint'` /
-`crouchAction = ''`, `aimSource` (`'possessed' | 'node' | 'world'`), `driveAimTarget = true`,
+`crouchAction = ''`, `crouchToggle = false` (a press crouches, the next stands), `aimSource` (`'possessed' | 'node' | 'world'`), `driveAimTarget = true`,
 `goal` (an `AiGoal`), `targetKey = 'target'`, `goalPoint`, `behavior`, `goals`, `fuzzy`,
 `brain` (`'machine' | 'goal' | 'none'`), `brainId`, `perception`, `eyeHeight = 1.6`,
 `autoAcquire = true`, `steering`, `whiskerCount = 3`, `whiskerSpread = 60`, `flockRadius = 6`,
@@ -912,15 +913,18 @@ speed: number ; paused: boolean
 ### SoundNode — `'sound'`
 
 ```ts
-play(): void ; stop(): void ; pause(): void ; resume(): void
+play(options?: { offset?: number; restart?: boolean; vary?: boolean }): void
+stop(): void ; pause(): void ; resume(): void          // every voice
 fadeTo(volume: number, seconds: number): void
-get isPlaying: boolean
+get isPlaying: boolean ; get activeVoices: number
 syncSpatial(): void
 ```
 
 Properties: `mode` (`'ambient' | 'spatial'`), `sampleId`, `volume`, `loopMode`
 (`'inherit' | 'on' | 'off'`), `playOnStart`, `spatial`, plus the shortcuts `distanceModel`,
-`refDistance`, `maxDistance`, `rolloffFactor`.
+`refDistance`, `maxDistance`, `rolloffFactor`. Overlap: `voices` (1..32; 1 restarts), `whenFull`
+(`'oldest' | 'quietest' | 'farthest' | 'skip'`), `voicesStayPut`, `pitchVariation` (semitones),
+`volumeVariation`, `retrigger` (seconds).
 
 > `play()` is a silent no-op when `scene.soundsEnabled === false`.
 

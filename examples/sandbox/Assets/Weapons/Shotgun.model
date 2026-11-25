@@ -1,0 +1,117 @@
+{
+  "id": "fcafd5f569be4835bf29933807b3c402",
+  "name": "Shotgun",
+  "thumbnail": "",
+  "textureIds": [
+    "b4a0c77634c13ece38081fec5660bd9a",
+    "4e405ac3b2e7d201f0f8314a138ba332",
+    "06490e0130fb6196e5b7c24d41d915a9"
+  ],
+  "materialIds": [
+    "db0bf88dfbeaf384c94ad77505f69138"
+  ],
+  "nodeJson": {
+    "id": "13876d8b1b20b2361f7b62da6fda7f4f",
+    "name": "Shotgun",
+    "type": "model",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": [1, 1, 1],
+    "children": [],
+    "spawnOnStart": true,
+    "variables": {
+      "__materialId": {
+        "type": "string",
+        "value": "db0bf88dfbeaf384c94ad77505f69138",
+        "access": "public"
+      },
+      "__materialIds": {
+        "type": "string",
+        "value": "[\"db0bf88dfbeaf384c94ad77505f69138\"]",
+        "access": "public"
+      }
+    },
+    "model": {
+      "geometry": {
+        "$geo": {
+          "positions": {
+            "h": "e8ad80e6bcc3c01671ac357d556d35beba927693c1fb96c067461282b3d2a421",
+            "l": 359844
+          },
+          "normals": {
+            "h": "b4f21ff3070046a61e6e054421446fe5c3a892fd5d59240d8b6d0ead204910e0",
+            "l": 359844
+          },
+          "empty": [
+            "tangents",
+            "bitangents"
+          ],
+          "texCoords": {
+            "h": "951c8d3f734c786fe01f02c9f12f79b3daaaa2c3e8c5f4a90c6db32bda54ba96",
+            "l": 239896
+          },
+          "indices": {
+            "h": "82245346878ab649f456b3eee1d9a7501aead4ccf22f1e69fd92b1231ed65c5b",
+            "l": 194784,
+            "bits": 16
+          },
+          "typed": true
+        }
+      },
+      "material": {
+        "type": "pbr",
+        "baseColor": [1, 1, 1],
+        "metallic": 1,
+        "roughness": 1,
+        "reflectance": 0.5,
+        "opacity": 1,
+        "emissiveFactor": [0, 0, 0],
+        "emissiveIntensity": 1,
+        "textures": {
+          "baseColorTexture": "b4a0c77634c13ece38081fec5660bd9a",
+          "metallicRoughnessTexture": "4e405ac3b2e7d201f0f8314a138ba332",
+          "occlusionMap": "4e405ac3b2e7d201f0f8314a138ba332",
+          "normalMap": "06490e0130fb6196e5b7c24d41d915a9"
+        },
+        "config": {
+          "side": "double",
+          "wireframe": false,
+          "transparent": false,
+          "castShadow": true,
+          "probeable": true
+        }
+      },
+      "materials": [
+        {
+          "type": "pbr",
+          "baseColor": [1, 1, 1],
+          "metallic": 1,
+          "roughness": 1,
+          "reflectance": 0.5,
+          "opacity": 1,
+          "emissiveFactor": [0, 0, 0],
+          "emissiveIntensity": 1,
+          "textures": {
+            "baseColorTexture": "b4a0c77634c13ece38081fec5660bd9a",
+            "metallicRoughnessTexture": "4e405ac3b2e7d201f0f8314a138ba332",
+            "occlusionMap": "4e405ac3b2e7d201f0f8314a138ba332",
+            "normalMap": "06490e0130fb6196e5b7c24d41d915a9"
+          },
+          "config": {
+            "side": "double",
+            "wireframe": false,
+            "transparent": false,
+            "castShadow": true,
+            "probeable": true
+          }
+        }
+      ],
+      "submeshes": [
+        {
+          "start": 0,
+          "count": 97392
+        }
+      ]
+    }
+  }
+}

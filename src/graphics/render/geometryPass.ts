@@ -88,7 +88,8 @@ export class GeometryPass {
      * either lose its motion vector or write one over a surface it does not own.
      */
     public inGBuffer(node: ModelNode): boolean {
-        if (!node.visible) return false;
+        // A shadow-only node (Node.shadowOnly) casts in the shadow passes and is seen by no camera.
+        if (!node.visible || node.shadowOnly) return false;
         // Editor chrome belongs to the overlay layer, which is composited after the post chain. Keeping
         // it out of the G-buffer is also what keeps it out of the DEPTH snapshot, and so out of god
         // rays, sky fog, depth of field and SSAO — a collider box used to punch a hole through all four.

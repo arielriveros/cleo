@@ -2,19 +2,20 @@
   "id": "ca06ff713b185345b51a97b6acc92ff9",
   "name": "Rifle",
   "thumbnail": "",
-  "textureIds": [],
+  "textureIds": [
+    "7f52f31ae3774a6671320d18acd590d9",
+    "a13d482458670e23d0c854270416585d",
+    "b41058e0fc2b48723b5e52e553e3936a",
+    "f69b348b6d4c8ff9981859501aed1dc3",
+    "2db0ca4fe50d0f548d9d3dd84e0501c0",
+    "284890b17935dacd530505c30bbda932"
+  ],
   "materialIds": [
-    "5150803f984efa0889b1e2b26d3a68a0",
-    "09a43341fd9dfbe699d123ba8364db7c",
-    "00fb734f8ee7813cb3f793cdb2fda103",
-    "7c910b4c4ef62e3f702870fa72536469",
-    "7bcf3260a0fa444c7771e8ef482b37de",
-    "7fcbb70d1b9ddb2952786abf24450a52",
-    "087af2e6cda3a9ed8e7e6df65a4befe7",
-    "03a98a4ed87e114d64274471a02bbdfb"
+    "f195dfa3599454f37bc2ff758680cba0",
+    "f66b43db39788756b85c02801e3ee7f4"
   ],
   "nodeJson": {
-    "id": "6b1137ec4b88289822dcac075cd1cc8b",
+    "id": "6e3ce8d2412b84f1394e2a41feaeab98",
     "name": "Rifle",
     "type": "model",
     "position": [0, 0, 0],
@@ -25,12 +26,12 @@
     "variables": {
       "__materialId": {
         "type": "string",
-        "value": "5150803f984efa0889b1e2b26d3a68a0",
+        "value": "f195dfa3599454f37bc2ff758680cba0",
         "access": "public"
       },
       "__materialIds": {
         "type": "string",
-        "value": "[\"5150803f984efa0889b1e2b26d3a68a0\",\"09a43341fd9dfbe699d123ba8364db7c\",\"00fb734f8ee7813cb3f793cdb2fda103\",\"7c910b4c4ef62e3f702870fa72536469\",\"7bcf3260a0fa444c7771e8ef482b37de\",\"7fcbb70d1b9ddb2952786abf24450a52\",\"087af2e6cda3a9ed8e7e6df65a4befe7\",\"03a98a4ed87e114d64274471a02bbdfb\"]",
+        "value": "[\"f195dfa3599454f37bc2ff758680cba0\",\"f66b43db39788756b85c02801e3ee7f4\"]",
         "access": "public"
       }
     },
@@ -38,24 +39,24 @@
       "geometry": {
         "$geo": {
           "positions": {
-            "h": "ec458d8af687f90ee989c30ba58d531394e4ea0ff07302854e1ed04f0f0954fe",
-            "l": 348528
+            "h": "0d06570272961547b5f1a6ff5937ba5f10dba2803185de2db256555e3595ede9",
+            "l": 275616
           },
           "normals": {
-            "h": "c566beb91bda5be9a66d84113ccf4543e64c9ffa2a814aa905ac6f0280a42dff",
-            "l": 348528
+            "h": "abb5dbbc67bb87d919dece0ae4211be8b862a64219e035761c47a4d4c118ae8a",
+            "l": 275616
           },
           "empty": [
             "tangents",
             "bitangents"
           ],
           "texCoords": {
-            "h": "e160a65f182f8bf31ac5fa5dc46593525855155ae8710f01bd10c06bc99604cc",
-            "l": 232352
+            "h": "2ddcc51bd099697210b8cc41c3637fe1d326fc85834e37f88a136e4376c0aeb8",
+            "l": 183744
           },
           "indices": {
-            "h": "9c8bbd1b5c65dde8b5559135ef0d4f5484d6941b0c8ab633b6c8fa70bd3b5e36",
-            "l": 64056,
+            "h": "d9f301184cdbca8b18be5fb9a2755d183054ccc7b00c208139d201a2c10cc692",
+            "l": 148278,
             "bits": 16
           },
           "typed": true
@@ -63,14 +64,21 @@
       },
       "material": {
         "type": "pbr",
-        "baseColor": [0.03, 0.03, 0.03],
-        "metallic": 0,
-        "roughness": 0.85,
+        "baseColor": [1, 1, 1],
+        "metallic": 1,
+        "roughness": 1,
+        "reflectance": 0.5,
         "opacity": 1,
         "emissiveFactor": [0, 0, 0],
-        "textures": {},
+        "emissiveIntensity": 1,
+        "textures": {
+          "baseColorTexture": "7f52f31ae3774a6671320d18acd590d9",
+          "metallicRoughnessTexture": "a13d482458670e23d0c854270416585d",
+          "occlusionMap": "a13d482458670e23d0c854270416585d",
+          "normalMap": "b41058e0fc2b48723b5e52e553e3936a"
+        },
         "config": {
-          "side": "front",
+          "side": "double",
           "wireframe": false,
           "transparent": false,
           "castShadow": true,
@@ -80,14 +88,21 @@
       "materials": [
         {
           "type": "pbr",
-          "baseColor": [0.03, 0.03, 0.03],
-          "metallic": 0,
-          "roughness": 0.85,
+          "baseColor": [1, 1, 1],
+          "metallic": 1,
+          "roughness": 1,
+          "reflectance": 0.5,
           "opacity": 1,
           "emissiveFactor": [0, 0, 0],
-          "textures": {},
+          "emissiveIntensity": 1,
+          "textures": {
+            "baseColorTexture": "7f52f31ae3774a6671320d18acd590d9",
+            "metallicRoughnessTexture": "a13d482458670e23d0c854270416585d",
+            "occlusionMap": "a13d482458670e23d0c854270416585d",
+            "normalMap": "b41058e0fc2b48723b5e52e553e3936a"
+          },
           "config": {
-            "side": "front",
+            "side": "double",
             "wireframe": false,
             "transparent": false,
             "castShadow": true,
@@ -96,110 +111,21 @@
         },
         {
           "type": "pbr",
-          "baseColor": [0.02, 0.02, 0.02],
-          "metallic": 0,
-          "roughness": 0.85,
+          "baseColor": [1, 1, 1],
+          "metallic": 1,
+          "roughness": 1,
+          "reflectance": 0.5,
           "opacity": 1,
           "emissiveFactor": [0, 0, 0],
-          "textures": {},
+          "emissiveIntensity": 1,
+          "textures": {
+            "baseColorTexture": "f69b348b6d4c8ff9981859501aed1dc3",
+            "metallicRoughnessTexture": "2db0ca4fe50d0f548d9d3dd84e0501c0",
+            "occlusionMap": "2db0ca4fe50d0f548d9d3dd84e0501c0",
+            "normalMap": "284890b17935dacd530505c30bbda932"
+          },
           "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.01, 0.01, 0.01],
-          "metallic": 0,
-          "roughness": 0.85,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.21, 0.19, 0.18],
-          "metallic": 0,
-          "roughness": 0.85,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.8, 0.8, 0.8],
-          "metallic": 0,
-          "roughness": 0.82,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.06, 0.06, 0.06],
-          "metallic": 0,
-          "roughness": 0.82,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.03, 0.03, 0.03],
-          "metallic": 0,
-          "roughness": 0.82,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
-            "wireframe": false,
-            "transparent": false,
-            "castShadow": true,
-            "probeable": true
-          }
-        },
-        {
-          "type": "pbr",
-          "baseColor": [0.06, 0.06, 0.06],
-          "metallic": 0,
-          "roughness": 0.85,
-          "opacity": 1,
-          "emissiveFactor": [0, 0, 0],
-          "textures": {},
-          "config": {
-            "side": "front",
+            "side": "double",
             "wireframe": false,
             "transparent": false,
             "castShadow": true,
@@ -210,35 +136,11 @@
       "submeshes": [
         {
           "start": 0,
-          "count": 14025
+          "count": 21678
         },
         {
-          "start": 14025,
-          "count": 6885
-        },
-        {
-          "start": 20910,
-          "count": 6426
-        },
-        {
-          "start": 27336,
-          "count": 660
-        },
-        {
-          "start": 27996,
-          "count": 138
-        },
-        {
-          "start": 28134,
-          "count": 1194
-        },
-        {
-          "start": 29328,
-          "count": 360
-        },
-        {
-          "start": 29688,
-          "count": 2340
+          "start": 21678,
+          "count": 52461
         }
       ]
     }

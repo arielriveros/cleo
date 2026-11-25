@@ -1,0 +1,704 @@
+{
+  "id": "7f2f6f1ea94563fbeb4f016973053d46",
+  "name": "AK-47 Viewmodel",
+  "rigId": "11e73d0068e744e37eb1c4a839af15e5",
+  "machine": {
+    "parameters": [
+      {
+        "name": "Moving",
+        "type": "bool",
+        "default": false
+      },
+      {
+        "name": "Sprinting",
+        "type": "bool",
+        "default": false
+      },
+      {
+        "name": "Aim",
+        "type": "bool",
+        "default": false
+      },
+      {
+        "name": "Equip",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Fire",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "AimFire",
+        "type": "trigger",
+        "default": false
+      },
+      {
+        "name": "Reload",
+        "type": "trigger",
+        "default": false
+      }
+    ],
+    "states": [
+      {
+        "name": "Idle",
+        "clipName": "Idle",
+        "loop": true,
+        "speed": 1,
+        "isEntry": true,
+        "x": 40,
+        "y": 40
+      },
+      {
+        "name": "IdleAim",
+        "clipName": "IdleAim",
+        "loop": true,
+        "speed": 1,
+        "isEntry": false,
+        "x": 270,
+        "y": 40
+      },
+      {
+        "name": "Walk",
+        "clipName": "Walk",
+        "loop": true,
+        "speed": 1,
+        "isEntry": false,
+        "x": 500,
+        "y": 40
+      },
+      {
+        "name": "WalkAim",
+        "clipName": "WalkAim",
+        "loop": true,
+        "speed": 1,
+        "isEntry": false,
+        "x": 40,
+        "y": 180
+      },
+      {
+        "name": "Run",
+        "clipName": "Run",
+        "loop": true,
+        "speed": 1,
+        "isEntry": false,
+        "x": 270,
+        "y": 180
+      }
+    ],
+    "transitions": [
+      {
+        "from": "Idle",
+        "to": "IdleAim",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "false"
+            },
+            {
+              "param": "Aim",
+              "op": "true"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "Idle",
+        "to": "Walk",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "true"
+            },
+            {
+              "param": "Sprinting",
+              "op": "false"
+            },
+            {
+              "param": "Aim",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "Idle",
+        "to": "WalkAim",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "true"
+            },
+            {
+              "param": "Aim",
+              "op": "true"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "Idle",
+        "to": "Run",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "true"
+            },
+            {
+              "param": "Sprinting",
+              "op": "true"
+            },
+            {
+              "param": "Aim",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "IdleAim",
+        "to": "Idle",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "false"
+            },
+            {
+              "param": "Aim",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "IdleAim",
+        "to": "Walk",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "true"
+            },
+            {
+              "param": "Sprinting",
+              "op": "false"
+            },
+            {
+              "param": "Aim",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "IdleAim",
+        "to": "WalkAim",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "true"
+            },
+            {
+              "param": "Aim",
+              "op": "true"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "IdleAim",
+        "to": "Run",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "true"
+            },
+            {
+              "param": "Sprinting",
+              "op": "true"
+            },
+            {
+              "param": "Aim",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "Walk",
+        "to": "Idle",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "false"
+            },
+            {
+              "param": "Aim",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "Walk",
+        "to": "IdleAim",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "false"
+            },
+            {
+              "param": "Aim",
+              "op": "true"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "Walk",
+        "to": "WalkAim",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "true"
+            },
+            {
+              "param": "Aim",
+              "op": "true"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "Walk",
+        "to": "Run",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "true"
+            },
+            {
+              "param": "Sprinting",
+              "op": "true"
+            },
+            {
+              "param": "Aim",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "WalkAim",
+        "to": "Idle",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "false"
+            },
+            {
+              "param": "Aim",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "WalkAim",
+        "to": "IdleAim",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "false"
+            },
+            {
+              "param": "Aim",
+              "op": "true"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "WalkAim",
+        "to": "Walk",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "true"
+            },
+            {
+              "param": "Sprinting",
+              "op": "false"
+            },
+            {
+              "param": "Aim",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "WalkAim",
+        "to": "Run",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "true"
+            },
+            {
+              "param": "Sprinting",
+              "op": "true"
+            },
+            {
+              "param": "Aim",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "Run",
+        "to": "Idle",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "false"
+            },
+            {
+              "param": "Aim",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "Run",
+        "to": "IdleAim",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "false"
+            },
+            {
+              "param": "Aim",
+              "op": "true"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "Run",
+        "to": "Walk",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "true"
+            },
+            {
+              "param": "Sprinting",
+              "op": "false"
+            },
+            {
+              "param": "Aim",
+              "op": "false"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      },
+      {
+        "from": "Run",
+        "to": "WalkAim",
+        "conditions": [],
+        "minDwell": 0.04,
+        "hasExitTime": false,
+        "exitTime": 1,
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Moving",
+              "op": "true"
+            },
+            {
+              "param": "Aim",
+              "op": "true"
+            }
+          ]
+        },
+        "blendTime": 0.16
+      }
+    ],
+    "layers": [
+      {
+        "name": "Actions",
+        "blend": "override",
+        "weight": 1,
+        "states": [
+          {
+            "name": "Off",
+            "clipName": "",
+            "loop": true,
+            "speed": 1,
+            "isEntry": true,
+            "x": 40,
+            "y": 40
+          },
+          {
+            "name": "Equip",
+            "clipName": "Equip",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "ikWeight": 0,
+            "triggers": [
+              {
+                "trigger": "Equip",
+                "blendTime": 0.06
+              }
+            ],
+            "x": 300,
+            "y": 40
+          },
+          {
+            "name": "Fire",
+            "clipName": "Fire",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "ikWeight": 0,
+            "triggers": [
+              {
+                "trigger": "Fire",
+                "blendTime": 0.06
+              }
+            ],
+            "x": 500,
+            "y": 40
+          },
+          {
+            "name": "AimFire",
+            "clipName": "AimFire",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "ikWeight": 0,
+            "triggers": [
+              {
+                "trigger": "AimFire",
+                "blendTime": 0.06
+              }
+            ],
+            "x": 700,
+            "y": 40
+          },
+          {
+            "name": "Reload",
+            "clipName": "Reload",
+            "loop": false,
+            "speed": 1,
+            "isEntry": false,
+            "ikWeight": 0,
+            "triggers": [
+              {
+                "trigger": "Reload",
+                "blendTime": 0.06
+              }
+            ],
+            "x": 900,
+            "y": 40
+          }
+        ],
+        "transitions": [
+          {
+            "from": "Equip",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.902,
+            "blendTime": 0.18
+          },
+          {
+            "from": "Fire",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.73,
+            "blendTime": 0.18
+          },
+          {
+            "from": "AimFire",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.73,
+            "blendTime": 0.18
+          },
+          {
+            "from": "Reload",
+            "to": "Off",
+            "conditions": [],
+            "minDwell": 0,
+            "hasExitTime": true,
+            "exitTime": 0.961,
+            "blendTime": 0.18
+          }
+        ]
+      }
+    ],
+    "events": [],
+    "eventActions": [
+      {
+        "event": "shot",
+        "actions": [
+          {
+            "kind": "sound",
+            "target": "Sounds/ShotRifle"
+          },
+          {
+            "kind": "spawn",
+            "template": "Muzzle Flash",
+            "at": "Muzzle",
+            "rotation": "camera",
+            "follow": true
+          }
+        ]
+      }
+    ]
+  }
+}

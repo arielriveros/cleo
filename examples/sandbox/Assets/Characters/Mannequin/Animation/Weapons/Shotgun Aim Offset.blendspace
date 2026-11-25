@@ -1,0 +1,246 @@
+{
+  "id": "bd9316c9254e2ddee3aa0a9b981226ec",
+  "name": "Shotgun Aim Offset",
+  "rigId": "1ca1de6215e2febc1b4ec0cb651189eb",
+  "mode": "2d",
+  "xAxis": {
+    "name": "Yaw",
+    "min": -90,
+    "max": 90,
+    "smoothing": 0.05
+  },
+  "yAxis": {
+    "name": "Pitch",
+    "min": -60,
+    "max": 60,
+    "smoothing": 0.05
+  },
+  "weightSmoothing": 0.03,
+  "samples": [
+    {
+      "clipName": "pose:eccd21639b6c701273d0d8e116391036",
+      "x": -90,
+      "y": -60,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "eccd21639b6c701273d0d8e116391036"
+      }
+    },
+    {
+      "clipName": "pose:e3bada3551b5d5357cd13024ed53da1c",
+      "x": -90,
+      "y": -30,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "e3bada3551b5d5357cd13024ed53da1c"
+      }
+    },
+    {
+      "clipName": "pose:36eff3f78cb3b23a2a5a478690eee96c",
+      "x": -90,
+      "y": 0,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "36eff3f78cb3b23a2a5a478690eee96c"
+      }
+    },
+    {
+      "clipName": "pose:eae305c5c3c7e42d70d081df68f134e1",
+      "x": -90,
+      "y": 30,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "eae305c5c3c7e42d70d081df68f134e1"
+      }
+    },
+    {
+      "clipName": "pose:4a074ae4dce47c16dbd31c68bc92496b",
+      "x": -90,
+      "y": 60,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "4a074ae4dce47c16dbd31c68bc92496b"
+      }
+    },
+    {
+      "clipName": "pose:a69d17b028e0c53c61225c679e05b647",
+      "x": -45,
+      "y": -60,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "a69d17b028e0c53c61225c679e05b647"
+      }
+    },
+    {
+      "clipName": "pose:e53e8fe4f8c596c2822e435cfd96d931",
+      "x": -45,
+      "y": -30,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "e53e8fe4f8c596c2822e435cfd96d931"
+      }
+    },
+    {
+      "clipName": "pose:d6639e5b85788b059813553790ae9cb8",
+      "x": -45,
+      "y": 0,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "d6639e5b85788b059813553790ae9cb8"
+      }
+    },
+    {
+      "clipName": "pose:726ca365a42a807ef022505327231792",
+      "x": -45,
+      "y": 30,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "726ca365a42a807ef022505327231792"
+      }
+    },
+    {
+      "clipName": "pose:297618f066b62459df1504b2b6c49f1f",
+      "x": -45,
+      "y": 60,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "297618f066b62459df1504b2b6c49f1f"
+      }
+    },
+    {
+      "clipName": "pose:17b92b16f1a21ef820020139e4c606c4",
+      "x": 0,
+      "y": -60,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "17b92b16f1a21ef820020139e4c606c4"
+      }
+    },
+    {
+      "clipName": "pose:f13c2d9177c9d4b0768749a3be7914a3",
+      "x": 0,
+      "y": -30,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "f13c2d9177c9d4b0768749a3be7914a3"
+      }
+    },
+    {
+      "clipName": "pose:282ed03793d46cdbffa41b90b9322690",
+      "x": 0,
+      "y": 0,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "282ed03793d46cdbffa41b90b9322690"
+      }
+    },
+    {
+      "clipName": "pose:765a31934900cf28e2eb9dbb08eb06c3",
+      "x": 0,
+      "y": 30,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "765a31934900cf28e2eb9dbb08eb06c3"
+      }
+    },
+    {
+      "clipName": "pose:677a017af2b1e78b7b2bb83e3375ebbe",
+      "x": 0,
+      "y": 60,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "677a017af2b1e78b7b2bb83e3375ebbe"
+      }
+    },
+    {
+      "clipName": "pose:2fce071047340ef5e145dbc8336aecc3",
+      "x": 45,
+      "y": -60,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "2fce071047340ef5e145dbc8336aecc3"
+      }
+    },
+    {
+      "clipName": "pose:dd9951040d39e4cd809c8fc2dc65c9f1",
+      "x": 45,
+      "y": -30,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "dd9951040d39e4cd809c8fc2dc65c9f1"
+      }
+    },
+    {
+      "clipName": "pose:2d4aedee17b3ac1d3ab6e22438bee4e4",
+      "x": 45,
+      "y": 0,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "2d4aedee17b3ac1d3ab6e22438bee4e4"
+      }
+    },
+    {
+      "clipName": "pose:4d5c685398e904d537bdc6b74459f124",
+      "x": 45,
+      "y": 30,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "4d5c685398e904d537bdc6b74459f124"
+      }
+    },
+    {
+      "clipName": "pose:736d9920efd7b8884c66a6d7f6a4e341",
+      "x": 45,
+      "y": 60,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "736d9920efd7b8884c66a6d7f6a4e341"
+      }
+    },
+    {
+      "clipName": "pose:7cb463eae825e2a694e3af1c15da99b4",
+      "x": 90,
+      "y": -60,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "7cb463eae825e2a694e3af1c15da99b4"
+      }
+    },
+    {
+      "clipName": "pose:76ad32032acc4f72a324f75c2e05ac52",
+      "x": 90,
+      "y": -30,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "76ad32032acc4f72a324f75c2e05ac52"
+      }
+    },
+    {
+      "clipName": "pose:06e397d5ec7b0187639a409ee0d279cb",
+      "x": 90,
+      "y": 0,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "06e397d5ec7b0187639a409ee0d279cb"
+      }
+    },
+    {
+      "clipName": "pose:17da87d5b63a43eac6abb5fcebce43d1",
+      "x": 90,
+      "y": 30,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "17da87d5b63a43eac6abb5fcebce43d1"
+      }
+    },
+    {
+      "clipName": "pose:2b26e25cc735761100c448d068f6332a",
+      "x": 90,
+      "y": 60,
+      "poseRef": {
+        "assetId": "d283ae955a766095c016bccc7abf990b",
+        "poseId": "2b26e25cc735761100c448d068f6332a"
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "cleo": 1,
+  "guid": "5073b8b9c1e71bc77274e26734456daf",
+  "kind": "image",
+  "created": 1790000000000,
+  "record": {
+    "id": "5073b8b9c1e71bc77274e26734456daf",
+    "name": "Pistol HIpistol Normal.png",
+    "mime": "image/png",
+    "width": 0,
+    "height": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1790000000000
+  },
+  "importer": {
+    "mime": "image/png",
+    "config": {
+      "flipY": false,
+      "usage": "color",
+      "wrapping": "repeat",
+      "wrapU": "repeat",
+      "wrapV": "repeat",
+      "wrapW": "repeat",
+      "mipMap": true,
+      "mipMapFilter": "linear",
+      "minFilter": "linear",
+      "magFilter": "linear",
+      "anisotropy": 1,
+      "precision": "low",
+      "format": "rgba8unorm",
+      "target": "texture2D"
+    }
+  }
+}

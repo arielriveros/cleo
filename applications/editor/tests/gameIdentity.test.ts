@@ -92,7 +92,7 @@ describe('the game in game.bin', () => {
     const manifest = unpackGameBin(packGameBin(data(game)).buffer).manifest;
     expect(manifest.game).toEqual(game);
     expect(manifest.contract).toBe(PLAYER_CONTRACT);
-    expect(PLAYER_CONTRACT).toBe(52);
+    expect(PLAYER_CONTRACT).toBe(53);
   });
 
   it('is absent from a pack built without it (Play in window), and changes the content hash', () => {

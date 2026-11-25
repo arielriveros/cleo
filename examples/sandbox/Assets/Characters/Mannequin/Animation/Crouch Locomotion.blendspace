@@ -1,0 +1,113 @@
+{
+  "id": "c6757562743e60040be414ccd3fc42ec",
+  "name": "Crouch Locomotion",
+  "rigId": "1ca1de6215e2febc1b4ec0cb651189eb",
+  "mode": "2d",
+  "xAxis": {
+    "name": "Direction",
+    "min": -180,
+    "max": 180,
+    "wrap": true,
+    "smoothing": 0.03,
+    "deadzone": 0
+  },
+  "yAxis": {
+    "name": "Speed",
+    "min": 0,
+    "max": 3,
+    "smoothing": 0.03
+  },
+  "weightSmoothing": 0.04,
+  "samples": [
+    {
+      "clipName": "CrouchF",
+      "x": 0,
+      "y": 1.512
+    },
+    {
+      "clipName": "CrouchFL",
+      "x": 45,
+      "y": 1.28
+    },
+    {
+      "clipName": "CrouchL",
+      "x": 90,
+      "y": 1.939
+    },
+    {
+      "clipName": "CrouchBL",
+      "x": 135,
+      "y": 1.794
+    },
+    {
+      "clipName": "CrouchB",
+      "x": 180,
+      "y": 1.25
+    },
+    {
+      "clipName": "CrouchBR",
+      "x": -135,
+      "y": 1.299
+    },
+    {
+      "clipName": "CrouchR",
+      "x": -90,
+      "y": 1.904
+    },
+    {
+      "clipName": "CrouchFR",
+      "x": -45,
+      "y": 0.969
+    },
+    {
+      "clipName": "CrouchB",
+      "x": -180,
+      "y": 1.25
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": 90,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": -90,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": 180,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": -180,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": 45,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": -45,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": 135,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": -135,
+      "y": 0
+    }
+  ]
+}

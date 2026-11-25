@@ -77,7 +77,8 @@ empty to leave it unbound.
 | **Look** | The action that turns the aim. |
 | **Jump** | The action that jumps (a vehicle's hand brake). |
 | **Sprint** | The action held to run. |
-| **Crouch** | The action held to crouch. |
+| **Crouch** | The action held to crouch (pressed to crouch, and again to stand, with **Crouch toggles** on). |
+| **Crouch toggles** | On: a press of Crouch crouches and the next stands, a sprint or a jump standing it up too. Off: it crouches while the action is held. A Character crouches only with a crouch height set. |
 
 ### Aim
 

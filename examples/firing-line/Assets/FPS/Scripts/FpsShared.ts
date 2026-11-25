@@ -1,5 +1,4 @@
-import { SoundNode } from 'cleo'
-import type { Node } from 'cleo'
+import type { Node, SoundNode } from 'cleo'
 
 /**
  * FPS example — shared data and helpers. A script MODULE: it exports, it is never attached to a node, and it
@@ -229,34 +228,16 @@ export function findByVariable(root: Node, variable: string): Node[] {
   return out
 }
 
-/** Spare emitters per cue, so a new shot rings over the tail of the last one instead of cutting it off. */
-const overlaps = new WeakMap<Node, SoundNode[]>()
-const MAX_OVERLAP = 6
-
 /**
- * Play a SoundNode cue by name from the nearest `Sounds` group at or above `from`. Silent when absent. A
- * SoundNode restarts when played while sounding, so a cue that is still playing is handed to a spare emitter
- * (copied from it, made on first need) and the earlier shot rings out.
+ * Play a SoundNode cue by name from the nearest `Sounds` group at or above `from`. Silent when absent. How a cue
+ * still sounding overlaps is the node's own (its Voices: the player's ShotPistol has 16).
  */
 export function playCue(from: Node, name: string): void {
   for (let n: Node | null = from; n; n = n.parent) {
     const group = n.getChildByName('Sounds')[0]
     if (!group) continue
     const cue = group.getChildByName(name)[0] as SoundNode | undefined
-    if (!cue?.play) return
-    if (!cue.isPlaying) { cue.play(); return }
-    let pool = overlaps.get(cue)
-    if (!pool) { pool = []; overlaps.set(cue, pool) }
-    let spare = pool.find(s => !s.isPlaying)
-    if (!spare && pool.length < MAX_OVERLAP) {
-      spare = new SoundNode(name + ' (overlap)', {
-        mode: cue.mode, sampleId: cue.sampleId ?? undefined, volume: cue.volume, loopMode: cue.loopMode, playOnStart: false,
-        distanceModel: cue.distanceModel, refDistance: cue.refDistance, maxDistance: cue.maxDistance, rolloffFactor: cue.rolloffFactor,
-      })
-      group.addChild(spare)
-      pool.push(spare)
-    }
-    if (spare) spare.play(); else cue.play()
+    cue?.play?.()
     return
   }
 }

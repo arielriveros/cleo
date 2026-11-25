@@ -47,12 +47,47 @@ function formatOf(mime: string): string | undefined {
  * HTML5-audio fallback, where the voice is an `<audio>` element with no Web Audio graph at all.
  */
 function voiceOutputNode(howl: Howl, voiceId: number): AudioNode | null {
-    const sounds = (howl as unknown as { _sounds?: { _id: number; _node?: unknown }[] })._sounds;
-    if (!Array.isArray(sounds)) return null;
-    const voice = sounds.find(s => s._id === voiceId);
-    const node = voice?._node;
+    const node = howlVoice(howl, voiceId)?._node;
     // An HTML5 `<audio>` element is also stored on `_node`; only a real AudioNode can be connected.
     return node && typeof (node as AudioNode).connect === 'function' ? node as AudioNode : null;
+}
+
+/** Howler's record of one voice (internals, like `voiceOutputNode`): a recycled voice gets a NEW id, so a stale id finds none. */
+interface HowlVoice { _id: number; _ended?: boolean; _node?: { bufferSource?: { buffer?: AudioBuffer | null } } & Partial<AudioNode> }
+function howlVoice(howl: Howl, voiceId: number): HowlVoice | undefined {
+    const sounds = (howl as unknown as { _sounds?: HowlVoice[] })._sounds;
+    return Array.isArray(sounds) ? sounds.find(s => s._id === voiceId) : undefined;
+}
+
+/** Seconds per window of a sample's loudness envelope (`loudnessEnvelope`). */
+export const ENVELOPE_WINDOW = 0.02;
+
+/**
+ * A decoded sample's loudness over time: the peak |sample| of every channel in each `ENVELOPE_WINDOW`, 0..1. What
+ * "quietest" weighs a voice by, at its playhead: a shot's tail is quieter than its crack, whatever its volume.
+ */
+export function loudnessEnvelope(channels: ArrayLike<number>[], sampleRate: number): Float32Array {
+    const window = Math.max(1, Math.round(sampleRate * ENVELOPE_WINDOW));
+    const length = channels.reduce((n, c) => Math.max(n, c.length), 0);
+    const out = new Float32Array(Math.ceil(length / window));
+    for (const channel of channels) {
+        for (let i = 0; i < channel.length; i++) {
+            const v = Math.abs(channel[i]);
+            const w = (i / window) | 0;
+            if (v > out[w]) out[w] = v;
+        }
+    }
+    return out;
+}
+
+/**
+ * Seconds on the clock plays are timed by (a Sound node's retrigger guard): the movie's while one records, which
+ * runs at the render's pace, else the page's.
+ */
+export function audioNow(): number {
+    const recorder = audioRecorder();
+    if (recorder) return recorder.now;
+    return (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
 }
 
 /** The sprite name a loop region is played under. Arbitrary, but it must not collide with a user sprite. */
@@ -70,6 +105,8 @@ export class Sound {
 
     private _settings: SoundSettings;
     private _rack: EffectRack | null = null;
+    /** The sample's loudness envelope (`loudnessEnvelope`), read off the first voice's decoded buffer; null before. */
+    private _envelope: Float32Array | null = null;
     private _duration = 0;
     private _deleted = false;
     /** The bus the rack output is currently wired to, so a settings change knows whether to rewire. */
@@ -185,13 +222,52 @@ export class Sound {
         if (fade > 0 && typeof voiceId === 'number') {
             const from = this._howl.volume(voiceId) as unknown as number;
             this._howl.fade(typeof from === 'number' ? from : this._settings.volume, 0, fade * 1000, voiceId);
-            // `once` rather than `on`: the same voice id may be reused by the pool later, and a lingering
-            // handler would stop a future, unrelated note.
-            this._howl.once('fade', (id: number) => { if (id === voiceId) this._howl.stop(voiceId); });
+            // `once`, and scoped to this voice's id: an unscoped `once` is spent by whichever voice's fade ends
+            // first, which would leave this one faded to silence but never stopped.
+            this._howl.once('fade', () => this._howl.stop(voiceId), voiceId);
             return;
         }
         if (typeof voiceId === 'number') this._howl.stop(voiceId);
         else this._howl.stop();
+    }
+
+    /**
+     * Stop one voice over `seconds`, whatever the sample's own fade-out: the short ramp a Sound node gives the voice
+     * it steals for a new play, so the cut does not click.
+     */
+    public stopVoice(voiceId: number, seconds: number): void {
+        if (this._deleted) return;
+        const recorder = audioRecorder();
+        if (recorder) { recorder.stop(this, voiceId, seconds); return; }
+        if (!(seconds > 0)) { this._howl.stop(voiceId); return; }
+        const from = this._howl.volume(voiceId) as unknown as number;
+        this._howl.fade(typeof from === 'number' ? from : this._settings.volume, 0, seconds * 1000, voiceId);
+        this._howl.once('fade', () => this._howl.stop(voiceId), voiceId);
+    }
+
+    /** Whether a voice is still going: playing, paused, or queued until the sample decodes. False once it ended or stopped. */
+    public voiceAlive(voiceId: number): boolean {
+        if (this._deleted) return false;
+        const recorder = audioRecorder();
+        if (recorder) return recorder.alive(voiceId);
+        const voice = howlVoice(this._howl, voiceId);
+        return !!voice && !voice._ended;
+    }
+
+    /**
+     * How loud a voice is now, 0..1: its gain times the sample's loudness at its playhead (`loudnessEnvelope`), or its
+     * gain alone before the envelope is known (and while a movie records).
+     */
+    public voiceLevel(voiceId: number): number {
+        if (this._deleted) return 0;
+        const recorder = audioRecorder();
+        if (recorder) return recorder.volumeOf(voiceId);
+        const raw = this._howl.volume(voiceId) as unknown;
+        const volume = typeof raw === 'number' ? raw : this._settings.volume;
+        const envelope = this._envelope;
+        if (!envelope || envelope.length === 0) return volume;
+        const at = this.seek(voiceId);
+        return volume * envelope[Math.min(envelope.length - 1, Math.max(0, Math.floor(at / ENVELOPE_WINDOW)))];
     }
 
     public pause(voiceId?: number): void {
@@ -407,5 +483,13 @@ export class Sound {
         // creates its context lazily on the first unlock, so try once more here.
         if (!this._rack) this._buildRack();
         this._rack?.attach(voiceOutputNode(this._howl, voiceId));
+        if (!this._envelope) {
+            const buffer = howlVoice(this._howl, voiceId)?._node?.bufferSource?.buffer;
+            if (buffer && buffer.length > 0) {
+                const channels: Float32Array[] = [];
+                for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c));
+                this._envelope = loudnessEnvelope(channels, buffer.sampleRate);
+            }
+        }
     }
 }

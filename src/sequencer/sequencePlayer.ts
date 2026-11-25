@@ -729,7 +729,8 @@ export class SequencePlayer {
             state.audioSection = s.id;
             // Past a one-shot's end there is nothing left to hear.
             if (past) { if (node.isPlaying) node.stop(); return; }
-            if (entering || !node.isPlaying) node.play({ offset: want }); else node.seek(want);
+            // Exactly as authored: the one voice, no random pitch or volume, whatever the node's overlap settings.
+            if (entering || !node.isPlaying) node.play({ offset: want, restart: true, vary: false }); else node.seek(want);
             return;
         }
         if (!past && node.isPlaying && Math.abs(Number(node.playhead) - want) > 0.2) node.seek(want);

@@ -81,12 +81,13 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const player = collider.children[0];
         expect(player.type).toBe('character');
         const types = player.children.map((c: any) => c.type);
-        expect(types).toEqual(['cameraRig', 'model', 'node', 'controller']);
+        expect(types).toEqual(['cameraRig', 'model', 'node', 'node', 'controller']);
         expect(player.children[2].name).toBe('Weapons');
+        expect(player.children[3].name).toBe('Sounds');
         const [camera] = player.children;
         expect(camera.name).toBe('Camera Rig');
         expect(camera.children[0].active).toBe(true);
-        const controller = player.children[3];
+        const controller = player.children[4];
         expect(controller.possessedId).toBe(player.id);
         expect(controller.aimSource).toBe('node');
         expect(controller.aimSourceId).toBe(camera.id);
@@ -536,8 +537,9 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     });
 
     it('names only clips its skeleton owns, and links every parameter to something that exists', () => {
-        const clipNames = new Set(library('animations').map(a => a.clips[0].name));
-        expect(new Set(rig().animationIds)).toEqual(new Set(library('animations').map(a => a.id)));
+        const own = library('animations').filter(a => a.rigId === rig().id)
+        const clipNames = new Set(own.map(a => a.clips[0].name));
+        expect(new Set(rig().animationIds)).toEqual(new Set(own.map(a => a.id)));
         const sm = machine();
         for (const s of sm.states) {
             if (s.field) for (const sample of s.field.samples) expect(clipNames.has(sample.clipName), sample.clipName).toBe(true);
@@ -556,7 +558,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         }
         const field = sm.states.find((s: any) => s.name === 'Locomotion').field;
         // The embedded copy is the blend space asset's.
-        expect(field.samples).toEqual(library('animationFields')[0].samples);
+        expect(field.samples).toEqual(library('animationFields').find((f: any) => f.name === 'Locomotion').samples);
         for (const s of field.samples) {
             expect(s.x).toBeGreaterThanOrEqual(field.xAxis.min);
             expect(s.x).toBeLessThanOrEqual(field.xAxis.max);
@@ -572,7 +574,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             if (p.type === 'trigger') continue;
             expect(p.variable.nodeRef).toBe('parent');
             if (p.variable.source === 'builtin') expect(NODE_BUILTINS[p.variable.varName], p.variable.varName).toBeDefined();
-            else expect(['moveDir', 'isJumping', 'turnRequest'].includes(p.variable.varName) || scriptFields.has(p.variable.varName), p.variable.varName).toBe(true);
+            else expect(['moveDir', 'isJumping', 'turnRequest', 'crouched'].includes(p.variable.varName) || scriptFields.has(p.variable.varName), p.variable.varName).toBe(true);
         }
         const params = new Set(sm.parameters.map((p: any) => p.name));
         const conds = (c: any): any[] => !c ? [] : c.children ? c.children.flatMap(conds) : [c];
@@ -580,7 +582,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         // Only the turns, the stop (which plants sideways), the hard landing (which crouches where it came down) and
         // getting in and out of the car (from the door to the seat and back) drive the character with their root motion.
         const rootMotion = library('animations').filter(a => a.clips[0].rootMotion).map(a => a.name).sort();
-        expect(rootMotion).toEqual(['CarEnter', 'CarExit', 'LandHard', 'RunTurnL', 'RunTurnR', 'Stop', 'StopMirror', 'Turn180L', 'Turn180R', 'Turn90L', 'Turn90R']);
+        expect(rootMotion).toEqual(['CarEnter', 'CarExit', 'CrouchTurn90L', 'CrouchTurn90R', 'LandHard', 'RunTurnL', 'RunTurnR', 'Stop', 'StopMirror', 'Turn180L', 'Turn180R', 'Turn90L', 'Turn90R']);
     });
 
     it('ships the current scripts and the actions they read', () => {
@@ -590,7 +592,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             expect(named(node).script, node).toBe(script.source);
         }
         const actions = read('libraries', 'inputMap.json').maps.find((m: any) => m.name === 'Gameplay').actions.map((a: any) => a.name);
-        for (const a of ['Move', 'Look', 'Jump', 'Sprint', 'Walk', 'Interact', 'Drive', 'Day', 'Sunset', 'Night']) expect(actions).toContain(a);
+        for (const a of ['Move', 'Look', 'Jump', 'Sprint', 'Walk', 'Interact', 'Drive', 'Day', 'Sunset', 'Night', 'Reload', 'Crouch', 'View']) expect(actions).toContain(a);
         // The camera's framing follows the sprint: no action switches it.
         expect(actions).not.toContain('Camera');
     });
@@ -1062,8 +1064,10 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     it('leans through three additive layers masked to the bones a whole-body lean moves', () => {
         expect(machine().layers.map((l: any) => [l.name, l.blend, l.weightParam])).toEqual([
             ['Pistol', 'override', 'PistolWeight'], ['Pistol Support', 'override', 'PistolSupport'], ['Rifle', 'override', 'RifleWeight'],
+            ['Shotgun', 'override', 'ShotgunWeight'],
             ['Lean Left', 'additive', 'LeanLeft'], ['Lean Right', 'additive', 'LeanRight'], ['Lean Forward', 'additive', 'LeanForward'],
-            ['Pistol Aim', 'additive', 'PistolAimWeight'], ['Rifle Aim', 'additive', 'RifleAimWeight'], ['Look', 'additive', 'LookWeight']]);
+            ['Pistol Aim', 'additive', 'PistolAimWeight'], ['Rifle Aim', 'additive', 'RifleAimWeight'], ['Shotgun Aim', 'additive', 'ShotgunAimWeight'],
+            ['Look', 'additive', 'LookWeight']]);
         const layers = machine().layers.filter((l: any) => /^Lean/.test(l.name));
         const mask = library('boneMasks').find((m: any) => m.name === 'Lean');
         expect(Object.keys(mask.weights).map(n => n.replace(/^.*:/, '')).sort()).toEqual(
@@ -1364,19 +1368,31 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const instance = named('Player Collider');
         expect(instance.variables.__templateId.value).toBe(template.id);
         const inside = allNodes(template.nodeJson);
-        // The weapons: Weapons, then each grip holder, its model instance (a node with the mesh under it) and its Muzzle.
+        // The weapons: Weapons, then each grip holder, its model instance (a node with the mesh under it) and its Muzzle;
+        // under the camera the Viewmodels, each a model and its Muzzle; the Sounds, three shots.
         const weapon = ['node', 'node', 'model', 'node'];
-        expect(inside.map((n: any) => n.type)).toEqual(['collider', 'character', 'cameraRig', 'camera', 'model', 'node', ...weapon, ...weapon, 'controller']);
+        const viewmodel = ['model', 'node'];
+        expect(inside.map((n: any) => n.type)).toEqual(['collider', 'character', 'cameraRig', 'camera', 'node', ...viewmodel, ...viewmodel, ...viewmodel,
+            'model', 'node', ...weapon, ...weapon, ...weapon, 'node', 'sound', 'sound', 'sound', 'controller']);
         // The instance holds just what the template holds, and references inside it point inside it.
         expect(allNodes(instance).map((n: any) => n.type)).toEqual(inside.map((n: any) => n.type));
+        // The shot cues overlap on their own voices: a held AK-47 rings on over its 4.5 s shot.
+        for (const nodes of [inside, allNodes(instance)]) {
+            const cues = nodes.filter((n: any) => n.type === 'sound');
+            expect(cues.map((n: any) => n.name)).toEqual(['ShotPistol', 'ShotRifle', 'ShotShotgun']);
+            for (const cue of cues) {
+                const { voices, whenFull, pitchVariation, volumeVariation } = cue.sound;
+                expect({ voices, whenFull, pitchVariation, volumeVariation }, cue.name).toEqual({ voices: 16, whenFull: 'quietest', pitchVariation: 0.5, volumeVariation: 0.1 });
+            }
+        }
         const ids = new Set(inside.map((n: any) => n.id));
         const controller = inside.find((n: any) => n.type === 'controller');
         expect(ids.has(controller.possessedId) && ids.has(controller.aimSourceId)).toBe(true);
         const publics = (name: string) => library('scripts').find(s => s.name === name).variables
             .filter((v: any) => v.attribute && !v.hidden && v.access === 'public').map((v: any) => v.name).sort();
-        expect(publics('SandboxPlayer')).toEqual(['backDiagonalScale', 'backScale', 'enterTrigger', 'exitTrigger', 'runFootSpeed', 'runFootWeight', 'runTurnSpeed', 'sprintTakeoff',
+        expect(publics('SandboxPlayer')).toEqual(['backDiagonalScale', 'backScale', 'enterTrigger', 'exitTrigger', 'eyeCrouch', 'eyeStand', 'runFootSpeed', 'runFootWeight', 'runTurnSpeed', 'sprintTakeoff',
             'stairDownRunSpeed', 'stairDownWalkSpeed', 'stairUpRunSpeed', 'stairUpWalkSpeed', 'stairsLayer', 'turnDelay', 'walkBackDiagonalScale', 'walkFootSpeed', 'walkScale']);
-        expect(publics('SandboxCamera')).toEqual(['aimArm', 'aimShoulderOffset', 'pivotHeight', 'shoulderArm', 'shoulderOffset', 'thirdPersonArm']);
+        expect(publics('SandboxCamera')).toEqual(['aimArm', 'aimShoulderOffset', 'crouchDrop', 'pivotHeight', 'shoulderArm', 'shoulderOffset', 'thirdPersonArm']);
         expect(inside.find((n: any) => n.type === 'character').script).toBe(named('Player').script);
         expect(inside.find((n: any) => n.type === 'cameraRig').script).toBe(named('Camera Rig').script);
     });
@@ -1564,18 +1580,19 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     /** Where the left hand's joint is in a weapon's frame: the support hand on it. */
     const leftOnWeapon = (p: ReturnType<typeof play>, socket: string) =>
         vec3.transformMat4(vec3.create(), mat4.getTranslation(vec3.create(), jointMatrix(p, 'LeftHand')), mat4.invert(mat4.create(), weaponFrame(p, socket))!);
-    /** Take out `weapon` (1 the pistol, 2 the rifle): tap Equip until it is up. */
+    /** Take out `weapon` (1 the pistol, 2 the rifle, 3 the shotgun): tap Equip until it is up. */
     const equip = (p: ReturnType<typeof play>, weapon: number) => {
-        for (let k = 0; k < 3 && p.player.weapon !== weapon; k++) { input.tap('Equip'); p.run(0.7); }
+        for (let k = 0; k < 4 && p.player.weapon !== weapon; k++) { input.tap('Equip'); p.run(0.7); }
         expect(p.player.weapon).toBe(weapon);
     };
 
-    it('holds a pistol and a rifle by grip sockets on the right hand, each with its model and muzzle', () => {
+    it('holds a pistol, a rifle and a shotgun by grip sockets on the right hand, each with its model and muzzle', () => {
         const stored = rig().skin;
-        expect(stored.sockets.map((x: any) => [x.name, x.bone.replace(/^.*:/, '')])).toEqual([['Pistol Grip', 'RightHand'], ['Rifle Grip', 'RightHand']]);
-        expect(rig().sockets.map((x: any) => x.name)).toEqual(['Pistol Grip', 'Rifle Grip']);
+        expect(stored.sockets.map((x: any) => [x.name, x.bone.replace(/^.*:/, '')])).toEqual([['Pistol Grip', 'RightHand'], ['Rifle Grip', 'RightHand'], ['Shotgun Grip', 'RightHand']]);
+        expect(rig().sockets.map((x: any) => x.name)).toEqual(['Pistol Grip', 'Rifle Grip', 'Shotgun Grip']);
         const weapons = named('Weapons');
-        for (const [holder, model, length] of [['Pistol Grip', 'Pistol', 0.241], ['Rifle Grip', 'Rifle', 0.838]] as const) {
+        // Firing Line's: its pistol, its AK-47, its SAPS-12 (lengths in metres, grip to muzzle and the rest).
+        for (const [holder, model, length] of [['Pistol Grip', 'Pistol', 0.268], ['Rifle Grip', 'Rifle', 0.868], ['Shotgun Grip', 'Shotgun', 0.836]] as const) {
             const h = weapons.children.find((c: any) => c.name === holder);
             expect(h.socketAttachment).toEqual({ target: 'parent', socket: holder });
             expect(h.children.map((c: any) => c.name)).toEqual([model, 'Muzzle']);
@@ -1587,45 +1604,58 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             expect(muzzle[2]).toBeGreaterThan(length * 0.6);
             expect(muzzle[2]).toBeLessThan(length);
         }
-        // Credited.
-        expect(JSON.parse(readFileSync(join(PROJECT, 'example.json'), 'utf8')).description).toMatch(/TastyTony \(CC-BY-4\.0\)/);
+        // Firing Line's weapons, the same models in either view: the third person's are cut from the viewmodels'.
+        const description = JSON.parse(readFileSync(join(PROJECT, 'example.json'), 'utf8')).description;
+        expect(description).toMatch(/Firing Line/);
+        expect(description).not.toMatch(/TastyTony/);
+        for (const [model, viewmodel] of [['Pistol', 'Pistol Viewmodel'], ['Rifle', 'AK-47 Viewmodel'], ['Shotgun', 'SAPS-12 Viewmodel']]) {
+            const third = library('models').find((m: any) => m.name === model), first = library('models').find((m: any) => m.name === viewmodel);
+            for (const id of third.materialIds) expect(first.materialIds, `${model}: ${id}`).toContain(id);
+        }
     });
 
-    it('takes out the pistol, then the rifle, then puts it away, a tap of Equip each', () => {
+    it('takes out the pistol, then the rifle, then the shotgun, then puts it away, a tap of Equip each', () => {
         const p = play(OPEN);
         p.run(0.5);
-        const shown = () => ['Pistol Grip', 'Rifle Grip'].map(n => (p.scene.findNode(n) as Node).visible);
+        const shown = () => ['Pistol Grip', 'Rifle Grip', 'Shotgun Grip'].map(n => (p.scene.findNode(n) as Node).visible);
+        const weights = () => [p.player.pistolWeight, p.player.rifleWeight, p.player.shotgunWeight];
         expect(p.player.weapon).toBe(0);
-        expect(shown()).toEqual([false, false]);
+        expect(shown()).toEqual([false, false, false]);
         input.tap('Equip');
         p.run(0.7);
         expect(p.player.weapon).toBe(1);
         expect(p.player.pistolWeight).toBe(1);
         expect(p.player.pistolSupport).toBeCloseTo(1, 3);
-        expect(shown()).toEqual([true, false]);
+        expect(shown()).toEqual([true, false, false]);
         expect(p.animator.layerStateName('Pistol')).toBe('Carry');
         input.tap('Equip');
         p.run(0.9);
         expect(p.player.weapon).toBe(2);
-        expect([p.player.pistolWeight, p.player.rifleWeight]).toEqual([0, 1]);
-        expect(shown()).toEqual([false, true]);
+        expect(weights()).toEqual([0, 1, 0]);
+        expect(shown()).toEqual([false, true, false]);
+        input.tap('Equip');
+        p.run(0.9);
+        expect(p.player.weapon).toBe(3);
+        expect(weights()).toEqual([0, 0, 1]);
+        expect(shown()).toEqual([false, false, true]);
+        expect(p.animator.layerStateName('Shotgun')).toBe('Carry');
         input.tap('Equip');
         p.run(0.7);
         expect(p.player.weapon).toBe(0);
-        expect([p.player.pistolWeight, p.player.rifleWeight]).toEqual([0, 0]);
-        expect(shown()).toEqual([false, false]);
+        expect(weights()).toEqual([0, 0, 0]);
+        expect(shown()).toEqual([false, false, false]);
     });
 
     it('holds its weapons’ poses: the carry over the walk’s axes, the aim’s directions variants of Aim', () => {
         const poseAssets = library('poseAssets');
         const fields = new Map(library('animationFields').map((f: any) => [f.name, f]));
         const walk = fields.get('Locomotion');
-        for (const W of ['Pistol', 'Rifle']) {
+        for (const W of ['Pistol', 'Rifle', 'Shotgun']) {
             const asset = poseAssets.find((a: any) => a.name === `${W} Poses`);
             expect(asset, W).toBeTruthy();
             const byName = new Map<string, any>(asset.poses.map((p: any) => [p.name, p]));
             const aim = byName.get('Aim');
-            for (const name of ['Carry', 'Aim', 'Sprint']) expect(byName.get(name).baseRef, name).toBeUndefined();
+            for (const name of ['Carry', 'Aim', 'Sprint', 'Reload']) expect(byName.get(name).baseRef, name).toBeUndefined();
             // The aim's 25 directions, each a variant of Aim: what it changes from it, a few bones.
             const directions = asset.poses.filter((p: any) => p.baseRef);
             expect(directions.length).toBe(25);
@@ -1654,7 +1684,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         // The layers: Carry (that blend space) and Aim (the pose), Steady, the aim steadier; the rifle's left hand, and
         // the pistol's support layer, held on by hand IK. Each pose is embedded once.
         const layers = new Map<string, any>(machine().layers.map((l: any) => [l.name, l]));
-        for (const W of ['Pistol', 'Rifle']) {
+        for (const W of ['Pistol', 'Rifle', 'Shotgun']) {
             const l = layers.get(W);
             const carry = l.states.find((s: any) => s.name === 'Carry'), aim = l.states.find((s: any) => s.name === 'Aim');
             expect(Object.keys(carry.field.poses).length).toBe(2);
@@ -1665,10 +1695,11 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             expect(l.states.some((s: any) => s.syncGroup)).toBe(false);
         }
         expect(layers.get('Rifle').handIk).toEqual({ hand: 'left' });
+        expect(layers.get('Shotgun').handIk).toEqual({ hand: 'left' });
         expect(layers.get('Pistol Support').handIk).toEqual({ hand: 'left' });
         expect(layers.get('Pistol').handIk).toBeUndefined();
-        // No clip of their own any more: the weapons are poses.
-        expect(library('animations').some((a: any) => /^(Pistol|Rifle) /.test(a.name))).toBe(false);
+        // No clip of their own on the Mannequin: its weapons are poses (the viewmodels' clips are on their own rigs).
+        expect(library('animations').some((a: any) => a.rigId === rig().id && /^(Pistol|Rifle|Shotgun) /.test(a.name))).toBe(false);
     });
 
     it('follows an edit to a pose: Aim moves every aim direction with it, a direction moves only itself', () => {
@@ -1950,9 +1981,17 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         }
         expect(named('Rifle Grip').scriptVars.auto).toBe(true);
         expect(named('Pistol Grip').scriptVars.auto).toBe(false);
-        // The crosshair is on the HUD, hidden until a weapon is out.
-        expect(allNodes(named('HUD')).filter((n: any) => /^Crosshair/.test(n.name)).map((n: any) => n.name))
+        // The crosshair, the ammunition and the reload are the Player's own: a screen canvas in the Player template
+        // (every copy has its own), the crosshair hidden until a weapon is out. The scene's HUD keeps the controls.
+        const playerHud = named('Player Collider').children.find((c: any) => c.name === 'Player')
+            .children.find((c: any) => c.name === 'HUD');
+        expect(playerHud?.type).toBe('uiRoot');
+        expect(playerHud.children.map((c: any) => c.name)).toEqual(['Crosshair', 'Ammunition', 'Reloading']);
+        expect(allNodes(playerHud).filter((n: any) => /^Crosshair/.test(n.name)).map((n: any) => n.name))
             .toEqual(['Crosshair', 'Crosshair Dot', 'Crosshair Top', 'Crosshair Bottom', 'Crosshair Left', 'Crosshair Right']);
+        const template = allNodes(templates.get('Player').nodeJson);
+        expect(template.filter((n: any) => n.type === 'uiRoot').map((n: any) => n.name)).toEqual(['HUD']);
+        expect(named('HUD').children.map((c: any) => c.name)).toEqual(['Controls']);
     });
 
     it('shoots where the crosshair looks, the bullet pushing the crate it hits', () => {
@@ -1966,17 +2005,17 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             const start = vec3.clone(crate.worldPosition);
             input.press('Aim');
             p.run(0.4);
-            aimCamera(p, [start[0], start[1] + 0.1, start[2]]);
+            aimCamera(p, [start[0], start[1] - 0.1, start[2]]);
             const gun = gunOf(p, 'Rifle Grip');
             const before = gun.shots;
             input.press('Fire');
             const hits: string[] = [];
-            p.run(0.5, () => { if (gun.lastHit) hits.push(gun.lastHit.node?.name ?? 'ground'); });
+            p.run(0.7, () => { if (gun.lastHit) hits.push(gun.lastHit.node?.name ?? 'ground'); });
             input.release('Fire');
             const fired = gun.shots - before;
-            // 700 rounds a minute: five or six in half a second.
-            expect(fired).toBeGreaterThanOrEqual(5);
-            expect(fired).toBeLessThanOrEqual(7);
+            // 600 rounds a minute: seven or eight in 0.7 s.
+            expect(fired).toBeGreaterThanOrEqual(6);
+            expect(fired).toBeLessThanOrEqual(8);
             p.run(0.4);
             // How far depends on each backend's friction (Jolt slides it most): a push, on all of them.
             const moved = vec3.distance(crate.worldPosition, start);
@@ -2007,7 +2046,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             p.run(1);
             input.release('Fire');
             const held = gun.shots - before;
-            if (weapon === 2) { expect(held).toBeGreaterThanOrEqual(11); expect(held).toBeLessThanOrEqual(13); }
+            if (weapon === 2) { expect(held).toBeGreaterThanOrEqual(9); expect(held).toBeLessThanOrEqual(11); }
             else expect(held).toBe(1);
             // Three pulls, three shots, as fast as the pistol cycles.
             p.run(0.1);
@@ -2016,6 +2055,36 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             expect(gun.shots - after).toBe(3);
             input.release('Aim');
         } } finally { clearTemplates(); }
+    });
+
+    it('plays the rifle cue once a shot, each shot on a voice of the cue (no copies of it)', () => {
+        withEffects();
+        try {
+            const p = play(OPEN);
+            p.run(0.5);
+            equip(p, 2);
+            const cue = p.scene.findNode('ShotRifle') as any;
+            expect([cue.voices, cue.whenFull]).toEqual([16, 'quietest']);
+            const plays = vi.spyOn(cue, 'play');
+            const gun = gunOf(p, 'Rifle Grip');
+            input.press('Aim');
+            p.run(0.4);
+            const shots = gun.shots;
+            input.press('Fire');
+            p.run(1);
+            input.release('Fire');
+            p.run(0.3);
+            // Third person: the gun plays it (first person: the viewmodel's Fire clip, through its Event Actions; this
+            // headless run builds no viewmodel animators).
+            expect(gun.shots - shots).toBeGreaterThanOrEqual(9);
+            expect(plays.mock.calls.length).toBe(gun.shots - shots);
+            input.release('Aim');
+            // No spare copies of the cue (how overlap used to be faked, six at most).
+            const names: string[] = [];
+            const walkAll = (n: Node) => { names.push(n.name); n.children.forEach(walkAll); };
+            walkAll(p.scene.root);
+            expect(names.filter(n => n.includes('(overlap)'))).toEqual([]);
+        } finally { clearTemplates(); }
     });
 
     it('raises the weapon to fire from the hip, and kicks the camera up, most of it coming back', () => {
@@ -2084,18 +2153,182 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
     it('shows the model of the weapon in the hands through weapon:Equipped', () => {
         const p = play(OPEN);
         p.run(0.3);
-        const pistol = gunOf(p, 'Pistol Grip'), rifle = gunOf(p, 'Rifle Grip');
+        const pistol = gunOf(p, 'Pistol Grip'), rifle = gunOf(p, 'Rifle Grip'), shotgun = gunOf(p, 'Shotgun Grip');
         const told: [number, number][] = [];
         const off = p.player.addEventListener('weapon:Equipped', (now: number, was: number) => told.push([now, was]));
         try {
             equip(p, 1);
-            expect([pistol.visible, rifle.visible]).toEqual([true, false]);
+            expect([pistol.visible, rifle.visible, shotgun.visible]).toEqual([true, false, false]);
             equip(p, 2);
-            expect([pistol.visible, rifle.visible]).toEqual([false, true]);
+            expect([pistol.visible, rifle.visible, shotgun.visible]).toEqual([false, true, false]);
+            equip(p, 3);
+            expect([pistol.visible, rifle.visible, shotgun.visible]).toEqual([false, false, true]);
             equip(p, 0);
-            expect([pistol.visible, rifle.visible]).toEqual([false, false]);
-            expect(told).toEqual([[1, 0], [2, 1], [0, 2]]);
+            expect([pistol.visible, rifle.visible, shotgun.visible]).toEqual([false, false, false]);
+            expect(told).toEqual([[1, 0], [2, 1], [3, 2], [0, 3]]);
         } finally { off(); }
+    });
+
+    it('fires the shotgun nine pellets a shot, a round off the magazine each, and reloads it from the reserve', () => {
+        withEffects();
+        try {
+            const p = play(OPEN);
+            p.run(0.5);
+            equip(p, 3);
+            p.run(0.5);
+            const gun = gunOf(p, 'Shotgun Grip');
+            // Firing Line's SAPS-12: six in the magazine, thirty-six more.
+            expect([gun.ammo, gun.reserve, gun.pellets]).toEqual([6, 36, 9]);
+            input.press('Aim');
+            p.run(0.4);
+            const told: any[] = [];
+            const off = p.player.addEventListener('weapon:Shot', (shot: any) => told.push(shot));
+            try { input.tap('Fire'); p.run(0.9); } finally { off(); }
+            expect(told).toHaveLength(1);
+            expect(told[0].hits).toHaveLength(9);
+            expect(gun.ammo).toBe(5);
+            // The Player's own HUD (its canvas, not the scene's) counts what is left.
+            const hud = allSceneNodes({ root: (p.player as any).getChildByName('HUD')[0] });
+            const ui = (name: string) => hud.find((n: any) => n.name === name);
+            expect([ui('Ammunition').visible, ui('Ammo').text, ui('Reserve').text, ui('Weapon Name').text])
+                .toEqual([true, '5', '/ 36', gun.displayName]);
+            expect(ui('Crosshair').opacity).toBeGreaterThan(0);
+            input.release('Aim');
+            p.run(0.3);
+            // R: the Reload pose held, the magazine filled near its end from the reserve.
+            input.tap('Reload');
+            p.run(0.5);
+            expect(p.player.reloading).toBe(true);
+            expect(ui('Reloading').visible).toBe(true);
+            expect(p.animator.layerStateName('Shotgun')).toBe('Reload');
+            p.run(gun.reloadSeconds);
+            expect(p.player.reloading).toBe(false);
+            expect([gun.ammo, gun.reserve]).toEqual([6, 35]);
+            expect([ui('Reloading').visible, ui('Ammo').text, ui('Reserve').text]).toEqual([false, '6', '/ 35']);
+            expect(p.animator.layerStateName('Shotgun')).toBe('Carry');
+        } finally { clearTemplates(); }
+    });
+
+    it('runs dry once the reserve is spent, and a pull on an empty magazine reloads', () => {
+        withEffects();
+        try {
+            const p = play(OPEN);
+            p.run(0.5);
+            equip(p, 1);
+            const gun = gunOf(p, 'Pistol Grip');
+            input.press('Aim');
+            p.run(0.4);
+            // The last round, then a pull on the empty magazine: it reloads from the reserve.
+            gun.ammo = 1;
+            input.tap('Fire');
+            p.run(0.4);
+            expect(gun.ammo).toBe(0);
+            input.tap('Fire');
+            p.run(0.2);
+            expect(p.player.reloading).toBe(true);
+            p.run(gun.reloadSeconds);
+            expect([gun.ammo, gun.reserve]).toEqual([12, 72]);
+            // With nothing left in reserve, an empty magazine stays empty.
+            gun.ammo = 0;
+            gun.reserve = 0;
+            const shots = gun.shots;
+            input.tap('Fire');
+            p.run(0.4);
+            input.tap('Reload');
+            p.run(0.4);
+            expect(p.player.reloading).toBe(false);
+            expect(gun.shots).toBe(shots);
+            expect(gun.ammo).toBe(0);
+            input.release('Aim');
+        } finally { clearTemplates(); }
+    });
+
+    it('switches to first person and back with View: the camera at the eyes, the body in the shadows alone, the viewmodel in the hands', () => {
+        const p = play(OPEN);
+        p.run(0.5);
+        equip(p, 2);
+        const rig = p.rigs[0] as any;
+        const mannequin = p.scene.findNode('Mannequin') as Node, weapons = p.scene.findNode('Weapons') as Node;
+        const views = ['Pistol Viewmodel', 'AK-47 Viewmodel', 'SAPS-12 Viewmodel'].map(n => p.scene.findNode(n) as Node);
+        const shown = () => views.map(v => v.visible);
+        expect(rig.armLength).toBeGreaterThan(1);
+        expect([mannequin.shadowOnly, weapons.shadowOnly]).toEqual([false, false]);
+        expect(shown()).toEqual([false, false, false]);
+        input.tap('View');
+        p.run(0.6);
+        expect(p.player.firstPerson).toBe(true);
+        expect(rig.armLength).toBeLessThan(0.01);
+        expect(rig.followOffset[1]).toBeCloseTo(p.player.eyeStand, 2);
+        // Drawn into the shadows alone: not hidden (it keeps animating and casting).
+        expect([mannequin.shadowOnly, weapons.shadowOnly]).toEqual([true, true]);
+        expect(mannequin.visible).toBe(true);
+        expect(shown()).toEqual([false, true, false]);
+        expect(views.every(v => v.viewmodel)).toBe(true);
+        expect(rig.fov).toBeGreaterThan(70);
+        // The body faces the camera at once, standing still too: no turn in place.
+        rig.yaw = rig.yaw + 90;
+        p.run(0.1);
+        expect(Math.abs(wrap(p.yawOf(p.player) - rig.yaw))).toBeLessThan(2);
+        // The weapon changes: its viewmodel comes up.
+        input.tap('Equip');
+        p.run(0.5);
+        expect(p.player.weapon).toBe(3);
+        expect(shown()).toEqual([false, false, true]);
+        input.tap('View');
+        p.run(0.6);
+        expect(p.player.firstPerson).toBe(false);
+        expect(rig.armLength).toBeGreaterThan(1);
+        expect([mannequin.shadowOnly, weapons.shadowOnly]).toEqual([false, false]);
+        expect(shown()).toEqual([false, false, false]);
+    });
+
+    it('crouches and stands with a tap of Crouch: the capsule shortened, the crouch walk playing, a sprint standing it up', () => {
+        const p = play(OPEN);
+        p.run(0.5);
+        const body = (p.collider as any).body;
+        const height = () => { const c = body.colliders.find((d: any) => d.shape.kind === 'capsule'); return c.shape.height + 2 * c.shape.radius; };
+        expect(height()).toBeCloseTo(1.765, 2);
+        input.tap('Crouch');
+        p.run(0.6);
+        expect(p.player.crouched).toBe(true);
+        expect(height()).toBeCloseTo(1.2, 2);
+        expect(p.animator.currentStateName).toBe('Crouch');
+        input.setMove(0, 1);
+        p.run(1.5);
+        expect(p.animator.currentStateName).toBe('Crouch');
+        // The crouch walk's own pace.
+        expect(p.player.planarSpeed).toBeGreaterThan(1.1);
+        expect(p.player.planarSpeed).toBeLessThan(1.8);
+        input.press('Sprint');
+        p.run(0.6);
+        expect(p.player.crouched).toBe(false);
+        expect(height()).toBeCloseTo(1.765, 2);
+        input.release('Sprint');
+        input.setMove(0, 0);
+        p.run(0.8);
+        input.tap('Crouch');
+        p.run(0.5);
+        expect(p.player.crouched).toBe(true);
+        input.tap('Crouch');
+        p.run(0.8);
+        expect(p.player.crouched).toBe(false);
+        expect(p.animator.currentStateName).not.toBe('Crouch');
+    });
+
+    it('crouches on the rifle pack\'s clips, retargeted onto the Mannequin: in place, feet locked, the turns on the Pivot', () => {
+        const names = new Map<number, string>(rig().skin.nodeNames);
+        const crouch = library('animations').filter((a: any) => /^Crouch/.test(a.name));
+        expect(crouch.map((a: any) => a.name).sort()).toEqual(['CrouchB', 'CrouchBL', 'CrouchBR', 'CrouchF', 'CrouchFL', 'CrouchFR', 'CrouchIdle', 'CrouchL', 'CrouchR', 'CrouchTurn90L', 'CrouchTurn90R']);
+        for (const a of crouch) {
+            expect(a.rigId, a.name).toBe(rig().id);
+            expect(a.clips[0].footLocks, a.name).toBeTruthy();
+            const pivot = a.clips[0].channels.some((c: any) => names.get(c.targetNodeIndex) === 'Pivot');
+            expect(pivot, `${a.name} turns on the Pivot`).toBe(/Turn/.test(a.name));
+            expect(!!a.clips[0].rootMotion, a.name).toBe(/Turn/.test(a.name));
+        }
+        const field = library('animationFields').find((f: any) => f.name === 'Crouch Locomotion');
+        expect(machine().states.find((s: any) => s.name === 'Crouch').fieldId).toBe(field.id);
+        expect(machine().parameters.find((p: any) => p.name === 'Crouching').variable.varName).toBe('crouched');
     });
 
     it('never shoots itself, and passes through the stairs\' ramps', () => {
@@ -2171,7 +2404,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const sm = machine();
         const states = new Set(sm.states.map((s: any) => s.name));
         const forks = new Set((sm.forks ?? []).map((f: any) => f.name));
-        expect(sm.groups.map((g: any) => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car']);
+        expect(sm.groups.map((g: any) => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car', 'Crouching']);
         const seen = new Set<string>();
         for (const g of sm.groups) {
             expect(states.has(g.name) || forks.has(g.name), `${g.name} is not also a state or a fork`).toBe(false);
@@ -2201,15 +2434,15 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             const into = sm.transitions.filter((t: any) => t.to === g).map((t: any) => t.from);
             expect(new Set(into).size, `${g}: one line from each source`).toBe(into.length);
         }
-        // Into the air from eight places, each one line: 22 transitions once.
+        // Into the air from nine places, each one line: 22 transitions once.
         expect(sm.transitions.filter((t: any) => t.to === 'Air').map((t: any) => t.from).sort())
-            .toEqual(['Idle', 'Landing', 'Locomotion', 'Running Turn', 'Stairs', 'Start', 'Stopping', 'Turning']);
+            .toEqual(['Crouching', 'Idle', 'Landing', 'Locomotion', 'Running Turn', 'Stairs', 'Start', 'Stopping', 'Turning']);
         expect(sm.transitions.filter((t: any) => t.from === 'Take Off').map((t: any) => t.to)).toEqual(['JumpRun', 'JumpStand', 'Fall']);
         // The start's stop goes straight to the early stop: Pick Stop's exit is the run's phase, not the start clip's.
         expect(sm.transitions.filter((t: any) => group('Stopping').states.includes(t.to) && t.from === 'Start').map((t: any) => t.to)).toHaveLength(1);
         // The Car keeps its triggers (no fork): getting in and out are entered from anywhere by them.
         expect(group('Car').entry).toBeUndefined();
-        expect(sm.transitions.length).toBeLessThan(70);
+        expect(sm.transitions.length).toBeLessThan(80);
     });
 
 

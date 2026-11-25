@@ -635,7 +635,7 @@
           "min": 0,
           "max": 1,
           "step": 0.05,
-          "tooltip": "The share of the camera's kick that comes back, and how fast (per second)."
+          "tooltip": "The share of the camera's kick that comes back, and how fast (per second, of what is left)."
         }
       },
       {
@@ -644,7 +644,7 @@
           "kind": "number"
         },
         "access": "private",
-        "default": 7,
+        "default": 6,
         "hidden": false,
         "attribute": {
           "group": "Weapons",
@@ -667,6 +667,239 @@
           "max": 60,
           "step": 0.5,
           "tooltip": "How fast the weapon's kick in the hands settles, per second."
+        }
+      },
+      {
+        "name": "eyeStand",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.62,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 0.3,
+          "max": 2.5,
+          "step": 0.01,
+          "tooltip": "First person: the eye's height over the feet standing, and crouched (m). The character's own, so public."
+        }
+      },
+      {
+        "name": "eyeCrouch",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.1,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 0.3,
+          "max": 2.5,
+          "step": 0.01
+        }
+      },
+      {
+        "name": "crouchSmoothing",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.09,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 0.01,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "Seconds the eye takes to drop for a crouch, and to come back up."
+        }
+      },
+      {
+        "name": "hipFov",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 78,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 30,
+          "max": 120,
+          "step": 1,
+          "tooltip": "First person: the field of view from the hip, degrees, and how much wider at a sprint."
+        }
+      },
+      {
+        "name": "sprintFovBoost",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 5,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 0,
+          "max": 30,
+          "step": 1
+        }
+      },
+      {
+        "name": "adsSeconds",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.14,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 0.03,
+          "max": 1,
+          "step": 0.01,
+          "tooltip": "Seconds the aim down the sights takes, and the mouse's speed down them (a share of its speed from the hip)."
+        }
+      },
+      {
+        "name": "adsSensitivity",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.55,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 0.1,
+          "max": 1,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "viewmodelFov",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 58,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 20,
+          "max": 120,
+          "step": 1,
+          "tooltip": "The lens the viewmodels are drawn at (degrees), and how far in front of the camera they reach (m: what a wall must leave room for)."
+        }
+      },
+      {
+        "name": "viewmodelReach",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.95,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 0.2,
+          "max": 3,
+          "step": 0.05
+        }
+      },
+      {
+        "name": "aimClipRaise",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0.028,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 0,
+          "max": 0.2,
+          "step": 0.001,
+          "tooltip": "Aimed with aim clips, how far the viewmodel comes up (m)."
+        }
+      },
+      {
+        "name": "dofAperture",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 2,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 0.5,
+          "max": 32,
+          "step": 0.5,
+          "tooltip": "Down the sights: the depth of field's aperture, its widest blur (px), what stays sharp near (m), its farthest focus (m)."
+        }
+      },
+      {
+        "name": "dofMaxBlur",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 14,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 0,
+          "max": 64,
+          "step": 1
+        }
+      },
+      {
+        "name": "dofNearCutoff",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1.2,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 0,
+          "max": 10,
+          "step": 0.1
+        }
+      },
+      {
+        "name": "dofFarFocus",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 60,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 5,
+          "max": 500,
+          "step": 5
+        }
+      },
+      {
+        "name": "sprintAngle",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 50,
+        "hidden": false,
+        "attribute": {
+          "group": "First Person",
+          "min": 10,
+          "max": 180,
+          "step": 5,
+          "tooltip": "First person: a sprint goes only this far off straight ahead (degrees); past it, the body jogs."
         }
       },
       {
@@ -905,6 +1138,15 @@
         "hidden": true
       },
       {
+        "name": "shotgunWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
         "name": "pistolSupport",
         "type": {
           "kind": "number"
@@ -933,6 +1175,69 @@
       },
       {
         "name": "rifleAimWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "shotgunAimWeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "reloading",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "firstPerson",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "public",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "eyeHeight",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1.62,
+        "hidden": true
+      },
+      {
+        "name": "viewFov",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 78,
+        "hidden": true
+      },
+      {
+        "name": "ads",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "spreadNow",
         "type": {
           "kind": "number"
         },
@@ -1196,6 +1501,135 @@
         "hidden": true
       },
       {
+        "name": "_views",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [],
+        "hidden": true
+      },
+      {
+        "name": "_viewmodels",
+        "type": {
+          "kind": "node",
+          "className": "Node"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true
+      },
+      {
+        "name": "_vmBase",
+        "type": {
+          "kind": "vector",
+          "size": 3
+        },
+        "access": "private",
+        "default": [0, 0, 0],
+        "hidden": true
+      },
+      {
+        "name": "_vmDepth",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_viewParams",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_time",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_busyUntil",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_reloadToken",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_wheelWait",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_baseYawSens",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -1,
+        "hidden": true
+      },
+      {
+        "name": "_basePitchSens",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -1,
+        "hidden": true
+      },
+      {
+        "name": "_dofOn",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_dofKey",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
+        "name": "_dofFocus",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 20,
+        "hidden": true
+      },
+      {
         "name": "_fireHold",
         "type": {
           "kind": "number"
@@ -1225,20 +1659,160 @@
       {
         "name": "_crosshair",
         "type": {
+          "kind": "node",
+          "className": "UIPanelNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "HUD/Crosshair"
+        }
+      },
+      {
+        "name": "_tickTop",
+        "type": {
+          "kind": "node",
+          "className": "UIPanelNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "HUD/Crosshair Top"
+        }
+      },
+      {
+        "name": "_tickBottom",
+        "type": {
+          "kind": "node",
+          "className": "UIPanelNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "HUD/Crosshair Bottom"
+        }
+      },
+      {
+        "name": "_tickLeft",
+        "type": {
+          "kind": "node",
+          "className": "UIPanelNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "HUD/Crosshair Left"
+        }
+      },
+      {
+        "name": "_tickRight",
+        "type": {
+          "kind": "node",
+          "className": "UIPanelNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "HUD/Crosshair Right"
+        }
+      },
+      {
+        "name": "_ammunition",
+        "type": {
+          "kind": "node",
+          "className": "UIPanelNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "HUD/Ammunition"
+        }
+      },
+      {
+        "name": "_ammoText",
+        "type": {
+          "kind": "node",
+          "className": "UITextNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "HUD/Ammo"
+        }
+      },
+      {
+        "name": "_reserveText",
+        "type": {
+          "kind": "node",
+          "className": "UITextNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "HUD/Reserve"
+        }
+      },
+      {
+        "name": "_weaponName",
+        "type": {
+          "kind": "node",
+          "className": "UITextNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "HUD/Weapon Name"
+        }
+      },
+      {
+        "name": "_reloadingText",
+        "type": {
+          "kind": "node",
+          "className": "UITextNode"
+        },
+        "access": "private",
+        "default": null,
+        "hidden": true,
+        "ref": {
+          "kind": "child",
+          "name": "HUD/Reloading"
+        }
+      },
+      {
+        "name": "_gap",
+        "type": {
           "kind": "number"
         },
         "access": "private",
-        "default": 0,
+        "default": -1,
         "hidden": true
       },
       {
-        "name": "_ticks",
+        "name": "_look",
         "type": {
           "kind": "vector",
           "size": 3
         },
         "access": "private",
-        "default": [],
+        "default": [0, 0, 1],
         "hidden": true
       }
     ],

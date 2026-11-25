@@ -36,6 +36,7 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
   const [spawnOnStart, setSpawnOnStart] = useState(props.node.spawnOnStart);
   const [motionBlur, setMotionBlur] = useState<MotionBlurMode>(props.node.motionBlur);
   const [viewmodel, setViewmodel] = useState(props.node.viewmodel);
+  const [shadowOnly, setShadowOnly] = useState(props.node.shadowOnly);
   const [drawDistance, setDrawDistance] = useState(props.node.drawDistance);
   const [converting, setConverting] = useState(false);
 
@@ -44,6 +45,7 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
     setSpawnOnStart(props.node.spawnOnStart);
     setMotionBlur(props.node.motionBlur);
     setViewmodel(props.node.viewmodel);
+    setShadowOnly(props.node.shadowOnly);
     setDrawDistance(props.node.drawDistance);
   }, [props.node]);
 
@@ -76,6 +78,13 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
   const handleViewmodelChange = (value: boolean) => {
     setViewmodel(value);
     props.node.viewmodel = value;
+    eventEmitter.emit('SCENE_CHANGED');
+  }
+
+  // Fans out to descendants, like the viewmodel flag.
+  const handleShadowOnlyChange = (value: boolean) => {
+    setShadowOnly(value);
+    props.node.shadowOnly = value;
     eventEmitter.emit('SCENE_CHANGED');
   }
 
@@ -230,6 +239,12 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
             <PropertyRow label='Viewmodel' divider={false}
               hint='Draw this node as a first-person viewmodel (the arms and weapon under the player’s camera): with the camera’s Viewmodel Field of View instead of the world’s, and pulled toward the camera when a script lowers the camera’s viewmodelDepth so it stays clear of walls at the same size on the screen. It is never culled. Applies to the whole subtree.'>
               <Toggle checked={viewmodel} disabled={props.readOnly} onChange={handleViewmodelChange} />
+            </PropertyRow>
+          }
+          {props.node.name !== 'root' && hasGeometry &&
+            <PropertyRow label='Shadow only' divider={false}
+              hint='Draw this node into shadow maps alone: no camera sees it (nor a reflection probe or a capture), but it still casts its shadow. A first-person player’s own body, hidden from the eye it would fill while its shadow stays on the ground. It keeps animating. Applies to the whole subtree.'>
+              <Toggle checked={shadowOnly} disabled={props.readOnly} onChange={handleShadowOnlyChange} />
             </PropertyRow>
           }
           {props.node.name !== 'root' && hasGeometry &&

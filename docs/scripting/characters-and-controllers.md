@@ -101,11 +101,13 @@ script name and default.
 - **Jump** — take-off **Speed**. **Coyote** keeps a jump working just after walking off an edge,
   **Buffer** keeps one pressed just before landing, and **Lockout** suppresses the ground projection
   right after take-off so it cannot flatten the jump.
+- **Crouch** — the capsule's **Height** while the intent crouches, and the **Crouch speed** it moves at. See
+  [Crouching](#crouching).
 - **Advanced** — **Drive without a Controller** runs locomotion with nothing possessing the character.
   Off by default, so an unpossessed character is inert and cannot fight physics for its own velocity.
 
 The **Turn in place** group is [below](#turn-in-place), and **Animator outputs** shows the
-[three outputs](#animator-outputs) live while the scene runs.
+[four outputs](#animator-outputs) live while the scene runs.
 
 | Field | Script name | Default | Meaning |
 |---|---|---|---|
@@ -123,7 +125,21 @@ The **Turn in place** group is [below](#turn-in-place), and **Animator outputs**
 | **Coyote** | `coyoteSeconds` | `0.12` | Seconds after walking off an edge that a jump still counts as from the ground. |
 | **Buffer** | `jumpBufferSeconds` | `0.15` | Seconds a jump pressed just before landing is remembered for. |
 | **Lockout** | `jumpLockoutSeconds` | `0.15` | Seconds after take-off the ground projection is suppressed, so it cannot flatten the jump. |
+| **Height** | `crouchCapsuleHeight` | `0` | Metres: the Collider's capsule's whole height while the character crouches. `0`: it never crouches and its capsule never changes. |
+| **Crouch speed** | `crouchSpeed` | `0.5` | Its speed crouching, as a share of the walk it would go at. A crouch never sprints. |
 | **Drive without a Controller** | `driveWhenUnpossessed` | `false` | Run locomotion with nothing possessing this character. Off, an unpossessed character is inert and cannot fight physics for its own velocity. |
+
+### Crouching
+
+With a **Crouch** height set (`crouchCapsuleHeight`), a character crouches while its intent's `crouch` is on: the
+first capsule of the Collider it stands in is shortened to that height, its feet where they were, it moves at
+`crouchSpeed` of its walk and never sprints. It reads `crouched` true (bind it to a `Crouching` parameter). It
+stands back up as soon as `crouch` goes off, but only where the standing capsule fits: under a low ceiling it
+stays down until it walks out. A jump stands it up first, and is dropped where there is no room. The capsule is
+rebuilt in one go on every physics backend, the physics worker included.
+
+A player Controller sets `crouch` from its **Crouch** action (`crouchAction`): held, or with **Crouch toggles**
+(`crouchToggle`) on, pressed once to crouch and again to stand, a sprint or a jump standing it up too.
 
 ### Turning
 
@@ -194,7 +210,7 @@ command. Two consequences worth knowing before you tune it:
 
 ## Animator outputs
 
-A character publishes exactly three fields for its animator to read, shown live in the inspector
+A character publishes four fields for its animator to read, shown live in the inspector
 while the scene runs. Bind one from an animator parameter of type **Variable** whose node reference
 is the character (**Parent**, from a model that is its child).
 
@@ -206,6 +222,7 @@ check that a prototype getter fails.
 | `moveDir` | Strafe angle relative to facing: `0` ahead, **`-90` right**, **`+90` left**, `±180` back. |
 | `isJumping` | True from take-off until the feet land. |
 | `turnRequest` | Turn clip selector: `0` none, `±1` 90°, `±2` 180°. |
+| `crouched` | True while it crouches (see [Crouching](#crouching)). |
 
 Speed is not among them — read it as the built-in `planarSpeed`, which is **measured**, so a
 character jammed against a wall reads 0 and drops to idle instead of running on the spot.

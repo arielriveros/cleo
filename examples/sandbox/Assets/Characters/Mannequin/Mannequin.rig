@@ -816,6 +816,14 @@
           "t": [-0.001177, 0.139784, 0.007721],
           "r": [0.315094, 0.638863, 0.412513, -0.567806]
         }
+      },
+      {
+        "name": "Shotgun Grip",
+        "bone": "mixamorig1:RightHand",
+        "offset": {
+          "t": [-0.001177, 0.139784, 0.007721],
+          "r": [0.315094, 0.638863, 0.412513, -0.567806]
+        }
       }
     ]
   },
@@ -910,7 +918,18 @@
     "ed0b1bde0cc294d94b2a8f3316cfd19e",
     "0db0cab5169e3166b45b642037997c27",
     "8db1de2a9f9e114955d16d5b2fcfbe91",
-    "cb1b01b54fbb387b121254f690df332a"
+    "cb1b01b54fbb387b121254f690df332a",
+    "07287f3c7cd124f92d06319d9e0b9d7e",
+    "c5cf61138d8d43567314d06da8ccb81d",
+    "24261179220a53ae015f0702a5489c9b",
+    "726e05a50c2e9b17d7a75faff70cca0d",
+    "857be423031a78ba1b18bee435b590ea",
+    "584d8abc741897cba4fb1c72ab5aac71",
+    "e6c976f42c94b87372029d4c2b8141d6",
+    "e8de4fb782e6cd4f85f368ea9348cd0e",
+    "6eb135bd423403441ce016353c59a080",
+    "4b4658759ab126c185fd8162e11a515d",
+    "11abf682e34b5ab3f9c3ec0cdf83cbd4"
   ],
   "sockets": [
     {
@@ -932,6 +951,16 @@
         "r": [0.315094, 0.638863, 0.412513, -0.567806]
       },
       "previewModelId": "ca06ff713b185345b51a97b6acc92ff9"
+    },
+    {
+      "id": "3025eceecb8e3544ea672ebd41b743ab",
+      "name": "Shotgun Grip",
+      "bone": "mixamorig1:RightHand",
+      "offset": {
+        "t": [-0.001177, 0.139784, 0.007721],
+        "r": [0.315094, 0.638863, 0.412513, -0.567806]
+      },
+      "previewModelId": "fcafd5f569be4835bf29933807b3c402"
     }
   ]
 }

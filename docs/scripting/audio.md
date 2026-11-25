@@ -12,11 +12,13 @@ Authoring is in [Audio (editor)](../editor/audio.md).
 const sfx = this.findNode('Explosion') as SoundNode
 
 sfx.play()
-sfx.stop()
+sfx.play({ restart: true })   // every voice stopped for this one (offset, vary: false also)
+sfx.stop()                    // every voice
 sfx.pause()
 sfx.resume()
 sfx.fadeTo(volume: number, seconds: number): void
-sfx.get isPlaying: boolean
+sfx.get isPlaying: boolean      // any voice sounding
+sfx.get activeVoices: number    // voices going (playing or paused)
 sfx.syncSpatial(): void
 ```
 
@@ -31,6 +33,15 @@ Node properties:
 | `playOnStart` | |
 | `spatial` | Distance model and falloff. |
 | `distanceModel`, `refDistance`, `maxDistance`, `rolloffFactor` | Shortcuts into `spatial`. |
+| `voices` | How many plays sound at once, 1..32. 1 (the default): a play restarts it. |
+| `whenFull` | `'oldest'` / `'quietest'` / `'farthest'` (the voice a play steals when all are busy) or `'skip'`. |
+| `voicesStayPut` | Spatial: a voice stays where it was played instead of following the node. |
+| `pitchVariation` | Semitones, 0..12: each play's random pitch offset, either way. |
+| `volumeVariation` | 0..1: each play is quieter by a random share up to this. |
+| `retrigger` | Seconds: a play this soon after the last one is ignored. |
+
+A gun is one node with several `voices`, not a pool of copies: see
+[Overlap](../editor/audio.md#overlap).
 
 > `play()` is a **silent no-op** when `scene.soundsEnabled === false`. That is how the editor keeps
 > a scene quiet while you author it — so a sound that does nothing in the viewport but works in Play

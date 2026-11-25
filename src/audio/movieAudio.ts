@@ -163,9 +163,10 @@ export class AudioRecorder {
         return id;
     }
 
-    public stop(sound: RecordedSound, id?: number): void {
+    /** `fadeSeconds`: this stop's own ramp (a stolen voice's de-click) instead of the sample's fade-out. */
+    public stop(sound: RecordedSound, id?: number, fadeSeconds?: number): void {
         const t = this.now;
-        const fade = typeof id === 'number' ? Math.max(0, sound.settings.fadeOut) : 0;
+        const fade = typeof id === 'number' ? Math.max(0, fadeSeconds ?? sound.settings.fadeOut) : 0;
         for (const v of this._voicesOf(sound, id)) {
             if (!v.playing) continue;
             this._log({ op: 'stop', t, voice: v.id, fade });
@@ -196,6 +197,14 @@ export class AudioRecorder {
             last = v.id;
         }
         return last;
+    }
+
+    /** Whether a voice is still going (playing or paused), not ended or stopped. */
+    public alive(id: number): boolean {
+        const v = this._voice(id);
+        if (!v) return false;
+        this._position(v);
+        return v.playing;
     }
 
     public isPlaying(sound: RecordedSound, id?: number): boolean {

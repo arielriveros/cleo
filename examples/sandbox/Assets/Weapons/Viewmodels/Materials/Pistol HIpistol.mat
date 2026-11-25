@@ -1,0 +1,33 @@
+{
+  "id": "3c9ebb84b31ae857e661c45292798cc4",
+  "name": "Pistol HIpistol",
+  "material": {
+    "type": "pbr",
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "reflectance": 0.5,
+    "opacity": 1,
+    "emissiveFactor": [0, 0, 0],
+    "emissiveIntensity": 1,
+    "textures": {
+      "baseColorTexture": "880ad90c3a8471539dc565c21a347e21",
+      "metallicRoughnessTexture": "aa64235601ef8da0e0e3dae6ffe374ac",
+      "occlusionMap": "aa64235601ef8da0e0e3dae6ffe374ac",
+      "normalMap": "5073b8b9c1e71bc77274e26734456daf"
+    },
+    "config": {
+      "side": "double",
+      "wireframe": false,
+      "transparent": false,
+      "castShadow": true,
+      "probeable": true
+    }
+  },
+  "textureIds": [
+    "880ad90c3a8471539dc565c21a347e21",
+    "aa64235601ef8da0e0e3dae6ffe374ac",
+    "5073b8b9c1e71bc77274e26734456daf"
+  ],
+  "thumbnail": ""
+}

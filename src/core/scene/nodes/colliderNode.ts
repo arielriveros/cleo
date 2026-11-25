@@ -1,5 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
+import { quat } from 'gl-matrix';
 import { Node } from "./node";
+import type { ColliderDesc } from "../../../physics/pal/types";
+import type { Shape } from "../../../physics/shape";
+import type { RigidBody } from "../../../physics/body";
 import { parseSimulationMode } from "../../../physics/simulationRange";
 import type { SimulationMode } from "../../../physics/simulationRange";
 import { ALL_LAYERS, LAYER } from "../../../physics/collisionLayers";
@@ -130,6 +134,27 @@ export class ColliderNode extends Node {
         // AFTER every shape: the mass goes to the shapes' centre, not the node origin, or an offset shape
         // leaves the body rotating until it lines up with whatever it stands on.
         body.recenterMass();
+    }
+
+    /**
+     * Rebuild the body's colliders from `shapes`, a copy of {@link shapes} with some of them changed, in one go;
+     * `null` puts the authored {@link shapes} back. The authored list itself is left alone, so this is runtime
+     * state: what a crouching Character does to its capsule. Nothing happens without a body.
+     */
+    public reshape(shapes: readonly ColliderShape[] | null): void {
+        const body = this._body;
+        if (!body) return;
+        const colliders: ColliderDesc[] = [];
+        // attachShapes' own conversion (world scale, euler degrees), collected instead of attached one by one.
+        const sink = {
+            attachShape(shape: Shape, offset: ArrayLike<number> = [0, 0, 0], orientation: ArrayLike<number> = [0, 0, 0]) {
+                const q = quat.fromEuler(quat.create(), orientation[0], orientation[1], orientation[2]);
+                colliders.push({ shape: shape.desc, offset: [offset[0], offset[1], offset[2]], rotation: [q[0], q[1], q[2], q[3]] });
+                return sink;
+            },
+        };
+        Node.attachShapes(this, shapes ?? this.shapes, sink as unknown as RigidBody);
+        body.setColliders(colliders);
     }
 
     protected _afterParse(json: any): void {

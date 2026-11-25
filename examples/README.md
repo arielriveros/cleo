@@ -10,7 +10,7 @@ Each folder here is a Cleo project folder, the same kind the desktop editor crea
 | `firing-line/` | Firing Line: a first-person shooter against bots, online too |
 | `duskwell/` | Duskwell: a small 2D metroidvania |
 | `island/` | Island: a World Creator island with lakes and rivers |
-| `sandbox/` | Sandbox: ALS-style locomotion, a car and two guns |
+| `sandbox/` | Sandbox: ALS-style locomotion, a car, and three guns in first or third person |
 
 A folder IS the example, and it is edited in the Cleo desktop app and nowhere else: no tool generates or patches
 it. The editor's Examples gallery installs a bundle built from the folder, and its tests are its own.

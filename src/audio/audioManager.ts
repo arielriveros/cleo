@@ -179,6 +179,9 @@ export class AudioManager {
      * Skips the write when nothing moved: `Howler.pos`/`orientation` walk every live voice's panner, and
      * a stationary camera would otherwise pay for that on every frame of the game.
      */
+    /** Where the listener was last placed (the origin before the first frame). A Sound node steals its farthest voice by it. */
+    public get listenerPosition(): Readonly<vec3> { return this._listenerPosition; }
+
     public setListener(position: vec3, forward: vec3, up: vec3): void {
         const moved = !this._listenerSet
             || !vec3.exactEquals(position, this._listenerPosition)

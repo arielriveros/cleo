@@ -14,6 +14,7 @@ import { clearIntent, consumeRequest, createIntent, decayRequests, INTENT_REQUES
 import type { ControlIntent } from "../../control/intent";
 import type { ControllerNode } from "./controllerNode";
 import type { RigidBody } from "../../../physics/body";
+import type { ColliderNode, ColliderShape } from "./colliderNode";
 import { finiteOr } from "../../math";
 
 /**
@@ -106,6 +107,13 @@ export class CharacterNode extends Node {
      */
     public turnRequest: number = 0;
 
+    /**
+     * True while it crouches: its capsule is {@link crouchCapsuleHeight} tall. Follows the intent's `crouch`, except that
+     * it stays down while there is no room to stand up, and stands for a jump where there is. Bind to a `Crouching`
+     * bool parameter. Set by the engine; runtime only.
+     */
+    public crouched: boolean = false;
+
     // ----- tuning (serialized, inspector-visible) -------------------------------------------------
 
     public walkSpeed: number = 1.5;
@@ -157,6 +165,14 @@ export class CharacterNode extends Node {
     /** `aim` turns toward the intent's aim (a strafe character), `velocity` toward travel, `none` never. */
     public facingMode: FacingMode = 'aim';
     /**
+     * Metres: the capsule's whole height while crouching (the intent's `crouch`). The Collider's capsule is
+     * shortened to it with the feet where they were, and stands back up only where the standing capsule fits
+     * under what is overhead. 0 (the default): this character never crouches, and its capsule never changes.
+     */
+    public crouchCapsuleHeight: number = 0;
+    /** Its speed while crouching, as a share of the walk it would go at (a crouch never sprints). */
+    public crouchSpeed: number = 0.5;
+    /**
      * Whether locomotion runs with nothing possessing this character. False by default, so an
      * unpossessed Character is inert and cannot fight physics for control of its own velocity.
      */
@@ -174,6 +190,8 @@ export class CharacterNode extends Node {
     private _warnedNoBody: boolean = false;
     private _warnedConstrained: boolean = false;
     private _warnedAnimatorAncestor: boolean = false;
+    /** The standing capsule, as authored on the Collider, kept while crouched. */
+    private _standing: { collider: ColliderNode; shape: ColliderShape } | null = null;
 
     // Scratch, to keep the per-frame path allocation-free. Static: only one character steps at a time.
     private static readonly _v0: vec3 = vec3.create();
@@ -254,6 +272,7 @@ export class CharacterNode extends Node {
                 for (const kind of INTENT_REQUESTS) this._intent.requests[kind] = 0;
                 this.isJumping = false;
                 this.turnRequest = 0;
+                this._setCrouched(false);
             }
             this._driven = false;
             return;
@@ -279,10 +298,15 @@ export class CharacterNode extends Node {
             return;
         }
 
+        // Crouching or standing up, before the step: a crouch is slower, never sprints, and stands for a jump.
+        this._stepCrouch();
+
         // Held by the animation: no move, stopped at once, facing left alone. The intent itself is untouched, so
         // a jump request still waits in it for when the hold ends.
         const held = this.animationHold;
-        const intent = held ? { ...this._intent, move: [0, 0] as [number, number], sprint: false } : this._intent;
+        const intent = held ? { ...this._intent, move: [0, 0] as [number, number], sprint: false }
+            : this.crouched ? { ...this._intent, sprint: false, speedScale: this._intent.speedScale * Math.max(0, this.crouchSpeed) }
+            : this._intent;
         const tuning = held ? { ...this.tuning, acceleration: 0, facingMode: 'none' as const } : this.tuning;
         const out = stepLocomotion(intent, this._sense(delta), tuning, this._locomotion);
         this._locomotion = out.next;
@@ -308,6 +332,79 @@ export class CharacterNode extends Node {
     }
 
     private static _yawQ = quat.create();
+
+    // ----- crouching ------------------------------------------------------------------------------
+
+    /** Down when the intent crouches, up when it does not (or asks for a jump) and there is room to stand. */
+    private _stepCrouch(): void {
+        const jump = this._intent.requests.jump > 0;
+        const want = this.crouchCapsuleHeight > 0 && this._intent.crouch && !jump;
+        if (want === this.crouched) return;
+        if (want) { this._setCrouched(true); return; }
+        // Standing up (let go, or a jump): only where the standing capsule fits. A jump with no room is dropped,
+        // or it would launch the moment the character walked out from under the low ceiling.
+        if (this._roomToStand()) this._setCrouched(false);
+        else if (jump) consumeRequest(this._intent, 'jump');
+    }
+
+    /** Shorten the Collider's first capsule to {@link crouchCapsuleHeight}, feet kept, or put the authored one back. */
+    private _setCrouched(down: boolean): void {
+        if (down === this.crouched) return;
+        if (!down) {
+            this._standing?.collider.reshape(null);
+            this._standing = null;
+            this.crouched = false;
+            return;
+        }
+        const collider = this.collider as ColliderNode | null;
+        const index = collider ? collider.shapes.findIndex(s => s.type === 'capsule') : -1;
+        if (!collider || index < 0) return;
+        const shape = collider.shapes[index];
+        const height = finiteOr(shape.height, 0), radius = finiteOr(shape.radius, 0);
+        const crouch = Math.max(2 * radius, Math.min(height, this.crouchCapsuleHeight));
+        if (!(crouch < height)) return;
+        const offset = [shape.offset?.[0] ?? 0, (shape.offset?.[1] ?? 0) - (height - crouch) / 2, shape.offset?.[2] ?? 0];
+        const shapes = collider.shapes.slice();
+        shapes[index] = { ...shape, height: crouch, offset };
+        this._standing = { collider, shape };
+        collider.reshape(shapes);
+        this.crouched = true;
+    }
+
+    /**
+     * Whether the standing capsule fits where the character crouches: nothing it collides with in the part of it
+     * above the crouched capsule (an exact test against boxes, spheres and capsules), and no mesh or landscape over
+     * its head (rays up its middle and round its edge).
+     */
+    private _roomToStand(): boolean {
+        const standing = this._standing, physics = this._scene?.physics;
+        if (!standing || !physics) return true;
+        const { collider, shape } = standing;
+        const scale = collider.worldScale, m = collider.worldTransform;
+        const sy = Math.abs(scale[1]) || 1, sr = Math.max(Math.abs(scale[0]), Math.abs(scale[2])) || 1;
+        const height = finiteOr(shape.height, 0) * sy, radius = finiteOr(shape.radius, 0) * sr;
+        const crouch = Math.max(2 * radius, Math.min(height, this.crouchCapsuleHeight * sy));
+        // The capsule's bottom in world space (its offset through the Collider's transform), and the Collider's up.
+        const o = shape.offset ?? [0, 0, 0];
+        const lx = o[0] ?? 0, ly = (o[1] ?? 0) - finiteOr(shape.height, 0) / 2, lz = o[2] ?? 0;
+        const foot = [
+            m[0] * lx + m[4] * ly + m[8] * lz + m[12],
+            m[1] * lx + m[5] * ly + m[9] * lz + m[13],
+            m[2] * lx + m[6] * ly + m[10] * lz + m[14],
+        ];
+        const ul = Math.hypot(m[4], m[5], m[6]) || 1;
+        const up = [m[4] / ul, m[5] / ul, m[6] / ul];
+        const at = (h: number, dx = 0, dz = 0) => vec3.fromValues(foot[0] + up[0] * h + dx, foot[1] + up[1] * h, foot[2] + up[2] * h + dz);
+        // A little narrower than the capsule, so a wall it is pressed against does not count as overhead.
+        const r = radius * 0.9;
+        if (physics.overlapCapsule(at(Math.max(r, crouch - r)), at(height - r), r, { ignore: collider, layerMask: collider.mask }).length)
+            return false;
+        const body = collider.ownBody;
+        if (!body) return true;
+        for (const [dx, dz] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]])
+            if (physics.raycast(at(crouch - 0.05, dx, dz), at(height + 0.02, dx, dz), { ignore: body, collidingWith: body })) return false;
+        return true;
+    }
 
     /** Everything the world can say about this character this frame, as plain numbers. */
     private _sense(delta: number): LocomotionSense {
@@ -373,6 +470,7 @@ export class CharacterNode extends Node {
         // (an id is authored state), so it is deliberately left alone here.
         this._locomotion = createLocomotionState();
         this._driven = false;
+        this._setCrouched(false);
     }
 
     // ----- serialization ---------------------------------------------------------------------------
@@ -403,6 +501,8 @@ export class CharacterNode extends Node {
             jumpLockoutSeconds: this.jumpLockoutSeconds,
             facingMode: this.facingMode,
             driveWhenUnpossessed: this.driveWhenUnpossessed,
+            // Written only by a character that crouches, so every scene saved before it reads back the same.
+            ...(this.crouchCapsuleHeight > 0 ? { crouchCapsuleHeight: this.crouchCapsuleHeight, crouchSpeed: this.crouchSpeed } : {}),
         };
     }
 
@@ -430,6 +530,8 @@ export class CharacterNode extends Node {
         node.jumpLockoutSeconds = finiteOr(json.jumpLockoutSeconds, node.jumpLockoutSeconds);
         if ((FACING_MODES as readonly string[]).includes(json.facingMode)) node.facingMode = json.facingMode;
         node.driveWhenUnpossessed = bool(json.driveWhenUnpossessed, node.driveWhenUnpossessed);
+        node.crouchCapsuleHeight = Math.max(0, finiteOr(json.crouchCapsuleHeight, node.crouchCapsuleHeight));
+        node.crouchSpeed = Math.max(0, finiteOr(json.crouchSpeed, node.crouchSpeed));
 
         // _commonParse adds the node to its parent — do not addChild again.
         Node.finishParse(node, parent, json);

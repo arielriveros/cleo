@@ -120,6 +120,37 @@ describe('SoundNode serialization', () => {
         expect(() => node.fadeTo(0.5, 1)).not.toThrow();
     });
 
+    it('round-trips its overlap settings, and writes none of them at their defaults', async () => {
+        const plain = await new SoundNode('step', { sampleId: 's' }).serialize();
+        for (const key of ['voices', 'whenFull', 'voicesStayPut', 'pitchVariation', 'volumeVariation', 'retrigger']) {
+            expect(plain.sound, key).not.toHaveProperty(key);
+        }
+        const node = new SoundNode('shot', {
+            sampleId: 's', voices: 16, whenFull: 'farthest', voicesStayPut: true,
+            pitchVariation: 0.5, volumeVariation: 0.1, retrigger: 0.05,
+        });
+        const parsed = await roundTrip(node);
+        expect([parsed.voices, parsed.whenFull, parsed.voicesStayPut]).toEqual([16, 'farthest', true]);
+        expect([parsed.pitchVariation, parsed.volumeVariation, parsed.retrigger]).toEqual([0.5, 0.1, 0.05]);
+    });
+
+    it('reads junk overlap settings as the nearest legal ones', () => {
+        const parent = new Node('parent');
+        SoundNode.parse(parent, {
+            name: 'broken', id: 'x', type: 'sound',
+            sound: { voices: 900, whenFull: 'loudest', voicesStayPut: 'yes', pitchVariation: -3, volumeVariation: 7, retrigger: 'soon' },
+        });
+        const parsed = parent.children[0] as SoundNode;
+        expect([parsed.voices, parsed.whenFull, parsed.voicesStayPut]).toEqual([32, 'oldest', false]);
+        expect([parsed.pitchVariation, parsed.volumeVariation, parsed.retrigger]).toEqual([0, 1, 0]);
+        parsed.voices = 2.6;
+        expect(parsed.voices).toBe(3);
+        parsed.voices = 0;
+        expect(parsed.voices).toBe(1);
+        parsed.pitchVariation = 40;
+        expect(parsed.pitchVariation).toBe(12);
+    });
+
     it('gives the editor a selectable box around its origin', () => {
         const node = new SoundNode('emitter');
         node.setPosition([5, 0, 0]);

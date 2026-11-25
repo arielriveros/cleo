@@ -42,13 +42,13 @@ export default function CharacterEditor(props: { node: CharacterNode }) {
  * looks almost right until you watch the number.
  */
 function AnimatorOutputs({ node, live }: { node: CharacterNode; live: boolean }) {
-  const [values, setValues] = useState({ moveDir: 0, isJumping: false, turnRequest: 0 })
+  const [values, setValues] = useState({ moveDir: 0, isJumping: false, turnRequest: 0, crouched: false })
   const frame = useRef(0)
 
   useEffect(() => {
     if (!live) return
     const tick = () => {
-      setValues({ moveDir: node.moveDir, isJumping: node.isJumping, turnRequest: node.turnRequest })
+      setValues({ moveDir: node.moveDir, isJumping: node.isJumping, turnRequest: node.turnRequest, crouched: node.crouched })
       frame.current = requestAnimationFrame(tick)
     }
     frame.current = requestAnimationFrame(tick)
@@ -68,6 +68,7 @@ function AnimatorOutputs({ node, live }: { node: CharacterNode; live: boolean })
       {row('moveDir', live ? values.moveDir.toFixed(1) : '—', '0 ahead · -90 right · +90 left')}
       {row('turnRequest', live ? String(values.turnRequest) : '—', '±1 / ±2, + is right')}
       {row('isJumping', live ? String(values.isJumping) : '—', 'take-off until landed')}
+      {row('crouched', live ? String(values.crouched) : '—', 'the short capsule')}
       {!live && <p className='text-ui-sm text-muted mt-1'>Press Play to watch these update.</p>}
     </div>
   )
