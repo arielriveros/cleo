@@ -1,18 +1,39 @@
-# The unit-test gate, as a reusable workflow. Called by ci.yml (every push and PR) and by release.yml
-# (before anything is tagged or published), so the bar a release has to clear is literally the same file
-# as the bar a merge has to clear, rather than a copy of it that drifts.
+# The unit-test gate, as a reusable workflow. Called by ci.yml (every pull request to main) and by release.yml
+# (before anything is tagged or published), so the bar a release has to clear is literally the same file as the bar
+# a merge has to clear, rather than a copy of it that drifts.
 #
-# Both suites run vitest with coverage thresholds enforced inside their configs -- 90% statements,
-# functions and lines over an explicit allowlist of the modules the tests actually target. See the long
-# comment in vitest.config.ts for why the allowlist has to be explicit.
+# Each suite runs only for the areas its caller says changed (tools/ci/affected.mjs). The callers pass what the
+# change touched; the defaults are "everything", so a caller that passes nothing still gets the whole gate. The
+# engine closure (an engine change turns on every app) is affected.mjs's, not this file's.
+#
+# The engine and editor suites run vitest with coverage thresholds enforced inside their configs -- 90% statements,
+# functions and lines over an explicit allowlist of the modules the tests actually target. See the long comment in
+# vitest.config.ts for why the allowlist has to be explicit.
 name: Tests
 
 on:
   workflow_call:
+    inputs:
+      engine:
+        type: boolean
+        default: true
+      appkit:
+        type: boolean
+        default: true
+      editor:
+        type: boolean
+        default: true
+      creator:
+        type: boolean
+        default: true
+      examples:
+        type: boolean
+        default: true
 
 jobs:
   test-engine:
     name: Test engine
+    if: inputs.engine
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,8 +76,40 @@ jobs:
           path: coverage/lcov.info
           if-no-files-found: warn
 
+  # The examples' own suites, when the engine job (which runs them as part of the whole root suite) does not. They
+  # run for an editor change too: they read and write each example through the editor's folder codec (@editor/…).
+  test-examples:
+    name: Test examples
+    if: ${{ !inputs.engine && (inputs.examples || inputs.editor) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - uses: actions/cache@v4
+        with:
+          path: build/example-packs
+          key: example-packs-${{ hashFiles('examples/*/data.lock.json') }}
+          restore-keys: example-packs-
+      - name: Fetch the examples' data
+        run: npm run examples:fetch
+      - name: Check the examples against their locks and the release
+        run: npm run examples:check -- --remote
+
+      - name: Test
+        env:
+          CLEO_TEST_HOST: '0'
+        run: npm run test:examples
+
   test-editor:
     name: Test editor
+    if: inputs.editor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -96,8 +149,11 @@ jobs:
           path: applications/editor/coverage/lcov.info
           if-no-files-found: warn
 
-  test-apps:
-    name: Test app-kit and Cleo Creator
+  # Same arrangement as the editor job: engine source resolves out of the root install, the apps' dependencies out
+  # of the applications/ workspace install.
+  test-app-kit:
+    name: Test app-kit
+    if: inputs.appkit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -107,8 +163,6 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # Same arrangement as the editor job: engine source resolves out of the root install, the apps'
-      # dependencies out of the applications/ workspace install.
       - run: npm ci
 
       - name: Install application deps
@@ -118,6 +172,24 @@ jobs:
       - name: Test app-kit
         run: npm test
         working-directory: applications/app-kit
+
+  test-creator:
+    name: Test Cleo Creator
+    if: inputs.creator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install application deps
+        run: npm ci
+        working-directory: applications
 
       - name: Test Cleo Creator
         run: npm test

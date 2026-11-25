@@ -20,5 +20,8 @@ CLAUDE.md
 graphify-out
 
 # The example gallery: built from examples/<slug>/ by tools/examples/gallery.mjs (npm run examples:bundle), never
-# committed.
+# committed. Dev only: a built editor downloads its examples from the `examples` release (tools/examples/release.mjs).
 applications/editor/public/examples/
+
+# wrangler's local state (tools/ci/examples-worker: `npx wrangler dev`).
+.wrangler/

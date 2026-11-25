@@ -1,13 +1,14 @@
 // Build the example gallery from the example folders: each examples/<slug>/ becomes the bundle the editor's
 // Examples tab installs, in applications/editor/public/examples/<slug>/ (gitignored build output), and the
-// catalogue index.json is regenerated. The editor and desktop builds ship that folder as before.
+// catalogue index.json is regenerated. The dev server serves that folder; tools/examples/release.mjs zips these
+// bundles into the `examples` release, which is where a shipped editor downloads them from.
 //
 //   node tools/examples/gallery.mjs [slug…] [--force]
 //
 // Each example's data lock is brought up to its folder first (tools/examples/data.mjs `lock`, no network), so what
 // an edit in the desktop editor stored is in it. An example whose data is not all on disk (npm run examples:fetch)
 // is left out of the gallery, with a hint;
-// with CLEO_EXAMPLES_REQUIRED=1 (release builds) that is an error instead. An example whose folder has not
+// with CLEO_EXAMPLES_REQUIRED=1, or `required` (the examples release), that is an error instead. An example whose folder has not
 // changed since its bundle was built is skipped: a stamp of the tools that build it and of every file it reads.
 // Each example builds in a child process of its own, with a large heap (the biggest are several hundred MB).
 
@@ -19,19 +20,10 @@ import { fileURLToPath } from 'url'
 import { ROOT, EXAMPLES_DIR, listExamples, missingData, projectFiles, readExampleFolder } from '../exampleKit/folder.mjs'
 import { GALLERY_DIR, regenerateIndex } from '../exampleKit/galleryIndex.mjs'
 import { lock, lockSummary } from './data.mjs'
+import { TOOL_SOURCES } from './toolSources.mjs'
 
 const SELF = fileURLToPath(import.meta.url)
 const STAMP = '.build.json'
-
-/** The sources whose change rebuilds every example's bundle. */
-const TOOL_SOURCES = [
-  'tools/examples/gallery.mjs', 'tools/examples/bundleWriter.mjs', 'tools/exampleKit/folder.mjs',
-  'tools/exampleKit/editorModules.mjs', 'tools/exampleKit/tsLoader.mjs',
-  'applications/editor/src/utils/folder/projectCodec.ts', 'applications/editor/src/utils/folder/codec.ts',
-  'applications/editor/src/utils/folder/layout.ts', 'applications/editor/src/utils/payloads.ts',
-  'applications/editor/src/utils/bundle.ts', 'applications/editor/src/utils/bundleRead.ts',
-  'applications/editor/src/utils/bundleAssets.ts',
-]
 
 /** What an example's bundle was built from: the tools, and every file of the folder (path, size, time). */
 export function stampOf(dir) {

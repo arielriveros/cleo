@@ -10,6 +10,8 @@
     "start": "vite --open /creator/",
     "dev": "vite",
     "build": "vite build",
+    "prebuild:web": "npm run build:engine",
+    "build:web": "vite build --mode web",
     "build:standalone": "vite build --mode standalone",
     "test": "vitest run"
   },

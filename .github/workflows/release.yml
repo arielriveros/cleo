@@ -1,27 +1,38 @@
-# Cuts a release when a pull request from `development` is merged into `main`: runs the tests, bumps
-# the version, writes the PR's own description into the changelog, tags, builds, publishes and
-# deploys, then builds and attaches the desktop installers -- with the latest*.yml and block maps the
-# desktop editor's updater reads -- and only then marks the release the repository's latest.
+# Ships a merge: when a pull request from `development` is merged into `main`, test and ship what it changed.
 #
-# THE CHANGELOG IS THE PULL REQUEST DESCRIPTION. It used to be a list of commit subjects between two
-# tags, which is not what CHANGELOG.md reads like: its entries are prose, and prose is what a reviewer
-# has already written by the time a branch is ready to merge. tools/release-pr.mjs is the one place
-# that reads a PR -- it strips the template's HTML comments, drops the `Release:` marker and demotes
-# top-level headings so they nest under the version -- and tools/changelog.mjs still owns the file's
-# shape. The description becomes the GitHub Release body too, so the two cannot disagree.
+#   gate ─► tests ─► release ─┬► build-editor ─┬► deploy-editor   (Firebase site cleo-editor: editor.cleoengine.com)
+#                             │                └► installers [ubuntu, windows] ─► publish-latest
+#                             ├► build-creator ─► deploy-creator  (Firebase site cleo-creator: creator.cleoengine.com)
+#                             ├► examples                         (the rolling `examples` release)
+#                             └► worker                           (the Cloudflare Worker the web gallery reads through)
 #
-# HOW FAR IT BUMPS. A `release:breaking` / `release:feature` / `release:fix` label on the PR decides;
-# failing that, a `Release: <level>` line in the description; failing that, `fix`. A `no-release` label
-# skips the release entirely, and so does a merge from any branch other than `development`. Two
-# release labels is an error rather than a coin toss -- see tools/release-pr.mjs.
+# WHAT SHIPS. tools/ci/affected.mjs reads the pull request's own changes (merge-base..head) and names the areas they
+# touched; the engine is the dependency of everything, so an engine change ships every app and every example. An
+# editor change builds the editor once (web and desktop), deploys it, and packages the Windows and Linux installers
+# from that same build. A Creator change builds and deploys the Creator's own site. An examples change re-zips the
+# examples it touched into the `examples` release, which the editor's gallery downloads from (web and desktop).
 #
-# The version scheme is 1.<breaking>.<feature>.<fix>. npm only accepts three-component semver, so the
-# leading `1.` is a fixed product-line prefix that exists only in tags and in the UI -- package.json
-# stores the remaining x.y.z. tools/bump-version.mjs owns that mapping and is the only thing that
-# rewrites the three package.json files, their lockfiles and src/version.ts.
+# EVERY MERGE THAT SHIPS SOMETHING IS A RELEASE: a version, a CHANGELOG.md entry, a tag and a GitHub Release with the
+# PR's notes. Only a release that carries installers is marked latest, which is what every desktop editor's updater
+# reads (app-kit/desktop/desktopUpdater.js): a notes-only release (the Creator, the examples) never moves it.
 #
-# `workflow_dispatch` survives as the manual fallback, and it still takes its notes from the commit
-# list: there is no pull request to read when a human triggers it by hand.
+# THE CHANGELOG IS THE PULL REQUEST DESCRIPTION. tools/release-pr.mjs is the one place that reads a PR -- it strips
+# the template's HTML comments, drops the `Release:` marker and demotes top-level headings so they nest under the
+# version -- and tools/changelog.mjs still owns the file's shape. The description becomes the GitHub Release body
+# too, so the two cannot disagree.
+#
+# HOW FAR IT BUMPS. A `release:breaking` / `release:feature` / `release:fix` label on the PR decides; failing that,
+# a `Release: <level>` line in the description; failing that, `fix`. A `no-release` label skips the release
+# entirely, and so does a merge from any branch other than `development`, or one that changed nothing that ships
+# (prose, the PR template). Two release labels is an error rather than a coin toss -- see tools/release-pr.mjs.
+#
+# The version scheme is 1.<breaking>.<feature>.<fix>. npm only accepts three-component semver, so the leading `1.`
+# is a fixed product-line prefix that exists only in tags and in the UI -- package.json stores the remaining x.y.z.
+# tools/bump-version.mjs owns that mapping and is the only thing that rewrites the three package.json files, their
+# lockfiles and src/version.ts.
+#
+# `workflow_dispatch` survives as the manual fallback: it ships everything, and takes its notes from the commit list
+# (there is no pull request to read when a human triggers it by hand).
 name: Release
 
 on:
@@ -40,7 +51,7 @@ on:
           - feature    # y -- major features
           - breaking   # x -- breaking changes
 
-# Pushing the bump commit and the tag, and creating the GitHub Release.
+# Pushing the bump commit and the tag, and creating and editing GitHub Releases.
 permissions:
   contents: write
 
@@ -51,17 +62,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Whether this event releases at all, and how far. A JOB rather than an `if:` on each job below,
-  # because a skipped job has no outputs for the next one to read -- and because "no release, and here
-  # is why" is worth saying out loud in the run summary instead of leaving as a grey skip.
+  # Whether this event releases at all, how far, and what it ships. A JOB rather than an `if:` on each job below,
+  # because a skipped job has no outputs for the next one to read -- and because "no release, and here is why" is
+  # worth saying out loud in the run summary instead of leaving as a grey skip.
   gate:
     name: Decide
     runs-on: ubuntu-latest
     outputs:
       release: ${{ steps.decide.outputs.release }}
       bump: ${{ steps.decide.outputs.bump }}
+      engine: ${{ steps.affected.outputs.engine }}
+      appkit: ${{ steps.affected.outputs.appkit }}
+      editor: ${{ steps.affected.outputs.editor }}
+      creator: ${{ steps.affected.outputs.creator }}
+      examples: ${{ steps.affected.outputs.examples }}
+      example_slugs: ${{ steps.affected.outputs.example_slugs }}
+      worker: ${{ steps.affected.outputs.worker }}
     steps:
+      # Full history: the merge base of the pull request's base and head has to be in the clone.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Which areas changed
+        id: affected
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            node tools/ci/affected.mjs --base "$BASE" --head "$HEAD"
+          else
+            node tools/ci/affected.mjs --all
+          fi
 
       - name: Decide
         id: decide
@@ -75,6 +109,7 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           EVENT: ${{ github.event_name }}
           MANUAL_BUMP: ${{ inputs.bump }}
+          SHIPS: ${{ steps.affected.outputs.any }}
         run: |
           set -euo pipefail
 
@@ -88,13 +123,14 @@ jobs:
           if [ "$EVENT" = workflow_dispatch ]; then
             echo 'release=true' >> "$GITHUB_OUTPUT"
             echo "bump=$MANUAL_BUMP" >> "$GITHUB_OUTPUT"
-            echo "### Manual release ($MANUAL_BUMP), notes from the commit list" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Manual release ($MANUAL_BUMP) of everything, notes from the commit list" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
           [ "$MERGED" = true ] || decline 'the pull request was closed without merging.'
           [ "$HEAD_REF" = development ] || decline "merged from '$HEAD_REF'; only 'development' cuts a release."
           case "$PR_LABELS" in *'"no-release"'*) decline 'the no-release label is set.' ;; esac
+          [ "$SHIPS" = true ] || decline 'nothing it changed ships (prose, the PR template, generated files).'
 
           # Writes release= and bump=. Fails loudly on two release labels rather than picking one.
           node tools/release-pr.mjs --level
@@ -104,19 +140,28 @@ jobs:
           node tools/release-pr.mjs --notes "$RUNNER_TEMP/notes-check.md"
           echo "### Releasing $(node tools/release-pr.mjs --level) from '$HEAD_REF'" >> "$GITHUB_STEP_SUMMARY"
 
-  # The same file ci.yml calls, so nothing can be released past a suite that a merge would have been
-  # blocked on. Typechecks are NOT re-run here: they are advisory in ci.yml, and a warning that does not
-  # block a merge has no business blocking a release either.
+  # The same file ci.yml calls, for the same areas, so nothing can be released past a suite that a merge would have
+  # been blocked on. Typechecks are NOT re-run here: they are advisory in ci.yml, and a warning that does not block
+  # a merge has no business blocking a release either.
   tests:
     name: Unit tests
     needs: gate
     if: needs.gate.outputs.release == 'true'
     uses: ./.github/workflows/tests.yml
+    with:
+      engine: ${{ needs.gate.outputs.engine == 'true' }}
+      appkit: ${{ needs.gate.outputs.appkit == 'true' }}
+      editor: ${{ needs.gate.outputs.editor == 'true' }}
+      creator: ${{ needs.gate.outputs.creator == 'true' }}
+      examples: ${{ needs.gate.outputs.examples == 'true' }}
 
+  # The version, the changelog, the tag and the GitHub Release (notes only: the jobs below attach what they build).
   release:
     name: Bump, tag & publish
     runs-on: ubuntu-latest
     needs: [gate, tests]
+    # A change that tests nothing (the Worker alone) leaves `tests` with every job skipped.
+    if: ${{ !cancelled() && needs.gate.outputs.release == 'true' && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
     outputs:
       version: ${{ steps.bump.outputs.version }}
 
@@ -125,8 +170,7 @@ jobs:
       # not a branch anything can be pushed back to. The merge commit is already on main by the time
       # `closed` fires, so this is the tree that was just approved.
       #
-      # Full history and tags: the manual changelog path diffs against the previous tag, and the editor
-      # build reads `git describe --exact-match` to decide whether it may drop the `-dev` suffix.
+      # Full history and tags: the manual changelog path diffs against the previous tag.
       - uses: actions/checkout@v4
         with:
           ref: main
@@ -163,9 +207,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: node tools/changelog.mjs --release ${{ steps.bump.outputs.version }} "$RUNNER_TEMP/notes.md"
 
-      # Commit and tag BEFORE building. The editor stamps its version from `git describe --exact-match`
-      # on HEAD, so a build made before the tag exists ships labelled `-dev` -- the artifact attached to
-      # the release would then disagree with the release it is attached to.
+      # Commit and tag BEFORE anything builds. The apps stamp their version from `git describe --exact-match` on
+      # HEAD, so a build made before the tag exists ships labelled `-dev` -- the build jobs check this tag out.
       - name: Commit and tag
         run: |
           git config user.name  'github-actions[bot]'
@@ -175,17 +218,14 @@ jobs:
           git commit -m 'chore(release): v${{ steps.bump.outputs.version }}'
           git tag 'v${{ steps.bump.outputs.version }}'
 
-      - name: Build engine and editor
-        run: npm ci && npm run build && npm run editor:install && npm run editor:build
-
-      - name: Package editor bundle
-        run: cd applications/editor/dist && zip -qr "$RUNNER_TEMP/cleo-editor-v${{ steps.bump.outputs.version }}.zip" .
-
+      # GitHub suppresses workflow triggers for pushes made with the default GITHUB_TOKEN, so this push starts
+      # nothing; ci.yml does not run on pushes anyway.
       - name: Push
         run: git push --atomic origin HEAD:main 'refs/tags/v${{ steps.bump.outputs.version }}'
 
-      # Not the latest release yet: desktop editors update from whatever GitHub calls latest, and this one has no
-      # installers until the job below attaches them. `publish-latest` marks it once they are there.
+      # Not the latest release: desktop editors update from whatever GitHub calls latest, and this one has no
+      # installers yet (and, for a Creator- or examples-only merge, never will). `publish-latest` marks it once the
+      # installers are attached.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -193,44 +233,21 @@ jobs:
           gh release create 'v${{ steps.bump.outputs.version }}' \
             --title 'v${{ steps.bump.outputs.version }}' \
             --notes-file "$RUNNER_TEMP/notes.md" \
-            --latest=false \
-            "$RUNNER_TEMP/cleo-editor-v${{ steps.bump.outputs.version }}.zip"
+            --latest=false
 
       - name: Summary
         run: echo "### Released v${{ steps.bump.outputs.version }} (${{ needs.gate.outputs.bump }})" >> "$GITHUB_STEP_SUMMARY"
 
-      # CI will NOT fire for the push above -- GitHub suppresses workflow triggers for pushes made with
-      # the default GITHUB_TOKEN -- so ci.yml's deploy job never runs for a release commit. Without this
-      # step the live editor would keep serving the previous, `-dev`-labelled build. It reuses the build
-      # from two steps up, so it costs nothing extra.
-      - name: Deploy to Firebase Hosting
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          entryPoint: ./applications/editor
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CLEO_EDITOR }}
-          channelId: live
-          projectId: cleo-editor
-
-  # Every release. The desktop editor updates itself from these (app-kit/desktop/desktopUpdater.js): it reads
-  # the latest release's latest.yml / latest-mac.yml / latest-linux.yml and downloads the installer beside it,
-  # so a release without them is one no desktop editor ever reaches. That is why this is no longer kept for
-  # breaking releases, even though three runners each doing a full engine + editor + player build before
-  # electron-builder starts is the most expensive thing in this repo. Everything else in the release is
-  # already published by the job above; this only adds assets to it.
-  installers:
-    name: Desktop installer (${{ matrix.os }})
+  # The editor, built once at the tag: the web build for its site, then the same build with the Creator embedded at
+  # /creator/ (one origin, app://editor, the way the desktop shell serves both) for the installers.
+  build-editor:
+    name: Build editor
     needs: [gate, release]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      # One platform failing to package should not withhold the two that succeeded.
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-
+    if: needs.gate.outputs.editor == 'true'
+    runs-on: ubuntu-latest
     steps:
-      # The tag the release job just pushed, not the branch head: buildVersion.js reads
-      # `git describe --exact-match` off HEAD, and only an exact tag match drops the `-dev` suffix.
+      # The tag the release job just pushed, not the branch head: buildVersion.js reads `git describe
+      # --exact-match` off HEAD, and only an exact tag match drops the `-dev` suffix.
       - uses: actions/checkout@v4
         with:
           ref: v${{ needs.release.outputs.version }}
@@ -241,27 +258,158 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # The example gallery the installer ships is built from examples/ (tools/examples/gallery.mjs), with their
-      # binary data from the example-data release; every example must make it in.
-      - uses: actions/cache@v4
-        with:
-          path: build/example-packs
-          key: example-packs-${{ hashFiles('examples/*/data.lock.json') }}
-          restore-keys: example-packs-
-      - name: Fetch the examples' data
-        run: npm ci && npm run examples:fetch
+      - name: Install
+        run: npm ci && npm run apps:install
 
-      # electron-builder (applications/app-kit/desktop) packages ../../editor/dist as extraResources, so the editor must be built first --
-      # and with the production engine, since this is what ships in the installer.
-      - name: Build engine and editor
+      # build:player's prebuild hook builds the engine (dist/); the editor and the player compile engine SOURCE
+      # through Vite, so nothing else needs sequencing. The examples are not in this build: the gallery downloads
+      # them (CLEO_EXAMPLES_URL, the examples Worker, on the web; the desktop shell proxies the release).
+      - name: Build the editor
         env:
-          CLEO_EXAMPLES_REQUIRED: '1'
-        run: npm ci && npm run build && npm run editor:install && npm run editor:build
+          VITE_CLEO_EXAMPLES_URL: ${{ vars.CLEO_EXAMPLES_URL }}
+          VITE_CLEO_CREATOR_URL: ${{ vars.CLEO_CREATOR_URL }}
+        run: |
+          npm run build:player
+          cd applications/editor && npx vite build
+
+      - name: Upload the web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-editor
+          path: applications/editor/dist
+          if-no-files-found: error
+
+      # The Creator's default (embedded) mode: base /creator/, built into the editor's dist/creator.
+      - name: Embed the Creator for the desktop app
+        working-directory: applications/creator
+        run: npx vite build
+
+      - name: Upload the desktop build
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-editor
+          path: applications/editor/dist
+          if-no-files-found: error
+
+  deploy-editor:
+    name: Deploy editor
+    needs: [release, build-editor]
+    runs-on: ubuntu-latest
+    steps:
+      # For firebase.json (site cleo-editor), which lives beside the build.
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-editor
+          path: applications/editor/dist
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          entryPoint: ./applications/editor
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CLEO_EDITOR }}
+          channelId: live
+          projectId: cleo-editor
+
+  # The Creator on its own site. Its library reaches the editor's through a hidden frame of the editor's origin
+  # (app-kit creatorLibrary/frame.ts), which works because editor.cleoengine.com and creator.cleoengine.com are one
+  # site: CLEO_EDITOR_ORIGIN names it.
+  build-creator:
+    name: Build Cleo Creator
+    needs: [gate, release]
+    if: needs.gate.outputs.creator == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci && npm run apps:install
+
+      - name: Build the Creator for its own site
+        env:
+          VITE_CLEO_EDITOR_ORIGIN: ${{ vars.CLEO_EDITOR_ORIGIN }}
+        run: npm run creator:build:web
+
+      - name: Upload the web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-creator
+          path: applications/creator/dist
+          if-no-files-found: error
+
+  deploy-creator:
+    name: Deploy Cleo Creator
+    needs: [release, build-creator]
+    runs-on: ubuntu-latest
+    steps:
+      # For applications/creator/firebase.json (site cleo-creator).
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-creator
+          path: applications/creator/dist
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          entryPoint: ./applications/creator
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CLEO_EDITOR }}
+          channelId: live
+          projectId: cleo-editor
+
+  # Every editor release. The desktop editor updates itself from these (app-kit/desktop/desktopUpdater.js): it reads
+  # the latest release's latest.yml / latest-linux.yml and downloads the installer beside it, so a release without
+  # them is one no desktop editor ever reaches. Windows and Linux; macOS is no longer built, so a macOS editor sees
+  # no further updates. Both legs package the one editor build-editor made, rather than rebuilding it.
+  installers:
+    name: Desktop installer (${{ matrix.os }})
+    needs: [gate, release, build-editor]
+    if: needs.gate.outputs.editor == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing to package should not withhold the one that succeeded.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # electron-builder (applications/app-kit/desktop) packages ../../editor/dist as extraResources: the editor
+      # with the Creator embedded, as build-editor made it.
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-editor
+          path: applications/editor/dist
 
       # extraResources ships these too (the project SDK and the dedicated NetSync host): built here, or the
-      # installer carries whatever an earlier checkout left, or nothing.
+      # installer carries whatever an earlier checkout left, or nothing. The SDK is built on the engine's dist/.
       - name: Build the SDK and the host
-        run: npm run build:sdk && npm run host:install && npm run build:host
+        run: npm ci && npm run build && npm run build:sdk && npm run host:install && npm run build:host
 
       # electron-builder puts build/release-notes.md into latest.yml as `releaseNotes`: what the Update
       # button shows before the update, the same section Help > About shows after it (buildVersion.js).
@@ -271,20 +419,18 @@ jobs:
           mkdir -p applications/app-kit/desktop/build
           node tools/changelogSection.mjs '${{ needs.release.outputs.version }}' > applications/app-kit/desktop/build/release-notes.md
 
-      # Nothing here is signed. Without this, electron-builder hunts for a keychain identity on macOS and
-      # fails the job; unsigned is the honest outcome, not a silent one. (Windows updates install unsigned;
-      # macOS ones cannot, so the editor there only announces them.) `npm run dist` builds with
-      # `--publish never`: the package.json `publish` block only tells electron-builder to write latest*.yml
-      # and app-update.yml, and the step below uploads.
+      # Nothing here is signed; unsigned is the honest outcome, not a silent one (Windows updates install
+      # unsigned). `npm run dist` builds with `--publish never`: the package.json `publish` block only tells
+      # electron-builder to write latest*.yml and app-update.yml, and the step below uploads.
       - name: Build installer
         working-directory: applications/app-kit/desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm ci && npm run dist
 
-      # bash on all three runners so one glob works everywhere. nullglob because each runner produces
-      # exactly one of these three and an unmatched glob would otherwise reach gh as a literal filename.
-      # --clobber keeps a re-run of a failed matrix leg from colliding with what it uploaded last time.
+      # bash on both runners so one glob works everywhere. nullglob because each runner produces exactly one of
+      # these and an unmatched glob would otherwise reach gh as a literal filename. --clobber keeps a re-run of a
+      # failed matrix leg from colliding with what it uploaded last time.
       #
       # Matched on the package version rather than by extension alone: electron-builder never cleans
       # dist/, so a bare *.exe also picks up whatever a previous build left there. A hosted runner starts
@@ -301,7 +447,7 @@ jobs:
           shopt -s nullglob
           pkg=$(node -p "require('./applications/app-kit/desktop/package.json').version")
           dist=applications/app-kit/desktop/dist
-          installers=("$dist"/*"$pkg"*.exe "$dist"/*"$pkg"*.dmg "$dist"/*"$pkg"*.AppImage)
+          installers=("$dist"/*"$pkg"*.exe "$dist"/*"$pkg"*.AppImage)
           if [ ${#installers[@]} -eq 0 ]; then
             echo "::error title=No installer::electron-builder produced nothing matching $pkg"
             ls -l "$dist" || true
@@ -320,17 +466,81 @@ jobs:
           printf 'uploading: %s\n' "${installers[@]}" "${feeds[@]}" "${blockmaps[@]}"
           gh release upload 'v${{ needs.release.outputs.version }}' --clobber "${installers[@]}" "${feeds[@]}" "${blockmaps[@]}"
 
-  # Only now is the release the latest one, which is what every desktop editor's updater reads. After the
-  # installers rather than before, so no editor finds a release it cannot download. `always()` so one platform
-  # failing to package does not hold the other two back: that platform's editors see a missing latest*.yml,
-  # which they take as "nothing new" until the next release.
+  # Only now is the release the latest one, which is what every desktop editor's updater reads. After the installers
+  # rather than before, so no editor finds a release it cannot download. `always()` so one platform failing to
+  # package does not hold the other back: that platform's editors see a missing latest*.yml, which they take as
+  # "nothing new" until the next release. Never for a release without installers (the editor did not change, or
+  # its build failed): that would point every updater at a release with nothing to download.
   publish-latest:
     name: Mark the release latest
-    needs: [release, installers]
-    if: always() && needs.release.result == 'success'
+    needs: [gate, release, installers]
+    if: always() && needs.release.result == 'success' && needs.gate.outputs.editor == 'true' && needs.installers.result != 'skipped' && needs.installers.result != 'cancelled'
     runs-on: ubuntu-latest
     steps:
       - name: Mark latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit 'v${{ needs.release.outputs.version }}' --latest --repo "$GITHUB_REPOSITORY"
+
+  # The example projects the editor's gallery installs, one zip each, on the rolling `examples` release (never the
+  # latest): only the examples this merge touched are rebuilt, the rest keep their zips. tools/examples/release.mjs
+  # builds each bundle from examples/<slug>/ with its data from the example-data release.
+  examples:
+    name: Publish examples
+    needs: [gate, release]
+    if: needs.gate.outputs.examples == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # The bundle writer runs the editor's folder codec, whose imports resolve out of the workspace install.
+      - name: Install
+        run: npm ci && npm run apps:install
+
+      - uses: actions/cache@v4
+        with:
+          path: build/example-packs
+          key: example-packs-${{ hashFiles('examples/*/data.lock.json') }}
+          restore-keys: example-packs-
+
+      # `all`, or the slugs this merge touched (word-split on purpose: one argument each).
+      - name: Fetch the examples' data
+        env:
+          SLUGS: ${{ needs.gate.outputs.example_slugs }}
+        run: |
+          if [ "$SLUGS" = all ]; then set --; else set -- $SLUGS; fi
+          npm run examples:fetch -- "$@"
+          npm run examples:check -- --remote "$@"
+
+      - name: Build and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLUGS: ${{ needs.gate.outputs.example_slugs }}
+        run: |
+          if [ "$SLUGS" = all ]; then set -- --all; else set -- $SLUGS; fi
+          npm run examples:release -- --publish "$@"
+
+  # The Cloudflare Worker the web editor downloads examples through (GitHub's release downloads send no CORS
+  # headers, so a page cannot read them). Needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
+  worker:
+    name: Deploy the examples Worker
+    needs: [gate, release]
+    if: needs.gate.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: tools/ci/examples-worker

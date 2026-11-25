@@ -1,8 +1,10 @@
 // The Creator library: assets saved in Cleo Creator, shared with the Cleo Editor.
 //
-// Both apps run on one origin (the Creator at /creator/), so they share this IndexedDB database. The
-// Creator writes an asset whenever it changes; the editor mirrors every asset into each project's
-// /Creator folder and listens on the channel to follow edits live. See store.ts and channel.ts.
+// Both apps share this IndexedDB database. On one origin (the desktop app, dev: the Creator at /creator/)
+// each opens it directly; on the web, where the Creator has a site of its own, the Creator reaches the
+// editor's through a hidden frame of the editor's origin (frame.ts). The Creator writes an asset whenever
+// it changes; the editor mirrors every asset into each project's /Creator folder and listens on the
+// channel to follow edits live. See store.ts and channel.ts.
 
 export type CreatorAssetKind = 'foliage' | 'fx' | 'world' | 'motion' | 'character' | 'pose' | 'video';
 

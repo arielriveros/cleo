@@ -1,19 +1,33 @@
 {
   "hosting": {
+    "site": "cleo-editor",
     "public": "dist",
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**",
       "assets/sponza/**",
-      "assets/mannequin.gltf",
-      "examples/**"
+      "assets/mannequin.gltf"
+    ],
+    "headers": [
+      {
+        "source": "/creator-library.html",
+        "headers": [
+          { "key": "Cross-Origin-Embedder-Policy", "value": "credentialless" },
+          { "key": "Cross-Origin-Resource-Policy", "value": "same-site" },
+          { "key": "Content-Security-Policy", "value": "frame-ancestors 'self' https://creator.cleoengine.com" },
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      }
+    ],
+    "redirects": [
+      {
+        "source": "/creator{,/**}",
+        "destination": "https://creator.cleoengine.com/",
+        "type": 302
+      }
     ],
     "rewrites": [
-      {
-        "source": "/creator/**",
-        "destination": "/creator/index.html"
-      },
       {
         "source": "**",
         "destination": "/index.html"

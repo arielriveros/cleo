@@ -189,7 +189,11 @@ export async function encodeFolderJob(inputs: AssetInput[]): Promise<EncodedFold
 
 /** Unzip + parse a bundle file off the main thread into its structured contents. */
 export async function importBundleJob(file: File): Promise<BundleData> {
-  const buffer = await file.arrayBuffer();
+  return importBundleBufferJob(await file.arrayBuffer());
+}
+
+/** The same, for a zip already in memory (a downloaded example). */
+export async function importBundleBufferJob(buffer: ArrayBuffer): Promise<BundleData> {
   const result = await dispatch({ kind: 'importBundle', buffer });
   if (result.kind !== 'importBundle') throw new Error('Unexpected job result');
   return result.bundle;

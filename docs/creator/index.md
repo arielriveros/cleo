@@ -16,11 +16,17 @@ left end goes back to the home page. A reload keeps the tool that was open; a ne
 | **Foliage Creator** | Grass clumps, bushes, trees and rocks from parameters, each with an LOD ladder and its materials | One `.glb` per level (textures embedded), impostor atlases for trees, and a JSON sidecar with the LOD distances |
 | **[Motion Creator](motion.md)** | Character animation from a few key poses: eased in-betweens, overlapping action, IK-planted hands and feet | An `.anim.json` clip with its skeleton, and a JSON sidecar |
 
-Open it from the Editor's menu bar (**Creator**), or run `npm run dev:all` at the repository root and go
-to `http://localhost:8080/creator/`. It lives on the Editor's origin, under `/creator/`, so the two
-share one asset library (see [Saved assets](#saved-assets)). `npm run creator:dev` still runs it alone, on
-port 8081. The desktop app opens it as a second window. `npm run editor:dev` and `npm run desktop:dev` start
-the Editor alone; to open the Creator from them, run `npm run creator:serve` alongside.
+Open it from the Editor's menu bar (**Creator**). On the web it has a site of its own,
+`creator.cleoengine.com`, beside the Editor's `editor.cleoengine.com`; the desktop app opens it as a second
+window. Either way the two share one asset library (see [Saved assets](#saved-assets)): on the web the
+Creator reaches the Editor's library through a hidden page of the Editor's site, which works because the two
+subdomains are one site. If the Editor's site cannot be reached, the Creator says **Not syncing with the
+editor** and keeps what you save in its own browser storage.
+
+In development, run `npm run dev:all` at the repository root and go to `http://localhost:8080/creator/`: the
+Creator is served on the Editor's origin, under `/creator/`. `npm run creator:dev` still runs it alone, on port
+8081. `npm run editor:dev` and `npm run desktop:dev` start the Editor alone; to open the Creator from them, run
+`npm run creator:serve` alongside.
 
 ## Menu bar
 

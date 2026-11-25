@@ -104,5 +104,14 @@ Every example also runs `tests/project.test.ts`, which checks what the editor's 
 Sandbox by default, `E2E_EXAMPLES=valley,dungeon` for others) opens with Open Folder, and opening it writes nothing;
 an edit to one material changes only that material's file. It needs a built editor (`npm run editor:build`).
 
-The gallery bundles (`applications/editor/public/examples/`) are build output: `npm run examples:bundle`, and every
-`editor:dev`, `desktop:dev` and `editor:build` rebuilds the ones whose folder changed.
+## How the examples ship
+
+A shipped editor carries no examples. Its gallery downloads them from the repository's rolling `examples` release:
+one zip per example, listed in its `index.json` (the web editor through the examples Worker, the desktop editor
+through its shell; [applications/editor/docs/examples.md](../applications/editor/docs/examples.md)). A merge into
+`main` that changed an example re-publishes that example's zip (`release.yml`, `npm run examples:release`); one that
+changed the tools that pack them, or the engine, re-publishes all of them. The others keep their zips.
+
+The local gallery bundles (`applications/editor/public/examples/`) are dev-only build output:
+`npm run examples:bundle`, and every `editor:dev`, `desktop:dev` and `dev:all` rebuilds the ones whose folder
+changed, so an edit shows up in the dev gallery. A build of the editor leaves them out.

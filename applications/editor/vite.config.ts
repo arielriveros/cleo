@@ -1,6 +1,8 @@
 import { defineConfig, mergeConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import fs from 'node:fs'
 import path from 'node:path'
+import type { Plugin } from 'vite'
 // @ts-expect-error -- a plain .mjs; it has no declarations. Needed here only for the worker pass below,
 // which does not inherit the top-level plugins the shared engine config contributes.
 import { glslRaw } from '../../tools/viteGlsl.mjs'
@@ -24,6 +26,21 @@ const CREATOR_NOT_RUNNING = `<!doctype html><meta charset="utf-8"><title>Cleo Cr
 <button onclick="window.cleoDesktop && window.cleoDesktop.window ? window.cleoDesktop.window.close() : window.close()"
  style="font:inherit;color:inherit;background:#333;border:1px solid #555;border-radius:4px;padding:.25rem .75rem;cursor:pointer">Close this window</button></div>`
 
+/**
+ * A build leaves out public/examples: the local gallery (tools/examples/gallery.mjs) is for the dev server, and a
+ * built editor downloads its examples from the `examples` release (utils/examples.ts). Without this, a checkout
+ * that ever ran editor:dev would copy several hundred MB of bundles into dist/, and so into a local desktop build.
+ */
+function withoutLocalExamples(): Plugin {
+  let outDir = ''
+  return {
+    name: 'cleo:without-local-examples',
+    apply: 'build',
+    configResolved(config) { outDir = path.resolve(config.root, config.build.outDir) },
+    closeBundle() { fs.rmSync(path.join(outDir, 'examples'), { recursive: true, force: true }) },
+  }
+}
+
 // The shared engine config (../vite.config.ts) contributes the shader plugin and the `cleo` ->
 // ../src/cleo.ts alias, so the dev server, this build, the player build and both test suites resolve and
 // transform engine source identically. Everything below is editor-specific.
@@ -42,7 +59,7 @@ export default mergeConfig(engineConfig, defineConfig({
   // glslRaw() comes from the shared engine config; react() and nagaAssets() are the editor-only pair.
   // Cross-origin isolated (see crossOriginIsolation): the physics worker's replies go through shared memory.
   // agentBridgeDiscovery() is dev-only: it lets the page find a running Cleo MCP server (applications/mcp).
-  plugins: [crossOriginIsolationPlugin(), react(), nagaAssetsPlugin('/'), agentBridgeDiscoveryPlugin()],
+  plugins: [crossOriginIsolationPlugin(), react(), nagaAssetsPlugin('/'), agentBridgeDiscoveryPlugin(), withoutLocalExamples()],
 
   worker: {
     // Both project workers are ES modules (see workers/*Client.ts, which pass { type: 'module' }); this
@@ -97,6 +114,9 @@ export default mergeConfig(engineConfig, defineConfig({
         // the editor, not with the published player (vite.player.config.ts), so it can never be a build
         // behind the engine the editor runs, and it loads any physics backend as the editor does.
         play: path.resolve(__dirname, 'play.html'),
+        // The Creator library's storage frame: Cleo Creator on its own site (creator.cleoengine.com) embeds it to
+        // reach this origin's library (app-kit creatorLibrary/frame.ts). Same site, so the frame shares storage.
+        creatorLibrary: path.resolve(__dirname, 'creator-library.html'),
       },
     },
   },

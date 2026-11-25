@@ -69,11 +69,42 @@ function editorRoot() {
   return app.isPackaged ? HOSTED_APP.packagedDist() : HOSTED_APP.devDist;
 }
 
+// --- The examples ------------------------------------------------------------------------------
+//
+// The editor's gallery reads examples/index.json and the zips it names (applications/editor/src/utils/examples.ts).
+// A packaged editor ships none: they are on the repository's rolling `examples` release (tools/examples/release.mjs),
+// and this process fetches them from there. The page sees them on its own origin, so GitHub's release downloads --
+// which send no CORS headers, and so cannot be read by a page on another origin -- are no obstacle. (The web
+// editor goes through the examples Worker instead.)
+
+const EXAMPLES_RELEASE = `https://github.com/${desktopUpdater.REPO.owner}/${desktopUpdater.REPO.repo}/releases/download/examples/`;
+const EXAMPLE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const EXAMPLE_TYPES = { '.json': 'application/json', '.zip': 'application/zip', '.png': 'image/png' };
+
+/** `examples/<name>`, from the release: a 404 for a name the release does not hold, a 502 when it cannot be reached. */
+async function exampleFromRelease(name) {
+  const type = EXAMPLE_TYPES[path.extname(name).toLowerCase()];
+  if (!EXAMPLE_NAME.test(name) || !type) return new Response('Not found', { status: 404 });
+  let res;
+  try {
+    res = await net.fetch(EXAMPLES_RELEASE + name, { redirect: 'follow' });
+  } catch (e) {
+    return new Response(`The examples could not be reached: ${e?.message ?? e}`, { status: 502 });
+  }
+  if (!res.ok) return new Response('Not found', { status: res.status === 404 ? 404 : 502 });
+  const headers = new Headers({ 'Content-Type': type, 'Cache-Control': name === 'index.json' ? 'no-cache' : 'max-age=31536000, immutable' });
+  const length = res.headers.get('content-length');
+  if (length) headers.set('Content-Length', length);
+  return new Response(res.body, { status: 200, headers });
+}
+
 function registerAppProtocol() {
   const root = editorRoot();
   protocol.handle(APP_SCHEME, async (request) => {
     let pathname = decodeURIComponent(new URL(request.url).pathname);
     if (!pathname || pathname === '/') pathname = '/index.html';
+    // The gallery's examples, from the release (an unpackaged run serves whatever the local build has).
+    else if (app.isPackaged && pathname.startsWith('/examples/')) return isolated(await exampleFromRelease(pathname.slice('/examples/'.length)));
     // The Creator's page, however it is linked.
     else if (pathname === '/creator' || pathname === '/creator/') pathname = '/creator/index.html';
     // Resolve within root and block path traversal outside it.

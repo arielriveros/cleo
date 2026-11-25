@@ -1,0 +1,14 @@
+# The examples Worker (worker.mjs): the web editor's gallery downloads the `examples` release through it.
+# Deployed by release.yml's `worker` job (cloudflare/wrangler-action), or by hand: `npx wrangler deploy` here.
+# Its URL, with a trailing slash, is the repository variable CLEO_EXAMPLES_URL that the web editor is built with.
+#
+# On the free plan: 100k requests a day, and no limit on a response's size (the body is streamed through).
+# If cleoengine.com's DNS is on Cloudflare, it can serve examples.cleoengine.com instead of its workers.dev URL:
+#   routes = [{ pattern = "examples.cleoengine.com", custom_domain = true }]
+name = "cleo-examples"
+main = "worker.mjs"
+compatibility_date = "2026-11-01"
+
+[vars]
+REPO = "arielriveros/cleo"
+TAG = "examples"

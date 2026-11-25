@@ -5,7 +5,9 @@
 
 import type { CreatorMessage } from './types';
 
-const NAME = 'cleo-creator';
+/** The BroadcastChannel's name: the editor's and the Creator's windows (and the storage frame) all open it. */
+export const CREATOR_CHANNEL_NAME = 'cleo-creator';
+const NAME = CREATOR_CHANNEL_NAME;
 
 export interface CreatorChannel {
   post(msg: CreatorMessage): void;
@@ -37,3 +39,9 @@ export function creatorChannel(): CreatorChannel {
 
 /** Drop the channel (tests): the next `creatorChannel()` opens a fresh one. */
 export function resetCreatorChannel(): void { open?.close(); open = null; channel = null; }
+
+/**
+ * Use `c` as this window's channel: the Creator on its own origin, whose BroadcastChannel would reach no editor,
+ * talks through the storage frame instead (frame.ts). Null goes back to the BroadcastChannel.
+ */
+export function setCreatorChannel(c: CreatorChannel | null): void { open?.close(); open = null; channel = c; }

@@ -317,8 +317,8 @@ export function lockSummary(slug, r) {
 // Release transport
 // ---------------------------------------------------------------------------------------------------
 
-const hasGh = () => spawnSync('gh', ['--version'], { stdio: 'ignore', shell: process.platform === 'win32' }).status === 0
-const downloadUrl = (repo, release, name) => `https://github.com/${repo}/releases/download/${release}/${name}`
+export const hasGh = () => spawnSync('gh', ['--version'], { stdio: 'ignore', shell: process.platform === 'win32' }).status === 0
+export const downloadUrl = (repo, release, name) => `https://github.com/${repo}/releases/download/${release}/${name}`
 
 async function download(url, file) {
   const res = await fetch(url, { redirect: 'follow' })
@@ -354,7 +354,7 @@ async function fetchPack(repo, [name, release, sha], from) {
 }
 
 /** The release's assets (name -> {id, size}), and its id; null when it does not exist. */
-async function releaseAssets(repo, release) {
+export async function releaseAssets(repo, release) {
   const token = process.env.GITHUB_TOKEN
   if (hasGh()) {
     const r = spawnSync('gh', ['release', 'view', release, '--repo', repo, '--json', 'assets,databaseId'], { encoding: 'utf8', shell: process.platform === 'win32' })
@@ -377,33 +377,51 @@ async function releaseAssets(repo, release) {
   return { id: v.id, assets }
 }
 
-async function createRelease(repo, release) {
-  const notes = 'Binary data of the example projects in examples/ (see examples/README.md). Fetched by `npm run examples:fetch`; never the latest release.'
+const DATA_NOTES = 'Binary data of the example projects in examples/ (see examples/README.md). Fetched by `npm run examples:fetch`; never the latest release.'
+
+/** A prerelease that is never the latest (the desktop updater reads the latest). Example data's title and notes by default. */
+export async function createRelease(repo, release, { title = 'Example data', notes = DATA_NOTES } = {}) {
   if (hasGh()) {
-    const r = spawnSync('gh', ['release', 'create', release, '--repo', repo, '--prerelease', '--latest=false', '--title', 'Example data', '--notes', notes], { stdio: 'inherit', shell: process.platform === 'win32' })
+    const r = spawnSync('gh', ['release', 'create', release, '--repo', repo, '--prerelease', '--latest=false', '--title', title, '--notes', notes], { stdio: 'inherit', shell: process.platform === 'win32' })
     if (r.status !== 0) throw new Error('gh release create failed')
     return
   }
   const res = await fetch(`https://api.github.com/repos/${repo}/releases`, {
     method: 'POST',
     headers: { authorization: `Bearer ${process.env.GITHUB_TOKEN}`, accept: 'application/vnd.github+json' },
-    body: JSON.stringify({ tag_name: release, name: 'Example data', body: notes, prerelease: true, make_latest: 'false' }),
+    body: JSON.stringify({ tag_name: release, name: title, body: notes, prerelease: true, make_latest: 'false' }),
   })
   if (!res.ok) throw new Error(`creating the release: HTTP ${res.status} ${await res.text()}`)
 }
 
-async function uploadPack(repo, release, releaseId, file) {
+/** Upload one file to a release. `clobber` replaces an asset of the same name (gh --clobber; REST: delete, then upload). */
+export async function uploadAsset(repo, release, releaseId, file, { clobber = false, existingId } = {}) {
   if (hasGh()) {
-    const r = spawnSync('gh', ['release', 'upload', release, file, '--repo', repo], { stdio: 'inherit', shell: process.platform === 'win32' })
+    const r = spawnSync('gh', ['release', 'upload', release, file, '--repo', repo, ...(clobber ? ['--clobber'] : [])], { stdio: 'inherit', shell: process.platform === 'win32' })
     if (r.status !== 0) throw new Error(`gh release upload ${path.basename(file)} failed`)
     return
   }
+  if (clobber && existingId) await deleteAsset(repo, release, path.basename(file), existingId)
   const res = await fetch(`https://uploads.github.com/repos/${repo}/releases/${releaseId}/assets?name=${encodeURIComponent(path.basename(file))}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${process.env.GITHUB_TOKEN}`, 'content-type': 'application/octet-stream' },
     body: fs.readFileSync(file),
   })
   if (!res.ok) throw new Error(`uploading ${path.basename(file)}: HTTP ${res.status}`)
+}
+
+const uploadPack = (repo, release, releaseId, file) => uploadAsset(repo, release, releaseId, file)
+
+/** Delete one asset from a release, by name (gh) or by id (REST). */
+export async function deleteAsset(repo, release, name, id) {
+  if (hasGh()) {
+    const r = spawnSync('gh', ['release', 'delete-asset', release, name, '--repo', repo, '--yes'], { stdio: 'inherit', shell: process.platform === 'win32' })
+    if (r.status !== 0) throw new Error(`gh release delete-asset ${name} failed`)
+    return
+  }
+  if (!id) throw new Error(`deleting ${name} needs its asset id`)
+  const res = await fetch(`https://api.github.com/repos/${repo}/releases/assets/${id}`, { method: 'DELETE', headers: { authorization: `Bearer ${process.env.GITHUB_TOKEN}`, accept: 'application/vnd.github+json' } })
+  if (!res.ok && res.status !== 404) throw new Error(`deleting ${name}: HTTP ${res.status}`)
 }
 
 // ---------------------------------------------------------------------------------------------------

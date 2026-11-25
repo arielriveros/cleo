@@ -10,7 +10,7 @@
     "prebuild:player": "npm run build:engine",
     "start": "vite --open",
     "dev": "vite",
-    "build": "vite build && npm run build:creator",
+    "build": "vite build",
     "build:creator": "cd ../creator && npx vite build",
     "build:player": "vite build --config vite.player.config.ts",
     "build:player:only": "vite build --config vite.player.config.ts",

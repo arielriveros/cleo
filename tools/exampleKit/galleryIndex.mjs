@@ -35,35 +35,46 @@ export function formatBytes(bytes) {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
 }
 
+/**
+ * One bundle's catalogue entry, read from what is on disk in `bundleDir` (a gallery folder): null when it holds no
+ * bundle. `thumbnail` and `bytes` describe the folder; the examples release (tools/examples/release.mjs) replaces
+ * them with its own file names and the zip's size.
+ */
+export async function bundleEntry(bundleDir, slug = path.basename(bundleDir)) {
+  const manifest = await readJsonFile(path.join(bundleDir, 'manifest.json'))
+  if (!manifest) return null
+  const meta = (await readJsonFile(path.join(bundleDir, 'example.json'))) ?? {}
+  // Format 2 lists textures in assets.json alongside every other payload; format 1 had a file each.
+  const textures = (await readJsonFile(path.join(bundleDir, 'assets.json')))?.textures
+    ?? (await readJsonFile(path.join(bundleDir, 'textures', 'index.json')))
+    ?? []
+  const hasThumb = await fs.access(path.join(bundleDir, 'thumbnail.png')).then(() => true, () => false)
+  return {
+    slug,
+    name: meta.name || manifest.projectName || slug,
+    ...(meta.description ? { description: meta.description } : {}),
+    ...(hasThumb ? { thumbnail: `${slug}/thumbnail.png` } : {}),
+    ...(meta.order !== undefined ? { order: meta.order } : {}),
+    bytes: await dirSize(bundleDir),
+    sceneCount: (manifest.sceneMetas ?? []).length,
+    textureCount: textures.length,
+    createdAt: meta.createdAt ?? manifest.createdAt ?? 0,
+  }
+}
+
+/** The gallery's display order: `order`, then name. */
+export const byOrder = (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name)
+
 /** Rebuild index.json from the bundles in the gallery folder. Returns its entries. */
 export async function regenerateIndex(dir = GALLERY_DIR) {
   await fs.mkdir(dir, { recursive: true })
   const entries = []
   for (const dirent of await fs.readdir(dir, { withFileTypes: true })) {
     if (!dirent.isDirectory()) continue
-    const slug = dirent.name
-    const bundleDir = path.join(dir, slug)
-    const manifest = await readJsonFile(path.join(bundleDir, 'manifest.json'))
-    if (!manifest) continue
-    const meta = (await readJsonFile(path.join(bundleDir, 'example.json'))) ?? {}
-    // Format 2 lists textures in assets.json alongside every other payload; format 1 had a file each.
-    const textures = (await readJsonFile(path.join(bundleDir, 'assets.json')))?.textures
-      ?? (await readJsonFile(path.join(bundleDir, 'textures', 'index.json')))
-      ?? []
-    const hasThumb = await fs.access(path.join(bundleDir, 'thumbnail.png')).then(() => true, () => false)
-    entries.push({
-      slug,
-      name: meta.name || manifest.projectName || slug,
-      ...(meta.description ? { description: meta.description } : {}),
-      ...(hasThumb ? { thumbnail: `${slug}/thumbnail.png` } : {}),
-      ...(meta.order !== undefined ? { order: meta.order } : {}),
-      bytes: await dirSize(bundleDir),
-      sceneCount: (manifest.sceneMetas ?? []).length,
-      textureCount: textures.length,
-      createdAt: meta.createdAt ?? manifest.createdAt ?? 0,
-    })
+    const entry = await bundleEntry(path.join(dir, dirent.name), dirent.name)
+    if (entry) entries.push(entry)
   }
-  entries.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name))
+  entries.sort(byOrder)
   await fs.writeFile(path.join(dir, 'index.json'), JSON.stringify({ version: 1, examples: entries }, null, 2) + '\n')
   return entries
 }

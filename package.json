@@ -24,7 +24,7 @@
     "test:updates": "node applications/app-kit/desktop/tools/updatesE2E.mjs",
     "editor:install": "cd applications && npm ci",
     "editor:dev": "node tools/ensurePlayer.mjs && node tools/ensureExamples.mjs && concurrently \"npm run watch:types\" \"npm run editor\"",
-    "editor:build": "npm run build:player && node tools/ensureExamples.mjs && cd applications/editor && npm run build",
+    "editor:build": "npm run build:player && cd applications/editor && npm run build && npm run build:creator",
     "desktop:install": "cd applications/app-kit/desktop && npm install",
     "desktop:dev": "node tools/ensurePlayer.mjs && node tools/ensureExamples.mjs && node tools/ensureDesktop.mjs && concurrently --kill-others --names types,editor,electron \"npm run watch:types\" \"npm run editor:serve\" \"cd applications/app-kit/desktop && npm run dev\"",
     "desktop:build": "npm run build && npm run editor:build && npm run build:sdk && npm run build:host && cd applications/app-kit/desktop && npm run dist",
@@ -43,6 +43,7 @@
     "creator:serve": "cd applications/creator && npm run dev",
     "creator:dev": "concurrently \"npm run watch:types\" \"npm run creator\"",
     "creator:build": "cd applications/creator && npm run build",
+    "creator:build:web": "cd applications/creator && npm run build:web",
     "dev:all": "node tools/ensurePlayer.mjs && node tools/ensureExamples.mjs && concurrently \"npm run watch:types\" \"npm run editor\" \"npm run creator:serve\"",
     "test:engine": "vitest run --project engine --project \"engine on *\"",
     "test:examples": "vitest run --project \"example:*\"",
@@ -54,6 +55,7 @@
     "examples:publish": "node tools/examples/data.mjs publish",
     "examples:prune": "node tools/examples/data.mjs prune",
     "examples:bundle": "node tools/examples/gallery.mjs",
+    "examples:release": "node tools/examples/release.mjs",
     "examples:sync": "node tools/exampleKit/syncScripts.mjs",
     "examples:typecheck": "node tools/examples/typecheck.mjs"
   },
@@ -67,6 +69,7 @@
     "@vitest/coverage-istanbul": "^3.2.7",
     "@webgpu/types": "^0.1.72",
     "concurrently": "^8.2.2",
+    "jszip": "^3.10.2",
     "typescript": "^5.3.2",
     "vite": "^7.3.6",
     "vitest": "^3.2.7"

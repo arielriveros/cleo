@@ -6,6 +6,12 @@
   created with the same text as its body. Write it for someone reading it in six months, not for the
   reviewer reading it today -- the entries already in CHANGELOG.md are the house style.
 
+  WHAT SHIPS is what this PR changed (tools/ci/affected.mjs; the engine ships everything):
+    - the editor: its site, and the Windows and Linux installers (this release becomes the latest);
+    - Cleo Creator: its site;
+    - an example: its zip on the `examples` release.
+  A PR that changes none of these (prose, this template) merges without a release.
+
   These comments are stripped before any of that, so leave them in.
 
   HOW FAR THE VERSION MOVES (1.<breaking>.<feature>.<fix>):

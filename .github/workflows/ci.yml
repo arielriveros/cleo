@@ -1,30 +1,31 @@
-# The pre-release pipeline: typecheck, test, deploy. One workflow so the stages can depend on each other
-# -- the editor used to deploy from firebase-hosting-merge.yml, which ran in parallel with CI and happily
-# shipped a build whose tests were red. Deploy now hangs off the test jobs.
+# The pull-request gate: typecheck and test what the pull request changed. Nothing here deploys -- merges into main
+# are shipped by release.yml, which runs the same tests.yml first.
+#
+# WHAT RUNS. The `changes` job asks tools/ci/affected.mjs which areas the pull request touched (its own commits:
+# merge-base..head). Each job below runs for its areas only, and the engine is the dependency of everything: an
+# engine change typechecks and tests every app. A job skipped because its area did not change is not a failure;
+# `CI result` at the bottom is the one check branch protection should require, and it reads every other job.
 #
 # Severity is deliberately not uniform:
 #
-#   typecheck  WARNS.  `tsc --noEmit` is the only thing that checks the editor at all (Vite transforms
-#              through esbuild, which strips types without looking at them), so it has to run -- but
-#              a type error blocks nothing that a green test suite says is working. It reports as an
-#              annotation plus a job-summary block, and the job stays green.
-#   tests      FAIL.   Plus a coverage floor. They live in tests.yml, which release.yml calls too, so the
-#              bar for shipping is the same file as the bar for merging.
+#   typecheck  WARNS for the engine and the editor. `tsc --noEmit` is the only thing that checks the editor at all
+#              (Vite transforms through esbuild, which strips types without looking at them), so it has to run --
+#              but a type error blocks nothing that a green test suite says is working. It reports as an annotation
+#              plus a job-summary block, and the job stays green. The app-kit and Creator typechecks BLOCK: both
+#              started clean.
+#   tests      FAIL.   Plus a coverage floor. They live in tests.yml, which release.yml calls too, so the bar for
+#              shipping is the same file as the bar for merging.
 #
-# The two typecheck jobs and the two test jobs all start at once. The typechecks are the slow half (the
-# editor one needs a full engine build first, because dist/ is gitignored and the editor consumes the
-# engine through it), so running them alongside the tests rather than in front of them is what keeps the
-# gate fast enough to not be ignored. None of them touch a secret, so they run for fork PRs too.
+# None of these touch a secret, so they run for fork pull requests too.
 name: CI
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
+    branches: [main]
+  # Everything, on demand.
+  workflow_dispatch:
 
-# A newer push to the same branch makes the older run's answer irrelevant -- and, for a PR, its preview
-# deploy stale.
+# A newer push to the same branch makes the older run's answer irrelevant.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -35,14 +36,44 @@ permissions:
   pull-requests: write
 
 jobs:
+  changes:
+    name: Changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      engine: ${{ steps.affected.outputs.engine }}
+      appkit: ${{ steps.affected.outputs.appkit }}
+      editor: ${{ steps.affected.outputs.editor }}
+      creator: ${{ steps.affected.outputs.creator }}
+      examples: ${{ steps.affected.outputs.examples }}
+    steps:
+      # Full history: the merge base of the pull request's base and head has to be in the clone.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # No setup-node and no install: affected.mjs imports nothing outside node: and the repository.
+      - name: Which areas changed
+        id: affected
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            node tools/ci/affected.mjs --base "$BASE" --head "$HEAD"
+          else
+            node tools/ci/affected.mjs --all
+          fi
+
   typecheck-engine:
     name: Typecheck engine (warn)
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # The deploy used to ride whatever Node ubuntu-latest happened to ship -- a silently moving target.
-      # Every job here reads the major from .nvmrc so there is one source of truth.
+      # Every job here reads the Node major from .nvmrc so there is one source of truth.
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -89,8 +120,12 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  typecheck-editor:
-    name: Typecheck editor (warn)
+  # One job for the three application typechecks: they share the engine declaration build and the workspace install,
+  # which are most of the job's time, and each step runs only for its own area.
+  typecheck-apps:
+    name: Typecheck applications
+    needs: changes
+    if: needs.changes.outputs.editor == 'true' || needs.changes.outputs.creator == 'true' || needs.changes.outputs.appkit == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -103,17 +138,18 @@ jobs:
       - run: npm ci
 
       # dist/ is untracked and applications/node_modules/cleo points at it, so the engine's declarations must be
-      # emitted before the editor can resolve -- let alone typecheck against -- `cleo`. This is also the
+      # emitted before the applications can resolve -- let alone typecheck against -- `cleo`. This is also the
       # only automated check on that .d.ts tree, which the editor compiles against in strict mode.
       - name: Build engine declarations (the applications resolve cleo -> ../../dist)
         run: npm run build
 
-      - name: Install editor deps
+      - name: Install application deps
         run: npm ci
         working-directory: applications
 
-      - name: Typecheck
+      - name: Typecheck editor
         id: tsc
+        if: needs.changes.outputs.editor == 'true'
         continue-on-error: true
         shell: bash
         working-directory: applications/editor
@@ -134,56 +170,39 @@ jobs:
 
       # Blocking, unlike the editor's: both are new and start clean.
       - name: Typecheck app-kit
+        if: needs.changes.outputs.appkit == 'true'
         working-directory: applications/app-kit
         run: npm run typecheck
 
       - name: Typecheck Cleo Creator
+        if: needs.changes.outputs.creator == 'true'
         working-directory: applications/creator
         run: npm run typecheck
 
   tests:
     name: Unit tests
+    needs: changes
     uses: ./.github/workflows/tests.yml
+    with:
+      engine: ${{ needs.changes.outputs.engine == 'true' }}
+      appkit: ${{ needs.changes.outputs.appkit == 'true' }}
+      editor: ${{ needs.changes.outputs.editor == 'true' }}
+      creator: ${{ needs.changes.outputs.creator == 'true' }}
+      examples: ${{ needs.changes.outputs.examples == 'true' }}
 
-  deploy:
-    name: Deploy editor
+  # The one check to require. A job skipped for its area reports `skipped`, which is fine; one that failed or was
+  # cancelled is not. `always()` so this runs -- and fails -- even when something it needs did.
+  ci-result:
+    name: CI result
+    needs: [changes, typecheck-engine, typecheck-apps, tests]
+    if: always()
     runs-on: ubuntu-latest
-    needs: tests
-    # The Firebase secret is invisible to fork PRs, so this would fail for a reason the contributor cannot
-    # fix. Skip it there; the four check jobs above still run and are what gate the merge.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - uses: actions/checkout@v4
-        # The editor stamps its version from `git describe --exact-match`, which needs the tags. Without
-        # them every build silently renders as `-dev`.
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      # `editor:build` -> `build:player` -> npm's implicit prebuild hook -> root `build`, so the engine's
-      # declarations are emitted as part of this. Both builds compile engine SOURCE through Vite, so there
-      # is no engine bundle to sequence against.
-      - run: npm ci && npm run editor:install && npm run editor:build
-
-      - name: Deploy to live
-        if: github.event_name == 'push'
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          entryPoint: ./applications/editor
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CLEO_EDITOR }}
-          channelId: live
-          projectId: cleo-editor
-
-      - name: Deploy preview channel
-        if: github.event_name == 'pull_request'
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          entryPoint: ./applications/editor
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CLEO_EDITOR }}
-          projectId: cleo-editor
+      - name: Every job passed or was not needed
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "results: $RESULTS"
+          case "$RESULTS" in
+            *failure*|*cancelled*) echo "::error title=CI failed::a required job failed or was cancelled"; exit 1 ;;
+          esac

@@ -1,7 +1,9 @@
-// Dev and build guard for the example gallery (applications/editor/public/examples/, built from examples/ by
-// tools/examples/gallery.mjs). Rebuilds only the examples whose folder changed; never downloads anything. An
-// example whose data has not been fetched is left out with a hint, and the dev start goes on: a missing gallery
-// must not stop anyone from working. A release build sets CLEO_EXAMPLES_REQUIRED=1, which makes it an error.
+// Dev guard for the local example gallery (applications/editor/public/examples/, built from examples/ by
+// tools/examples/gallery.mjs), run by editor:dev, desktop:dev and dev:all. Rebuilds only the examples whose folder
+// changed; never downloads anything. An example whose data has not been fetched is left out with a hint, and the
+// dev start goes on: a missing gallery must not stop anyone from working. (A shipped editor downloads its examples
+// from the `examples` release instead: tools/examples/release.mjs.) CLEO_EXAMPLES_REQUIRED=1 makes a missing
+// example an error.
 import { buildGallery } from './examples/gallery.mjs';
 
 try {

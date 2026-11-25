@@ -12,8 +12,8 @@ import {
 import { foldersOnly } from '../../utils/projects'
 import { LocationModal } from '../projectFolder/LocationField'
 
-// The gallery of example projects that ship with this build. Picking one downloads its folder from
-// examples/ and opens it as a brand-new project.
+// The gallery of example projects. Picking one downloads it -- its zip from the `examples` release, or in dev its
+// folder from the local gallery (utils/examples.ts) -- and opens it as a brand-new project.
 //
 // Nothing here may touch scoped storage: it renders on the boot launcher too, where no project is open
 // and `scoped()` throws by design.
@@ -78,8 +78,8 @@ export default function ExamplesGallery({ examples, className = '' }: {
       const download = load.step('download').start()
       // False means the unsaved-work confirm was declined, before anything was downloaded: put the
       // gallery back rather than leaving a loading screen up for a switch that is not coming.
-      if (!await importExample(entry, (done, total) => {
-        download.progress(done, total, 'files')
+      if (!await importExample(entry, (done, total, unit) => {
+        download.progress(done, total, unit)
         if (total > 0 && done >= total) download.done()
       }, true, { folder })) {
         setBusySlug(null)
