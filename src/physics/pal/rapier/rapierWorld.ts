@@ -2,9 +2,11 @@ import type { Collider, ColliderDesc as RColliderDesc, EventQueue, ImpulseJoint,
 import type { PhysicsCapabilities } from '../capabilities';
 import { PhysicsEventKind } from '../types';
 import type {
-    BodyDesc, BodyHandle, BodyType, ColliderDesc, ColliderPart, JointDesc, JointHandle, MassProperties, Out,
+    BodyDesc, BodyHandle, BodyPin, BodyType, ColliderDesc, ColliderPart, JointDesc, JointDrive, JointHandle, MassProperties, Out,
     RayHit, RayOptions, ShapeDesc, StepProfile, V3,
 } from '../types';
+import { DriveSolver } from '../drive/driveSolver';
+import { driveRecord } from '../drive/driveRecords';
 import type { DescribedWorld } from '../copy/describedWorld';
 import { boundingRadiusOf, collidersAabb, multiply, partShapeFor, rotate } from '../shapeBounds';
 import { fromX, matchedFrame } from '../jointFrames';
@@ -42,6 +44,8 @@ export const RAPIER_CAPABILITIES: PhysicsCapabilities = {
     precision: 32,
     vehicleCasts: ['ray'],
     nativeDrivetrain: false,
+    // Its spherical joints' motors take per-axis angles, not a rotation: the shared spring drives them instead.
+    jointDrives: 'shared',
 };
 
 /** Rapier's interaction groups: 16 bits of membership over 16 of filter. */
@@ -116,6 +120,7 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
     /** Rapier collider handle → the body handle it belongs to. */
     private readonly _owner = new Map<number, BodyHandle>();
     private readonly _joints = new Map<number, { joint: ImpulseJoint; record: RapierJointRecord }>();
+    public readonly drives = new DriveSolver();
     private readonly _vehicles = new Map<number, VehicleEntry<RapierVehicle>>();
     private _nextVehicle = 1;
     /** Queued events: [kind, a, b] per event. */
@@ -198,6 +203,7 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
         for (const c of e.colliders) this._owner.delete(c.handle);
         // Rapier removes a body's joints with it.
         for (const [id, j] of this._joints) if (j.record.a === h || j.record.b === h) this._joints.delete(id);
+        if (this.drives.size) this.drives.removeBody(h);
         for (const [id, v] of [...this._vehicles]) if (v.chassis === h) this.destroyVehicle(id as VehicleHandle);
         this._raw.removeRigidBody(e.body);
         this._entries.delete(h);
@@ -439,6 +445,36 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
         if (!entry) return;
         if (entry.joint.isValid()) this._raw.removeImpulseJoint(entry.joint, true);
         this._joints.delete(j);
+        this.drives.setDrive(j, null, null);
+    }
+
+    // ---- drives ----
+
+    public setJointDrive(j: JointHandle, drive: JointDrive | null, subtree?: readonly BodyHandle[]): void {
+        const r = this._joints.get(j)?.record;
+        const record = !drive || !r || r.kind === 'fixed' ? null
+            : driveRecord(r.a, r.b, r.kind === 'hinge' ? 'hinge' : 'swing', r.anchorB, r.kind === 'hinge' ? r.axisB : null, subtree);
+        this.drives.setDrive(j, record, record ? drive : null, this);
+    }
+
+    public setJointTarget(j: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null): void {
+        this.drives.setTarget(j, rotation, angularVelocity);
+    }
+
+    public readJointDrive(j: JointHandle, out: Out): void { this.drives.report(j, out); }
+
+    public setBodyPin(h: BodyHandle, pin: BodyPin | null): void { this.drives.setPin(h, pin, this); }
+
+    public setBodyPinTarget(h: BodyHandle, pose: ArrayLike<number>, velocity?: ArrayLike<number> | null): void {
+        this.drives.setPinTarget(h, pose, velocity);
+    }
+
+    public applyTorque(h: BodyHandle, torque: ArrayLike<number>): void { this.addTorque(h, torque[0], torque[1], torque[2]); }
+
+    /** The frame getMassProperties' principal inertia is measured in (Rapier sorts the axes): what the drives read. */
+    public inertiaFrame(h: BodyHandle, out: Out): void {
+        const r = this._entry(h).body.principalInertiaLocalFrame();
+        out[0] = r.x; out[1] = r.y; out[2] = r.z; out[3] = r.w;
     }
 
     // ---- vehicles ----
@@ -500,6 +536,7 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
 
     public step(dt: number): void {
         this.onPreSubstep?.(dt);
+        if (this.drives.size) this.drives.apply(this, dt);
         this._wakeTouched();
         if (this._vehicles.size > 0) {
             // The wheels' rays read the query tree: it must see bodies moved by hand since the last step.
@@ -613,6 +650,7 @@ export class RapierWorld implements DescribedWorld<RapierJointRecord> {
         this._bodyList = null;
         this._owner.clear();
         this._joints.clear();
+        this.drives.clear();
         // The controllers went with the Rapier world they were made in.
         this._vehicles.clear();
         this._events = [];

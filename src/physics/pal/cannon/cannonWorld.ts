@@ -5,8 +5,11 @@ import {
 import type { PhysicsCapabilities } from '../capabilities';
 import { PhysicsEventKind } from '../types';
 import type {
-    BodyDesc, BodyHandle, ColliderDesc, ColliderPart, JointDesc, JointHandle, MassProperties, Out, RayHit, RayOptions, StepProfile, V3,
+    BodyDesc, BodyHandle, BodyPin, ColliderDesc, ColliderPart, JointDesc, JointDrive, JointHandle, MassProperties, Out, RayHit,
+    RayOptions, StepProfile, V3,
 } from '../types';
+import { DriveSolver } from '../drive/driveSolver';
+import { driveRecordOf } from '../drive/driveRecords';
 import type { PhysicsWorld } from '../world';
 import { CannonBody } from './cannonBody';
 import { cannonParts } from './shapes';
@@ -35,6 +38,7 @@ export const CANNON_CAPABILITIES: PhysicsCapabilities = {
     precision: 64,
     vehicleCasts: ['ray'],
     nativeDrivetrain: false,
+    jointDrives: 'shared',
 };
 
 /**
@@ -63,7 +67,10 @@ export class CannonWorld implements PhysicsWorld {
     /** Bodies taken out of the world but kept (setEnabled false): readable and writable, not simulated. */
     private readonly _disabled = new Map<number, Body>();
     private readonly _joints = new Map<number, Constraint>();
+    /** What each joint was made from: where its drive acts (drive/driveRecords.ts). */
+    private readonly _jointDescs = new Map<number, JointDesc>();
     private _nextJoint = 1;
+    public readonly drives = new DriveSolver();
     private readonly _vehicles = new Map<number, VehicleEntry<CannonVehicle>>();
     private _nextVehicle = 1;
     private readonly _profile: StepProfile = { broadphaseMs: 0, narrowphaseMs: 0, solveMs: 0, integrateMs: 0 };
@@ -139,6 +146,7 @@ export class CannonWorld implements PhysicsWorld {
 
     public destroyBody(h: BodyHandle): void {
         for (const [id, v] of [...this._vehicles]) if (v.chassis === h) this._vehicles.delete(id);
+        if (this.drives.size) this.drives.removeBody(h);
         if (this._disabled.delete(h)) return;
         const body = this.raw.getBodyById(h);
         if (!body) return;
@@ -267,6 +275,11 @@ export class CannonWorld implements PhysicsWorld {
         this._body(h).applyForce(f, r);
     }
 
+    public applyTorque(h: BodyHandle, torque: ArrayLike<number>): void {
+        const t = this._body(h).torque;
+        t.x += torque[0]; t.y += torque[1]; t.z += torque[2];
+    }
+
     public clearForces(h: BodyHandle): void {
         const body = this._body(h);
         body.force.set(0, 0, 0);
@@ -327,6 +340,7 @@ export class CannonWorld implements PhysicsWorld {
         this.raw.addConstraint(joint);
         const id = this._nextJoint++;
         this._joints.set(id, joint);
+        this._jointDescs.set(id, desc);
         return id as JointHandle;
     }
 
@@ -335,6 +349,28 @@ export class CannonWorld implements PhysicsWorld {
         if (!joint) return;
         this.raw.removeConstraint(joint);
         this._joints.delete(j);
+        this._jointDescs.delete(j);
+        this.drives.setDrive(j, null, null);
+    }
+
+    // ---- drives ----
+
+    public setJointDrive(j: JointHandle, drive: JointDrive | null, subtree?: readonly BodyHandle[]): void {
+        const desc = this._jointDescs.get(j);
+        const record = drive && desc ? driveRecordOf(desc, subtree) : null;
+        this.drives.setDrive(j, record, record ? drive : null, this);
+    }
+
+    public setJointTarget(j: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null): void {
+        this.drives.setTarget(j, rotation, angularVelocity);
+    }
+
+    public readJointDrive(j: JointHandle, out: Out): void { this.drives.report(j, out); }
+
+    public setBodyPin(h: BodyHandle, pin: BodyPin | null): void { this.drives.setPin(h, pin, this); }
+
+    public setBodyPinTarget(h: BodyHandle, pose: ArrayLike<number>, velocity?: ArrayLike<number> | null): void {
+        this.drives.setPinTarget(h, pose, velocity);
     }
 
     // ---- vehicles ----
@@ -408,6 +444,8 @@ export class CannonWorld implements PhysicsWorld {
     public step(dt: number): void {
         const world = this.raw;
         world.doProfiling = this.profile;
+        // Before cannon's step, not in its preStep hook: that runs after the solver, which would never see them.
+        if (this.drives.size) this.drives.apply(this, dt);
         world.step(dt);
         if (this.profile) {
             const prof = (world as unknown as { profile: Record<string, number> }).profile;
@@ -537,6 +575,8 @@ export class CannonWorld implements PhysicsWorld {
     public clear(): void {
         for (const constraint of [...this.raw.constraints]) this.raw.removeConstraint(constraint);
         this._joints.clear();
+        this._jointDescs.clear();
+        this.drives.clear();
         this._vehicles.clear();
         // Removing bodies is subtle enough to live in its own module — see clearWorld for the two traps
         // (splice-while-iterating, and truncating world.bodies behind the broadphase's back).

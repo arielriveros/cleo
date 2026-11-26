@@ -2,9 +2,11 @@ import type JoltNS from 'jolt-physics';
 import type { PhysicsCapabilities } from '../capabilities';
 import { PhysicsEventKind } from '../types';
 import type {
-    BodyDesc, BodyHandle, BodyType, ColliderDesc, ColliderPart, JointDesc, JointHandle, MassProperties, Out,
+    BodyDesc, BodyHandle, BodyPin, BodyType, ColliderDesc, ColliderPart, JointDesc, JointDrive, JointHandle, MassProperties, Out,
     RayHit, RayOptions, ShapeDesc, StepProfile, V3,
 } from '../types';
+import { DriveSolver, MAX_OMEGA_H, quadratic, type DriveEntry } from '../drive/driveSolver';
+import { driveRecord } from '../drive/driveRecords';
 import type { DescribedWorld } from '../copy/describedWorld';
 import { boundingRadiusOf, collidersAabb, multiply, partShapeFor, rotate } from '../shapeBounds';
 import { fromX, matchedFrame } from '../jointFrames';
@@ -52,6 +54,8 @@ export const JOLT_CAPABILITIES: PhysicsCapabilities = {
     precision: 32,
     vehicleCasts: ['ray', 'sphere', 'cylinder'],
     nativeDrivetrain: true,
+    // Hinge and cone joints by their own motors (SwingTwist and Hinge, Position mode); ball joints by the shared spring.
+    jointDrives: 'native',
 };
 
 /** cannon's damping, `v *= (1 − d)^dt`, as Jolt's rate `c` in `v *= 1 − c·dt`: the same decay for small dt. */
@@ -148,6 +152,9 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
     private readonly _order: BodyHandle[] = [];
     private _bodyList: BodyHandle[] | null = null;
     private readonly _joints = new Map<number, { constraint: JoltNS.TwoBodyConstraint; record: JoltJointRecord }>();
+    public readonly drives = new DriveSolver();
+    /** Each native drive's inertia along its motor axes when its springs were last set: [twist or hinge, swing]. */
+    private readonly _gains = new Map<number, number[]>();
     private readonly _vehicles = new Map<number, VehicleEntry<JoltVehicle>>();
     private _nextVehicle = 1;
     /** Body pairs ("lo,hi" handles) a joint keeps from colliding. */
@@ -172,6 +179,9 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
     private readonly _vec2: JoltNS.Vec3;
     private readonly _rvec: JoltNS.RVec3;
     private readonly _quat: JoltNS.Quat;
+    private readonly _spring: JoltNS.SpringSettings;
+    /** The last substep's length: what a motor's impulse is read back over. */
+    private _lastDt = 0;
     private readonly _ray: JoltNS.RRayCast;
     private readonly _raySettings: JoltNS.RayCastSettings;
     private readonly _closest: JoltNS.CastRayClosestHitCollisionCollector;
@@ -189,6 +199,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         this._vec2 = own(new J.Vec3(0, 0, 0));
         this._rvec = own(new J.RVec3(0, 0, 0));
         this._quat = own(new J.Quat(0, 0, 0, 1));
+        this._spring = own(new J.SpringSettings());
         this._ray = own(new J.RRayCast());
         this._raySettings = own(new J.RayCastSettings());
         // Not solid, both faces: a ray meets a body's entry and exit faces, and one that starts inside meets
@@ -238,6 +249,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
     public destroyBody(h: BodyHandle): void {
         const e = this._entries.get(h);
         if (!e) return;
+        if (this.drives.size) this.drives.removeBody(h);
         // Jolt keeps a joint's bodies by pointer: its joints go first.
         for (const [id, j] of [...this._joints]) if (j.record.a === h || j.record.b === h) this.destroyJoint(id as JointHandle);
         for (const [id, v] of [...this._vehicles]) if (v.chassis === h) this.destroyVehicle(id as VehicleHandle);
@@ -549,11 +561,138 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
     public destroyJoint(j: JointHandle): void {
         const entry = this._joints.get(j);
         if (!entry) return;
+        this.drives.setDrive(j, null, null);
         this._system.RemoveConstraint(entry.constraint);
         this._joints.delete(j);
+        this._gains.delete(j);
         if (!entry.record.collideConnected) {
             const key = pairKey(entry.record.a, entry.record.b), n = (this._noCollide.get(key) ?? 1) - 1;
             if (n > 0) this._noCollide.set(key, n); else this._noCollide.delete(key);
+        }
+    }
+
+    // ---- drives ----
+
+    public setJointDrive(j: JointHandle, drive: JointDrive | null, subtree?: readonly BodyHandle[]): void {
+        const entry = this._joints.get(j), r = entry?.record;
+        const record = !drive || !r || r.kind === 'fixed' ? null
+            : driveRecord(r.a, r.b, r.kind === 'hinge' ? 'hinge' : 'swing', r.anchorB, r.kind === 'hinge' ? rotate(r.frameB, 1, 0, 0, [0, 0, 0]) : null, subtree);
+        // A motor left on would keep pulling after its drive is gone.
+        if (!record && entry && this.drives.drive(j)) this._motor(entry, null);
+        this.drives.setDrive(j, record, record ? drive : null, this);
+    }
+
+    public setJointTarget(j: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null): void {
+        this.drives.setTarget(j, rotation, angularVelocity);
+    }
+
+    public readJointDrive(j: JointHandle, out: Out): void { this.drives.report(j, out); }
+
+    public setBodyPin(h: BodyHandle, pin: BodyPin | null): void { this.drives.setPin(h, pin, this); }
+
+    public setBodyPinTarget(h: BodyHandle, pose: ArrayLike<number>, velocity?: ArrayLike<number> | null): void {
+        this.drives.setPinTarget(h, pose, velocity);
+    }
+
+    public applyTorque(h: BodyHandle, torque: ArrayLike<number>): void { this.addTorque(h, torque[0], torque[1], torque[2]); }
+
+    /** The frame getMassProperties' principal inertia is measured in (Jolt sorts the axes): what the drives read. */
+    public inertiaFrame(h: BodyHandle, out: Out): void {
+        const e = this._entry(h);
+        if (e.type !== 'dynamic') { out[0] = out[1] = out[2] = 0; out[3] = 1; return; }
+        const r = e.body.GetMotionProperties().GetInertiaRotation();
+        out[0] = r.GetX(); out[1] = r.GetY(); out[2] = r.GetZ(); out[3] = r.GetW();
+    }
+
+    /**
+     * A drive on one of Jolt's own motors (hinge and cone joints), in Position mode: given the stiffness and
+     * damping the shared spring would meet the same joint with (k = I·Ω², c = 2ζIΩ, I the joint's effective
+     * inertia along each motor's axes; see drive/driveSolver.ts), so a drive feels the same on every backend.
+     * Its target is set every substep. False for a joint Jolt has no motor for (ball): the shared spring drives it.
+     */
+    private readonly _nativeDrive = (e: DriveEntry, K: readonly number[], qA: readonly number[], dt: number): boolean => {
+        const joint = this._joints.get(e.id);
+        if (!joint || (joint.record.kind !== 'hinge' && joint.record.kind !== 'cone')) return false;
+        const d = e.drive;
+        if (e.dirty) { this._motor(joint, d); e.dirty = false; this._gains.delete(e.id); }
+        if (!(d.frequency > 0) || !(d.maxTorque > 0)) return true;
+        const J = this._J, record = joint.record;
+        let omega = 2 * Math.PI * d.frequency;
+        if (omega * dt > MAX_OMEGA_H) omega = MAX_OMEGA_H / dt;
+        const zeta = Math.max(0, d.damping);
+        // Inertia along the motors' axes: A's joint frame (X the twist / hinge axis, Y and Z the swing).
+        const frame = multiply(qA, record.frameA, [0, 0, 0, 1]);
+        const along = (x: number, y: number, z: number) => { const a = rotate(frame, x, y, z, [0, 0, 0]); const q = quadratic(K, a); return q > 0 ? 1 / q : 0; };
+        const iTwist = along(1, 0, 0);
+        const iSwing = record.kind === 'cone' ? 0.5 * (along(0, 1, 0) + along(0, 0, 1)) : 0;
+        const gains = this._gains.get(e.id) ?? [NaN, NaN];
+        const changed = (was: number, now: number) => !(Math.abs(now - was) <= 0.02 * Math.abs(was));
+        if (changed(gains[0], iTwist) || changed(gains[1], iSwing)) {
+            gains[0] = iTwist; gains[1] = iSwing;
+            this._gains.set(e.id, gains);
+            if (record.kind === 'cone') {
+                const c = J.castObject(joint.constraint, J.SwingTwistConstraint);
+                this._stiffness(c.GetTwistMotorSettings(), iTwist * omega * omega, 2 * zeta * iTwist * omega);
+                this._stiffness(c.GetSwingMotorSettings(), iSwing * omega * omega, 2 * zeta * iSwing * omega);
+            } else {
+                this._stiffness(J.castObject(joint.constraint, J.HingeConstraint).GetMotorSettings(), iTwist * omega * omega, 2 * zeta * iTwist * omega);
+            }
+        }
+        // What the motor pushed in the last substep, for readJointDrive.
+        const last = this._lastDt > 0 ? this._lastDt : dt;
+        let lambda: number;
+        // Jolt's body-space target is B's rotation in A's frame (R2 = R1·X): the inverse of the drive's.
+        const t = e.target, q = this._q4([-t[0], -t[1], -t[2], t[3]]);
+        if (record.kind === 'cone') {
+            const c = J.castObject(joint.constraint, J.SwingTwistConstraint);
+            const l = c.GetTotalLambdaMotor();
+            lambda = Math.hypot(l.GetX(), l.GetY(), l.GetZ());
+            c.SetTargetOrientationBS(q);
+        } else {
+            const c = J.castObject(joint.constraint, J.HingeConstraint);
+            lambda = Math.abs(c.GetTotalLambdaMotor());
+            c.SetTargetOrientationBS(q);
+        }
+        e.report[0] += lambda / last;
+        e.report[1] = Math.min(1, lambda / (d.maxTorque * last));
+        const a = this._entries.get(record.a), b = this._entries.get(record.b);
+        if (a?.enabled && a.type === 'dynamic' && !a.body.IsActive()) this._bi.ActivateBody(a.body.GetID());
+        if (b?.enabled && b.type === 'dynamic' && !b.body.IsActive()) this._bi.ActivateBody(b.body.GetID());
+        return true;
+    };
+
+    /** A motor's spring as absolute stiffness (N·m/rad) and damping (N·m·s/rad). */
+    private _stiffness(m: JoltNS.MotorSettings, k: number, c: number): void {
+        const spring = this._spring;
+        spring.mMode = this._J.ESpringMode_StiffnessAndDamping;
+        spring.mStiffness = Number.isFinite(k) ? Math.max(0, k) : 0;
+        spring.mDamping = Number.isFinite(c) ? Math.max(0, c) : 0;
+        m.set_mSpringSettings(spring);
+    }
+
+    /** Turn a hinge or cone joint's motors on with a drive's torque limit, or off (null, or no spring) with its friction. */
+    private _motor(joint: { constraint: JoltNS.TwoBodyConstraint; record: JoltJointRecord }, d: JointDrive | null): void {
+        const J = this._J;
+        const on = !!d && d.frequency > 0 && d.maxTorque > 0;
+        const state = on ? J.EMotorState_Position : J.EMotorState_Off;
+        const limit = (m: JoltNS.MotorSettings) => {
+            const t = on ? Math.max(0, d!.maxTorque) : 0;
+            m.mMaxTorqueLimit = t;
+            m.mMinTorqueLimit = -t;
+        };
+        const friction = d && !on ? Math.max(0, d.friction ?? 0) : 0;
+        if (joint.record.kind === 'cone') {
+            const c = J.castObject(joint.constraint, J.SwingTwistConstraint);
+            limit(c.GetSwingMotorSettings());
+            limit(c.GetTwistMotorSettings());
+            c.SetMaxFrictionTorque(friction);
+            c.SetSwingMotorState(state);
+            c.SetTwistMotorState(state);
+        } else if (joint.record.kind === 'hinge') {
+            const c = J.castObject(joint.constraint, J.HingeConstraint);
+            limit(c.GetMotorSettings());
+            c.SetMaxFrictionTorque(friction);
+            c.SetMotorState(state);
         }
     }
 
@@ -616,6 +755,8 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
 
     public step(dt: number): void {
         this.onPreSubstep?.(dt);
+        if (this.drives.size) this.drives.apply(this, dt, this._nativeDrive);
+        this._lastDt = dt;
         this._rows = [];
         // A world that steps reads its own vehicles again, not what a copy's step landed.
         for (const e of this._vehicles.values()) {
@@ -700,6 +841,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         this._order.length = 0;
         this._bodyList = null;
         this._joints.clear();
+        this.drives.clear();
         this._noCollide.clear();
         this._events = [];
         this._live.clear();

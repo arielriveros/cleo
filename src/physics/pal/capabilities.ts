@@ -32,6 +32,12 @@ export interface PhysicsCapabilities {
      * shared model's (vehicle/raycastDrive.ts) over a native raycast vehicle.
      */
     readonly nativeDrivetrain: boolean;
+    /**
+     * How joint drives (muscles) are met: by the backend's own joint motors (Jolt's, for hinge and cone joints),
+     * or by the shared implicit spring applied as torque (drive/driveSolver.ts). The same gains mean the same
+     * either way; body pins and gravity compensation are always the shared ones.
+     */
+    readonly jointDrives: 'native' | 'shared';
 }
 
 /** The boot log line: `physics cannon · capsule compound · groups 32-bit · ...`. */
@@ -42,6 +48,7 @@ export function describePhysicsCapabilities(c: PhysicsCapabilities): string {
         `groups ${c.collisionGroupBits}-bit`,
         `cone limit ${c.coneLimit}`,
         `f${c.precision}`,
+        `drives ${c.jointDrives}`,
         c.threadable ? 'worker capable' : 'main thread only',
     ].join(' · ');
 }

@@ -164,6 +164,43 @@ export type JointDesc = { a: BodyHandle; b: BodyHandle; maxForce?: number; colli
     | { kind: 'coneTwist'; anchorA: V3; anchorB: V3; axisA: V3; axisB: V3; coneAngle: number; twistAngle: number }
 );
 
+/**
+ * A joint's muscle: an angular spring that turns body A toward a target rotation relative to body B
+ * (PhysicsWorld.setJointTarget), as stiff as `frequency` says and damped by `damping`. The gains are
+ * mass-normalised, so the same numbers feel the same on a hand and a thigh: a spring at `frequency` Hz with
+ * damping ratio `damping` (1 = critical: no overshoot, fastest settle). Jolt's joint motors take exactly these;
+ * the other backends meet them with the same implicit spring applied as torque (drive/driveSolver.ts).
+ */
+export interface JointDrive {
+    /** Hz. 0 = no spring (the joint only holds its limits, plus `friction`). About 2 is a relaxed limb, 10 a rigid one. */
+    frequency: number;
+    /** Damping ratio: 1 critical, below it the target is overshot, above it reached slowly. */
+    damping: number;
+    /** N·m: the most the muscle can push with. What a falling body overpowers. */
+    maxTorque: number;
+    /** N·m that resists any motion of the joint while its spring is off (a stiff, tired limb). Default 0. */
+    friction?: number;
+    /**
+     * 0..1: how much of gravity's pull on everything this joint holds up (setJointDrive's `subtree`) the
+     * muscle cancels on its own, so a soft spring holds its pose instead of sagging. Default 0.
+     */
+    gravityCompensation?: number;
+}
+
+/**
+ * Puppet strings: a body pulled toward a target pose in the world (PhysicsWorld.setBodyPinTarget) by a
+ * force and torque that come from nowhere — what keeps an otherwise simulated body on its animation.
+ * Springs at the given frequencies (Hz) and damping ratio, mass-normalised like JointDrive.
+ */
+export interface BodyPin {
+    linearFrequency: number;
+    angularFrequency: number;
+    damping: number;
+    /** N and N·m: the most the strings may pull with. */
+    maxForce: number;
+    maxTorque: number;
+}
+
 export interface RayOptions {
     /**
      * Every hit, in the backend's own order (`'all'`; a body may be hit more than once, on the faces the

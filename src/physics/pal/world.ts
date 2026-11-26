@@ -1,8 +1,9 @@
 import type { PhysicsCapabilities } from './capabilities';
 import type {
-    BodyDesc, BodyHandle, ColliderDesc, ColliderPart, JointDesc, JointHandle, MassProperties, Out, PhysicsBackendKind,
-    PhysicsEventKind, RayHit, RayOptions, StepProfile, V3,
+    BodyDesc, BodyHandle, BodyPin, ColliderDesc, ColliderPart, JointDesc, JointDrive, JointHandle, MassProperties, Out,
+    PhysicsBackendKind, PhysicsEventKind, RayHit, RayOptions, StepProfile, V3,
 } from './types';
+import type { DriveSolver } from './drive/driveSolver';
 import type { VehicleDesc, VehicleHandle, VehicleInput } from './vehicle/vehicleDesc';
 
 /**
@@ -79,6 +80,8 @@ export interface PhysicsWorld {
     applyImpulse(body: BodyHandle, impulse: ArrayLike<number>, relativePoint?: ArrayLike<number>): void;
     /** A force at a point measured from the centre of mass, acting over the next substep only. */
     applyForce(body: BodyHandle, force: ArrayLike<number>, relativePoint?: ArrayLike<number>): void;
+    /** A torque [3] (world), acting over the next substep only. */
+    applyTorque(body: BodyHandle, torque: ArrayLike<number>): void;
     /** Drop the force and torque applied since the last substep. */
     clearForces(body: BodyHandle): void;
 
@@ -106,6 +109,29 @@ export interface PhysicsWorld {
     createJoint(desc: JointDesc): JointHandle;
     destroyJoint(joint: JointHandle): void;
 
+    // ---- drives (drive/driveSolver.ts) ----
+
+    /**
+     * Give a hinge, cone-twist or ball joint a muscle (see JointDrive), or take it away (null). Its target starts
+     * at the rotation the two bodies hold now. `subtree`: the bodies the joint holds up — A and everything that
+     * hangs from it — which the drive's gravity compensation weighs. Calling again changes the gains and keeps
+     * the target. A fixed joint is never driven.
+     */
+    setJointDrive(joint: JointHandle, drive: JointDrive | null, subtree?: readonly BodyHandle[]): void;
+    /**
+     * Where a driven joint's muscle turns body A: A's rotation in B's frame, `inv(qB)·qA` [x y z w], and that
+     * target's own angular velocity [3] in B's frame (what the spring damps relative to; default still).
+     */
+    setJointTarget(joint: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null): void;
+    /** What a driven joint did in the last substep: [torque N·m, saturation 0..1, angle still to go rad] into `out`. */
+    readJointDrive(joint: JointHandle, out: Out): void;
+    /** Pin a dynamic body to a pose in the world with puppet strings (see BodyPin), or let it go (null). */
+    setBodyPin(body: BodyHandle, pin: BodyPin | null): void;
+    /** A pinned body's target: node-origin pose [px py pz qx qy qz qw] and its velocity [vx vy vz wx wy wz] (default still). */
+    setBodyPinTarget(body: BodyHandle, pose: ArrayLike<number>, velocity?: ArrayLike<number> | null): void;
+    /** The drives and pins themselves: what the physics worker's copy reads and writes (drive/driveCopy.ts). */
+    readonly drives: DriveSolver;
+
     // ---- vehicles ----
 
     /**
@@ -121,7 +147,10 @@ export interface PhysicsWorld {
 
     // ---- the step ----
 
-    /** Called at the start of every substep, before the solver: where per-substep forces go (buoyancy). */
+    /**
+     * Called at the start of every substep, before the solver: where per-substep forces go (buoyancy). The
+     * world's own drives and pins are applied right after it, in the same substep.
+     */
     onPreSubstep: ((dt: number) => void) | null;
     /** Advance by ONE substep of `dt` seconds. */
     step(dt: number): void;
