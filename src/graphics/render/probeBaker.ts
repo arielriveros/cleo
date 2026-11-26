@@ -2,7 +2,7 @@ import { mat4, vec3 } from 'gl-matrix';
 import { Frustum } from '../../core/frustum';
 import { lightReachesProbe } from '../../core/scene/probeBakeState';
 import { Logger } from '../../core/logger';
-import { isEditorOnlyNode } from '../../core/scene/editorNodes';
+import { isEditorOnlyNode, isSpawnWarmupCopy } from '../../core/scene/editorNodes';
 import type { LightBakeSnapshot } from '../../core/scene/nodes/lightNode';
 import type { LightProbeNode } from '../../core/scene/nodes/lightProbeNode';
 import type { ModelNode } from '../../core/scene/nodes/modelNode';
@@ -457,6 +457,7 @@ function inCapture(node: ModelNode): boolean {
     if (isEditorOnlyNode(node)) return false;
     // The wider "hidden from the tree" set a capture has always left out, preview props included.
     if (node.name.startsWith('__editor__') || node.name.startsWith('__debug__')) return false;
+    if (isSpawnWarmupCopy(node)) return false;
     const config = node.model.material.config;
     if (config.transparent) return false;
     // ===false so legacy/default materials with the flag unset still render.

@@ -20,6 +20,8 @@ import { Texture } from '../texture';
 import { TextureManager } from '../systems/textureManager';
 import { ShaderManager } from '../systems/shaderManager';
 import { Logger } from '../../core/logger';
+import { shaderActivity } from '../shaderActivity';
+import { particlePipelineRecipe, type ParticleRecipe, type PipelineRecipe } from '../shaderOptimizer';
 import { frameStats } from '../renderStats';
 import { LUT_ROWS, LUT_WIDTH } from '../../particles/curves';
 import { DRAW, SIM, SURFACE, packEmitter, simStripMask, stepUniforms, surfaceFlags, type PackedEmitter } from '../../particles/particlePack';
@@ -69,6 +71,11 @@ export const MAX_SORTED_PARTICLES = 65536;
 /** What the simulation needs from the frame, all of it from the PREVIOUS frame's camera and depth. */
 export interface ParticleSimFrame {
     encoder: CommandEncoder;
+    /**
+     * Whether a pipeline this frame still lacks is built off the main thread and waited for (an on-screen frame on
+     * WebGPU: PipelineCache.deferring), rather than at once. Absent: at once (a capture, a preview).
+     */
+    defer?: boolean;
     /** Scene gravity, world space. */
     gravity: readonly number[];
     /** Opaque scene depth and the unjittered view-projection that produced it. Null before frame 1. */
@@ -95,6 +102,8 @@ export interface ParticleSimFrame {
 export interface ParticleDrawFrame {
     pass: RenderPassEncoder;
     target: RenderTarget;
+    /** As {@link ParticleSimFrame.defer}: an emitter whose draw pipeline is still building is left out of the frame. */
+    defer?: boolean;
     /** The raster view-projection, in the backend's clip convention. */
     viewProj: mat4;
     view: mat4;
@@ -330,15 +339,23 @@ export class ParticleRenderer {
     private readonly _systems = new Map<ParticleSystemNode, SystemGpu>();
     private readonly _meshes = new Map<string, MeshGpu>();
     private _frame = 0;
-    private _computePipeline: ComputePipeline | null = null;
     private _simUniforms: UniformSet | null = null;
     private _simPipelineGL: RenderPipeline | null = null;
-    private _sortComputePipeline: ComputePipeline | null = null;
     /** Simulation pipelines with an emitter's custom code spliced in, by source key. */
     private readonly _customPipelines = new Map<string, ComputePipeline | RenderPipeline>();
     private _sortUniforms: UniformSet | null = null;
     private _sortPipelineGL: RenderPipeline | null = null;
     private readonly _drawPipelines = new Map<string, RenderPipeline>();
+    /**
+     * Pipelines being built off the main thread (WebGPU), by key, and those that failed there (built at once next
+     * time). See {@link _obtain}.
+     */
+    private readonly _building = new Set<string>();
+    private readonly _buildFailed = new Set<string>();
+    /** Bumped by resetPipelines: a build started on the device before must not land in the caches after. */
+    private _generation = 0;
+    /** Every pipeline this session built that a later one could warm, as recipes (custom code never: no name). */
+    private readonly _recipes = new Map<string, PipelineRecipe>();
     private _white: Texture | null = null;
     private _blackCube: Texture | null = null;
     private _depthFallback: Texture | null = null;
@@ -531,6 +548,10 @@ export class ParticleRenderer {
                     continue;
                 }
                 const gpu = this._gpuFor(node, flat2D);
+                // Its simulation pipelines first. One still building off the main thread holds the system: its steps
+                // stay queued (as a hidden tab's do, the oldest dropped past the cap) and run once it is in, instead
+                // of this frame stalling on the compile. Every one is asked for, so they build together.
+                if (compute && !this._simPipelinesReady(gpu, runtime, frame.defer === true)) continue;
                 frameStats.particleSystems++;
                 const colliders = this._collidersFor(scene, node, gpu);
                 // INTERLEAVED by step, not emitter by emitter: a sub-emitter reads its parent's state
@@ -732,10 +753,8 @@ export class ParticleRenderer {
 
     private _stepCompute(emitter: EmitterGpu, values: Record<string, unknown>, frame: ParticleSimFrame,
                          parent: EmitterGpu | null, _start: number, count: number): void {
-        const base = this._ensureComputePipeline();
-        const strip = !emitter.packed.custom && particleSimVariants() ? simStripMask(emitter.packed.simMask, !!parent) : 0;
-        const pipeline = emitter.packed.custom ? this._customComputePipeline(emitter.packed.custom)
-            : strip ? this._variantComputePipeline(strip) : base;
+        // In by now: `simulate` held the system until it was (_simPipelinesReady).
+        const pipeline = this._simPipeline(emitter, parent, false)!;
         const pid = pipelineId(pipeline);
         const uniforms = this._simUniforms!;
         this._writeStep(emitter, values, frame, 'arena', (name, value) => { uniforms.set(name, value); });
@@ -832,30 +851,43 @@ export class ParticleRenderer {
         return pipeline;
     }
 
-    /** The WebGPU simulation pipeline for a strip-mask variant. Same uniform layout as the full one. */
-    private _variantComputePipeline(strip: number): ComputePipeline {
-        const key = 'vc:' + strip;
-        let pipeline = this._customPipelines.get(key) as ComputePipeline | undefined;
-        if (!pipeline) {
-            pipeline = this._computePipelineFor(particleSimProgram(strip),
-                ParticleSimComputeProgram.variants?.[`s${strip}`] ?? ParticleSimComputeProgram);
-            this._customPipelines.set(key, pipeline);
+    /**
+     * Whether every simulation pipeline `gpu`'s emitters step with is in, asking for each one missing: in a frame
+     * that may wait (`defer`), built off the main thread, else at once.
+     */
+    private _simPipelinesReady(gpu: SystemGpu, runtime: ParticleSystemNode['runtime'], defer: boolean): boolean {
+        let ready = true;
+        for (let i = 0; i < gpu.emitters.length; i++) {
+            const link = runtime.links[i];
+            const parent = link ? gpu.emitters[link.parent] ?? null : null;
+            if (!this._simPipeline(gpu.emitters[i], parent, defer)) ready = false;
         }
-        return pipeline;
+        return ready;
     }
 
-    /** The WebGPU simulation pipeline with `custom` spliced into the core. WGSL, compiled by the browser. */
-    private _customComputePipeline(custom: NonNullable<PackedEmitter['custom']>): ComputePipeline {
-        const key = 'c:' + custom.compiled.key;
-        let pipeline = this._customPipelines.get(key) as ComputePipeline | undefined;
-        if (!pipeline) {
-            pipeline = this._computePipelineFor(`particleSim#${custom.compiled.key}`, {
-                ...ParticleSimComputeProgram,
-                wgsl: composeCustomSim(ParticleSimComputeProgram.wgsl, custom.source),
-            });
-            this._customPipelines.set(key, pipeline);
+    /**
+     * The WebGPU simulation pipeline `emitter` steps with: its custom code spliced into the core, a strip-mask
+     * variant (the same uniform layout as the full program), or the full program. Null while it builds off the
+     * main thread ({@link _obtain}).
+     */
+    private _simPipeline(emitter: EmitterGpu, parent: EmitterGpu | null, defer: boolean): ComputePipeline | null {
+        this._simUniforms ??= this._uniformsFor(ParticleSimComputeProgram, 'particleSim');
+        const custom = emitter.packed.custom;
+        if (custom) {
+            const label = `particleSim#${custom.compiled.key}`;
+            return this._obtainCompute('c:' + custom.compiled.key, label, {
+                ...ParticleSimComputeProgram, wgsl: composeCustomSim(ParticleSimComputeProgram.wgsl, custom.source),
+            }, defer, null);
         }
-        return pipeline;
+        const strip = particleSimVariants() ? simStripMask(emitter.packed.simMask, !!parent) : 0;
+        return this._simVariant(strip, defer);
+    }
+
+    /** The full simulation program (`strip` 0), or one of its strip-mask variants. */
+    private _simVariant(strip: number, defer: boolean): ComputePipeline | null {
+        if (!strip) return this._obtainCompute('sim', 'particleSim', ParticleSimComputeProgram, defer, { kind: 'sim', strip: 0 });
+        return this._obtainCompute('vc:' + strip, particleSimProgram(strip),
+            ParticleSimComputeProgram.variants?.[`s${strip}`] ?? ParticleSimComputeProgram, defer, { kind: 'sim', strip });
     }
 
     /**
@@ -915,19 +947,111 @@ export class ParticleRenderer {
         return group;
     }
 
-    private _ensureComputePipeline(): ComputePipeline {
-        if (this._computePipeline) return this._computePipeline;
-        this._computePipeline = this._computePipelineFor('particleSim', ParticleSimComputeProgram);
-        this._simUniforms = this._uniformsFor(ParticleSimComputeProgram, 'particleSim');
-        return this._computePipeline;
-    }
-
-    private _computePipelineFor(label: string, program: ParticleProgram): ComputePipeline {
-        const module = device.createShaderModule({
+    private _computeModule(label: string, program: ParticleProgram) {
+        return device.createShaderModule({
             label, stage: ShaderStage.COMPUTE,
             source: program.wgsl, entryPoints: program.entryPoints, resources: program.resources,
         });
-        return device.createComputePipeline({ label, compute: module });
+    }
+
+    /** A compute pipeline by `key` (the full simulation, a variant, custom code, the sort) through {@link _obtain}. */
+    private _obtainCompute(key: string, label: string, program: ParticleProgram, defer: boolean,
+                           recipe: ParticleRecipe | null): ComputePipeline | null {
+        const cache = this._computeCache;
+        return this._obtain(key, label, recipe, defer, () => cache.get(key) ?? null, p => cache.set(key, p),
+            () => device.createComputePipeline({ label, compute: this._computeModule(label, program) }),
+            device.createComputePipelineAsync
+                ? () => device.createComputePipelineAsync!({ label, compute: this._computeModule(label, program) })
+                : null);
+    }
+
+    /** Compute pipelines by key: `sim` (the full simulation), `vc:<strip>`, `c:<custom key>`, `sort`. */
+    private readonly _computeCache = new Map<string, ComputePipeline>();
+
+    /**
+     * `key`'s pipeline if it is in. On a miss in a frame that may go without it (`defer`, an on-screen frame on
+     * WebGPU), its build is started off the main thread and null returned until it is ready: what
+     * PipelineCache.getOrDefer does for a material, for the pipelines the particle renderer builds itself. On
+     * WebGPU creating a pipeline IS its compile, and the first muzzle flash of a session held the whole window for
+     * seconds compiling its simulation and its lit draw. A frame that must have it (a capture, a preview) builds it
+     * at once, a build still under way included. Counted as a build (shaderActivity) while it runs, so a shader
+     * sweep waits for it, and recorded as a recipe a later session warms (`recipe`; null for custom code).
+     */
+    private _obtain<T>(key: string, label: string, recipe: ParticleRecipe | null, defer: boolean,
+                       have: () => T | null, keep: (pipeline: T) => void,
+                       build: () => T, buildAsync: (() => Promise<T>) | null): T | null {
+        const hit = have();
+        if (hit) return hit;
+        if (recipe && !this._recipes.has(key)) this._recipes.set(key, particlePipelineRecipe(label, recipe));
+        const offThread = defer && !!buildAsync && !this._buildFailed.has(key)
+            && device.capabilities.conventions.pipelineCreationCompiles;
+        if (offThread) {
+            if (!this._building.has(key)) this._startBuild(key, label, have, keep, buildAsync!);
+            return null;
+        }
+        const pipeline = build();
+        keep(pipeline);
+        return pipeline;
+    }
+
+    /** Start `key`'s build off the main thread; it is kept when it lands, unless something built it meanwhile. */
+    private _startBuild<T>(key: string, label: string, have: () => T | null, keep: (pipeline: T) => void,
+                           buildAsync: () => Promise<T>): Promise<boolean> {
+        const generation = this._generation;
+        this._building.add(key);
+        const activity = shaderActivity.begin({ program: label, kind: 'pipeline' });
+        const start = performance.now(); // wall-clock: how long the driver took, for the log
+        return buildAsync().then(pipeline => {
+            this._building.delete(key);
+            shaderActivity.end(activity);
+            if (generation !== this._generation || have()) return false;
+            keep(pipeline);
+            const ms = performance.now() - start;
+            if (ms > 1000) Logger.info(`[shaders] particle pipeline '${label}' built off the main thread in ${(ms / 1000).toFixed(1)} s`, 'Particles');
+            return true;
+        }, error => {
+            this._building.delete(key);
+            shaderActivity.end(activity);
+            this._buildFailed.add(key);
+            Logger.warn(`[shaders] could not build particle pipeline '${label}' off the main thread (built at once instead): ${error}`, 'Particles');
+            return false;
+        });
+    }
+
+    /** Particle pipelines being built off the main thread right now. */
+    public get pendingBuilds(): number { return this._building.size; }
+
+    /** Every particle pipeline this session built that a later one can warm (shaderOptimizer/pipelineRecipes.ts). */
+    public recipes(): PipelineRecipe[] {
+        return [...this._recipes.values()].map(r => JSON.parse(JSON.stringify(r)));
+    }
+
+    /**
+     * Build one recorded particle pipeline ahead of use, off the main thread: a remembered recipe (the editor's last
+     * sessions) or one a published game shipped. Resolves true when it built one. Null when there is nothing to do
+     * (built, building, or this device has no off-thread builds).
+     */
+    public warmRecipe(recipe: ParticleRecipe): Promise<boolean> | null {
+        if (!device.capabilities.conventions.pipelineCreationCompiles) return null;
+        if (recipe.kind === 'draw') {
+            if (!recipe.blend || !recipe.color || !device.createRenderPipelineAsync) return null;
+            const d = this._drawDescriptor(!!recipe.mesh, !!recipe.lit, recipe.blend as RenderSettings['blend'], recipe.color, recipe.depth ?? undefined);
+            if (this._drawPipelines.has(d.key) || this._building.has(d.key)) return null;
+            this._recipes.set(d.key, particlePipelineRecipe(d.label, recipe));
+            return this._startBuild(d.key, d.label, () => this._drawPipelines.get(d.key) ?? null,
+                p => this._drawPipelines.set(d.key, p), () => device.createRenderPipelineAsync!(d.build()));
+        }
+        if (!device.capabilities.hasCompute || !device.createComputePipelineAsync) return null;
+        const cache = this._computeCache;
+        const [key, label, program] = recipe.kind === 'sort'
+            ? ['sort', 'particleSort', ParticleSortComputeProgram] as const
+            : recipe.strip
+                ? ['vc:' + recipe.strip, particleSimProgram(recipe.strip), ParticleSimComputeProgram.variants?.[`s${recipe.strip}`]] as const
+                : ['sim', 'particleSim', ParticleSimComputeProgram] as const;
+        if (!program || cache.has(key) || this._building.has(key)) return null;
+        this._recipes.set(key, particlePipelineRecipe(label, recipe));
+        return this._startBuild(key, label, () => cache.get(key) ?? null, p => cache.set(key, p),
+            () => device.createComputePipelineAsync!({ label, compute: this._computeModule(label, program) }));
     }
 
     private _uniformsFor(program: ParticleProgram, label: string): UniformSet {
@@ -961,7 +1085,7 @@ export class ParticleRenderer {
      * Order the alpha-blended emitters that asked for it, back to front from `cameraPosition`. Call
      * BEFORE opening the pass `draw` records into: the sort runs passes of its own.
      */
-    public sort(nodes: Iterable<ParticleSystemNode>, encoder: CommandEncoder, cameraPosition: vec3): void {
+    public sort(nodes: Iterable<ParticleSystemNode>, encoder: CommandEncoder, cameraPosition: vec3, defer = false): void {
         if (this._failed || !this.supported) return;
         try {
             for (const node of nodes) {
@@ -973,6 +1097,8 @@ export class ParticleRenderer {
                 for (const emitter of gpu.emitters) {
                     const r = emitter.runtime.def.render;
                     if (!r.sort || r.blend !== 'alpha' || emitter.runtime.capacity > MAX_SORTED_PARTICLES) continue;
+                    // Still building off the main thread: drawn in slot order meanwhile, not sorted.
+                    if (device.capabilities.hasCompute && !this._sortPipeline(defer)) continue;
                     this._sortEmitter(emitter, node, encoder, cameraPosition);
                 }
             }
@@ -1015,11 +1141,8 @@ export class ParticleRenderer {
                 ],
             }));
         if (device.capabilities.hasCompute) {
-            if (!this._sortComputePipeline) {
-                this._sortComputePipeline = this._computePipelineFor('particleSort', ParticleSortComputeProgram);
-                this._sortUniforms = this._uniformsFor(ParticleSortComputeProgram, 'particleSort');
-            }
-            const pipeline = this._sortComputePipeline;
+            // In by now: `sort` skipped the emitter until it was.
+            const pipeline = this._sortPipeline(false)!;
             const uniforms = this._sortUniforms!;
             for (const [name, value] of Object.entries(values)) uniforms.set(name, value);
             uniforms.flush(device);
@@ -1048,6 +1171,12 @@ export class ParticleRenderer {
         pass.setViewport(0, 0, sort.width, sort.n / sort.width);
         pass.draw(3);
         pass.end();
+    }
+
+    /** The sort's compute pipeline, through {@link _obtain}; its uniforms with it. */
+    private _sortPipeline(defer: boolean): ComputePipeline | null {
+        this._sortUniforms ??= this._uniformsFor(ParticleSortComputeProgram, 'particleSort');
+        return this._obtainCompute('sort', 'particleSort', ParticleSortComputeProgram, defer, { kind: 'sort' });
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -1157,8 +1286,15 @@ export class ParticleRenderer {
                     const mesh = render.mode === 'mesh' ? this._meshFor(render) : null;
                     // A lit emitter's draw takes the sun's shadow and every light of the grid per pixel in its `lit`
                     // program variant, once that is compiled (until then the base program, with the CPU key light).
-                    const perPixel = !!render.lit && !!frame.frameLighting && this._litReady(!!mesh);
-                    const pipeline = this._drawPipeline(frame.target, render, !!mesh, perPixel);
+                    let perPixel = !!render.lit && !!frame.frameLighting && this._litReady(!!mesh);
+                    // A pipeline still building off the main thread (frame.defer): a lit draw falls back on the base
+                    // one meanwhile, as it does while the lit program compiles; with neither, the emitter waits.
+                    let pipeline = this._drawPipeline(frame.target, render, !!mesh, perPixel, frame.defer === true);
+                    if (!pipeline && perPixel) {
+                        perPixel = false;
+                        pipeline = this._drawPipeline(frame.target, render, !!mesh, false, frame.defer === true);
+                    }
+                    if (!pipeline) continue;
                     frame.pass.setPipeline(pipeline);
 
                     // The engine's own sprites (rain, snow) are resolved here, never through the TextureManager.
@@ -1317,46 +1453,61 @@ export class ParticleRenderer {
         }
     }
 
-    private _drawPipeline(target: RenderTarget, render: RenderSettings, mesh: boolean, perPixel = false): RenderPipeline {
+    /** An emitter's draw pipeline for `target`, through {@link _obtain}: null while it builds off the main thread. */
+    private _drawPipeline(target: RenderTarget, render: RenderSettings, mesh: boolean, perPixel = false,
+                          defer = false): RenderPipeline | null {
         const color = target.colorViews[0].texture.format;
         const depthFormat = target.depthView?.texture.format;
+        const d = this._drawDescriptor(mesh, perPixel, render.blend, color, depthFormat);
+        const cache = this._drawPipelines;
+        return this._obtain(d.key, d.label,
+            { kind: 'draw', mesh, lit: perPixel, blend: render.blend, color, depth: depthFormat ?? null }, defer,
+            () => cache.get(d.key) ?? null, p => cache.set(d.key, p),
+            () => device.createRenderPipeline(d.build()),
+            device.createRenderPipelineAsync ? () => device.createRenderPipelineAsync!(d.build()) : null);
+    }
+
+    /** A draw pipeline's cache key, label and descriptor: one spelling for the draw and the recipe warm-up. */
+    private _drawDescriptor(mesh: boolean, perPixel: boolean, blend: RenderSettings['blend'], color: string, depthFormat: string | undefined) {
         // Opaque cutout meshes write depth, so they occlude each other like any solid; everything else
         // tests against the scene and leaves its depth alone.
-        const writesDepth = mesh && render.blend === 'cutout';
-        const key = `${mesh ? 'mesh' : 'billboard'}${perPixel ? '~lit' : ''}|${render.blend}|${color}|${depthFormat ?? '-'}|${writesDepth}`;
-        let pipeline = this._drawPipelines.get(key);
-        if (pipeline) return pipeline;
+        const writesDepth = mesh && blend === 'cutout';
+        const key = `${mesh ? 'mesh' : 'billboard'}${perPixel ? '~lit' : ''}|${blend}|${color}|${depthFormat ?? '-'}|${writesDepth}`;
         const base = mesh ? PARTICLE_PROGRAMS.mesh : PARTICLE_PROGRAMS.billboard;
         const name = perPixel ? particleDrawProgramName(mesh, true) : base[0];
         const program = (perPixel ? base[1].variants?.lit : base[1]) ?? base[1];
-        const module = device.createShaderModule({
-            label: name, program: name, stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
-            source: program.wgsl, entryPoints: program.entryPoints, resources: program.resources,
-        });
-        pipeline = device.createRenderPipeline({
-            label: `${name}.${render.blend}`, vertex: module, fragment: module,
-            vertexLayouts: mesh ? ParticleRenderer._meshLayout() : [],
-            primitive: { topology: 'triangle-list', cullMode: mesh ? 'back' : 'none', frontFace: 'ccw' },
-            ...(depthFormat ? {
-                depthStencil: { format: depthFormat, depthWriteEnabled: writesDepth, depthCompare: 'less-equal' as const },
-            } : {}),
-            colorTargets: [{
-                format: color,
-                blend: render.blend === 'additive' ? ADDITIVE_KEEP_ALPHA
-                     : render.blend === 'cutout' ? DEFAULT_BLEND
-                     : PREMULTIPLIED_KEEP_ALPHA,
-            }],
-        });
-        this._drawPipelines.set(key, pipeline);
-        return pipeline;
+        const label = `${name}.${blend}`;
+        const build = () => {
+            const module = device.createShaderModule({
+                label: name, program: name, stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
+                source: program.wgsl, entryPoints: program.entryPoints, resources: program.resources,
+            });
+            return {
+                label, vertex: module, fragment: module,
+                vertexLayouts: mesh ? ParticleRenderer._meshLayout() : [],
+                primitive: { topology: 'triangle-list' as const, cullMode: (mesh ? 'back' : 'none') as 'back' | 'none', frontFace: 'ccw' as const },
+                ...(depthFormat ? {
+                    depthStencil: { format: depthFormat as never, depthWriteEnabled: writesDepth, depthCompare: 'less-equal' as const },
+                } : {}),
+                colorTargets: [{
+                    format: color as never,
+                    blend: blend === 'additive' ? ADDITIVE_KEEP_ALPHA
+                         : blend === 'cutout' ? DEFAULT_BLEND
+                         : PREMULTIPLIED_KEEP_ALPHA,
+                }],
+            };
+        };
+        return { key, label, build };
     }
 
     /** Drop pipelines, e.g. after the device is replaced. */
     public resetPipelines(): void {
-        this._computePipeline = null;
+        this._generation++;
+        this._building.clear();
+        this._buildFailed.clear();
+        this._computeCache.clear();
         this._simUniforms?.destroy();
         this._simUniforms = null;
-        this._sortComputePipeline = null;
         this._sortUniforms?.destroy();
         this._sortUniforms = null;
         this._simPipelineGL = null;

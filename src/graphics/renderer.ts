@@ -33,7 +33,8 @@ import { parseRecipes, resetShaderOptimizerFrame } from './shaderOptimizer';
 import type { PipelineRecipe } from './shaderOptimizer';
 import { OcclusionBuffer } from './occlusion/occlusionBuffer';
 import type { OcclusionVolumeNode } from '../core/scene/nodes/occlusionVolumeNode';
-import { EXTRA_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
+import { EXTRA_LOGICAL_NAMES, FILTER_DEPENDENT, physicalFor, type ShadowFilter } from './programVariants';
+import { EffectPrefetch } from './render/effectPrefetch';
 import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
 import { cpuProfiler } from './cpuProfiler';
 import { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from '../terrain/terrainLayerSizes';
@@ -42,7 +43,7 @@ import { ScreenProgram } from './render/programs';
 import { createFrameView, type FrameView } from './render/frameView';
 import { FrameTargets } from './render/frameTargets';
 import { PassEncoder } from './render/passEncoder';
-import { PipelineCache } from './render/pipelineCache';
+import { PipelineCache, type PipelineReflection } from './render/pipelineCache';
 import { BindGroupCache } from './render/bindGroups';
 import { FullscreenPasses } from './render/fullscreenPasses';
 import { MaterialBinder } from './render/materialBinder';
@@ -117,6 +118,17 @@ export interface ShaderPreparation {
     /** Whether it stopped at its time limit rather than with everything built. */
     readonly timedOut: boolean;
     readonly seconds: number;
+    /** Copies of what the scene can spawn that were drawn with it ({@link PrepareShadersOptions.warmup}). */
+    readonly spawnables: number;
+}
+
+/**
+ * Drawn with the scene while its shaders are prepared, then taken away: copies of what it can spawn
+ * (core/scene/spawnWarmup.ts), mounted by the caller. Stepped before each sweep frame.
+ */
+export interface SweepWarmup {
+    readonly count: number;
+    beforeFrame(dt: number): void;
 }
 
 /** Options of {@link Renderer.prepareShaders}. */
@@ -127,11 +139,14 @@ export interface PrepareShadersOptions {
     signal?: AbortSignal;
     /** Stop waiting after this long, in ms (default 5 minutes): a driver that never answers must not hold a load. */
     timeoutMs?: number;
+    /** What the scene can spawn, mounted in it for the sweep (spawnWarmup.ts's mountSpawnWarmup). */
+    warmup?: SweepWarmup;
 }
 
 /** A shader sweep in progress (Renderer.prepareShaders): the scene its frames draw, and how many it still wants. */
 interface ShaderSweep extends SweepFrames {
     readonly scene: Scene;
+    readonly warmup?: SweepWarmup;
 }
 
 /** Every custom material `scene` can draw with: on its models, its landscapes, and every 3D camera's screen materials. */
@@ -423,8 +438,11 @@ export class Renderer {
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
+            get deferPipelines() { return renderer._pipelines.deferring; },
         }, this._view, this._targets, this._passes, this._bindGroups, this._projection, this._temporal, this._subsystems)
             ?? createNullParticles();
+        // The particle renderer builds its own pipelines, and warms its own recorded ones (pipelineRecipes).
+        this._pipelines.particleWarmer = recipe => this._particlePasses.warmPipelineRecipe(recipe);
         this._fog = featureFactory<(...a: ConstructorParameters<typeof VolumetricFogPasses>) => VolumetricFogPasses>(RENDER_FACTORY.volumetricFog)?.({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
@@ -878,11 +896,13 @@ export class Renderer {
         if (isCamera2D(active)) active.fitView(this._renderWidth, this._renderHeight);
         if (this._view.flat2D && !flat) this.invalidateTemporalHistory();
         this._view.flat2D = flat;
-        // A sweep frame culls nothing, so every material the scene can draw asks for its pipeline.
+        // A sweep frame culls nothing, so every material the scene can draw asks for its pipeline. What the scene
+        // can spawn steps first, so its particle systems have something to simulate and draw.
         const culling = this._visibility.frustumCulling;
         if (sweep) {
             this._visibility.frustumCulling = false;
             this._visibility.sweeping = true;
+            sweep.warmup?.beforeFrame(1 / 60);
         }
         try {
             if (flat) this._renderFrame2D(scene);
@@ -914,6 +934,11 @@ export class Renderer {
      *    nothing a draw distance hides), so every material, water body and particle system off screen asks for
      *    its pipeline too. On WebGPU those are built off the main thread (PipelineCache.getOrDefer).
      *  - Any warm-up of remembered recipes still under way (`warmPipelines`).
+     *  - With `warmup`, copies of what the scene can spawn (a muzzle flash, a bullet hole) drawn with it, their
+     *    particle systems emitting: a template only a script instantiates otherwise met its pipelines the frame
+     *    it first appeared, and a GPU particle system or a decal compiles on the spot.
+     *  - In these frames, the post effects a script can switch on (depth of field, chromatic aberration, lens
+     *    flare, vignette, film grain) run whatever their settings, so turning one on later builds nothing.
      *
      * It resolves when nothing is building and one more such frame, drawn with all of it in, starts nothing
      * new. Builds that compile on the spot are done when their frame is. A viewport that draws no frame for a
@@ -923,28 +948,77 @@ export class Renderer {
         const t0 = performance.now(); // wall-clock: how long the build took, for the log
         const customs = customMaterialsOf(scene);
         const screens = customs.filter(m => m.renderMode === 'screen');
-        const sweep: ShaderSweep = { scene, wanted: 0, rendered: 0 };
+        const sweep: ShaderSweep = { scene, wanted: 0, rendered: 0, warmup: options.warmup };
         this._shaderSweep = sweep;
+        // The effects a script can switch on that keep history (reflections, indirect light, TAA, fog, clouds,
+        // exposure, the other shadow filter): their pipelines asked for by key, once, without running them.
+        const prefetch = new EffectPrefetch(this._pipelines);
+        let prefetched = false;
         let result: ShaderWaitResult;
         try {
             result = await awaitShaders({
                 poll: () => {
+                    if (!prefetched) { prefetched = true; this._prefetchEffects(scene, prefetch); }
                     // Each call starts a custom program's compile or, once it is in, registers it.
                     for (const mat of customs) ensureCustomShader(mat, { background: true });
                     for (const mat of screens) if (customShaderReady(mat)) this._post.screenMaterialPipeline(mat, 'prefetch');
                 },
-                building: () => this._pipelines.pendingBuilds + pendingCustomCompiles() > 0 || this._pipelines.warming,
+                // Programs compiling in the background while a stand-in draws (a particle variant) count too.
+                building: () => this._pipelines.pendingBuilds + pendingCustomCompiles() + this._programs.compileQueue.pendingCount
+                    + this._particlePasses.pendingPipelines > 0 || this._pipelines.warming,
                 counts: () => shaderActivity.counts(),
                 warm: () => shaderActivity.snapshot().warm,
             }, sweep, { onProgress: options.onProgress, signal: options.signal, timeoutMs: options.timeoutMs });
         } finally {
             if (this._shaderSweep === sweep) this._shaderSweep = null;
+            prefetch.dispose();
         }
-        const remaining = this._pipelines.pendingBuilds + pendingCustomCompiles();
+        // The sweep's frames ran effects the scene does not (motion blur on every model, the post chain whatever its
+        // settings) and drew the copies of what it can spawn: the first frame after must remember none of them.
+        if (sweep.rendered > 0) this.invalidateTemporalHistory();
+        if (options.warmup?.count) this.snapExposure();
+        const remaining = this._pipelines.pendingBuilds + pendingCustomCompiles() + this._programs.compileQueue.pendingCount
+            + this._particlePasses.pendingPipelines;
         const seconds = (performance.now() - t0) / 1000; // wall-clock: as above
         if (result.timedOut) Logger.warn(`[shaders] still building ${remaining} after ${seconds.toFixed(0)} s; the rest builds as it is drawn`, 'Renderer');
-        else if (result.built) Logger.info(`[shaders] the scene's shaders are built (${result.built} in ${seconds.toFixed(1)} s)`, 'Renderer');
-        return { built: result.built, remaining, frames: sweep.rendered, timedOut: result.timedOut, seconds };
+        else if (result.built) {
+            const spawned = options.warmup?.count ? `, with ${options.warmup.count} it can spawn` : '';
+            Logger.info(`[shaders] the scene's shaders are built (${result.built} in ${seconds.toFixed(1)} s${spawned})`, 'Renderer');
+        }
+        return { built: result.built, remaining, frames: sweep.rendered, timedOut: result.timedOut, seconds,
+                 spawnables: options.warmup?.count ?? 0 };
+    }
+
+    /**
+     * Ask for the pipelines of the effects a script can switch on that keep history (render/effectPrefetch.ts),
+     * each subsystem by the shapes its passes draw in; and, where the programs are built per shadow filter (a
+     * published game), the deferred lighting of the other filter, which switching it builds on the spot. A failure
+     * here only means that effect builds when it first runs, as before.
+     */
+    private _prefetchEffects(scene: Scene, prefetch: EffectPrefetch): void {
+        const each: [string, () => void][] = [
+            ['TAA', () => this._temporal.prefetchPipelines(prefetch)],
+            ['reflections', () => this._ssr.prefetchPipelines(prefetch)],
+            ['indirect light', () => this._ssil.prefetchPipelines(prefetch)],
+            ['scene radiance', () => this._radiance.prefetchPipelines(prefetch)],
+            ['volumetric fog', () => this._fog.prefetchPipelines(prefetch, scene)],
+            ['clouds', () => this._clouds.prefetchPipelines(prefetch, scene)],
+            ['auto exposure', () => this._autoExposure.prefetchPipelines(prefetch)],
+            ['shadow filter', () => {
+                if (!this._programs.variants) return;
+                const other: ShadowFilter = this._programs.filter() === 1 ? 0 : 1;
+                const physical = physicalFor('deferredLighting', other);
+                const descriptor = this._programs.descriptorFor(physical);
+                // `builtFor` stays the logical name: the key the lighting pass's `fullscreen('deferredLighting')` makes.
+                if (physical !== 'deferredLighting' && descriptor)
+                    prefetch.pipeline(physical, descriptor as unknown as PipelineReflection,
+                                      { vertex: 'model', builtFor: 'deferredLighting' }, this._targets.scene.renderTarget);
+            }],
+        ];
+        for (const [name, run] of each) {
+            try { run(); }
+            catch (e) { Logger.warn(`[shaders] could not prepare ${name}: ${(e as Error)?.message ?? e}`, 'Renderer'); }
+        }
     }
 
     private _renderFrame(scene: Scene): void {
@@ -1058,10 +1132,13 @@ export class Renderer {
         // answer before post-processing would have supplied it.
         // `|| _temporal.anyObjectMoved`: asking only whether the CAMERA moved is what made an object crossing
         // the view of a parked camera produce no blur at all — the chain was never even run.
-        this._temporal.motionBlurWillRun = this._temporal.motionBlurEnabled && this._view.hasPrevViewProj
-                                  && this._temporal.motionBlurIntensity > 0.0 && this._passEnabled['motionBlur']
-                                  && !this._thumbnailMode
-                                  && (this._temporal.cameraMoved() || this._temporal.anyObjectMoved);
+        // A shader sweep frame (prepareShaders) runs it whatever its settings: a script switching it on later
+        // finds its pipelines built, and the velocity pass it needs runs too (every model's draw, see _selectMover).
+        // Its tile buffers are made at boot, so this allocates nothing.
+        this._temporal.motionBlurWillRun = this._view.hasPrevViewProj && this._passEnabled['motionBlur'] && !this._thumbnailMode
+                                  && (this._visibility.sweeping
+                                      || (this._temporal.motionBlurEnabled && this._temporal.motionBlurIntensity > 0.0
+                                          && (this._temporal.cameraMoved() || this._temporal.anyObjectMoved)));
         this._temporal.velocityProducedThisFrame = false;
         // Cleared here rather than after the composite: `_buildPostGraph` reads it to decide whether
         // to add the composite node at all, and that runs after the whole scene render.
@@ -1957,7 +2034,8 @@ export class Renderer {
      * hands them to publish, which writes them into `config.graphics.pipelines` for the player to warm.
      */
     public pipelineRecipes(): PipelineRecipe[] {
-        return this._pipelines.recipes();
+        // The particle renderer's own pipelines too, which it warms itself (PipelineCache.particleWarmer).
+        return [...this._pipelines.recipes(), ...this._particlePasses.pipelineRecipes()];
     }
 
     /**
@@ -2262,6 +2340,10 @@ export class Renderer {
         const materials = this._postProcessingAllowed && !this._view.preview ? (scene.activeCamera?.screenMaterials ?? []) : [];
         const chain = this._postProcessingAllowed && !this._view.preview
             ? resolvePostChain(scene.activeCamera?.postChain, materials.length) : [];
+        // A shader sweep frame (prepareShaders) runs the effects a script may switch on whatever their settings, so
+        // their pipelines are built before the scene opens: one turned on in play (depth of field when aiming)
+        // would otherwise compile on the spot.
+        const sweeping = this._visibility.sweeping;
         for (const entry of chain) {
             if (!entry.enabled) continue;
             const materialIndex = materialIndexOf(entry.effect);
@@ -2319,7 +2401,7 @@ export class Renderer {
                 // Two nodes rather than one, because the pyramid and the composite are separately
                 // switchable in the profiler and only the composite consumes a chain stage. Fused,
                 // switching the composite off would advance the ping-pong onto an unwritten buffer.
-                if (this._post.bloomIntensity <= 0 || !this._passEnabled['bloom.bright']) continue;
+                if ((this._post.bloomIntensity <= 0 && !sweeping) || !this._passEnabled['bloom.bright']) continue;
                 const from = src;
                 graph.addPass({
                     id: 'bloom.generate', scope: 'bloom.bright', reads: [from],
@@ -2336,7 +2418,7 @@ export class Renderer {
             }
 
             if (entry.effect === 'chromatic') {
-                if (this._post.chromaticAberrationStrength <= 0 || !this._passEnabled['chromatic']) continue;
+                if ((this._post.chromaticAberrationStrength <= 0 && !sweeping) || !this._passEnabled['chromatic']) continue;
                 const from = src, to = flip();
                 graph.addPass({
                     id: 'chromatic', scope: 'chromatic', reads: [from], writes: [to],
@@ -2350,7 +2432,7 @@ export class Renderer {
                 // `_temporal.depthSource()` is only filled outside thumbnail mode, but the whole chain is
                 // bypassed for `_capture.presentTarget` before this runs, so there is no stale-depth path here.
                 // Not in a flat 2D frame, which takes no depth snapshot to focus by.
-                if (!this._post.dofEnabled || this._post.dofMaxBlur <= 0 || !this._passEnabled['dof.coc'] || this._view.flat2D) continue;
+                if (((!this._post.dofEnabled || this._post.dofMaxBlur <= 0) && !sweeping) || !this._passEnabled['dof.coc'] || this._view.flat2D) continue;
                 const from = src, to = flip();
                 const half = { kind: 'scaled' as const, scale: 0.5 };
                 const coc = graph.declare({ ...hdr, name: 'dof.coc', size: half, lifetime: 'transient' });
@@ -2367,7 +2449,7 @@ export class Renderer {
             if (entry.effect === 'lensFlare') {
                 // The god-rays shape: composited additively INTO the stage it reads, so it consumes no
                 // chain stage. `readWrites` is what tells the pool it may not lend that buffer out.
-                if (this._post.lensFlareIntensity <= 0 || !this._passEnabled['lensFlare']) continue;
+                if ((this._post.lensFlareIntensity <= 0 && !sweeping) || !this._passEnabled['lensFlare']) continue;
                 const inPlace = src;
                 const scratch = graph.declare({
                     ...hdr, name: 'lensFlare.scratch', size: { kind: 'scaled', scale: 0.5 },
@@ -2381,7 +2463,7 @@ export class Renderer {
             }
 
             if (entry.effect === 'vignette') {
-                if (this._post.vignetteStrength <= 0 || !this._passEnabled['vignette']) continue;
+                if ((this._post.vignetteStrength <= 0 && !sweeping) || !this._passEnabled['vignette']) continue;
                 const from = src, to = flip();
                 graph.addPass({
                     id: 'vignette', scope: 'vignette', reads: [from], writes: [to],
@@ -2392,7 +2474,7 @@ export class Renderer {
             }
 
             if (entry.effect === 'filmGrain') {
-                if (this._post.filmGrainIntensity <= 0 || !this._passEnabled['filmGrain']) continue;
+                if ((this._post.filmGrainIntensity <= 0 && !sweeping) || !this._passEnabled['filmGrain']) continue;
                 const from = src, to = flip();
                 graph.addPass({
                     id: 'filmGrain', scope: 'filmGrain', reads: [from], writes: [to],
@@ -2407,7 +2489,7 @@ export class Renderer {
         // final scene image only: the overlay is composited after the present, so the grid and gizmos
         // keep their crisp lines.
         // Always in a preview pane, which has no TAA to antialias it, and never a debug channel.
-        if ((this._post.fxaaEnabled || this._view.preview) && this._passEnabled['fxaa']
+        if ((this._post.fxaaEnabled || this._view.preview || sweeping) && this._passEnabled['fxaa']
             && (this._debugViews.debugView === 'final' || this._view.preview)) {
             const from = src, to = flip();
             graph.addPass({

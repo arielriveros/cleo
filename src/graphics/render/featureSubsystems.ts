@@ -72,7 +72,7 @@ export function createNullWater(): WaterSubsystem {
 
 export type CloudSubsystem = Pick<VolumetricCloudPasses,
     'cloudsFBO' | 'cloudTraceFBO' | 'cloudHistory' | 'cloudBaseNoise' | 'cloudDetailNoise' | 'cloudsTierApplied' |
-    'windOffset' | 'advanceCloudWind' | 'cloudWindOffset' | 'renderVolumetricClouds' | 'paintSkyFaces'>;
+    'windOffset' | 'advanceCloudWind' | 'cloudWindOffset' | 'renderVolumetricClouds' | 'paintSkyFaces' | 'prefetchPipelines'>;
 
 export function createNullClouds(): CloudSubsystem {
     const windOffset: [number, number, number] = [0, 0, 0];
@@ -83,6 +83,7 @@ export function createNullClouds(): CloudSubsystem {
         cloudBaseNoise: null, cloudDetailNoise: null, cloudsTierApplied: null,
         windOffset,
         advanceCloudWind() {}, cloudWindOffset: () => windOffset, renderVolumetricClouds() {}, paintSkyFaces() {},
+        prefetchPipelines() {},
     };
 }
 
@@ -112,13 +113,13 @@ export function createNullGi(): GiSubsystem {
 
 export type FogSubsystem = Pick<VolumetricFogPasses,
     'enabled' | 'tileSize' | 'slices' | 'distance' | 'temporal' | 'localLights' | 'localShadows' | 'frameVolumes' |
-    'render' | 'invalidate'>;
+    'render' | 'invalidate' | 'prefetchPipelines'>;
 
 /** With VolumetricFogPasses' defaults, so the settings read the same either way. */
 export function createNullFog(): FogSubsystem {
     return {
         enabled: true, tileSize: 16, slices: 64, distance: 128, temporal: true, localLights: true, localShadows: true,
-        frameVolumes: [], render: () => false, invalidate() {},
+        frameVolumes: [], render: () => false, invalidate() {}, prefetchPipelines() {},
     };
 }
 
@@ -127,7 +128,8 @@ export function createNullFog(): FogSubsystem {
 /** What the renderer and its forward and 2D passes use of the particle passes (render/particlePasses.ts). */
 export type ParticleSubsystem = Pick<ParticlePasses,
     'simulateParticles' | 'renderParticles' | 'isFlatParticleScene' | 'draw2D' | 'rememberCollisionCamera' |
-    'invalidateCollision' | 'particleLodDistanceScale' | 'precipitationDensity'>;
+    'invalidateCollision' | 'particleLodDistanceScale' | 'precipitationDensity' | 'pipelineRecipes' |
+    'warmPipelineRecipe' | 'pendingPipelines'>;
 
 /** With ParticlePasses' defaults, so the settings read the same either way. */
 export function createNullParticles(): ParticleSubsystem {
@@ -135,6 +137,7 @@ export function createNullParticles(): ParticleSubsystem {
         particleLodDistanceScale: 1, precipitationDensity: 1,
         simulateParticles() {}, renderParticles() {}, isFlatParticleScene: () => false, draw2D() {},
         rememberCollisionCamera() {}, invalidateCollision() {},
+        pipelineRecipes: () => [], warmPipelineRecipe: () => null, pendingPipelines: 0,
     };
 }
 

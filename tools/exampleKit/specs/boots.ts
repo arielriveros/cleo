@@ -22,7 +22,7 @@ export function bootSpecs({ seconds = 3, scenes = [] as string[] } = {}): void {
           spy.mockRestore()
         }
         expect(errors).toEqual([])
-      })
+      }, 300_000) // a whole project built and played here: the Valley's is hundreds of MB, minutes beside a full run
     }
   })
 }

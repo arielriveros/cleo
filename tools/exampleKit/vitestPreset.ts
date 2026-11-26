@@ -75,7 +75,10 @@ export function exampleProjects(dir: string): any[] {
       env: { CLEO_PROJECT: dir, ...(test.env ?? {}) },
       pool: 'forks',
       // --expose-gc: a WASM physics world dropped without dispose is freed when collected (backendSetup.ts).
-      poolOptions: { forks: { execArgv: ['--expose-gc', `--max-old-space-size=${tests.heapMb ?? 8192}`] } },
+      // `serial`: one file at a time, in one process (the suites that measure real time; see below).
+      poolOptions: { forks: { execArgv: ['--expose-gc', `--max-old-space-size=${tests.heapMb ?? 8192}`], ...(test.serial ? { singleFork: true } : {}) } },
+      // A serial project runs in a later group, after every other project is done: alone on the machine.
+      ...(test.serial ? { sequence: { groupOrder: 1 } } : {}),
       testTimeout: 60_000,
       hookTimeout: 180_000,
       include: test.include,
@@ -89,9 +92,13 @@ export function exampleProjects(dir: string): any[] {
   const hostSuites = process.env.CLEO_TEST_HOST !== '0'
   // The main project locks the example's data first (lockSetup.ts): an edit's new data is in the lock it tests.
   const projects = [base(`example:${slug}`, {
-    include: ['tests/**/*.test.ts'], exclude: ['tests/net/**', ...(hostSuites ? [] : ['tests/host/**'])],
+    include: ['tests/**/*.test.ts'], exclude: ['tests/net/**', 'tests/host/**'],
     globalSetup: [at('tools', 'exampleKit', 'lockSetup.ts')],
   })]
+  // The host suites in a project of their own, run serially after everything else: they measure real time (tick
+  // budgets, a host's busy time), and beside a full run's other forks they timed out or blew their budgets.
+  if (hostSuites && fs.existsSync(path.join(dir, 'tests', 'host')))
+    projects.push(base(`example:${slug} host`, { include: ['tests/host/**/*.test.ts'], serial: true }))
   for (const backend of tests.physicsSuites?.length ? OTHER_BACKENDS : []) {
     projects.push(base(`example:${slug} on ${backend}`, {
       include: tests.physicsSuites!.map(s => `tests/${s}.test.ts`),
@@ -101,7 +108,7 @@ export function exampleProjects(dir: string): any[] {
   }
   if (hostSuites && hostInstalled() && fs.existsSync(path.join(dir, 'tests', 'net')))
     // A test file's bare imports resolve from the example folder up, which never reaches the host's own packages.
-    projects.push(base(`example:${slug} net`, { include: ['tests/net/**/*.test.ts'] }, ['ws', '@fails-components/webtransport'].map(pkg => ({
+    projects.push(base(`example:${slug} net`, { include: ['tests/net/**/*.test.ts'], serial: true }, ['ws', '@fails-components/webtransport'].map(pkg => ({
       find: new RegExp(`^${pkg}$`), replacement: at('applications', 'host', 'node_modules', ...pkg.split('/')),
     }))))
   return projects

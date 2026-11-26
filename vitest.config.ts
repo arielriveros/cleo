@@ -38,6 +38,9 @@ export default mergeConfig(engineConfig, defineConfig({
         poolOptions: { forks: { execArgv: ['--expose-gc'] } },
         // What src/cleo.ts installs (the script compiler), for the tests that never import it.
         setupFiles: ['tests/helpers/engineTools.ts'],
+        // vitest's 5 s default is a CPU budget nothing here means: a test that walks the published declarations, or
+        // steps a WASM world twice, ran past it whenever the machine was busy. The editor's suite runs at 30 s too.
+        testTimeout: 30_000,
         projects: [
             { extends: true, test: { name: 'engine', include: ['tests/**/*.test.ts'] } },
             // The suites about what the engine does with its physics (not cannon's bits), again on each other

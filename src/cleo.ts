@@ -39,7 +39,7 @@ export type { FbxTextureInfo, FbxEmbeddedImage, FbxMaterialTextures } from "./gr
 export { GLTFLoader } from "./graphics/utils/gltfLoader";
 export type { GltfParseResult, GltfMeshDescriptor, GltfMaterialDescriptor, GltfImageSource } from "./graphics/utils/gltfLoader";
 // Which shader programs a game draws with, read off its scenes at publish (features/publish/collectProgramUsage.ts).
-export { createProgramUsage, usageFromSceneJson, usageFromRenderSettings, castsShadows, programsFor, PROGRAM_CLASS } from "./graphics/programUsage";
+export { createProgramUsage, usageFromSceneJson, usageFromRenderSettings, usageFromScriptSources, castsShadows, programsFor, PROGRAM_CLASS } from "./graphics/programUsage";
 export type { ProgramUsage } from "./graphics/programUsage";
 export { MAX_SORTED_PARTICLES } from "./graphics/particles/particleRenderer";
 // Rendering a sequence to video, offline (sequencer/movie/).

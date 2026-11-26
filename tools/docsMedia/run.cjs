@@ -134,6 +134,73 @@ async function evalInPage(body) {
     return JSON.parse(r.result.value);
 }
 
+/**
+ * Evaluate `body` in another page target (the Play-in-window popup, play.html), found by a substring of its URL:
+ * a socket of its own, opened for the call.
+ */
+async function evalInTarget(match, body) {
+    const targets = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json();
+    const t = targets.find(x => x.type === 'page' && x.url.includes(match));
+    if (!t) return { error: `no page target matching "${match}"`, pages: targets.filter(x => x.type === 'page').map(x => x.url) };
+    const sock = new WebSocket(t.webSocketDebuggerUrl);
+    await new Promise((res, rej) => { sock.onopen = res; sock.onerror = rej; });
+    try {
+        const expression = `(async () => { ${prelude()}
+${body}
+})().then(v => JSON.stringify(v ?? null), e => JSON.stringify({ error: String(e && e.stack || e) }))`;
+        const r = await new Promise((resolve, reject) => {
+            sock.onmessage = (m) => { const msg = JSON.parse(m.data); if (msg.id === 1) msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result); };
+            sock.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
+        });
+        if (r.exceptionDetails) return { error: r.exceptionDetails.text };
+        return JSON.parse(r.result.value);
+    } finally { sock.close(); }
+}
+
+/**
+ * A trace of the whole browser for `seconds`, GPU process included: a shader compile on WebGPU or ANGLE runs
+ * there, so a stall it causes is invisible to JS timings (they read ~0 ms) and shows up here. Written as JSON,
+ * loadable in chrome://tracing or Perfetto.
+ */
+async function traceBrowser(seconds, file) {
+    const version = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)).json();
+    const sock = new WebSocket(version.webSocketDebuggerUrl);
+    await new Promise((res, rej) => { sock.onopen = res; sock.onerror = rej; });
+    let id = 0;
+    const waiting = new Map();
+    let complete = null;
+    const done = new Promise(res => { complete = res; });
+    sock.onmessage = (m) => {
+        const msg = JSON.parse(m.data);
+        if (msg.id && waiting.has(msg.id)) { const w = waiting.get(msg.id); waiting.delete(msg.id); msg.error ? w.reject(new Error(msg.error.message)) : w.resolve(msg.result); }
+        else if (msg.method === 'Tracing.tracingComplete') complete(msg.params.stream);
+    };
+    const call = (method, params = {}) => new Promise((resolve, reject) => { const n = ++id; waiting.set(n, { resolve, reject }); sock.send(JSON.stringify({ id: n, method, params })); });
+    try {
+        await call('Tracing.start', {
+            transferMode: 'ReturnAsStream',
+            traceConfig: {
+                recordMode: 'recordContinuously',
+                includedCategories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'v8.execute', 'gpu', 'gpu.dawn',
+                    'disabled-by-default-gpu.dawn', 'gpu.angle', 'gpu.service', 'viz', 'toplevel', 'blink'],
+            },
+        });
+        await sleep(seconds * 1000);
+        await call('Tracing.end');
+        const stream = await done;
+        const chunks = [];
+        for (;;) {
+            const r = await call('IO.read', { handle: stream, size: 1 << 20 });
+            chunks.push(r.base64Encoded ? Buffer.from(r.data, 'base64').toString('utf8') : r.data);
+            if (r.eof) break;
+        }
+        await call('IO.close', { handle: stream });
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, chunks.join(''));
+        return { file, bytes: fs.statSync(file).size };
+    } finally { sock.close(); }
+}
+
 async function capture(crop) {
     const r = await cdp('Page.captureScreenshot', {
         format: 'png',
@@ -152,7 +219,12 @@ function control() {
         const crop = url.searchParams.get('crop')?.split(',').map(Number);
         try {
             let out = null;
-            if (url.pathname === '/eval') out = await evalInPage(await readBody(req));
+            if (url.pathname === '/eval') {
+                const target = url.searchParams.get('target');
+                out = target ? await evalInTarget(target, await readBody(req)) : await evalInPage(await readBody(req));
+            } else if (url.pathname === '/trace') {
+                out = await traceBrowser(Number(url.searchParams.get('seconds') ?? 5), url.searchParams.get('out'));
+            }
             else if (url.pathname === '/shot') {
                 const file = url.searchParams.get('out');
                 fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -246,6 +318,9 @@ function control() {
         `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${PROFILE}`, '--no-first-run', '--no-default-browser-check',
         '--enable-unsafe-webgpu', '--force-device-scale-factor=1', `--window-size=${WIDTH + 16},${HEIGHT + 140}`,
         '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
+        // Extra flags, space-separated: `--disable-gpu-shader-disk-cache` makes every shader compile cold, as on a
+        // first launch (Chrome's D3D shader cache otherwise hides a compile stall from the second run on).
+        ...(process.env.DOCS_MEDIA_CHROME_ARGS ?? '').split(/\s+/).filter(Boolean),
         // DOCS_MEDIA_START=creator opens Cleo Creator (on the editor origin) instead of the editor, which
         // would otherwise open its last project first -- the Valley's load holds the page for minutes.
         process.env.DOCS_MEDIA_START === 'creator' ? `http://localhost:${EDITOR_PORT}/creator/` : `http://localhost:${EDITOR_PORT}/`,

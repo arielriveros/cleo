@@ -53,9 +53,35 @@ describe('surface decals', () => {
 
     it('set the pipeline per decal, which is what resets WebGL2 texture units', () => {
         const body = methodBody('surfaceDecalPass');
-        const loop = body.indexOf('for (const decal of this.surfaceDecals)');
+        const loop = body.indexOf('for (let i = 0; i < this.surfaceDecals.length; i++)');
         expect(loop).toBeGreaterThan(-1);
         expect(body.indexOf('pass.setPipeline(pipeline)', loop)).toBeGreaterThan(loop);
+    });
+
+    it('wait for their pipelines off the main thread instead of compiling them on the spot', () => {
+        // The Sandbox's first bullet hole held the window while decalSurface and decalResolve compiled. Asked for
+        // through getOrDefer, every one before anything draws, and a frame that can draw none skips the pass.
+        const body = methodBody('surfaceDecalPass');
+        expect(body).toMatch(/getOrDefer\('decalSurface'/);
+        expect(body).toMatch(/getOrDefer\('decalResolve'/);
+        expect(body).not.toMatch(/_pipelines\.get\('decal/);
+        const skip = body.indexOf('if (!resolvePipeline || surfacePipelines.every(p => !p)) return;');
+        expect(skip).toBeGreaterThan(-1);
+        expect(skip).toBeLessThan(body.indexOf("'decals'"));
+        expect(methodBody('drawColorDecals')).toMatch(/getOrDefer\('decalColor'[\s\S]*if \(!pipeline\) continue;/);
+    });
+
+    it('name the target of the pass each pipeline is for, asked for before any pass is open', () => {
+        // A pipeline takes its attachment formats from the open pass unless it names a target. Asked for up front,
+        // the resolve was built against the previous pass's attachments: "Attachment state of decalResolve is not
+        // compatible with decals.resolve", every frame with a bullet hole in it invalid, the screen black.
+        const body = methodBody('surfaceDecalPass');
+        expect(body).toMatch(/getOrDefer\('decalSurface'[\s\S]*?target: dbuffer\.renderTarget/);
+        expect(body).toMatch(/getOrDefer\('decalResolve'[\s\S]*?target: gBuffer\.renderTarget/);
+        // ...and the targets exist by then: allocated before the pipelines are asked for.
+        expect(body.indexOf('const dbuffer =')).toBeLessThan(body.indexOf("getOrDefer('decalSurface'"));
+        expect(body).toMatch(/beginFullscreenPass\(dbuffer\.renderTarget, 'decals'/);
+        expect(body).toMatch(/beginFullscreenPass\(gBuffer\.renderTarget, 'decals\.resolve'/);
     });
 
     it('clear every DBuffer attachment, not attachment 0 alone', () => {

@@ -26,6 +26,18 @@ export function markEditorOnly(node: Node, value: boolean = true): void {
 
 export { EDITOR_NODE_MARKERS, isEditorOwnedName } from './editorOwnership';
 
+/** The holder of the copies a shader sweep draws of what a scene can spawn (core/scene/spawnWarmup.ts). */
+export const SPAWN_WARMUP_HOLDER = '__editor__spawnWarmup';
+
+/**
+ * Whether a node is one of those copies, or under one. A GI or probe capture leaves them out: they are in the
+ * scene for a few frames of a load, and a capture (or a bake's geometry signature) taken then must not see them.
+ */
+export function isSpawnWarmupCopy(node: Node): boolean {
+    for (let n: Node | null = node; n; n = n.parent) if (n.name === SPAWN_WARMUP_HOLDER) return true;
+    return false;
+}
+
 /**
  * Whether a node is EDITOR-OWNED — editor chrome or a preview prop, not authored content — and so must
  * never mark a document unsaved, never become an undo step and never be saved. See

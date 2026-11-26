@@ -21,6 +21,8 @@ import { graphPlan, groupsOf } from '@editor/features/animation/stateGroups';
 import { rerouteKey } from '@editor/features/animation/reroutes';
 import { estimatedSize } from '@editor/features/animation/tidyLayout';
 import { registerTemplates, clearTemplates } from '@engine/core/scene/templates';
+import { warmCopyJson } from '@engine/core/scene/spawnWarmup';
+import { spawnableSubtrees, unplacedTemplates } from '@editor/features/publish/spawnables';
 import { Events } from '@engine/core/events';
 
 // The Sandbox example: a mannequin with ALS-style locomotion built from the engine's own tools.
@@ -1400,6 +1402,27 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(stop, 'never back').toBeLessThan(0.05);
     });
 
+    it('prepares the effects its guns spawn with the scene: a copy of each that draws and runs nothing', () => {
+        // The first shot froze the game for seconds: the muzzle flash's particles and the bullet hole's decal built
+        // their shaders the frame they first appeared. They are templates the scene never places, so they are what
+        // the scene's shader step draws with it (publish/spawnables.ts, core/scene/spawnWarmup.ts).
+        const placed = { nodes: nodes().map((n: any) => ({ getVariable: (k: string) => n.variables?.[k]?.value })) } as any;
+        const unplaced = unplacedTemplates(library('templates'), placed);
+        const names = unplaced.map(t => t.name);
+        for (const name of ['Muzzle Flash', 'Bullet Impact', 'Bullet Hole', 'Tracer']) expect(names, name).toContain(name);
+        for (const name of ['Player', 'Environment', 'Course']) expect(names, name).not.toContain(name);
+        const subtrees = spawnableSubtrees(unplaced, library('materials')) as any[];
+        const flash = warmCopyJson(subtrees.find(s => s.name === 'Muzzle Flash'));
+        const inside = allNodes(flash);
+        expect(inside.filter(n => n.type === 'particleSystem').map(n => n.name).sort()).toEqual(['Flash', 'Smoke']);
+        expect(inside.some(n => n.type === 'light')).toBe(true);
+        // Baked as Play bakes it, its SandboxShotFx in; the copy keeps none of it.
+        expect(allNodes(subtrees.find(s => s.name === 'Muzzle Flash')).some(n => typeof n.script === 'string')).toBe(true);
+        expect(inside.some(n => n.script !== undefined || n.scriptVars !== undefined)).toBe(false);
+        const hole = allNodes(warmCopyJson(subtrees.find(s => s.name === 'Bullet Hole')));
+        expect(hole.some(n => n.type === 'decal')).toBe(true);
+    });
+
     it('is a Player template, placed once, with the attributes each character sets public', () => {
         const templates = library('templates');
         // A folder lists its templates in explorer order, not in the order the generator made them.
@@ -1440,8 +1463,14 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(publics('SandboxPlayer')).toEqual(['backDiagonalScale', 'backScale', 'enterTrigger', 'exitTrigger', 'eyeCrouch', 'eyeStand', 'runFootSpeed', 'runFootWeight', 'runTurnSpeed', 'sprintTakeoff',
             'stairDownRunSpeed', 'stairDownWalkSpeed', 'stairUpRunSpeed', 'stairUpWalkSpeed', 'stairsLayer', 'turnDelay', 'walkBackDiagonalScale', 'walkFootSpeed', 'walkScale']);
         expect(publics('SandboxCamera')).toEqual(['aimArm', 'aimShoulderOffset', 'crouchDrop', 'pivotHeight', 'shoulderArm', 'shoulderOffset', 'thirdPersonArm']);
-        expect(inside.find((n: any) => n.type === 'character').script).toBe(named('Player').script);
-        expect(inside.find((n: any) => n.type === 'cameraRig').script).toBe(named('Camera Rig').script);
+        // The template keeps its nodes' sources the way the editor saves a template: out of the nodes, in its
+        // `scripts` map by node id, each node linked to its script asset by `__scriptId`. They are the scene's.
+        const character = inside.find((n: any) => n.type === 'character');
+        const cameraRig = inside.find((n: any) => n.type === 'cameraRig');
+        expect(template.scripts[character.id]).toBe(named('Player').script);
+        expect(template.scripts[cameraRig.id]).toBe(named('Camera Rig').script);
+        expect(character.variables.__scriptId.value).toBe(named('Player').variables.__scriptId.value);
+        expect(cameraRig.variables.__scriptId.value).toBe(named('Camera Rig').variables.__scriptId.value);
     });
 
     it('keeps its sky and its course in templates of their own', () => {
@@ -2428,6 +2457,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
 
     it('shoots where the crosshair looks, the bullet pushing the crate it hits', () => {
         withEffects();
+        // No random recoil yaw or spread: the same shots every run, every one of them through the crate.
+        const random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
         try {
             const p = play();
             p.run(0.5);
@@ -2440,20 +2471,31 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             aimCamera(p, [start[0], start[1] - 0.1, start[2]]);
             const gun = gunOf(p, 'Rifle Grip');
             const before = gun.shots;
+            // Away from the shooter, along the shot.
+            const away = [start[0] - p.collider.worldPosition[0], 0, start[2] - p.collider.worldPosition[2]];
+            const awayLength = Math.hypot(away[0], away[2]);
             input.press('Fire');
             const hits: string[] = [];
-            p.run(0.7, () => { if (gun.lastHit) hits.push(gun.lastHit.node?.name ?? 'ground'); });
+            let fastest = 0;
+            p.run(0.7, () => {
+                if (gun.lastHit) hits.push(gun.lastHit.node?.name ?? 'ground');
+                const v = crate.velocity;
+                fastest = Math.max(fastest, (v[0] * away[0] + v[2] * away[2]) / awayLength);
+            });
             input.release('Fire');
             const fired = gun.shots - before;
             // 600 rounds a minute: seven or eight in 0.7 s.
             expect(fired).toBeGreaterThanOrEqual(6);
             expect(fired).toBeLessThanOrEqual(8);
+            expect(hits).toContain('Crate Collider');
+            // Each hit pushes it: 18 N·s on 25 kg is 0.72 m/s along the shot, less what one step's friction takes.
+            expect(fastest, `the crate's fastest along the shot: ${fastest.toFixed(2)} m/s`).toBeGreaterThan(0.3);
             p.run(0.4);
-            // How far depends on each backend's friction (Jolt slides it most): a push, on all of them.
+            // How far it slides is each backend's friction. Jolt and Rapier: centimetres. cannon caps friction per
+            // contact point rather than by the load on it, and a box resting on the floor has four, so it holds the
+            // crate with about four times the friction its 0.3 gives it: millimetres.
             const moved = vec3.distance(crate.worldPosition, start);
-            expect(moved, `the crate moved ${(moved * 100).toFixed(1)} cm`).toBeGreaterThan(0.02);
-            // Away from the shooter, along the shot.
-            const away = [start[0] - p.collider.worldPosition[0], 0, start[2] - p.collider.worldPosition[2]];
+            expect(moved, `the crate moved ${(moved * 100).toFixed(1)} cm`).toBeGreaterThan(TEST_PHYSICS === 'cannon' ? 0.002 : 0.02);
             const push = [crate.worldPosition[0] - start[0], 0, crate.worldPosition[2] - start[2]];
             expect(push[0] * away[0] + push[2] * away[2]).toBeGreaterThan(0);
             // The shots left holes on it, which ride with it.
@@ -2461,7 +2503,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             expect(holes.length).toBeGreaterThan(0);
             expect(holes.some((h: any) => h.parent === crate)).toBe(true);
             input.release('Aim');
-        } finally { clearTemplates(); }
+        } finally { random.mockRestore(); clearTemplates(); }
     });
 
     it('fires the rifle while the trigger is held and the pistol once a pull', () => {

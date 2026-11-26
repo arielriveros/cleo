@@ -13,6 +13,7 @@ import { TaaResolveProgram, TaaSharpenProgram, ScreenProgram, MotionBlurVelocity
 import type { TaaHistoryFilter } from './settingsTypes';
 import { displayExposure } from './frameView';
 import type { FrameView } from './frameView';
+import { HALF_FLOAT_COLOR, type EffectPrefetch } from './effectPrefetch';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
 import { DEPTH_TEST } from './pipelineCache';
@@ -241,6 +242,17 @@ export class TemporalPasses {
      * write happens at the bottom. Folding them together would leave the gate one frame behind and the
      * first frame of every motion unblurred.
      */
+    /**
+     * Ask for this effect's pipelines ahead of its first run (render/effectPrefetch.ts): the shader sweep does, so a
+     * script switching it on in play finds them built. Each as its pass asks for it, by the target shape it draws in.
+     */
+    public prefetchPipelines(p: EffectPrefetch): void {
+        // TAA: the resolve into its history, then back over the scene buffer, sharpened or copied.
+        p.fullscreen('taaResolve', TaaResolveProgram, HALF_FLOAT_COLOR);
+        p.fullscreen('taaSharpen', TaaSharpenProgram, this._targets.scene.renderTarget);
+        p.fullscreen('screen', ScreenProgram, this._targets.scene.renderTarget);
+    }
+
     public detectObjectMotion(scene: Scene): void {
         this.anyObjectMoved = false;
         if (!this._velocityWanted()) return;
@@ -518,7 +530,9 @@ export class TemporalPasses {
         // A node that did not move is EXACTLY what the reprojection already describes, so drawing
         // it would spend a draw call writing back the value already there. The two opt-out modes
         // always draw: their whole job is to cancel what the base pass wrote.
-        if (node.motionBlur === 'full' && !this._nodeMoved(node)) return;
+        // A shader sweep frame (Renderer.prepareShaders) draws them all: something still now may move later (a
+        // spawned tracer), and its velocity pipeline would be built on the spot then.
+        if (node.motionBlur === 'full' && !this._nodeMoved(node) && !this._sys.visibility.sweeping) return;
         movers.push(node);
     }
 

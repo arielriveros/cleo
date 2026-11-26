@@ -6,6 +6,7 @@ import { device } from '../rhi/deviceHandle';
 import type { ShaderProgramDescriptor, ShaderProgram } from '../rhi/shaderProgram';
 import { ProgramCompileQueue, shaderOptimizerStats, recordStall } from '../shaderOptimizer';
 import { shaderStats } from '../shaderStats';
+import { shaderActivity } from '../shaderActivity';
 import { shadersAreLibraryHandles, shaderIsShipped } from '../shaderLibrary';
 import { programTable } from './programs';
 import { setParticleSimVariants } from '../particles/particlePrograms';
@@ -174,19 +175,29 @@ export class ProgramRegistry implements PipelineCacheHost {
         // the base program's runtime branches cover whatever the variant compiled out, so the frame is
         // right (or, for a parallax or wind variant, merely flat or still for a few frames) and nothing
         // stalls. The variant is swapped in under its names the frame its compile finishes.
+        // Counted as a build (shaderActivity) while it compiles: a shader sweep waits for it, and its count shows it.
         const standIn = this._standInFor(physical);
+        const already = this.compileQueue.isPending(physical);
+        let activity = -1;
         if (standIn && this.compileQueue.request(physical, { ...descriptor, label: physical }, built => {
+            shaderActivity.end(activity);
             this._builtByDescriptor.set(descriptor, built);
             this._registerProgram(physical, built);
-        }, error => Logger.error(`[shaders] '${physical}' failed to compile: ${error}`, 'Renderer'))) {
-            if (this.programList)
-                Logger.warn(`[shaders] '${physical}' compiling in the background — missing from the published program list`, 'Renderer');
+        }, error => {
+            shaderActivity.end(activity);
+            Logger.error(`[shaders] '${physical}' failed to compile: ${error}`, 'Renderer');
+        })) {
+            if (!already) activity = shaderActivity.begin({ program: physical, kind: 'program' });
+            // A shader sweep asking for it (what a scene can spawn, prepared with it) is the list's gap being
+            // covered before play, not a hitch: said, not warned.
+            if (this.programList && !already)
+                Logger[this._sys.visibility.sweeping ? 'info' : 'warn'](`[shaders] '${physical}' compiling in the background — missing from the published program list`, 'Renderer');
             shaderOptimizerStats.fallbackDraws++;
             return standIn;
         }
 
         if (this.programList)
-            Logger.warn(`[shaders] '${physical}' built on demand — missing from the published program list`, 'Renderer');
+            Logger[this._sys.visibility.sweeping ? 'info' : 'warn'](`[shaders] '${physical}' built on demand — missing from the published program list`, 'Renderer');
         const start = performance.now();
         program = this._host.device.createShaderProgram({ ...descriptor, label: physical });
         shaderOptimizerStats.syncCompiles++;

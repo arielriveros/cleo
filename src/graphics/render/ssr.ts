@@ -5,6 +5,7 @@ import { TemporalHistory } from './temporalHistory';
 import { SSR_DEFAULTS, SSR_FEEDBACK, SSR_SAMPLE_BIAS, ssrRoughnessFade, ssrStepCount } from '../ssrSettings';
 import { SsrProgram, SsrResolveProgram, SsrTemporalProgram } from './programs';
 import type { FrameView } from './frameView';
+import { HALF_FLOAT_COLOR, type EffectPrefetch } from './effectPrefetch';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
 import type { PipelineCache } from './pipelineCache';
@@ -125,6 +126,17 @@ export class SsrPasses {
      * Trace, resolve and accumulate. Returns whether a result was produced; the caller records it in
      * {@link ssrProducedThisFrame}.
      */
+    /**
+     * Ask for this effect's pipelines ahead of its first run (render/effectPrefetch.ts): the shader sweep does, so a
+     * script switching it on in play finds them built. Each as its pass asks for it, by the target shape it draws in.
+     */
+    public prefetchPipelines(p: EffectPrefetch): void {
+        p.pipeline('ssr', SsrProgram, { vertex: 'model', builtFor: 'ssr', targets: 2 },
+            { colorAttachments: 2, colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
+        p.fullscreen('ssrResolve', SsrResolveProgram, HALF_FLOAT_COLOR);
+        p.fullscreen('ssrTemporal', SsrTemporalProgram, HALF_FLOAT_COLOR);
+    }
+
     public ssrPass(): boolean {
         const w = this.ssrWidth, h = this.ssrHeight;
         this._ensureTargets(w, h);

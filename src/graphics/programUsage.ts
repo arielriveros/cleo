@@ -307,6 +307,39 @@ export function usageFromRenderSettings(settings: Partial<RenderSettings> | null
             'pbrGeometryInstancedLeanOpaque', 'pbrGeometryInstancedLeanOpaqueFoliage');
 }
 
+/**
+ * The render settings a script can switch on in play (`Game.updateRenderSettings`), each with the value that means
+ * on: what {@link usageFromScriptSources} looks for.
+ */
+const SCRIPT_SWITCHABLE: Partial<Record<keyof RenderSettings, boolean | number>> = {
+    bloomEnabled: true, ssaoEnabled: true, ssrEnabled: true, autoExposureEnabled: true, dofEnabled: true,
+    localExposureEnabled: true, taaEnabled: true, motionBlurEnabled: true, fxaaEnabled: true, foliagePrepass: true,
+    lensFlareIntensity: 1, chromaticAberrationStrength: 1, vignetteStrength: 1, filmGrainIntensity: 1,
+};
+
+/**
+ * Accumulate what the game's scripts can switch on: every render setting their source names (a
+ * `Game.updateRenderSettings({ dofEnabled: true })` aiming a gun). The published settings are only how the game
+ * starts; a program a script turns on later would otherwise be missing from the list and link on the spot, a stall,
+ * the first time the effect runs. A name is enough to count: the list errs toward including. A script naming
+ * `shadowFilterMode` gets both filters' programs.
+ */
+export function usageFromScriptSources(sources: readonly string[], use: ProgramUsage): void {
+    const text = sources.filter(s => typeof s === 'string').join('\n');
+    if (!text) return;
+    const named = (key: string) => new RegExp(`\\b${key}\\b`).test(text);
+    // Everything off but what a script names, so only that is added (an unstated setting counts as ON there).
+    const settings: Partial<Record<keyof RenderSettings, unknown>> = {};
+    let any = false;
+    for (const [key, on] of Object.entries(SCRIPT_SWITCHABLE) as [keyof RenderSettings, boolean | number][]) {
+        const hit = named(key);
+        settings[key] = hit ? on : (typeof on === 'number' ? 0 : false);
+        any ||= hit;
+    }
+    if (any) usageFromRenderSettings(settings as Partial<RenderSettings>, use);
+    if (named('shadowFilterMode')) { use.filters.add(0); use.filters.add(1); }
+}
+
 /** Logical names the velocity pass needs only when TAA or motion blur runs. */
 const VELOCITY = ['objectVelocity', 'objectVelocitySkinned', 'objectVelocityBasicSkinned'];
 

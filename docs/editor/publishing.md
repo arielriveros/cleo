@@ -58,6 +58,11 @@ when you publish) and **Physics backend** (the project's). As it starts, the gam
 browser console (the desktop build's developer tools), and the reason when it is not what it asked for: a WebGPU
 game on a machine without WebGPU, or a physics backend that could not load, falls back and says so.
 
+Before a scene starts, under the loading screen ("Compiling shaders"), the game builds every shader the scene draws
+with and every one what it can spawn needs: a copy of each template is drawn once, its particles emitting, then
+taken away. So a gun's first shot, or the first enemy a spawner makes, does not stall the game while its effects'
+shaders compile. A scene loaded by `Game.loadScene` does the same, for up to 30 s.
+
 A common shape is three scenes: a menu, the game, and an end screen — with a two-line button script
 in each.
 

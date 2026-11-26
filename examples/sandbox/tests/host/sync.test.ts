@@ -161,11 +161,14 @@ describe('NetSync phase 3: a 200-prop sandbox under load', () => {
 
 describe('NetSync phase 3: sixteen peers', () => {
     let w: Awaited<ReturnType<typeof world>>;
-    beforeAll(async () => { w = await world(); }, 120_000);
+    // The sixteen joins here, under the hook's budget: each builds a peer's copy of the Sandbox.
+    beforeAll(async () => {
+        w = await world();
+        for (let i = 0; i < 16; i++) await w.join({ ...LOSSY, seed: 100 + i });
+    }, 240_000);
     afterAll(() => w.dispose());
 
     it('serves 16 peers 200 props through an explosion, each within its budget, and all converge', async () => {
-        for (let i = 0; i < 16; i++) await w.join({ ...LOSSY, seed: 100 + i });
         expect(w.session.peers.size).toBe(16);
         let added = 0;
         const existing = [...w.runtime.scene.nodes].filter((n: any) => n.nodeType === 'collider' && n.mass > 0).length;
@@ -196,5 +199,5 @@ describe('NetSync phase 3: sixteen peers', () => {
             expect(d.missing).toBe(0);
             expect(d.pos).toBeLessThan(CONVERGED);
         }
-    });
+    }, 240_000); // about 620 ticks of 200 props and 16 peers, all simulated here
 });

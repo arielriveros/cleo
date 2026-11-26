@@ -1,6 +1,7 @@
 import { useEffect, useState, type RefObject } from 'react'
 import { EYE_TRIGGER_CLASS } from '@cleo/app-kit/ui'
 import { getShellBridge } from '@cleo/app-kit/platform/desktopShell'
+import { playFullscreenTarget } from './playFullscreenTarget'
 
 // Play's fullscreen button, in the viewport's top-right chrome. Fullscreen is what lets the game take EVERY key:
 // in a normal tab Chrome keeps Ctrl+W, Ctrl+T and Ctrl+N from the page, so a game that walks on Ctrl and W closes
@@ -21,17 +22,8 @@ const ExitIcon = () => (
   </svg>
 )
 
-/**
- * Marks the element Play goes fullscreen with: the viewport panel, holding the engine's canvas AND what is drawn
- * over it as DOM (the game UI, the touch controls). Fullscreen shows only the fullscreen element's subtree, so
- * the canvas's own wrapper alone would leave the HUD behind.
- */
-export const PLAY_SURFACE_ATTR = 'data-cleo-play-surface'
-
-/** What goes fullscreen for the viewport `el`: the play surface round it, else `el` itself. */
-export function playFullscreenTarget<T extends { closest(selector: string): unknown }>(el: T): T {
-  return (el.closest(`[${PLAY_SURFACE_ATTR}]`) as T | null) ?? el
-}
+// The play surface and its lookup live apart, with no imports (playFullscreenTarget.ts).
+export { PLAY_SURFACE_ATTR, playFullscreenTarget } from './playFullscreenTarget'
 
 /** Whether this page can go fullscreen itself (a browser that allows it, not the desktop shell). */
 export function canPlayFullscreen(): boolean {

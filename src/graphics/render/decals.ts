@@ -243,19 +243,34 @@ export class DecalPasses {
         const copy = this.gBufferCopyFBO = this.decalTarget(this.gBufferCopyFBO, () => new Framebuffer({
             colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
 
+        // A first decal's pipelines build off the main thread on WebGPU, as a material's do (PipelineCache
+        // .getOrDefer): until they are in, its decals wait a frame or two instead of the whole window waiting on
+        // the compile. All of them asked for before anything is drawn, so they build together; a frame that can
+        // draw none of them skips the pass, which leaves the G-buffer as it is.
+        // Each names the TARGET of the pass it will draw in: none is open yet, and a pipeline takes its attachment
+        // formats from the open pass otherwise. Asked for with the previous pass's, the resolve was built for the
+        // wrong attachments and every frame with a decal in it failed validation, and went black.
+        const surfacePipelines = this.surfaceDecals.map(decal => this._pipelines.getOrDefer('decalSurface', DecalSurfaceProgram, {
+            cullMode: DecalPasses._decalCull(decal),
+            targets: 3,
+            blend: DecalPasses._DECAL_DBUFFER_BLEND,
+            vertex: 'model',
+            builtFor: 'irradiance',
+            target: dbuffer.renderTarget,
+        }));
+        // `_pipelines.fullscreen`'s vertex setup, with three targets.
+        const resolvePipeline = this._pipelines.getOrDefer('decalResolve', DecalResolveProgram,
+                                                           { vertex: 'model', builtFor: 'decalResolve', targets: 3, target: gBuffer.renderTarget });
+        if (!resolvePipeline || surfacePipelines.every(p => !p)) return;
+
         const pass = this._passes.beginFullscreenPass(dbuffer.renderTarget, 'decals', true, [0, 0, 0, 1], false, true);
-        for (const decal of this.surfaceDecals) {
+        for (let i = 0; i < this.surfaceDecals.length; i++) {
+            const decal = this.surfaceDecals[i], pipeline = surfacePipelines[i];
+            if (!pipeline) continue;
             const receivers = this._decalReceiverDepth(decal, gBuffer.depth);
             if (!receivers) continue;
             const material = decal.material ?? this._defaultDecalMaterial;
             this._shaderManager.bind('decalSurface');
-            const pipeline = this._pipelines.get('decalSurface', DecalSurfaceProgram, {
-                cullMode: DecalPasses._decalCull(decal),
-                targets: 3,
-                blend: DecalPasses._DECAL_DBUFFER_BLEND,
-                vertex: 'model',
-                builtFor: 'irradiance',
-            });
             // PER DECAL, not hoisted: WebGL2 hands texture units out in bind order and resets them only
             // on `setPipeline`, so a hoisted one runs past the 16 guaranteed units within three decals.
             pass.setPipeline(pipeline);
@@ -275,9 +290,6 @@ export class DecalPasses {
         // apart by the DBuffer's alphas instead, and discards them.
         const resolve = this._passes.beginFullscreenPass(gBuffer.renderTarget, 'decals.resolve', false, undefined, false);
         this._shaderManager.bind('decalResolve');
-        // `_pipelines.fullscreen`'s vertex setup, with three targets.
-        const resolvePipeline = this._pipelines.get('decalResolve', DecalResolveProgram,
-                                                  { vertex: 'model', builtFor: 'decalResolve', targets: 3 });
         resolve.setPipeline(resolvePipeline);
         resolve.setBindGroup(0, this._bindGroups.textureGroup(resolvePipeline, 0, [
             copy.colors[0], copy.colors[1], copy.colors[2],
@@ -313,12 +325,14 @@ export class DecalPasses {
             this._shaderManager.bind('decalColor');
             // No depth state named: both targets carry the scene's depth, and the synthesised default is
             // "test nothing, write nothing" — the overlay in particular must never write that attachment.
-            const pipeline = this._pipelines.get('decalColor', DecalColorProgram, {
+            // Off the main thread on WebGPU, as the surface decals' are: one waits for its pipeline a frame or two.
+            const pipeline = this._pipelines.getOrDefer('decalColor', DecalColorProgram, {
                 cullMode: DecalPasses._decalCull(decal),
                 blend,
                 vertex: 'model',
                 builtFor: 'irradiance',
             });
+            if (!pipeline) continue;
             pass.setPipeline(pipeline);
             this._setDecalUniforms(decal, material, invViewProj, mode);
             pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));

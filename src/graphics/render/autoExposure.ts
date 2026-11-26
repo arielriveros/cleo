@@ -8,6 +8,7 @@ import { device } from '../rhi/deviceHandle';
 import { ShaderManager } from '../systems/shaderManager';
 import { ExposureMeterProgram } from './programs';
 import type { FrameView } from './frameView';
+import type { EffectPrefetch } from './effectPrefetch';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
 import type { PipelineCache } from './pipelineCache';
@@ -124,6 +125,14 @@ export class AutoExposure {
      * editor's non-scene tabs) render at the fixed preview exposure, which is k = 1, so they are what they
      * were without pre-exposure — and they never disturb the scene's own hysteresis.
      */
+    /**
+     * Ask for this effect's pipelines ahead of its first run (render/effectPrefetch.ts): the shader sweep does, so a
+     * script switching it on in play finds them built. Each as its pass asks for it, by the target shape it draws in.
+     */
+    public prefetchPipelines(p: EffectPrefetch): void {
+        if (this.exposureFBOs[0]) p.fullscreen('exposureMeter', ExposureMeterProgram, this.exposureFBOs[0].renderTarget);
+    }
+
     public beginFrame(preview: boolean): void {
         if (preview || !this.preExposureEnabled) {
             this._view.preExposure = 1;

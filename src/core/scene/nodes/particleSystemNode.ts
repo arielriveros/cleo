@@ -328,6 +328,26 @@ export class ParticleSystemNode extends Node {
             if (!emitterName || emitter.def.name === emitterName) emitter.queueSources(packSpawnSources(sources, emitter.capacity));
     }
 
+    /** Set once the shader sweep runs this system (warmStep): it then simulates and draws whatever the preview says. */
+    private _warming = false;
+
+    /**
+     * @internal One step of a copy the shader sweep draws (core/scene/spawnWarmup.ts), so the system's simulation and
+     * draw programs are built before the real one first plays. The first step plays it; EVERY step fires a particle
+     * from every emitter: a pipeline is asked for only by a draw with something alive, and a muzzle flash's
+     * particles live a few frames, gone before its simulation (built off the main thread meanwhile) first ran, or
+     * before its lit program finished compiling. No step runs the node's update, its LOD or offscreen pausing, or a
+     * script.
+     */
+    public warmStep(dt: number): void {
+        if (!this._warming) {
+            this._warming = true;
+            this.play();
+        }
+        for (const emitter of this._runtime.emitters) emitter.burst(1);
+        this._runtime.advance(dt, this.worldTransform, 1);
+    }
+
     private _startRuntime(): void {
         for (const emitter of this._runtime.emitters) emitter.play();
         this._runtime.prewarm(this.worldTransform);
@@ -342,7 +362,7 @@ export class ParticleSystemNode extends Node {
      * neither simulates nor draws — frozen mid-flight particles would read as a bug, not a pause.
      */
     public get previewSuppressed(): boolean {
-        return authoring.enabled && this.scene?.particlePreview === false;
+        return !this._warming && authoring.enabled && this.scene?.particlePreview === false;
     }
 
     /** Whether the clock may advance right now. */

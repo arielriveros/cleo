@@ -15,6 +15,7 @@ import { VolumetricCloudsProgram, CloudUpsampleProgram, CloudNoiseBakeProgram, C
 import { QUALITY_TIERS } from './settingsTypes';
 import type { QualityPreset } from './settingsTypes';
 import type { FrameView } from './frameView';
+import type { EffectPrefetch } from './effectPrefetch';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
 import type { PipelineCache } from './pipelineCache';
@@ -289,6 +290,20 @@ export class VolumetricCloudPasses {
     private readonly _windDir: [number, number, number] = [0, 0, 0];
 
     /** Carry the clouds on by `dt` seconds of the render clock, with the node's wind as it is now. */
+    /**
+     * Ask for this effect's pipelines ahead of its first run, for a scene with a clouds node (switched on or not) (render/effectPrefetch.ts): the shader sweep does, so a
+     * script switching it on in play finds them built. Each as its pass asks for it, by the target shape it draws in.
+     */
+    public prefetchPipelines(p: EffectPrefetch, scene: Scene): void {
+        if (!scene.volumetricClouds) return;
+        // The noise volumes are baked by a compute pass that builds its pipeline on the spot: baked now, while
+        // the scene loads, rather than the frame the clouds are first switched on.
+        this.bakeCloudNoise();
+        p.fullscreen('volumetricClouds', VolumetricCloudsProgram, this._targets.scene.renderTarget, CLOUD_BLEND);
+        p.fullscreen('cloudUpsample', CloudUpsampleProgram, this._targets.scene.renderTarget, CLOUD_BLEND);
+        p.fullscreen('cloudTemporalResolve', CloudTemporalResolveProgram, { colorTextureOptions: { mipMap: false, precision: 'high' } });
+    }
+
     public advanceCloudWind(scene: Scene, dt: number): void {
         const node = scene.volumetricClouds;
         if (!node || !(dt > 0)) return;

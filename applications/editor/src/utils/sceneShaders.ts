@@ -6,8 +6,12 @@
 // Why: on WebGPU a pipeline's shader compiles when the pipeline is made, and Chromium's D3D12 backend compiles
 // the big ones with FXC for seconds each (the Sketch project's pencil screen material took 45 s). Built while
 // the project was already open, a material popped in late, and the game camera's effect arrived well into Play.
+//
+// What the scene can SPAWN is drawn with it too (`spawnables`, mounted by spawnWarmup.ts): a template only a script
+// instantiates met its shaders the frame it first appeared, and the Sandbox's first shot froze the game for seconds
+// while its muzzle flash's particles and its bullet hole's decal compiled.
 
-import { CustomMaterial, type Scene } from 'cleo'
+import { CustomMaterial, mountSpawnWarmup, type Scene } from 'cleo'
 import type { LoadStepHandle } from '@cleo/app-kit/feedback/loadingStore'
 import { ensureWgslTranslator } from '@cleo/app-kit/engine/wgslTranslator'
 
@@ -17,8 +21,12 @@ export interface ShaderPreparer {
   prepareShaders(scene: Scene, options: {
     onProgress?: (done: number, total: number) => void
     signal?: AbortSignal
+    warmup?: { readonly count: number; beforeFrame(dt: number): void }
   }): Promise<{ built: number; remaining: number; timedOut: boolean; seconds: number }>
 }
+
+/** What a scene can spawn, as subtrees to draw with it while its shaders are prepared. Read when the step starts. */
+export type SpawnableSource = () => unknown[] | Promise<unknown[]>
 
 /** Whether `scene` draws with a custom material anywhere: a model, a landscape, or any camera's screen materials. */
 export function sceneHasCustomMaterials(scene: Scene): boolean {
@@ -58,18 +66,29 @@ export function engineShaderProgress(step: LoadStepHandle, done: number, total: 
  * Report `renderer.prepareShaders(scene)` as `step`: its count while it runs, then what it built. Settles the step
  * whatever happens (an error fails it), so the loading screen never waits on it forever. `already`: what the step
  * counted before (the engine's programs, when it is the startup's one shaders step), carried in its count.
+ * `spawnables`: what the scene can spawn, drawn with it for the step and taken away after (spawnWarmup.ts).
  */
 export async function prepareSceneShaders(renderer: ShaderPreparer | null | undefined, scene: Scene,
                                           step: LoadStepHandle, signal?: AbortSignal,
-                                          already: CountedShaders = { done: 0, total: 0 }): Promise<void> {
+                                          already: CountedShaders = { done: 0, total: 0 },
+                                          spawnables?: SpawnableSource): Promise<void> {
   if (!renderer) { step.skip('no renderer'); return }
   step.start()
+  let warmup: ReturnType<typeof mountSpawnWarmup> | null = null
   try {
     await ensureTranslatorFor(renderer, scene)
+    // What it can spawn, mounted for the sweep. Never a reason to fail the step: without it the scene's own
+    // shaders are still built.
+    try {
+      const subtrees = spawnables ? await spawnables() : []
+      if (subtrees.length) warmup = mountSpawnWarmup(scene, subtrees)
+    } catch { warmup = null }
+    const spawned = warmup?.count ? ` · ${warmup.count} it can spawn` : ''
     const started = performance.now()
     let shown = ''
     const report = await renderer.prepareShaders(scene, {
       signal,
+      ...(warmup?.count ? { warmup } : {}),
       onProgress: (done, total) => {
         if (total <= 0) return
         // The renderer reports every frame; the screen redraws on a change, and once a second while a long
@@ -77,7 +96,7 @@ export async function prepareSceneShaders(renderer: ShaderPreparer | null | unde
         // also what keeps the loading screen's watchdog from closing on it).
         const seconds = Math.floor((performance.now() - started) / 1000)
         const left = total - done
-        const detail = left > 0 && seconds >= 3 ? `${left} building · ${seconds} s` : ''
+        const detail = left > 0 && seconds >= 3 ? `${left} building · ${seconds} s${spawned}` : ''
         const key = `${done}/${total}/${detail}`
         if (key === shown) return
         shown = key
@@ -90,5 +109,7 @@ export async function prepareSceneShaders(renderer: ShaderPreparer | null | unde
     else step.done(built ? `${built} built` : 'up to date')
   } catch (e) {
     step.fail(String((e as Error)?.message ?? e))
+  } finally {
+    warmup?.dispose()
   }
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { awaitShaders, type ShaderWaitSource, type SweepFrames } from '../src/graphics/render/shaderSweep';
+import { methodBody } from './helpers/rendererSource';
 
 // Renderer.prepareShaders holds the editor's loading screen until nothing the scene can draw is still building.
 // Its frames draw the scene culled by nothing, so what is off screen asks for its pipeline too; it is done when
@@ -123,5 +124,60 @@ describe('waiting for a scene\'s shaders', () => {
         const result = await run(w);
         expect(result).toMatchObject({ built: 0, timedOut: false, noFrames: false });
         expect(w.frames.rendered).toBe(3);
+    });
+});
+
+// What a sweep frame does that a normal frame does not, read off the renderer's source (a Renderer needs a GPU). Each
+// one is something the Sandbox's first shot met for the first time in play: copies of what the scene can spawn,
+// stepped so their particles emit; a program compiled in the background held for; a post effect switched on later;
+// a velocity draw for something that only moves later.
+describe('a sweep frame', () => {
+    it('steps the copies of what the scene can spawn before it draws', () => {
+        const body = methodBody('render');
+        const step = body.indexOf('sweep.warmup?.beforeFrame(');
+        expect(step).toBeGreaterThan(-1);
+        expect(step).toBeLessThan(body.indexOf('this._renderFrame(scene)'));
+    });
+
+    it('waits for programs compiling in the background, and resets the history the copies were drawn into', () => {
+        const body = methodBody('prepareShaders');
+        expect(body).toMatch(/building: \(\) => [^\n]*compileQueue\.pendingCount/);
+        // Any sweep that drew resets the history (below); one that drew copies of what the scene can spawn snaps the
+        // exposure too.
+        expect(body).toContain('if (options.warmup?.count) this.snapExposure();');
+    });
+
+    it('runs the post effects a script can switch on, whatever their settings', () => {
+        const body = methodBody('_buildPostGraph');
+        expect(body).toContain('const sweeping = this._visibility.sweeping;');
+        for (const gate of ['chromaticAberrationStrength <= 0 && !sweeping', 'this._post.dofMaxBlur <= 0) && !sweeping',
+                            'lensFlareIntensity <= 0 && !sweeping', 'vignetteStrength <= 0 && !sweeping', 'filmGrainIntensity <= 0 && !sweeping'])
+            expect(body).toContain(gate);
+    });
+
+    it('draws every model\'s velocity, moved or not', () => {
+        expect(methodBody('_selectMover')).toContain("!this._nodeMoved(node) && !this._sys.visibility.sweeping");
+    });
+});
+
+// The effects a script can switch on in play, built during the loading step: those with no buffers of their own run in
+// the sweep frames (as depth of field does); those that keep history are asked for by key, without running.
+describe('a sweep frame, for what a script switches on later', () => {
+    it('runs bloom, FXAA and motion blur whatever their settings', () => {
+        const post = methodBody('_buildPostGraph');
+        expect(post).toContain('(this._post.bloomIntensity <= 0 && !sweeping)');
+        expect(post).toContain('(this._post.fxaaEnabled || this._view.preview || sweeping)');
+        const frame = methodBody('_renderFrame');
+        expect(frame).toMatch(/motionBlurWillRun = this\._view\.hasPrevViewProj[\s\S]*?this\._visibility\.sweeping/);
+    });
+
+    it('asks once for the pipelines of the effects that keep history, and resets the history after', () => {
+        const prepare = methodBody('prepareShaders');
+        expect(prepare).toContain('if (!prefetched) { prefetched = true; this._prefetchEffects(scene, prefetch); }');
+        expect(prepare).toContain('prefetch.dispose()');
+        expect(prepare).toContain('if (sweep.rendered > 0) this.invalidateTemporalHistory();');
+        const effects = methodBody('_prefetchEffects');
+        for (const sys of ['_temporal', '_ssr', '_ssil', '_radiance', '_fog', '_clouds', '_autoExposure'])
+            expect(effects).toContain(`this.${sys}.prefetchPipelines(prefetch`);
     });
 });

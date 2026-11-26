@@ -8,6 +8,7 @@ import type { BlendState } from '../rhi/types';
 import { ShaderManager } from '../systems/shaderManager';
 import { VolumetricFogInjectProgram, VolumetricFogIntegrateProgram, VolumetricFogApplyProgram } from './programs';
 import type { FrameView } from './frameView';
+import { HALF_FLOAT_COLOR, type EffectPrefetch } from './effectPrefetch';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
 import type { BindGroupCache } from './bindGroups';
@@ -115,6 +116,17 @@ export class VolumetricFogPasses {
      * Light, integrate and composite the fog over the scene buffer. Returns whether anything was drawn.
      * The caller has checked the profiler switch; this checks everything else.
      */
+    /**
+     * Ask for this effect's pipelines ahead of its first run, for a scene that has fog to draw (render/effectPrefetch.ts): the shader sweep does, so a
+     * script switching it on in play finds them built. Each as its pass asks for it, by the target shape it draws in.
+     */
+    public prefetchPipelines(p: EffectPrefetch, scene: Scene): void {
+        if (scene.volumetricFogs.size === 0 && !scene.precipitation.haze) return;
+        p.fullscreen('volumetricFogInject', VolumetricFogInjectProgram, HALF_FLOAT_COLOR);
+        p.fullscreen('volumetricFogIntegrate', VolumetricFogIntegrateProgram, HALF_FLOAT_COLOR);
+        p.fullscreen('volumetricFogApply', VolumetricFogApplyProgram, this._targets.scene.renderTarget, FOG_APPLY_BLEND);
+    }
+
     public render(scene: Scene): boolean {
         this.producedThisFrame = false;
         this.frameVolumes.length = 0;

@@ -57,7 +57,7 @@ import ProjectOptionsPanel, { INPUT_PAGE_ID } from '../options/ProjectOptionsPan
 import { useOptionPageShown } from '@cleo/app-kit/ui/OptionsShell';
 import AssetsExplorer from '../assets/AssetsExplorer';
 import { useCleoEngine, MODE_RENDERS_VIEWPORT } from '../EngineContext';
-import { PLAY_SURFACE_ATTR } from '../PlayFullscreenButton';
+import { PLAY_SURFACE_ATTR } from '../playFullscreenTarget';
 import { TextInput, cn, labelClass } from '@cleo/app-kit/ui';
 import { DocHover } from '@cleo/app-kit/ui/DocTooltip';
 import { DocScope, useDocEntry } from '@cleo/app-kit/docs/DocScope';

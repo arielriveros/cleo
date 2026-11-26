@@ -1588,7 +1588,25 @@ export class WebGPUDevice implements Device {
         const module = descriptor.compute as WebGPUShaderModule;
         const label = descriptor.label ?? 'compute-pipeline';
         this._checkGroupIndices(label, module.groups);
-        const handle = this._scoped(label, 'compute pipeline', () => this._device.createComputePipeline({
+        const handle = this._scoped(label, 'compute pipeline', () => this._device.createComputePipeline(
+            WebGPUDevice._computeDescriptor(label, module)));
+        return new WebGPUComputePipeline(descriptor, handle, module.groups, module);
+    }
+
+    /**
+     * The same pipeline, compiled by the driver off the main thread: a first particle simulation waits for it
+     * instead of the window waiting on the compile. A rejection carries the validation message, against the label.
+     */
+    public async createComputePipelineAsync(descriptor: ComputePipelineDescriptor): Promise<ComputePipeline> {
+        const module = descriptor.compute as WebGPUShaderModule;
+        const label = descriptor.label ?? 'compute-pipeline';
+        this._checkGroupIndices(label, module.groups);
+        const handle = await this._device.createComputePipelineAsync(WebGPUDevice._computeDescriptor(label, module));
+        return new WebGPUComputePipeline(descriptor, handle, module.groups, module);
+    }
+
+    private static _computeDescriptor(label: string, module: WebGPUShaderModule): GPUComputePipelineDescriptor {
+        return {
             label,
             layout: 'auto',
             compute: {
@@ -1597,8 +1615,7 @@ export class WebGPUDevice implements Device {
                 // to fall back on.
                 entryPoint: module.entryPoints.compute,
             },
-        }));
-        return new WebGPUComputePipeline(descriptor, handle, module.groups, module);
+        };
     }
 
     public createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget {
