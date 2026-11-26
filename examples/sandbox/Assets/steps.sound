@@ -1,0 +1,28 @@
+{
+  "id": "freesound_community-step_soundwav-14903.mp3",
+  "name": "steps",
+  "version": 1,
+  "source": {
+    "kind": "audio",
+    "audioId": "freesound_community-step_soundwav-14903.mp3"
+  },
+  "settings": {
+    "volume": 1,
+    "rate": 1,
+    "pan": 0,
+    "loop": false,
+    "loopStart": 0,
+    "loopEnd": 0,
+    "fadeIn": 0,
+    "fadeOut": 0,
+    "bus": "sfx",
+    "preload": true,
+    "effects": []
+  },
+  "soundIds": [
+    "freesound_community-step_soundwav-14903.mp3"
+  ],
+  "audioIds": [
+    "freesound_community-step_soundwav-14903.mp3"
+  ]
+}

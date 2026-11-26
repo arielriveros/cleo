@@ -14,100 +14,106 @@
   "yAxis": {
     "name": "Speed",
     "min": 0,
-    "max": 3,
+    "max": 2,
     "smoothing": 0.03
   },
   "weightSmoothing": 0.04,
   "samples": [
     {
+      "clipName": "CrouchIdle",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": 45,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": 90,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": 135,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": 180,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": -135,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": -90,
+      "y": 0
+    },
+    {
+      "clipName": "CrouchIdle",
+      "x": -45,
+      "y": 0
+    },
+    {
       "clipName": "CrouchF",
       "x": 0,
-      "y": 1.512
+      "y": 1.51,
+      "rateScale": 0.827,
+      "phaseOffset": 0.633
     },
     {
       "clipName": "CrouchFL",
       "x": 45,
-      "y": 1.28
+      "y": 1.51,
+      "rateScale": 0.775,
+      "phaseOffset": 0.6
     },
     {
       "clipName": "CrouchL",
       "x": 90,
-      "y": 1.939
+      "y": 1.51,
+      "rateScale": 0.825,
+      "phaseOffset": 0.95
     },
     {
       "clipName": "CrouchBL",
       "x": 135,
-      "y": 1.794
+      "y": 1.51,
+      "rateScale": 0.856,
+      "phaseOffset": 0.85
     },
     {
       "clipName": "CrouchB",
       "x": 180,
-      "y": 1.25
+      "y": 1.51,
+      "rateScale": 0.823,
+      "phaseOffset": 0.95
     },
     {
       "clipName": "CrouchBR",
       "x": -135,
-      "y": 1.299
+      "y": 1.51,
+      "rateScale": 0.836,
+      "phaseOffset": 0.85
     },
     {
       "clipName": "CrouchR",
       "x": -90,
-      "y": 1.904
+      "y": 1.51,
+      "rateScale": 0.791,
+      "phaseOffset": 0.75
     },
     {
       "clipName": "CrouchFR",
       "x": -45,
-      "y": 0.969
-    },
-    {
-      "clipName": "CrouchB",
-      "x": -180,
-      "y": 1.25
-    },
-    {
-      "clipName": "CrouchIdle",
-      "x": 0,
-      "y": 0
-    },
-    {
-      "clipName": "CrouchIdle",
-      "x": 90,
-      "y": 0
-    },
-    {
-      "clipName": "CrouchIdle",
-      "x": -90,
-      "y": 0
-    },
-    {
-      "clipName": "CrouchIdle",
-      "x": 180,
-      "y": 0
-    },
-    {
-      "clipName": "CrouchIdle",
-      "x": -180,
-      "y": 0
-    },
-    {
-      "clipName": "CrouchIdle",
-      "x": 45,
-      "y": 0
-    },
-    {
-      "clipName": "CrouchIdle",
-      "x": -45,
-      "y": 0
-    },
-    {
-      "clipName": "CrouchIdle",
-      "x": 135,
-      "y": 0
-    },
-    {
-      "clipName": "CrouchIdle",
-      "x": -135,
-      "y": 0
+      "y": 1.51,
+      "rateScale": 0.828,
+      "phaseOffset": 0.767
     }
   ]
 }

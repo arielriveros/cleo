@@ -1,0 +1,9 @@
+{
+  "id": "3e3e6f58895cf5a5e77393b1139a4ffd",
+  "name": "Head",
+  "rigId": "1ca1de6215e2febc1b4ec0cb651189eb",
+  "weights": {
+    "mixamorig1:Neck": 1,
+    "mixamorig1:Head": 1
+  }
+}

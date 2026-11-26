@@ -1,5 +1,5 @@
 import { Logger, MathUtils, Node } from 'cleo'
-import type { LayerName, TemplateName } from 'cleo'
+import type { LayerName, TemplateName, TriggerName } from 'cleo'
 import { attribute, eventDispatch } from 'cleo/decorators'
 
 /** What one shot was, as the gun tells it (`weapon:Shot`). */
@@ -118,7 +118,7 @@ export default class SandboxGunNode extends Node {
     @attribute('Recoil', { min: 0, max: 1, step: 0.01 })
     public shake: number = 0.04
 
-    /** The weapon's own kick in the hands per shot, degrees up (third person: the aim settles it back). */
+    /** The weapon's own kick per shot, degrees up, carried on `weapon:Shot` for listeners (the Sandbox's body takes `fireTrigger`'s clip instead). */
     @attribute('Recoil', { min: 0, max: 30, step: 0.5 })
     public kick: number = 7
 
@@ -166,6 +166,10 @@ export default class SandboxGunNode extends Node {
     /** The shot's cue in the holder's `Sounds` group (third person; in first person the fire clip plays it). */
     @attribute('Effects')
     public shotSound: string = 'ShotPistol'
+
+    /** The holder's body recoil, an animator trigger (the Recoil layer's kick of this weapon), raised on every shot. */
+    @attribute('Effects')
+    public fireTrigger: TriggerName = '' as TriggerName
 
     /** Rounds in the magazine, and in the reserve. */
     public ammo: number = 12

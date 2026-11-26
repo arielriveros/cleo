@@ -3,13 +3,14 @@
   "repo": "arielriveros/cleo",
   "buckets": 1,
   "packs": [
-    ["sandbox.0.ec2f669a3adfd0dc.pack","example-data",null,null]
+    ["sandbox.0.4c501bd656386fde.pack","example-data",null,null]
   ],
   "files": {
     "Assets/Characters/Mannequin/Textures/Source/Mannequin Base Color.png": ["8b37622ef94909a6dc7ae7f26f3ce443697fb91613122a99fe4aedf08ede8492",3079875,0],
     "Assets/Characters/Mannequin/Textures/Source/Mannequin Normal.png": ["581ea325de44753eee1586874bbc61b4b26e4be60e4a6f68b7dbae2f353c4168",4428939,0],
     "Assets/Characters/Mannequin/Textures/Source/Mannequin Roughness.png": ["9adbf647fe7aeb280cd76e07ac056faa4a54a3cb570ee8e10783b74248fe3367",1829631,0],
     "Assets/Level/Textures/Source/Grid.png": ["b2d5d974ce170cf6b5f8b7f8d28a2338d785745c940136a9e44ce4a21df78b44",1028,0],
+    "Assets/Source/freesound_community-step_soundwav-14903.mp3": ["645d2de6c3fd7d7bbca692e646c9cf4dd492f6f9911e6cea9d797f94b8595a65",310080,0],
     "Assets/Vehicles/Car/Textures/Source/Car Body Base Color.png": ["901536039894dec9b5d91eb7d21129afbfc760527d51e9f9e4c2c93da5f41be4",1347100,0],
     "Assets/Vehicles/Car/Textures/Source/Car Body Metal Roughness.png": ["7037896cc5152a5aaeae47a62c665d9e06f36ea873d80d6c69cb3f4d370cfd46",24247,0],
     "Assets/Vehicles/Car/Textures/Source/Car Body Normal.png": ["84193beada0e3036237607ac766d54ed7ad7a8f11957adbab3a2da7f3b9c0b9a",1219003,0],
@@ -257,6 +258,7 @@
     "Blobs/c8/c8f9c3483d8c626bd724d1faf25841aed8b21d0beb8f74a592371b4b6bd4d049.bin": ["c8f9c3483d8c626bd724d1faf25841aed8b21d0beb8f74a592371b4b6bd4d049",190584,0],
     "Blobs/c9/c915b8481694a09011f593eb6f9dbeaf27ffd73ff78a8b2b1783293fdbad2277.bin": ["c915b8481694a09011f593eb6f9dbeaf27ffd73ff78a8b2b1783293fdbad2277",330648,0],
     "Blobs/ca/ca07ad6c60bd747bb4e96e9460fd749c1895431f823486a8ec3daff042fb4b50.bin": ["ca07ad6c60bd747bb4e96e9460fd749c1895431f823486a8ec3daff042fb4b50",5136,0],
+    "Blobs/ca/ca3d0811f3f3bcb62860f53b1bc5a7e989d7020e190ef08b2ec9cf6a736d3b9a.bin": ["ca3d0811f3f3bcb62860f53b1bc5a7e989d7020e190ef08b2ec9cf6a736d3b9a",6432,0],
     "Blobs/ca/cac97bef1a877089ce7a1ca57538864334e1ee3b1b5827e1db8aa5090a64fdc5.bin": ["cac97bef1a877089ce7a1ca57538864334e1ee3b1b5827e1db8aa5090a64fdc5",5280,0],
     "Blobs/ce/ce6390f423447c97ee6222d951a3b5607c320d6fa9a31dad6cf778dbebf4dadc.bin": ["ce6390f423447c97ee6222d951a3b5607c320d6fa9a31dad6cf778dbebf4dadc",5600,0],
     "Blobs/cf/cf1d3b51d6f5c867c8339940d9b65ddc64ce9ceb660846805f97015169378b55.bin": ["cf1d3b51d6f5c867c8339940d9b65ddc64ce9ceb660846805f97015169378b55",434064,0],
@@ -273,6 +275,7 @@
     "Blobs/d8/d81d7836730cfa1fb1845e1b07717e7223af1e7702ec8661da38e8abd2918493.bin": ["d81d7836730cfa1fb1845e1b07717e7223af1e7702ec8661da38e8abd2918493",5600,0],
     "Blobs/d8/d8c3783fba381bc2d1344501a38cab66e8a0ef5620008ce1516f0308d915626a.bin": ["d8c3783fba381bc2d1344501a38cab66e8a0ef5620008ce1516f0308d915626a",5280,0],
     "Blobs/d9/d9f301184cdbca8b18be5fb9a2755d183054ccc7b00c208139d201a2c10cc692.bin": ["d9f301184cdbca8b18be5fb9a2755d183054ccc7b00c208139d201a2c10cc692",148278,0],
+    "Blobs/da/dafe09baf3d3e9f6f885e04dc92190b2f2b677d0bf09d78bf81ee0f4d62225b5.bin": ["dafe09baf3d3e9f6f885e04dc92190b2f2b677d0bf09d78bf81ee0f4d62225b5",6432,0],
     "Blobs/db/db96fbb7f6330754d03649859d1cdc36d26edbd7f4c70116ae7efcb0924b6ad4.bin": ["db96fbb7f6330754d03649859d1cdc36d26edbd7f4c70116ae7efcb0924b6ad4",5136,0],
     "Blobs/dc/dc5d81c3d4c3ac1895b38666aaeb71149842a55fb148d0a788a807164bd511f8.bin": ["dc5d81c3d4c3ac1895b38666aaeb71149842a55fb148d0a788a807164bd511f8",5000,0],
     "Blobs/dc/dcd1e0b954969446b596810616f96ce7ad377bf5b6bfc81cfdda9d5903d1a060.bin": ["dcd1e0b954969446b596810616f96ce7ad377bf5b6bfc81cfdda9d5903d1a060",280710,0],

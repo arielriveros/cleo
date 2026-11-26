@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { EXAMPLE, dataReady, readThisExample } from '@tools/exampleKit/testKit';
-import { mat4, quat, vec3 } from 'gl-matrix';
+import { mat3, mat4, quat, vec3 } from 'gl-matrix';
 // The whole engine: it registers itself as the scripts' 'cleo' module, so the example's script runs headless.
-import { Scene, CleoEngine, PhysicsSystem, Animator, Logger, NODE_BUILTINS, MathUtils } from 'cleo';
+import { Scene, CleoEngine, PhysicsSystem, Animator, Logger, NODE_BUILTINS, MathUtils, Game } from 'cleo';
 import type { CharacterNode, CameraRigNode, ControllerNode, Node } from 'cleo';
 import { loadSkin } from '@editor/utils/animationAssets';
 import { detectFootLockWindows } from '@engine/animation/footLockWindows';
@@ -81,13 +81,15 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const player = collider.children[0];
         expect(player.type).toBe('character');
         const types = player.children.map((c: any) => c.type);
-        expect(types).toEqual(['cameraRig', 'model', 'node', 'node', 'controller']);
+        expect(types).toEqual(['cameraRig', 'model', 'node', 'node', 'uiRoot', 'controller']);
         expect(player.children[2].name).toBe('Weapons');
         expect(player.children[3].name).toBe('Sounds');
+        // The Player's own HUD: a screen canvas (the crosshair, the ammunition, the reload).
+        expect([player.children[4].name, player.children[4].ui.space]).toEqual(['HUD', 'screen']);
         const [camera] = player.children;
         expect(camera.name).toBe('Camera Rig');
         expect(camera.children[0].active).toBe(true);
-        const controller = player.children[4];
+        const controller = player.children[5];
         expect(controller.possessedId).toBe(player.id);
         expect(controller.aimSource).toBe('node');
         expect(controller.aimSourceId).toBe(camera.id);
@@ -554,7 +556,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
                 else expect(clipNames.has(sample.clipName), `${l.name}: ${sample.clipName}`).toBe(true);
             }
             else if (s.poseRef) expect(poseIds.has(s.poseRef.poseId) && !!s.pose, `${l.name}: ${s.name}`).toBe(true);
-            else expect(clipNames.has(s.clipName), `${l.name}: ${s.clipName}`).toBe(true);
+            // An empty state (the Recoil layer's Off) adds nothing.
+            else if (s.clipName) expect(clipNames.has(s.clipName), `${l.name}: ${s.clipName}`).toBe(true);
         }
         const field = sm.states.find((s: any) => s.name === 'Locomotion').field;
         // The embedded copy is the blend space asset's.
@@ -569,7 +572,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const scriptFields = new Set(script.variables.map((v: any) => v.name));
         // The car's two triggers (fired by name: SandboxPlayer's enterTrigger and exitTrigger) are the only parameters
         // nothing links: everything else the machine reads by itself.
-        expect(sm.parameters.filter((p: any) => p.type === 'trigger').map((p: any) => p.name)).toEqual(['EnterCar', 'ExitCar']);
+        // The car's triggers, and each gun's recoil (the Recoil layer's kick, raised by the holder on every shot).
+        expect(sm.parameters.filter((p: any) => p.type === 'trigger').map((p: any) => p.name)).toEqual(['EnterCar', 'ExitCar', 'PistolFire', 'RifleFire', 'ShotgunFire']);
         for (const p of sm.parameters) {
             if (p.type === 'trigger') continue;
             expect(p.variable.nodeRef).toBe('parent');
@@ -582,7 +586,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         // Only the turns, the stop (which plants sideways), the hard landing (which crouches where it came down) and
         // getting in and out of the car (from the door to the seat and back) drive the character with their root motion.
         const rootMotion = library('animations').filter(a => a.clips[0].rootMotion).map(a => a.name).sort();
-        expect(rootMotion).toEqual(['CarEnter', 'CarExit', 'CrouchTurn90L', 'CrouchTurn90R', 'LandHard', 'RunTurnL', 'RunTurnR', 'Stop', 'StopMirror', 'Turn180L', 'Turn180R', 'Turn90L', 'Turn90R']);
+        expect(rootMotion).toEqual(['CarEnter', 'CarExit', 'CrouchTurn90L', 'CrouchTurn90R', 'LandHard', 'Rifle CrouchTurn90L', 'Rifle CrouchTurn90R', 'Rifle Turn90L', 'Rifle Turn90R', 'RunTurnL', 'RunTurnR', 'Stop', 'StopMirror', 'Turn180L', 'Turn180R', 'Turn90L', 'Turn90R']);
     });
 
     it('ships the current scripts and the actions they read', () => {
@@ -647,6 +651,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const stored = rig().skin;
         const skin = loadSkin(stored, (a: number[]) => mat4.clone(a as any));
         skin.ikRig = { ...stored.ikRig, ...ikRig };
+        // The model node's skeleton keeps the rig's sockets (the grips, the support hands' targets); loadSkin does not.
+        skin.sockets = stored.sockets;
         const animations = library('animations').map(a => a.clips[0]);
         const animator = new Animator({ skin, animations, hasSkin: true } as any);
         const model = scene.findNode('Mannequin') as Node;
@@ -1063,11 +1069,11 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
 
     it('leans through three additive layers masked to the bones a whole-body lean moves', () => {
         expect(machine().layers.map((l: any) => [l.name, l.blend, l.weightParam])).toEqual([
-            ['Pistol', 'override', 'PistolWeight'], ['Pistol Support', 'override', 'PistolSupport'], ['Rifle', 'override', 'RifleWeight'],
-            ['Shotgun', 'override', 'ShotgunWeight'],
+            ['Pistol', 'override', 'PistolWeight'], ['Rifle', 'override', 'RifleWeight'], ['Shotgun', 'override', 'ShotgunWeight'],
+            ['Lowered', 'additive', 'LoweredWeight'],
             ['Lean Left', 'additive', 'LeanLeft'], ['Lean Right', 'additive', 'LeanRight'], ['Lean Forward', 'additive', 'LeanForward'],
             ['Pistol Aim', 'additive', 'PistolAimWeight'], ['Rifle Aim', 'additive', 'RifleAimWeight'], ['Shotgun Aim', 'additive', 'ShotgunAimWeight'],
-            ['Look', 'additive', 'LookWeight']]);
+            ['Recoil', 'additive', undefined], ['Look', 'additive', 'LookWeight'], ['Look Head', 'additive', 'LookHeadWeight']]);
         const layers = machine().layers.filter((l: any) => /^Lean/.test(l.name));
         const mask = library('boneMasks').find((m: any) => m.name === 'Lean');
         expect(Object.keys(mask.weights).map(n => n.replace(/^.*:/, '')).sort()).toEqual(
@@ -1364,16 +1370,22 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         // A folder lists its templates in explorer order, not in the order the generator made them.
         for (const name of ['Player', 'Environment', 'Course', 'Car']) expect(templates.some((t: any) => t.name === name), name).toBe(true);
         const template = templates.find((t: any) => t.name === 'Player');
-        expect([...read('manifest.json').sceneMetas[0].refs.templateIds].sort()).toEqual(templates.map((t: any) => t.id).sort());
+        // The scene lists the templates placed in it, as the editor saves it; the ones scripts spawn by name (the
+        // shot's effects) are not placed, and a published game bakes every template in the library anyway.
+        const placed = new Set(nodes().map((n: any) => n.variables?.__templateId?.value).filter(Boolean));
+        expect([...read('manifest.json').sceneMetas[0].refs.templateIds].sort()).toEqual([...placed].sort());
+        expect([...placed].every(id => templates.some((t: any) => t.id === id))).toBe(true);
         const instance = named('Player Collider');
         expect(instance.variables.__templateId.value).toBe(template.id);
         const inside = allNodes(template.nodeJson);
         // The weapons: Weapons, then each grip holder, its model instance (a node with the mesh under it) and its Muzzle;
-        // under the camera the Viewmodels, each a model and its Muzzle; the Sounds, three shots.
+        // under the camera the Viewmodels, each a model and its Muzzle; the Sounds, three shots; the HUD, the crosshair
+        // (a dot and four ticks), the ammunition (its three texts) and the reload.
         const weapon = ['node', 'node', 'model', 'node'];
         const viewmodel = ['model', 'node'];
+        const hud = ['uiRoot', 'uiPanel', 'uiPanel', 'uiPanel', 'uiPanel', 'uiPanel', 'uiPanel', 'uiPanel', 'uiText', 'uiText', 'uiText', 'uiText'];
         expect(inside.map((n: any) => n.type)).toEqual(['collider', 'character', 'cameraRig', 'camera', 'node', ...viewmodel, ...viewmodel, ...viewmodel,
-            'model', 'node', ...weapon, ...weapon, ...weapon, 'node', 'sound', 'sound', 'sound', 'controller']);
+            'model', 'node', ...weapon, ...weapon, ...weapon, 'node', 'sound', 'sound', 'sound', ...hud, 'controller']);
         // The instance holds just what the template holds, and references inside it point inside it.
         expect(allNodes(instance).map((n: any) => n.type)).toEqual(inside.map((n: any) => n.type));
         // The shot cues overlap on their own voices: a held AK-47 rings on over its 4.5 s shot.
@@ -1423,8 +1435,11 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(clouds.sunsetColor).toEqual([1.0, 0.32, 0.1]);
         // The GI Volume: the floor's 120 m square, one probe up (2 m over the ground, mid-box), 20 by 20 across.
         const gi = named('GI Volume');
-        expect([gi.type, gi.position, gi.giVolume.size, gi.giVolume.probeCounts, gi.giVolume.probeInset, gi.giVolume.bakeId])
-            .toEqual(['giVolume', [0, 2, 0], [120, 8, 120], [20, 1, 20], 0.5, null]);
+        expect([gi.type, gi.position, gi.giVolume.size, gi.giVolume.probeCounts, gi.giVolume.probeInset])
+            .toEqual(['giVolume', [0, 2, 0], [120, 8, 120], [20, 1, 20], 0.5]);
+        // Unbaked, or baked by the editor (it bakes a volume on open): then its bake is in the project's Baked folder.
+        const bake = gi.giVolume.bakeId;
+        if (bake) expect(existsSync(join(PROJECT, 'Baked', `${bake}.bake`)), bake).toBe(true);
         const scene = new Scene();
         scene.parse({ ...sceneFile(), scene: withoutModels(sceneFile().scene) }, true);
         const volume = scene.findNode('GI Volume') as any;
@@ -1448,7 +1463,8 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
 
     it('stands on an open ocean, 2 m under the ground', () => {
         const ocean = named('Ocean');
-        expect([ocean.type, ocean.position, ocean.waterVolume.waterType, ocean.waterVolume.followWind]).toEqual(['waterVolume', [0, -2, 0], 'ocean', false]);
+        // followWind is saved only when on.
+        expect([ocean.type, ocean.position, ocean.waterVolume.waterType, ocean.waterVolume.followWind ?? false]).toEqual(['waterVolume', [0, -2, 0], 'ocean', false]);
         const material = library('materials').find((m: any) => m.id === ocean.waterVolume.waterMaterialId);
         expect(material.name).toBe('Ocean');
     });
@@ -1588,8 +1604,10 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
 
     it('holds a pistol, a rifle and a shotgun by grip sockets on the right hand, each with its model and muzzle', () => {
         const stored = rig().skin;
-        expect(stored.sockets.map((x: any) => [x.name, x.bone.replace(/^.*:/, '')])).toEqual([['Pistol Grip', 'RightHand'], ['Rifle Grip', 'RightHand'], ['Shotgun Grip', 'RightHand']]);
-        expect(rig().sockets.map((x: any) => x.name)).toEqual(['Pistol Grip', 'Rifle Grip', 'Shotgun Grip']);
+        // The grips, and where the left hand goes on the long guns (their handguard, their pump): all on the right hand.
+        const NAMES = ['Pistol Grip', 'Rifle Grip', 'Shotgun Grip', 'Rifle Support', 'Shotgun Support', 'Pistol Support'];
+        expect(stored.sockets.map((x: any) => [x.name, x.bone.replace(/^.*:/, '')])).toEqual(NAMES.map(n => [n, 'RightHand']));
+        expect(rig().sockets.map((x: any) => x.name)).toEqual(NAMES);
         const weapons = named('Weapons');
         // Firing Line's: its pistol, its AK-47, its SAPS-12 (lengths in metres, grip to muzzle and the rest).
         for (const [holder, model, length] of [['Pistol Grip', 'Pistol', 0.268], ['Rifle Grip', 'Rifle', 0.868], ['Shotgun Grip', 'Shotgun', 0.836]] as const) {
@@ -1598,12 +1616,30 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             expect(h.children.map((c: any) => c.name)).toEqual([model, 'Muzzle']);
             const asset = library('models').find((m: any) => m.name === model);
             expect(h.children[0].variables.__modelId.value).toBe(asset.id);
-            // In weapon space, the grip at the origin and the bore along +Z: the muzzle straight ahead of it.
+            // In weapon space the bore is +Z: the model sits unturned under its grip (only moved, to put its grip in
+            // the fist), so the barrel is where the aim points, and the muzzle is straight ahead of the model's grip.
+            const placed = h.children[0];
+            expect(placed.rotation, model).toEqual([0, 0, 0]);
             const muzzle = h.children[1].position;
-            expect(Math.abs(muzzle[0])).toBeLessThan(0.005);
-            expect(muzzle[2]).toBeGreaterThan(length * 0.6);
-            expect(muzzle[2]).toBeLessThan(length);
+            expect(Math.abs(muzzle[0] - placed.position[0]), model).toBeLessThan(0.005);
+            expect(muzzle[2] - placed.position[2]).toBeGreaterThan(length * 0.6);
+            expect(muzzle[2] - placed.position[2]).toBeLessThan(length);
         }
+        // Every copy of the sockets (the rig's skeleton, the Mannequin model, the template, the scene: the game reads
+        // those) is the rig's own.
+        const copies: any[][] = [];
+        const walk = (v: any) => {
+            if (!v || typeof v !== 'object') return;
+            if (Array.isArray(v)) { v.forEach(walk); return; }
+            if (Array.isArray(v.sockets) && v.sockets.some((s: any) => s?.name === 'Rifle Grip')) copies.push(v.sockets);
+            for (const k of Object.keys(v)) walk(v[k]);
+        };
+        walk(stored);
+        walk(library('models').find((m: any) => m.name === 'Mannequin'));
+        walk(library('templates').find((t: any) => t.name === 'Player'));
+        walk(sceneFile());
+        expect(copies.length).toBeGreaterThanOrEqual(4);
+        for (const list of copies) for (const s of list) expect(s.offset, s.name).toEqual(rig().sockets.find((x: any) => x.name === s.name).offset);
         // Firing Line's weapons, the same models in either view: the third person's are cut from the viewmodels'.
         const description = JSON.parse(readFileSync(join(PROJECT, 'example.json'), 'utf8')).description;
         expect(description).toMatch(/Firing Line/);
@@ -1625,7 +1661,9 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         p.run(0.7);
         expect(p.player.weapon).toBe(1);
         expect(p.player.pistolWeight).toBe(1);
-        expect(p.player.pistolSupport).toBeCloseTo(1, 3);
+        // The body moves on the pistol's set now.
+        expect(p.player.stance).toBe(1);
+        expect(p.animator.currentStateName).toBe('Pistol Idle');
         expect(shown()).toEqual([true, false, false]);
         expect(p.animator.layerStateName('Pistol')).toBe('Carry');
         input.tap('Equip');
@@ -1633,73 +1671,93 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(p.player.weapon).toBe(2);
         expect(weights()).toEqual([0, 1, 0]);
         expect(shown()).toEqual([false, true, false]);
+        expect([p.player.stance, p.animator.currentStateName]).toEqual([2, 'Rifle Idle']);
         input.tap('Equip');
         p.run(0.9);
         expect(p.player.weapon).toBe(3);
         expect(weights()).toEqual([0, 0, 1]);
         expect(shown()).toEqual([false, false, true]);
+        // The shotgun moves as the rifle does.
+        expect([p.player.stance, p.animator.currentStateName]).toEqual([2, 'Rifle Idle']);
         expect(p.animator.layerStateName('Shotgun')).toBe('Carry');
         input.tap('Equip');
         p.run(0.7);
         expect(p.player.weapon).toBe(0);
         expect(weights()).toEqual([0, 0, 0]);
         expect(shown()).toEqual([false, false, false]);
+        expect([p.player.stance, p.animator.currentStateName]).toEqual([0, 'Idle']);
     });
 
-    it('holds its weapons’ poses: the carry over the walk’s axes, the aim’s directions variants of Aim', () => {
+    it('holds its weapons in Mixamo’s hands: each set’s clips, the aim’s directions variants of its mocap aim', () => {
         const poseAssets = library('poseAssets');
         const fields = new Map(library('animationFields').map((f: any) => [f.name, f]));
-        const walk = fields.get('Locomotion');
-        for (const W of ['Pistol', 'Rifle', 'Shotgun']) {
+        const own = new Map(library('animations').filter((a: any) => a.rigId === rig().id).map((a: any) => [a.name, a]));
+        // What the generated holds were is the mocap now: no carry, sprint or long-gun reload poses, no shotgun poses.
+        expect(poseAssets.map((a: any) => a.name).sort()).toEqual(['Pistol Poses', 'Rifle Poses']);
+        for (const [W, kept] of [['Pistol', ['Aim', 'Reload']], ['Rifle', ['Aim']]] as const) {
             const asset = poseAssets.find((a: any) => a.name === `${W} Poses`);
-            expect(asset, W).toBeTruthy();
             const byName = new Map<string, any>(asset.poses.map((p: any) => [p.name, p]));
+            expect(asset.poses.filter((p: any) => !p.baseRef).map((p: any) => p.name)).toEqual(kept);
+            // Aim: the mocap aiming idle's first frame (the Shooter pack's for the rifle, the pistol pack's idle).
             const aim = byName.get('Aim');
-            for (const name of ['Carry', 'Aim', 'Sprint', 'Reload']) expect(byName.get(name).baseRef, name).toBeUndefined();
-            // The aim's 25 directions, each a variant of Aim: what it changes from it, a few bones.
-            const directions = asset.poses.filter((p: any) => p.baseRef);
+            const clip = own.get(W === 'Rifle' ? 'Rifle Aim' : 'Handgun Idle').clips[0];
+            const names = new Map<number, string>(rig().skin.nodeNames);
+            const spine = clip.channels.find((c: any) => names.get(c.targetNodeIndex)!.endsWith(':Spine1') && c.targetPath === 'rotation');
+            expect(spine, W).toBeTruthy();
+            expect(aim.bones.some((b: any) => b.name.endsWith(':Hips')), `${W} Aim: Hips`).toBe(true);
+            // The 25 directions: only the upper spine turned (the hips are the legs' own under the aim).
+            const directions = asset.poses.filter((p: any) => p.baseRef && p.name !== 'Low Ready');
             expect(directions.length).toBe(25);
             for (const d of directions) {
                 expect(d.baseRef).toEqual({ assetId: asset.id, poseId: aim.id });
-                expect(d.bones.length).toBeLessThan(aim.bones.length);
+                for (const b of d.bones) expect(b.name, d.name).toMatch(/:Spine[12]$/);
             }
-            // Each hold covers its layer's mask, and has the Hips: what Steady measures the chest by.
-            const mask = machine().layers.find((l: any) => l.name === W).mask;
-            for (const name of ['Carry', 'Aim', 'Sprint']) {
-                const bones = new Set(byName.get(name).bones.map((b: any) => b.name));
-                for (const b of Object.keys(mask)) expect(bones.has(b), `${W} ${name}: ${b}`).toBe(true);
-                expect([...bones].some(b => (b as string).endsWith(':Hips')), `${W} ${name}: Hips`).toBe(true);
-            }
-            // The carry: Carry wherever the walk plays a clip, Sprint where it sprints (so the weapon goes down as the
-            // legs speed up), and Carry standing.
-            const carry = fields.get(`${W} Carry`);
-            const moving = carry.samples.slice(0, walk.samples.length);
-            expect(moving.map((s: any) => [s.x, s.y])).toEqual(walk.samples.map((s: any) => [s.x, s.y]));
-            moving.forEach((s: any, k: number) => expect(s.poseRef.poseId).toBe(byName.get(walk.samples[k].clipName === 'SprintF' ? 'Sprint' : 'Carry').id));
-            for (const s of carry.samples.slice(walk.samples.length)) expect([s.y, s.poseRef.poseId]).toEqual([0, byName.get('Carry').id]);
-            // The aim's: every direction, at its yaw and pitch.
             const offset = fields.get(`${W} Aim Offset`);
-            expect(offset.samples.map((s: any) => s.poseRef.poseId).sort()).toEqual(directions.map((d: any) => d.id).sort());
+            expect(offset.samples.map((x: any) => x.poseRef.poseId).sort()).toEqual(directions.map((d: any) => d.id).sort());
+            // The Low Ready: a variant of Aim too, changing only the arms, the neck and the head.
+            const low = byName.get('Low Ready');
+            expect(low.baseRef).toEqual({ assetId: asset.id, poseId: aim.id });
+            for (const b of low.bones) expect(b.name, 'Low Ready').toMatch(/:(Neck|Head|(Left|Right)(Arm|ForeArm|Hand))$/);
         }
-        // The layers: Carry (that blend space) and Aim (the pose), Steady, the aim steadier; the rifle's left hand, and
-        // the pistol's support layer, held on by hand IK. Each pose is embedded once.
+        // The arms layers: the aiming idle carried (the Lowered layer turns it muzzle-down), the sprint's arms in step
+        // with the legs, the aim and the reload clips (the pistol's reload a pose: no clip has one), Steady, the aim
+        // steadier; the left hand held on OUR guns by their support sockets, the pistol's let go at a sprint.
         const layers = new Map<string, any>(machine().layers.map((l: any) => [l.name, l]));
-        for (const W of ['Pistol', 'Rifle', 'Shotgun']) {
-            const l = layers.get(W);
-            const carry = l.states.find((s: any) => s.name === 'Carry'), aim = l.states.find((s: any) => s.name === 'Aim');
-            expect(Object.keys(carry.field.poses).length).toBe(2);
-            expect(carry.field.samples.every((s: any) => !s.pose)).toBe(true);
-            expect(carry.meshSpace).toBeGreaterThan(0);
-            expect(aim.pose.bones.length).toBeGreaterThan(20);
-            expect(aim.meshSpace).toBeGreaterThan(carry.meshSpace);
-            expect(l.states.some((s: any) => s.syncGroup)).toBe(false);
+        const state = (l: string, n: string) => layers.get(l).states.find((s: any) => s.name === n);
+        for (const L of ['Rifle', 'Shotgun']) {
+            expect(['Carry', 'Crouch', 'Sprint', 'Aim', 'Crouch Aim', 'Reload'].map(n => state(L, n).clipName)).toEqual(
+                ['Rifle Aim', 'Rifle Aim', 'Rifle Sprint Arms', 'Rifle Aim', 'Rifle CrouchAim', 'Rifle Reload']);
+            expect([state(L, 'Carry').syncGroup, state(L, 'Sprint').syncGroup]).toEqual([undefined, 'Gait']);
+            expect(state(L, 'Aim').meshSpace).toBeGreaterThan(state(L, 'Carry').meshSpace);
+            expect(layers.get(L).handIk).toEqual({ hand: 'left', socket: `${L} Support` });
         }
-        expect(layers.get('Rifle').handIk).toEqual({ hand: 'left' });
-        expect(layers.get('Shotgun').handIk).toEqual({ hand: 'left' });
-        expect(layers.get('Pistol Support').handIk).toEqual({ hand: 'left' });
-        expect(layers.get('Pistol').handIk).toBeUndefined();
-        // No clip of their own on the Mannequin: its weapons are poses (the viewmodels' clips are on their own rigs).
-        expect(library('animations').some((a: any) => a.rigId === rig().id && /^(Pistol|Rifle|Shotgun) /.test(a.name))).toBe(false);
+        // The Reload clip plays over each gun's reloadSeconds.
+        const seconds = (clip: string) => Math.max(...own.get(clip).clips[0].samplers.map((x: any) => x.input[x.input.length - 1]));
+        for (const [L, grip] of [['Rifle', 'Rifle Grip'], ['Shotgun', 'Shotgun Grip']]) {
+            expect(state(L, 'Reload').speed * named(grip).scriptVars.reloadSeconds, L).toBeCloseTo(seconds('Rifle Reload'), 1);
+        }
+        expect(['Carry', 'Crouch', 'Sprint', 'Aim', 'Crouch Aim'].map(n => state('Pistol', n).clipName)).toEqual(
+            ['Handgun Idle', 'Handgun Idle', 'Handgun Sprint', 'Handgun Idle', 'Handgun Idle']);
+        expect(state('Pistol', 'Reload').poseRef).toBeTruthy();
+        expect(layers.get('Pistol').handIk).toEqual({ hand: 'left', socket: 'Pistol Support', weightParam: 'SupportHand' });
+        // No carry blend spaces: the arms hold the aiming idle at every gait.
+        expect([fields.has('Rifle Carry'), fields.has('Pistol Carry')]).toEqual([false, false]);
+        // The sprint's arms start on the right foot's plant, as the legs' sample does (its phase offset taken in).
+        const sprintSeconds = (n: string) => Math.max(...own.get(n).clips[0].samplers.map((x: any) => x.input[x.input.length - 1]));
+        const phase = fields.get('Rifle Locomotion').samples.find((x: any) => x.clipName === 'Rifle SprintF').phaseOffset ?? 0;
+        const spineAt = (n: string, t: number) => {
+            const c = own.get(n).clips[0];
+            const ch = c.channels.find((x: any) => (rig().skin.nodeNames as [number, string][]).find(([i]) => i === x.targetNodeIndex)?.[1].endsWith(':Spine2') && x.targetPath === 'rotation');
+            const s = c.samplers[ch.samplerIndex];
+            let k = 0;
+            while (k < s.input.length - 2 && s.input[k + 1] <= t) k++;
+            return s.output.slice(k * 4, k * 4 + 4);
+        };
+        const apart = (a: number[], b: number[]) => 2 * Math.acos(Math.min(1, Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]))) * DEG;
+        expect(apart(spineAt('Rifle Sprint Arms', 0), spineAt('Rifle SprintF', phase * sprintSeconds('Rifle SprintF')))).toBeLessThan(3);
+        // The Mannequin's pistol clips are 'Handgun ...': Firing Line's viewmodel clips (on their own rigs) are 'Pistol ...'.
+        expect([...own.keys()].some(n => /^Pistol /.test(n))).toBe(false);
+        expect(library('animations').filter((a: any) => /^Pistol /.test(a.name)).every((a: any) => a.rigId !== rig().id)).toBe(true);
     });
 
     it('follows an edit to a pose: Aim moves every aim direction with it, a direction moves only itself', () => {
@@ -1711,38 +1769,39 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const offset = (m: any) => m.layers.find((l: any) => l.name === 'Rifle Aim').states[0].field;
         const chestOf = (bones: any[]) => bones.find((b: any) => b.name.endsWith(':Spine2')).rotation;
         const directionChest = (m: any, poseId: string) => chestOf(resolveTablePose(offset(m).poses[poseSampleKey(poseId)], offset(m).poses).bones);
-        const heldChest = (m: any) => chestOf(m.layers.find((l: any) => l.name === 'Rifle').states.find((s: any) => s.name === 'Aim').pose.bones);
         const degrees = (a: number[], b: number[]) => 2 * Math.acos(Math.min(1, Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]))) * DEG;
         const nudge = quat.setAxisAngle(quat.create(), [0, 1, 0], 10 / DEG);
 
-        // Turn Aim's chest 10 degrees more.
+        // Turn Aim's chest 10 degrees more: every direction's chest turns with it, each still what it was relative to Aim.
         const turned = JSON.parse(JSON.stringify(poseAssets));
         const chest = turned.find((a: any) => a.id === rifle.id).poses.find((p: any) => p.id === aim.id).bones.find((b: any) => b.name.endsWith(':Spine2'));
         chest.rotation = Array.from(quat.normalize(quat.create(), quat.multiply(quat.create(), nudge, chest.rotation)));
         const next = reembedPoses(sm, turned)!;
         expect(next).toBeTruthy();
-        // The hold's Aim holds it, and every direction's chest turned by the same 10 degrees, each still what it was
-        // relative to Aim.
-        expect(degrees(heldChest(next), heldChest(sm))).toBeCloseTo(10, 2);
-        for (const d of rifle.poses.filter((p: any) => p.baseRef)) {
+        for (const d of rifle.poses.filter((p: any) => p.baseRef && p.name !== 'Low Ready')) {
             expect(degrees(directionChest(next, d.id), directionChest(sm, d.id)), d.name).toBeCloseTo(10, 2);
             expect(offset(next).poses[poseSampleKey(d.id)]).toEqual(offset(sm).poses[poseSampleKey(d.id)]);
         }
 
-        // Turn one direction instead: only its entry changes, and the hold not at all.
+        // Turn one direction instead (the head of Aim Up 30): only its entry changes.
         const one = JSON.parse(JSON.stringify(poseAssets));
         const u = one.find((a: any) => a.id === rifle.id).poses.find((p: any) => p.id === up.id);
-        u.bones = [...u.bones.filter((b: any) => !b.name.endsWith(':Head')), { name: chest.name.replace('Spine2', 'Head'), rotation: Array.from(nudge) }];
+        u.bones = [...u.bones, { name: chest.name.replace('Spine2', 'Head'), rotation: Array.from(nudge) }];
         const only = reembedPoses(sm, one)!;
         const changed = Object.keys(offset(sm).poses).filter(k => JSON.stringify(offset(sm).poses[k]) !== JSON.stringify(offset(only).poses[k]));
         expect(changed).toEqual([poseSampleKey(up.id)]);
-        expect(heldChest(only)).toEqual(heldChest(sm));
 
-        // And a character playing it shows the edit at once, mid-aim, without restarting anything.
+        // And a character aiming up shows a direction's edit at once, mid-aim, without restarting anything: its chest
+        // turned 10 degrees more puts the bore off where it was.
+        const tilted = JSON.parse(JSON.stringify(poseAssets));
+        const t = tilted.find((a: any) => a.id === rifle.id).poses.find((p: any) => p.id === up.id);
+        for (const b of t.bones) b.rotation = Array.from(quat.normalize(quat.create(), quat.multiply(quat.create(), nudge, b.rotation)));
+        const edited = reembedPoses(sm, tilted)!;
         const p = play(OPEN);
         p.run(0.5);
         equip(p, 2);
         input.press('Aim');
+        p.rigs[0].setOrbit(p.rigs[0].yaw, -30);
         p.run(0.8);
         const model = (p.scene.findNode('Mannequin') as any);
         const bore = () => {
@@ -1750,7 +1809,7 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             return vec3.normalize(vec3.create(), vec3.sub(vec3.create(), vec3.transformMat4(vec3.create(), [0, 0, 1], m), mat4.getTranslation(vec3.create(), m)));
         };
         const before = bore();
-        expect(p.animator.updateStateMachine(next)).toBe(true);
+        expect(p.animator.updateStateMachine(edited)).toBe(true);
         expect(p.animator.layerStateName('Rifle')).toBe('Aim');
         p.run(0.05);
         expect(Math.acos(Math.min(1, vec3.dot(before, bore()))) * DEG).toBeGreaterThan(5);
@@ -1860,7 +1919,12 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
                     }
                 });
                 const what = `weapon ${weapon}${aim ? ' aimed' : ''}${move ? ' jogging' : ''}`;
-                expect(worst, `${what}: a wrist bends ${worst.toFixed(0)} degrees`).toBeLessThan(40);
+                // The pistol pack's two-handed grip cups the support wrist round the gun hand (48 degrees in its clips, a
+                // little more jogging). The rifle at the low ready holds its handguard from below with the muzzle down:
+                // the support wrist bent 39 degrees standing (the least any elbow gives), a few more at a jog, where the
+                // carried chest sways under the steadied arms.
+                const limit = weapon === 1 ? 56 : !aim && move ? 46 : 40;
+                expect(worst, `${what}: a wrist bends ${worst.toFixed(0)} degrees`).toBeLessThan(limit);
                 expect(high, `${what}: an elbow ${(high * 100).toFixed(0)} cm above its shoulder`).toBeLessThan(0.02);
             }
             input.release('Aim'); input.setMove(0, 0);
@@ -1909,20 +1973,353 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         }
     });
 
-    it('lowers the weapon to sprint, and lets go of the pistol with the support hand', () => {
+    it('lowers the weapon to sprint, the arms on the set’s sprint', () => {
+        for (const [weapon, layer, state, legs] of [[1, 'Pistol', 'Pistol Locomotion', 'SprintF'], [2, 'Rifle', 'Rifle Locomotion', 'Rifle SprintF']] as const) {
+            const p = play(OPEN);
+            p.run(0.5);
+            equip(p, weapon);
+            input.press('Aim');
+            input.press('Sprint');
+            input.setMove(0, 1);
+            p.run(2);
+            expect(p.player.sprinting).toBe(true);
+            expect(p.player.aiming).toBe(false);
+            expect(p.animator.currentStateName).toBe(state);
+            // The arms on the sprint's (the pistol one-handed, its left hand let go), no low ready over them.
+            expect(p.animator.layerStateName(layer)).toBe('Sprint');
+            expect(p.animator.layerStateName('Lowered')).toBe('Off');
+            // (SupportHand: only the Pistol layer's hand IK reads it; the long guns keep both hands on.)
+            expect(p.player.supportHand, layer).toBe(0);
+            // The legs: with the pistol on the unarmed sprint (the pistol pack has none), with the long guns on the
+            // rifle pack's.
+            const sprint = (p.animator.activeFieldWeights ?? []).filter((w: any) => w.clipName === legs).reduce((a: number, w: any) => a + w.weight, 0);
+            expect(sprint, `${layer}: ${legs} plays`).toBeGreaterThan(0.85);
+            input.release('Sprint'); input.release('Aim'); input.setMove(0, 0);
+            p.run(1);
+            expect([p.animator.layerStateName(layer), p.player.supportHand]).toEqual(['Carry', 1]);
+        }
+    });
+
+    /** The bore of the weapon in the hands, in the world: the right hand's grip socket's +Z. */
+    const boreOf = (p: ReturnType<typeof play>, socket: string) => {
+        const model = p.scene.findNode('Mannequin') as Node;
+        const m = mat4.multiply(mat4.create(), model.worldTransform as mat4, weaponFrame(p, socket));
+        return vec3.normalize(vec3.create(), vec3.sub(vec3.create(), vec3.transformMat4(vec3.create(), [0, 0, 1], m), mat4.getTranslation(vec3.create(), m)));
+    };
+    const pitchOf = (b: vec3) => Math.asin(b[1]) * DEG;
+
+    it('holds the weapon at the low ready unless it aims: the aim’s own hold turned muzzle-down, lifted the moment it aims', () => {
+        for (const [weapon, grip, set] of [[1, 'Pistol Grip', 'Pistol'], [2, 'Rifle Grip', 'Rifle'], [3, 'Shotgun Grip', 'Rifle']] as const) {
+            const p = play(OPEN);
+            p.run(0.5);
+            equip(p, weapon);
+            p.run(0.6);
+            expect(p.animator.layerStateName('Lowered'), `weapon ${weapon}`).toBe(set);
+            expect(p.player.loweredWeight).toBeCloseTo(1, 2);
+            const held = leftOnWeapon(p, grip);
+            // Standing, walking, jogging and crouched: the muzzle at the ground, both hands on the weapon.
+            const ways: [string, () => void][] = [
+                ['standing', () => {}],
+                ['walking', () => { input.press('Walk'); input.setMove(0, 1); }],
+                ['jogging', () => { input.release('Walk'); input.setMove(0, 1); }],
+                ['crouched', () => { input.setMove(0, 0); input.tap('Crouch'); }],
+            ];
+            for (const [what, go] of ways) {
+                go();
+                p.run(1.2);
+                let highest = -90, stray = 0;
+                p.run(0.8, () => {
+                    highest = Math.max(highest, pitchOf(boreOf(p, grip)));
+                    stray = Math.max(stray, vec3.distance(leftOnWeapon(p, grip), held));
+                });
+                expect(highest, `weapon ${weapon} ${what}: the muzzle at ${highest.toFixed(0)} degrees`).toBeLessThan(-25);
+                expect(stray, `weapon ${weapon} ${what}: the left hand ${(stray * 100).toFixed(1)} cm off its hold`).toBeLessThan(0.02);
+            }
+            input.tap('Crouch');
+            p.run(1.2);
+            // Aim: up it comes on the very hold it was lowered from, onto the camera's line in a quarter of a second.
+            input.press('Aim');
+            p.run(0.25);
+            expect(p.player.loweredWeight).toBe(0);
+            const yaw = p.rigs[0].yaw / DEG, pitch = p.rigs[0].pitch / DEG;
+            const aim = [Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)];
+            const off = Math.acos(Math.min(1, vec3.dot(boreOf(p, grip), aim as any))) * DEG;
+            expect(off, `weapon ${weapon}: the bore ${off.toFixed(1)} degrees off the aim 0.25 s after Aim`).toBeLessThan(6);
+            input.release('Aim');
+            p.run(0.5);
+            expect(pitchOf(boreOf(p, grip)), `weapon ${weapon}: down again`).toBeLessThan(-25);
+        }
+    });
+
+    /** A joint's position in model space, as posed this frame. */
+    const jointAt = (p: ReturnType<typeof play>, base: string) => mat4.getTranslation(vec3.create(), jointMatrix(p, base));
+
+    it('hangs the pistol’s right elbow at the low ready, the elbow bending on the hinge it bends on aiming', () => {
+        // The elbow where the wrist bends least lay across the chest; raised off it, the arm twisted up and out.
         const p = play(OPEN);
         p.run(0.5);
         equip(p, 1);
+        p.run(1.2);
+        expect(p.player.loweredWeight).toBeCloseTo(1, 2);
+        /** The axis the right elbow bends about, in the upper arm's own frame: cross(upper arm, forearm). */
+        const hinge = () => {
+            const u = vec3.sub(vec3.create(), jointAt(p, 'RightForeArm'), jointAt(p, 'RightArm'));
+            const f = vec3.sub(vec3.create(), jointAt(p, 'RightHand'), jointAt(p, 'RightForeArm'));
+            const n = vec3.normalize(vec3.create(), vec3.cross(vec3.create(), u, f));
+            const upper = mat3.fromMat4(mat3.create(), jointMatrix(p, 'RightArm'));
+            return vec3.normalize(vec3.create(), vec3.transformMat3(vec3.create(), n, mat3.transpose(mat3.create(), upper)));
+        };
+        let highest = -1, lowered = hinge();
+        p.run(0.6, () => { highest = Math.max(highest, jointAt(p, 'RightForeArm')[1] - jointAt(p, 'RightArm')[1]); lowered = hinge(); });
+        expect(-highest, `the right elbow ${(-highest * 100).toFixed(1)} cm below the shoulder`).toBeGreaterThan(0.18);
         input.press('Aim');
-        input.press('Sprint');
+        p.run(0.8);
+        const aimed = hinge();
+        input.release('Aim');
+        const off = Math.acos(Math.min(1, vec3.dot(lowered, aimed))) * DEG;
+        expect(off, `the lowered elbow bends ${off.toFixed(1)} degrees off the aimed elbow's hinge`).toBeLessThan(12);
+    });
+
+    it('keeps the support arm steady as the view swings and the body strafes from side to side, the elbow never through the chest', () => {
+        // The pistol's layer once held the right arm alone: its left arm was the body's, whatever played under it (a
+        // strafe, a walk turned round, a turn in place), the low ready's difference thrown onto it and the hand IK's
+        // bend plane with it, so the elbow snapped across, through the chest (6.6 cm in a frame, walking round).
+        /** The left elbow in the chest's own frame (Spine2's): where the arm is on the body, whatever the body does. */
+        const onChest = (p: ReturnType<typeof play>) => vec3.transformMat4(vec3.create(), jointAt(p, 'LeftForeArm'), mat4.invert(mat4.create(), jointMatrix(p, 'Spine2'))!);
+        /** The left elbow's distance from the torso's axis (Spine1 to Neck), model space. */
+        const fromTorso = (p: ReturnType<typeof play>) => {
+            const a = jointAt(p, 'Spine1'), b = jointAt(p, 'Neck'), e = jointAt(p, 'LeftForeArm');
+            const ab = vec3.sub(vec3.create(), b, a);
+            const t = Math.max(0, Math.min(1, vec3.dot(vec3.sub(vec3.create(), e, a), ab) / vec3.squaredLength(ab)));
+            return vec3.distance(e, vec3.scaleAndAdd(vec3.create(), a, ab, t));
+        };
+        for (const [weapon, layer] of [[1, 'Pistol'], [2, 'Rifle'], [3, 'Shotgun']] as const) {
+            const p = play(OPEN);
+            p.run(0.5);
+            equip(p, weapon);
+            p.run(1.2);
+            for (const aimed of [false, true]) {
+                if (aimed) { input.press('Aim'); p.run(0.6); }
+                const steady = fromTorso(p);
+                // The pistol's low ready holds its left elbow out off the belly (it was 11.6 cm from the torso's axis).
+                if (weapon === 1 && !aimed) expect(steady, `the pistol's lowered left elbow ${(steady * 100).toFixed(1)} cm from the torso's axis`).toBeGreaterThan(0.15);
+                let prev = onChest(p), jump = 0, closest = steady, at = '', near = '';
+                const watch = (what: string) => () => {
+                    const e = onChest(p);
+                    const where = `${what}: ${p.animator.currentStateName} / ${p.animator.layerStateName(layer)}`;
+                    const d = vec3.distance(e, prev);
+                    if (d > jump) { jump = d; at = where; }
+                    const t = fromTorso(p);
+                    if (t < closest) { closest = t; near = where; }
+                    prev = e;
+                };
+                // The view round to 100 degrees on the body's left, across to 100 on its right, and back: past the turn
+                // in place both ways while it aims.
+                const start = p.yawOf(p.player);
+                for (const [from, to] of [[0, 100], [100, -100], [-100, 0]]) {
+                    const seconds = Math.abs(to - from) / 100, frames = Math.round(seconds / FRAME);
+                    let k = 0;
+                    const look = watch(`view ${from} to ${to}`);
+                    p.run(seconds, () => { p.rigs[0].setOrbit(start + from + (to - from) * Math.min(1, ++k / frames), 5); look(); });
+                }
+                // Strafing left and right, walking and jogging, the diagonals, back and forward again.
+                for (const walk of [true, false]) {
+                    if (walk) input.press('Walk'); else input.release('Walk');
+                    for (const [x, y] of [[-1, 0], [1, 0], [-1, 0], [-0.7, 0.7], [0.7, 0.7], [-0.7, -0.7], [0.7, -0.7], [0, -1], [0, 1]]) {
+                        input.setMove(x, y);
+                        p.run(0.9, watch(`${walk ? 'walking' : 'jogging'} ${x}, ${y}`));
+                    }
+                }
+                input.setMove(0, 0); input.release('Walk');
+                p.run(1);
+                const what = `weapon ${weapon}${aimed ? ' aimed' : ''}`;
+                expect(jump, `${what}: the left elbow jumps ${(jump * 100).toFixed(1)} cm on the chest in a frame (${at})`).toBeLessThan(0.025);
+                expect(steady - closest, `${what}: the left elbow ${(closest * 100).toFixed(1)} cm from the torso's axis, ${(steady * 100).toFixed(1)} held still (${near})`).toBeLessThan(0.02);
+            }
+            input.release('Aim');
+        }
+    });
+
+    it('holds the rifle by its pistol grip: the right fist round the grip, carried and aimed', () => {
+        // The AK's grip sits further behind its trigger than the motion capture's rifle's: the rifle is moved forward in
+        // the hand (the Rifle node) and the aiming holds' hand back, so the grip is in the fist and the aimed rifle where
+        // it was. The grip's centre line in the model's space, measured off its mesh at two heights:
+        const top = vec3.fromValues(0, 0.013, 0.0161), bottom = vec3.fromValues(0, -0.02, 0.0062);
+        const placed = named('Rifle Grip').children.find((c: any) => c.name === 'Rifle');
+        const p = play(OPEN);
+        p.run(0.5);
+        equip(p, 2);
+        /** The centre of the circle through three points: a curled finger's joints wrap round it. */
+        const circle = (a: vec3, b: vec3, c: vec3) => {
+            const ab = vec3.sub(vec3.create(), b, a), ac = vec3.sub(vec3.create(), c, a), n = vec3.cross(vec3.create(), ab, ac);
+            const t1 = vec3.scale(vec3.create(), vec3.cross(vec3.create(), n, ab), vec3.squaredLength(ac));
+            const t2 = vec3.scale(vec3.create(), vec3.cross(vec3.create(), ac, n), vec3.squaredLength(ab));
+            return vec3.add(vec3.create(), a, vec3.scale(vec3.create(), vec3.add(vec3.create(), t1, t2), 1 / (2 * vec3.squaredLength(n))));
+        };
+        /** The middle and ring fingers' curl centres in the rifle model's space. */
+        const fist = () => {
+            const model = mat4.multiply(mat4.create(), weaponFrame(p, 'Rifle Grip'), mat4.fromTranslation(mat4.create(), placed.position));
+            const inv = mat4.invert(mat4.create(), model)!;
+            return ['Middle', 'Ring'].map(f => vec3.transformMat4(vec3.create(), circle(jointAt(p, `RightHand${f}1`), jointAt(p, `RightHand${f}2`), jointAt(p, `RightHand${f}3`)), inv));
+        };
+        const axis = vec3.normalize(vec3.create(), vec3.sub(vec3.create(), top, bottom));
+        const offLine = (c: vec3) => { const d = vec3.sub(vec3.create(), c, bottom); return vec3.length(vec3.scaleAndAdd(vec3.create(), d, axis, -vec3.dot(d, axis))); };
+        for (const [what, aim] of [['carried', false], ['aimed', true]] as const) {
+            if (aim) input.press('Aim');
+            p.run(0.8);
+            let worst = 0;
+            p.run(0.4, () => { for (const c of fist()) { worst = Math.max(worst, offLine(c)); expect(c[1], `${what}: the fist on the grip's height`).toBeGreaterThan(-0.035); expect(c[1]).toBeLessThan(0.03); } });
+            expect(worst, `${what}: the fist ${(worst * 100).toFixed(1)} cm off the grip's centre line`).toBeLessThan(0.012);
+        }
+        input.release('Aim');
+    });
+
+    it('zooms in and blurs everything but the target while Aim is held in third person, not for a shot from the hip', () => {
+        const written: any[] = [];
+        const spy = vi.spyOn(Game, 'updateRenderSettings').mockImplementation((s: any) => { written.push(s); });
+        try {
+            const p = play(OPEN);
+            p.run(0.5);
+            equip(p, 2);
+            const rig = p.rigs[0] as any;
+            const camera = (n: string) => library('scripts').find(x => x.name === 'SandboxCamera').variables.find((v: any) => v.name === n).default;
+            const hipFov = camera('thirdPersonFov'), aimFov = camera('aimFov');
+            expect(aimFov).toBeLessThan(hipFov);
+            expect(rig.fov).toBeCloseTo(hipFov, 1);
+            // A shot from the hip brings the gun up, and nothing else: the lens stays, nothing blurs.
+            input.press('Fire');
+            p.run(0.3);
+            input.release('Fire');
+            expect(p.player.aiming).toBe(true);
+            expect(p.player.aimingDown).toBe(false);
+            expect(rig.fov).toBeCloseTo(hipFov, 1);
+            expect(written.some(s => s.dofEnabled)).toBe(false);
+            p.run(1.5);
+            // Aim held: the lens narrows (the mouse slowed as much), and a hard depth of field comes on, focused where
+            // the crosshair is, nothing nearer kept sharp.
+            input.press('Aim');
+            p.run(0.6);
+            expect(p.player.aimingDown).toBe(true);
+            expect(rig.fov).toBeCloseTo(aimFov, 1);
+            const half = (d: number) => Math.tan(d * Math.PI / 360);
+            expect(rig.zoomSensitivity).toBeCloseTo(half(aimFov) / half(hipFov), 3);
+            const on = written.filter(s => s.dofEnabled).at(-1);
+            expect(on).toBeTruthy();
+            expect(on.dofNearCutoff).toBe(0);
+            expect(on.dofAperture).toBeLessThan(2);
+            expect(on.dofMaxBlur).toBeGreaterThan(20);
+            expect(on.dofFocusDistance).toBeGreaterThan(1.4);
+            input.release('Aim');
+            p.run(0.6);
+            expect(rig.fov).toBeCloseTo(hipFov, 1);
+            expect(rig.zoomSensitivity).toBeCloseTo(1, 3);
+            expect(written.at(-1).dofEnabled).toBe(false);
+        } finally { spy.mockRestore(); }
+    });
+
+    for (const [weapon, set] of [[2, 'Rifle'], [1, 'Pistol']] as const) {
+        it(`walks and jogs in eight directions on the ${set.toLowerCase()}'s own clips, facing the camera, its feet holding`, () => {
+            const jog = named('Player').walkSpeed;
+            const walk = jog * named('Player').scriptVars.walkScale;
+            const lines: string[] = [];
+            for (const gait of ['walk', 'jog'] as const) for (const [name, x, y, dir] of DIRECTIONS) {
+                const p = play(OPEN);
+                p.run(0.5);
+                equip(p, weapon);
+                p.run(0.3);
+                if (gait === 'walk') input.press('Walk');
+                input.setMove(x, y);
+                p.run(1.5);
+                const slide = footSlide(p, 1.5);
+                const speed = p.player.planarSpeed;
+                expect(p.animator.currentStateName, `${set} ${gait} ${name}`).toBe(`${set} Locomotion`);
+                expect(Math.abs(wrap(p.player.moveDir - dir)), `${set} ${gait} ${name} moveDir ${p.player.moveDir}`).toBeLessThan(12);
+                const nominal = gait === 'walk' ? walk : jog;
+                expect(speed, `${set} ${gait} ${name}`).toBeLessThanOrEqual(nominal * 1.03);
+                expect(speed, `${set} ${gait} ${name}`).toBeGreaterThan(nominal * 0.4);
+                lines.push(`${set} ${gait} ${name}: ${speed.toFixed(2)} m/s, foot slide ${slide.toFixed(2)} m/s`);
+                // As unarmed: within 8% of the travel on the cardinal directions, 15% on the diagonals.
+                const limit = name.includes('-') ? Math.max(0.35, speed * 0.15) : Math.max(0.15, speed * 0.08);
+                expect(slide, `${set} ${gait} ${name}: foot slide at ${speed.toFixed(2)} m/s`).toBeLessThan(limit);
+                input.setMove(0, 0);
+                input.release('Walk');
+                p.run(1.2);
+                expect(p.animator.currentStateName, `${set} ${gait} ${name} at rest`).toBe(`${set} Idle`);
+            }
+            console.log(lines.join('\n'));
+        });
+    }
+
+    it('changes stance with the weapon in step: a weapon coming up mid-stride carries the stride across', () => {
+        const p = play(OPEN);
+        p.run(0.5);
         input.setMove(0, 1);
-        p.run(2);
-        expect(p.player.sprinting).toBe(true);
-        expect(p.player.aiming).toBe(false);
-        expect(p.player.pistolSupport).toBeLessThan(0.05);
-        input.release('Sprint'); input.release('Aim'); input.setMove(0, 0);
         p.run(1.5);
-        expect(p.player.pistolSupport).toBeGreaterThan(0.95);
+        expect(p.animator.currentStateName).toBe('Locomotion');
+        for (const [taps, to] of [[1, 'Pistol Locomotion'], [1, 'Rifle Locomotion'], [2, 'Locomotion']] as const) {
+            const from = p.animator.currentStateName;
+            for (let k = 0; k < taps; k++) { input.tap('Equip'); p.run(0.12); }
+            const seen = new Set<string>();
+            const slide = footSlide(p, 1.6, undefined, () => seen.add(p.animator.currentStateName));
+            // Straight across, never through a stop or a stand (the shotgun on the way back down is the rifle's set).
+            expect([...seen].every(n => /Locomotion$/.test(n)), `${from} -> ${to}: ${[...seen]}`).toBe(true);
+            expect(p.animator.currentStateName).toBe(to);
+            expect(slide, `${from} -> ${to}: foot slide`).toBeLessThan(0.35);
+        }
+        input.setMove(0, 0);
+    });
+
+    it('takes each shot’s recoil on the body, and reloads on the Shooter pack’s clip', () => {
+        withEffects();
+        try {
+            for (const [weapon, layer, kick] of [[2, 'Rifle', 'Rifle Fire'], [1, 'Pistol', 'Pistol Fire'], [3, 'Shotgun', 'Shotgun Fire']] as const) {
+                const p = play(OPEN);
+                p.run(0.5);
+                equip(p, weapon);
+                input.press('Aim');
+                p.run(0.5);
+                const seen = new Set<string>();
+                input.tap('Fire');
+                p.run(0.3, () => seen.add(p.animator.layerStateName('Recoil') ?? ''));
+                expect(seen.has(kick), `${layer}: ${[...seen]}`).toBe(true);
+                p.run(1.2);
+                expect(p.animator.layerStateName('Recoil')).not.toBe(kick);
+                input.release('Aim');
+                p.run(0.4);
+                input.tap('Reload');
+                p.run(0.3);
+                expect(p.player.reloading, layer).toBe(true);
+                expect(p.animator.layerStateName(layer)).toBe('Reload');
+            }
+        } finally { clearTemplates(); }
+    });
+
+    it('stands up from an unarmed crouch through Crouch To Stand, and kneels down and gets up with the pistol', () => {
+        const p = play(OPEN);
+        p.run(0.5);
+        const through = (seconds: number) => { const seen = new Set<string>(); p.run(seconds, () => seen.add(p.animator.currentStateName)); return seen; };
+        input.tap('Crouch');
+        p.run(0.8);
+        expect(p.animator.currentStateName).toBe('Crouch');
+        input.tap('Crouch');
+        expect(through(1.4).has('CrouchStand')).toBe(true);
+        expect(p.animator.currentStateName).toBe('Idle');
+        equip(p, 1);
+        p.run(0.4);
+        input.tap('Crouch');
+        expect(through(1.2).has('Pistol KneelDown')).toBe(true);
+        expect(p.animator.currentStateName).toBe('Pistol Crouch');
+        input.tap('Crouch');
+        expect(through(1.4).has('Pistol KneelUp')).toBe(true);
+        expect(p.animator.currentStateName).toBe('Pistol Idle');
+        // On the move, a crouch is a cross-fade: no kneeling down mid-stride.
+        input.setMove(0, 1);
+        p.run(1);
+        input.tap('Crouch');
+        const moving = through(0.8);
+        expect(moving.has('Pistol KneelDown')).toBe(false);
+        expect(p.animator.currentStateName).toBe('Pistol Crouch');
+        input.setMove(0, 0);
     });
 
     it('moves exactly as it did unarmed while no weapon is out', () => {
@@ -2315,19 +2712,39 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         expect(p.animator.currentStateName).not.toBe('Crouch');
     });
 
-    it('crouches on the rifle pack\'s clips, retargeted onto the Mannequin: in place, feet locked, the turns on the Pivot', () => {
+    it('crouches on Mixamo’s crouch: the unarmed arms free, the rifle’s and the pistol’s on their own clips, the turns on the Pivot', () => {
         const names = new Map<number, string>(rig().skin.nodeNames);
-        const crouch = library('animations').filter((a: any) => /^Crouch/.test(a.name));
-        expect(crouch.map((a: any) => a.name).sort()).toEqual(['CrouchB', 'CrouchBL', 'CrouchBR', 'CrouchF', 'CrouchFL', 'CrouchFR', 'CrouchIdle', 'CrouchL', 'CrouchR', 'CrouchTurn90L', 'CrouchTurn90R']);
-        for (const a of crouch) {
-            expect(a.rigId, a.name).toBe(rig().id);
-            expect(a.clips[0].footLocks, a.name).toBeTruthy();
-            const pivot = a.clips[0].channels.some((c: any) => names.get(c.targetNodeIndex) === 'Pivot');
+        const own = library('animations').filter((a: any) => a.rigId === rig().id);
+        const crouch = own.filter((a: any) => /^Crouch/.test(a.name));
+        expect(crouch.map((a: any) => a.name).sort()).toEqual(['CrouchB', 'CrouchBL', 'CrouchBR', 'CrouchF', 'CrouchFL', 'CrouchFR', 'CrouchIdle', 'CrouchL', 'CrouchR', 'CrouchStand', 'CrouchTurn90L', 'CrouchTurn90R']);
+        for (const a of [...crouch, ...own.filter((x: any) => /^Rifle Crouch/.test(x.name))]) {
+            const clip = a.clips[0];
+            const pivot = clip.channels.some((c: any) => names.get(c.targetNodeIndex) === 'Pivot');
             expect(pivot, `${a.name} turns on the Pivot`).toBe(/Turn/.test(a.name));
-            expect(!!a.clips[0].rootMotion, a.name).toBe(/Turn/.test(a.name));
+            expect(!!clip.rootMotion, a.name).toBe(/Turn/.test(a.name));
+            if (/Crouch(F|B|L|R|FL|FR|BL|BR)$/.test(a.name)) expect(clip.footLocks, a.name).toBeTruthy();
         }
-        const field = library('animationFields').find((f: any) => f.name === 'Crouch Locomotion');
-        expect(machine().states.find((s: any) => s.name === 'Crouch').fieldId).toBe(field.id);
+        // The unarmed crouch walk's hands hang free (the rifle pack's hold its rifle, a third of a metre apart).
+        const skin = loadSkin(rig().skin, (a: number[]) => mat4.clone(a as any));
+        const handsApart = (clipName: string) => {
+            const a = new Animator({ skin, animations: own.map((x: any) => x.clips[0]), hasSkin: true } as any);
+            a.playAnimationByName(clipName, true, false);
+            for (let k = 0; k < 18; k++) a.update(FRAME);
+            const at = (bone: string) => {
+                const j = skin.joints.findIndex((x: any) => (names.get(x.nodeIndex) ?? '').endsWith(':' + bone));
+                const world = mat4.multiply(mat4.create(), a.getFinalBoneMatrices()[j] as mat4, mat4.invert(mat4.create(), skin.joints[j].inverseBindMatrix));
+                return mat4.getTranslation(vec3.create(), world);
+            };
+            return vec3.distance(at('LeftHand'), at('RightHand'));
+        };
+        expect(handsApart('CrouchF')).toBeGreaterThan(0.45);
+        expect(handsApart('Rifle CrouchF')).toBeLessThan(0.4);
+        // Each stance crouches on its own blend space; the Character's crouched drives them all.
+        const fields = new Map(library('animationFields').map((f: any) => [f.name, f]));
+        for (const [state, field] of [['Crouch', 'Crouch Locomotion'], ['Rifle Crouch', 'Rifle Crouch'], ['Pistol Crouch', 'Pistol Crouch']]) {
+            expect(machine().states.find((s: any) => s.name === state).fieldId, state).toBe(fields.get(field).id);
+            expect(machine().states.find((s: any) => s.name === state).syncGroup, state).toBe('Crouch');
+        }
         expect(machine().parameters.find((p: any) => p.name === 'Crouching').variable.varName).toBe('crouched');
     });
 
@@ -2347,6 +2764,30 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const hit = gun.fire([e[0], e[1], e[2]], [toward[0] / l, toward[1] / l, toward[2] / l], 0, body);
         expect(hit?.node?.name ?? 'nothing').not.toBe('Player Collider');
         input.release('Aim');
+    });
+
+    it('looks round crouched with its head alone, the trunk staying as the crouch holds it', () => {
+        const p = play(OPEN);
+        p.run(0.5);
+        input.tap('Crouch');
+        p.run(1.5);
+        expect(p.animator.currentStateName).toBe('Crouch');
+        const start = p.yawOf(p.player);
+        const chest = () => { const r = quat.create(); mat4.getRotation(r, jointMatrix(p, 'Spine2')); return quat.normalize(r, r); };
+        const head = () => { const r = quat.create(); mat4.getRotation(r, jointMatrix(p, 'Head')); return quat.normalize(r, r); };
+        const chest0 = chest(), head0 = head();
+        p.rigs[0].setOrbit(start + 60, 12);
+        p.run(1.2);
+        expect(p.player.lookHeadWeight).toBeGreaterThan(0.9);
+        expect(p.player.lookWeight).toBeLessThan(0.05);
+        expect(Math.abs(wrap(p.yawOf(p.player) - start)), 'no turn in place yet').toBeLessThan(1);
+        expect(degreesApart(chest(), chest0), 'the chest').toBeLessThan(4);
+        expect(degreesApart(head(), head0), 'the head').toBeGreaterThan(40);
+        // Standing up, the trunk turns under the head again.
+        input.tap('Crouch');
+        p.run(2);
+        expect(p.player.lookWeight).toBeGreaterThan(0.9);
+        expect(p.player.lookHeadWeight).toBeLessThan(0.05);
     });
 
     it('holds a look round without twitching', () => {
@@ -2404,14 +2845,16 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const sm = machine();
         const states = new Set(sm.states.map((s: any) => s.name));
         const forks = new Set((sm.forks ?? []).map((f: any) => f.name));
-        expect(sm.groups.map((g: any) => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car', 'Crouching']);
+        expect(sm.groups.map((g: any) => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car', 'Crouching', 'Standing', 'Moving']);
         const seen = new Set<string>();
         for (const g of sm.groups) {
             expect(states.has(g.name) || forks.has(g.name), `${g.name} is not also a state or a fork`).toBe(false);
             for (const m of g.states) { expect(states.has(m) || forks.has(m), m).toBe(true); expect(seen.has(m), m).toBe(false); seen.add(m); }
         }
-        // Left outside: the ones everything comes back to.
-        for (const s of ['Idle', 'Locomotion', 'Start', 'Stairs']) expect(seen.has(s), s).toBe(false);
+        // Left outside: the ones everything comes back to. Standing and Moving hold each stance's idle and locomotion
+        // (folded on the graph), with no line of their own: each of their states leaves as it does.
+        for (const s of ['Start', 'Stairs']) expect(seen.has(s), s).toBe(false);
+        for (const g of ['Standing', 'Moving']) expect(sm.transitions.some((t: any) => t.from === g || t.to === g), g).toBe(false);
         const fromGroups = sm.transitions.filter((t: any) => sm.groups.some((g: any) => g.name === t.from));
         expect(fromGroups.length).toBeGreaterThan(6);
         expect(sm.states.find((s: any) => s.name === 'LandHard').holdMovement).toBe(true);
@@ -2421,7 +2864,9 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         const sm = machine();
         const states = new Set(sm.states.map((s: any) => s.name));
         const forks = new Set((sm.forks ?? []).map((f: any) => f.name));
-        expect([...forks]).toEqual(['Take Off', 'Pick Turn', 'Pick Stop', 'Settle', 'Pick Run Turn']);
+        expect([...forks].slice(0, 5)).toEqual(['Take Off', 'Pick Turn', 'Pick Stop', 'Settle', 'Pick Run Turn']);
+        // A stance's states are entered through their role's fork, which picks by Stance.
+        expect([...forks].slice(5).sort()).toEqual(['Crouch Down', ...['Crouch', 'CrouchTurn90L', 'CrouchTurn90R', 'Fall', 'FallFar', 'Idle', 'JumpLand', 'JumpRun', 'JumpStand', 'LandRun', 'Locomotion', 'Turn90L', 'Turn90R'].map(r => `Pick ${r}`)].sort());
         for (const f of forks) expect(states.has(f), `${f} is not also a state`).toBe(false);
         const group = (name: string) => sm.groups.find((g: any) => g.name === name);
         for (const [g, f] of [['Air', 'Take Off'], ['Turning', 'Pick Turn'], ['Stopping', 'Pick Stop'], ['Running Turn', 'Pick Run Turn']]) {
@@ -2436,13 +2881,15 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         }
         // Into the air from nine places, each one line: 22 transitions once.
         expect(sm.transitions.filter((t: any) => t.to === 'Air').map((t: any) => t.from).sort())
-            .toEqual(['Crouching', 'Idle', 'Landing', 'Locomotion', 'Running Turn', 'Stairs', 'Start', 'Stopping', 'Turning']);
-        expect(sm.transitions.filter((t: any) => t.from === 'Take Off').map((t: any) => t.to)).toEqual(['JumpRun', 'JumpStand', 'Fall']);
+            .toEqual(['Crouching', 'Idle', 'Landing', 'Locomotion', 'Pistol Idle', 'Pistol Locomotion', 'Rifle Idle', 'Rifle Locomotion', 'Running Turn', 'Stairs', 'Start', 'Stopping', 'Turning']);
+        expect(sm.transitions.filter((t: any) => t.from === 'Take Off').map((t: any) => t.to)).toEqual(['Pick JumpRun', 'Pick JumpStand', 'Pick Fall']);
         // The start's stop goes straight to the early stop: Pick Stop's exit is the run's phase, not the start clip's.
         expect(sm.transitions.filter((t: any) => group('Stopping').states.includes(t.to) && t.from === 'Start').map((t: any) => t.to)).toHaveLength(1);
         // The Car keeps its triggers (no fork): getting in and out are entered from anywhere by them.
         expect(group('Car').entry).toBeUndefined();
-        expect(sm.transitions.length).toBeLessThan(80);
+        // Three stances: the roles with variants leave as they do (one copy of each way out per variant) and switch
+        // stance among themselves; still no line per pair of states.
+        expect(sm.transitions.length).toBeLessThan(210);
     });
 
 

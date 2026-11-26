@@ -38,7 +38,8 @@ import { animTrigger, attribute, child, eventListener, observable } from 'cleo/d
  *   - `footPlacement`, the foot IK weight while moving: full at a walk, light at a run (the solver plants the
  *     lower foot whenever it nears the ground, which a run's flight phase between strides must not do);
  *   - the LOOK-AT: where the camera faces off the body (`lookYaw`, `lookPitch`) and the Look layer's weight
- *     (`lookWeight`, up standing still), and the turn in place held back `turnDelay` seconds so the head turns first;
+ *     (`lookWeight`, up standing still; crouched, the Look Head layer's `lookHeadWeight` instead: the head alone
+ *     turns), and the turn in place held back `turnDelay` seconds so the head turns first;
  *   - the CAR: a car hands it its seat (`boardVehicle`) and takes it back (`leaveVehicle`): it lets go of its own
  *     Controller, takes its body out of the physics world and rides in the seat, getting in and out by the animator's
  *     root motion (`enterTrigger`, `exitTrigger`), and takes its Controller back once on its feet (SandboxCar);
@@ -48,16 +49,20 @@ import { animTrigger, attribute, child, eventListener, observable } from 'cleo/d
  *     how much faster the stair clips play while the body still slows onto it;
  *   - the WEAPONS: Equip (or the mouse wheel) cycles none, the pistol, the rifle, the shotgun: the one in the hands
  *     goes down and is put away, the next is shown and comes up (its layer's weight, `pistolWeight` / `rifleWeight` /
- *     `shotgunWeight`); Aim held aims it (`aiming`, the aim layers' weights, where the camera aims off the body in
- *     `aimYaw` / `aimPitch`), facing the camera and strafing, turning in place sooner; a sprint lowers it (and lets go
- *     of the pistol with the support hand, `pistolSupport`);
+ *     `shotgunWeight`), and the body takes its STANCE as it does (`stance`: 0 unarmed, 1 the pistol pack's moves, 2
+ *     the rifle pack's, which the shotgun shares); Aim held aims it (`aiming`, the aim layers' weights, where the
+ *     camera aims off the body in `aimYaw` / `aimPitch`), facing the camera and strafing, turning in place sooner; not
+ *     aimed, it is held at the low ready, the aim's own hold turned muzzle-down (`loweredWeight`, the Lowered layer),
+ *     and a sprint carries it as the sprint clip does (the pistol one-handed: `supportHand`); in third person, Aim
+ *     held also zooms the camera in and blurs everything but what the crosshair is on (`aimingDown`);
  *   - FIRING: Fire pulls the trigger of the weapon in the hands (its SandboxGun shoots by raycast, a round off its
  *     magazine, and pushes what it hits). Fired from the hip in third person, the weapon comes up first and stays up
  *     `fireAimHold` seconds after the last shot. Each shot kicks the camera up and a little aside, most of which comes
- *     back (`recoilRecovery`), and the weapon up in the hands (its aim's pitch, settling at `kickRecovery`); the HUD's
+ *     back (`recoilRecovery`), and the body takes the weapon's recoil (its gun's `fireTrigger`); the HUD's
  *     Crosshair shows where it goes, its ticks spread as the shot does; the HUD's Ammunition counts what is left;
- *   - RELOADING: Reload, or a pull on an empty magazine, fills the magazine from the reserve (`reloading`: the Reload
- *     pose in third person, the viewmodel's reload clips in first person); out of the reserve, the weapon is dry;
+ *   - RELOADING: Reload, or a pull on an empty magazine, fills the magazine from the reserve (`reloading`: the weapon
+ *     layer's Reload in third person, the viewmodel's reload clips in first person); out of the reserve, the weapon is
+ *     dry;
  *   - CROUCHING: the Crouch action toggles it (the Controller's), the Character shortens its capsule (`crouched`, which
  *     the animator reads), and the eye drops in first person;
  *   - FIRST PERSON: View toggles it (`firstPerson`): the camera folds in to the eyes (`eyeHeight`), the body is drawn
@@ -73,6 +78,8 @@ import { animTrigger, attribute, child, eventListener, observable } from 'cleo/d
  */
 /** The weapons' grip holders (their SandboxGun) on the hand, and their viewmodels under the camera: 1 the pistol, 2 the rifle, 3 the shotgun. */
 const WEAPON_GRIPS = ['Pistol Grip', 'Rifle Grip', 'Shotgun Grip']
+/** The body's stance with each weapon in the hands: the pistol's, then the rifle's for both long guns. */
+const STANCES = [1, 2, 2]
 const WEAPON_VIEWMODELS = ['Pistol Viewmodel', 'AK-47 Viewmodel', 'SAPS-12 Viewmodel']
 
 export default class SandboxPlayerNode extends CharacterNode {
@@ -251,10 +258,6 @@ export default class SandboxPlayerNode extends CharacterNode {
     @attribute('Weapons', { min: 0.5, max: 30, step: 0.5 })
     private recoilRecoverySpeed: number = 6
 
-    /** How fast the weapon's kick in the hands settles, per second. */
-    @attribute('Weapons', { min: 0.5, max: 60, step: 0.5 })
-    private kickRecovery: number = 14
-
     /** First person: the eye's height over the feet standing, and crouched (m). The character's own, so public. */
     @attribute('First Person', { min: 0.3, max: 2.5, step: 0.01 })
     public eyeStand: number = 1.62
@@ -304,6 +307,19 @@ export default class SandboxPlayerNode extends CharacterNode {
     @attribute('First Person', { min: 5, max: 500, step: 5 })
     private dofFarFocus: number = 60
 
+    /**
+     * Aimed in third person (Aim held), a hard depth of field: its aperture (wide open), its widest blur (px), and how
+     * deep the sharp band round what the crosshair is on (m).
+     */
+    @attribute('Third Person Aim', { min: 0.7, max: 16, step: 0.1 })
+    private aimDofAperture: number = 1.2
+
+    @attribute('Third Person Aim', { min: 0, max: 64, step: 1 })
+    private aimDofMaxBlur: number = 32
+
+    @attribute('Third Person Aim', { min: 0, max: 10, step: 0.1 })
+    private aimDofRange: number = 1
+
     /** First person: a sprint goes only this far off straight ahead (degrees); past it, the body jogs. */
     @attribute('First Person', { min: 10, max: 180, step: 5 })
     private sprintAngle: number = 50
@@ -351,11 +367,13 @@ export default class SandboxPlayerNode extends CharacterNode {
     public footPlacement: number = 1
     /**
      * LookYaw, LookPitch: where the camera faces, off the body (degrees; yaw + left, pitch + down), clamped to the
-     * Look blend space's range. LookWeight: the Look layer's weight, up while standing still.
+     * Look blend space's range. LookWeight: the Look layer's weight, up while standing still. LookHeadWeight: the Look
+     * Head layer's, which takes over crouched: the head alone turns, not the trunk.
      */
     public lookYaw: number = 0
     public lookPitch: number = 0
     public lookWeight: number = 0
+    public lookHeadWeight: number = 0
     /** OnStairs: standing or moving on a flight of stairs (its ramp is under the body). */
     public onStairs: boolean = false
     /** Stairs: on a flight, the way along it: +1 up, -1 down, 0 across it or off it. */
@@ -372,13 +390,23 @@ export default class SandboxPlayerNode extends CharacterNode {
     public pistolWeight: number = 0
     public rifleWeight: number = 0
     public shotgunWeight: number = 0
-    /** PistolSupport: the pistol's support hand on it, letting go as a sprint takes over from the jog. */
-    public pistolSupport: number = 0
+    /**
+     * Stance: how the body moves with what it holds, the animator's sets of moves: 0 unarmed, 1 the pistol, 2 a long gun
+     * (the rifle and the shotgun). It changes once the weapon coming up is halfway in the hands.
+     */
+    public stance: number = 0
     /** Aiming: Aim held with a weapon in the hands, not sprinting. PistolAimWeight, RifleAimWeight, ShotgunAimWeight: the aim layers'. */
     public aiming: boolean = false
     public pistolAimWeight: number = 0
     public rifleAimWeight: number = 0
     public shotgunAimWeight: number = 0
+    /**
+     * LoweredWeight: the Lowered layer's weight: the weapon in the hands at the low ready (its aim's own hold turned
+     * muzzle-down), all the way while it is not aimed, lifting as it aims.
+     */
+    public loweredWeight: number = 0
+    /** SupportHand: the pistol's left hand on it (the Pistol layer's hand IK), let go over a sprint. */
+    public supportHand: number = 1
     /** Reloading: the weapon in the hands is being reloaded (the Reload pose). */
     public reloading: boolean = false
     /** First person (View toggles it), the eye's height over the feet, and the field of view the camera takes there. */
@@ -387,6 +415,11 @@ export default class SandboxPlayerNode extends CharacterNode {
     public viewFov: number = 78
     /** First person: how far down the sights the aim is, 0..1. */
     public ads: number = 0
+    /**
+     * Third person: Aim held (not a shot from the hip), which zooms the camera in (SandboxCamera's `aimFov`) and blurs
+     * everything but what the crosshair is on.
+     */
+    public aimingDown: boolean = false
     /** The spread of the weapon in the hands now, degrees (the crosshair's). */
     public spreadNow: number = 0
     /** AimYaw, AimPitch: where the camera aims, off the body (degrees; yaw + left, pitch + down), for the aim blend spaces. */
@@ -430,6 +463,9 @@ export default class SandboxPlayerNode extends CharacterNode {
     private _weaponWanted: number = 0
     /** The aim's weight, before the weapon's own scales it. */
     private _aim: number = 0
+    /** The look-at's weight before the crouch splits it, and how far into the crouch's head-only look it is (0..1). */
+    private _lookAmount: number = 0
+    private _lookCrouch: number = 0
     /** The Character's turn threshold as authored: aiming turns in place sooner. */
     private _turnThreshold: number = -1
     /** The weapons' nodes on the hand: the grip holders (their SandboxGun), and their viewmodels under the camera. */
@@ -458,9 +494,8 @@ export default class SandboxPlayerNode extends CharacterNode {
     private _dofFocus: number = 20
     /** Seconds the weapon stays up for a shot from the hip. */
     private _fireHold: number = 0
-    /** The camera's kick still to come back, degrees, and the weapon's kick in the hands. */
+    /** The camera's kick still to come back, degrees. */
     private _recoilBack: number = 0
-    private _kick: number = 0
     /**
      * Its own HUD (the HUD canvas under it, not the scene's): the crosshair and its four ticks, the ammunition (the
      * magazine, the reserve, the weapon's name) and the reload. And the crosshair's gap as last laid out.
@@ -590,11 +625,15 @@ export default class SandboxPlayerNode extends CharacterNode {
 
         // Strafing backwards: full speed up to the side, the diagonal share at 135 degrees, the back share straight
         // back: the speeds the backward clips cover. A sprint faces where it goes, so it is always "forward".
+        // Each stance's clips have their own: the rifle pack moves as fast every way, as does every crouch; the pistol
+        // pack backs off at 0.7 (its diagonals are the rifle's legs, at 0.85).
         const angle = Math.abs(Math.atan2(right, forward) * 180 / Math.PI)
-        const diagonal = walking ? this.walkBackDiagonalScale : this.backDiagonalScale
+        const [backShare, diagonal] = this.crouched || this.stance === 2 ? [1, 1]
+            : this.stance === 1 ? [0.7, 0.85]
+            : [this.backScale, walking ? this.walkBackDiagonalScale : this.backDiagonalScale]
         const target = sprinting || angle <= 90 ? 1
             : angle <= 135 ? 1 + (diagonal - 1) * (angle - 90) / 45
-            : diagonal + (this.backScale - diagonal) * (angle - 135) / 45
+            : diagonal + (backShare - diagonal) * (angle - 135) / 45
         const k = this.directionEase > 0 ? 1 - Math.exp(-delta / this.directionEase) : 1
         this._directionScale += (target - this._directionScale) * k
 
@@ -719,7 +758,19 @@ export default class SandboxPlayerNode extends CharacterNode {
         this.lookPitch = Math.max(-45, Math.min(45, pitch - this.lookPitchRest))
         // Aiming, the aim turns the head with the weapon.
         const still = !this.hasMoveInput && this.isGrounded && this.groundSpeed < 0.3 && !this.aiming
-        if (delta > 0) this.lookWeight += ((still ? 1 : 0) - this.lookWeight) * (1 - Math.exp(-this.lookSpeed * delta))
+        if (delta > 0) {
+            this._lookAmount += ((still ? 1 : 0) - this._lookAmount) * (1 - Math.exp(-this.lookSpeed * delta))
+            // Crouched, the head alone turns (the Look Head layer); standing, the trunk under it too (Look).
+            this._lookCrouch = Math.max(0, Math.min(1, this._lookCrouch + (this.crouched ? delta : -delta) / 0.25))
+        }
+        this._lookWeights()
+    }
+
+    /** The look-at's weight split between the trunk's look (Look) and the head's alone (Look Head, crouched). */
+    private _lookWeights() {
+        const c = MathUtils.smoothstep(0, 1, this._lookCrouch)
+        this.lookWeight = this._lookAmount * (1 - c)
+        this.lookHeadWeight = this._lookAmount * c
     }
 
     /**
@@ -775,6 +826,11 @@ export default class SandboxPlayerNode extends CharacterNode {
             }
         } else if (this.weapon > 0) weights[this.weapon - 1] = Math.min(1, weights[this.weapon - 1] + step)
         ;[this.pistolWeight, this.rifleWeight, this.shotgunWeight] = weights
+        // The stance follows the weapon more than halfway in the hands; with none, the body is unarmed. Between two
+        // weapons it keeps the last one's, so a swap is one cross-fade, not two.
+        const top = weights.indexOf(Math.max(...weights))
+        if (weights[top] >= 0.5) this.stance = STANCES[top]
+        else if (weights[top] < 0.05) this.stance = 0
         const up = this.weapon > 0 && this.weapon === this._weaponWanted && this._time >= this._busyUntil
         // Aiming: Aim held (or, in third person, a shot from the hip), the weapon up, not sprinting or reloading.
         this.aiming = !holster && up && !sprinting && !this.reloading && (Input.pressed('Aim') || this._fireHold > 0)
@@ -785,13 +841,16 @@ export default class SandboxPlayerNode extends CharacterNode {
         this.pistolAimWeight = this._aim * this.pistolWeight
         this.rifleAimWeight = this._aim * this.rifleWeight
         this.shotgunAimWeight = this._aim * this.shotgunWeight
-        // The weapon's kick in the hands: its aim pitched up, settling back.
-        this._kick *= delta > 0 ? Math.exp(-this.kickRecovery * delta) : 1
+        // Not aimed, the weapon is held at the low ready: the aim's own hold, turned muzzle-down (the Lowered layer).
+        this.loweredWeight = Math.max(...weights) * (1 - this._aim)
+        // The pistol's left hand lets go over a sprint, as the arms go over to the sprint's (0.3 s, as their blend).
+        const supportStep = delta > 0 ? delta / 0.3 : 0
+        this.supportHand = Math.max(0, Math.min(1, this.supportHand + (this.sprinting && !this.aiming ? -supportStep : supportStep)))
+        // Aim held in third person zooms in and blurs all but the target (not a shot from the hip).
+        this.aimingDown = this.aiming && !fp && Input.pressed('Aim')
+        // Where the camera aims off the body: the aim layers' blend.
         this.aimYaw = Math.max(-90, Math.min(90, this._wrap(yaw)))
-        this.aimPitch = Math.max(-60, Math.min(60, pitch - this._kick))
-        // The support hand: on, but letting go between the jog's speed and the sprint's (the hold's sprint takes over).
-        const sprintShare = Math.max(0, Math.min(1, (this.groundSpeed - this.walkSpeed) / Math.max(0.01, this.runSpeed - this.walkSpeed)))
-        this.pistolSupport = this.pistolWeight * (this.aiming || this.reloading ? 1 : 1 - MathUtils.smoothstep(0, 1, sprintShare))
+        this.aimPitch = Math.max(-60, Math.min(60, pitch))
         this._fire(delta, holster, sprinting, fp, up)
         this._firstPersonToward(delta, fp)
         this._hudToward(fp)
@@ -854,7 +913,7 @@ export default class SandboxPlayerNode extends CharacterNode {
 
     /**
      * The trigger: the weapon in the hands (its SandboxGun) fires along the camera's aim once it is up, a round off its
-     * magazine a shot. Each shot comes back as `weapon:Shot`, whose recoil kicks the camera and the weapon (`_shot`);
+     * magazine a shot. Each shot comes back as `weapon:Shot`, whose recoil kicks the camera and the body (`_shot`);
      * most of the camera's kick comes back. In first person the viewmodel plays the shot (its Fire clip, or AimFire
      * down the sights; the shotgun pumps after).
      */
@@ -906,11 +965,12 @@ export default class SandboxPlayerNode extends CharacterNode {
         this.viewFov = MathUtils.damp(this.viewFov, gun ? lerp(fovGoal, gun.aimFov, this.ads) : fovGoal, 14, delta)
         if (rig) {
             if (this._baseYawSens < 0) { this._baseYawSens = rig.yawSensitivity; this._basePitchSens = rig.pitchSensitivity }
-            const sens = lerp(1, this.adsSensitivity, this.ads)
+            // Slower down the sights, and with the third person's zoom (the view turning as fast on the screen).
+            const sens = lerp(1, this.adsSensitivity, this.ads) * (rig.zoomSensitivity ?? 1)
             rig.yawSensitivity = this._baseYawSens * sens
             rig.pitchSensitivity = this._basePitchSens * sens
         }
-        if (!shown) { this._depthOfField(delta, 0); return }
+        if (!shown) { this._depthOfField(delta, 0, rig?.zoomMix ?? 0); return }
         const moving = this.planarSpeed > 0.4
         this._setViewParam('Moving', moving)
         this._setViewParam('Sprinting', moving && this.sprinting)
@@ -923,7 +983,7 @@ export default class SandboxPlayerNode extends CharacterNode {
             g.setPosition([this._vmBase[0] + shift[0] * t, this._vmBase[1] + shift[1] * t, this._vmBase[2] + shift[2] * t])
         }
         this._viewmodelClearance(delta)
-        this._depthOfField(delta, this.ads)
+        this._depthOfField(delta, this.ads, 0)
     }
 
     /** A viewmodel animator's bool, sent down to the viewmodels when it changes. */
@@ -988,11 +1048,15 @@ export default class SandboxPlayerNode extends CharacterNode {
     }
 
     /**
-     * Depth of field while aimed down the sights: the background softens, the focus where the crosshair points, the
-     * weapon (nearer than `dofNearCutoff`) sharp. Off the rest of the time, so it costs nothing; written only on a change.
+     * Depth of field, focused where the crosshair points. Down the sights in first person (`amount`): the background
+     * softens, the weapon (nearer than `dofNearCutoff`) stays sharp. Aimed in third person (`zoom`, the camera's zoom):
+     * hard, only what the crosshair is on sharp, the character in front of it blurred too. Off the rest of the time, so
+     * it costs nothing; written only on a change.
      */
-    private _depthOfField(delta: number, amount: number) {
-        if (amount < 0.01) {
+    private _depthOfField(delta: number, amount: number, zoom: number) {
+        const third = zoom > amount
+        const level = Math.max(amount, zoom)
+        if (level < 0.01) {
             if (this._dofOn) { Game.updateRenderSettings({ dofEnabled: false }); this._dofOn = false }
             return
         }
@@ -1007,12 +1071,15 @@ export default class SandboxPlayerNode extends CharacterNode {
             if (hit) focus = Math.max(1.5, hit.distance)
         }
         this._dofFocus = MathUtils.damp(this._dofFocus, focus, 8, delta)
-        const q = Math.round(amount * 20) / 20, f = Math.round(this._dofFocus * 10) / 10
-        const key = q + ':' + f
+        const q = Math.round(level * 20) / 20, f = Math.round(this._dofFocus * 10) / 10
+        const key = (third ? 'third:' : 'first:') + q + ':' + f
         if (this._dofOn && key === this._dofKey) return
         this._dofOn = true
         this._dofKey = key
-        Game.updateRenderSettings({
+        Game.updateRenderSettings(third ? {
+            dofEnabled: true, dofNearCutoff: 0, dofFocusDistance: f,
+            dofFocusRange: lerp(12, this.aimDofRange, q), dofAperture: lerp(16, this.aimDofAperture, q), dofMaxBlur: lerp(0.5, this.aimDofMaxBlur, q),
+        } : {
             dofEnabled: true, dofNearCutoff: this.dofNearCutoff, dofFocusDistance: f,
             dofFocusRange: lerp(12, 2, q), dofAperture: lerp(16, this.dofAperture, q), dofMaxBlur: lerp(0.5, this.dofMaxBlur, q),
         })
@@ -1030,7 +1097,7 @@ export default class SandboxPlayerNode extends CharacterNode {
             const aimed = fp && this.ads > 0.6 && !!gun?.aimClips
             crosshair.opacity = aimed || (fp && this.sprinting) ? 0 : out * (fp ? 0.9 : 0.5 + 0.5 * this._aim)
             // Pixels from the middle: the spread's angle at the screen's scale (1080 px over the field of view).
-            const fov = fp ? this.viewFov : 60
+            const fov = fp ? this.viewFov : ((this.cameraRig() as any)?.fov ?? 60)
             const perDegree = 540 / Math.tan(fov * Math.PI / 360) * Math.PI / 180
             const gap = Math.round(4 + this.spreadNow * perDegree)
             if (gap !== this._gap) {
@@ -1057,7 +1124,7 @@ export default class SandboxPlayerNode extends CharacterNode {
 
     /**
      * A shot from the weapon in the hands (SandboxGun's `weapon:Shot`, bubbling up from the grip): its recoil kicks
-     * the camera up and aside (less crouched and down the sights) and shakes it, and kicks the weapon in the hands. A
+     * the camera up and aside (less crouched and down the sights) and shakes it, and the body takes the gun's recoil clip. A
      * shot fired some other way carries no recoil.
      */
     @eventListener('weapon:Shot')
@@ -1070,7 +1137,13 @@ export default class SandboxPlayerNode extends CharacterNode {
         rig.yaw = rig.yaw + recoil.yaw
         if (recoil.shake) rig.shake(recoil.shake)
         this._recoilBack += pitch * this.recoilRecovery
-        this._kick += recoil.kick
+        this._bodyRecoil()
+    }
+
+    /** The body's recoil for the shot just fired: the gun's `fireTrigger`, sent down to the animator under this character. */
+    @animTrigger()
+    private _bodyRecoil() {
+        return this._gun?.fireTrigger ?? ''
     }
 
     /** The weapon in the hands changed (`weapon:Equipped`, from setting `weapon`): its model shown, the others hidden. */
@@ -1202,7 +1275,8 @@ export default class SandboxPlayerNode extends CharacterNode {
         this.leanLeft = 0
         this.leanRight = 0
         this.leanForward = 0
-        this.lookWeight -= this.lookWeight * ease
+        this._lookAmount -= this._lookAmount * ease
+        this._lookWeights()
         // No weapon in a car: put away.
         this._weaponsToward(delta, true, false, 0, 0)
         this._carTime += delta

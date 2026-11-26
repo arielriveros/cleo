@@ -153,8 +153,9 @@ Each frame the first of these that holds wins: an Any State transition, then a s
 [group](#state-groups). A transition into a [fork](#forks) counts only when it can go on through one of the
 fork's ways out.
 
-The toolbar carries a tab strip — **Base | *layer* … | + Layer** — that picks which
-[layer](#layers-and-bone-masks) the canvas shows. The highlighted state is that layer's current one.
+The toolbar carries a layer dropdown — **Base**, or one of the machine's layers — that picks which
+[layer](#layers-and-bone-masks) the canvas shows, with **+ Layer** beside it. The highlighted state is that
+layer's current one.
 
 ### State groups
 
@@ -268,7 +269,7 @@ A sync group is not a [state group](#state-groups). State groups share transitio
 
 ### The inspector
 
-The Animator part's **Animator** panel edits what the graph has selected. On a layer's tab it starts
+The Animator part's **Animator** panel edits what the graph has selected. With a layer picked it starts
 with that [layer's settings](#layers-and-bone-masks).
 
 **Save** commits the animator: onto the character it was opened from, or — when it is a
@@ -395,9 +396,10 @@ A machine can have **layers** above the base. Each layer runs its own states and
 the **same parameters**, and is blended on top of everything beneath it — the legs keep walking on
 the base while an upper-body layer aims, waves or holds a torch.
 
-Add one with **+ Layer** on the graph toolbar, then pick its tab to edit its states.
+Add one with **+ Layer** on the graph toolbar; it is picked in the layer dropdown beside it, where you pick a
+layer to edit its states.
 
-**Layer** — the section at the top of the Animator panel while a layer's tab is picked, titled with
+**Layer** — the section at the top of the Animator panel while a layer is picked, titled with
 the layer's name. It holds that layer's own settings:
 
 | Field | Meaning |
@@ -760,7 +762,7 @@ rig's follow target instead.
 - The **Skeletons** overlay draws joints and bones.
 - The Animator panel's **Preview** simulates without entering Play.
 - Warnings flag oscillating transition pairs and unreachable ones.
-- On a layer's tab, the graph highlights that layer's current state.
+- With a layer picked, the graph highlights that layer's current state.
 
 ## See also
 

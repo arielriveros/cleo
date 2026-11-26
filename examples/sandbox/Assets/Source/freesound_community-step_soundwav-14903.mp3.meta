@@ -1,0 +1,20 @@
+{
+  "cleo": 1,
+  "guid": "freesound_community-step_soundwav-14903.mp3",
+  "kind": "audioSource",
+  "created": 1795636267143,
+  "record": {
+    "id": "freesound_community-step_soundwav-14903.mp3",
+    "name": "freesound_community-step_soundwav-14903.mp3",
+    "mime": "audio/mpeg",
+    "duration": 0,
+    "sampleRate": 0,
+    "channels": 0,
+    "byteSize": 0,
+    "origin": "import",
+    "created": 1795636266991
+  },
+  "importer": {
+    "mime": "audio/mpeg"
+  }
+}

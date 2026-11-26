@@ -6,6 +6,8 @@ import { attribute } from 'cleo/decorators'
 interface Framed {
     sprinting?: boolean
     aiming?: boolean
+    /** Aim held in third person (not a shot from the hip): the camera zooms in. */
+    aimingDown?: boolean
     crouched?: boolean
     inVehicle?: boolean
     /** The view the player asks for: first person, or third. */
@@ -25,7 +27,9 @@ interface Framed {
  * turns the rig from the Look input, and this script never touches yaw or pitch. No action switches the third-person
  * framing; the character's sprint and aim do. They are read from the Character the rig belongs to (the one under the
  * Collider above it): its script's `sprinting` and `aiming`. The aim comes in quickly (`aimSeconds`), on top of
- * whichever of the two framings it is in. Crouched (the Character's `crouched`), it orbits `crouchDrop` lower.
+ * whichever of the two framings it is in; with Aim held (`aimingDown`, not a shot from the hip) the lens narrows to
+ * `aimFov` as well (`zoomMix`), and the mouse slows with it (`zoomSensitivity`, read by the character). Crouched (the
+ * Character's `crouched`), it orbits `crouchDrop` lower.
  *
  * FIRST PERSON (the character's `firstPerson`, which the View action toggles): the boom folds in to the eyes over
  * `viewSeconds` (eased), to the character's `eyeHeight` over its feet, with no follow damping and no collision (the
@@ -89,6 +93,10 @@ export default class SandboxCameraNode extends CameraRigNode {
     @attribute('Switch', { min: 20, max: 120, step: 1 })
     private thirdPersonFov: number = 60
 
+    /** Aim held in third person: the narrower field of view it zooms to (degrees). */
+    @attribute('Switch', { min: 10, max: 120, step: 1 })
+    private aimFov: number = 45
+
     /** First person: the pitch's reach, degrees up and down. */
     @attribute('Switch', { min: 30, max: 89, step: 1 })
     private firstPersonPitch: number = 85
@@ -107,6 +115,11 @@ export default class SandboxCameraNode extends CameraRigNode {
 
     /** How far into first person the camera is: 0 third person, 1 at the eyes (eased). */
     public firstPersonMix: number = 0
+    /** How far into the aim's zoom the third-person lens is: 0 `thirdPersonFov`, 1 `aimFov` (eased). */
+    public zoomMix: number = 0
+    /** The mouse's share of its speed under that zoom, so the view turns as fast on the screen (1 unzoomed). */
+    public zoomSensitivity: number = 1
+    private _zoom: number = 0
 
     onStart() {
         this._authored = {
@@ -169,7 +182,14 @@ export default class SandboxCameraNode extends CameraRigNode {
             this.pitchMax = lerp(authored.pitchMax, this.firstPersonPitch, f)
             this.collisionEnabled = authored.collision && f < 0.5
         }
-        this.fov = lerp(this.thirdPersonFov, character?.viewFov ?? this.thirdPersonFov, f)
+        // The aim's zoom (Aim held, third person), eased in and out over the aim's framing time.
+        this._zoom = character?.aimingDown && !firstPerson ? Math.min(1, this._zoom + aimStep) : Math.max(0, this._zoom - aimStep)
+        const z = MathUtils.smoothstep(0, 1, this._zoom)
+        this.zoomMix = z * (1 - f)
+        const thirdFov = lerp(this.thirdPersonFov, this.aimFov, z)
+        const half = (deg: number) => Math.tan(deg * Math.PI / 360)
+        this.zoomSensitivity = lerp(half(thirdFov) / half(this.thirdPersonFov), 1, f)
+        this.fov = lerp(thirdFov, character?.viewFov ?? this.thirdPersonFov, f)
 
         // At the eyes, the body and the weapons it holds are drawn into the shadows only.
         const inside = f > 0.6

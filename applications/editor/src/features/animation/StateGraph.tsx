@@ -5,7 +5,7 @@ import {
   BoltIcon, Button, ChevronLeftIcon, cn, JOINED_DIVIDER_CLASS, JOINED_GROUP_CLASS, SegmentedControl,
 } from '@cleo/app-kit/ui'
 import MachineGraph from '../../components/MachineGraph'
-import { LayerTabs } from './LayerPanels'
+import { LayerPicker } from './LayerPanels'
 import type { GraphLinkModel, GraphMenuItem, GraphNodeModel } from '../../components/MachineGraph'
 import { isConditionGroup } from 'cleo'
 import type { AnimationTransition, AnimationCondition, AnimationConditionNode } from 'cleo'
@@ -484,10 +484,10 @@ export default function StateGraph() {
             ]}
             value='graph'
             onChange={v => setGraphView(v === 'graph')} />
-          <LayerTabs />
+          <LayerPicker />
           <Button variant='primary' className='shrink-0 whitespace-nowrap'
             onClick={addAtCenter} title='Add a new state (or double-click the canvas)'>+ State</Button>
-          {/* Never squeezed: a long row of layer tabs would crush the strip down to its first button. */}
+          {/* Never squeezed: the hint at the end gives way instead. */}
           <div className={cn(JOINED_GROUP_CLASS, 'shrink-0')}>
             <button type='button' className={iconButton}
               title={openGroup ? `Add a fork to ${openGroup}: transitions go in, and on to the first of its ways out that holds` : 'Add a fork: transitions go in, and on to the first of its ways out that holds'}

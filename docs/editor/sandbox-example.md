@@ -15,9 +15,11 @@ does. It can:
 - crouch and walk crouched in eight directions, its capsule shorter, standing up only where there is room
   (see [Crouching](#crouching));
 - get into a car by its door, drive it, and get out again (see [The car](#the-car));
-- carry Firing Line's pistol, AK-47 rifle and SAPS-12 shotgun at the low ready, aim them where the camera looks,
-  fire and reload them, walking, jogging and running with them, their shots raycasts that push what they hit (see
-  [The weapons](#the-weapons));
+- carry Firing Line's pistol, AK-47 rifle and SAPS-12 shotgun, and move with each on motion capture made for it:
+  the rifle's walks, jogs, sprint, crouch, turns and jumps, the pistol's walks, jogs, kneel and jumps (see
+  [Moving armed](#moving-armed));
+- aim them where the camera looks, fire them, the body taking each shot's recoil, and reload them, their shots
+  raycasts that push what they hit (see [The weapons](#the-weapons));
 - switch to first person and back: Firing Line's viewmodels and its shooter's mechanics, the body still casting its
   shadow (see [First person](#first-person)).
 
@@ -46,8 +48,9 @@ It uses only what the engine has:
 
 - a **Character** and a **Controller**;
 - one **Camera Rig**, with a script that frames it over the shoulder, and in third person while sprinting;
-- blend spaces (locomotion, the look-at, the stairs, up and down, and each weapon's carry, aim and aim poses) and
-  one animator, its states in groups, with a layer for each weapon;
+- blend spaces (locomotion unarmed, with the rifle and with the pistol, each crouched too, the look-at, the stairs,
+  up and down, and each weapon's carry and aim) and one animator, its states in groups, an armed variant beside each
+  state a weapon has clips for, and a layer for each weapon;
 - foot placement and foot locking on the skeleton;
 - one script on the Character, which handles input and writes the values the animator reads.
 
@@ -62,7 +65,9 @@ feet's detail, the stairs' ramps and the pillars).
 Each is placed once.
 
 It is edited in the desktop editor, as the project folder `examples/sandbox`
-([examples/README.md](../../examples/README.md)). Its clips come from a Mixamo locomotion pack.
+([examples/README.md](../../examples/README.md)). Its clips are Mixamo's: the **Locomotion Pack** unarmed; the
+**Rifle 8-Way Locomotion Pack**, the **Pistol Handgun Locomotion Pack**, the **Shooter Pack** and the **Slim Shooter
+Pack** armed; *Crouch To Stand* and *Shooting* on their own.
 
 ## Playing
 
@@ -142,6 +147,8 @@ What each layer is for:
 | Walking and jogging relative to the camera, the body facing it, side-stepping and backpedalling | The Character (facing **Aim**, ALS's looking direction), driven by the Player Controller |
 | Changing direction without coasting on, at full speed | The Character's **Turn Friction** (8, Unreal's ground friction) |
 | Eight directions at a walk and a jog, the legs matching the speed and the way the body really goes | The **Locomotion** blend space: Direction (`moveDir`, read from the body's travel) x Speed (the body's speed) |
+| Moving with a weapon on that weapon's own clips: walking, jogging, sprinting, crouching, turning, jumping | The states' **armed variants** (Rifle Locomotion, Pistol Idle, ...), picked by the script's `stance` (see [Moving armed](#moving-armed)) |
+| Taking a weapon out or putting it away mid-stride without missing a step | A 0.25 s cross-fade between a state and its variant, the two in one **sync group** |
 | Sprinting in any direction at 6.5 m/s, the body turned to where it runs | The script sets facing to **Velocity** while sprinting (ALS's velocity direction); the blend space has only a forward sprint |
 | Setting off into a sprint | The **Start** state, the start clip sped up to the Character's acceleration |
 | Stopping from a run, off whichever foot is swinging | The **Stop** and **StopMirror** states, picked by the run's phase |
@@ -153,6 +160,7 @@ What each layer is for:
 | Crouching through a hard landing where it came down, whatever the stick says | The hard landing's **root motion**, and its state's **hold** switch |
 | Rolling out of a far fall while running, and running on | The **LandRoll** state, entered from the fall by the graph alone (`Running` and `Speed`) |
 | Looking round at the camera standing still, before turning to it | The additive **Look** layer (a blend space of look poses), and the Character's turn delay |
+| Looking round crouched with the head alone | The additive **Look Head** layer, which takes over from Look while crouched |
 | Feet on slopes, steps and bumps, held on the spot while the body turns over them | **Foot placement** (its **Trace layers**) and **foot locking** on the Mannequin skeleton |
 | Slowing to a stair pace before the first riser, and climbing one step a tread, facing up the flight | The script's stair speeds and look-ahead, and facing **Velocity** on a flight |
 | Climbing and descending stairs with stair clips, in step with the walk it came from | The **Stairs** state (the **Stairs** blend space, up and down), in the same **sync group** as Locomotion |
@@ -195,30 +203,37 @@ plants.)
 
 ### The animator
 
-**Mannequin Locomotion** is a shared animator on the Mannequin skeleton. Its base layer has twenty-four states,
-twenty of them in six **groups**, so the graph shows Idle, Locomotion, Start and Stairs and six group nodes. Five
-[forks](animation.md#forks) untangle what is left: a choice several states make the same way is written once, as a
-fork's ways out, and each of those states has one line to it.
+**Mannequin Locomotion** is a shared animator on the Mannequin skeleton. Its base layer has fifty states, all but
+Start and Stairs in nine **groups**, so the graph shows Start, Stairs and nine group nodes. Twenty of the
+states are the [armed variants](#moving-armed) of the others. Nineteen [forks](animation.md#forks) untangle what is
+left: a choice several states make the same way is written once, as a fork's ways out, and each of those states has
+one line to it.
 
 | Group | Entered through | Its states | Its own transitions (from any of its states) |
 |---|---|---|---|
-| **Turning** | **Pick Turn**: the turn in place the script's `Turn` asks for | Turn90L/R, Turn180L/R | into the air, onto a flight, and off into Locomotion when the stick moves |
+| **Standing** | **Pick Idle**: the idle of the stance | Idle, Pistol Idle, Rifle Idle | |
+| **Moving** | **Pick Locomotion**: the locomotion of the stance | Locomotion, Pistol Locomotion, Rifle Locomotion | |
+| **Turning** | **Pick Turn**: the turn in place the script's `Turn` asks for (a quarter turn then through **Pick Turn90L/R**, by stance) | Turn90L/R, Turn180L/R, Rifle Turn90L/R | into the air, onto a flight, and off into Locomotion when the stick moves |
 | **Stopping** | **Pick Stop**: the stop that plants the foot that is swinging (by the run's phase) | Stop, StopMirror, and the **Settle** fork | into the air |
 | **Running Turn** | **Pick Run Turn**: left or right, by `RunTurn` | RunTurnL/R | into the air, to Idle when let go, back into Locomotion when the script lets go of `RunTurn` |
-| **Air** | **Take Off**: a running jump at a run's speed, else a standing jump, or off a ledge a fall | JumpStand, JumpRun, Fall, FallFar | |
-| **Landing** | its landings, from Air | JumpLand, LandRun, LandSoft, LandHard, LandRoll | into Idle once a landing has played out, and into the air |
+| **Air** | **Take Off**: a running jump at a run's speed, else a standing jump, or off a ledge a fall (each through its **Pick** fork, by stance) | JumpStand, JumpRun, Fall, FallFar, and the pistol's and rifle's | |
+| **Landing** | its landings, from Air (JumpLand and LandRun through their **Pick** forks) | JumpLand, LandRun, LandSoft, LandHard, LandRoll, and the pistol's and rifle's JumpLand and LandRun | into Idle once a landing has played out, and into the air |
 | **Car** | its triggers (no fork) | CarEnter, CarDrive, CarExit | |
+| **Crouching** | **Crouch Down**: the pistol kneels when it stands still, else **Pick Crouch** | Crouch, Pistol Crouch, Rifle Crouch, the crouched quarter turns, Pistol KneelDown/KneelUp, CrouchStand | standing up, into the air |
 
 So every grounded state has ONE way into the air, a line into Air, and Take Off picks the jump or the fall: 22
 transitions became 11. A stop settles through **Settle**: into Turning when a turn in place is asked for (Pick Turn
-picks which), else into Idle. In all the base layer has 68 transitions, where it had 86.
+picks which), else into Idle. Every way into Idle or Locomotion is a line to **Pick Idle** or **Pick Locomotion**,
+which goes on to the stance's variant. In all the base layer has 196 transitions: 22 of them change stance between a
+state and its variants, 21 are the Pick forks' ways out, and each variant keeps the transitions of the state it
+stands in for.
 
 Each state keeps the transitions only it has (a turn's way back to Idle as it ends, a landing's way into the run).
 Double-click a group in the graph to see its states and forks.
 
 The states:
 
-- **Idle** and **Locomotion** (the blend space).
+- **Idle** and **Locomotion** (the blend space), and their armed variants (see [Moving armed](#moving-armed)).
 - **Start**: entered from Idle when a sprint sets off within 45 degrees of where the body faces (`Sprinting`,
   `MoveAngle`, and `Speed` above 0.12 m/s, so pushing against a wall does not start it).
   - The clip's push-off fits an acceleration of about 5 m/s², and the body takes off at that rate (the script's
@@ -267,7 +282,9 @@ The states:
 **Look.** A fourth additive layer, **Look**, plays a 2D blend space of nine look poses: the trunk and head turned
 up to 90 degrees either way and 45 up or down, spread up Spine, Spine1, Spine2, Neck and Head (the **Look** bone
 mask) so the head looks the whole way. Its axes are `LookYaw` and `LookPitch` (where the camera faces, off the
-body) and its weight is `LookWeight`, which the script raises while the character stands still.
+body) and its weight is `LookWeight`, which the script raises while the character stands still. Crouched, the
+**Look Head** layer after it takes its weight (`LookHeadWeight`) and turns the head alone (see
+[Crouching](#crouching)).
 
 **Lean.** Three **additive** layers, **Lean Left**, **Lean Right** and **Lean Forward**, play a lean clip at the weight
 of `LeanLeft` / `LeanRight` / `LeanForward`. The sideways clips are made as a runner banks: the whole body
@@ -541,10 +558,11 @@ the wheel with the steering, and the seated feet go through the floor (no leg IK
 
 Three weapons, Firing Line's: its pistol, its AK-47 rifle and its SAPS-12 shotgun, carried in the right hand.
 **Q** (RB on a pad) takes out the pistol, then the rifle, then the shotgun, then puts it away; the mouse wheel goes
-the same way round, or back. Holding the **right mouse button** aims it (LT). Aiming, the character faces the
-camera and strafes, turns in place as soon as the camera is 45 degrees round (`aimTurnThreshold`), and the camera
-moves in over the shoulder. Sprinting lowers the weapon (and lets go of the pistol with the left hand); getting into
-the car puts it away. In first person they are Firing Line's viewmodels instead (see [First person](#first-person)):
+the same way round, or back. Not aimed, the weapon is held at the **low ready**, its muzzle at the ground ahead.
+Holding the **right mouse button** aims it (LT). Aiming, the character faces the camera and strafes, turns in place
+as soon as the camera is 45 degrees round (`aimTurnThreshold`), and the camera moves in over the shoulder and zooms in,
+with a hard depth of field (see [Aiming in third person](#aiming-in-third-person)). Sprinting carries the weapon as
+the sprint clip does; getting into the car puts it away. In first person they are Firing Line's viewmodels instead (see [First person](#first-person)):
 the same weapons, the same magazines.
 
 ```
@@ -564,9 +582,19 @@ Player
 
 **On the hand.** Each weapon hangs on a socket of its own on the right hand (`Pistol Grip`, `Rifle Grip`,
 `Shotgun Grip`, on the Mannequin rig, shown with their weapon in the animation editors). The socket's frame is the
-weapon's: its grip at the origin, its bore along +Z. Under it, the weapon's model sits at the origin, and a
-**Muzzle** node marks the end of its bore, for whatever fires it. The script shows the one in the hands and hides
-the others.
+weapon's: its grip at the origin, its bore along +Z, the line every aim is built on. Under it the weapon's model sits
+unturned, so its barrel is where the aim points; it is only moved, to put its grip in the fist (the Rifle's node
+sits 3 cm back and 1.4 cm to the left). A **Muzzle** node marks the end of the model's bore, for whatever fires it.
+The script shows the one in the hands and hides the others.
+
+The grips are fitted to the motion capture's right fist: the rifle's bore runs along the line the clips hold their
+rifle on (from the right fist to the left, averaged over the walks, the runs and the aim), turned 8.8 degrees as the
+rifle was set in the hand in the editor; the long guns' aims are turned onto it. The AK-47's pistol grip sits further
+behind its trigger than Mixamo's rifle's did, so the rifle is moved forward in the hand until its grip is in the fist
+(the index finger lies along the frame), and the aiming idles' right hand is moved back by as much: aimed, the rifle
+is where it was, its butt at the shoulder. Three more sockets on the right hand, **Pistol Support**, **Rifle Support** and **Shotgun
+Support**, mark where the left hand holds each weapon: the pistol's grip from below, the AK-47's handguard, the
+SAPS-12's pump. The left hand goes there by IK (see the layers below), whatever the clip's own left hand did.
 
 **The models.** The third person's weapons are Firing Line's viewmodels' own: each one's weapon parts (not the
 arms, not the shotgun's ejected shell), as its viewmodel's Idle clip holds them, laid out in weapon space. The grip
@@ -574,45 +602,128 @@ is the middle of the part the viewmodel's right fist closes round, on the weapon
 weapon's own (its rig's weapon bone). They wear the viewmodels' materials, which cast shadows (a viewmodel never
 does, whatever its material says). The pistol is 27 cm long, the AK-47 87 cm, the SAPS-12 84 cm.
 
-**The poses.** Everything about how each weapon is held is a POSE, in a Pose asset per weapon (**Pistol Poses**,
-**Rifle Poses**, **Shotgun Poses**, in `/Characters/Mannequin/Animation/Weapons`), editable in the editor (see
+**The poses.** The aim's directions are POSES, in a Pose asset per weapon set (**Pistol Poses**, and **Rifle
+Poses**, which the shotgun shares, in `/Characters/Mannequin/Animation/Weapons`), editable in the editor (see
 [Editing a pose](animation.md#editing-a-pose)):
 
-- **Carry**, **Aim** and **Sprint**: the stances, the spine, the head, both arms and the fingers.
-- **Reload**: the weapon brought up in front of the chest and canted, the magazine toward the left hand, the left
-  hand at the magazine (the shotgun's: at its loading port), the head down to it.
+- **Aim**: the motion capture's own aiming idle (the Shooter pack's for the rifle, the pistol pack's idle for the
+  pistol), its first frame, turned so the bore looks along the camera's ray.
 - **Aim Left 45 Up 30** and the rest, 25 in all: the aim's directions, each a [variant](animation.md#variants) of
-  **Aim** that stores only what it changes from it (the upper spine, the head, the arms).
+  **Aim** that stores only what it changes from it: Spine1 and Spine2 turn by the direction, so the arms, the
+  weapon and the head go round with the chest.
+- **Low Ready**: a variant of **Aim** too, the weapon lowered (the rifle 40 degrees, its butt kept in the shoulder;
+  the pistol 45, about the shoulders), both hands moved onto it by IK with the elbows where the wrists bend least,
+  and the head up off the sights, looking ahead. The pistol's right elbow is the exception: where the wrist bends
+  least it lies across the chest, so it hangs instead, as low as it goes with the hands on the gun (21 cm under the
+  shoulder, 7 cm further out); and its left elbow is held 5 cm further off the torso than the least bend puts it, no
+  higher, so it is out at the side rather than against the belly. Each arm bends as the Mannequin's does: the upper arm turned about itself until the
+  elbow bends on its own hinge (the one the motion capture's elbows bend on), the forearm turned about itself so the
+  hand sits on it as it does in the aim, the wrist untwisted. It stores the arms, the neck and the head.
+- **Reload** (the pistol's): the pistol brought up in front of the chest, the magazine toward the left hand. The long
+  guns reload on the Slim Shooter pack's clip.
 
-Edit **Aim** and every aim direction moves with it; edit one direction and only it changes. Edit **Carry** and the
-weapon is carried that way at every gait and on the stairs. The rifle's and the shotgun's left hand is where Firing
-Line's viewmodel holds each weapon: the AK-47's handguard; on the shotgun, as far toward its pump as the
-Mannequin's arm reaches in every aim direction.
+Edit **Aim** and every aim direction, and the low ready, moves with it; edit one direction and only it changes.
 
 **The layers.** Each weapon has an override layer, **Pistol**, **Rifle** and **Shotgun**, which holds the spine,
-the head and the arms (the pistol's left arm is on a layer of its own, **Pistol Support**, so it can let go at a
-sprint). Its weight is the script's (`pistolWeight`, `rifleWeight`, `shotgunWeight`): one at a time, faded out and
-in over `equipSeconds` (0.3 s).
+the head and both arms with their fingers (the **Pistol** and **Rifle** bone masks). Its weight is the script's
+(`pistolWeight`, `rifleWeight`, `shotgunWeight`): one at a time, faded out and in over `equipSeconds` (0.3 s). The
+support arm is the weapon's hold, never the body's under it: with the right arm alone, the pistol's left arm was
+whatever the legs' clip had (a strafe, a turn in place), the low ready's difference added to it, and its elbow
+snapped across the chest as that clip changed.
 
-- **Carry** is a blend space of the poses over the base layer's walk axes (**Pistol Carry**, **Rifle Carry**,
-  **Shotgun Carry**): the Carry pose wherever the walk plays a clip and standing, the Sprint pose where it sprints,
-  so the weapon goes down as the legs speed up. **Aim** holds the Aim pose. **Reload** holds the Reload pose while
-  the script reloads (its `reloading`, the animator's **Reloading**).
-- Carry, Aim and Reload are **Steady** (see [Steady holds](animation.md#steady-holds)): the chest keeps the pose's
-  own turn over the hips, whatever the legs do, walking, running or on a flight of stairs, so one pose is the whole
-  hold. Carrying, at 0.5, it keeps half the hips' sway and lean into a run (about 9 degrees of sway at a jog);
-  aiming, at 0.85, nearly none (under 3), so the weapon stays on target. The legs are never touched, so foot
-  placement and foot locking work as they do unarmed.
-- **Hand IK** keeps the left hand on the weapon (the **Rifle** and **Shotgun** layers', and **Pistol Support**'s):
-  it goes where the pose has it relative to the right hand, whatever the aim layer above does to the right arm,
-  and however the poses are edited. The pistol's lets go with the support layer at a sprint.
+- **Carry** plays the set's aiming idle (**Rifle Aim**, which the shotgun shares; **Handgun Idle**) at every gait
+  but the sprint, standing, walking and jogging, over whatever the legs do; the **Lowered** layer turns it
+  muzzle-down. So the arms hold the weapon steady against the chest at every gait, as a low ready is held.
+- **Crouch** does the same crouched.
+- **Sprint** plays the sprint's arms, in step with the legs (the **Gait** sync group): the rifle pack's sprint for the
+  long guns (**Rifle Sprint Arms**, its loop started on the right foot's plant as the legs' sample is), and for the
+  pistol **Handgun Sprint**: the Locomotion Pack's sprint, the left arm pumping free, the right one-handed by the hip,
+  its muzzle down and forward, swinging with 30% of the sprint's own arm swing.
+- **Aim** and **Crouch Aim** play the aim, standing and crouched (the Shooter pack's rifle aiming idle, the Rifle
+  8-Way pack's crouching aim, the pistol pack's idle).
+- **Reload** plays the Slim Shooter pack's reload for the rifle and the shotgun, at the rate that fits it to the
+  gun's `reloadSeconds`, and holds the pistol's Reload pose, while the script reloads (its `reloading`, the
+  animator's **Reloading**).
+- They are **Steady** (see [Steady holds](animation.md#steady-holds)): the chest keeps the clip's own turn over the
+  hips, whatever the legs do. Carrying, crouched and sprinting, at 0.5, it keeps half the hips' sway; aiming, at 1,
+  none, so the weapon stays on target. The legs are never touched, so foot placement and foot locking work as they do
+  unarmed.
+- **Hand IK** keeps the left hand on the weapon: on the weapon's support socket (**Pistol Support**, **Rifle
+  Support**, **Shotgun Support**), whatever the layers above do to the right arm, so the hand is on these models
+  whatever weapon Mixamo's actor held. The pistol's lets go at a sprint: its weight is `supportHand`, which the
+  script eases to 0 over the 0.3 s the arms take to go over to the sprint's.
+
+**The low ready.** The **Lowered** layer is additive, over the **Lowered** bone mask (both arms, the neck and the
+head). It plays the set's **Low Ready** pose (**Pistol**, or **Rifle** for both long guns, picked by Stance) at the
+weight `loweredWeight`: the weapon layer's weight times one less the aim's. So the weapon is held at the low ready
+whenever it is not aimed, and aiming lifts the very hold it was lowered from, over the aim's 0.15 s: the bore is on the
+camera's line within a quarter of a second of pressing Aim. A shot from the hip aims first, so it lifts the weapon too.
+The layer goes to its empty **Off** while the body sprints or reloads (the sprint's and the reload's own holds).
 
 **The aim.** **Pistol Aim**, **Rifle Aim** and **Shotgun Aim** are additive layers like the **Look** layer: each a
-blend space of the 25 aim directions (**Pistol Aim Offset**, **Rifle Aim Offset**, **Shotgun Aim Offset**) over
+blend space of the 25 aim directions (**Pistol Aim Offset**; **Rifle Aim Offset**, which the shotgun shares) over
 the aim's yaw off the body (`aimYaw`, -90 to 90) and its pitch (`aimPitch`, -60 to 60, the camera's own). Each adds
-what its direction changes from **Aim**: the chest takes most of the yaw and part of the pitch, the arms the rest,
-the head following the sights. Their weight is the aim's (`aimSeconds`, 0.15 s) times the weapon's. Aiming, the
-Look layer is off: the aim turns the head.
+what its direction changes from **Aim**: the upper chest turns, carrying the arms, the weapon and the head with it.
+Their weight is the aim's (`aimSeconds`, 0.15 s) times the weapon's. Aiming, the Look layer is off: the aim turns
+the head.
+
+### Moving armed
+
+With a weapon out, the body moves on that weapon's motion capture, not on the unarmed walk with the arms held over
+it. Each state a weapon set has clips for has an **armed variant** beside it, in the same group: **Pistol Idle** and
+**Rifle Idle** beside Idle, **Pistol Locomotion** and **Rifle Locomotion** beside Locomotion, and so on. The script's
+`stance` (the animator's **Stance**) says which: 0 unarmed, 1 the pistol, 2 the rifle, which the shotgun shares.
+
+| | Unarmed | Pistol | Rifle and shotgun |
+|---|---|---|---|
+| Standing | Idle | the pistol pack's idle | the rifle pack's idle |
+| Walk and jog, 8 directions | the Locomotion Pack | the pistol pack's walk back and sideways, its run and run back; the rifle pack's legs for the rest (the diagonals, the walk forward, the jog sideways), always under the pistol's arms | the rifle pack's walks and runs; the Shooter pack's slow walk forward and back for a barely pushed stick |
+| Sprint | the Locomotion Pack | the Locomotion Pack's sprint, the pistol one-handed | the rifle pack's sprint |
+| Crouched | Crouch (see [Crouching](#crouching)) | the pistol pack's kneel, the rifle pack's crouch walks | the rifle pack's crouch idle and crouch walks |
+| Quarter turns in place, standing and crouched | the Locomotion Pack (crouched: combined) | the unarmed ones, the pistol's arms | the rifle pack's |
+| Jumps | the Locomotion Pack | the pistol pack's, standing and running | the rifle pack's jump up, loop and down; the Shooter pack's jump forward running |
+| Aim | | the pistol pack's idle (its two-handed hold is an aim) | the Shooter pack's aiming idle; the rifle pack's crouching aim |
+| Not aimed | | the aim, at the low ready (the Lowered layer) | the aim, at the low ready (the Lowered layer) |
+| Fire | | *Shooting*'s first shot | the Slim Shooter pack's firing rifle |
+| Reload | | the Reload pose | the Slim Shooter pack's reloading |
+
+- **Routing.** Every way into a state that has variants goes through a **Pick** fork (Pick Idle, Pick Locomotion,
+  Pick Crouch, Pick Turn90L, ...), whose ways out test Stance. So a variant needs no copy of the lines into its state,
+  and each variant keeps the lines out of the state it stands in for.
+- **Changing stance.** Between a state and its variants, a Stance change is a 0.25 s cross-fade (0.3 s standing). The
+  locomotion and crouch variants share their unarmed state's sync group (**Gait**, **Crouch**), so a weapon taken out
+  mid-stride carries the stride on in the new set, the feet in step. The script changes `stance` once the weapon
+  coming up is halfway in the hands, and keeps it between two weapons, so a swap is one cross-fade.
+- **Gaits.** The armed blend spaces (**Rifle Locomotion**, **Pistol Locomotion**, **Rifle Crouch**, **Pistol
+  Crouch**) put every clip at the Locomotion rings' speeds (creep 0.8 m/s, walk 1.6, jog 4.19, sprint 6.5,
+  crouched 1.51), each played at the rate that makes its feet cover that ground. The rifle pack moves as fast every
+  way, so with a long gun out the script slows nothing going backwards; the pistol's backpedal and diagonals are
+  0.7 and 0.85 of the speed, as its clips are.
+- **What the clips were given.** Every cycle is in place with only its average travel taken out, phase-shifted so its
+  right foot plants at phase 0 (as the unarmed set), and carries its foot-lock windows. Where a clip's feet drift on
+  the ground through a plant, the stance foot is pinned by leg IK (two-bone, the toe held where it planted), so
+  every direction at a walk and a jog stays within the unarmed set's foot-slide limits (the tests'). The rifle pack's jog back-right drifts
+  too far for that; the legs of its jog back-left, mirrored, play in its place, under the true clip's arms. The turns'
+  yaw is root motion on the Pivot, as the unarmed turns'.
+- **Kneeling with the pistol.** Crouching standing still with the pistol out kneels down through the pistol pack's
+  *stand to kneel* (**Pistol KneelDown**), and standing up from the kneel gets up through *kneel to stand*
+  (**Pistol KneelUp**). On the move, a crouch is a cross-fade.
+
+### Aiming in third person
+
+Holding Aim in third person (`aimingDown`: not a shot from the hip, which only raises the weapon) does three things
+over the camera's `aimSeconds`:
+
+- **The lens narrows** from the third person's 60 degrees to the Camera Rig script's `aimFov` (45): SandboxCamera's
+  `zoomMix`.
+- **The mouse slows with it** (the camera's `zoomSensitivity`, the tangent of the half angles' ratio), so the view
+  turns as fast on the screen as it did.
+- **A hard depth of field comes on**, focused where the crosshair points (the camera's ray, the character's own
+  body ignored; nothing hit, `dofFarFocus`): the aperture `aimDofAperture` (1.2), blur up to `aimDofMaxBlur` (32 px),
+  a sharp band `aimDofRange` (1 m) deep round the target. Nothing nearer is kept sharp, so the character in front of
+  the camera blurs too and only what the crosshair is on stays sharp. It goes off when Aim is let go.
+
+The crosshair's spread is drawn at the lens it is seen through, so its ticks stay on the shot's cone as it zooms.
 
 ### Firing
 
@@ -634,9 +745,9 @@ the last shot: a pull made while it comes up fires as soon as it is up (`pullBuf
 the car and a weapon coming into the hands hold fire.
 
 **Ammunition.** Each gun keeps its magazine and its reserve (`ammo`, `reserve`), so a weapon put away and taken out
-again is as it was left. **R** (B on a pad) reloads, and so does a pull on an empty magazine: the Reload pose is held
-for the gun's `reloadSeconds` (in first person, the viewmodel's reload clips), and near its end the magazine fills
-from the reserve. Out of the reserve, the weapon is dry until the scene starts again: the Sandbox has no pickups yet.
+again is as it was left. **R** (B on a pad) reloads, and so does a pull on an empty magazine: the weapon layer's
+Reload plays for the gun's `reloadSeconds` (in first person, the viewmodel's reload clips), and near its end the
+magazine fills from the reserve. Out of the reserve, the weapon is dry until the scene starts again: the Sandbox has no pickups yet.
 The Player's HUD (its own canvas, in the Player template) shows them: **Ammunition**, bottom right, the magazine, the
 reserve and the weapon's name; **Reloading** under the crosshair while it reloads. The script finds them under its
 own node (`@child('HUD/Ammo')`), never the scene's, so a second Player drives its own.
@@ -676,8 +787,11 @@ aimed (in first person, gone down the sights of a weapon with sights to look dow
 
 **Recoil.** Each shot kicks the camera up and a little aside (the weapon's recoil, a quarter less crouched and a
 third less down the sights) and shakes it (the shotgun hard); 70% of the pitch comes back (`recoilRecovery`), faster
-the more is left, so a held AK-47 climbs. The weapon kicks up in the hands too in third person (the gun's `kick`,
-through the aim blend space's pitch), settling at `kickRecovery`.
+the more is left, so a held AK-47 climbs. In third person the body takes the shot too: the gun's `fireTrigger`
+(**PistolFire**, **RifleFire**, **ShotgunFire**) is raised on the animator by name, and the additive **Recoil**
+layer (the arms, the chest and the head) plays that weapon's fire clip over whatever the body is doing: the Slim
+Shooter pack's *firing rifle* for the rifle (played at 0.7 for the shotgun's slower shove), *Shooting*'s first shot
+for the pistol. The state is entered on its trigger (no lines), and plays out back to the layer's empty **Off**.
 
 **Every shot is an event.** The gun tells each shot as `weapon:Shot`, dispatched at its grip:
 `{ gun, hit, hits, recoil }` (`hits`: every pellet's). It bubbles up to the character holding it, where
@@ -687,8 +801,8 @@ the hands is the player's `weapon` field. Setting it sends `weapon:Equipped` (th
 which shows that weapon's model in the hand. See [Events](../scripting/events.md).
 
 What the weapons do not do yet: nothing in the Sandbox takes damage (each gun's `damage` is kept for the game modes
-to come), no draw or holster animation in third person (the arms move straight into the hold and the weapon appears
-in the hand), and the hold is the same whichever way the character moves (only the legs walk sideways or back).
+to come), and there is no draw or holster animation in third person (the arms move straight into the hold and the
+weapon appears in the hand).
 
 ## First person
 
@@ -726,13 +840,31 @@ where the full capsule fits, so under something low it stays down until it walks
 (see [Crouching](../scripting/characters-and-controllers.md#crouching)). The animator reads the Character's
 `crouched` (**Crouching**).
 
-The clips are Firing Line's Mixamo rifle-pack crouch: an idle, the walk in eight directions and two quarter turns,
-retargeted onto the Mannequin as its own clips, each with its foot-lock windows. **Crouch Locomotion** is their blend
-space over the walk's axes, at each clip's own pace; the base layer's **Crouch** plays it, and **CrouchTurn90L** and
-**CrouchTurn90R** turn in place (their turn on the Pivot, as root motion). They are the **Crouching** group: Idle,
-Locomotion and Stairs crouch when Crouching comes on, and Crouch stands up into Idle when it goes off. With a weapon
-out, the weapon's layer holds the spine and the arms over the crouching legs. Unarmed, the arms are the rifle pack's
-too: they hold no weapon, but stay as if they did.
+**Crouch Locomotion** is the unarmed crouch's blend space (an idle and the walk in eight directions, over the
+walk's axes); the base layer's **Crouch** plays it, and **CrouchTurn90L** and **CrouchTurn90R** turn in place (their
+turn on the Pivot, as root motion). With a weapon out, **Rifle Crouch** and **Pistol Crouch** take over, and the
+rifle's quarter turns are its own (see [Moving armed](#moving-armed)). They are the **Crouching** group: Idle,
+Locomotion and Stairs crouch when Crouching comes on, through **Crouch Down** (where the pistol kneels when it stands
+still), and Crouch stands up into Idle when it goes off.
+
+**The unarmed crouch is combined.** Mixamo has no unarmed crouch walk in the packs the Sandbox uses (its *Crouch
+Walking* holds a rifle), so each unarmed crouch clip is two:
+
+- the hips and the legs of the rifle pack's crouch clip of that direction (its idle, its walk, its turn), so the
+  stride, the plants and the foot locks are motion capture;
+- above the hips, the crouched upper body of *Crouch To Stand*, the moment its hips rise through the crouch walk's
+  height (the hands off the ground, the head up), held, its spine rocking with the rifle clip's spine so the chest
+  still breathes and sways with the stride.
+
+**Standing up** from the unarmed crouch, standing still, plays *Crouch To Stand*'s rise (**CrouchStand**) into Idle;
+on the move, or with a weapon out (but the pistol's kneel), it is a cross-fade.
+
+**Looking round crouched** turns the head alone. The **Look Head** layer (additive, the **Head** bone mask: the neck and
+the head) plays the **Head Look** blend space, the Look blend space's nine directions on clips of their own
+(**HeadLookC** to **HeadLookDR**): each look pose's head turn, 85% of it (up to 76 degrees round, 38 up or down),
+on the neck (40%) and the head (60%). The script hands the look-at's weight from Look (`lookWeight`) to Look Head
+(`lookHeadWeight`) over a quarter of a second as the body crouches, and back as it stands, so the crouched trunk
+stays as the crouch holds it while the head follows the camera.
 
 ## Things to push
 
@@ -769,7 +901,9 @@ So the shipped clips keep the rotation as authored, with only the travel removed
 
 Jog is the pack's running set. A better clip goes in through the editor: import it into the project, take its ground
 travel out as above, set its foot-lock windows (**Detect**), and put it in its blend space or state in place of the one
-it replaces.
+it replaces. An armed clip goes in its weapon set's blend space or variant state, under the set's name (`Rifle ...`,
+`Handgun ...`); a state that has no variant yet gets one by adding a state to its group and a way out of its **Pick**
+fork on Stance.
 
 ## Limits
 
@@ -783,12 +917,13 @@ it replaces.
   straight and cannot reach back to the lock.
 - **Blends between gaits.** A quick change from forward to sideways blends two clips whose feet do not plant
   together, so for a step the blend lifts a foot the lock was holding, and it slides back to the animation.
-- **Weapons over clips other than the walk's.** A weapon layer's clips are built against the walk's and the stairs'
-  hips. Over a start, a stop, a turn in place, a jump or a landing, the chest follows those clips' hips instead, so
-  the weapon tilts with them for as long as they play.
-- **Two hands across a change of stance.** Going into or out of an aim, or between the carry and the sprint, the two
-  arms are blended separately, so for the blend's length the support hand comes off the weapon by a few
-  centimetres.
+- **States with no armed clips.** The start, the stops, the turn round, the running turns, the stairs, the soft,
+  hard and rolling landings and the car have no armed variant: the weapon layer holds the set's arms over the
+  unarmed legs, and the chest follows those clips' hips, so the weapon tilts with them for as long as they play.
+- **The pistol's gaps.** The pistol pack has no sprint, no diagonal walks, no crouch walk and no turns in place: the
+  pistol sprints on the unarmed sprint, and the rifle pack's legs and the unarmed turns play under the pistol's arms
+  for the rest.
+- **The unarmed crouch** is combined from two clips (see [Crouching](#crouching)), not captured as one.
 - **Running landings.** The running landing is the running jump's own last 0.3 s, so a landing at a run is brief.
 - **The stair clips' steps.** The clips step 23 cm risers 24 cm apart, and the flights have 15 and 20 cm risers
   30 cm apart. Foot placement takes up the riser and foot locking the stride: a planted foot creeps 2 to 13 cm/s.

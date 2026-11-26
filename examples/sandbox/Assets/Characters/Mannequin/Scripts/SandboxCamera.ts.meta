@@ -219,6 +219,22 @@
         }
       },
       {
+        "name": "aimFov",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 45,
+        "hidden": false,
+        "attribute": {
+          "group": "Switch",
+          "min": 10,
+          "max": 120,
+          "step": 1,
+          "tooltip": "Aim held in third person: the narrower field of view it zooms to (degrees)."
+        }
+      },
+      {
         "name": "firstPersonPitch",
         "type": {
           "kind": "number"
@@ -303,6 +319,33 @@
           "kind": "number"
         },
         "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "zoomMix",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "zoomSensitivity",
+        "type": {
+          "kind": "number"
+        },
+        "access": "public",
+        "default": 1,
+        "hidden": true
+      },
+      {
+        "name": "_zoom",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
         "default": 0,
         "hidden": true
       }

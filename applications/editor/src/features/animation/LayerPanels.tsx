@@ -24,7 +24,7 @@ const MASK_MIME = 'text/cleo-bone-mask'
 //
 // A layer is a second state machine over the same parameters, blended on top of everything beneath it
 // through a bone mask: the base walks, an "Upper body" layer aims or holds a torch. The graph edits the
-// ACTIVE layer (the tab strip on the graph toolbar); this is where a layer's own settings live.
+// ACTIVE layer (the layer dropdown on the graph toolbar); this is where a layer's own settings live.
 //
 // A slot is where a script's `animator.playAction('Reload', { slot: 'UpperBody' })` plays — no graph
 // wiring at all. Unity has nothing quite like it; it is Unreal's Montage slot.
@@ -43,22 +43,23 @@ const HAND_IK_OPTIONS = [
   { value: 'right' as const, label: 'Right', title: 'The right hand reaches where this layer’s pose has it relative to the left' },
 ]
 
-/** The tab strip that picks which layer the graph shows. */
-export function LayerTabs() {
+/** The dropdown that picks which layer the graph shows, and the button that adds one. */
+export function LayerPicker() {
   const { fullSm, activeLayer, setActiveLayer, addLayer } = useStateMachine()
   const layers = fullSm.layers ?? []
-  const tab = (i: number, label: string) => (
-    <Button key={i} size='sm' variant='subtle' active={i === activeLayer} className='shrink-0 whitespace-nowrap'
-      onClick={() => setActiveLayer(i)}
-      title={i === 0 ? 'The base layer: drives the whole body and the character’s root motion' : `Edit the “${label}” layer`}
-    >{label}</Button>
-  )
-  // The one part of the graph's toolbar that gives way to the rest: a machine with many layers scrolls its tabs
-  // rather than squeezing the buttons beside them.
+  const current = activeLayer > 0 ? layers[activeLayer - 1] : undefined
+  // One control of one width however many layers the machine has (a long name is cut short), so the toolbar beside it
+  // never moves as layers come and go.
   return (
-    <div className='flex items-center gap-1 min-w-0 overflow-x-auto'>
-      {tab(0, 'Base')}
-      {layers.map((l, i) => tab(i + 1, l.name))}
+    <div className='flex items-center gap-1 shrink-0'>
+      <Select className={cn(tight, 'w-[136px] truncate')} value={activeLayer}
+        onChange={e => setActiveLayer(Number(e.target.value))}
+        title={current
+          ? `The graph shows and edits the “${current.name}” layer (${current.blend ?? 'override'}). Pick another, or Base`
+          : 'The graph shows and edits the base layer: it drives the whole body and the character’s root motion. Pick a layer to edit its states'}>
+        <option value={0}>Base</option>
+        {layers.map((l, i) => <option key={i} value={i + 1}>{l.name}</option>)}
+      </Select>
       <Button size='sm' variant='subtle' className='shrink-0 whitespace-nowrap' onClick={addLayer}
         title='Add a layer: its own states over the same parameters, blended on top through a bone mask'>+ Layer</Button>
     </div>

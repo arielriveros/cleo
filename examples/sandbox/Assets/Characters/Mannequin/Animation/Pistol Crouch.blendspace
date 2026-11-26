@@ -1,0 +1,119 @@
+{
+  "id": "f75e025f21701d7fc04b4e244311f2d6",
+  "name": "Pistol Crouch",
+  "rigId": "1ca1de6215e2febc1b4ec0cb651189eb",
+  "mode": "2d",
+  "xAxis": {
+    "name": "Direction",
+    "min": -180,
+    "max": 180,
+    "wrap": true,
+    "smoothing": 0.03,
+    "deadzone": 0
+  },
+  "yAxis": {
+    "name": "Speed",
+    "min": 0,
+    "max": 2,
+    "smoothing": 0.03
+  },
+  "weightSmoothing": 0.04,
+  "samples": [
+    {
+      "clipName": "Handgun Kneel",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "clipName": "Handgun Kneel",
+      "x": 45,
+      "y": 0
+    },
+    {
+      "clipName": "Handgun Kneel",
+      "x": 90,
+      "y": 0
+    },
+    {
+      "clipName": "Handgun Kneel",
+      "x": 135,
+      "y": 0
+    },
+    {
+      "clipName": "Handgun Kneel",
+      "x": 180,
+      "y": 0
+    },
+    {
+      "clipName": "Handgun Kneel",
+      "x": -135,
+      "y": 0
+    },
+    {
+      "clipName": "Handgun Kneel",
+      "x": -90,
+      "y": 0
+    },
+    {
+      "clipName": "Handgun Kneel",
+      "x": -45,
+      "y": 0
+    },
+    {
+      "clipName": "Rifle CrouchF",
+      "x": 0,
+      "y": 1.51,
+      "rateScale": 0.827,
+      "phaseOffset": 0.633
+    },
+    {
+      "clipName": "Rifle CrouchFL",
+      "x": 45,
+      "y": 1.51,
+      "rateScale": 0.775,
+      "phaseOffset": 0.6
+    },
+    {
+      "clipName": "Rifle CrouchL",
+      "x": 90,
+      "y": 1.51,
+      "rateScale": 0.825,
+      "phaseOffset": 0.95
+    },
+    {
+      "clipName": "Rifle CrouchBL",
+      "x": 135,
+      "y": 1.51,
+      "rateScale": 0.856,
+      "phaseOffset": 0.85
+    },
+    {
+      "clipName": "Rifle CrouchB",
+      "x": 180,
+      "y": 1.51,
+      "rateScale": 0.823,
+      "phaseOffset": 0.95
+    },
+    {
+      "clipName": "Rifle CrouchBR",
+      "x": -135,
+      "y": 1.51,
+      "rateScale": 0.836,
+      "phaseOffset": 0.85
+    },
+    {
+      "clipName": "Rifle CrouchR",
+      "x": -90,
+      "y": 1.51,
+      "rateScale": 0.791,
+      "phaseOffset": 0.75
+    },
+    {
+      "clipName": "Rifle CrouchFR",
+      "x": -45,
+      "y": 1.51,
+      "rateScale": 0.828,
+      "phaseOffset": 0.767
+    }
+  ]
+}

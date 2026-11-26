@@ -806,7 +806,7 @@
         "bone": "mixamorig1:RightHand",
         "offset": {
           "t": [-0.001177, 0.139784, 0.007721],
-          "r": [0.265102, 0.671968, 0.35605, -0.592797]
+          "r": [-0.49635, -0.40403, -0.55512, 0.53126]
         }
       },
       {
@@ -814,7 +814,7 @@
         "bone": "mixamorig1:RightHand",
         "offset": {
           "t": [-0.001177, 0.139784, 0.007721],
-          "r": [0.315094, 0.638863, 0.412513, -0.567806]
+          "r": [-0.36465, -0.54851, -0.51303, 0.55042]
         }
       },
       {
@@ -822,7 +822,31 @@
         "bone": "mixamorig1:RightHand",
         "offset": {
           "t": [-0.001177, 0.139784, 0.007721],
-          "r": [0.315094, 0.638863, 0.412513, -0.567806]
+          "r": [-0.36465, -0.54851, -0.51303, 0.55042]
+        }
+      },
+      {
+        "name": "Rifle Support",
+        "bone": "mixamorig1:RightHand",
+        "offset": {
+          "t": [-0.05467, 0.36325, 0.1617],
+          "r": [-0.43504, 0.3313, -0.2916, 0.78482]
+        }
+      },
+      {
+        "name": "Shotgun Support",
+        "bone": "mixamorig1:RightHand",
+        "offset": {
+          "t": [-0.06661, 0.33814, 0.12909],
+          "r": [-0.4945, 0.29851, -0.31272, 0.75403]
+        }
+      },
+      {
+        "name": "Pistol Support",
+        "bone": "mixamorig1:RightHand",
+        "offset": {
+          "t": [-0.10425, 0.06367, 0.0389],
+          "r": [0.18948, 0.9772, -0.00877, -0.09539]
         }
       }
     ]
@@ -929,7 +953,81 @@
     "e8de4fb782e6cd4f85f368ea9348cd0e",
     "6eb135bd423403441ce016353c59a080",
     "4b4658759ab126c185fd8162e11a515d",
-    "11abf682e34b5ab3f9c3ec0cdf83cbd4"
+    "11abf682e34b5ab3f9c3ec0cdf83cbd4",
+    "e63be0ba3e2f14dea55ce63351247d04",
+    "2fcea33bc86ce2953a0921b712e420fe",
+    "83273efce406f333acc9891e70e46af2",
+    "c4f22475e7404c8c2f2274683a198a56",
+    "d681ed4f707fedbb03721cda0fbcde1f",
+    "f26769bffa6a88b481d7b3af8b9eb662",
+    "2e54889b2e8377833f88f848cdf4d25e",
+    "f7dc3714b6f59ba32fcb0883069a05da",
+    "6412a2ed18ec4c023120dde51d25d774",
+    "815ec8ee34d4f043c2d476036c9a0d3f",
+    "f6f96588b73c52dc7e388ad5a47edc26",
+    "3f33598d0af7301456fb9d397de3afd6",
+    "08b539c31df10ac3fe7d81bb336f35b5",
+    "690f3586308e30bb013581b5067d19b8",
+    "d38738742cbd3ee8295a100b162e803b",
+    "ff87ce2546083826d8fb9c1bd81200f4",
+    "673c3b2852591df0add061f3cd63315c",
+    "24793f462babe1a35ec37e9ae68700b7",
+    "81b7b6215dd93c1a4e11b7827432f542",
+    "4f688b49f0fd6d84b8e9dadf8b2e3ecb",
+    "8be7524c0ac9c233d14c8e8096b85fa5",
+    "1f58aa346a6074e6036b8e850c661dd6",
+    "6486f82b0c2173cd9ce0c521cdeced7d",
+    "0e4edbd28c10ad92934f4173eb6a4ae4",
+    "865d5563d681927c8d8b703d69e40217",
+    "1f12a1a88525ef8020841eb78eaaab65",
+    "619eaad01390330e037565287a854fb1",
+    "078df542c5679d6dd6d943b9f787080a",
+    "c4bc3a99c9355ecc93baeace8a60909e",
+    "4854af6fc22d5a651d15a9e7699c871c",
+    "40fc2be3263bd1bacb45879ef72a5910",
+    "8b10cff1170d367f91f56d22083fb6b7",
+    "89ef267049e3807b5a6b6449cf26d3cf",
+    "54ebb39fcae46dd86330802fc5cb489e",
+    "6921d894e43d092415e8ab22989546d8",
+    "a18005de6cebb9612f31d59a03953c3e",
+    "846ef43a40234b0d8cbd23b54cbf32f4",
+    "8c0c7feadfd50e9a2a9d4d836a7b57b1",
+    "952407a97a664e6cf8a50a7c7aaad486",
+    "e44830d4e2c2e1169b7846e662085529",
+    "ac8880f062643f4b94152d5724a65fab",
+    "b2c51de92881b98e558a5ebd83413f18",
+    "1b88d3b0e7ec6bbef31eaaf3d0d6c83c",
+    "d9991529f85556faf1cec69aea4f872e",
+    "fb73d4871a004da6fc7a6a79e4dd5b05",
+    "d4bfa5464ab35a39d968981a844bb801",
+    "9149c49da133f6267492f4ed376ec853",
+    "daee0beee1d180ebbfc8b222977a796f",
+    "da07a1a0fb1fd4bb13099d59cb14ceb8",
+    "b9ae427b9c42d40864c094a498756211",
+    "c439fa66368cd0b6b421bc62eeb3fdb8",
+    "b2ab42cff54be7e860d2638985a90d54",
+    "c9eb6b9694c8007dd71a7a9c34383e08",
+    "aa1a074dda58e7890b49fe98ee181d21",
+    "bfa05c9ad7bee2e0d2421db5cd2cca12",
+    "f0f8ee34c2ccb73a35fb37e502c40954",
+    "b042a65c94de5eefb8cc581b8910da33",
+    "dc3927679b4d7417a8f573537e29d45c",
+    "1307a83f71e30b4457d279e8ed472204",
+    "79715423e420831f4ecc4246373f26ff",
+    "e48bd4272382e35d14433ebd9a02914d",
+    "8d163ee142ed10fffb06391b5d127d89",
+    "2d4e4b4553cb055d7e5862c22e2999a4",
+    "1c3174b877c44201f78976db1e623116",
+    "d0196d4c4caa111bd1e208bf8533819d",
+    "2977879a927741ea48c383e403e6addb",
+    "b945aa958fa0b9c0be57bdbe3c65ac36",
+    "f6b771836f07bc0ad416cf901f077216",
+    "554d2a6a764c2f9ec433fdf2ecedede8",
+    "4fa2614f4a433186cda0058f5920afa1",
+    "21881a9eee72aebaf9d01e5aeed78079",
+    "2a111067982e4deea625c8ca1d2b4333",
+    "6bf057ca7571def61f74bd681b58d7d3",
+    "1e57d4bb3ab138dfb597890e2ff806f9"
   ],
   "sockets": [
     {
@@ -938,7 +1036,7 @@
       "bone": "mixamorig1:RightHand",
       "offset": {
         "t": [-0.001177, 0.139784, 0.007721],
-        "r": [0.265102, 0.671968, 0.35605, -0.592797]
+        "r": [-0.49635, -0.40403, -0.55512, 0.53126]
       },
       "previewModelId": "cff74fd3ba284bef822bc97fe751259f"
     },
@@ -948,7 +1046,7 @@
       "bone": "mixamorig1:RightHand",
       "offset": {
         "t": [-0.001177, 0.139784, 0.007721],
-        "r": [0.315094, 0.638863, 0.412513, -0.567806]
+        "r": [-0.36465, -0.54851, -0.51303, 0.55042]
       },
       "previewModelId": "ca06ff713b185345b51a97b6acc92ff9"
     },
@@ -958,9 +1056,36 @@
       "bone": "mixamorig1:RightHand",
       "offset": {
         "t": [-0.001177, 0.139784, 0.007721],
-        "r": [0.315094, 0.638863, 0.412513, -0.567806]
+        "r": [-0.36465, -0.54851, -0.51303, 0.55042]
       },
       "previewModelId": "fcafd5f569be4835bf29933807b3c402"
+    },
+    {
+      "id": "14878211f0e70e68db7298b4aeba7a3f",
+      "name": "Rifle Support",
+      "bone": "mixamorig1:RightHand",
+      "offset": {
+        "t": [-0.05467, 0.36325, 0.1617],
+        "r": [-0.43504, 0.3313, -0.2916, 0.78482]
+      }
+    },
+    {
+      "id": "ca297898f581cfb635f2e37d39017fdd",
+      "name": "Shotgun Support",
+      "bone": "mixamorig1:RightHand",
+      "offset": {
+        "t": [-0.06661, 0.33814, 0.12909],
+        "r": [-0.4945, 0.29851, -0.31272, 0.75403]
+      }
+    },
+    {
+      "id": "f9f7bfafd474d825a718b9a1bbcc087a",
+      "name": "Pistol Support",
+      "bone": "mixamorig1:RightHand",
+      "offset": {
+        "t": [-0.10425, 0.06367, 0.0389],
+        "r": [0.18948, 0.9772, -0.00877, -0.09539]
+      }
     }
   ]
 }

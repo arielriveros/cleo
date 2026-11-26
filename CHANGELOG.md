@@ -35,6 +35,48 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     feet-first in one collider rebuild (`ColliderNode.reshape`, `PhysicsBody.setColliders`, every backend and the
     worker). It stands only where the standing capsule fits, and it publishes `crouched`. The Controller gains
     `crouchToggle`. `MathUtils.directionFromAim` and `MathUtils.randomInCone` are new. Player contract 53.
+- **The Sandbox moves armed on Mixamo's rifle and pistol motion capture.**
+  - Mixamo's Rifle 8-Way Locomotion, Pistol Handgun Locomotion, Shooter and Slim Shooter packs, retargeted onto the
+    Mannequin. With the rifle or the shotgun out, the body idles, walks, jogs and sprints in eight directions,
+    crouches, turns in place and jumps on the rifle pack's clips. With the pistol it does so on the pistol pack's,
+    kneeling down, holding the kneel and getting up. They replace the generated Carry, Sprint and Reload poses and
+    Firing Line's crouch clips.
+  - The animator has twenty armed variants (Rifle Idle, Pistol Locomotion, Rifle Crouch, Rifle Turn90L, the jumps,
+    the falls and the landings), each in its unarmed state's group. They are picked by the new **Stance** parameter
+    (the script's `stance`) through **Pick** forks. A weapon taken out mid-stride cross-fades in step, in the same
+    sync group.
+  - Every cycle is in place, phase-aligned to the unarmed set and foot-locked. Where a clip's planted foot drifts,
+    leg IK pins it. Every armed walk and jog, in all eight directions, is within the unarmed foot-slide limits.
+  - The grip sockets are re-fitted to the clips' right fist. The left hand goes by hand IK onto new **Rifle
+    Support** and **Shotgun Support** sockets, and the **Pistol Support** layer became a socket.
+  - Aiming is the Shooter pack's aiming idle and the rifle pack's crouching aim, and the pistol pack's two-handed idle
+    for the pistol. The 25 aim directions are rebuilt on it. The long guns reload on the Slim Shooter pack's clip.
+  - Not aimed, the weapon is held at the low ready at every gait but the sprint: the aiming idle, turned
+    muzzle-down by a **Low Ready** pose (a variant of Aim, so it follows edits to Aim) on a new additive **Lowered**
+    layer. Its weight is the aim's complement, so aiming lifts the very hold it was lowered from in 0.15 s. Its arms
+    bend as the Mannequin's do: each elbow on its own hinge, the forearm carrying the hand's twist. At the pistol's
+    low ready the right elbow hangs, not across the chest, and the left is held out off the belly. The pistol's layer
+    holds both arms, as the long guns' do, so its support arm no longer snaps across the chest as the body strafes or
+    turns. The rifle sprints on the rifle pack's arms in step with the legs; the pistol sprints one-handed on the
+    unarmed sprint, its left hand let go (`handIk.weightParam` `SupportHand`).
+  - The rifle is held along its barrel: the turn it was given in the hand is the Rifle Grip socket's now, the long
+    guns' aims turned onto it, so the barrel points at the crosshair (it was 9 degrees off) and the Muzzle is at the
+    model's muzzle. Its pistol grip is in the fist: the rifle moved 4 cm forward in the hand and the aiming idles'
+    right hand back as much, so the aimed rifle stays at the shoulder. Every copy of the sockets (the rig's skeleton,
+    the Mannequin model, the template, the scene) now matches the rig's.
+  - Aim held in third person zooms the lens from 60 to 45 degrees (`aimFov`), slows the mouse to match, and turns on
+    a hard depth of field: only what the crosshair is on stays sharp, the character included in the blur. A shot
+    from the hip only raises the weapon.
+  - Crouched, looking round turns the head alone: a new **Look Head** layer (the neck and the head, nine head-only
+    look clips) takes over from Look as the body crouches.
+  - Each shot raises its gun's new `fireTrigger` by name, and a new additive **Recoil** layer plays that weapon's
+    fire clip. The script's procedural kick is gone.
+  - The unarmed crouch is combined: the rifle pack's crouch legs under *Crouch To Stand*'s crouched upper body, so
+    the hands are free. Standing up from it, standing still, plays *Crouch To Stand*'s rise.
+  - No engine change.
+- **The animator graph picks its layer from a dropdown.** The toolbar's row of layer buttons (Base, then one per
+  layer) is one dropdown beside **+ Layer**, so a machine with many layers (the Sandbox has 13) no longer scrolls
+  the toolbar.
 - **A Sound node sets how its plays overlap.** Its new **Overlap** card: **Voices** (how many plays sound at
   once, 1 to 32; 1, the default, restarts it as before), **When full** (steal the oldest, the quietest or the
   farthest voice, faded out in 30 ms, or skip the new play), **Stay put** (a spatial voice stays where it was

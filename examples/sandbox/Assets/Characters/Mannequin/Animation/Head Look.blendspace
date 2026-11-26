@@ -1,0 +1,75 @@
+{
+  "id": "c6e6924447ad076a198c9b126cd20ce2",
+  "name": "Head Look",
+  "rigId": "1ca1de6215e2febc1b4ec0cb651189eb",
+  "mode": "2d",
+  "xAxis": {
+    "name": "Yaw",
+    "min": -90,
+    "max": 90,
+    "smoothing": 0.08
+  },
+  "yAxis": {
+    "name": "Pitch",
+    "min": -45,
+    "max": 45,
+    "smoothing": 0.08
+  },
+  "weightSmoothing": 0.05,
+  "samples": [
+    {
+      "clipName": "HeadLookC",
+      "x": 0,
+      "y": 0,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "HeadLookL",
+      "x": 90,
+      "y": 0,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "HeadLookR",
+      "x": -90,
+      "y": 0,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "HeadLookU",
+      "x": 0,
+      "y": -45,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "HeadLookD",
+      "x": 0,
+      "y": 45,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "HeadLookUL",
+      "x": 90,
+      "y": -45,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "HeadLookUR",
+      "x": -90,
+      "y": -45,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "HeadLookDL",
+      "x": 90,
+      "y": 45,
+      "phaseOffset": 0.5
+    },
+    {
+      "clipName": "HeadLookDR",
+      "x": -90,
+      "y": 45,
+      "phaseOffset": 0.5
+    }
+  ]
+}

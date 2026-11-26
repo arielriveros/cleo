@@ -1,0 +1,17 @@
+{
+  "id": "b9be2245b18b6bfd4ab6f10905abc7b1",
+  "name": "Lowered",
+  "rigId": "1ca1de6215e2febc1b4ec0cb651189eb",
+  "weights": {
+    "mixamorig1:Neck": 1,
+    "mixamorig1:Head": 1,
+    "mixamorig1:LeftShoulder": 1,
+    "mixamorig1:LeftArm": 1,
+    "mixamorig1:LeftForeArm": 1,
+    "mixamorig1:LeftHand": 1,
+    "mixamorig1:RightShoulder": 1,
+    "mixamorig1:RightArm": 1,
+    "mixamorig1:RightForeArm": 1,
+    "mixamorig1:RightHand": 1
+  }
+}

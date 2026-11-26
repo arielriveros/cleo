@@ -13,11 +13,13 @@ describe.skipIf(!dataReady())('state groups on the Sandbox animator', () => {
     const find = (n: any): any => n.name === 'Mannequin' ? n : (n.children ?? []).map(find).find(Boolean)
     const sm: AnimationStateMachine = find(scene).stateMachine
     const top = graphPlan(sm, null)
-    expect(top.states.sort()).toEqual(['Idle', 'Locomotion', 'Stairs', 'Start'])
-    expect(top.groups.map(g => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car', 'Crouching'])
+    // Standing and Moving fold each stance's idle and locomotion (unarmed, pistol, rifle) into one box.
+    expect(top.states.sort()).toEqual(['Stairs', 'Start'])
+    expect(top.groups.map(g => g.name)).toEqual(['Turning', 'Stopping', 'Running Turn', 'Air', 'Landing', 'Car', 'Crouching', 'Standing', 'Moving'])
     // Its forks are its groups': each drawn inside its group, the group standing for it outside.
     expect(top.forks).toEqual([])
-    expect(top.groups.flatMap(g => g.forks)).toEqual(['Pick Turn', 'Pick Stop', 'Settle', 'Pick Run Turn', 'Take Off'])
+    for (const f of ['Pick Turn', 'Pick Stop', 'Settle', 'Pick Run Turn', 'Take Off']) expect(top.groups.flatMap(g => g.forks)).toContain(f)
+    expect(top.groups.flatMap(g => g.forks)).toContain('Pick Idle')
     const drawn = new Set(top.links.flatMap(l => [...l.forward, ...l.backward]))
     const memberOf = new Map(sm.groups!.flatMap(g => g.states.map(s => [s, g.name] as const)))
     for (const t of sm.transitions) {
