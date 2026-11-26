@@ -1,18 +1,52 @@
 import { mat4, vec3, quat } from 'gl-matrix';
 import { PhysicsBody } from './physicsBody';
 import { ALL_LAYERS, LAYER } from './collisionLayers';
-import type { JointHandle } from './pal/types';
+import type { BodyPin, JointDrive, JointHandle } from './pal/types';
 import type { JointSpec } from './physicsSystem';
-import { AnimatedModel } from '../animation/animatedModel';
-import type { Animator } from '../animation/animator';
+import { AnimatedModel, type Skin } from '../animation/animatedModel';
+import type { Animator, PhysicsMappingSource } from '../animation/animator';
 import type { ModelNode } from '../core/scene/nodes/modelNode';
 import type { PhysicsSystem } from './physicsSystem';
 import { skeletonTopology } from '../animation/skeletonTopology';
+import { humanoidRigOf } from '../animation/animationRetarget';
 import {
-    autoHumanoidProfile, parseRagdollProfile, ragdollLayout, ragdollPartPose, rigidRotation,
+    autoHumanoidProfile, parseRagdollProfile, ragdollLayout, ragdollPartPose, ragdollPartPoseInto, rigidRotation,
     type RagdollProfile, type RagdollLayoutPart,
 } from './ragdollProfile';
 import { DEG2RAD } from '../core/math';
+
+/** What a ragdoll part is, for the muscles and reflexes that move it. */
+export type RagdollRegion = 'pelvis' | 'spine' | 'neck' | 'arms' | 'hands' | 'legs' | 'feet';
+
+/** One body of a profile ragdoll, with what a powered ragdoll's controller needs to know of it. */
+export interface RagdollPartInfo {
+    readonly index: number;
+    readonly name: string;
+    /** The humanoid slot of its bone ('upperArm.L', 'head', 'hips'...), or null for a bone that has none. */
+    readonly role: string | null;
+    readonly region: RagdollRegion;
+    readonly side: 'L' | 'R' | null;
+    readonly body: PhysicsBody;
+    /** Its parent part's index, -1 for the root (the pelvis). */
+    readonly parent: number;
+    readonly children: number[];
+    /** The joint its muscle drives (a knee's or an elbow's hinge, else its cone), null for the root or a fixed one. */
+    joint: JointHandle | null;
+    readonly hinge: boolean;
+    /** This part and every part below it: what its joint holds up. */
+    readonly subtree: PhysicsBody[];
+    /** The joint's pivot in this part's frame and in its parent's (from each body's centre). */
+    readonly pivotSelf: [number, number, number];
+    readonly pivotParent: [number, number, number];
+    /** World units: half the segment's length along its Y, and its radius. */
+    readonly halfLength: number;
+    readonly radius: number;
+    readonly mass: number;
+    readonly layout: RagdollLayoutPart;
+}
+
+/** Where a hit landed on a ragdoll: the part and how far from its surface. */
+export interface RagdollPartHit { part: number; distance: number }
 
 export interface RagdollOptions {
     /**
@@ -54,10 +88,17 @@ export interface RagdollOptions {
     /** A hit: this velocity change (m/s, world) goes to the part nearest `hitPoint` (half to its parent). */
     hitDirection?: number[];
     hitPoint?: number[];
+    /**
+     * 'passive' (default): a body with no will of its own, the skeleton drawn from it. 'powered': joints carry
+     * muscles (setMuscle) and the animation keeps running underneath as their target, the skeleton drawn by
+     * how much of each part the simulation owns (setMapping). A powered ragdoll spawns with no push of its own
+     * unless `impulse` is given. Profile ragdolls only; a generic one is always passive.
+     */
+    mode?: 'passive' | 'powered';
 }
 
 /** Shared default ragdoll simulation parameters — single source of truth for the engine and editor UI. */
-export const RAGDOLL_DEFAULTS: Required<Omit<RagdollOptions, 'inheritVelocity' | 'profile' | 'massScale' | 'hitDirection' | 'hitPoint'>> = {
+export const RAGDOLL_DEFAULTS: Required<Omit<RagdollOptions, 'inheritVelocity' | 'profile' | 'massScale' | 'hitDirection' | 'hitPoint' | 'mode'>> = {
     // Cone-twist by default. The twist limit must stay LOOSE: cannon-es's twist equation jitters badly
     // when tight and bones spin in place. Limit swing, leave twist relaxed.
     jointType: 'coneTwist',
@@ -94,7 +135,7 @@ const MAX_HANDOFF_RISE = 0.5;
  * body at the bone's current animated world pose, linked to its parent's body by a cone-twist or ball
  * joint. Switches the owning Animator to ragdoll mode so it reads bone matrices back from the bodies.
  */
-export class Ragdoll {
+export class Ragdoll implements PhysicsMappingSource {
     private _physics: PhysicsSystem;
     private _animator: Animator | null = null;
     private _bodies: Map<number, PhysicsBody> = new Map();   // GLTF nodeIndex -> body
@@ -110,6 +151,15 @@ export class Ragdoll {
     private _stillFor = 0;
     private _frozen = false;
     private _destroyed = false;
+    /** Muscles and a running animation underneath (RagdollOptions.mode). */
+    public readonly powered: boolean;
+    private _skin: Skin | null = null;
+    private _parts: RagdollPartInfo[] = [];
+    private _mapping = new Float32Array(0);
+    private _bindOf: mat4[] = [];
+    /** The joints as made: kept so a frozen ragdoll can be put back (unfreeze). */
+    private _jointSpecs: { a: PhysicsBody; b: PhysicsBody; spec: JointSpec; drivePart: number }[] = [];
+    public partOfJoint = new Int32Array(0);
 
     /** Bone speed (m/s, linear and angular) under which a ragdoll counts as at rest. */
     public static readonly SETTLE_SPEED = 0.15;
@@ -119,6 +169,7 @@ export class Ragdoll {
     constructor(modelNode: ModelNode, physics: PhysicsSystem, options: RagdollOptions = {}) {
         this._physics = physics;
         this.node = modelNode;
+        this.powered = options.mode === 'powered';
 
         const model = modelNode.model;
         const animator = modelNode.animator;
@@ -128,8 +179,10 @@ export class Ragdoll {
         }
         this._animator = animator;
 
-        // Merge: shared defaults < node's persisted config (editor tuning) < explicit call options.
+        // Merge: shared defaults < node's persisted config (editor tuning) < explicit call options. A powered
+        // ragdoll is pushed only by what its caller says (a reaction's own hit), never by the death push.
         const cfg = { ...RAGDOLL_DEFAULTS, ...(modelNode.ragdollConfig || {}), ...options };
+        if (this.powered) cfg.impulse = options.impulse ?? [0, 0, 0];
 
         // The dying character's own capsule is invisible and frictionless: limbs that land on it drape
         // over thin air. It stops colliding with ragdolls (it keeps standing on the floor).
@@ -147,6 +200,8 @@ export class Ragdoll {
         const chosen = options.profile === null ? null
             : parseRagdollProfile(options.profile ?? model.skin.ragdollProfile ?? autoHumanoidProfile(model.skin));
         if (chosen && chosen.parts.length >= 2 && this._buildProfile(modelNode, animator, chosen, cfg)) return;
+        // A powered ragdoll needs a profile's segments: the generic one is passive.
+        (this as { powered: boolean }).powered = false;
 
         const skin = model.skin;
         const joints = skin.joints;
@@ -451,6 +506,7 @@ export class Ragdoll {
             this._bodies.set(lp.node, body);
             this._physics.addBody(body);
         }
+        this._physics._registerRagdollParts(this, bodies);
 
         // A hit lands on the part nearest it, and half of it on that part's parent.
         if (cfg.hitDirection && cfg.hitPoint) {
@@ -476,6 +532,8 @@ export class Ragdoll {
             vec3.transformQuat(out, out, quat.invert(quat.create(), q));
             return [out[0], out[1], out[2]];
         };
+        const driveJoint: (JointHandle | null)[] = layout.parts.map(() => null);
+        const pivots: { self: [number, number, number]; parent: [number, number, number] }[] = layout.parts.map(() => ({ self: [0, 0, 0], parent: [0, 0, 0] }));
         for (const lp of layout.parts) {
             if (lp.parent < 0) continue;
             const pp = layout.parts[lp.parent];
@@ -483,35 +541,43 @@ export class Ragdoll {
             const sA = scales[lp.index], sB = scales[lp.parent];
             const pivotA = local(lp.rotation, lp.pivot, lp.center, sA);
             const pivotB = local(pp.rotation, lp.pivot, pp.center, sB);
+            pivots[lp.index] = { self: pivotA, parent: pivotB };
             const type = lp.part.joint?.type ?? 'cone';
             if (type === 'fixed') {
                 this._add(a, b, { kind: 'fixed', maxForce, collideConnected: false });
                 continue;
             }
             if (type === 'hinge' && lp.hingeAxis) {
-                this._add(a, b, {
+                // A knee's or an elbow's muscle turns it about its hinge; the cone below only limits it.
+                driveJoint[lp.index] = this._add(a, b, {
                     kind: 'hinge', anchorA: pivotA, anchorB: pivotB,
                     axisA: local(lp.rotation, lp.hingeAxis, null, 1),
                     axisB: local(pp.rotation, lp.hingeAxis, null, 1),
                     maxForce, collideConnected: false,
-                });
+                }, lp.index);
             }
             // The limit: a cone around the neutral direction (for a hinge, around mid-bend, half the range
             // wide). The twist stays loose for hinges -- the hinge already holds it.
-            this._add(a, b, {
+            const cone = this._add(a, b, {
                 kind: 'coneTwist', anchorA: pivotA, anchorB: pivotB,
                 axisA: local(lp.rotation, lp.childAxis, null, 1),
                 axisB: local(pp.rotation, lp.parentAxis, null, 1),
                 coneAngle: lp.coneAngle,
                 twistAngle: type === 'hinge' ? Math.PI : Math.max(lp.twistAngle, 5 * DEG2RAD),
                 maxForce, collideConnected: false,
-            });
+            }, driveJoint[lp.index] === null ? lp.index : -1);
+            if (driveJoint[lp.index] === null) driveJoint[lp.index] = cone;
         }
 
         this.solverIterations = Math.max(0, Math.round(profile.solverIterations));
-        animator.enableRagdoll(this._bodies);
-        // AFTER the skin is bound to the bodies, so the mesh rises with them rather than staying buried.
-        this._liftOutOfGround(bodies);
+        this._skin = skin;
+        this._buildParts(skin, layout.parts, bodies, scales, driveJoint, pivots);
+        if (this.powered) animator.enablePhysicsMapping(this);
+        else animator.enableRagdoll(this._bodies);
+        // AFTER the skin is bound to the bodies, so the mesh rises with them rather than staying buried. Not a
+        // powered one: it starts from a live pose standing on the ground, which a lift would pop off it, and its
+        // pins and muscles hold it while the contacts settle the few centimetres a foot sits in the floor.
+        if (!this.powered) this._liftOutOfGround(bodies);
         return true;
     }
 
@@ -540,9 +606,204 @@ export class Ragdoll {
         for (const body of bodies) body.position.y += lift;
     }
 
-    private _add(a: PhysicsBody, b: PhysicsBody, joint: JointSpec): void {
+    private _add(a: PhysicsBody, b: PhysicsBody, joint: JointSpec, drivePart = -1): JointHandle | null {
         const handle = this._physics.addJoint(a, b, joint);
         if (handle !== null) this._joints.push(handle);
+        this._jointSpecs.push({ a, b, spec: joint, drivePart });
+        return handle;
+    }
+
+    /** The parts' table, and which part carries each joint of the skin (what the animator's mapping reads). */
+    private _buildParts(
+        skin: Skin, layout: RagdollLayoutPart[], bodies: PhysicsBody[], scales: number[],
+        driveJoint: (JointHandle | null)[], pivots: { self: [number, number, number]; parent: [number, number, number] }[],
+    ): void {
+        const roleOf = new Map<number, string>();
+        for (const [slot, node] of humanoidRigOf(skin)) if (!roleOf.has(node)) roleOf.set(node, slot);
+        const children: number[][] = layout.map(() => []);
+        for (const lp of layout) if (lp.parent >= 0) children[lp.parent].push(lp.index);
+        const below = (i: number, out: PhysicsBody[]): PhysicsBody[] => { out.push(bodies[i]); for (const c of children[i]) below(c, out); return out; };
+        this._parts = layout.map(lp => {
+            const role = roleOf.get(lp.node) ?? null;
+            const side = role?.endsWith('.L') ? 'L' : role?.endsWith('.R') ? 'R' : sideFromName(lp.part.name);
+            return {
+                index: lp.index, name: lp.part.name, role, region: regionOf(role, lp.part.name, lp.parent < 0), side,
+                body: bodies[lp.index], parent: lp.parent, children: children[lp.index],
+                joint: lp.parent >= 0 ? driveJoint[lp.index] : null, hinge: (lp.part.joint?.type ?? 'cone') === 'hinge' && !!lp.hingeAxis,
+                subtree: below(lp.index, []), pivotSelf: pivots[lp.index].self, pivotParent: pivots[lp.index].parent,
+                halfLength: lp.length * scales[lp.index] / 2, radius: lp.radius * scales[lp.index], mass: bodies[lp.index].mass, layout: lp,
+            };
+        });
+        this._mapping = new Float32Array(layout.length).fill(1);
+        this._bindOf = layout.map(lp => {
+            const m = mat4.create();
+            if (!mat4.invert(m, skin.joints[lp.joint].inverseBindMatrix as mat4)) mat4.identity(m);
+            return m;
+        });
+        // Each joint is carried by the nearest part at or above it.
+        const partOfNode = new Map<number, number>();
+        for (const lp of layout) partOfNode.set(lp.node, lp.index);
+        const parentOf = skeletonTopology(skin).parentNodeOfNode;
+        this.partOfJoint = new Int32Array(skin.joints.length).fill(-1);
+        for (let j = 0; j < skin.joints.length; j++) {
+            for (let n: number | undefined = skin.joints[j].nodeIndex; n !== undefined; n = parentOf.get(n)) {
+                const p = partOfNode.get(n);
+                if (p !== undefined) { this.partOfJoint[j] = p; break; }
+            }
+        }
+    }
+
+    // ---- parts, muscles and pins (powered) ----
+
+    /** The bodies, as parts (profile ragdolls; empty for a generic one). */
+    public get parts(): readonly RagdollPartInfo[] { return this._parts; }
+
+    /** The part a body is, or -1. */
+    public partOf(body: PhysicsBody): number {
+        for (const p of this._parts) if (p.body === body) return p.index;
+        return -1;
+    }
+
+    /** The part by its name ("Forearm L") or humanoid role ('foreArm.L'), or -1. */
+    public findPart(nameOrRole: string): number {
+        for (const p of this._parts) if (p.name === nameOrRole || p.role === nameOrRole) return p.index;
+        return -1;
+    }
+
+    /** The part whose surface is nearest a world point, and how far it is from it (negative inside). */
+    public partAt(point: ArrayLike<number>): RagdollPartHit | null {
+        let best: RagdollPartHit | null = null;
+        const seg = [0, 0, 0], y = [0, 0, 0];
+        for (const p of this._parts) {
+            const b = p.body, q = b.quaternion;
+            vec3.transformQuat(y as vec3, [0, 1, 0], [q.x, q.y, q.z, q.w]);
+            const dx = point[0] - b.position.x, dy = point[1] - b.position.y, dz = point[2] - b.position.z;
+            const along = Math.max(-p.halfLength + p.radius, Math.min(p.halfLength - p.radius, dx * y[0] + dy * y[1] + dz * y[2]));
+            seg[0] = dx - y[0] * along; seg[1] = dy - y[1] * along; seg[2] = dz - y[2] * along;
+            const d = Math.hypot(seg[0], seg[1], seg[2]) - p.radius;
+            if (!best || d < best.distance) best = { part: p.index, distance: d };
+        }
+        return best;
+    }
+
+    /** Give part `i`'s joint a muscle (null: none). The root part has no joint. */
+    public setMuscle(i: number, drive: JointDrive | null): void {
+        const p = this._parts[i];
+        if (!p || p.joint === null || this._frozen) return;
+        this._physics.setJointDrive(p.joint, drive, p.subtree);
+    }
+
+    /** Where part `i`'s muscle turns it: its rotation in its parent's frame, inv(qParent)·qPart, and that target's spin. */
+    public setTarget(i: number, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null): void {
+        const p = this._parts[i];
+        if (!p || p.joint === null || this._frozen) return;
+        this._physics.setJointTarget(p.joint, rotation, angularVelocity);
+    }
+
+    /** What part `i`'s muscle did in the last substep: [torque N·m, saturation 0..1, angle to go rad]. */
+    public readMuscle(i: number, out: number[]): number[] {
+        const p = this._parts[i];
+        if (!p || p.joint === null) { out[0] = out[1] = out[2] = 0; return out; }
+        this._physics.readJointDrive(p.joint, out);
+        return out;
+    }
+
+    /** Puppet strings on part `i` (null: none), pulling it toward setPinTarget's pose. */
+    public setPin(i: number, pin: BodyPin | null): void {
+        const p = this._parts[i];
+        if (!p || this._frozen) return;
+        this._physics.setBodyPin(p.body, pin);
+    }
+
+    public setPinTarget(i: number, pose: ArrayLike<number>, velocity?: ArrayLike<number> | null): void {
+        const p = this._parts[i];
+        if (!p || this._frozen) return;
+        this._physics.setBodyPinTarget(p.body, pose, velocity);
+    }
+
+    /** How much of part `i` is drawn as simulated, 0..1 (1 by default); see PhysicsMappingSource. */
+    public setMapping(i: number, weight: number): void {
+        if (i >= 0 && i < this._mapping.length) this._mapping[i] = Math.max(0, Math.min(1, weight));
+    }
+
+    /** Push part `i` (or the one nearest `point`) by `impulse` (N·s, world) at `point` (default its centre). */
+    public applyImpulse(impulse: ArrayLike<number>, point?: ArrayLike<number> | null, part?: number): number {
+        const i = part ?? (point ? this.partAt(point)?.part ?? -1 : 0);
+        const p = this._parts[i];
+        if (!p || this._frozen) return -1;
+        const b = p.body;
+        const rel = point ? [point[0] - b.position.x, point[1] - b.position.y, point[2] - b.position.z] : undefined;
+        b.applyImpulse([impulse[0], impulse[1], impulse[2]], rel);
+        b.wakeUp?.();
+        return i;
+    }
+
+    /**
+     * Every part's world pose as the ANIMATION poses it now ([px py pz qx qy qz qw] each) into `out`, which grows
+     * to the part count: what muscles and pins reach for.
+     */
+    public animatedPartPoses(out: number[][]): number[][] {
+        const animator = this._animator;
+        while (out.length < this._parts.length) out.push([0, 0, 0, 0, 0, 0, 1]);
+        if (!animator || !this._skin) return out;
+        const bones = animator.getTargetBoneMatrices(), nodeWorld = this.node.worldTransform as mat4;
+        for (let i = 0; i < this._parts.length; i++) this.animatedPose(i, bones, nodeWorld, out[i]);
+        return out;
+    }
+
+    /** Part `i`'s rotation in its parent's frame, inv(qParent)·qPart, from part poses (animatedPartPoses), into `out`. */
+    public relativeRotation(poses: readonly number[][], i: number, out: number[]): number[] {
+        const p = this._parts[i];
+        const c = poses[i];
+        if (!p || p.parent < 0) { out[0] = c[3]; out[1] = c[4]; out[2] = c[5]; out[3] = c[6]; return out; }
+        const q = poses[p.parent];
+        const ax = -q[3], ay = -q[4], az = -q[5], aw = q[6], bx = c[3], by = c[4], bz = c[5], bw = c[6];
+        out[0] = aw * bx + ax * bw + ay * bz - az * by;
+        out[1] = aw * by - ax * bz + ay * bw + az * bx;
+        out[2] = aw * bz + ax * by - ay * bx + az * bw;
+        out[3] = aw * bw - ax * bx - ay * by - az * bz;
+        return out;
+    }
+
+    private readonly _trackPoses: number[][] = [];
+    private readonly _trackQ = [0, 0, 0, 1];
+
+    /**
+     * The simplest will a powered ragdoll can have: every muscle (`muscle`, null leaves them as they are) reaching
+     * for the animation, every part pinned to it by `pin` (null: no pins). What a controller does with no
+     * reflexes at all; ReactionController builds its targets the same way and then edits them.
+     */
+    public followAnimation(muscle: JointDrive | null, pin: BodyPin | null): void {
+        if (!this.powered || this._frozen || this._destroyed) return;
+        const poses = this.animatedPartPoses(this._trackPoses);
+        for (const p of this._parts) {
+            if (p.joint !== null) {
+                if (muscle) this.setMuscle(p.index, muscle);
+                this.setTarget(p.index, this.relativeRotation(poses, p.index, this._trackQ));
+            }
+            this.setPin(p.index, pin);
+            if (pin) this.setPinTarget(p.index, poses[p.index]);
+        }
+    }
+
+    /** Part `i`'s world pose as the ANIMATION poses it now, [px py pz qx qy qz qw] into `out`. */
+    public animatedPartPose(i: number, out: number[]): number[] {
+        const animator = this._animator, p = this._parts[i];
+        if (!animator || !p || !this._skin) return out;
+        this.animatedPose(i, animator.getTargetBoneMatrices(), this.node.worldTransform as mat4, out);
+        return out;
+    }
+
+    // PhysicsMappingSource
+    public get partCount(): number { return this._parts.length; }
+    public mappingWeight(i: number): number { return this._mapping[i] ?? 0; }
+    public simulatedPose(i: number, out: number[]): void {
+        const b = this._parts[i].body, p = b.position, q = b.quaternion;
+        out[0] = p.x; out[1] = p.y; out[2] = p.z; out[3] = q.x; out[4] = q.y; out[5] = q.z; out[6] = q.w;
+    }
+    public animatedPose(i: number, finalBones: readonly mat4[], nodeWorld: mat4, out: number[]): void {
+        const lp = this._parts[i].layout;
+        ragdollPartPoseInto(this._skin!, lp, nodeWorld, finalBones[lp.joint] as mat4, out, this._bindOf[i]);
     }
 
     /** Underlying bone bodies keyed by GLTF node index. */
@@ -591,11 +852,27 @@ export class Ragdoll {
         this._frozen = true;
         for (const joint of this._joints) this._physics.removeJoint(joint);
         this._joints = [];
+        for (const p of this._parts ?? []) p.joint = null;
         for (const body of this._bodies.values()) {
             body.velocity.set(0, 0, 0);
             body.angularVelocity.set(0, 0, 0);
             this._physics.removeBody(body);
         }
+    }
+
+    /** Put a frozen ragdoll back into the world where it lies (a corpse kicked, a knocked-out body getting up). */
+    public unfreeze(): void {
+        if (!this._frozen || this._destroyed) return;
+        this._frozen = false;
+        this._stillFor = 0;
+        for (const body of this._bodies.values()) this._physics.addBody(body);
+        for (const j of this._jointSpecs) {
+            const handle = this._physics.addJoint(j.a, j.b, j.spec);
+            if (handle === null) continue;
+            this._joints.push(handle);
+            if (j.drivePart >= 0 && this._parts[j.drivePart]) this._parts[j.drivePart].joint = handle;
+        }
+        this._physics._registerRagdollParts(this, [...this._bodies.values()]);
     }
 
     /** Remove all bodies + constraints from physics and return the skeleton to animation. */
@@ -607,6 +884,38 @@ export class Ragdoll {
         for (const body of this._bodies.values()) this._physics.removeBody(body);
         this._bodies.clear();
         if (this._ownerBody) { this._ownerBody.collisionFilterMask = this._ownerMask; this._ownerBody = null; }
-        if (this._animator) this._animator.disableRagdoll();
+        if (this._animator) {
+            if (this.powered) this._animator.disablePhysicsMapping?.();
+            else this._animator.disableRagdoll();
+        }
     }
+}
+
+/** A part's region, from its humanoid role, else its name ("Thigh L"). */
+function regionOf(role: string | null, name: string, root: boolean): RagdollRegion {
+    if (root) return 'pelvis';
+    const r = (role ?? '').replace(/\.[LR]$/, '');
+    switch (r) {
+        case 'hips': return 'pelvis';
+        case 'spine': case 'chest': return 'spine';
+        case 'neck': case 'head': return 'neck';
+        case 'shoulder': case 'upperArm': case 'foreArm': return 'arms';
+        case 'hand': return 'hands';
+        case 'upLeg': case 'leg': return 'legs';
+        case 'foot': case 'toe': return 'feet';
+    }
+    const n = name.toLowerCase();
+    if (/head|neck/.test(n)) return 'neck';
+    if (/hand/.test(n)) return 'hands';
+    if (/arm|shoulder|elbow/.test(n)) return 'arms';
+    if (/foot|toe/.test(n)) return 'feet';
+    if (/thigh|shin|leg|knee/.test(n)) return 'legs';
+    if (/pelvis|hip/.test(n)) return 'pelvis';
+    return 'spine';
+}
+
+function sideFromName(name: string): 'L' | 'R' | null {
+    if (/(^|\s|_)L$|left/i.test(name)) return 'L';
+    if (/(^|\s|_)R$|right/i.test(name)) return 'R';
+    return null;
 }

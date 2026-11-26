@@ -293,6 +293,36 @@ export function ragdollPartPose(skin: Skin, lp: RagdollLayoutPart, nodeWorld: ma
     return { center, rotation, scale };
 }
 
+const POSE_BIND = mat4.create();
+const POSE_WORLD = mat4.create();
+const POSE_X = vec3.create(), POSE_Y = vec3.create(), POSE_Z = vec3.create(), POSE_OFF = vec3.create();
+const POSE_Q = quat.create(), POSE_REL = quat.create(), POSE_INV = quat.create();
+
+/**
+ * {@link ragdollPartPose} without allocating, for code that asks every frame (a powered ragdoll's targets and
+ * its mapping): [px py pz qx qy qz qw] into `out`; returns the scale. `bind`: the joint's bind matrix
+ * (inverse of its inverseBindMatrix) when the caller keeps it.
+ */
+export function ragdollPartPoseInto(skin: Skin, lp: RagdollLayoutPart, nodeWorld: mat4, boneMatrix: mat4, out: number[], bind?: mat4): number {
+    const b = bind ?? (mat4.invert(POSE_BIND, skin.joints[lp.joint].inverseBindMatrix as mat4) ? POSE_BIND : mat4.identity(POSE_BIND));
+    const world = mat4.multiply(POSE_WORLD, nodeWorld, boneMatrix);
+    mat4.multiply(world, world, b);
+    const scale = Math.hypot(world[0], world[1], world[2]) / (Math.hypot(b[0], b[1], b[2]) || 1);
+    // Rigid rotation by Gram-Schmidt (see rigidRotation).
+    vec3.normalize(POSE_X, vec3.set(POSE_X, world[0], world[1], world[2]));
+    vec3.set(POSE_Y, world[4], world[5], world[6]);
+    vec3.normalize(POSE_Y, vec3.scaleAndAdd(POSE_Y, POSE_Y, POSE_X, -vec3.dot(POSE_Y, POSE_X)));
+    vec3.cross(POSE_Z, POSE_X, POSE_Y);
+    quatFromBasis(POSE_Q, POSE_X, POSE_Y, POSE_Z);
+    quat.multiply(POSE_REL, POSE_Q, quat.invert(POSE_INV, lp.boneRotation));
+    vec3.scale(POSE_OFF, vec3.sub(POSE_OFF, lp.center, lp.bonePos), scale);
+    vec3.transformQuat(POSE_OFF, POSE_OFF, POSE_REL);
+    out[0] = world[12] + POSE_OFF[0]; out[1] = world[13] + POSE_OFF[1]; out[2] = world[14] + POSE_OFF[2];
+    quat.multiply(POSE_Q, POSE_REL, lp.rotation);
+    out[3] = POSE_Q[0]; out[4] = POSE_Q[1]; out[5] = POSE_Q[2]; out[6] = POSE_Q[3];
+    return scale;
+}
+
 /**
  * The character's up / forward / left in bind model space. Up is +Y (every importer normalizes to it);
  * left comes from the sided bones (upper arms, else thighs), and forward completes the frame.

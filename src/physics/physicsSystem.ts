@@ -29,7 +29,7 @@ import type { PhysicsCapabilities } from "./pal/capabilities";
 import type { PhysicsWorld } from "./pal/world";
 import { PhysicsEventKind, type BodyHandle, type ColliderGeometry, type ColliderPart } from "./pal/types";
 import { PhysicsBody } from "./physicsBody";
-import type { JointDesc, JointHandle, PhysicsBackendKind } from "./pal/types";
+import type { BodyPin, JointDesc, JointDrive, JointHandle, PhysicsBackendKind } from "./pal/types";
 import { WorkerPort, type PhysicsPort } from "./worker/ports";
 import { effectiveSimulationRange, shouldFreeze, SIMULATION_WAKE_GRACE } from "./simulationRange";
 
@@ -88,6 +88,9 @@ export interface PhysicsRaycastHit {
   body: PhysicsBody;
   /** The Node that owns `body`, or null for bodies with no owner — the terrain heightfield, for instance. */
   node: Node | null;
+  /** A ragdoll's body: the ragdoll, and which of its parts (Ragdoll.parts) was hit. */
+  ragdoll?: Ragdoll;
+  part?: number;
 }
 
 export interface PhysicsRaycastOptions {
@@ -1173,6 +1176,57 @@ export class PhysicsSystem {
     this._world?.destroyJoint(joint);
   }
 
+  // ---- muscles and puppet strings (pal/drive/driveSolver.ts): what a powered ragdoll moves by ----
+
+  /**
+   * Give a joint a muscle (see JointDrive), or take it away (null). `subtree`: the bodies it holds up, which
+   * its gravity compensation weighs. Its target starts at the rotation the bodies hold now.
+   */
+  public setJointDrive(joint: JointHandle, drive: JointDrive | null, subtree?: readonly PhysicsBody[]): void {
+    const world = this._world;
+    if (!world) return;
+    let handles: BodyHandle[] | undefined;
+    if (subtree) { handles = []; for (const b of subtree) if (b.world === world) handles.push(b.handle); }
+    world.setJointDrive(joint, drive, handles);
+  }
+
+  /** Where a driven joint turns body A: A's rotation in B's frame [x y z w], and that target's spin in B's frame. */
+  public setJointTarget(joint: JointHandle, rotation: ArrayLike<number>, angularVelocity?: ArrayLike<number> | null): void {
+    this._world?.setJointTarget(joint, rotation, angularVelocity);
+  }
+
+  /** What a driven joint did in the last substep: [torque N·m, saturation 0..1, angle still to go rad]. */
+  public readJointDrive(joint: JointHandle, out: number[]): number[] {
+    if (this._world) this._world.readJointDrive(joint, out);
+    else { out[0] = out[1] = out[2] = 0; }
+    return out;
+  }
+
+  /** Pin a body to a pose in the world (see BodyPin), or let it go (null). */
+  public setBodyPin(body: PhysicsBody, pin: BodyPin | null): void {
+    if (this._world && body.world === this._world) this._world.setBodyPin(body.handle, pin);
+  }
+
+  /** A pinned body's target: node-origin pose [px py pz qx qy qz qw], and its velocity [vx vy vz wx wy wz]. */
+  public setBodyPinTarget(body: PhysicsBody, pose: ArrayLike<number>, velocity?: ArrayLike<number> | null): void {
+    if (this._world && body.world === this._world) this._world.setBodyPinTarget(body.handle, pose, velocity);
+  }
+
+  /** Every ragdoll body, by body: which ragdoll and which part. What resolves a ray's hit to a limb. */
+  private readonly _ragdollParts = new WeakMap<PhysicsBody, { ragdoll: Ragdoll; part: number }>();
+
+  /** @internal The bodies a profile ragdoll made, in its parts' order (ragdoll.ts). */
+  public _registerRagdollParts(ragdoll: Ragdoll, bodies: readonly PhysicsBody[]): void {
+    bodies.forEach((body, part) => this._ragdollParts.set(body, { ragdoll, part }));
+  }
+
+  /** The ragdoll part a body is, or null for any other body. */
+  public ragdollPartOf(body: PhysicsBody | null | undefined): { ragdoll: Ragdoll; part: number } | null {
+    if (!body) return null;
+    const hit = this._ragdollParts.get(body);
+    return hit && !hit.ragdoll.destroyed ? hit : null;
+  }
+
   /** Who touched whom in the last step, for the rest sleep (see _updateActivation): dynamic bodies only. */
   private _recordTouching(contacts: ContactSource): void {
     const touching = this._touching;
@@ -1495,6 +1549,11 @@ export class PhysicsSystem {
 
     physicsStats.rayMs += performance.now() - rayStart;
     physicsStats.rayCount++;
+    if (nearest) {
+      const hit = nearest as PhysicsRaycastHit;
+      const part = this.ragdollPartOf(hit.body);
+      if (part) { hit.ragdoll = part.ragdoll; hit.part = part.part; }
+    }
     return nearest;
   }
 

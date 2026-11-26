@@ -129,6 +129,10 @@ export class DriveSolver {
     private readonly _k9 = [0, 0, 0, 0, 0, 0, 0, 0, 0];
     private readonly _m9 = [0, 0, 0, 0, 0, 0, 0, 0, 0];
     private readonly _s9 = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    private readonly _c9 = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    private readonly _k9b = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    private readonly _k9c = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    private readonly _v3a = [0, 0, 0];
     private readonly _q4 = [0, 0, 0, 1];
     private readonly _r4 = [0, 0, 0, 1];
     private _warned = false;
@@ -353,46 +357,65 @@ export class DriveSolver {
         rotate(B.q, e.omega[0], e.omega[1], e.omega[2], om);
         const wx = A.w[0] - B.w[0] - om[0], wy = A.w[1] - B.w[1] - om[1], wz = A.w[2] - B.w[2] - om[2];
 
+        // Kc: the pair's own inverse inertia about their centres, what a torque on them meets in the instant it is
+        // applied (the joint carries the rest round only through the solver). The spring's gains come from the
+        // joint's inertia (K above); it is solved implicitly against Kc, so it stays stable however stiff.
+        const Kc = this._c9;
+        for (let i = 0; i < 9; i++) Kc[i] = A.invI[i] + B.invI[i];
+
         let jx = 0, jy = 0, jz = 0;
         const f = Math.max(0, d.frequency);
         if (f > 0 && maxJ > 0) {
             let omega = TWO_PI * f;
             if (omega * h > MAX_OMEGA_H) omega = MAX_OMEGA_H / h;
             const zeta = Math.max(0, d.damping);
-            const denom = 1 + 2 * zeta * omega * h + omega * omega * h * h;
-            const kh = h * omega * omega;
-            // The implicit spring solved with what gravity still does to the joint (α = K·τ), whose own
-            // impulse the step adds: so the spring holds a weight at k = I·Ω² exactly, as a motor does, rather
-            // than at k / (1 + 2ζΩh + Ω²h²).
+            // k = I·Ω², c = 2ζIΩ with I the joint's inertia; (Ic + h·c + h²·k)·ω' = Ic·ω + h·(k·e + τ), τ what
+            // gravity still turns the joint with; the impulse is Ic·(ω' − ω) less τ's own, which the step adds:
+            // so a weight is held at exactly k, as a motor holds it.
+            const kScale = omega * omega, cScale = 2 * zeta * omega;
             if (r.kind === 'hinge') {
-                const k = this._t3;
-                rotate(B.q, r.axisB[0], r.axisB[1], r.axisB[2], k);
-                const ek = err[0] * k[0] + err[1] * k[1] + err[2] * k[2];
-                const wk = wx * k[0] + wy * k[1] + wz * k[2];
-                const kk = quadratic(K, k);
-                if (kk > 0) {
-                    const ak = (gx * k[0] + gy * k[1] + gz * k[2]) * kk;
-                    const j = ((wk + kh * ek + h * ak) / denom - wk - h * ak) / kk;
-                    jx = j * k[0]; jy = j * k[1]; jz = j * k[2];
+                const a = this._t3;
+                rotate(B.q, r.axisB[0], r.axisB[1], r.axisB[2], a);
+                const ea = err[0] * a[0] + err[1] * a[1] + err[2] * a[2];
+                const wa = wx * a[0] + wy * a[1] + wz * a[2];
+                const ta = gx * a[0] + gy * a[1] + gz * a[2];
+                const kp = quadratic(K, a), kc = quadratic(Kc, a);
+                if (kp > 0 && kc > 0) {
+                    const Ip = 1 / kp, Ic = 1 / kc, k = Ip * kScale, c = Ip * cScale * dampingFor(Ic, Ip * h * cScale, Ip * h * h * kScale);
+                    const w2 = (Ic * wa + h * (k * ea + ta)) / (Ic + h * c + h * h * k);
+                    const j = Ic * (w2 - wa) - h * ta;
+                    jx = j * a[0]; jy = j * a[1]; jz = j * a[2];
                 }
             } else {
-                const M = this._m9;
-                if (invert3(K, M)) {
-                    const ax = K[0] * gx + K[1] * gy + K[2] * gz;
-                    const ay = K[3] * gx + K[4] * gy + K[5] * gz;
-                    const az = K[6] * gx + K[7] * gy + K[8] * gz;
-                    const dx = (wx + kh * err[0] + h * ax) / denom - wx - h * ax;
-                    const dy = (wy + kh * err[1] + h * ay) / denom - wy - h * ay;
-                    const dz = (wz + kh * err[2] + h * az) / denom - wz - h * az;
-                    jx = M[0] * dx + M[1] * dy + M[2] * dz;
-                    jy = M[3] * dx + M[4] * dy + M[5] * dz;
-                    jz = M[6] * dx + M[7] * dy + M[8] * dz;
+                const Ip = this._m9, Ic = this._s9, S = this._k9b;
+                if (invert3(K, Ip) && invert3(Kc, Ic)) {
+                    // S = Ic + h·c + h²·k, rhs = Ic·ω + h·(k·e + τ)
+                    const tc = Ic[0] + Ic[4] + Ic[8], tp = Ip[0] + Ip[4] + Ip[8];
+                    const cs = cScale * dampingFor(tc, tp * h * cScale, tp * h * h * kScale);
+                    for (let i = 0; i < 9; i++) S[i] = Ic[i] + (h * cs + h * h * kScale) * Ip[i];
+                    const ke = this._v3a;
+                    ke[0] = kScale * (Ip[0] * err[0] + Ip[1] * err[1] + Ip[2] * err[2]) + gx;
+                    ke[1] = kScale * (Ip[3] * err[0] + Ip[4] * err[1] + Ip[5] * err[2]) + gy;
+                    ke[2] = kScale * (Ip[6] * err[0] + Ip[7] * err[1] + Ip[8] * err[2]) + gz;
+                    const rx = Ic[0] * wx + Ic[1] * wy + Ic[2] * wz + h * ke[0];
+                    const ry = Ic[3] * wx + Ic[4] * wy + Ic[5] * wz + h * ke[1];
+                    const rz = Ic[6] * wx + Ic[7] * wy + Ic[8] * wz + h * ke[2];
+                    const Si = this._k9c;
+                    if (invert3(S, Si)) {
+                        const w2x = Si[0] * rx + Si[1] * ry + Si[2] * rz;
+                        const w2y = Si[3] * rx + Si[4] * ry + Si[5] * rz;
+                        const w2z = Si[6] * rx + Si[7] * ry + Si[8] * rz;
+                        const dx = w2x - wx, dy = w2y - wy, dz = w2z - wz;
+                        jx = Ic[0] * dx + Ic[1] * dy + Ic[2] * dz - h * gx;
+                        jy = Ic[3] * dx + Ic[4] * dy + Ic[5] * dz - h * gy;
+                        jz = Ic[6] * dx + Ic[7] * dy + Ic[8] * dz - h * gz;
+                    }
                 }
             }
         } else if ((d.friction ?? 0) > 0) {
             // No spring: resist the joint's motion, up to the friction torque.
             const M = this._m9;
-            if (invert3(K, M)) {
+            if (invert3(Kc, M)) {
                 jx = -(M[0] * wx + M[1] * wy + M[2] * wz);
                 jy = -(M[3] * wx + M[4] * wy + M[5] * wz);
                 jz = -(M[6] * wx + M[7] * wy + M[8] * wz);
@@ -579,6 +602,19 @@ export class DriveSolver {
 }
 
 // ---- arithmetic ----
+
+/**
+ * How much more damping the spring needs to keep its damping ratio once the implicit solve against the bodies'
+ * own inertia (`ic`) has softened it: the solve scales stiffness and damping both by ic / (ic + hc + h²k), which
+ * leaves the stiffness lower (stable) and the ratio lower by the square root of that; this puts the ratio back.
+ * `hc`, `hhk`: h·c and h²·k at the asked damping.
+ */
+function dampingFor(ic: number, hc: number, hhk: number): number {
+    if (!(ic > 0)) return 1;
+    let s = 1;
+    for (let i = 0; i < 3; i++) s = Math.sqrt((ic + hc * s + hhk) / ic);
+    return Number.isFinite(s) ? s : 1;
+}
 
 /** `out` = R·diag(a, b, c)·Rᵀ, row-major, R given by its rows. */
 function sandwich(out: number[], r00: number, r01: number, r02: number, r10: number, r11: number, r12: number,

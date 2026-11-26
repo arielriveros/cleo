@@ -39,6 +39,24 @@ export interface RagdollBodyRef {
     quaternion: { x: number; y: number; z: number; w: number };
 }
 
+/**
+ * What draws a skeleton from simulated bodies while its animation keeps running underneath (a powered
+ * ragdoll: physics/ragdoll.ts). The animation still plays and poses — it is the TARGET the bodies' muscles
+ * reach for (Animator.getTargetBoneMatrices) — and each bone is then carried from where the animation puts its
+ * part to where the simulation has it, by the part's weight: 0 draws the animation, 1 the body.
+ */
+export interface PhysicsMappingSource {
+    /** Per skin joint index: the part (body) that carries the joint, or -1 for one that keeps its animation. */
+    readonly partOfJoint: Int32Array;
+    readonly partCount: number;
+    /** 0..1: how much of part `i` is drawn as simulated. */
+    mappingWeight(part: number): number;
+    /** Part `i`'s rigid world pose [px py pz qx qy qz qw] as simulated. */
+    simulatedPose(part: number, out: number[]): void;
+    /** Part `i`'s rigid world pose as the animation poses it (its final bone matrices, the node's world transform). */
+    animatedPose(part: number, finalBones: readonly mat4[], nodeWorld: mat4, out: number[]): void;
+}
+
 /** Trigger-based animation playback. Superseded by the state machine below. */
 export interface AnimationMapping {
     animationName: string;
@@ -1170,6 +1188,14 @@ export class Animator {
     private _ragdollActive: boolean = false;
     private _ragdollDrive: Map<number, { body: RagdollBodyRef, offset: mat4 }> | null = null;
 
+    // Physics mapping (a powered ragdoll, see PhysicsMappingSource): the animation keeps posing into these
+    // TARGET matrices, and the skinning matrices are carried from them to the simulated bodies.
+    private _physicsMapping: PhysicsMappingSource | null = null;
+    private readonly _targetBones: mat4[] = [];
+    private readonly _targetModel: mat4[] = [];
+    /** No foot placement while bodies carry the legs: planting an animated foot on the ground fights them. */
+    public ikSuppressed = false;
+
     // When set, drives playback each frame instead of the AnimationMapping list. Parameter values are
     // live; triggers are consumed when a transition using them fires.
     private _stateMachine: AnimationStateMachine | null = null;
@@ -2178,12 +2204,19 @@ export class Animator {
             this._updateRagdollMatrices();
             return;
         }
+        this._updatePosed(deltaTime);
+        // A powered ragdoll: the animation above posed the target; the bodies carry the skin from it.
+        if (this._physicsMapping) this._applyPhysicsMapping();
+    }
+
+    private _updatePosed(deltaTime: number): void {
         if (this._setWhileClipsPending) this._catchUpClips();
         this._capturePreviousPose(deltaTime);
         // A layer's animator poses whenever the animator it belongs to does; see _skipPose.
         if (!this._isOverlay) {
             this._skipPose = false;
-            if (this._lodStride > 1) {
+            // Bodies drive this skeleton every frame: its target must be as fresh.
+            if (this._lodStride > 1 && !this._physicsMapping) {
                 this._lodCountdown--;
                 if (this._lodCountdown > 0) this._skipPose = true;
                 else this._lodCountdown = this._lodStride;
@@ -2888,6 +2921,7 @@ export class Animator {
             mat4.multiply(this._finalBoneMatrices[jointIndex], globalTransform, joint.inverseBindMatrix);
             mat4.copy(this._jointModelMatrices[jointIndex] ??= mat4.create(), globalTransform);
         }
+        if (this._physicsMapping) this._keepTarget();
         if (this._keepPosedLocals) {
             for (const [nodeIndex, local] of localTransforms) {
                 let copy = this._posedLocalCopies.get(nodeIndex);
@@ -3123,6 +3157,7 @@ export class Animator {
         globalTransforms: Map<number, mat4>,
         topo: SkeletonTopology,
     ): boolean {
+        if (this.ikSuppressed) return false;
         const rig = this._skin?.ikRig;
         if (!rig || !rig.feet?.length || !this._node) return false;
 
@@ -5323,6 +5358,118 @@ export class Animator {
     public disableRagdoll(): void {
         this._ragdollActive = false;
         this._ragdollDrive = null;
+    }
+
+    /**
+     * Draw the skeleton from simulated bodies while the animation keeps running underneath, as its target
+     * (see PhysicsMappingSource). Replaces any earlier source.
+     */
+    public enablePhysicsMapping(source: PhysicsMappingSource): void {
+        this._physicsMapping = source;
+        this._playing = true;
+        this._keepTarget();
+    }
+
+    /** Draw the animation alone again. */
+    public disablePhysicsMapping(): void {
+        if (!this._physicsMapping) return;
+        this._physicsMapping = null;
+        this.ikSuppressed = false;
+        // Skinning matrices back to the animation's, now.
+        if (this._targetBones.length === this._finalBoneMatrices.length) {
+            for (let j = 0; j < this._finalBoneMatrices.length; j++) {
+                mat4.copy(this._finalBoneMatrices[j], this._targetBones[j]);
+                if (this._targetModel[j]) mat4.copy(this._jointModelMatrices[j] ??= mat4.create(), this._targetModel[j]);
+            }
+        }
+    }
+
+    /** True while bodies draw the skeleton over a running animation (a powered ragdoll). */
+    public get physicsMapped(): boolean { return this._physicsMapping !== null; }
+
+    /**
+     * The skinning matrices the ANIMATION poses, before any physics mapping: what a powered ragdoll's muscles
+     * reach for. The same array as getFinalBoneMatrices when nothing maps the skeleton. Live: overwritten by the
+     * next pose.
+     */
+    public getTargetBoneMatrices(): mat4[] {
+        return this._physicsMapping && this._targetBones.length === this._finalBoneMatrices.length ? this._targetBones : this._finalBoneMatrices;
+    }
+
+    /** A joint's model-space transform as the ANIMATION poses it (see getTargetBoneMatrices). */
+    public getTargetJointModelMatrix(jointIndex: number): mat4 | null {
+        if (!this._physicsMapping) return this.getJointModelMatrix(jointIndex);
+        return this._targetModel[jointIndex] ?? this.getJointModelMatrix(jointIndex);
+    }
+
+    /** The animation's pose, kept as the target before the mapping draws over it. */
+    private _keepTarget(): void {
+        const n = this._finalBoneMatrices.length;
+        for (let j = 0; j < n; j++) {
+            mat4.copy(this._targetBones[j] ??= mat4.create(), this._finalBoneMatrices[j]);
+            const model = this._jointModelMatrices[j];
+            if (model) mat4.copy(this._targetModel[j] ??= mat4.create(), model);
+        }
+        this._targetBones.length = n;
+    }
+
+    private readonly _mapAnim = [0, 0, 0, 0, 0, 0, 1];
+    private readonly _mapSim = [0, 0, 0, 0, 0, 0, 1];
+    private _mapParts: mat4[] = [];
+    private readonly _mapInv = mat4.create();
+    private readonly _mapA = mat4.create();
+    private readonly _mapB = mat4.create();
+
+    /**
+     * Skinning matrices carried from the animation to the bodies: per part, D = inv(N)·B·inv(A)·N in model
+     * space, A the part as animated, B as drawn (A blended toward the simulation by the part's weight); every
+     * bone the part carries is D times its animated matrix, so a bone keeps where the animation puts it RELATIVE
+     * to its part (fingers on a physical hand still curl).
+     */
+    private _applyPhysicsMapping(): void {
+        const src = this._physicsMapping, skin = this._skin, node = this._node;
+        if (!src || !skin || !node) return;
+        const n = this._finalBoneMatrices.length;
+        if (this._targetBones.length !== n) this._keepTarget();
+        const nodeWorld = node.worldTransform as mat4;
+        if (!mat4.invert(this._mapInv, nodeWorld)) return;
+        const parts = src.partCount;
+        while (this._mapParts.length < parts) this._mapParts.push(mat4.create());
+        const active: boolean[] = [];
+        const anim = this._mapAnim, sim = this._mapSim;
+        for (let p = 0; p < parts; p++) {
+            const w = src.mappingWeight(p);
+            active[p] = w > 0;
+            if (!active[p]) continue;
+            src.animatedPose(p, this._targetBones, nodeWorld, anim);
+            src.simulatedPose(p, sim);
+            let ok = true;
+            for (let i = 0; i < 7; i++) if (!Number.isFinite(sim[i])) ok = false;
+            if (!ok) { active[p] = false; continue; }
+            const qa = [anim[3], anim[4], anim[5], anim[6]] as quat;
+            const qb = w >= 1 ? [sim[3], sim[4], sim[5], sim[6]] as quat : quat.slerp(quat.create(), qa, [sim[3], sim[4], sim[5], sim[6]] as quat, w);
+            const pb: vec3 = w >= 1 ? [sim[0], sim[1], sim[2]] : [anim[0] + (sim[0] - anim[0]) * w, anim[1] + (sim[1] - anim[1]) * w, anim[2] + (sim[2] - anim[2]) * w];
+            mat4.fromRotationTranslation(this._mapA, qa, [anim[0], anim[1], anim[2]]);
+            mat4.invert(this._mapA, this._mapA);
+            mat4.fromRotationTranslation(this._mapB, qb, pb);
+            const d = this._mapParts[p];
+            // D = inv(N) · B · inv(A) · N
+            mat4.multiply(d, this._mapB, this._mapA);
+            mat4.multiply(d, d, nodeWorld);
+            mat4.multiply(d, this._mapInv, d);
+        }
+        for (let j = 0; j < n; j++) {
+            const p = src.partOfJoint[j];
+            const target = this._targetBones[j], model = this._targetModel[j];
+            if (p >= 0 && p < parts && active[p]) {
+                const d = this._mapParts[p];
+                mat4.multiply(this._finalBoneMatrices[j], d, target);
+                if (model) mat4.multiply(this._jointModelMatrices[j] ??= mat4.create(), d, model);
+            } else {
+                mat4.copy(this._finalBoneMatrices[j], target);
+                if (model) mat4.copy(this._jointModelMatrices[j] ??= mat4.create(), model);
+            }
+        }
     }
 
     // Final bone matrices from ragdoll bodies: world transform -> model space -> inverse bind matrix.
