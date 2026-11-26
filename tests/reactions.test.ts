@@ -219,9 +219,9 @@ describe.each(BACKENDS)('reactions on %s', backend => {
     });
 });
 
-// The arm's muscles aim the hand and a string lands it (hitReact's Reach pull). On cannon the reaching arm meets
-// the chest it crosses, whose contacts are stiffer: it is held short (docs/editor/reactions.md#physics-backends).
-describe.each(['jolt', 'rapier'] as PhysicsBackendKind[])('a hand to the wound on %s', backend => {
+// The arm's muscles aim the hand, a string lands it (hitReact's Reach pull), and the forearm and hand pass through
+// the chest they cross (cannon's stiff contacts held them off it).
+describe.each(BACKENDS)('a hand to the wound on %s', backend => {
     beforeAll(async () => { await acquirePhysicsBackend(backend); });
 
     it('shot in the left forearm, brings it in and holds it with the right hand', () => {
@@ -238,7 +238,7 @@ describe.each(['jolt', 'rapier'] as PhysicsBackendKind[])('a hand to the wound o
             }
         }
         expect(r.wounds.length === 0 || r.wounds[0].hand === 'R').toBe(true);
-        expect(best).toBeLessThan(backend === 'jolt' ? 0.12 : 0.2);
+        expect(best).toBeLessThan(backend === 'jolt' ? 0.12 : backend === 'rapier' ? 0.2 : 0.3);
         physics.dispose();
     });
 });

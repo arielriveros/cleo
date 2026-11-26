@@ -57,6 +57,22 @@
         }
       },
       {
+        "name": "bailSpeed",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 6,
+        "hidden": false,
+        "attribute": {
+          "group": "Driving",
+          "min": 0,
+          "max": 50,
+          "step": 0.5,
+          "tooltip": "Faster than this (m/s), Interact throws the driver out of the moving car rather than braking first."
+        }
+      },
+      {
         "name": "_vehicle",
         "type": {
           "kind": "node",

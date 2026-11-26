@@ -86,6 +86,7 @@ Pack** armed; *Crouch To Stand* and *Shooting* on their own.
 | Reload | R | B |
 | Crouch, or stand up | C | right stick click |
 | First person, or third | V | d-pad down |
+| Trip over, or be shoved back off balance (see [Reactions](#reactions)) | T, G | |
 
 In the car, the **Drive** action drives and steers: W forward, S brakes, then reverses, A and D steer; on a gamepad
 the right trigger drives on and the left one brakes, then reverses (both analog), and the left stick steers (its up
@@ -525,6 +526,11 @@ both move the Character. The car's Controller possesses the Vehicle (the switch 
 takes the view from exactly where the Player's camera was, then eases out to a chase framing. The car stays Parked
 until the driver is seated, then the Driving loop plays.
 
+**Bailing out.** Press Interact while the car goes faster than SandboxCar's **Bail Speed** (6 m/s, about 22 km/h)
+and the driver is thrown out of its door at the car's speed instead: out of the seat at once, its body its
+[reactions'](reactions.md) (it leaves with the car's velocity, passes clear of the car for a moment, braces, tumbles,
+comes to rest and gets up). Its own Controller and camera have it again at once; the empty car brakes to a stop.
+
 **Getting out.** Press Interact again. A moving car first brakes to a stop (it is Parked). If the Exit Point beside
 the door is clear, the Player fires `ExitCar`, and the clip's root motion carries it out to the Exit Point while
 the car's camera eases back toward the Player's. Once it is on its feet, back in the animator's Idle, its body is put
@@ -553,6 +559,24 @@ mirrored to left-hand drive, since the Mixamo clips get in on the driver's left.
 What the car does not do yet: the doors do not open (the character passes through the door), the hands do not
 reach the steering wheel (the clips are for a seat further forward; no hand IK), the driver does not lean or turn
 the wheel with the steering, and the seated feet go through the floor (no leg IK).
+
+## Reactions
+
+The mannequin reacts with its whole body, with the [reactions](reactions.md) of its skeleton (the built-in
+**Default** set: the Mannequin rig has no sets of its own yet; give it some in its **Reactions** tab):
+
+- **T** trips it: its feet stop, it falls forward onto its hands, lies a moment and gets up.
+- **G** shoves it back: it steps back to keep its balance, tiring with each step, and falls if it cannot.
+- **Bailing out** of the car at speed (above) throws it out to tumble along the ground.
+- **A shot** that strikes a character (its capsule, or a limb of a body already reacting) is its reactions'
+  (SandboxGun hands it to `physics.applyHit`), on the limb the shot meets: a flinch and a hand to the wound, a
+  stagger, or a fall, by how hard it lands. The Player cannot shoot itself, so it takes a second character to see:
+  place one (a Collider with a Character under it and the Mannequin model under that) and shoot it.
+
+While a reaction has the body (it staggers, falls, lies or gets up) the stick does nothing and the weapon is put
+away; a flinch it stands through keeps it in hand. It gets up without a clip of its own: the strings lift the body
+back onto its idle. Mixamo's *Getting Up* (face down) and *Stand Up* (face up), imported onto the Mannequin rig and
+given to the set's **Get up** behaviour, would give it a real one.
 
 ## The weapons
 

@@ -38,6 +38,11 @@ export class ReactionBody {
      */
     public readonly goal: number[][] = [];
     public readonly goalWeight: Float64Array;
+    /**
+     * Per part, this frame: 1 to pass through the rest of the body (no self-collision), as an arm reaching across
+     * the chest for a wound must: the chest's contacts would hold it off what it reaches for.
+     */
+    public readonly passThrough: Uint8Array;
     /** Each limb by side. */
     public readonly arms: Partial<Record<'L' | 'R', Limb>> = {};
     public readonly legs: Partial<Record<'L' | 'R', Limb>> = {};
@@ -56,6 +61,7 @@ export class ReactionBody {
             this.target.push([0, 0, 0, 1]); this.spin.push([0, 0, 0]); this.goal.push([0, 0, 0]);
         }
         this.goalWeight = new Float64Array(n);
+        this.passThrough = new Uint8Array(n);
         this.frequency = new Float64Array(n); this.damping = new Float64Array(n); this.torque = new Float64Array(n);
         this.holdUp = new Float64Array(n); this.friction = new Float64Array(n);
         this.pin = new Float64Array(n); this.mapping = new Float64Array(n).fill(1);
@@ -87,6 +93,7 @@ export class ReactionBody {
             const s = this.spin[p.index]; s[0] = s[1] = s[2] = 0;
         }
         this.goalWeight.fill(0);
+        this.passThrough.fill(0);
     }
 
     /** A string from part `i`'s centre to a world point, `w` (0..1) of the set's strings; its rotation left free. */

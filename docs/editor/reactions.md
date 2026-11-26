@@ -164,7 +164,7 @@ turns to the wound and the free hand reaches for it and holds it.
 | **Hold for** | How long a hand holds the wound. |
 | **Reach** | The farthest a hand reaches for a wound, in metres; beyond it, it does not try. |
 | **Reach stiffness** | How firmly the reaching arm holds the wound. |
-| **Reach pull** | How firmly a string draws the hand onto the wound, as a share of the **Strings** (0: the muscles of the arm alone). |
+| **Reach pull** | How firmly a string draws the hand onto the wound, as a share of the **Strings** (0: the muscles of the arm alone). While it reaches, the forearm and the hand pass through the rest of the body. |
 | **Look for** | How long the head turns toward the wound. |
 | **Lasts** | How long a hit reaction runs before the character is back on its animation. |
 | **Flinch** | Pose: the body's recoil from a hit, blended in for a moment (spine, neck, arms). |
@@ -388,8 +388,9 @@ Each placed character decides for itself, in its Skeleton section's
 Reactions run on all three physics backends and with the physics worker on or off.
 
 - **Jolt** drives the muscles with its own joint motors.
-- **cannon-es** drives them with motor constraints solved with the joints. Its contacts are stiffer, so a
-  hand reaching across the body for a wound is often held short of it by the chest it crosses.
+- **cannon-es** drives them with motor constraints solved with the joints. Its contacts are stiffer than the
+  others', so a hand reaching across the body for a wound passes through the chest on its way (on every backend)
+  rather than being held off it, and lands a little less exactly.
 - **Rapier** drives them with the engine's shared muscle solver, and doubles its substeps while a powered
   ragdoll exists, which costs some time. Its muscles are a little softer than the other two's: a falling
   body's arms brace a little later.

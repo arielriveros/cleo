@@ -581,6 +581,32 @@
           ]
         },
         {
+          "name": "Trip",
+          "kind": "button",
+          "bindings": [
+            {
+              "id": "trip:t",
+              "source": {
+                "device": "key",
+                "code": "KeyT"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Shove",
+          "kind": "button",
+          "bindings": [
+            {
+              "id": "shove:g",
+              "source": {
+                "device": "key",
+                "code": "KeyG"
+              }
+            }
+          ]
+        },
+        {
           "name": "Day",
           "kind": "button",
           "bindings": [

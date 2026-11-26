@@ -510,6 +510,7 @@ export class ReactionController {
     }
 
     private _forget(): void {
+        this._ownMask = [];
         this.ragdoll = null;
         this._body = null;
         this._running.clear();
@@ -588,6 +589,10 @@ export class ReactionController {
                 r.setPinTarget(i, a, v);
             } else r.setPin(i, null);
             r.setMapping(i, body.mapping[i]);
+            // Self-collision off for a part that asks to pass through the body (and back on after).
+            const b = p.body, own = this._ownMask[i] ??= b.collisionFilterMask;
+            const mask = body.passThrough[i] ? own & ~LAYER.RAGDOLL : own;
+            if (b.collisionFilterMask !== mask) b.collisionFilterMask = mask;
             const prev = this._prevAnim[i];
             for (let k = 0; k < 7; k++) prev[k] = body.anim[i][k];
         }
@@ -596,6 +601,8 @@ export class ReactionController {
     }
 
     private readonly _goalPose = [0, 0, 0, 0, 0, 0, 1];
+    /** Each part's collision mask as the ragdoll made it (what passThrough turns self-collision off from). */
+    private _ownMask: number[] = [];
 
     private _massScale(r: Ragdoll): number {
         return r.parts.reduce((s, p) => s + p.mass, 0) / REFERENCE_MASS || 1;

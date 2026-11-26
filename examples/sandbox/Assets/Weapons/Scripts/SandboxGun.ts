@@ -330,8 +330,14 @@ export default class SandboxGunNode extends Node {
         return this._mask
     }
 
-    /** A dynamic body hit is pushed along the shot, at the point hit (measured from its centre). */
+    /**
+     * A dynamic body hit is pushed along the shot, at the point hit (measured from its centre). A character hit (its
+     * capsule, or a limb of a body already reacting) takes the shot with its whole body instead: its reactions, on
+     * the limb the shot meets (`physics.applyHit`), flinch, stagger or fall by how hard it lands.
+     */
     private _push(hit: any, way: number[], impulse: number): void {
+        const physics = this.scene?.physics as any
+        if (impulse > 0 && physics?.reactionsFor?.(hit.body) && physics.applyHit(hit, way, impulse)) return
         const body = hit.body
         if (!body || !body.isDynamic || impulse <= 0) return
         const origin = body.owner?.worldPosition ?? hit.point

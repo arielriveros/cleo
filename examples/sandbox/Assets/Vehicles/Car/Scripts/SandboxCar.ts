@@ -8,6 +8,8 @@ interface Driver extends Node {
     readonly seated: boolean
     boardVehicle(seat: Node, enterPoint: Node): boolean
     leaveVehicle(): boolean
+    /** Thrown out at speed: its reactions take its body (false when it has none, or is not seated). */
+    bailOut?(velocity: ArrayLike<number>, exitDirection: ArrayLike<number>, vehicle: Node): boolean
     cameraRig(): CameraRigNode | null
 }
 
@@ -35,7 +37,9 @@ interface CarCamera extends Node {
  * Interact by the door: the character in the Door Zone gets in (it lets go of its own Controller, and this car's
  * Controller takes the Vehicle; the car's camera takes over the view). Parked until the driver is seated. Interact
  * again: the car brakes to a stop if it is moving, then the driver gets out (if the Exit Point is clear) and
- * takes its own Controller back; the view goes back to its camera.
+ * takes its own Controller back; the view goes back to its camera. Faster than `bailSpeed`, the driver bails out
+ * instead: thrown out of its door at the car's speed, its body its reactions' (it tumbles, comes to rest and gets
+ * up), and the car, empty, brakes to a stop.
  *
  * The car decides when; the character decides how (its animator's triggers, its root motion). It plays nothing.
  *
@@ -55,6 +59,10 @@ export default class SandboxCarNode extends ColliderNode {
     /** Slower than this (m/s), the driver may get out; faster, Interact brakes the car first. */
     @attribute('Driving', { min: 0, max: 5, step: 0.05 })
     private exitSpeed: number = 0.3
+
+    /** Faster than this (m/s), Interact throws the driver out of the moving car rather than braking first. */
+    @attribute('Driving', { min: 0, max: 50, step: 0.5 })
+    private bailSpeed: number = 6
 
     @child('Vehicle')
     private _vehicle: VehicleNode = null
@@ -106,7 +114,16 @@ export default class SandboxCarNode extends ColliderNode {
                 break
             case 'driving':
                 vehicle.parked = false
-                if (pressed) this._state = 'stopping'
+                if (!pressed) break
+                if (Math.abs(vehicle.speed) > this.bailSpeed && this._driver?.bailOut?.(this.velocity, this._doorOut(), this)) {
+                    // Out at speed: the driver's own camera and Controller have it again at once, and the car brakes.
+                    this._camera?.release()
+                    this._controller?.release()
+                    this._driver = null
+                    this._state = 'parked'
+                    break
+                }
+                this._state = 'stopping'
                 break
             case 'stopping':
                 // Brakes on (Parked) until it stands still on its wheels; then out, if there is room to get out.
@@ -184,6 +201,14 @@ export default class SandboxCarNode extends ColliderNode {
             if (character && typeof character.boardVehicle === 'function' && !character.inVehicle) return character as Driver
         }
         return null
+    }
+
+    /** Out through the driver's door, level: from the Seat toward the Door Zone. */
+    private _doorOut(): number[] {
+        const s = this._seat?.worldPosition, d = this._doorZone?.worldPosition
+        if (!s || !d) return [0, 0, 0]
+        const x = d[0] - s[0], z = d[2] - s[2], n = Math.hypot(x, z)
+        return n > 1e-3 ? [x / n, 0, z / n] : [0, 0, 0]
     }
 
     /** Standing on its wheels (three or more on the ground): not in the air, not on its side. */

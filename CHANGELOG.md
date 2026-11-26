@@ -16,6 +16,30 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Reactive ragdolls: characters take hits, stagger, fall, protect themselves and get up, with their whole body.**
+  - A powered ragdoll: physics moves the body, and a muscle in every joint pulls it toward the animation the character
+    was playing, the way NaturalMotion's Euphoria does. Behaviours run when their moment comes, each on the parts it
+    moves: a hit reaction (the struck part goes weak, a hand goes to the wound), stepping to balance by the capture
+    point, catching the fall on the hands, protecting the head, landing on bent knees, flailing on a long drop,
+    tumbling down stairs and slopes, bailing out of a moving vehicle, writhing, relaxing, and getting up face up or
+    face down.
+  - The rig editor's new **Reactions** tab: named reaction sets per skeleton (from Default, Tough, Wounded, Drunk,
+    Stiff and Loose presets), muscles per region, strings, thresholds and every behaviour's numbers, with pose slots
+    from the pose library and clip slots from the skeleton's clips. Its test bench runs the set on the preview
+    character on flat ground, stairs, a ramp, a ledge, a moving cart or against a wall: shoot or shove it with the
+    mouse, trip it, slow it down, pause and scrub the last 20 seconds on a timeline, and capture the pose the body
+    holds into the pose library.
+  - Each character picks its set, strength, health and whether it gets up in its **This character** rows.
+  - Scripts: `physics.reactionsOf(model)`, `model.reactions`, `character.reactions` with `hit`, `push`, `trip`,
+    `fall`, `bail`, `knockOut`, `kill`, `getUp`; `physics.applyHit(hit, direction, impulse)` sends a ray's hit to the
+    limb it meets; `reaction:*` events.
+  - The physics layer gains joint drives and body pins on every backend: Jolt's motors, cannon's motor equations, and
+    a shared implicit spring on Rapier, with gravity compensation, all copied into the physics worker bit for bit.
+    cannon's matched cone-twist joints now measure twist rather than the angle between their perpendiculars.
+  - The Sandbox trips (T), is shoved (G), bails out of the car at speed and hands its shots at characters to their
+    reactions.
+  - Player contract 54 (reaction sets travel in the skin).
+
 - **The Sandbox gets Firing Line's shooter: three weapons, first or third person, crouching.**
   - Firing Line's pistol, AK-47 and SAPS-12 shotgun replace the Low-Poly G40 and M4A1. The third person holds the
     viewmodels' own weapon meshes, cut out at their Idle frame into weapon space, on the Pistol, Rifle and new

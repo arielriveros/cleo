@@ -525,6 +525,7 @@ export default class SandboxPlayerNode extends CharacterNode {
 
     onUpdate(delta: number) {
         if (this._carPhase !== 'none') { this._ride(delta); return }
+        if (this._reacting(delta)) return
         if (this._acceleration < 0) this._acceleration = this.acceleration
         if (this._turnThreshold < 0) this._turnThreshold = this.turnThreshold
         const v = this.velocity
@@ -1173,6 +1174,35 @@ export default class SandboxPlayerNode extends CharacterNode {
         return null
     }
 
+    /**
+     * Thrown out of the car at speed (it was asked to stop going faster than its `bailSpeed`): out of the seat at
+     * once and into the world, its body its reactions' from there, leaving with the car's `velocity` out through
+     * `exitDirection`, clear of the car for a moment; it tumbles, comes to rest and gets up where it lies. Its own
+     * Controller has it again (it ignores the stick until it is up). False, and nothing done, when it has no reactions
+     * or is not seated.
+     */
+    public bailOut(velocity: ArrayLike<number>, exitDirection: ArrayLike<number>, vehicle: Node): boolean {
+        const reactions = this.reactions
+        const body = this.collider as ColliderNode | null
+        const scene = this.scene
+        if (this._carPhase !== 'seated' || !reactions || !body || !scene) return false
+        // Out of the seat where it sits, upright; its body stays out of the world (the reaction has it now).
+        const f = body.worldForward
+        body.reparent(scene.root)
+        body.setRotation([0, Math.atan2(f[0], f[2]) * 180 / Math.PI, 0])
+        body.updateTransforms(null)
+        this._ownController?.possess(this)
+        this._ownController = null
+        this._seat = null
+        this._carPhase = 'none'
+        this.inVehicle = false
+        this.seated = false
+        // Out of the seated clip: the body flies on whatever the animator stands it in.
+        this._animator?.forceState('Idle', 0.2)
+        reactions.bail({ velocity, exitDirection, vehicle })
+        return true
+    }
+
     /** The camera rig this character is seen through: its Controller's aim. */
     public cameraRig(): CameraRigNode | null {
         return (this._ownController ?? this.controller)?.aimRig ?? null
@@ -1329,6 +1359,35 @@ export default class SandboxPlayerNode extends CharacterNode {
         this._carPhase = 'none'
         this.inVehicle = false
         this.seated = false
+    }
+
+    // ----- reactions ------------------------------------------------------------------------------------------------
+
+    /**
+     * Its reactions (the skeleton's, physics/reactive/): Trip (T) knocks its feet from under it, Shove (G) pushes it
+     * back off balance, for trying them out. While a reaction has the body (it staggers, falls, lies, gets up) the body
+     * is the physics', not the stick's: nothing it is asked does anything, and its weapon is put away. A flinch it
+     * stands through keeps it in hand. True while it sits a reaction out.
+     */
+    private _reacting(delta: number): boolean {
+        const reactions = this.reactions
+        if (!reactions) return false
+        if (!reactions.reacting && this.isGrounded && !this.isJumping) {
+            if (Input.started('Trip')) reactions.trip()
+            else if (Input.started('Shove')) {
+                const f = this.worldForward
+                reactions.push([-f[0] * 1.3, 0.1, -f[2] * 1.3])
+            }
+        }
+        if (!reactions.reacting || reactions.state === 'hitReact') return false
+        this.hasMoveInput = false
+        this.running = false
+        this.sprinting = false
+        this.runTurn = 0
+        this.groundSpeed = 0
+        this.facingMode = 'none'
+        this._weaponsToward(delta, true, false, 0, 0)
+        return true
     }
 
     /** A node's upright pose in its parent's frame: `[x, y, z, yaw]`. */
