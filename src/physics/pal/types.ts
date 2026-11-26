@@ -160,8 +160,12 @@ export type JointDesc = { a: BodyHandle; b: BodyHandle; maxForce?: number; colli
     | { kind: 'ball'; anchorA: V3; anchorB: V3 }
     /** A shared point and a shared axis (each in its own body's frame). */
     | { kind: 'hinge'; anchorA: V3; anchorB: V3; axisA: V3; axisB: V3 }
-    /** A shared point, with the two axes kept within `coneAngle` of each other and twist within `twistAngle`. */
-    | { kind: 'coneTwist'; anchorA: V3; anchorB: V3; axisA: V3; axisB: V3; coneAngle: number; twistAngle: number }
+    /**
+     * A shared point, with the two axes kept within `coneAngle` of each other and twist within `twistAngle`.
+     * `matchTwist`: twist is measured from the pose the joint is made in, as Jolt and Rapier always do it (cannon
+     * otherwise picks its own reference: a joint made turned about its axis starts past its limit).
+     */
+    | { kind: 'coneTwist'; anchorA: V3; anchorB: V3; axisA: V3; axisB: V3; coneAngle: number; twistAngle: number; matchTwist?: boolean }
 );
 
 /**

@@ -2019,3 +2019,101 @@ export function intersectLines(l: ArrayLike<number>, m: ArrayLike<number>, eps =
     if (!(Math.abs(w) > eps * Math.max(1e-300, size))) return null;
     return [x / w, y / w];
 }
+
+// ---- reactive ragdolls (physics/reactive/) ----
+
+/** The rotation vector (axis × angle, the short way round) of a unit quaternion [x y z w]. */
+export function quatToRotationVector(q: ArrayLike<number>): Vec3Tuple {
+    let x = q[0], y = q[1], z = q[2], w = q[3];
+    if (w < 0) { x = -x; y = -y; z = -z; w = -w; }
+    const s = Math.hypot(x, y, z);
+    if (s < 1e-12) return [2 * x, 2 * y, 2 * z];
+    const k = 2 * Math.atan2(s, w) / s;
+    return [x * k, y * k, z * k];
+}
+
+/** The unit quaternion [x y z w] turning by rotation vector `v` (axis × angle). */
+export function rotationVectorToQuat(v: ArrayLike<number>): [number, number, number, number] {
+    const angle = Math.hypot(v[0], v[1], v[2]);
+    if (angle < 1e-12) return [v[0] / 2, v[1] / 2, v[2] / 2, 1];
+    const s = Math.sin(angle / 2) / angle;
+    return [v[0] * s, v[1] * s, v[2] * s, Math.cos(angle / 2)];
+}
+
+/** Spherical blend of unit quaternions [x y z w] from `a` (t = 0) to `b` (t = 1), the short way round. */
+export function quatSlerpTuple(a: ArrayLike<number>, b: ArrayLike<number>, t: number): [number, number, number, number] {
+    let bx = b[0], by = b[1], bz = b[2], bw = b[3];
+    let cos = a[0] * bx + a[1] * by + a[2] * bz + a[3] * bw;
+    if (cos < 0) { cos = -cos; bx = -bx; by = -by; bz = -bz; bw = -bw; }
+    let k0: number, k1: number;
+    if (cos > 0.9995) { k0 = 1 - t; k1 = t; }
+    else {
+        const omega = Math.acos(Math.min(1, cos)), sin = Math.sin(omega);
+        k0 = Math.sin((1 - t) * omega) / sin; k1 = Math.sin(t * omega) / sin;
+    }
+    const x = a[0] * k0 + bx * k1, y = a[1] * k0 + by * k1, z = a[2] * k0 + bz * k1, w = a[3] * k0 + bw * k1;
+    const n = Math.hypot(x, y, z, w) || 1;
+    return [x / n, y / n, z / n, w / n];
+}
+
+/** The shortest rotation [x y z w] turning unit direction `from` onto unit direction `to`. */
+export function quatFromToTuple(from: ArrayLike<number>, to: ArrayLike<number>): [number, number, number, number] {
+    const d = from[0] * to[0] + from[1] * to[1] + from[2] * to[2];
+    if (d < -0.999999) {
+        // Half a turn about any axis square to `from`.
+        let ax = 0, ay = -from[2], az = from[1];
+        if (Math.hypot(ax, ay, az) < 1e-6) { ax = from[2]; ay = 0; az = -from[0]; }
+        const n = Math.hypot(ax, ay, az) || 1;
+        return [ax / n, ay / n, az / n, 0];
+    }
+    const cx = from[1] * to[2] - from[2] * to[1], cy = from[2] * to[0] - from[0] * to[2], cz = from[0] * to[1] - from[1] * to[0];
+    const w = 1 + d, n = Math.hypot(cx, cy, cz, w) || 1;
+    return [cx / n, cy / n, cz / n, w / n];
+}
+
+/**
+ * The convex hull of 2D points [x, y] (Andrew's monotone chain), counter-clockwise, collinear points dropped.
+ * Fewer than three distinct points come back as they are (a point or a segment).
+ */
+export function convexHull2D(points: readonly (readonly [number, number])[]): [number, number][] {
+    const p = points.map(q => [q[0], q[1]] as [number, number]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    if (p.length < 3) return p;
+    const cross = (o: number[], a: number[], b: number[]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lower: [number, number][] = [], upper: [number, number][] = [];
+    for (const q of p) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop(); lower.push(q); }
+    for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop(); upper.push(q); }
+    lower.pop(); upper.pop();
+    return lower.concat(upper);
+}
+
+/**
+ * Signed distance from 2D point (x, y) to a convex polygon (counter-clockwise, as convexHull2D gives it):
+ * negative inside, positive outside. A segment or a point measures its distance (positive). Infinity for none.
+ */
+export function convexPolygonDistance2D(poly: readonly (readonly [number, number])[], x: number, y: number): number {
+    const n = poly.length;
+    if (n === 0) return Infinity;
+    const segDist = (a: readonly number[], b: readonly number[]) => {
+        const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+        const t = l2 > 0 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / l2)) : 0;
+        return Math.hypot(x - a[0] - dx * t, y - a[1] - dy * t);
+    };
+    if (n === 1) return Math.hypot(x - poly[0][0], y - poly[0][1]);
+    if (n === 2) return segDist(poly[0], poly[1]);
+    let inside = true, best = Infinity;
+    for (let i = 0; i < n; i++) {
+        const a = poly[i], b = poly[(i + 1) % n];
+        if ((b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]) < 0) inside = false;
+        best = Math.min(best, segDist(a, b));
+    }
+    return inside ? -best : best;
+}
+
+/**
+ * Where a body balancing over a point must step to stop (the linear inverted pendulum's capture point): its
+ * centre of mass's ground position plus its velocity times √(height / g). Horizontal [x, z].
+ */
+export function capturePoint(com: ArrayLike<number>, velocity: ArrayLike<number>, height: number, gravity = 9.81): [number, number] {
+    const t = Math.sqrt(Math.max(0, height) / Math.max(1e-6, gravity));
+    return [com[0] + velocity[0] * t, com[2] + velocity[2] * t];
+}

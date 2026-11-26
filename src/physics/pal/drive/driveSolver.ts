@@ -87,7 +87,21 @@ export interface PinEntry {
  * (row-major 3x3, world: the spring along unit axis `a` meets an inertia of 1/(aᵀKa)), true when it took the
  * spring; the solver then skips its own (gravity compensation stays here).
  */
-export type NativeDrive = (entry: DriveEntry, inverseInertia: readonly number[], rotationA: readonly number[], dt: number) => boolean;
+export type NativeDrive = (entry: DriveEntry, state: NativeDriveState) => boolean;
+
+/** What a native drive is handed each substep (all world-space, reused: copy what you keep). */
+export interface NativeDriveState {
+    /** The joint's effective inverse inertia K (see the header). */
+    inverseInertia: readonly number[];
+    /** A's rotation, and the rotation still to go (a rotation vector). */
+    rotationA: readonly number[];
+    error: readonly number[];
+    /** A's angular velocity relative to B's, measured from the target's own spin. */
+    omega: readonly number[];
+    /** What gravity still turns the joint with once compensated (N·m). */
+    gravity: readonly number[];
+    dt: number;
+}
 
 interface Mass { mass: number; invMass: number; com: number[]; inertia: number[]; frame: number[] }
 interface State {
@@ -133,6 +147,7 @@ export class DriveSolver {
     private readonly _k9b = [0, 0, 0, 0, 0, 0, 0, 0, 0];
     private readonly _k9c = [0, 0, 0, 0, 0, 0, 0, 0, 0];
     private readonly _v3a = [0, 0, 0];
+    private readonly _native: NativeDriveState = { inverseInertia: [], rotationA: [], error: [], omega: [0, 0, 0], gravity: [0, 0, 0], dt: 0 };
     private readonly _q4 = [0, 0, 0, 1];
     private readonly _r4 = [0, 0, 0, 1];
     private _warned = false;
@@ -350,12 +365,19 @@ export class DriveSolver {
         const K = this._k9;
         if (!this._jointInverseInertia(bodies, r, A, B, pivot, K)) return;
 
-        if (native && native(e, K, A.q, h)) { report[0] += torqueSum; return; }
-
         // Relative angular velocity, measured from the target's own.
         const om = this._u3;
         rotate(B.q, e.omega[0], e.omega[1], e.omega[2], om);
         const wx = A.w[0] - B.w[0] - om[0], wy = A.w[1] - B.w[1] - om[1], wz = A.w[2] - B.w[2] - om[2];
+
+        if (native) {
+            const s = this._native;
+            s.inverseInertia = K; s.rotationA = A.q; s.dt = h;
+            s.error = err;
+            const w = s.omega as number[]; w[0] = wx; w[1] = wy; w[2] = wz;
+            const g3 = s.gravity as number[]; g3[0] = gx; g3[1] = gy; g3[2] = gz;
+            if (native(e, s)) { report[0] += torqueSum; return; }
+        }
 
         // Kc: the pair's own inverse inertia about their centres, what a torque on them meets in the instant it is
         // applied (the joint carries the rest round only through the solver). The spring's gains come from the
@@ -689,6 +711,26 @@ export function rotate(q: ArrayLike<number>, x: number, y: number, z: number, ou
     out[0] = ix * qw + iw * -qx + iy * -qz - iz * -qy;
     out[1] = iy * qw + iw * -qy + iz * -qx - ix * -qz;
     out[2] = iz * qw + iw * -qz + ix * -qy - iy * -qx;
+    return out;
+}
+
+/**
+ * The relative angular velocity a drive's spring asks for at the end of a substep of `h` seconds, for a backend
+ * that solves it as a velocity motor with the joint (cannon's motor equations): the implicit spring on the joint's
+ * own inertia, ω' = (ω + hΩ²e + h·K·τ) / (1 + 2ζΩh + Ω²h²), ω the relative angular velocity measured from the
+ * target's, e the rotation to go, τ what gravity still turns the joint with. World, into `out`.
+ */
+export function motorVelocity(
+    frequency: number, damping: number, h: number, omega: ArrayLike<number>, error: ArrayLike<number>,
+    K: ArrayLike<number>, gravity: ArrayLike<number>, out: number[],
+): number[] {
+    let w = 2 * Math.PI * Math.max(0, frequency);
+    if (w * h > MAX_OMEGA_H * 2) w = MAX_OMEGA_H * 2 / h;
+    const denom = 1 + 2 * Math.max(0, damping) * w * h + w * w * h * h, kh = h * w * w;
+    const gx = gravity[0], gy = gravity[1], gz = gravity[2];
+    out[0] = (omega[0] + kh * error[0] + h * (K[0] * gx + K[1] * gy + K[2] * gz)) / denom;
+    out[1] = (omega[1] + kh * error[1] + h * (K[3] * gx + K[4] * gy + K[5] * gz)) / denom;
+    out[2] = (omega[2] + kh * error[2] + h * (K[6] * gx + K[7] * gy + K[8] * gz)) / denom;
     return out;
 }
 

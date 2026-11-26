@@ -74,7 +74,7 @@ export function poseClip(name: string, turns: Record<string, [[number, number, n
 /** Standing with the arms down along the body. */
 export const IDLE = (): Animation => poseClip('Idle', {
     LeftArm: [[0, 0, 1], -75], RightArm: [[0, 0, 1], 75],
-    LeftForeArm: [[0, 1, 0], 15], RightForeArm: [[0, 1, 0], -15],
+    LeftForeArm: [[0, 1, 0], -15], RightForeArm: [[0, 1, 0], 15],
 });
 
 /**
@@ -86,6 +86,7 @@ export function humanoidModel(clips: Animation[] = [IDLE()], position: [number, 
     Object.assign(model, { _skin: humanoidSkin(), _animations: clips, _materials: [], _submeshes: [], skinnedCloth: null });
     const node = new ModelNode('person', model);
     node.setPosition(position);
+    node.updateTransforms(null);
     // In a scene, as far as the ragdoll's lifetime check cares (a node with no scene ends its ragdoll).
     node.scene = {} as any;
     if (clips.length) node.animator!.playAnimationByName(clips[0].name, true, false);

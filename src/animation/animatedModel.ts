@@ -6,6 +6,7 @@ import { Logger } from '../core/logger';
 import { mat4 } from 'gl-matrix';
 import type { IkRig } from './ik';
 import type { RagdollProfile } from '../physics/ragdollProfile';
+import type { ReactionSets } from '../physics/reactive/reactionSet';
 import { parseSkinnedCloth, type SkinnedClothData } from '../physics/cloth/skinnedClothData';
 
 // Animation data structures based on GLTF specification
@@ -80,6 +81,11 @@ export interface Skin {
      * Absent: a humanoid skeleton gets the automatic profile, anything else the generic ragdoll.
      */
     ragdollProfile?: RagdollProfile;
+    /**
+     * How this skeleton reacts when it is hit, pushed, falls or is thrown (physics/reactive/reactionSet.ts):
+     * the reaction sets authored on the rig, poses resolved. Absent: the built-in default set.
+     */
+    reactionSets?: ReactionSets;
 }
 
 /** One attach point: a bone (by NAME) plus a local offset from it. */
@@ -338,7 +344,9 @@ export class AnimatedModel {
                 ikRig: data.skin.ikRig ?? undefined,
                 sockets: Array.isArray(data.skin.sockets) ? data.skin.sockets : undefined,
                 // Carried as plain JSON; the ragdoll validates it when it builds (parseRagdollProfile).
-                ragdollProfile: data.skin.ragdollProfile && Array.isArray(data.skin.ragdollProfile.parts) ? data.skin.ragdollProfile : undefined
+                ragdollProfile: data.skin.ragdollProfile && Array.isArray(data.skin.ragdollProfile.parts) ? data.skin.ragdollProfile : undefined,
+                // Plain JSON too; the reactions read it through parseReactionSets.
+                reactionSets: data.skin.reactionSets && Array.isArray(data.skin.reactionSets.sets) ? data.skin.reactionSets : undefined,
             };
         }
         
@@ -519,7 +527,8 @@ export class AnimatedModel {
                 nodeNames,
                 ikRig: this._skin.ikRig ?? null,
                 ...(this._skin.sockets?.length ? { sockets: this._skin.sockets } : {}),
-                ...(this._skin.ragdollProfile?.parts?.length ? { ragdollProfile: this._skin.ragdollProfile } : {})
+                ...(this._skin.ragdollProfile?.parts?.length ? { ragdollProfile: this._skin.ragdollProfile } : {}),
+                ...(this._skin.reactionSets?.sets?.length ? { reactionSets: this._skin.reactionSets } : {}),
             };
         }
         

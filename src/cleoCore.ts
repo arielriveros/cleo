@@ -271,7 +271,21 @@ export { RigidBody as Body, Trigger } from "./physics/body";
 export type { TriggerOptions, TriggerContact } from "./physics/body";
 export type { TriggerOverlap } from "./physics/triggerOverlaps";
 export { Ragdoll, RAGDOLL_DEFAULTS } from "./physics/ragdoll";
-export type { RagdollOptions } from "./physics/ragdoll";
+export type { RagdollOptions, RagdollPartInfo, RagdollRegion, RagdollPartHit } from "./physics/ragdoll";
+// Reactions: reactive (powered) ragdolls, Euphoria-style (physics/reactive/).
+export { ReactionController } from "./physics/reactive/reactionController";
+export type { ReactionHit, ReactionEventInfo, ModelReactionConfig, ReactionState, ReactionWound } from "./physics/reactive/reactionController";
+export {
+    defaultReactionSet, parseReactionSet, parseReactionSets, pickReactionSet, reactionParamKeys,
+    REACTION_PRESETS, BEHAVIOUR_SPECS, BEHAVIOUR_IDS, MUSCLE_SPECS, MUSCLE_DEFAULTS, MUSCLE_REGIONS, PIN_SPECS, THRESHOLD_SPECS,
+} from "./physics/reactive/reactionSet";
+export type {
+    ReactionSet, ReactionSets, MuscleRegion, MuscleSettings, BehaviourId, BehaviourConfig, BehaviourSpec, ReactionParamSpec, ReactionPoseSlot,
+} from "./physics/reactive/reactionSet";
+export { ReactionBody, posePartTargets } from "./physics/reactive/reactionBody";
+export { BodySensors } from "./physics/reactive/bodySensors";
+export type { PredictedImpact, TerrainKind } from "./physics/reactive/bodySensors";
+export type { JointDrive, BodyPin } from "./physics/pal/types";
 export {
     autoHumanoidProfile, effectiveRagdollProfile, parseRagdollProfile, ragdollLayout, defaultJoint,
     findBoneJoint, ragdollPartPose, RAGDOLL_PROFILE_DEFAULTS,

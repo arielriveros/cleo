@@ -5,7 +5,7 @@ import type {
     BodyDesc, BodyHandle, BodyPin, BodyType, ColliderDesc, ColliderPart, JointDesc, JointDrive, JointHandle, MassProperties, Out,
     RayHit, RayOptions, ShapeDesc, StepProfile, V3,
 } from '../types';
-import { DriveSolver, MAX_OMEGA_H, quadratic, type DriveEntry } from '../drive/driveSolver';
+import { DriveSolver, MAX_OMEGA_H, quadratic, type DriveEntry, type NativeDriveState } from '../drive/driveSolver';
 import { driveRecord } from '../drive/driveRecords';
 import type { DescribedWorld } from '../copy/describedWorld';
 import { boundingRadiusOf, collidersAabb, multiply, partShapeFor, rotate } from '../shapeBounds';
@@ -614,7 +614,8 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
      * inertia along each motor's axes; see drive/driveSolver.ts), so a drive feels the same on every backend.
      * Its target is set every substep. False for a joint Jolt has no motor for (ball): the shared spring drives it.
      */
-    private readonly _nativeDrive = (e: DriveEntry, K: readonly number[], qA: readonly number[], dt: number): boolean => {
+    private readonly _nativeDrive = (e: DriveEntry, s: NativeDriveState): boolean => {
+        const K = s.inverseInertia, qA = s.rotationA, dt = s.dt;
         const joint = this._joints.get(e.joint);
         if (!joint || (joint.record.kind !== 'hinge' && joint.record.kind !== 'cone')) return false;
         const d = e.drive;

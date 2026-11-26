@@ -10,6 +10,7 @@ import { RigidBody, Trigger, triggerState } from "./body";
 import type { TriggerContact } from "./body";
 import { TriggerOverlapPass, TriggerOverlap, pairKey } from "./triggerOverlaps";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
+import { ReactionController, type ReactionHit } from "./reactive/reactionController";
 import type { Vehicle } from "./vehicle";
 import { skipCameraHit, CameraProbeBody, CameraProbeLayers, skipRayHit, RayHitBody, RayFilter } from "./cameraRayFilter";
 import { DEFAULT_LAYER_NAMES, layerByName, normalizeLayerNames } from "./collisionLayers";
@@ -170,6 +171,8 @@ export class PhysicsSystem {
   private _world!: PhysicsWorld;
   private _gravity: number[];
   private _ragdolls: Ragdoll[] = [];
+  /** Every model's reactions (physics/reactive/), made on first ask. */
+  private readonly _reactions = new Map<ModelNode, ReactionController>();
   /** Unpaused seconds of simulated time; the clock GROUND_GRACE is measured against. */
   private _time = 0;
   /** Per body: the most ground-like contact seen recently, its surface normal, and when. See _record. */
@@ -344,6 +347,17 @@ export class PhysicsSystem {
   public maxSubsteps: number = PhysicsSystem.MAX_SUBSTEPS;
 
   /**
+   * Substeps a frame takes now: {@link substepsFor}, doubled while a powered ragdoll's muscles run on a backend
+   * that drives them with the shared spring (cannon, Rapier). Those are torques the step adds rather than
+   * motors it solves, and a step of 1/60 s holds a stiff limb back; 1/120 lets it move as the numbers say.
+   */
+  private _substeps(dt: number): number {
+    const n = PhysicsSystem.substepsFor(dt, this.maxSubsteps);
+    return this._fineSubsteps ? Math.min(n * 2, Math.max(1, Math.floor(this.maxSubsteps)) * 2) : n;
+  }
+  private _fineSubsteps = false;
+
+  /**
    * The project's simulation range, in metres from the active camera (project option "Simulation range").
    * Dynamic bodies beyond it are frozen in place — still solid, not simulated — unless their own
    * `simulationMode` says otherwise. `0` = unlimited, the default. See physics/simulationRange.ts.
@@ -413,7 +427,7 @@ export class PhysicsSystem {
   }
 
   private _inlineExecutor(): InlineExecutor {
-    return new InlineExecutor(() => this._world, dt => PhysicsSystem.substepsFor(dt, this.maxSubsteps), () => this.profileStep, this._substepHooks);
+    return new InlineExecutor(() => this._world, dt => this._substeps(dt), () => this.profileStep, this._substepHooks);
   }
 
   // A character is not pushed about by lighter bodies (physics/characterContacts.ts): the rule runs around each
@@ -497,6 +511,8 @@ export class PhysicsSystem {
       if (inline) this._updateActivation(deltaTime);
       // This frame's driver input, into vehicles built where their chassis is now.
       if (inline) this._syncVehicles();
+      // Reacting bodies' muscles and strings for this step (with the worker: in endFrame, before the post).
+      if (inline) this._reactionsBeforeStep(deltaTime);
       const result = this._executor.step(deltaTime, timeScale);
       // What the step (inline, or the worker's just applied) left them at.
       this._readVehicles();
@@ -508,6 +524,7 @@ export class PhysicsSystem {
       const stepDt = inline ? deltaTime : result.dt;
 
       if (inline || stepDt > 0) {
+        this._reactionsAfterStep(stepDt, result.contacts);
         this._updateRagdolls(stepDt);
         // update() runs only while unpaused, so the grace window cannot expire behind a paused game.
         this._time += stepDt;
@@ -1593,8 +1610,9 @@ export class PhysicsSystem {
   private _applyRagdollIterations(): void {
     const world = this._world;
     if (!world) return;
-    let want = 0;
-    for (const r of this._ragdolls) if (!r.frozen && !r.destroyed) want = Math.max(want, r.solverIterations);
+    let want = 0, powered = false;
+    for (const r of this._ragdolls) if (!r.frozen && !r.destroyed) { want = Math.max(want, r.solverIterations); powered ||= r.powered; }
+    this._fineSubsteps = powered && world.capabilities.jointDrives === 'shared';
     if (want > 0) {
       if (this._baseIterations === null) this._baseIterations = world.solverIterations;
       world.solverIterations = Math.max(this._baseIterations, want);
@@ -1630,6 +1648,93 @@ export class PhysicsSystem {
     this._applyRagdollIterations();
   }
 
+  // ---- reactions (physics/reactive/) ----
+
+  /**
+   * A skinned model's reactions: how it takes a hit, stumbles, falls and gets up (a ReactionController, made on
+   * first ask). Null for a model that has no skeleton a ragdoll fits, or whose reactions are turned off.
+   */
+  public reactionsOf(model: ModelNode | null | undefined): ReactionController | null {
+    const node = model ? unwrapScriptNode(model) : null;
+    if (!node) return null;
+    let reactions = this._reactions.get(node);
+    if (reactions) return reactions;
+    const cfg = (node.ragdollConfig as { reactions?: { enabled?: boolean } } | null)?.reactions;
+    if (!node.animator || cfg?.enabled === false) return null;
+    const skin = (node.model as { skin?: unknown } | null)?.skin;
+    if (!skin) return null;
+    reactions = new ReactionController(node, this);
+    this._reactions.set(node, reactions);
+    return reactions;
+  }
+
+  /** The reactions of a ragdoll body's model, a Character's or a model's (a ray's hit), or null. */
+  public reactionsFor(target: Node | PhysicsBody | null | undefined): ReactionController | null {
+    if (!target) return null;
+    if (target instanceof PhysicsBody) {
+      const part = this.ragdollPartOf(target);
+      if (part) return this.reactionsOf(part.ragdoll.node);
+      const owner = (target as { owner?: Node | null }).owner;
+      return owner ? this.reactionsFor(owner) : null;
+    }
+    const node = unwrapScriptNode(target as Node) as Node;
+    if (node instanceof ModelNode && node.animator) return this.reactionsOf(node);
+    const character = (node as { character?: Node | null }).character ?? null;
+    const root = character ?? node;
+    const find = (n: Node): ModelNode | null => {
+      for (const c of n.children) {
+        if (c instanceof ModelNode && c.animator && (c.model as { skin?: unknown } | null)?.skin) return c;
+        const deeper = c.nodeType === 'collider' || c.nodeType === 'character' ? null : find(c);
+        if (deeper) return deeper;
+      }
+      return null;
+    };
+    const model = find(root);
+    return model ? this.reactionsOf(model) : null;
+  }
+
+  /**
+   * A hit from a ray (a bullet, a blade): to the reactions of whatever it struck — a limb of a reacting body, a
+   * character's capsule — else an impulse on the body at the point. `direction` world, `impulse` N·s. Returns
+   * whether reactions took it.
+   */
+  public applyHit(hit: PhysicsRaycastHit, direction: ArrayLike<number>, impulse: number, options: Omit<ReactionHit, 'point' | 'direction' | 'impulse'> = {}): boolean {
+    const reactions = this.reactionsFor(hit.body) ?? (hit.node ? this.reactionsFor(hit.node) : null);
+    if (reactions) {
+      reactions.hit({ ...options, point: hit.point, direction, impulse, ...(hit.part !== undefined && hit.ragdoll === reactions.ragdoll ? { part: hit.part } : {}) });
+      return true;
+    }
+    const body = hit.body;
+    if (body && body.world && (body.mass ?? 0) > 0) {
+      const n = Math.hypot(direction[0], direction[1], direction[2]) || 1;
+      const c = body.position;
+      body.applyImpulse([direction[0] / n * impulse, direction[1] / n * impulse, direction[2] / n * impulse],
+        [hit.point[0] - c.x, hit.point[1] - c.y, hit.point[2] - c.z]);
+      body.wakeUp?.();
+    }
+    return false;
+  }
+
+  /** Every model's reactions that have a body to drive: the muscles' targets for the coming step. */
+  private _reactionsBeforeStep(dt: number): void {
+    if (this._reactions.size === 0) return;
+    for (const [node, reactions] of this._reactions) {
+      if (!node.scene || node.markForRemoval) { reactions.destroy(); this._reactions.delete(node); continue; }
+      if (reactions.ragdoll) {
+        try { reactions._preStep(dt); } catch (e) { logScriptError('Reactions', e, 'Runtime'); }
+      }
+    }
+  }
+
+  /** And after the step: measure, move between states, follow with the Collider. */
+  private _reactionsAfterStep(dt: number, contacts: ContactSource): void {
+    if (this._reactions.size === 0) return;
+    for (const reactions of this._reactions.values()) {
+      if (!reactions.ragdoll) continue;
+      try { reactions._postStep(dt, contacts); } catch (e) { logScriptError('Reactions', e, 'Runtime'); }
+    }
+  }
+
   /** Ragdolls still alive (frozen ones included), for the stats panel and tests. */
   public get ragdollCount(): number { return this._ragdolls.length; }
 
@@ -1647,6 +1752,8 @@ export class PhysicsSystem {
   public clear(): void {
     if (!this._world) return;
 
+    for (const reactions of this._reactions.values()) reactions.destroy();
+    this._reactions.clear();
     for (const ragdoll of this._ragdolls) ragdoll.destroy();
     this._ragdolls = [];
     this._applyRagdollIterations();
@@ -1708,6 +1815,7 @@ export class PhysicsSystem {
       this._activatedThisFrame = false;
       // The input this frame's scripts set, diffed out with the step.
       this._syncVehicles();
+      this._reactionsBeforeStep(deltaTime);
       this._executor.endFrame(deltaTime, nextTimeScale);
     } catch (e) {
       logScriptError(`Physics`, e, 'Runtime');
@@ -1787,7 +1895,7 @@ export class PhysicsSystem {
         water: () => this._waterSpecs(),
         // Posted at the end of the frame whose scene asked: this frame's requests.
         slopeHolds: () => this._slopeHoldsOf(this._holdFrame, this._world!).map(r => ({ body: r.handle, cosLimit: r.cosLimit })),
-        substepsFor: dt => PhysicsSystem.substepsFor(dt, this.maxSubsteps),
+        substepsFor: dt => this._substeps(dt),
         profileStep: () => this.profileStep,
         onFailure: (error) => {
           const reason = error instanceof Error ? error.message : String(error);

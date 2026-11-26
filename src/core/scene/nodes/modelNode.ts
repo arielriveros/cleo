@@ -4,6 +4,7 @@ import { Model } from "../../../graphics/model";
 import { ShaderManager } from "../../../graphics/systems/shaderManager";
 import { geometryAttributesFor } from '../../../graphics/rhi/vertexLayouts';
 import type { RagdollOptions } from "../../../physics/ragdoll";
+import type { ReactionController } from "../../../physics/reactive/reactionController";
 import type { BVH } from "../../bvh";
 import { sceneStats, sceneStatsDetail } from "../sceneStats";
 import { mat4, vec3 } from "gl-matrix";
@@ -205,6 +206,15 @@ export class ModelNode extends Node {
         return model ? mat4.multiply(out, this.worldTransform, model) : null;
     }
     public get ragdollConfig(): RagdollOptions | null { return this._ragdollConfig; }
+
+    /**
+     * How this model reacts when it is hit, pushed, falls or is thrown (physics/reactive/): its
+     * ReactionController — `model.reactions?.hit({ point, direction, impulse })`. Null outside Play, for a model
+     * with no skeleton a ragdoll fits, or with reactions turned off.
+     */
+    public get reactions(): ReactionController | null {
+        return (this.scene?.physics as { reactionsOf?(m: ModelNode): ReactionController | null } | undefined)?.reactionsOf?.(this) ?? null;
+    }
     public set ragdollConfig(config: RagdollOptions | null) { this._ragdollConfig = config; }
     public get movementDirection(): vec3 { return this._movementDirection; }
     public set movementDirection(direction: vec3) { 

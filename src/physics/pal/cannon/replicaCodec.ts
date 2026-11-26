@@ -2,6 +2,7 @@ import {
     Body, Box, ConeTwistConstraint, Constraint, ConvexPolyhedron, Cylinder, Heightfield, HingeConstraint, LockConstraint,
     Particle, Plane, PointToPointConstraint, Quaternion, Shape, Sphere, Trimesh, Vec3,
 } from 'cannon-es';
+import { matchConeTwist, matchedTwistOf } from './matchedConeTwist';
 import type { VehicleChanges } from '../vehicle/vehicleCopy';
 import type { DriveChanges } from '../drive/driveCopy';
 
@@ -82,7 +83,7 @@ export const BODY_ROW = 15;
 
 export type ConstraintDef =
     | { t: 'p2p'; a: number; b: number; pivotA: number[]; pivotB: number[]; maxForce: number; collide: boolean }
-    | { t: 'cone'; a: number; b: number; pivotA: number[]; pivotB: number[]; axisA: number[]; axisB: number[]; angle: number; twist: number; maxForce: number; collide: boolean }
+    | { t: 'cone'; a: number; b: number; pivotA: number[]; pivotB: number[]; axisA: number[]; axisB: number[]; angle: number; twist: number; maxForce: number; collide: boolean; twistA?: number[]; twistB?: number[] }
     | { t: 'hinge'; a: number; b: number; pivotA: number[]; pivotB: number[]; axisA: number[]; axisB: number[]; maxForce: number; collide: boolean }
     /**
      * `frame`: the lock's pivots and the bodies' axes as it measured them when it was made — pivotA pivotB
@@ -330,8 +331,13 @@ export function encodeConstraint(c: Constraint, slotOf: (b: Body) => number | un
         const frame = ['pivotA', 'pivotB', 'xA', 'xB', 'yA', 'yB', 'zA', 'zB'].flatMap(key => v(k[key]));
         return { t: 'lock', a, b, maxForce, collide, frame };
     }
-    if (c instanceof ConeTwistConstraint)
-        return { t: 'cone', a, b, pivotA: v(k.pivotA), pivotB: v(k.pivotB), axisA: v(k.axisA), axisB: v(k.axisB), angle: k.angle, twist: k.twistAngle, maxForce, collide };
+    if (c instanceof ConeTwistConstraint) {
+        const matched = matchedTwistOf(c);
+        return {
+            t: 'cone', a, b, pivotA: v(k.pivotA), pivotB: v(k.pivotB), axisA: v(k.axisA), axisB: v(k.axisB), angle: k.angle, twist: k.twistAngle, maxForce, collide,
+            ...(matched ? { twistA: matched.twistA, twistB: matched.twistB } : {}),
+        };
+    }
     if (c instanceof HingeConstraint)
         return { t: 'hinge', a, b, pivotA: v(k.pivotA), pivotB: v(k.pivotB), axisA: v(k.axisA), axisB: v(k.axisB), maxForce, collide };
     if (c instanceof PointToPointConstraint)
@@ -349,10 +355,14 @@ export function decodeConstraint(def: ConstraintDef, bodyOf: (slot: number) => B
             ['pivotA', 'pivotB', 'xA', 'xB', 'yA', 'yB', 'zA', 'zB'].forEach((key, i) => c[key].set(def.frame[i * 3], def.frame[i * 3 + 1], def.frame[i * 3 + 2]));
             return c;
         }
-        case 'cone': return new ConeTwistConstraint(a, b, {
-            pivotA: v(def.pivotA), pivotB: v(def.pivotB), axisA: v(def.axisA), axisB: v(def.axisB),
-            angle: def.angle, twistAngle: def.twist, maxForce: def.maxForce, collideConnected: def.collide,
-        });
+        case 'cone': {
+            const c = new ConeTwistConstraint(a, b, {
+                pivotA: v(def.pivotA), pivotB: v(def.pivotB), axisA: v(def.axisA), axisB: v(def.axisB),
+                angle: def.angle, twistAngle: def.twist, maxForce: def.maxForce, collideConnected: def.collide,
+            });
+            if (def.twistA && def.twistB) matchConeTwist(c, def.twistA, def.twistB);
+            return c;
+        }
         case 'hinge': {
             const c = new HingeConstraint(a, b, {
                 pivotA: v(def.pivotA), pivotB: v(def.pivotB), axisA: v(def.axisA), axisB: v(def.axisB),

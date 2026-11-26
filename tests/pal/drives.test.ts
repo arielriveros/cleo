@@ -45,7 +45,7 @@ describe.each(BACKENDS)('drives on %s', kind => {
     beforeAll(async () => { await acquirePhysicsBackend(kind); });
 
     it('says how it drives', () => {
-        expect(make().capabilities.jointDrives).toBe(kind === 'jolt' ? 'native' : 'shared');
+        expect(make().capabilities.jointDrives).toBe(kind === 'rapier' ? 'shared' : 'native');
     });
 
     for (const joint of ['hinge', 'ball', 'coneTwist'] as const) {
@@ -229,14 +229,13 @@ describe('drives feel the same on every backend', () => {
             at[kind] = swingOf(w, r.rod);
             w.dispose();
         }
-        // The shared spring is the same maths on cannon and Rapier. Jolt's motors are solved with the joint, so
-        // they meet a stiff muscle fully, where the shared one (torques the step adds) is held back for stability:
-        // Jolt gets there at least as fast.
-        const ref = at.cannon;
-        expect(ref).toBeGreaterThan(5 * DEG);
-        expect(Math.abs(at.rapier - ref), `rapier: ${at.rapier / DEG}° vs cannon ${ref / DEG}°`).toBeLessThan(ref * 0.2);
-        expect(at.jolt).toBeGreaterThan(ref * 0.9);
-        expect(at.jolt).toBeLessThan(60 * DEG * 1.1);
+        // Jolt's motors and cannon's motor equations are solved with the joint: the same muscle gets as far in the
+        // same time. Rapier's shared spring is torques the step adds, held back for stability: slower, not stuck.
+        const ref = at.jolt;
+        expect(ref).toBeGreaterThan(20 * DEG);
+        expect(Math.abs(at.cannon - ref), `cannon: ${at.cannon / DEG}° vs jolt ${ref / DEG}°`).toBeLessThan(ref * 0.2);
+        expect(at.rapier, `rapier: ${at.rapier / DEG}°`).toBeGreaterThan(ref * 0.4);
+        expect(at.rapier).toBeLessThan(60 * DEG * 1.1);
     });
 
     it('a muscle without gravity compensation holds a weight equally stiffly', () => {

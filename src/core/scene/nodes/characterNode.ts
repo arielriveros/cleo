@@ -52,6 +52,14 @@ export class CharacterNode extends Node {
      * A Character authors no shape of its own, so every body-derived reading on it -- `velocity`,
      * `isGrounded`, `groundNormal`, the measured motion -- and every write to `velocity` go to that body.
      */
+    /**
+     * This character's reactions (physics/reactive/): the ReactionController of the skinned model it is drawn
+     * with — `this.reactions?.hit(...)`, `reactions.isDown`. Null without one.
+     */
+    public get reactions(): import('../../../physics/reactive/reactionController').ReactionController | null {
+        return (this.scene?.physics as { reactionsFor?(n: Node): import('../../../physics/reactive/reactionController').ReactionController | null } | undefined)?.reactionsFor?.(this) ?? null;
+    }
+
     public override get body(): RigidBody | null {
         for (let n = this.parent; n; n = n.parent) if (n.nodeType === 'collider') return n.ownBody;
         return this._body;

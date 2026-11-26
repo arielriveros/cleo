@@ -95,10 +95,12 @@ export interface RagdollOptions {
      * unless `impulse` is given. Profile ragdolls only; a generic one is always passive.
      */
     mode?: 'passive' | 'powered';
+    /** The model's reactions (physics/reactive/): which set, its strength, its health. Kept with the rest of the node's ragdoll config. */
+    reactions?: import('./reactive/reactionController').ModelReactionConfig;
 }
 
 /** Shared default ragdoll simulation parameters — single source of truth for the engine and editor UI. */
-export const RAGDOLL_DEFAULTS: Required<Omit<RagdollOptions, 'inheritVelocity' | 'profile' | 'massScale' | 'hitDirection' | 'hitPoint' | 'mode'>> = {
+export const RAGDOLL_DEFAULTS: Required<Omit<RagdollOptions, 'inheritVelocity' | 'profile' | 'massScale' | 'hitDirection' | 'hitPoint' | 'mode' | 'reactions'>> = {
     // Cone-twist by default. The twist limit must stay LOOSE: cannon-es's twist equation jitters badly
     // when tight and bones spin in place. Limit swing, leave twist relaxed.
     jointType: 'coneTwist',
@@ -153,6 +155,8 @@ export class Ragdoll implements PhysicsMappingSource {
     private _destroyed = false;
     /** Muscles and a running animation underneath (RagdollOptions.mode). */
     public readonly powered: boolean;
+    /** Freeze once at rest (updateSettle). A reaction controller keeps a living body awake to get up. */
+    public autoFreeze = true;
     private _skin: Skin | null = null;
     private _parts: RagdollPartInfo[] = [];
     private _mapping = new Float32Array(0);
@@ -565,6 +569,9 @@ export class Ragdoll implements PhysicsMappingSource {
                 coneAngle: lp.coneAngle,
                 twistAngle: type === 'hinge' ? Math.PI : Math.max(lp.twistAngle, 5 * DEG2RAD),
                 maxForce, collideConnected: false,
+                // A muscle turns a joint to where the animation has it, and the twist that pose starts with must
+                // not read as past the limit (cannon's own reference is arbitrary).
+                ...(this.powered ? { matchTwist: true } : {}),
             }, driveJoint[lp.index] === null ? lp.index : -1);
             if (driveJoint[lp.index] === null) driveJoint[lp.index] = cone;
         }
@@ -823,7 +830,7 @@ export class Ragdoll implements PhysicsMappingSource {
      * Returns true when this call froze it.
      */
     public updateSettle(dt: number): boolean {
-        if (this._frozen || this._destroyed || this._bodies.size === 0) return false;
+        if (this._frozen || this._destroyed || this._bodies.size === 0 || this.autoFreeze === false) return false;
         // Mass-weighted: a 0.4 kg hand rocking on its knuckles must not keep a 70 kg body awake. Light,
         // round extremities on the ground twitch at a few tenths of a rad/s for many seconds after the
         // body is still, and freezing them where they lie is invisible.
