@@ -3,6 +3,7 @@ import type { BodyHandle } from '../types';
 import type { ReplicaFloater, WorldReplica } from '../replication';
 import { CannonWorld } from './cannonWorld';
 import { VehicleReplica } from '../vehicle/vehicleCopy';
+import { DriveReplica } from '../drive/driveCopy';
 import {
     BODY_ROW, STATE_STRIDE, applyConfig, decodeConstraint, decodeShape, writeState, type CannonChanges, type ShapeRef,
 } from './replicaCodec';
@@ -20,9 +21,10 @@ export class CannonReplica implements WorldReplica {
     private readonly _shapes = new Map<number, Shape>();
     private readonly _floater: ReplicaFloater = { mass: 0, isTrigger: false, collisionResponse: true, character: false };
     private readonly _vehicles = new VehicleReplica(this.world, slot => this._bodies[slot]?.id as BodyHandle | undefined);
+    private readonly _drives = new DriveReplica(this.world, slot => this._bodies[slot]?.id as BodyHandle | undefined);
 
     public receive(changes: unknown): void {
-        const { ops, writes, writeCount, vehicles } = changes as CannonChanges;
+        const { ops, writes, writeCount, vehicles, drives } = changes as CannonChanges;
         const world = this.world;
         for (const op of ops) {
             switch (op.op) {
@@ -66,6 +68,7 @@ export class CannonReplica implements WorldReplica {
             if (b) writeState(b, writes, at + 2, writes[at + 1]);
         }
         this._vehicles.receive(vehicles);
+        this._drives.receive(drives);
     }
 
     public reportVehicles(): Float64Array | undefined { return this._vehicles.report(); }

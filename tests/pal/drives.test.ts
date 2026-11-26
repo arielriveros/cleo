@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
-import { acquirePhysicsBackend, createPhysicsWorld } from '../../src/physics/pal/createWorld';
+import { acquirePhysicsBackend, createPhysicsWorld, createWorldMirror, createWorldReplica } from '../../src/physics/pal/createWorld';
 import type { BodyDesc, BodyHandle, JointDesc, JointDrive, JointHandle, PhysicsBackendKind, ShapeDesc } from '../../src/physics/pal/types';
 import type { PhysicsWorld } from '../../src/physics/pal/world';
 
@@ -247,5 +247,68 @@ describe('drives feel the same on every backend', () => {
         }
         // k = I·Ω²: 2 kg on a 1 m rod about its end, 2 Hz, against 6.9 N·m at 45 degrees: ~3.7 degrees.
         for (const kind of BACKENDS) expect(sag[kind] / DEG, kind).toBeCloseTo(3.7, 0);
+    });
+});
+
+describe.each(BACKENDS)('drives in the physics worker on %s', kind => {
+    beforeAll(async () => { await acquirePhysicsBackend(kind); });
+
+    /** Two rods hanging from each other, both driven, the lower one also pinned: drives and pins sharing bodies. */
+    function chain(w: PhysicsWorld) {
+        const anchor = body(w, { kind: 'sphere', radius: 0.05 }, [0, 5, 0], { mass: 0 });
+        const upper = body(w, { kind: 'box', halfExtents: [0.05, 0.5, 0.05] }, [0, 4.5, 0], { mass: 2 });
+        const lower = body(w, { kind: 'box', halfExtents: [0.04, 0.4, 0.04] }, [0, 3.6, 0], { mass: 1 });
+        const hip = w.createJoint({ kind: 'coneTwist', a: upper, b: anchor, anchorA: [0, 0.5, 0], anchorB: [0, 0, 0], axisA: [0, -1, 0], axisB: [0, -1, 0], coneAngle: 1.2, twistAngle: 1 });
+        const knee = w.createJoint({ kind: 'hinge', a: lower, b: upper, anchorA: [0, 0.4, 0], anchorB: [0, -0.5, 0], axisA: [0, 0, 1], axisB: [0, 0, 1] });
+        w.setJointDrive(hip, { frequency: 3, damping: 0.8, maxTorque: 120, gravityCompensation: 0.7 }, [upper, lower]);
+        w.setJointDrive(knee, { frequency: 4, damping: 1, maxTorque: 60, gravityCompensation: 1 }, [lower]);
+        w.setBodyPin(lower, { linearFrequency: 1.5, angularFrequency: 1, damping: 1, maxForce: 30, maxTorque: 8 });
+        return { upper, lower, hip, knee };
+    }
+
+    it('steps a driven, pinned chain exactly as the world itself would', () => {
+        const inline = createPhysicsWorld(kind, [0, G, 0]), original = createPhysicsWorld(kind, [0, G, 0]);
+        if (!inline.capabilities.threadable) { inline.dispose(); original.dispose(); return; }
+        const a = chain(inline), b = chain(original);
+        const mirror = createWorldMirror(original), replica = createWorldReplica(kind);
+        for (let frame = 0; frame < 150; frame++) {
+            const t = frame * H;
+            for (const [w, s] of [[inline, a], [original, b]] as const) {
+                w.setJointTarget(s.hip, aboutZ(0.6 * Math.sin(t * 2)), [0, 0, 1.2 * Math.cos(t * 2)]);
+                w.setJointTarget(s.knee, aboutZ(0.8 + 0.4 * Math.sin(t * 3)));
+                w.setBodyPinTarget(s.lower, [0.3 * Math.sin(t), 3.8, 0.2, 0, 0, 0, 1]);
+                if (frame === 60) w.setJointDrive(s.knee, { frequency: 1, damping: 0.5, maxTorque: 20, friction: 1 }, [s.lower]);
+                if (frame === 100) w.setBodyPin(s.lower, null);
+                if (frame === 120) w.setJointDrive(s.hip, null);
+            }
+            inline.step(H);
+            const diff = mirror.diff();
+            replica.receive(structuredClone(diff.changes));
+            replica.world.gravity = original.gravity;
+            replica.world.time = original.time;
+            replica.world.step(H);
+            const rows = replica.report(bytes => new ArrayBuffer(bytes));
+            mirror.apply(structuredClone({ ...rows, events: new Int32Array(0), time: replica.world.time }), () => {});
+        }
+        // To the bit, as the rest of a world copies (a rotation read back from Rapier may differ in its last bit:
+        // it renormalises what it is given, see tests/rapierWorker.test.ts).
+        for (const key of ['upper', 'lower'] as const) {
+            const p = pose(original, b[key]), q = pose(inline, a[key]);
+            expect(p.slice(0, 3), `${key} position`).toEqual(q.slice(0, 3));
+            for (let i = 3; i < 7; i++) expect(Math.abs(p[i] - q[i]), `${key} rotation`).toBeLessThanOrEqual(kind === 'rapier' ? 2 ** -22 : 0);
+            expect(velocity(original, b[key]), `${key} velocity`).toEqual(velocity(inline, a[key]));
+        }
+        expect(replica.world.drives.driveCount).toBe(1);
+        expect(replica.world.drives.pinCount).toBe(0);
+        inline.dispose(); original.dispose(); replica.world.dispose();
+    });
+
+    it('sends nothing for a world without drives', () => {
+        const w = createPhysicsWorld(kind, [0, G, 0]);
+        if (!w.capabilities.threadable) { w.dispose(); return; }
+        body(w, { kind: 'sphere', radius: 0.5 }, [0, 3, 0]);
+        const mirror = createWorldMirror(w);
+        expect((mirror.diff().changes as { drives?: unknown }).drives).toBeUndefined();
+        w.dispose();
     });
 });

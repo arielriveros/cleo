@@ -2,6 +2,7 @@ import type { BodyHandle, JointHandle } from '../types';
 import type { ReplicaFloater, WorldReplica } from '../replication';
 import type { DescribedJointRecord, DescribedWorld } from './describedWorld';
 import { VehicleReplica } from '../vehicle/vehicleCopy';
+import { DriveReplica } from '../drive/driveCopy';
 import {
     BODY_ROW, STATE_STRIDE, WRITE_ANGVEL, WRITE_FORCE, WRITE_POSE, WRITE_SLEEP, WRITE_TORQUE, WRITE_VEL, type DescribedChanges,
 } from './copyMessages';
@@ -14,9 +15,11 @@ export class DescribedReplica<J extends DescribedJointRecord> implements WorldRe
     /** `world`: an empty world of the backend copied (pal/createWorld.ts makes it). */
     constructor(public readonly world: DescribedWorld<J>) {
         this._vehicles = new VehicleReplica(world, slot => this._bySlot[slot]);
+        this._drives = new DriveReplica(world, slot => this._bySlot[slot], id => this._joints.get(id));
     }
 
     private readonly _vehicles: VehicleReplica;
+    private readonly _drives: DriveReplica;
 
     private readonly _bySlot: (BodyHandle | undefined)[] = [];
     private readonly _slotOf = new Map<BodyHandle, number>();
@@ -25,7 +28,7 @@ export class DescribedReplica<J extends DescribedJointRecord> implements WorldRe
     private readonly _seven = new Float64Array(7);
 
     public receive(changes: unknown): void {
-        const { ops, writes, writeCount, vehicles } = changes as DescribedChanges<J>;
+        const { ops, writes, writeCount, vehicles, drives } = changes as DescribedChanges<J>;
         const world = this.world;
         for (const op of ops) {
             switch (op.op) {
@@ -71,6 +74,7 @@ export class DescribedReplica<J extends DescribedJointRecord> implements WorldRe
             if (h !== undefined) this._write(h, writes, at + 2, writes[at + 1]);
         }
         this._vehicles.receive(vehicles);
+        this._drives.receive(drives);
     }
 
     public reportVehicles(): Float64Array | undefined { return this._vehicles.report(); }

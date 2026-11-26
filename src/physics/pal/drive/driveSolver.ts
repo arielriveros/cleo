@@ -55,7 +55,10 @@ export interface DriveRecord {
 }
 
 export interface DriveEntry {
+    /** The key the drive is set and ordered by: the joint's handle in the world it was made in. */
     readonly id: number;
+    /** The joint in THIS world (a copy in the physics worker keys its drives by the original's handles). */
+    joint: number;
     record: DriveRecord;
     drive: JointDrive;
     /** A's rotation in B's frame to reach, [x y z w]. */
@@ -70,6 +73,8 @@ export interface DriveEntry {
 
 export interface PinEntry {
     readonly body: BodyHandle;
+    /** What pins are ordered by: the body's handle in the world it was made in (a copy's own differ). */
+    order: number;
     pin: BodyPin;
     /** The node-origin pose to pull toward, [px py pz qx qy qz qw]. */
     readonly target: number[];
@@ -127,6 +132,8 @@ export class DriveSolver {
     private readonly _q4 = [0, 0, 0, 1];
     private readonly _r4 = [0, 0, 0, 1];
     private _warned = false;
+    /** Told of each drive taken away (a backend switching its own motor off). */
+    public onRemove: ((entry: DriveEntry) => void) | null = null;
 
     /** Drives and pins in all: 0 means `apply` does nothing. */
     public get size(): number { return this._drives.size + this._pins.size; }
@@ -139,15 +146,16 @@ export class DriveSolver {
      * Drive joint `id` (the world's handle) with `drive`, acting as `record` says; null stops it. The target
      * starts at the rotation the bodies hold now unless one was set before.
      */
-    public setDrive(id: number, record: DriveRecord | null, drive: JointDrive | null, bodies?: DriveBodies): void {
+    public setDrive(id: number, record: DriveRecord | null, drive: JointDrive | null, bodies?: DriveBodies, joint = id): void {
         if (!drive || !record) {
-            if (this._drives.delete(id)) this._driveOrder = null;
+            const gone = this._drives.get(id);
+            if (gone) { this._drives.delete(id); this._driveOrder = null; this.onRemove?.(gone); }
             return;
         }
         let entry = this._drives.get(id);
         if (!entry) {
             entry = {
-                id, record, drive: { ...drive }, target: [0, 0, 0, 1], omega: [0, 0, 0],
+                id, joint, record, drive: { ...drive }, target: [0, 0, 0, 1], omega: [0, 0, 0],
                 report: new Float64Array(3), dirty: true,
             };
             if (bodies) this._currentRelative(bodies, record, entry.target);
@@ -184,6 +192,24 @@ export class DriveSolver {
         }
     }
 
+    /**
+     * Write a drive's target and a pin's as they are held elsewhere, already normalised: what a copy does, so
+     * normalising twice cannot move a bit.
+     */
+    public writeTarget(id: number, rotation: ArrayLike<number>, angularVelocity: ArrayLike<number>): void {
+        const e = this._drives.get(id);
+        if (!e) return;
+        for (let i = 0; i < 4; i++) e.target[i] = rotation[i];
+        for (let i = 0; i < 3; i++) e.omega[i] = angularVelocity[i];
+    }
+
+    public writePinTarget(body: BodyHandle, pose: ArrayLike<number>, velocity: ArrayLike<number>): void {
+        const e = this._pins.get(body);
+        if (!e) return;
+        for (let i = 0; i < 7; i++) e.target[i] = pose[i];
+        for (let i = 0; i < 6; i++) e.velocity[i] = velocity[i];
+    }
+
     /** [torque N·m, saturation 0..1, angle to go rad] after the last substep, into `out`. */
     public report(id: number, out: Out): void {
         const r = this._drives.get(id)?.report;
@@ -198,7 +224,7 @@ export class DriveSolver {
 
     // ---- pins ----
 
-    public setPin(body: BodyHandle, pin: BodyPin | null, bodies?: DriveBodies): void {
+    public setPin(body: BodyHandle, pin: BodyPin | null, bodies?: DriveBodies, order: number = body): void {
         if (!pin) {
             if (this._pins.delete(body)) this._pinOrder = null;
             return;
@@ -207,7 +233,7 @@ export class DriveSolver {
         if (!entry) {
             const target = [0, 0, 0, 0, 0, 0, 1];
             if (bodies) bodies.getTransform(body, target);
-            entry = { body, pin: { ...pin }, target, velocity: [0, 0, 0, 0, 0, 0] };
+            entry = { body, order, pin: { ...pin }, target, velocity: [0, 0, 0, 0, 0, 0] };
             this._pins.set(body, entry);
             this._pinOrder = null;
             if (bodies) this._refreshMass(bodies, body);
@@ -232,7 +258,7 @@ export class DriveSolver {
     public removeBody(h: BodyHandle): void {
         if (this._pins.delete(h)) this._pinOrder = null;
         for (const [id, e] of this._drives) {
-            if (e.record.a === h || e.record.b === h) { this._drives.delete(id); this._driveOrder = null; }
+            if (e.record.a === h || e.record.b === h) { this._drives.delete(id); this._driveOrder = null; this.onRemove?.(e); }
         }
         this._mass.delete(h);
         this._states.delete(h);
@@ -251,9 +277,9 @@ export class DriveSolver {
         return this._driveOrder ??= [...this._drives.values()].sort((x, y) => x.id - y.id);
     }
 
-    /** Every pin, in body order. */
+    /** Every pin, in the order of the bodies' handles where they were made. */
     public pins(): readonly PinEntry[] {
-        return this._pinOrder ??= [...this._pins.values()].sort((x, y) => x.body - y.body);
+        return this._pinOrder ??= [...this._pins.values()].sort((x, y) => x.order - y.order);
     }
 
     // ---- the substep ----

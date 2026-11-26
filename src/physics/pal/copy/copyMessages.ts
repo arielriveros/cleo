@@ -1,6 +1,7 @@
 import type { BodyDesc } from '../types';
 import type { DescribedJointRecord } from './describedWorld';
 import type { VehicleChanges } from '../vehicle/vehicleCopy';
+import type { DriveChanges } from '../drive/driveCopy';
 
 // How a world is copied into the physics worker by description (see describedWorld.ts): the mirror
 // (describedMirror.ts) sends each body as the description it was made from, and each joint as the record it
@@ -37,4 +38,6 @@ export interface DescribedChanges<J extends DescribedJointRecord = DescribedJoin
     writeCount: number;
     /** Vehicles added and removed, and every vehicle's input (after the bodies). */
     vehicles?: VehicleChanges;
+    /** Every joint drive and body pin, while there are any (after the joints). */
+    drives?: DriveChanges;
 }

@@ -3,6 +3,7 @@ import {
     Particle, Plane, PointToPointConstraint, Quaternion, Shape, Sphere, Trimesh, Vec3,
 } from 'cannon-es';
 import type { VehicleChanges } from '../vehicle/vehicleCopy';
+import type { DriveChanges } from '../drive/driveCopy';
 
 // How the cannon world is copied into the physics worker (see pal/replication.ts): the messages, and bodies,
 // shapes and constraints as plain data and back. Both halves live here so they cannot drift: the main
@@ -106,6 +107,8 @@ export interface CannonChanges {
     writeCount: number;
     /** Vehicles added and removed, and every vehicle's input (after the bodies). */
     vehicles?: VehicleChanges;
+    /** Every joint drive and body pin, while there are any (after the constraints). */
+    drives?: DriveChanges;
 }
 
 // cannon's Shape.types.

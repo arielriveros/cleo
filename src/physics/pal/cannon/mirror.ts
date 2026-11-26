@@ -3,6 +3,7 @@ import { PhysicsEventKind, type BodyHandle } from '../types';
 import type { LandedBody, MirrorDiff, ReplicaReport, WorldMirror } from '../replication';
 import type { CannonWorld } from './cannonWorld';
 import { VehicleMirror } from '../vehicle/vehicleCopy';
+import { DriveMirror } from '../drive/driveCopy';
 import {
     BODY_ROW, STATE_STRIDE, WRITE_ANGVEL, WRITE_FORCE, WRITE_POSE, WRITE_SLEEP, WRITE_TORQUE, WRITE_VEL,
     encodeConfig, encodeConstraint, isCharacterBody, readState, shapeBuffers, type CannonChanges, type Op,
@@ -47,9 +48,11 @@ export class CannonMirror implements WorldMirror {
     private _cfgScratch = new Float64Array(64);
 
     private readonly _vehicles: VehicleMirror;
+    private readonly _drives: DriveMirror;
 
     constructor(private readonly _world: CannonWorld) {
         this._vehicles = new VehicleMirror(_world, h => this.slotOf(h));
+        this._drives = new DriveMirror(_world, h => this.slotOf(h));
     }
 
     public handleOf(slot: number): BodyHandle | undefined {
@@ -140,7 +143,11 @@ export class CannonMirror implements WorldMirror {
         }
 
         const ops = [...constraintRemoves, ...removes, ...adds, ...configs, ...constraintAdds];
-        const changes: CannonChanges = { ops, writes: Float64Array.from(writes), writeCount: writes.length / (STATE_STRIDE + 2), vehicles: this._vehicles.diff() };
+        const drives = this._drives.diff();
+        const changes: CannonChanges = {
+            ops, writes: Float64Array.from(writes), writeCount: writes.length / (STATE_STRIDE + 2), vehicles: this._vehicles.diff(),
+            ...(drives ? { drives } : {}),
+        };
         const transfer: ArrayBuffer[] = [changes.writes.buffer as ArrayBuffer];
         for (const op of ops) if (op.op === 'addBody' || op.op === 'config') {
             for (const s of op.config.shapes) transfer.push(...shapeBuffers(s.def));
@@ -232,6 +239,7 @@ export class CannonMirror implements WorldMirror {
 
     public clear(): void {
         this._vehicles.clear();
+        this._drives.clear();
         this._slotOf.clear();
         this._slots.length = 0;
         this._freeSlots.length = 0;

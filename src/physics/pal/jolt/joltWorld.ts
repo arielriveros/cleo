@@ -200,6 +200,12 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         this._rvec = own(new J.RVec3(0, 0, 0));
         this._quat = own(new J.Quat(0, 0, 0, 1));
         this._spring = own(new J.SpringSettings());
+        // A motor left on would keep pulling after its drive is gone.
+        this.drives.onRemove = e => {
+            const joint = this._joints.get(e.joint);
+            if (joint) this._motor(joint, null);
+            this._gains.delete(e.joint);
+        };
         this._ray = own(new J.RRayCast());
         this._raySettings = own(new J.RayCastSettings());
         // Not solid, both faces: a ray meets a body's entry and exit faces, and one that starts inside meets
@@ -577,8 +583,6 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         const entry = this._joints.get(j), r = entry?.record;
         const record = !drive || !r || r.kind === 'fixed' ? null
             : driveRecord(r.a, r.b, r.kind === 'hinge' ? 'hinge' : 'swing', r.anchorB, r.kind === 'hinge' ? rotate(r.frameB, 1, 0, 0, [0, 0, 0]) : null, subtree);
-        // A motor left on would keep pulling after its drive is gone.
-        if (!record && entry && this.drives.drive(j)) this._motor(entry, null);
         this.drives.setDrive(j, record, record ? drive : null, this);
     }
 
@@ -611,10 +615,10 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
      * Its target is set every substep. False for a joint Jolt has no motor for (ball): the shared spring drives it.
      */
     private readonly _nativeDrive = (e: DriveEntry, K: readonly number[], qA: readonly number[], dt: number): boolean => {
-        const joint = this._joints.get(e.id);
+        const joint = this._joints.get(e.joint);
         if (!joint || (joint.record.kind !== 'hinge' && joint.record.kind !== 'cone')) return false;
         const d = e.drive;
-        if (e.dirty) { this._motor(joint, d); e.dirty = false; this._gains.delete(e.id); }
+        if (e.dirty) { this._motor(joint, d); e.dirty = false; this._gains.delete(e.joint); }
         if (!(d.frequency > 0) || !(d.maxTorque > 0)) return true;
         const J = this._J, record = joint.record;
         let omega = 2 * Math.PI * d.frequency;
@@ -625,11 +629,11 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         const along = (x: number, y: number, z: number) => { const a = rotate(frame, x, y, z, [0, 0, 0]); const q = quadratic(K, a); return q > 0 ? 1 / q : 0; };
         const iTwist = along(1, 0, 0);
         const iSwing = record.kind === 'cone' ? 0.5 * (along(0, 1, 0) + along(0, 0, 1)) : 0;
-        const gains = this._gains.get(e.id) ?? [NaN, NaN];
+        const gains = this._gains.get(e.joint) ?? [NaN, NaN];
         const changed = (was: number, now: number) => !(Math.abs(now - was) <= 0.02 * Math.abs(was));
         if (changed(gains[0], iTwist) || changed(gains[1], iSwing)) {
             gains[0] = iTwist; gains[1] = iSwing;
-            this._gains.set(e.id, gains);
+            this._gains.set(e.joint, gains);
             if (record.kind === 'cone') {
                 const c = J.castObject(joint.constraint, J.SwingTwistConstraint);
                 this._stiffness(c.GetTwistMotorSettings(), iTwist * omega * omega, 2 * zeta * iTwist * omega);
