@@ -67,14 +67,23 @@ export interface PublishWindowSettings {
    * game, a fifth or so of its shader text lighter, which tells a player without WebGPU so.
    */
   webgl2Fallback: boolean;
-  /** The graphics API the game runs on (see PublishGraphicsSetting). */
-  graphicsBackend: PublishGraphicsSetting;
+  /**
+   * The graphics API the game runs on (see PublishGraphicsSetting). Absent: 'editor'. Optional, and kept absent by
+   * the parse when the file does not say it, as `excludedScenes` is: a project saved before these existed opens with
+   * nothing to write back (tools/exampleKit/editorNormalize.mjs), its file unchanged until one is set.
+   */
+  graphicsBackend?: PublishGraphicsSetting;
   /**
    * Scenes left out of the published game, by id: a new scene ships unless taken out here. The start scene always
-   * ships, whatever this says.
+   * ships, whatever this says. Absent: none.
    */
-  excludedScenes: string[];
+  excludedScenes?: string[];
 }
+
+/** The graphics API setting a project's publish asks for, its default filled in. */
+export const publishGraphicsOf = (p: PublishWindowSettings): PublishGraphicsSetting => p.graphicsBackend ?? 'editor';
+/** The scenes a project's publish leaves out, its default filled in. */
+export const excludedScenesOf = (p: PublishWindowSettings): string[] => p.excludedScenes ?? [];
 
 /**
  * Who the published game is, as against how its window looks (`publish`): what an installer, an update and a
@@ -217,7 +226,7 @@ export const LEGACY_ADDONS: readonly string[] = ['mcp-server', 'claude-code'];
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   version: PROJECT_SETTINGS_VERSION,
   engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'on', physicsBackend: 'jolt', maxFrameDelta: 0.1, masterVolume: 1 },
-  publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true, webgl2Fallback: true, graphicsBackend: 'editor', excludedScenes: [] },
+  publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true, webgl2Fallback: true },
   identity: { version: '1.0.0', appId: '', icon: '', cover: '' },
   features: { disabled: [] },
   addons: { enabled: [...LEGACY_ADDONS], settings: {} },
@@ -331,8 +340,10 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       resizable: typeof p.resizable === 'boolean' ? p.resizable : d.publish.resizable,
       onlyUsedShaders: typeof p.onlyUsedShaders === 'boolean' ? p.onlyUsedShaders : d.publish.onlyUsedShaders,
       webgl2Fallback: typeof p.webgl2Fallback === 'boolean' ? p.webgl2Fallback : d.publish.webgl2Fallback,
-      graphicsBackend: PUBLISH_GRAPHICS_SETTINGS.includes(p.graphicsBackend) ? p.graphicsBackend : d.publish.graphicsBackend,
-      excludedScenes: idList(p.excludedScenes) ?? [],
+      // Only when the file has them (see PublishWindowSettings.graphicsBackend).
+      ...(p.graphicsBackend !== undefined
+        ? { graphicsBackend: PUBLISH_GRAPHICS_SETTINGS.includes(p.graphicsBackend) ? p.graphicsBackend : 'editor' } : {}),
+      ...(p.excludedScenes !== undefined ? { excludedScenes: idList(p.excludedScenes) ?? [] } : {}),
     },
     identity: {
       version: cleanGameVersion(id.version) || d.identity.version,

@@ -16,12 +16,15 @@ import type { ViewProjection } from './viewProjection';
 import type { TemporalPasses } from './temporal';
 import type { RenderSubsystems } from './subsystems';
 import type { ParticleWeather } from './weather';
+import type { ParticleRecipe, PipelineRecipe } from '../shaderOptimizer';
 
 /** What ParticlePasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface ParticlePassesHost {
     readonly renderHeight: number;
     readonly renderWidth: number;
     readonly thumbnailMode: boolean;
+    /** Whether a pipeline missing this frame is built off the main thread and waited for (PipelineCache.deferring). */
+    readonly deferPipelines: boolean;
 }
 
 /**
@@ -122,6 +125,15 @@ export class ParticlePasses {
         return out;
     }
 
+    /** The particle pipelines this session built, as recipes a later one warms (ParticleRenderer.recipes). */
+    public pipelineRecipes(): PipelineRecipe[] { return this.particles.recipes(); }
+
+    /** Build one recorded particle pipeline ahead of use (ParticleRenderer.warmRecipe). */
+    public warmPipelineRecipe(recipe: ParticleRecipe): Promise<boolean> | null { return this.particles.warmRecipe(recipe); }
+
+    /** Particle pipelines building off the main thread right now. */
+    public get pendingPipelines(): number { return this.particles.pendingBuilds; }
+
     private _particleSimFrame(scene: Scene): ParticleSimFrame {
         // Force fields, packed once for every emitter this frame: the ones that move the air first, the
         // wind sources the foliage sees too (particleFields.ts).
@@ -129,6 +141,7 @@ export class ParticlePasses {
         const live = this.particleCollideValid && !this._host.thumbnailMode && !this._view.capturing;
         return {
             encoder: this._passes.acquireEncoder('particles.sim'),
+            defer: this._host.deferPipelines,
             gravity: scene.physics?.gravity ?? [0, -9.81, 0],
             depth: live ? this._temporal.depthSource() : null,
             viewProj: live ? this.particleCollideViewProj : null,
@@ -168,7 +181,7 @@ export class ParticlePasses {
                                emitters: 'all' | 'nonAdditive' | 'additive' = 'all'): void {
         // The sort runs passes of its own, so it goes before the particle pass opens — once a frame.
         if (emitters !== 'additive')
-            this.particles.sort(nodes, this._passes.acquireEncoder('particles.sort'), this._view.camera.position);
+            this.particles.sort(nodes, this._passes.acquireEncoder('particles.sort'), this._view.camera.position, this._host.deferPipelines);
         const pass = this._passes.beginFullscreenPass(target, 'particles', false, undefined, false);
         const frame = this.particleDrawFrame(scene, pass, target, true);
         frame.emitters = emitters;
@@ -195,6 +208,7 @@ export class ParticlePasses {
             && this.perPixelLighting && !this._view.flat2D;
         return {
             pass, target,
+            defer: this._host.deferPipelines,
             frameLighting: lighting ? (p, pipeline, program) => {
                 // The program is bound: its shadow block and light grid block take the frame's values, and group 3
                 // (the cascades and the light data) the frame's textures, as a lit sprite's draw does.

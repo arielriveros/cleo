@@ -1,4 +1,4 @@
-import { createProgramUsage, usageFromSceneJson, usageFromRenderSettings, castsShadows, programsFor } from 'cleo'
+import { createProgramUsage, usageFromSceneJson, usageFromRenderSettings, usageFromScriptSources, castsShadows, programsFor } from 'cleo'
 import type { RenderSettings } from 'cleo'
 
 /**
@@ -7,14 +7,16 @@ import type { RenderSettings } from 'cleo'
  * is most of a first launch's wait on Windows. Anything this misses still builds the first time it is
  * drawn (with a warning in the console), so the list errs toward including.
  *
- * Templates count in full: a script can spawn any of them into any scene.
+ * Templates count in full: a script can spawn any of them into any scene. So does whatever a script can switch on
+ * (`scripts`, the game's script sources): an effect the published settings leave off but a script turns on in play.
  */
 export function collectPrograms(game: { scenes: Record<string, { scene: any }>; templates?: { node: any }[] },
-                                render: Partial<RenderSettings> | undefined): string[] {
+                                render: Partial<RenderSettings> | undefined, scripts: readonly string[] = []): string[] {
   const use = createProgramUsage()
   const roots = [...Object.values(game.scenes).map(e => e.scene), ...(game.templates ?? []).map(t => t.node)]
   const shadows = roots.some(castsShadows)
   for (const root of roots) usageFromSceneJson(root, use, shadows)
   usageFromRenderSettings(render, use)
+  usageFromScriptSources(scripts, use)
   return programsFor(use)
 }

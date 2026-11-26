@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { CustomMaterial, type Material, type Scene } from 'cleo'
+import { CustomMaterial, Scene, SPAWN_WARMUP_HOLDER, type Material } from 'cleo'
 import type { LoadStepHandle } from '@cleo/app-kit/feedback/loadingStore'
 
 // The loading screen holds on "Compiling shaders" until the renderer has built everything the open scene can draw
@@ -111,5 +111,41 @@ describe('compiling the open scene\'s shaders', () => {
     await prepareSceneShaders(renderer('webgpu', async () => { abort.abort(); return { built: 0, remaining: 1, timedOut: false, seconds: 0 } }),
                               sceneWith(), closed.step, abort.signal)
     expect(closed.log).toEqual(['start', 'skip closed'])
+  })
+
+  it('draws what the scene can spawn with it, and takes it away after, whatever happens', async () => {
+    // The Sandbox's first shot: its muzzle flash and bullet hole are templates the scene never places.
+    const scene = new Scene()
+    const spark = () => [{ id: 's1', name: 'Spark', type: 'node', script: 'export default class {}', children: [] }]
+    const holderIn = (sc: Scene) => sc.root.children.some(c => c.name === SPAWN_WARMUP_HOLDER)
+    let during = false, count = 0
+    const ok = recorder()
+    await prepareSceneShaders(renderer('webgpu', async (sc, options) => {
+      during = holderIn(sc)
+      count = options.warmup?.count ?? 0
+      return { built: 1, remaining: 0, timedOut: false, seconds: 0 }
+    }), scene, ok.step, undefined, undefined, spark)
+    expect(during).toBe(true)
+    expect(count).toBe(1)
+    expect(holderIn(scene)).toBe(false)
+    expect(ok.log.at(-1)).toBe('done 1 built')
+
+    const broken = recorder()
+    await prepareSceneShaders(renderer('webgpu', async () => { throw new Error('device lost') }), scene, broken.step,
+                              undefined, undefined, spark)
+    expect(broken.log.at(-1)).toBe('fail device lost')
+    expect(holderIn(scene)).toBe(false)
+  })
+
+  it("still builds the scene's own shaders when what it can spawn cannot be read", async () => {
+    const { step, log } = recorder()
+    let asked = false
+    await prepareSceneShaders(renderer('webgl2', async (_sc, options) => {
+      asked = true
+      expect(options.warmup).toBeUndefined()
+      return { built: 0, remaining: 0, timedOut: false, seconds: 0 }
+    }), new Scene(), step, undefined, undefined, () => { throw new Error('library gone') })
+    expect(asked).toBe(true)
+    expect(log).toEqual(['start', 'done up to date'])
   })
 })

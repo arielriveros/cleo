@@ -5,6 +5,7 @@ import { TemporalHistory } from './temporalHistory';
 import { ssilTraceShape } from '../ssilSettings';
 import { SsilProgram, SsilTemporalProgram, SsilBlurProgram } from './programs';
 import type { FrameView } from './frameView';
+import { HALF_FLOAT_COLOR, type EffectPrefetch } from './effectPrefetch';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
 import type { PipelineCache } from './pipelineCache';
@@ -147,6 +148,17 @@ export class SsilPasses {
      * in the profiler, an edge-aware blur into `ssaoBlurFBO`. `ssaoResult` ends on whichever ran last.
      * Consumed by the deferred lighting pass: rgb = bounce light, a = visibility.
      */
+    /**
+     * Ask for this effect's pipelines ahead of its first run (render/effectPrefetch.ts): the shader sweep does, so a
+     * script switching it on in play finds them built. Each as its pass asks for it, by the target shape it draws in.
+     */
+    public prefetchPipelines(p: EffectPrefetch): void {
+        if (!this.ssaoFBO || !this.ssaoBlurFBO) return;
+        p.fullscreen('ssil', SsilProgram, this.ssaoFBO.renderTarget);
+        p.fullscreen('ssilTemporal', SsilTemporalProgram, HALF_FLOAT_COLOR);
+        p.fullscreen('ssilBlur', SsilBlurProgram, this.ssaoBlurFBO.renderTarget);
+    }
+
     public ssilPass(): void {
         const w = this.ssaoWidth, h = this.ssaoHeight;
         this._ensureSsilTargets(w, h);

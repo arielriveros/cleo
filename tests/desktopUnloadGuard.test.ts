@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { execFileSync } from 'child_process';
+import { compileFunction } from 'vm';
 
 /**
  * The desktop shell's unload guard, pinned at its seams.
@@ -69,9 +69,12 @@ describe('desktop unload guard', () => {
   });
 
   it('parses — neither desktop file is loadable outside Electron, so nothing else would catch a typo', () => {
+    // Compiled here, as Node wraps a CommonJS module, rather than by `node --check` processes, whose start on a busy
+    // machine outlasted the test's time in a full run.
     for (const file of ['main.js', 'preload.js']) {
-      expect(() => execFileSync(process.execPath, ['--check', join(ROOT, 'applications', 'app-kit', 'desktop', file)]))
-        .not.toThrow();
+      const path = join(ROOT, 'applications', 'app-kit', 'desktop', file);
+      expect(() => compileFunction(readFileSync(path, 'utf8'), ['exports', 'require', 'module', '__filename', '__dirname'],
+                                   { filename: path }), file).not.toThrow();
     }
   });
 });

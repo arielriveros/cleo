@@ -37,9 +37,14 @@ The script starts private editor (8090) and Creator (8091) dev servers. It never
 8080/8081. It then opens Chrome with a profile of its own (`%TEMP%\cleo-docs-media-chrome`), drives the
 page over the DevTools protocol, and listens on `127.0.0.1:8095`.
 
+`DOCS_MEDIA_CHROME_ARGS` passes Chrome more flags, space-separated. `--disable-gpu-shader-disk-cache` makes every
+shader compile cold, as on a first launch: Chrome's shader cache otherwise hides a compile stall from the second
+run on.
+
 | Endpoint | What it does |
 |---|---|
-| `POST /eval` | Runs the body in the page, with `prelude.js`'s helpers in scope. Returns the result as JSON. |
+| `POST /eval[?target=T]` | Runs the body in the page, with `prelude.js`'s helpers in scope. Returns the result as JSON. With `target`, in the other page whose URL contains `T` (the Play-in-window popup: `target=play.html`). |
+| `POST /trace?seconds=S&out=F` | Traces the whole browser for `S` seconds, GPU process included, into `F` (Chrome's trace JSON, opens in Perfetto). A shader compile on WebGPU or ANGLE runs in the GPU process: JS timings read it as ~0 ms, the trace does not. |
 | `POST /shot?out=F[&crop=x,y,w,h]` | Takes a page screenshot. |
 | `POST /record?dir=D&seconds=S` | Records a screencast: JPEG frames plus `frames.json` (frame times). |
 | `POST /canvas?out=F` | Reads the engine canvas at its full render size. Unreliable on WebGPU: see below. |

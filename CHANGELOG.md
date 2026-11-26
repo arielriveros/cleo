@@ -40,6 +40,62 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     reactions.
   - Player contract 54 (reaction sets travel in the skin).
 
+- **Fix: shooting in the Sandbox logged WebGPU errors and showed black frames.** Once a bullet hole existed, every
+  frame failed validation ("Attachment state of decalResolve is not compatible with decals.resolve") and was dropped.
+  The decal pipelines were asked for before their passes opened, so they were built for the previous pass's
+  attachments. Each now names its pass's target.
+- **Effects a script switches on in play build their shaders during the loading step too.**
+  - Bloom, FXAA and motion blur run in the sweep frames, as depth of field and the lens effects already did. Motion
+    blur running there is also what draws every model's velocity, so a tracer's velocity pipeline is built.
+  - Reflections, indirect light, TAA, volumetric fog, clouds (their noise baked), auto exposure and, in a published
+    game, the other shadow filter keep buffers they never give back, so they are not run: each subsystem asks for its
+    pipelines by key (render/effectPrefetch.ts). Measured: 22 effect pipelines dropped, rebuilt by a sweep with every
+    effect off, then all switched on: nothing built, worst frame 13.5 ms.
+  - A published game's program list (Only used shaders) counts an effect a script names (`dofEnabled`,
+    `ssrEnabled`, …) as used, though the game starts with it off.
+- **Multiplayer peers build their scene's shaders before joining.** `NetSyncClient.join` builds the scene before it
+  contacts the host, so preparing there runs with no session to keep alive. Skipping it had only moved the compiles
+  into the first live frames, under the host's 5 s silence watchdog.
+- **Tests that failed or flaked now pass.**
+  - Sandbox: the Player template test reads its sources from the template's `scripts` map (the editor's format).
+  - Sandbox: the crate test checks the push itself (the hit, 0.3 m/s or more along the shot). Distance is checked
+    per backend: cannon caps friction per contact point, so a box on the floor holds about four times its friction.
+  - The real-sockets NetSync test builds its peers' scenes before joining and waits on conditions, not fixed sleeps.
+  - The 16-peer test does its joins in `beforeAll`, and long host runs yield the event loop (vitest's worker starved).
+  - The Play fullscreen test imports a dependency-free module, and the desktop parse tests (play window, unload guard)
+    compile in-process rather than spawning `node --check`.
+  - The engine project's test timeout is 30 s, as the editor's is (the 5 s default failed the declaration walk and the
+    Rapier worker test on a busy machine). The nav-mesh load budget takes the fastest of three loads.
+  - The script workspace's type checks run the TypeScript compiler in-process, keeping the parsed engine declarations
+    between checks, instead of a `tsc` process per check. The decorator test checks its seventeen wrong variants in one
+    program, a module each (24 s for the file, from minutes under load).
+  - The examples' play-through and codec round-trip specs have a 5-minute budget: a big example's data is hundreds of MB.
+  - Fix: every example but the Sandbox would have rewritten its `settings.json` on opening: the Published game page's
+    two new fields (`graphicsBackend`, `excludedScenes`) were filled in on parse. They now stay absent until set
+    (absent: the editor's API, every scene).
+  - The examples' host and net suites run in projects of their own, one file at a time, after everything else.
+- **A template's first spawn no longer stalls the game: what a scene can spawn is built with it.** The Sandbox's first
+  shot froze the game for 2.7 s on WebGPU and 15 s on WebGL 2 while its muzzle flash's particles and its bullet
+  hole's decal compiled. Now the scene's "Compiling shaders" step draws a copy of every template it does not place,
+  in front of the camera with its particles emitting, then takes it away; the first shot is a normal frame (27-40 ms
+  measured, cold shader cache, editor Play and Play in window).
+  - The copies are inert: no scripts, no physics, no camera, sound or sky of their own, never saved, never an undo
+    step, never in a GI or probe capture (core/scene/spawnWarmup.ts; editor publish/spawnables.ts).
+  - Sweep frames also run the post effects a script can switch on (depth of field when aiming, chromatic aberration,
+    lens flare, vignette, film grain) and every model's velocity draw, and wait for programs compiling in the
+    background (a lit particle variant on WebGL 2).
+  - Play in window and published games now build their scene's shaders, spawnables included, before it starts, under
+    the loading screen; a `Game.loadScene` does the same for up to 30 s. A template added or edited after the scene
+    opened is built when Play starts.
+  - Template scripts compile ahead of their first spawn.
+  - A first decal's pipelines build off the main thread on WebGPU (decals skip a frame or two) instead of on the spot.
+  - GPU particles' pipelines (simulation, sort, every draw) build off the main thread on WebGPU too, as a material's
+    do: a system waits with its steps queued, an emitter is left out of the frame, a lit one draws unlit meanwhile.
+    An effect built in code, which nothing prepares, now appears a moment late (one 187 ms frame measured) instead of
+    freezing the window. They are recorded as recipes: the editor warms them next session, a publish ships them.
+    RHI: `createComputePipelineAsync`.
+  - docsMedia harness: `/trace` (the GPU process included), `/eval?target=` for the Play window, `DOCS_MEDIA_CHROME_ARGS`.
+
 - **The Sandbox gets Firing Line's shooter: three weapons, first or third person, crouching.**
   - Firing Line's pistol, AK-47 and SAPS-12 shotgun replace the Low-Poly G40 and M4A1. The third person holds the
     viewmodels' own weapon meshes, cut out at their Idle frame into weapon space, on the Pistol, Rifle and new

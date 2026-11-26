@@ -23,6 +23,17 @@ let listener: HostListener;
 const characters = new Map<number, Node>();
 const subtree = (root: Node): Node[] => [root, ...root.children.flatMap(subtree)];
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/**
+ * Wait until `ready` holds, checking every 50 ms, for at most `ms`: real time on a busy machine is not a fixed sleep.
+ * Throws, saying `what`, when it never does.
+ */
+async function until(what: string, ready: () => boolean, ms: number): Promise<void> {
+    const end = performance.now() + ms; // wall-clock: a deadline in real time
+    while (!ready()) {
+        if (performance.now() > end) throw new Error(`timed out after ${ms} ms waiting for ${what}`);
+        await wait(50);
+    }
+}
 
 beforeAll(async () => {
     await quicheLoaded;
@@ -58,16 +69,28 @@ afterAll(async () => {
 describe('NetSync over real sockets', () => {
     it('lets a WebTransport peer and a WebSocket peer each drive their character in real time', async () => {
         const endpoint = listener.endpoint('127.0.0.1');
+        // Both peers' copies of the Sandbox first, as NetSyncClient.join builds its scene before it contacts the host.
+        // Built after joining, each held this process's event loop for seconds with a session live: past the host's
+        // 5 s silence watchdog on a busy machine, the link dropped and the peer never saw its character (40 m off).
+        const scenes = [await peerScene(bin), await peerScene(bin)];
         const peers: { session: PeerSession; sync: SyncPeer; commands: PeerCommands; scene: Scene; move: [number, number] }[] = [];
-        for (const [only, move] of [[undefined, [0, 1]], ['websocket', [1, 0]]] as const) {
+        const dropped: string[] = [];
+        for (const [i, [only, move]] of ([[undefined, [0, 1]], ['websocket', [1, 0]]] as const).entries()) {
             const s = await PeerSession.join({
                 endpoint, contentHash: 'sandbox',
                 connectOptions: { WebTransportImpl: WebTransport as any, only },
             });
-            const scene = await peerScene(bin);
-            peers.push({ session: s, scene, sync: new SyncPeer(s, scene), commands: new PeerCommands(s), move: [...move] });
+            s.on('reconnecting', (e: { reason?: string }) => dropped.push(`${s.linkKind} reconnecting: ${e?.reason ?? ''}`));
+            s.on('closed', (e: { reason?: string }) => dropped.push(`${s.linkKind} closed: ${e?.reason ?? ''}`));
+            peers.push({ session: s, scene: scenes[i], sync: new SyncPeer(s, scenes[i]), commands: new PeerCommands(s), move: [...move] });
         }
         expect(peers.map((p) => p.session.linkKind)).toEqual(['webtransport', 'websocket']);
+        // How far a peer's view of its own character is from where the host has it, or Infinity before it sees it.
+        const offset = (p: (typeof peers)[number]) => {
+            const root = characters.get(p.session.peerId);
+            const seen = root ? p.scene.getNodeById(root.id) : null;
+            return root && seen ? vec3.distance(seen.position as vec3, root.position as vec3) : Infinity;
+        };
 
         // Each peer's frame loop at ~60 fps: follow the host, send this frame's intent.
         let driving = false;
@@ -78,16 +101,18 @@ describe('NetSync over real sockets', () => {
             }
         }, 16);
         try {
-            await wait(1500); // possessed, landed, clocks synced
-            // The steadiness below is measured from here: the joins before it load each peer's copy of the Sandbox in
-            // this same process, which stalls the host's clock for whole seconds -- the test's doing, not the host's.
+            // Possessed, landed, followed: each peer has its character and sees it where the host has it.
+            await until('both peers to possess and follow their characters',
+                () => peers.every((p) => p.commands.pawnId !== '' && offset(p) < 0.05), 15_000);
             const before = runtime.stats();
-            for (const p of peers) expect(p.commands.pawnId).not.toBe('');
             const start = peers.map((p) => vec3.clone(characters.get(p.session.peerId)!.position as vec3));
             driving = true;
             await wait(2000);
             driving = false;
-            await wait(1000);
+            // Stopped, and caught up: the peers' views settle on the host's within a few ticks.
+            await until('both peers to catch up with the host', () => peers.every((p) => offset(p) < 0.05), 5_000)
+                .catch(() => { /* the assertions below say by how much */ });
+            expect(dropped, 'no link dropped while driving').toEqual([]);
             for (const [i, p] of peers.entries()) {
                 const root = characters.get(p.session.peerId)!;
                 const moved = vec3.distance(start[i], root.position as vec3);
@@ -109,5 +134,5 @@ describe('NetSync over real sockets', () => {
             clearInterval(frame);
             for (const p of peers) p.session.leave();
         }
-    }, 20_000); // 4.5 s of real time by design, plus the joins: past vitest's default 5 s on a busy machine
+    }, 60_000); // about 3 s of real time, plus two copies of the Sandbox and the joins: deadlines inside say what is late
 });

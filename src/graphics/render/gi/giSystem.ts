@@ -1,7 +1,7 @@
 import { mat4, vec3 } from 'gl-matrix';
 import { Frustum } from '../../../core/frustum';
 import { Camera } from '../../../core/camera';
-import { isEditorOnlyNode } from '../../../core/scene/editorNodes';
+import { isEditorOnlyNode, isSpawnWarmupCopy } from '../../../core/scene/editorNodes';
 import type { GIVolumeNode } from '../../../core/scene/nodes/giVolumeNode';
 import type { LightNode } from '../../../core/scene/nodes/lightNode';
 import type { ModelNode } from '../../../core/scene/nodes/modelNode';
@@ -1449,6 +1449,7 @@ function inCapture(node: ModelNode, authored: boolean = false): boolean {
     if (!(authored ? node.authoredVisible : node.visible) || node.shadowOnly) return false;
     if (isEditorOnlyNode(node)) return false;
     if (node.name.startsWith('__editor__') || node.name.startsWith('__debug__')) return false;
+    if (isSpawnWarmupCopy(node)) return false;
     if (node.model instanceof AnimatedModel) return false;
     const config = node.model.material.config;
     if (config.transparent) return false;

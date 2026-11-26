@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Logger, isDefaultInputMap } from "cleo";
-import { isDefaultProjectSettings, resolveAppId, resolveSaveFolder } from "./options/projectSettings";
+import { isDefaultProjectSettings, resolveAppId, resolveSaveFolder, publishGraphicsOf } from "./options/projectSettings";
 import { gameIconFiles, type GameIconFiles } from "./publish/gameIcons";
 import { useCleoEngine, KIND_LABEL } from "./EngineContext";
 import { useVfs } from "./assets/VfsContext";
@@ -259,7 +259,7 @@ export default function MenuBar() {
       const game = { name: gameName || 'Cleo Game', version: projectSettings.identity.version, appId };
       // The graphics API the game runs on (Options ▸ Project ▸ Published game): "same as the editor" is the one this
       // editor was set to run on (Options ▸ Engine ▸ Renderer), as it is now.
-      const chosen = projectSettings.publish.graphicsBackend;
+      const chosen = publishGraphicsOf(projectSettings.publish);
       const graphicsBackend = chosen === 'editor' ? readBackendPreference() : chosen;
 
       task.setStep(0, { status: 'running', detail: 'Embedding textures' });

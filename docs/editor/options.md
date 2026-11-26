@@ -178,9 +178,10 @@ What the game runs on, whoever plays it: the same on the web and on the desktop.
   does not. Off makes a WebGPU-only game, lighter by its GLSL shaders, which tells a player whose browser or
   graphics card has no WebGPU that it needs it. Always on for a WebGL 2 game.
 - **Only used shaders** — compile just the shaders this game uses at startup, not all of them: a much
-  shorter first launch, and a smaller game: of each shader's variants it ships only those. Anything missed
-  still runs when first needed, drawn by the shader's general version (a parallax material then draws
-  flat).
+  shorter first launch, and a smaller game: of each shader's variants it ships only those. An effect a script
+  switches on in play counts as used when the script names its setting (`Game.updateRenderSettings({ dofEnabled:
+  true })`), though the game starts with it off. Anything missed still runs when first needed, drawn by the
+  shader's general version (a parallax material then draws flat).
 - **Physics backend** — the physics engine the game simulates with: the project's, the same setting as Options ▸
   Engine ▸ Runtime. The editor reads it when the project opens; a publish always uses it. A backend that cannot
   load where the game runs falls back to cannon-es, said in the console.

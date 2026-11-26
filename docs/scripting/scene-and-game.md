@@ -143,6 +143,12 @@ The reference keys that get remapped are `followId`, `lookAtId`, `cameraNodeId`,
 `focusTargetId`, `possessedId`, `aimSourceId`, `navMeshId` and `collisionIgnoreIds`. References
 pointing *outside* the copied subtree are deliberately left alone.
 
+**A template's first spawn costs no more than its next.** Its shaders are built before the scene starts: the
+loading step draws a copy of every template the scene can spawn (spawnWarmup.ts; [The interface ▸ background
+work](../editor/interface.md)), and its scripts are compiled ahead. A node a script builds in code
+(`new ParticleSystemNode(…)`) is not prepared: on WebGPU its shaders build off the main thread the first time it
+draws, so it appears a moment late rather than holding the game, and the editor remembers them for the next session.
+
 ### The template registry
 
 ```ts
@@ -150,6 +156,7 @@ registerTemplates(list: NodeTemplate[]): void
 clearTemplates(): void
 getTemplate(nameOrId: string): NodeTemplate | undefined
 templateNames(): string[]
+registeredTemplates(): NodeTemplate[]   // every one by id, two of one name included
 ```
 
 The registry is **global**, not per scene, and loading a scene must not clear it. Duplicate names

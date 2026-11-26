@@ -1,16 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtemp, rm, writeFile, mkdir, readFile, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { execFile } from 'child_process';
+import { createRequire } from 'module';
 import { tmpdir } from 'os';
 import path from 'path';
-import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { scaffoldFiles } from '../src/features/projectFolder/scaffoldText';
 import { projectTypesDeclaration } from '../src/utils/projectTriggers';
 import { PROJECT_TYPES_REL } from '@cleo/app-kit/code/projectTypes';
 
-const exec = promisify(execFile);
 const repo = fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]applications[\\/]editor[\\/]tests[\\/]?$/, '');
 
 // The point of a project folder being a TypeScript project is that it types a script exactly the way the in-editor
@@ -81,17 +79,52 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (root) await rm(root, { recursive: true, force: true }).catch(() => {});
-});
+}, 120000); // thousands of mirrored declaration files to delete, on a disk a full run keeps busy
 
-/** Run the real tsc over the generated workspace and return its (combined) output. */
+/** The repository's TypeScript: the same compiler `tsc` is, run in this process. */
+type TS = typeof import('typescript');
+let tsModule: TS | null = null;
+const typescript = (): TS => (tsModule ??= createRequire(path.join(repo, 'package.json'))('typescript') as TS);
+
+/** Parsed files by path, kept while their text is the same: each check parses only what a test changed. */
+const sourceFiles = new Map<string, { text: string; file: import('typescript').SourceFile }>();
+let lastProgram: import('typescript').Program | undefined;
+
+/**
+ * Type-check the generated workspace with the real compiler, as `tsc --noEmit -p tsconfig.json` would, and return
+ * its diagnostics in tsc's format. In this process, keeping the parsed engine declarations from one check to the
+ * next: a `tsc` per check re-read and re-parsed the whole declaration tree every time, and beside a full run's other
+ * workers that took minutes (one test ran past its four).
+ */
 async function typecheck(): Promise<{ ok: boolean; out: string }> {
-  const tsc = path.join(repo, 'node_modules', 'typescript', 'bin', 'tsc');
-  try {
-    await exec(process.execPath, [tsc, '--noEmit', '-p', path.join(root, 'tsconfig.json')], { cwd: root });
-    return { ok: true, out: '' };
-  } catch (e: any) {
-    return { ok: false, out: `${e.stdout ?? ''}${e.stderr ?? ''}` };
-  }
+  const ts = typescript();
+  const parsed = ts.getParsedCommandLineOfConfigFile(path.join(root, 'tsconfig.json'), {}, {
+    ...ts.sys, onUnRecoverableConfigFileDiagnostic: () => {},
+  });
+  if (!parsed) return { ok: false, out: 'tsconfig.json could not be read' };
+  const host = ts.createCompilerHost(parsed.options);
+  host.getSourceFile = (fileName, languageVersion) => {
+    const text = ts.sys.readFile(fileName);
+    if (text === undefined) return undefined;
+    const kept = sourceFiles.get(fileName);
+    if (kept && kept.text === text) return kept.file;
+    const file = ts.createSourceFile(fileName, text, languageVersion);
+    sourceFiles.set(fileName, { text, file });
+    return file;
+  };
+  const program = ts.createProgram({
+    rootNames: parsed.fileNames, options: parsed.options, host, oldProgram: lastProgram,
+    projectReferences: parsed.projectReferences,
+  });
+  lastProgram = program;
+  const diagnostics = [...parsed.errors, ...ts.getPreEmitDiagnostics(program)];
+  if (!diagnostics.length) return { ok: true, out: '' };
+  return {
+    ok: false,
+    out: ts.formatDiagnostics(diagnostics, {
+      getCanonicalFileName: (f) => f, getCurrentDirectory: () => root, getNewLine: () => '\n',
+    }),
+  };
 }
 
 /** A script, at its explorer path under the project folder's Assets/ (where the project keeps them). */
@@ -397,7 +430,7 @@ export default class Hero extends Node {
       expect(ok.out).toBe('');
       expect(ok.ok).toBe(true);
 
-      for (const wrong of [
+      const wrongs = [
         `@child('Muzzle') muzzle: number = 0`,
         `@options('nope') choice = 'a'`,
         `@onAction('Jupm') jump() {}`,
@@ -415,10 +448,14 @@ export default class Hero extends Node {
         `@attribute({ color: true }) tint: Color = [1, 1, 1]`,
         `@attribute tint: Color = 'red'`,
         `@attribute skin: Material = 'Brick'`,
-      ]) {
-        await writeScript('Player/Hero.ts', `${head}  ${wrong}\n}`);
-        expect((await typecheck()).ok, wrong).toBe(false);
-      }
+      ];
+      // Every mistake in a module of its own, and one check for them all: each is reported against its own file.
+      // A check per mistake (seventeen whole-project checks in one test) ran past its time beside a full run.
+      for (const [i, wrong] of wrongs.entries()) await writeScript(`Player/Wrong${i}.ts`, `${head}  ${wrong}\n}`);
+      const wrongly = await typecheck();
+      for (const i of wrongs.keys()) await rm(path.join(root, 'Assets', 'Player', `Wrong${i}.ts`), { force: true });
+      expect(wrongly.ok).toBe(false);
+      for (const [i, wrong] of wrongs.entries()) expect(wrongly.out, wrong).toMatch(new RegExp(`Wrong${i}\\.ts\\(`));
 
       // The decorators are 'cleo/decorators' only: one imported from 'cleo' is an error naming the module.
       await writeScript('Player/Hero.ts', `

@@ -10,7 +10,7 @@ const mem = new Map<string, string>();
 };
 
 import {
-  DEFAULT_PROJECT_SETTINGS, applyEngineRuntime, applyCollisionLayers, isDefaultProjectSettings, parseProjectSettings, projectSettingsConfig,
+  DEFAULT_PROJECT_SETTINGS, applyEngineRuntime, applyCollisionLayers, isDefaultProjectSettings, parseProjectSettings, projectSettingsConfig, excludedScenesOf, publishGraphicsOf,
   physicsWorkerOverride, physicsWorkerOverrideSource, storePhysicsWorkerOverride, physicsBackendOverride,
   cleanSaveFolder, resolveSaveFolder, PROJECT_SETTINGS_VERSION,
 } from '../src/features/options/projectSettings';
@@ -60,8 +60,9 @@ describe('project settings', () => {
   });
 
   it('keeps the published game\'s graphics API and the scenes it leaves out, out of the game\'s window config', () => {
-    expect(DEFAULT_PROJECT_SETTINGS.publish.graphicsBackend).toBe('editor');
-    expect(DEFAULT_PROJECT_SETTINGS.publish.excludedScenes).toEqual([]);
+    // Absent by default (see the next test): the editor's graphics API, every scene.
+    expect(publishGraphicsOf(DEFAULT_PROJECT_SETTINGS.publish)).toBe('editor');
+    expect(excludedScenesOf(DEFAULT_PROJECT_SETTINGS.publish)).toEqual([]);
     const s = parseProjectSettings({ publish: { graphicsBackend: 'webgpu', excludedScenes: ['menu', 'menu', 'not an id!', 3] } });
     expect(s.publish.graphicsBackend).toBe('webgpu');
     expect(s.publish.excludedScenes).toEqual(['menu']);
@@ -69,6 +70,15 @@ describe('project settings', () => {
     const window = projectSettingsConfig(s).window;
     expect(window).not.toHaveProperty('graphicsBackend');
     expect(window).not.toHaveProperty('excludedScenes');
+  });
+
+  it('leaves the two out of a file saved before them: opening that project writes nothing back', () => {
+    // The examples' settings.json predate them; filled in on parse, every example would be rewritten on open.
+    const old = { title: 'Old', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true, webgl2Fallback: true };
+    const s = parseProjectSettings({ publish: old });
+    expect(s.publish).toEqual(old);
+    expect(publishGraphicsOf(s.publish)).toBe('editor');
+    expect(excludedScenesOf(s.publish)).toEqual([]);
   });
 
   it('names the collision layers: 16, the engine four fixed, a project from before them on the defaults', () => {

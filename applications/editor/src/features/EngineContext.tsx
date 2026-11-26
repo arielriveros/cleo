@@ -18,8 +18,8 @@ import { useStableActions } from "@cleo/app-kit/utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
 import { savePipelineRecipes, warmProjectPipelines } from "../utils/pipelineWarmup";
-import { ensureTranslatorFor, prepareSceneShaders, engineShaderProgress, type CountedShaders } from "../utils/sceneShaders";
-import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, setMovieRender, engineEventBus, parseRuntimeScene, setSaveStore, resetSaveSession, beginSaveSessionFrom } from "cleo";
+import { ensureTranslatorFor, prepareSceneShaders, engineShaderProgress, type CountedShaders, type SpawnableSource } from "../utils/sceneShaders";
+import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, setMovieRender, engineEventBus, parseRuntimeScene, setSaveStore, resetSaveSession, beginSaveSessionFrom, particleCopiesOf, precompileTemplateScripts } from "cleo";
 import type { SaveDocument } from "cleo";
 import { playSaveStore, type PlaySavesConfig } from "./saves/playSaves";
 import { dimensionLookPatch, overlayDimensionOf } from "../utils/sceneDimension";
@@ -95,6 +95,7 @@ import { decimateGeometry } from "../workers/workerClient";
 import { cancelAllImports, ImportCancelled, parseAnimationFiles } from "../workers/importClient";
 import { detectMissingTextures } from "../utils/textureRefs";
 import { buildGameData } from "./publish/buildGameData";
+import { spawnableSubtrees, unplacedTemplates } from "./publish/spawnables";
 import { applyGameData, extractNodeState, ProjectPrefs } from "../utils/projectStorage";
 import { migrateScenePhysics, migrateTemplatePhysics } from "../utils/physicsMigration";
 import { migrateLegacyUI } from "../utils/uiMigration";
@@ -2580,7 +2581,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // the engine's own programs at startup: one "Compiling shaders" from the first shader to the last.
     void prepareSceneShaders(instanceRef.current?.renderer, editorSceneRef.current,
                              bootLoadRef.current.step('shaders'), shaderPrepAbortRef.current.signal,
-                             engineShadersRef.current);
+                             engineShadersRef.current, spawnablesOf(editorSceneRef.current));
   }, [assetsLoaded, isSceneReady]);
 
   /**
@@ -2755,6 +2756,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const terrainMaterialsRef = useRef<TerrainMaterialAsset[]>(terrainMaterials);
   const modelsRef = useRef<ModelAsset[]>(models);
   const templatesRef = useRef<Template[]>(templates);
+  // The template objects whose shaders were built with a scene (spawnablesOf): a template added or edited since
+  // (a new object) is built at Play's start instead.
+  const preparedTemplatesRef = useRef(new WeakSet<Template>());
+  /**
+   * What `scene` can spawn, for its shader step: the templates it does not place, and its own particle systems that
+   * are not running. Read when the step starts, so the libraries are the ones it opens with.
+   */
+  const spawnablesOf = (scene: Scene, only?: Template[]): SpawnableSource => async () => {
+    const templates = only ?? unplacedTemplates(templatesRef.current, scene);
+    for (const t of templates) preparedTemplatesRef.current.add(t);
+    const subtrees = spawnableSubtrees(templates, materialsRef.current, scriptAssetsRef.current);
+    return only ? subtrees : [...subtrees, ...await particleCopiesOf(scene, true)];
+  };
   // Mirrored during RENDER, never in a useEffect: effects run in DECLARATION order, these are declared far
   // below the boot resync effect, and resyncing against mirrors still holding [] unlinks every asset in the
   // scene. Plain "latest value" mirrors, so assigning during render is idempotent.
@@ -6265,7 +6279,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
       load.step('finish').done();
       // Every shader the scene can draw with, before the overlay lifts, as a project's first scene does.
-      await prepareSceneShaders(instanceRef.current?.renderer, scene, load.step('shaders'), shaderPrepAbortRef.current.signal);
+      await prepareSceneShaders(instanceRef.current?.renderer, scene, load.step('shaders'), shaderPrepAbortRef.current.signal,
+                                undefined, spawnablesOf(scene));
       Logger.info(`Opened scene "${entry.name}"`, 'Editor');
       return true;
     } finally {
@@ -6873,6 +6888,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Templates are global and shared by every scene in the session, so they are registered here rather
     // than per-parse — a runtime Game.loadScene must not drop what a script can still instantiate.
     registerTemplates(json.templates);
+    // Their scripts compiled now, not on the first spawn (a gun's muzzle flash): compiling runs none of them.
+    precompileTemplateScripts((json.templates ?? []).map((t: { node: unknown }) => t.node));
     // The materials and tilesets script fields name, once each: what a `skin: Material` field becomes.
     registerAssetTable(json.assets);
     // Before parse: a node's script imports its modules while it is being attached.
@@ -7120,6 +7137,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // silently does not draw, so load the translator here when there is one to build.
     if ([...editorSceneRef.current.nodes].some(n => n instanceof CameraNode && n.screenMaterials.length > 0))
       await ensureWgslTranslator();
+    // A template added or edited since the scene's shaders were built can still be spawned in this session: its
+    // shaders are built now, before the game starts, instead of on its first spawn.
+    const fresh = unplacedTemplates(templatesRef.current, editorSceneRef.current).filter(t => !preparedTemplatesRef.current.has(t));
+    if (fresh.length) {
+      const load = beginLoad('Starting the game', [{ id: 'shaders', label: 'Compiling shaders', weight: 1 }], 'overlay', { showAfterMs: 150 });
+      try {
+        await prepareSceneShaders(instance.renderer, editorSceneRef.current, load.step('shaders'), shaderPrepAbortRef.current.signal,
+                                  undefined, spawnablesOf(editorSceneRef.current, fresh));
+      } finally { load.finish(); }
+    }
     const savedSceneId = fromSave && fromSave.scene.id !== openSceneIdRef.current
       ? projectMetaRef.current?.scenes.find(s => s.id === fromSave.scene.id || s.name === fromSave.scene.name)?.id
       : undefined;

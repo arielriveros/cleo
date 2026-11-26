@@ -10,7 +10,7 @@ import { OptionsPageBody, OptionsShell, OPTION_LABEL, useMarkOptionPageShown, us
 import {
   BUILT_IN_COLLISION_LAYERS, COLLISION_LAYER_NAME_MAX, DEFAULT_PROJECT_SETTINGS, cleanSaveFolder, resolveSaveFolder,
   type ProjectNetSyncSettings, type ProjectSaveSettings, type PublishWindowSettings, type PhysicsBackendSetting,
-  type PublishGraphicsSetting,
+  type PublishGraphicsSetting, excludedScenesOf, publishGraphicsOf,
 } from './projectSettings'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import GameIdentityRows from './GameIdentityRows'
@@ -162,10 +162,10 @@ function PublishedGameOptions() {
   const setWindow = (patch: Partial<PublishWindowSettings>) =>
     setProjectSettings(prev => ({ ...prev, publish: { ...prev.publish, ...patch } }))
   const d = DEFAULT_PROJECT_SETTINGS.publish
-  const excluded = new Set(w.excludedScenes)
+  const excluded = new Set(excludedScenesOf(w))
   const startId = sceneList.some(s => s.id === mainSceneId) ? mainSceneId : sceneList[0]?.id
   const include = (id: string, on: boolean) => setProjectSettings(prev => {
-    const rest = prev.publish.excludedScenes.filter(x => x !== id)
+    const rest = excludedScenesOf(prev.publish).filter(x => x !== id)
     return { ...prev, publish: { ...prev.publish, excludedScenes: on ? rest : [...rest, id] } }
   })
   const shipped = sceneList.filter(s => s.id === startId || !excluded.has(s.id)).length
@@ -173,7 +173,7 @@ function PublishedGameOptions() {
   // The editor's own graphics API, which "same as the editor" publishes with.
   const editorBackend = readBackendPreference()
   const apiName = (b: 'webgpu' | 'webgl2') => (b === 'webgpu' ? 'WebGPU' : 'WebGL 2')
-  const runsOn = w.graphicsBackend === 'editor' ? editorBackend : w.graphicsBackend
+  const runsOn = publishGraphicsOf(w) === 'editor' ? editorBackend : publishGraphicsOf(w)
   const physicsBackend = projectSettings.engine.physicsBackend
   const setPhysics = (b: PhysicsBackendSetting) =>
     setProjectSettings(prev => ({ ...prev, engine: { ...prev.engine, physicsBackend: b } }))
@@ -216,7 +216,7 @@ function PublishedGameOptions() {
 
       <Section title='Rendering and physics'>
         <Field label='Graphics API' labelClassName={OPTION_LABEL}>
-          <Select className='flex-1' value={w.graphicsBackend}
+          <Select className='flex-1' value={publishGraphicsOf(w)}
             onChange={e => setWindow({ graphicsBackend: e.target.value as PublishGraphicsSetting })}>
             <option value='editor'>Same as the editor ({apiName(editorBackend)})</option>
             <option value='webgpu'>WebGPU</option>

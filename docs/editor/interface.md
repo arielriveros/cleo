@@ -272,8 +272,8 @@ The bakes there:
 - **Baking nav mesh**, **Baking impostor**, **Saving GI bake**: one card each, while they run.
 
 **Compiling shaders** lists the shaders being built in the background:
-- a material, the water or a screen effect seen for the first time, which shows up once its shader is
-  ready;
+- a material, the water, a particle effect or a screen effect seen for the first time, which shows up once
+  its shader is ready;
 - the shaders the project used last session, rebuilt as it opens, with their count.
 
 Work over in under half a second shows no card.
@@ -284,7 +284,17 @@ the scene can draw with is built, wherever the camera is:
   screen or past a draw distance;
 - custom materials;
 - the screen materials of every camera, including the game camera that only Play looks through;
+- **what the scene can spawn**: every template it does not place (a muzzle flash, an impact, a bullet hole a
+  script instantiates), drawn with it in front of the camera, its particles emitting, then taken away;
+- the effects a script can switch on in play, whatever the scene starts with: depth of field when aiming,
+  bloom, FXAA, motion blur and the lens effects run once; reflections, indirect light, TAA, fog, clouds, auto
+  exposure and the other shadow filter, which keep buffers of their own, have their shaders built without running;
 - at startup, the engine's own shaders first, in the same count.
+
+The copies of what the scene can spawn run no scripts, make no physics, are never saved and never mark the
+scene unsaved. A template added or edited after the scene opened is built when Play starts, under a short
+**Starting the game** step. Play in window and a published game do the same before their scene starts, under
+their own loading screen.
 
 Nothing should then pop in late or stall the first time it comes into view. A cold start on Windows can
 take a minute or more on this step. Its row counts the builds and shows how long the slowest one has been

@@ -313,6 +313,11 @@ export interface Device {
     createOcclusionQuerySet?(capacity: number, label?: string): OcclusionQuerySet;
     /** Build a compute pipeline. Throws on WebGL2 — see {@link DeviceCapabilities.hasCompute}. */
     createComputePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline;
+    /**
+     * {@link createComputePipeline} without blocking: the driver compiles it off the main thread and the promise
+     * resolves when it can be dispatched. Optional, WebGPU's (the particle simulation defers its first build).
+     */
+    createComputePipelineAsync?(descriptor: ComputePipelineDescriptor): Promise<ComputePipeline>;
     createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget;
     createBindGroup(descriptor: BindGroupDescriptor): BindGroup;
 

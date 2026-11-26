@@ -1,7 +1,7 @@
 import { Scene, TextureManager, AudioManager, GiBakeRegistry, FEATURES, featureApiNames } from 'cleo'
 import type { RenderSettings, InputMap } from 'cleo'
 import { isDefaultInputMap } from 'cleo'
-import { projectSettingsConfig } from '../options/projectSettings'
+import { projectSettingsConfig, excludedScenesOf } from '../options/projectSettings'
 import type { ProjectSettings } from '../options/projectSettings'
 import { buildGameData, bakeTemplates, attachScriptModules, injectSaveFields } from './buildGameData'
 import { publishedGraphics, publishedStartScene, shipsScene } from './publishChoices'
@@ -84,7 +84,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   // The scenes the project leaves out of its published game (Options ▸ Project ▸ Published game). The one it starts
   // with always ships.
   const startId = publishedStartScene(src.scenes.map(m => m.id), src.mainSceneId)
-  const excluded = new Set(src.projectSettings?.publish.excludedScenes ?? [])
+  const excluded = new Set(src.projectSettings ? excludedScenesOf(src.projectSettings.publish) : [])
 
   for (const meta of src.scenes) {
     if (!shipsScene(meta.id, startId, excluded)) continue
@@ -277,7 +277,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   if (Object.keys(absentApi).length) config.absentApi = absentApi
   // The shader programs the game uses: the player builds only these at boot (see collectPrograms).
   if (src.projectSettings?.publish.onlyUsedShaders !== false)
-    (config.graphics ??= {}).programs = collectPrograms(out, config.render)
+    (config.graphics ??= {}).programs = collectPrograms(out, config.render, (src.scriptAssets ?? []).map(a => a.source))
   if (src.pipelines?.length) (config.graphics ??= {}).pipelines = src.pipelines
   // The graphics API it runs on (the player starts the engine on it), and whether it ships its WebGL 2 shaders:
   // without, the player asks for WebGPU and says so where there is none.

@@ -724,6 +724,12 @@ Phase-9 details and findings:
     distance off (`quietSnaps`).
   With everything on one machine (two rendering game windows, the editor, the host) the host's tick rose to about
   30 ms mean and it skipped ticks, which showed as frequent corrections; a host has a machine of its own.
+- **A peer's shaders (2026-11-26):** the player builds every shader the peer's scene draws with, and what it can
+  spawn, before the scene starts (boot.tsx `prepareForStart`, Renderer.prepareShaders). For a peer that runs inside
+  `NetSyncClient.join`'s `loadScene`, which builds the scene BEFORE it contacts the host: no session is live yet, so
+  the host's 5 s Hello and silence limits do not apply. Skipping it (as the player first did) only moved the compiles
+  to the first live frames, where a stalled peer is closed. When scene following is built, prepare before swapping the
+  `SyncPeer` onto the new scene; that runs with a session live, relying on the sweep yielding between frames.
 - **Open from 9a:** a host scene change (`Game.loadScene` on the host) is not followed yet (the peer stays in
   its scene); mouse look is applied at frame rate locally but reaches the host once per tick, as everything
   else does; the NetSync chunk ships in every player build's core (a feature chunk of its own would keep it

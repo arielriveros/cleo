@@ -1,5 +1,5 @@
-import { CleoEngine, PhysicsSystem, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles, restrictFeatures, setAbsentFeatureNames, setSaveStore, beginSaveSessionFrom, createBridgeSaveStore, createIndexedDbSaveStore } from 'cleo';
-import type { BackendKind, LoadProgressListener, SaveStore, SaveDocument } from 'cleo';
+import { CleoEngine, PhysicsSystem, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry, installShaderLibrary, shadersAreLibraryHandles, restrictFeatures, setAbsentFeatureNames, setSaveStore, beginSaveSessionFrom, createBridgeSaveStore, createIndexedDbSaveStore, registeredTemplates, precompileTemplateScripts, mountSpawnWarmup, particleCopiesOf } from 'cleo';
+import type { BackendKind, LoadProgressListener, SaveStore, SaveDocument, Scene } from 'cleo';
 import { mountVirtualControls } from './virtualControls';
 import { collectUiTextureIds, type GameHeader } from './unpack';
 import { buildGameScene, installGameContent } from './gameContent';
@@ -55,6 +55,11 @@ export interface PlayerBootOptions {
   startFromSave?: () => Promise<SaveDocument | null>;
   /** A failure past boot: a scene switch that threw. Defaults to {@link showError}. */
   onError?: (err: unknown) => void;
+  /**
+   * Build every shader a scene can draw with, what it can spawn included, before it starts (default true): under the
+   * loading screen, not on the first frame something appears (a gun's first shot). False starts it at once.
+   */
+  prepareShaders?: boolean;
   /**
    * Join a NetSync host instead of playing alone (docs/design/netsync.md, phase 9): the game's scene is loaded as
    * a follower of the host's, this player's character predicted here.
@@ -293,6 +298,40 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   const content = { source, header, claimed };
   const permanentBakes = await installGameContent(content);
   let sceneBakes: string[] = [];
+  // Template scripts compiled now rather than on their first spawn. Only a pack that kept its sources (Play in window)
+  // has any: a published game's are functions already.
+  precompileTemplateScripts(registeredTemplates().map(t => t.node));
+
+  /**
+   * Every shader `scene` draws with, and what it can spawn (each template, and its own particle systems, none of which
+   * play before it starts), built before it starts: a template only a script instantiates otherwise built its shaders
+   * the frame it first appeared, and a GPU particle system or a decal held the whole window for seconds doing it (the
+   * Sandbox's first shot). The entry scene waits for its textures first: a material drawn without them is not the
+   * pipeline it will draw with. Never fails the start.
+   */
+  const prepareForStart = async (scene: Scene, first: boolean, onProgress?: LoadProgressListener): Promise<void> => {
+    if (options.prepareShaders === false) return;
+    if (first) await texturesLoaded;
+    let warmup: ReturnType<typeof mountSpawnWarmup> | null = null;
+    try {
+      warmup = mountSpawnWarmup(scene, [...registeredTemplates().map(t => t.node), ...await particleCopiesOf(scene, false)]);
+      const report = await engine.renderer.prepareShaders(scene, {
+        ...(warmup.count ? { warmup } : {}),
+        timeoutMs: first ? 120_000 : 30_000,
+        onProgress: (done, total) => {
+          if (total <= 0) return;
+          if (first) setLoadingText(`Compiling shaders ${Math.min(done, total)} / ${total}`);
+          onProgress?.(0.8 + 0.1 * Math.min(1, done / total), 'Compiling shaders');
+        },
+      });
+      Logger.info(`[shaders] ${report.built} built before the scene started${warmup.count ? ` (${warmup.count} it can spawn)` : ''}`, 'Player');
+    } catch (e) {
+      Logger.warn(`[shaders] preparing the scene failed: ${(e as Error)?.message ?? e}`, 'Player');
+    } finally {
+      warmup?.dispose();
+    }
+  };
+  let started = 0;
 
   // How the engine finds a node's precompiled script: consulted whenever a node has no `script`
   // source, including nodes created later by scene.instantiate (matched through their __sourceId).
@@ -347,6 +386,10 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     if (uiBox) scene.setUIViewport(uiBox.width, uiBox.height, window.devicePixelRatio || 1);
     // A script that paused before switching (a menu) must not land in a frozen scene.
     engine.isPaused = false;
+    // A NetSync peer's scene (`hold`) too: NetSyncClient.join builds it BEFORE it contacts the host, so this runs with
+    // no session yet to keep alive. Skipped, the compiles only moved to the first live frames, where the host's
+    // silence watchdog closes a peer that stalls.
+    await prepareForStart(scene, started++ === 0, onProgress);
     onProgress?.(0.9, 'Starting');
     if (hold) return () => { scene.start(); options.onSceneStarted?.(entry.name); };
     await new Promise<void>(resolve => setTimeout(() => { scene.start(); resolve(); }, 100));

@@ -38,6 +38,14 @@ export function getTemplate(nameOrId: string): NodeTemplate | undefined {
     return byName.get(nameOrId) ?? byId.get(nameOrId);
 }
 
+/**
+ * Every registered template, by id, in registration order: those sharing a name too, which
+ * {@link templateNames} lists once. What a scene can spawn, for the shader sweep (spawnWarmup.ts).
+ */
+export function registeredTemplates(): NodeTemplate[] {
+    return [...byId.values()];
+}
+
 /** Every registered template's name, in registration order. For diagnostics and editor tooling. */
 export function templateNames(): string[] {
     return [...byName.keys()];

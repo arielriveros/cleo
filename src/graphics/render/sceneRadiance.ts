@@ -2,6 +2,7 @@ import { mat4 } from 'gl-matrix';
 import { Framebuffer } from '../framebuffer';
 import { SsilHistoryProgram } from './programs';
 import type { FrameView } from './frameView';
+import { HALF_FLOAT_COLOR, type EffectPrefetch } from './effectPrefetch';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
 import type { ViewProjection } from './viewProjection';
@@ -72,6 +73,14 @@ export class SceneRadianceCopy {
      * Allocate the copy and size it to what the host asks for now. A reallocation drops the stamp:
      * `Framebuffer.resize` hands back uninitialized memory, not a stale image.
      */
+    /**
+     * Ask for this effect's pipelines ahead of its first run (render/effectPrefetch.ts): the shader sweep does, so a
+     * script switching it on in play finds them built. Each as its pass asks for it, by the target shape it draws in.
+     */
+    public prefetchPipelines(p: EffectPrefetch): void {
+        p.fullscreen('ssilHistory', SsilHistoryProgram, HALF_FLOAT_COLOR);
+    }
+
     public ensure(): Framebuffer {
         if (!this.fbo)
             this.fbo = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });

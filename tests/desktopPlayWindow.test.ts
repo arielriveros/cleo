@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { execFileSync } from 'child_process';
+import { compileFunction } from 'vm';
 import { createRequire } from 'module';
 
 /**
@@ -104,8 +104,12 @@ describe('the desktop play window', () => {
   });
 
   it('parses — none of the desktop files is loadable outside Electron, so nothing else would catch a typo', () => {
+    // Compiled here, as Node wraps a CommonJS module, rather than by five `node --check` processes: starting a
+    // process on a busy machine took seconds, and the five together outlasted the test's time in a full run.
     for (const file of ['main.js', 'preload.js', 'playWindow.js', 'playDebugger.js', 'debugPort.js']) {
-      expect(() => execFileSync(process.execPath, ['--check', join(DESKTOP, file)])).not.toThrow();
+      const path = join(DESKTOP, file);
+      expect(() => compileFunction(readFileSync(path, 'utf8'), ['exports', 'require', 'module', '__filename', '__dirname'],
+                                   { filename: path }), file).not.toThrow();
     }
   });
 });

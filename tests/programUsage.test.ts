@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import './helpers/features';
-import { PROGRAM_CLASS, createProgramUsage, usageFromSceneJson, usageFromRenderSettings, programsFor, castsShadows } from '../src/graphics/programUsage';
+import { PROGRAM_CLASS, createProgramUsage, usageFromSceneJson, usageFromRenderSettings, usageFromScriptSources, programsFor, castsShadows } from '../src/graphics/programUsage';
 import { physicalFor, variantLogicalNames, EXTRA_LOGICAL_NAMES } from '../src/graphics/programVariants';
 import { ShaderManager } from '../src/graphics/systems/shaderManager';
 import { PARTICLE_PROGRAMS } from '../src/graphics/particles/particleRenderer';
@@ -76,6 +76,33 @@ describe('programsFor', () => {
         usageFromRenderSettings({ quality: 'ultra' }, use);
         expect(programsFor(use)).toContain('deferredLighting~poisson');
         expect(programsFor(use)).toContain('taaResolve');
+    });
+});
+
+describe('what a script can switch on', () => {
+    // The published settings are how a game starts. The Sandbox's player turns depth of field on when it aims
+    // (`Game.updateRenderSettings({ dofEnabled: true })`): published with it off, the game linked DOF's programs the
+    // first time a gun was raised.
+    const listed = (sources: string[], render: Record<string, unknown> = { dofEnabled: false, ssrEnabled: false }) => {
+        const use = createProgramUsage();
+        usageFromRenderSettings(render, use);
+        usageFromScriptSources(sources, use);
+        return programsFor(use);
+    };
+
+    it('ships the programs of an effect a script turns on, though the settings leave it off', () => {
+        expect(listed([])).not.toContain('dofGather');
+        const aimed = listed(['Game.updateRenderSettings({ dofEnabled: true, dofFocusDistance: f })']);
+        expect(aimed).toEqual(expect.arrayContaining(['dofCoc', 'dofGather', 'dofComposite']));
+        // Only what it names: SSR stays off.
+        expect(aimed).not.toContain('ssr');
+    });
+
+    it('takes a name as a whole word, and both filters for a script that switches the shadow filter', () => {
+        expect(listed(['const ssrEnabledButton = 1'])).not.toContain('ssr');
+        const use = createProgramUsage();
+        usageFromScriptSources(['renderer.shadowFilterMode = 1'], use);
+        expect([...use.filters].sort()).toEqual([0, 1]);
     });
 });
 

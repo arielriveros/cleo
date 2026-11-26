@@ -39,7 +39,9 @@ describe('Play and the browser’s keys', () => {
   })
 
   it('takes the game UI into fullscreen with the canvas: the viewport panel goes fullscreen, not the canvas wrapper', async () => {
-    const { playFullscreenTarget, PLAY_SURFACE_ATTR } = await import('../src/features/PlayFullscreenButton')
+    // The lookup's own module, which imports nothing: the button's pulls in the UI kit and, through it, the whole
+    // engine, whose cold transform beside a full run's other workers outlasted the test's time.
+    const { playFullscreenTarget, PLAY_SURFACE_ATTR } = await import('../src/features/playFullscreenTarget')
     // The panel is marked as the play surface, and holds the viewport and the game UI layer.
     const panels = read('features', 'layout', 'panels.tsx')
     const surface = panels.indexOf('[PLAY_SURFACE_ATTR]: \'\'')

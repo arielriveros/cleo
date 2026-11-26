@@ -71,7 +71,7 @@ export function projectSpecs(options: ProjectSpecOptions = {}): void {
         for (const [rel, content] of snapshot.files) expect(bytes(again.files.get(rel)!).equals(bytes(content)), rel).toBe(true)
         // Every blob a file references is one the folder holds (an orphan the editor let go of is not an error).
         for (const hash of again.blobs.keys()) expect(snapshot.blobs.has(hash), blobRel(hash)).toBe(true)
-      })
+      }, 300_000) // every file and blob read, then written again, in this process: minutes for a big example under load
     })
   })
 }

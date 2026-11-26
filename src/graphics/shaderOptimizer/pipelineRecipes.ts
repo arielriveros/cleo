@@ -37,6 +37,47 @@ export interface PipelineRecipe {
     depthStencil: DepthStencilState | null;
     /** False for a depth-only draw (every colour write mask off). Absent = true. */
     colorWrite?: boolean;
+    /**
+     * A GPU particle pipeline (graphics/particles/particleRenderer.ts), which the particle renderer builds and warms
+     * itself: the fields above are then placeholders. Absent for every pipeline the cache builds.
+     */
+    particle?: ParticleRecipe;
+}
+
+/** What a particle pipeline was built from: its kind and the state its key is made of. */
+export interface ParticleRecipe {
+    /** `draw`: a billboard or mesh draw; `sim`: the simulation (compute); `sort`: the back-to-front sort (compute). */
+    kind: 'draw' | 'sim' | 'sort';
+    /** draw: a mesh emitter's (else a billboard's). */
+    mesh?: boolean;
+    /** draw: the `lit` per-pixel variant. */
+    lit?: boolean;
+    /** draw: the emitter's blend (`alpha`, `additive`, `cutout`). */
+    blend?: string;
+    /** draw: the colour target's format, and the depth's (null: none). */
+    color?: string;
+    depth?: string | null;
+    /** sim: the strip-mask variant (0: the full program). */
+    strip?: number;
+}
+
+/** A particle recipe read tolerantly, or undefined when it is not one. */
+export function parseParticleRecipe(raw: unknown): ParticleRecipe | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const o = raw as Record<string, unknown>;
+    if (o.kind === 'sort') return { kind: 'sort' };
+    if (o.kind === 'sim') return { kind: 'sim', strip: typeof o.strip === 'number' && o.strip >= 0 ? Math.floor(o.strip) : 0 };
+    if (o.kind !== 'draw' || typeof o.blend !== 'string' || typeof o.color !== 'string') return undefined;
+    return { kind: 'draw', mesh: o.mesh === true, lit: o.lit === true, blend: o.blend, color: o.color,
+             depth: typeof o.depth === 'string' ? o.depth : null };
+}
+
+/** The recipe a particle pipeline is recorded as: a PipelineRecipe whose own fields are placeholders. */
+export function particlePipelineRecipe(program: string, particle: ParticleRecipe): PipelineRecipe {
+    return {
+        program, cullMode: 'none', targets: 1, topology: 'triangle-list', vertex: false, builtFor: null, cubeFace: false,
+        colorFormats: [], blend: null, depthStencil: null, particle,
+    };
 }
 
 /** The plain-data copy of a recipe that goes into a published game's config. */
@@ -67,6 +108,7 @@ export function parseRecipe(raw: unknown): PipelineRecipe | null {
         blend: (o.blend && typeof o.blend === 'object') ? o.blend as BlendState : null,
         depthStencil: (o.depthStencil && typeof o.depthStencil === 'object') ? o.depthStencil as DepthStencilState : null,
         ...(o.colorWrite === false ? { colorWrite: false } : {}),
+        ...(o.particle !== undefined && parseParticleRecipe(o.particle) ? { particle: parseParticleRecipe(o.particle) } : {}),
     };
 }
 

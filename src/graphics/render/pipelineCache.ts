@@ -10,7 +10,7 @@ import { ShaderManager } from '../systems/shaderManager';
 import { EXTRA_LOGICAL_NAMES, type ShadowFilter } from '../programVariants';
 import { serializeRecipe, recordStall, shaderOptimizerStats } from '../shaderOptimizer';
 import { shaderActivity } from '../shaderActivity';
-import type { PipelineRecipe } from '../shaderOptimizer';
+import type { PipelineRecipe, ParticleRecipe } from '../shaderOptimizer';
 import type { FrameView } from './frameView';
 import type { PassEncoder } from './passEncoder';
 
@@ -311,6 +311,18 @@ export class PipelineCache {
     public get pendingBuilds(): number { return this._pending.size; }
 
     /**
+     * Whether a miss in this frame is built off the main thread rather than at once ({@link getOrDefer}): an
+     * on-screen frame on WebGPU. Read by the passes that build their own pipelines (the particle renderer).
+     */
+    public get deferring(): boolean { return this._deferring(); }
+
+    /**
+     * Who warms a particle recipe ({@link warm}): the particle renderer, which builds its own pipelines. Null
+     * where the game has no particles; such recipes are then skipped.
+     */
+    public particleWarmer: ((recipe: ParticleRecipe) => Promise<boolean> | null) | null = null;
+
+    /**
      * Whether a {@link warm} is still under way. Not the same as pending builds: it starts its recipes a few
      * at a time, a frame apart, so between two batches nothing may be building while more is still to come.
      */
@@ -593,6 +605,11 @@ export class PipelineCache {
         shaderActivity.setWarm(0, recipes.length);
         const job = async (r: PipelineRecipe) => {
             try {
+                if (r.particle) {
+                    const started = this.particleWarmer?.(r.particle);
+                    if (started && await started) warmed++;
+                    return;
+                }
                 const built = this._recipePipeline(r, create);
                 if (built) {
                     const [key, pipeline] = await built;

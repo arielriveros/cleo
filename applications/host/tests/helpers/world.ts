@@ -24,10 +24,24 @@ export async function manifestOf(bin: Uint8Array): Promise<any> {
     return (await readGameHeader(bufferSource(bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength) as ArrayBuffer))).manifest;
 }
 
+/**
+ * A game's source and header, read once per bin: sixteen peers joining one game read it once, not sixteen times.
+ * buildGameScene copies the scene JSON it inflates, so the header it reads from is never changed.
+ */
+const games = new WeakMap<Uint8Array, Promise<{ source: ReturnType<typeof bufferSource>; header: Awaited<ReturnType<typeof readGameHeader>> }>>();
+function gameOf(bin: Uint8Array) {
+    let game = games.get(bin);
+    if (!game) {
+        const source = bufferSource(bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength) as ArrayBuffer);
+        game = readGameHeader(source).then(header => ({ source, header }));
+        games.set(bin, game);
+    }
+    return game;
+}
+
 /** The same game's entry scene, parsed but not started: what a peer draws. */
 export async function peerScene(bin: Uint8Array, prepare?: (json: any) => void): Promise<Scene> {
-    const source = bufferSource(bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength) as ArrayBuffer);
-    const header = await readGameHeader(source);
+    const { source, header } = await gameOf(bin);
     const built = await buildGameScene({ source, header, claimed: new Set() }, (header.manifest as any).entry, undefined, prepare);
     return built!.scene;
 }
@@ -153,6 +167,10 @@ export async function world(bin: Uint8Array, options: WorldOptions = {}) {
                 if (intent && p.commands) p.commands.update(intent);
                 if (p.carry) { const h = p.hold?.(tick) ?? null; p.carry.update(tick, h?.pos ?? null, h?.rot ?? null); }
             }
+            // A real turn of the event loop every second of game time. The manual clock only ever yields to promise
+            // callbacks, so a long run held the loop for its whole length: vitest's worker could not report
+            // ("Timeout calling onTaskUpdate") and its own test timer could not fire.
+            if (i % 30 === 29) await new Promise<void>(resolve => setImmediate(resolve));
         }
     };
 
