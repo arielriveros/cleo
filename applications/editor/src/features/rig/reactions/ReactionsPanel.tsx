@@ -34,6 +34,9 @@ import {
 // The bench below runs the set being edited on the preview character, live: change a number and see it.
 
 const icon = 'inline-block w-4 h-4'
+/** The sliders' label and readout columns: room for the longest names ("Recovered after") and units ("250 N·m"). */
+const LABEL = 'w-[104px]'
+const READOUT = 'w-[64px] whitespace-nowrap'
 const REGION_LABEL: Record<MuscleRegion, string> = { neck: 'Neck and head', spine: 'Spine', arms: 'Arms', hands: 'Hands', legs: 'Legs', feet: 'Feet' }
 
 function useBench(): BenchState {
@@ -47,6 +50,7 @@ function SpecSlider({ spec, value, onChange, disabled }: { spec: ReactionParamSp
   const digits = spec.step >= 1 ? 0 : spec.step >= 0.1 ? 1 : 2
   return (
     <Slider label={spec.label} min={spec.min} max={spec.max} step={spec.step} value={value} title={spec.doc}
+      labelClassName={LABEL} readoutClassName={READOUT}
       readout={v => `${v.toFixed(digits)}${spec.unit ? ` ${spec.unit}` : ''}`}
       onChange={v => { if (!disabled) onChange(v) }} />
   )
@@ -228,6 +232,7 @@ export default function ReactionsPanel() {
               </Button>
             </div>
             <Slider label='Impulse' min={1} max={400} step={1} value={bench.impulse} readout={v => `${v.toFixed(0)} N·s`}
+              labelClassName={LABEL} readoutClassName={READOUT}
               title='How hard a shot, a click-shove or the hit button lands' onChange={v => benchStore.set({ impulse: v })} />
             <div className='flex gap-2'>
               <Toggle label='Target' checked={bench.overlays.target} title='Draw the pose the muscles reach for'
@@ -253,6 +258,7 @@ export default function ReactionsPanel() {
         <div className={cn(!authored && 'opacity-70')}>
           <Collapsable title='Muscles' persistKey='reactions.muscles' doc='editor/reactions#muscles'>
             <Slider label='Overall strength' min={0} max={5} step={0.05} value={set.strength} readout={v => `${v.toFixed(2)}×`}
+              labelClassName={LABEL} readoutClassName={READOUT}
               title='Multiplies every muscle: a tough character, a weak one' onChange={v => authored && writeSet({ ...set, strength: v })} />
             {MUSCLE_REGIONS.map(region => (
               <div key={region} className='mt-1'>

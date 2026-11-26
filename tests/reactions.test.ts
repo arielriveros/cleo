@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
+import { Logger } from '../src/core/logger';
 import { vec3 } from 'gl-matrix';
 import { acquirePhysicsBackend } from '../src/physics/pal/createWorld';
 import type { PhysicsBackendKind } from '../src/physics/pal/types';
@@ -261,6 +262,30 @@ describe('reactions with the physics worker', () => {
             }
             expect(physics.executor).toBe('worker');
             expect(states).toMatch(/>falling.*>down.*>getUp.*>animated/);
+            physics.dispose();
+        }, 60000);
+    }
+
+    // An editor action (the bench's End or Run) ends a reaction between frames: its bodies are gone before the step
+    // the worker is running for them comes back. The step lands without them.
+    for (const backend of ['jolt', 'rapier', 'cannon'] as const) {
+        it(`ends a reaction between frames on ${backend} without losing the step in flight`, async () => {
+            await acquirePhysicsBackend(backend);
+            const physics = groundWorld(backend);
+            physics.setWorkerMode('on', () => new LoopbackPort());
+            const node = humanoidModel();
+            const r = physics.reactionsOf(node)!;
+            const errors = vi.spyOn(Logger, 'error');
+            for (let f = 0; f < 120; f++) {
+                if (f === 3) r.trip();
+                physics.update(H);
+                node.animator!.update(H);
+                physics.endFrame(H);
+                if (f === 60) { expect(r.ragdoll).not.toBeNull(); r.reset(); }
+            }
+            expect(errors).not.toHaveBeenCalled();
+            expect(r.state).toBe('animated');
+            errors.mockRestore();
             physics.dispose();
         }, 60000);
     }

@@ -38,6 +38,8 @@ export interface SliderProps {
   editable?: boolean;
   className?: string;
   labelClassName?: string;
+  /** Classes for the readout (and its edit box): a wider one for values with units, say. */
+  readoutClassName?: string;
   /**
    * Native tooltip covering the whole control. Falls back to the label text when omitted. Unused when the
    * label names a row of its section's docs, whose card is shown on the label instead.
@@ -68,6 +70,7 @@ export function Slider({
   editable = true,
   className,
   labelClassName,
+  readoutClassName,
   title,
   doc,
   hardMax,
@@ -119,11 +122,11 @@ export function Slider({
               if (e.key === 'Enter') commit((e.target as HTMLInputElement).value);
               else if (e.key === 'Escape') setEditing(false);
             }}
-            className='w-[46px] shrink-0 bg-control border border-border rounded px-1 text-right text-ui-sm tabular-nums outline-none focus-visible:border-primary'
+            className={cn('w-[46px] shrink-0 bg-control border border-border rounded px-1 text-right text-ui-sm tabular-nums outline-none focus-visible:border-primary', readoutClassName)}
           />
         ) : (
           <span
-            className={cn('w-[46px] text-right tabular-nums shrink-0', editable && 'cursor-text hover:text-fg')}
+            className={cn('w-[46px] text-right tabular-nums shrink-0', editable && 'cursor-text hover:text-fg', readoutClassName)}
             title={editable ? 'Click to edit' : undefined}
             onClick={(e) => { if (editable) { e.preventDefault(); setEditing(true); } }}
           >

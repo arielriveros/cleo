@@ -165,6 +165,9 @@ export class DescribedMirror<J extends DescribedJointRecord> implements WorldMir
             const slot = this._slots[b[o]];
             if (!slot) continue;                          // removed since the step was posted
             const h = slot.handle, sh = slot.shadow;
+            // Destroyed since then, but not yet diffed out (outside the frame: an editor action, a test bench's
+            // reset): its slot goes with the next diff; there is nothing here to write the step into.
+            if (!w.hasBody(h)) continue;
             this._read(h, scratch);
             // Anything written here since the diff is kept (see the header). The shadow becomes what the
             // worker now holds either way, so the next diff sends exactly what differs from it.
@@ -209,7 +212,7 @@ export class DescribedMirror<J extends DescribedJointRecord> implements WorldMir
         const events = report.events;
         for (let i = 0; i < events.length; i += 3) {
             const a = this._slots[events[i + 1]]?.handle, c = this._slots[events[i + 2]]?.handle;
-            if (a !== undefined && c !== undefined) w.raise(events[i] as PhysicsEventKind, a, c);
+            if (a !== undefined && c !== undefined && w.hasBody(a) && w.hasBody(c)) w.raise(events[i] as PhysicsEventKind, a, c);
         }
         this._vehicles.apply(report.vehicles);
         w.time = report.time;
