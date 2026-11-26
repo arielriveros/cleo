@@ -4,6 +4,7 @@ import { isDefaultInputMap } from 'cleo'
 import { projectSettingsConfig } from '../options/projectSettings'
 import type { ProjectSettings } from '../options/projectSettings'
 import { buildGameData, bakeTemplates, attachScriptModules, injectSaveFields } from './buildGameData'
+import { publishedGraphics, publishedStartScene, shipsScene } from './publishChoices'
 import { buildScriptGraphCtx } from '../../utils/scriptGraph'
 import { compressTerrainData, compressTilemapData } from './terrainImages'
 import { stripDimensionData, stampSceneDimension } from './stripDimensionData'
@@ -65,6 +66,12 @@ export interface MultiSceneSources {
    * updater to compare with what is installed. A publish passes it; Play in window has no use for it.
    */
   game?: { name: string; version: string; appId: string }
+  /**
+   * The graphics API the game runs on, resolved by the caller (Options ▸ Project ▸ Published game, its "same as the
+   * editor" read as this editor's own): written into config.graphics. Absent (Play in window): the player is told at
+   * boot instead.
+   */
+  graphicsBackend?: 'webgpu' | 'webgl2'
 }
 
 /** The build was stopped at the features question (MultiSceneSources.onDisabledFeatureUse). */
@@ -74,8 +81,13 @@ export class PublishCanceledError extends Error {
 
 export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<any> {
   const scenes: Record<string, { name: string; scene: any; render?: Partial<RenderSettings> }> = {}
+  // The scenes the project leaves out of its published game (Options ▸ Project ▸ Published game). The one it starts
+  // with always ships.
+  const startId = publishedStartScene(src.scenes.map(m => m.id), src.mainSceneId)
+  const excluded = new Set(src.projectSettings?.publish.excludedScenes ?? [])
 
   for (const meta of src.scenes) {
+    if (!shipsScene(meta.id, startId, excluded)) continue
     if (meta.id === src.openSceneId) {
       // The open scene: serialize the live scene + live maps (includes unsaved edits).
       const gd = await buildGameData({
@@ -267,8 +279,10 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   if (src.projectSettings?.publish.onlyUsedShaders !== false)
     (config.graphics ??= {}).programs = collectPrograms(out, config.render)
   if (src.pipelines?.length) (config.graphics ??= {}).pipelines = src.pipelines
-  // Published without its WebGL 2 shaders: the player asks for WebGPU and says so where there is none.
-  if (src.projectSettings?.publish.webgl2Fallback === false) (config.graphics ??= {}).webgl2 = false
+  // The graphics API it runs on (the player starts the engine on it), and whether it ships its WebGL 2 shaders:
+  // without, the player asks for WebGPU and says so where there is none.
+  const graphicsChoice = publishedGraphics(src.graphicsBackend, src.projectSettings?.publish.webgl2Fallback)
+  if (Object.keys(graphicsChoice).length) Object.assign((config.graphics ??= {}), graphicsChoice)
   if (Object.keys(config).length > 0) out.config = config
   if (src.game) out.game = { name: src.game.name, version: src.game.version, appId: src.game.appId }
   return out

@@ -5,9 +5,11 @@ import {
   type Node as RFNode, type Edge as RFEdge, type Connection, type NodeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import FloatingEdge from '../features/animation/FloatingEdge'
+import RoutedEdge from '../features/animation/RoutedEdge'
+import { insertPoint, type ReroutePoint } from '../features/animation/reroutes'
 import { token } from '@cleo/app-kit/utils/cssTokens'
-import { MenuItem } from '@cleo/app-kit/ui'
+import { CloseIcon, JOINED_DIVIDER_CLASS, JOINED_GROUP_CLASS, MenuItem, cn } from '@cleo/app-kit/ui'
+import { RerouteAcrossIcon, RerouteDownIcon, TidyIcon } from './graphIcons'
 
 /**
  * The node-graph canvas, shared by every state machine the editor edits.
@@ -26,7 +28,7 @@ import { MenuItem } from '@cleo/app-kit/ui'
  * ## Links, not transitions
  *
  * An edge is a LINK between two states, carrying up to two directions. A→B and B→A are ONE line, and
- * `FloatingEdge` draws it as a single line for one direction or two parallel lines for both. Deleting
+ * `RoutedEdge` draws it as a single line for one direction or two parallel lines for both. Deleting
  * an edge therefore removes both directions; dropping just one is the sidebar's job. This mirrors how
  * an author thinks about a pair of states rather than how the data is stored.
  *
@@ -42,6 +44,14 @@ import { MenuItem } from '@cleo/app-kit/ui'
  *
  * A node with `shape: 'fork'` is drawn as a small pill with a diamond: a junction, not a place the machine is
  * in. It has the same two handles as a state, and the same floating lines.
+ *
+ * ## Reroute points
+ *
+ * A link's `points` route its line, as a Blueprint's reroute nodes do. Each is a small node of the canvas, so it is
+ * dragged, selected and deleted as any node is, and its line follows it live. Double-clicking a line adds one where
+ * it was clicked (`onAddLinkPoint`); hovering one shows its two buttons: which way the line passes through it, left
+ * to right or top to bottom (`onToggleLinkPoint`), and delete (`onRemoveLinkPoints`). A caller without the callbacks
+ * gets plain lines, and a double-click on a line does nothing.
  */
 
 const NODE_W = 156
@@ -131,6 +141,14 @@ export interface GraphLinkModel {
   dashed?: boolean
   /** False keeps Delete from removing it (a line that stands for several transitions). Default true. */
   deletable?: boolean
+  /** The points its line is routed through, from its first end (`a`'s node) to its second. */
+  points?: ReroutePoint[]
+}
+
+/** A reroute point of a link, as the canvas reports it: the link, and the point's place among its points. */
+export interface LinkPointRef {
+  link: GraphLinkModel
+  index: number
 }
 
 /** An extra row of the right-click menu: the caller's own action on a node. */
@@ -192,6 +210,15 @@ export interface MachineGraphProps {
   allowEntry?: boolean
   /** What a node is called, for the menu and the hint. "state" unless a caller says otherwise. */
   nodeNoun?: string
+
+  /** A line was double-clicked: add a reroute point at `index` among its points (see the class notes). */
+  onAddLinkPoint?(ref: LinkPointRef, point: ReroutePoint): void
+  /** Reroute points dragged: each one's new place (graph coordinates, its centre). */
+  onMoveLinkPoints?(moves: (LinkPointRef & { x: number; y: number })[]): void
+  /** A reroute point's way through turned: left to right, or top to bottom. */
+  onToggleLinkPoint?(ref: LinkPointRef): void
+  /** Reroute points deleted (its button, or Delete on the selected ones). */
+  onRemoveLinkPoints?(refs: LinkPointRef[]): void
 
   /** Buttons for the toolbar's left end — the caller's own actions. */
   toolbar?: React.ReactNode
@@ -343,15 +370,100 @@ export const GroupGlyph = () => (
   </svg>
 )
 
-const nodeTypes = { state: GraphNode, group: GroupNode, fork: ForkNode }
-const edgeTypes = { transition: FloatingEdge }
+/** Half a reroute point's size: its node's top-left is the point less this. */
+const REROUTE_R = 6
+/** A reroute point's node id: the line's id, then its place among the line's points. */
+const REROUTE_PREFIX = '@@reroute:'
+const rerouteId = (lineId: string, index: number) => `${REROUTE_PREFIX}${lineId}#${index}`
+const isReroute = (id: string) => id.startsWith(REROUTE_PREFIX)
+const rerouteOf = (id: string): { lineId: string; index: number } => {
+  const cut = id.lastIndexOf('#')
+  return { lineId: id.slice(REROUTE_PREFIX.length, cut), index: Number(id.slice(cut + 1)) }
+}
+
+interface RerouteData extends Record<string, unknown> {
+  axis: 'h' | 'v'
+  onToggle?(): void
+  onRemove?(): void
+}
+
+/**
+ * A reroute point: a dot its line passes through. Hovered (or selected) it shows which way the line passes through it,
+ * a button that turns it, and one that deletes it.
+ */
+function RerouteNode({ data, selected }: NodeProps) {
+  const d = data as RerouteData
+  const [hover, setHover] = useState(false)
+  const across = d.axis !== 'v'
+  const button = 'flex items-center justify-center px-1 py-0.5 text-muted hover:bg-surface-raised hover:text-fg'
+  return (
+    <div className='relative' style={{ width: REROUTE_R * 2, height: REROUTE_R * 2 }}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <div className={cn('w-full h-full rounded-full border-2 shadow-panel', selected ? 'border-selected bg-selected/50' : 'border-control-hover bg-surface-raised')}
+        title={across ? 'Reroute point: the line passes left to right' : 'Reroute point: the line passes top to bottom'} />
+      {(hover || selected) && (d.onToggle || d.onRemove) && (
+        // Padded down to the dot, so the pointer can reach the buttons without leaving the point.
+        <div className='nodrag nopan absolute left-1/2 -translate-x-1/2 bottom-full pb-1'>
+          <div className={cn(JOINED_GROUP_CLASS, 'bg-surface shadow-panel')}>
+            {d.onToggle && (
+              <button type='button' className={button} onClick={e => { e.stopPropagation(); d.onToggle?.() }}
+                title={across ? 'Left to right: make the line pass top to bottom' : 'Top to bottom: make the line pass left to right'}>
+                <span className='w-3.5 h-3.5'>{across ? <RerouteAcrossIcon /> : <RerouteDownIcon />}</span>
+              </button>
+            )}
+            {d.onRemove && (
+              <button type='button' className={cn(button, JOINED_DIVIDER_CLASS)} onClick={e => { e.stopPropagation(); d.onRemove?.() }}
+                title='Delete this reroute point'>
+                <span className='w-3.5 h-3.5'><CloseIcon /></span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Tidy: a toolbar button that lays the canvas out (the caller's `onTidy`, handed every node's measured size), then
+ * fits the view to it. Rendered inside the canvas's toolbar, where it can read the measured nodes.
+ */
+export function GraphTidyButton({ onTidy, className, title }: {
+  onTidy(sizes: Record<string, { w: number; h: number }>): void
+  className?: string
+  title?: string
+}) {
+  const { getNodes, fitView } = useReactFlow()
+  return (
+    <button type='button' className={className} title={title ?? 'Tidy: lay the graph out in columns'}
+      onClick={() => {
+        const sizes: Record<string, { w: number; h: number }> = {}
+        for (const n of getNodes()) {
+          if (isReroute(n.id)) continue
+          sizes[n.id] = { w: n.measured?.width ?? NODE_W, h: n.measured?.height ?? 52 }
+        }
+        onTidy(sizes)
+        // Once the new positions have reached the canvas (the caller's state, then the nodes rebuilt from it).
+        window.setTimeout(() => { void fitView({ padding: 0.2, duration: 200 }) }, 120)
+      }}>
+      <span className='w-4 h-4'><TidyIcon /></span>
+    </button>
+  )
+}
+
+const nodeTypes = { state: GraphNode, group: GroupNode, fork: ForkNode, reroute: RerouteNode }
+const edgeTypes = { transition: RoutedEdge }
 
 function Flow(props: MachineGraphProps) {
   const {
     nodes: model, links, activeId = null, selectedNode = null, selectedLink = null, selectedLinkKey = null,
     onMoveNode, onMoveNodes, onConnect, onDelete, onSelectNode, onSelectLink, onAddNode, onSetEntry, onRemoveNode,
     onNodeDoubleClick, onSelectionChange, menuItems, toolbar, hint, allowEntry = true, nodeNoun = 'state', viewKey,
+    onAddLinkPoint, onMoveLinkPoints, onToggleLinkPoint, onRemoveLinkPoints,
   } = props
+  // A link's line id (its edge's), and the link a line id names: reroute points are reported by link.
+  const lineIdOf = (l: GraphLinkModel) => l.key ?? `${l.a}|${l.b}`
+  const lineById = useMemo(() => new Map(links.map(l => [lineIdOf(l), l])), [links])
 
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>([])
@@ -379,7 +491,25 @@ function Flow(props: MachineGraphProps) {
     setNodes(prev => {
       const was = new Set(prev.filter(n => n.selected).map(n => n.id))
       const keep = selectedNode !== null && was.has(selectedNode)
-      return model.map(n => ({
+      // The reroute points: a node each, centred on the point, kept selected across a rebuild (a drag just committed).
+      const reroutes: RFNode[] = links.flatMap(l => (l.points ?? []).map((p, i) => {
+        const id = rerouteId(lineIdOf(l), i)
+        const ref = { link: l, index: i }
+        return {
+          id,
+          type: 'reroute',
+          position: { x: p.x - REROUTE_R, y: p.y - REROUTE_R },
+          selected: was.has(id),
+          connectable: false,
+          zIndex: 1000,
+          data: {
+            axis: p.axis === 'v' ? 'v' : 'h',
+            onToggle: onToggleLinkPoint ? () => onToggleLinkPoint(ref) : undefined,
+            onRemove: onRemoveLinkPoints ? () => onRemoveLinkPoints([ref]) : undefined,
+          } as RerouteData,
+        }
+      }))
+      return [...model.map(n => ({
       id: n.id,
       type: n.ports ? 'group' : n.shape === 'fork' ? 'fork' : 'state',
       position: { x: n.x, y: n.y },
@@ -404,10 +534,10 @@ function Flow(props: MachineGraphProps) {
         chipIcon: n.chipIcon,
         chipsTitle: n.chipsTitle,
       } as NodeData,
-    }))
+    })), ...reroutes]
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, selectedNode])
+  }, [model, selectedNode, links])
 
   useEffect(() => {
     // Markers must stay on the edge: xyflow resolves them into `url(#…)` strings for the custom edge.
@@ -423,10 +553,12 @@ function Flow(props: MachineGraphProps) {
             || (selectedLink.a === l.b && selectedLink.b === l.a))
       const source = l.nodeA ?? l.a, target = l.nodeB ?? l.b
       const ported = l.sourceHandle !== undefined || l.targetHandle !== undefined
+      const lineId = lineIdOf(l)
+      const points = l.points ?? []
       return {
-        id: l.key ?? `${l.a}|${l.b}`,
-        // A ported line runs handle to handle (xyflow's own bezier); the rest float along the borders.
-        type: ported ? 'default' : 'transition',
+        id: lineId,
+        // A ported line runs handle to handle; the rest float along the borders. Either through its points.
+        type: 'transition',
         source,
         target,
         ...(l.sourceHandle !== undefined ? { sourceHandle: l.sourceHandle } : {}),
@@ -436,7 +568,10 @@ function Flow(props: MachineGraphProps) {
         deletable: l.deletable ?? true,
         markerEnd: l.forward ? arrow : undefined,
         markerStart: l.backward ? arrow : undefined,
-        data: { a: l.a, b: l.b, key: l.key, forward: l.forward, backward: l.backward },
+        data: {
+          a: l.a, b: l.b, key: l.key, forward: l.forward, backward: l.backward, ported,
+          points, pointIds: points.map((_, i) => rerouteId(lineId, i)), pointRadius: REROUTE_R,
+        },
         // Light up whichever direction could actually fire from where the machine currently is.
         animated: activeId === source ? l.forward : activeId === target ? l.backward : false,
         style: { stroke: isSelected ? selectedStroke : undefined, ...(l.dashed ? { strokeDasharray: '5 4' } : {}) },
@@ -458,10 +593,20 @@ function Flow(props: MachineGraphProps) {
   // Every node the drag moved: a multi-selection dragged together moves them all, not just the one grabbed.
   const handleDragStop = useCallback((_: unknown, node: RFNode, dragged?: RFNode[]) => {
     const all = dragged?.length ? dragged : [node]
-    const moves = all.map(n => ({ id: n.id, x: Math.round(n.position.x), y: Math.round(n.position.y) }))
+    // Reroute points are reported by their line, at their centres.
+    const points: (LinkPointRef & { x: number; y: number })[] = []
+    for (const n of all) {
+      if (!isReroute(n.id)) continue
+      const { lineId, index } = rerouteOf(n.id)
+      const link = lineById.get(lineId)
+      if (link) points.push({ link, index, x: Math.round(n.position.x + REROUTE_R), y: Math.round(n.position.y + REROUTE_R) })
+    }
+    if (points.length) onMoveLinkPoints?.(points)
+    const moves = all.filter(n => !isReroute(n.id)).map(n => ({ id: n.id, x: Math.round(n.position.x), y: Math.round(n.position.y) }))
+    if (!moves.length) return
     if (onMoveNodes) onMoveNodes(moves)
     else for (const m of moves) onMoveNode(m.id, m.x, m.y)
-  }, [onMoveNode, onMoveNodes])
+  }, [onMoveNode, onMoveNodes, onMoveLinkPoints, lineById])
 
   const handleConnect = useCallback((c: Connection) => {
     // A self-transition can never fire and draws as an invisible stub behind the node, so refuse it
@@ -471,7 +616,16 @@ function Flow(props: MachineGraphProps) {
   }, [onConnect])
 
   const handleDelete = useCallback(({ nodes: dn, edges: de }: { nodes: RFNode[]; edges: RFEdge[] }) => {
-    const ids = dn.map(n => n.id)
+    // Selected reroute points go on their own: Delete takes the points, not the line.
+    const points: LinkPointRef[] = []
+    for (const n of dn) {
+      if (!isReroute(n.id)) continue
+      const { lineId, index } = rerouteOf(n.id)
+      const link = lineById.get(lineId)
+      if (link) points.push({ link, index })
+    }
+    if (points.length) onRemoveLinkPoints?.(points)
+    const ids = dn.filter(n => !isReroute(n.id)).map(n => n.id)
     // A keyed line says exactly what it stands for, so it is reported by key alone.
     const keys = de.map(e => (e.data as { key?: string })?.key).filter((k): k is string => typeof k === 'string')
     const removed = de
@@ -479,18 +633,36 @@ function Flow(props: MachineGraphProps) {
       .map(e => [(e.data as { a?: string })?.a, (e.data as { b?: string })?.b] as [string, string])
       .filter(([a, b]) => typeof a === 'string' && typeof b === 'string')
     if (ids.length || removed.length || keys.length) onDelete(ids, removed, keys)
-  }, [onDelete])
+  }, [onDelete, onRemoveLinkPoints, lineById])
 
   const handleNodeContextMenu = useCallback((e: React.MouseEvent, node: RFNode) => {
     e.preventDefault()
+    if (isReroute(node.id)) return
     onSelectNode(node.id)
     setMenu({ id: node.id, x: e.clientX, y: e.clientY })
   }, [onSelectNode])
 
   const handlePaneDoubleClick = useCallback((e: React.MouseEvent) => {
+    // A double-click on a line (or a point) is the line's: it never adds a state under it.
+    if ((e.target as Element | null)?.closest?.('.react-flow__edge, .react-flow__node-reroute')) return
     const p = screenToFlowPosition({ x: e.clientX, y: e.clientY })
     onAddNode(Math.round(p.x - NODE_W / 2), Math.round(p.y - 20))
   }, [screenToFlowPosition, onAddNode])
+
+  // Double-click a line: a reroute point where it was clicked, on the stretch of the line nearest the click.
+  const { getInternalNode } = useReactFlow()
+  const handleEdgeDoubleClick = useCallback((e: React.MouseEvent, edge: RFEdge) => {
+    e.stopPropagation()
+    const link = lineById.get(edge.id)
+    if (!link || !onAddLinkPoint) return
+    const at = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+    const centre = (id: string) => {
+      const n = getInternalNode(id)
+      return n ? { x: n.internals.positionAbsolute.x + (n.measured.width ?? 0) / 2, y: n.internals.positionAbsolute.y + (n.measured.height ?? 0) / 2 } : at
+    }
+    const { index, point } = insertPoint(link.points ?? [], centre(edge.source), centre(edge.target), at)
+    onAddLinkPoint({ link, index }, point)
+  }, [lineById, onAddLinkPoint, screenToFlowPosition, getInternalNode])
 
   const entry = model.find(n => n.id === menu?.id)
 
@@ -506,19 +678,23 @@ function Flow(props: MachineGraphProps) {
         onNodeDragStop={handleDragStop}
         onConnect={handleConnect}
         onDelete={handleDelete}
-        onNodeClick={(_, node) => { onSelectNode(node.id); setMenu(null) }}
+        onNodeClick={(_, node) => { if (!isReroute(node.id)) onSelectNode(node.id); setMenu(null) }}
         onNodeDoubleClick={(e, node) => {
+          // A point's double-click is its own: never a state added under it.
+          if (isReroute(node.id)) { e.stopPropagation(); return }
           if (!onNodeDoubleClick) return
           // Not also a double-click on the canvas, which would add a state under the pointer.
           e.stopPropagation()
           onNodeDoubleClick(node.id)
         }}
-        onSelectionChange={onSelectionChange ? ({ nodes: sel }) => onSelectionChange(sel.map(n => n.id)) : undefined}
+        onSelectionChange={onSelectionChange ? ({ nodes: sel }) => onSelectionChange(sel.filter(n => !isReroute(n.id)).map(n => n.id)) : undefined}
         onEdgeClick={(_, edge) => {
           const { a, b, key } = (edge.data ?? {}) as { a?: string; b?: string; key?: string }
           if (a && b) onSelectLink(a, b, key)
           setMenu(null)
         }}
+        onEdgeDoubleClick={handleEdgeDoubleClick}
+        zoomOnDoubleClick={false}
         onNodeContextMenu={handleNodeContextMenu}
         onPaneClick={() => { onSelectNode(null); setMenu(null) }}
         deleteKeyCode={['Delete', 'Backspace']}
@@ -527,7 +703,8 @@ function Flow(props: MachineGraphProps) {
         className='!bg-bg'>
         <Background color={colors.grid} gap={18} />
         <Controls className='!bg-surface-raised !border-border' showInteractive={false} />
-        <MiniMap pannable zoomable className='!bg-surface-sunken' maskColor={colors.minimapMask} nodeColor={colors.minimapNode} />
+        <MiniMap pannable zoomable className='!bg-surface-sunken' maskColor={colors.minimapMask}
+          nodeColor={n => (isReroute(n.id) ? 'transparent' : colors.minimapNode)} />
       </ReactFlow>
 
       {/* Bounded by the canvas: what does not fit gives way (the hint truncates, a caller's scroller scrolls). */}

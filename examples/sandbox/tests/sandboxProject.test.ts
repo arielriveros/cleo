@@ -17,6 +17,9 @@ import { MaterialBinder } from '@engine/graphics/render/materialBinder';
 import { fieldWeights, poseSampleKey } from '@engine/animation/animationField';
 import { resolveTablePose } from '@engine/animation/animationPose';
 import { reembedPoses } from '@editor/utils/animationControllers';
+import { graphPlan, groupsOf } from '@editor/features/animation/stateGroups';
+import { rerouteKey } from '@editor/features/animation/reroutes';
+import { estimatedSize } from '@editor/features/animation/tidyLayout';
 import { registerTemplates, clearTemplates } from '@engine/core/scene/templates';
 import { Events } from '@engine/core/events';
 
@@ -536,6 +539,38 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         // ramp would have it 5 cm higher and rolling down.
         expect(Math.abs(ball.position.y - ((k + 1) * f.rise + r)), `rests at ${ball.position.y.toFixed(3)}`).toBeLessThan(0.03);
         expect(Math.abs(ball.position.z - z)).toBeLessThan(0.02);
+    });
+
+    it('lays its animator graph out tidily: no two nodes of a view overlap, and every reroute point is on a drawn line', () => {
+        const sm = machine();
+        for (const layer of [sm, ...(sm.layers ?? [])] as any[]) {
+            const view = { ...sm, states: layer.states, transitions: layer.transitions, groups: layer.groups, forks: layer.forks };
+            const drawn = new Set<string>();
+            for (const open of [null, ...groupsOf(view).map((g: any) => g.name)]) {
+                const plan = graphPlan(view, open);
+                for (const l of plan.links) drawn.add(rerouteKey(open, l.key));
+                // The nodes a view draws where they are stored (Any State and an opened group's stand-ins are placed
+                // per session), at the canvas's sizes.
+                const boxes: { id: string; x: number; y: number; w: number; h: number }[] = [];
+                for (const s of plan.states) {
+                    const st = view.states.find((x: any) => x.name === s);
+                    boxes.push({ id: s, x: st.x, y: st.y, ...estimatedSize('state', { chips: !!st.triggers?.some((t: any) => t.trigger) }) });
+                }
+                for (const f of plan.forks) { const fk = view.forks.find((x: any) => x.name === f); boxes.push({ id: f, x: fk.x, y: fk.y, ...estimatedSize('fork') }); }
+                for (const g of plan.groups) {
+                    const gr = view.groups.find((x: any) => x.name === g.name);
+                    boxes.push({ id: g.name, x: gr.x, y: gr.y, ...estimatedSize('group', { rows: Math.max(g.inputs.length, g.outputs.length) }) });
+                }
+                for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+                    const a = boxes[i], b = boxes[j];
+                    const apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+                    expect(apart, `${layer.name ?? 'Base'}${open ? ` › ${open}` : ''}: ${a.id} overlaps ${b.id}`).toBe(true);
+                }
+            }
+            for (const key of Object.keys(layer.reroutes ?? {})) expect(drawn.has(key), `${layer.name ?? 'Base'}: reroute points on ${key}, a line not drawn`).toBe(true);
+        }
+        // The base layer's busiest lines are routed round the nodes they would cross.
+        expect(Object.keys(sm.reroutes ?? {}).length).toBeGreaterThan(5);
     });
 
     it('names only clips its skeleton owns, and links every parameter to something that exists', () => {

@@ -18,7 +18,7 @@ import {
   COVER_HEIGHT, COVER_WIDTH, captureCover, coverCaptureBlocked, removeCapturedCover,
 } from './coverCapture'
 
-// Options ▸ Project ▸ General ▸ Published game: who the game is. Its version, its app id, its icon and the project's
+// Options ▸ Project ▸ Published game: who the game is. Its version, its app id, its icon and the project's
 // cover (projectSettings.ts `ProjectIdentitySettings`). The explanations are docs/editor/options.md's rows.
 
 export default function GameIdentityRows({ projectName }: { projectName: string }) {

@@ -393,6 +393,8 @@ export interface AnimationStateMachine {
     groups?: AnimationStateGroup[];
     /** The base layer's forks: see {@link AnimationFork}. */
     forks?: AnimationFork[];
+    /** The base layer's graph reroute points: see {@link AnimationReroutes}. Authoring only. */
+    reroutes?: AnimationReroutes;
     events: AnimationEventMarker[];
     /**
      * What an event does: event name -> actions (a sound, a particle burst, a light flash, a spawned template), run by
@@ -463,6 +465,24 @@ export interface AnimationFork {
     y?: number;
 }
 
+/**
+ * A point a drawn transition line is routed through in the graph editor (authoring only, ignored at runtime): a
+ * reroute point, as in a Blueprint. The line passes through it left to right (`axis` 'h', the default) or top to
+ * bottom ('v'), whichever way it is heading.
+ */
+export interface AnimationReroute {
+    x: number;
+    y: number;
+    axis?: 'h' | 'v';
+}
+
+/**
+ * The reroute points of a layer's drawn lines, by line: `<view>::<line key>`, the view '' for the whole layer or the
+ * name of the group opened, the key the line's own (two names joined by '|', or a group's port line 'from>to').
+ * Authoring only, ignored at runtime.
+ */
+export type AnimationReroutes = Record<string, AnimationReroute[]>;
+
 /** How a layer or slot combines with the pose beneath it. */
 export type AnimationBlendMode = 'override' | 'additive';
 
@@ -479,6 +499,8 @@ export interface AnimationLayer {
     groups?: AnimationStateGroup[];
     /** The layer's forks: see {@link AnimationFork}. */
     forks?: AnimationFork[];
+    /** The layer's graph reroute points: see {@link AnimationReroutes}. Authoring only. */
+    reroutes?: AnimationReroutes;
     /** 0..1, default 1. */
     weight?: number;
     /** Parameter to read the weight from each frame. Overrides `weight`. */

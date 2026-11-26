@@ -349,6 +349,8 @@ handles, are steps like any other node's: one per edit, per drag of a field, or 
 
 A tilemap stroke is pushed as one entry, so **Ctrl+Z undoes a whole stroke**.
 
+The animator tab records its own edits, its graph's included: see [Animation ▸ Undo](animation.md#undo).
+
 ## Debug overlays
 
 The eye menu in the viewport toggles helpers, each with **two independent switches: Editor and

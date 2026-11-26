@@ -74,9 +74,35 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - The unarmed crouch is combined: the rifle pack's crouch legs under *Crouch To Stand*'s crouched upper body, so
     the hands are free. Standing up from it, standing still, plays *Crouch To Stand*'s rise.
   - No engine change.
-- **The animator graph picks its layer from a dropdown.** The toolbar's row of layer buttons (Base, then one per
-  layer) is one dropdown beside **+ Layer**, so a machine with many layers (the Sandbox has 13) no longer scrolls
-  the toolbar.
+- **A published game runs on the graphics API and the physics backend chosen for it, and a new Options ▸ Project ▸
+  Published game page sets everything it is made from.**
+  - **Graphics API:** *Same as the editor* (the Graphics API this editor runs on, read when you publish), *WebGPU* or
+    *WebGL 2*, written into the game's config. Before, every published game started on WebGL 2 whatever the editor
+    ran on, unless its WebGL 2 fallback was off. A WebGL 2 game always carries its WebGL 2 shaders.
+  - **Physics backend:** the project's (the same setting as Engine ▸ Runtime), as before; a published game now says
+    in the console what it runs on, and why when a backend fell back, even with its log off.
+  - **Start scene** and **Scenes**: the scene it starts in, and which scenes ship. A scene switched off is left out
+    with whatever only it used; the start scene always ships.
+  - The page also holds the window and identity rows (title, version, app id, icon, cover, window size, fullscreen,
+    resizable), Only used shaders and WebGL 2 fallback, moved from General.
+  - The player smoke test checks the graphics API a game was published for (WebGPU and WebGL 2 cases).
+- **The animator graph picks its layer from a dropdown, routes lines through reroute points, and tidies itself.**
+  - The toolbar's row of layer buttons (Base, then one per layer) is one dropdown beside **+ Layer**, so a machine
+    with many layers (the Sandbox has 13) no longer scrolls the toolbar.
+  - **Reroute points**, as in a Blueprint: double-click a line to add one where you clicked, drag it, and from its
+    hover buttons turn how the line passes through it (left to right, or top to bottom) or delete it. Saved with
+    the animator by layer and view (authoring only: `AnimationStateMachine.reroutes`, `AnimationLayer.reroutes`);
+    a rename keeps them, a line that goes away takes its points.
+  - **Tidy** lays the open view out in columns by the fewest lines from the entry (tidyLayout.ts).
+  - Fix: double-clicking a line added a state under it.
+- **The animator has undo.** Ctrl+Z / Ctrl+Shift+Z on the animator tab's own history take back any edit to the
+  machine: states, transitions, conditions, groups, forks, parameters, layers, slots, node moves, reroute points and
+  Tidy. Edit ▸ Undo names the step.
+  - One handler's edits are one step (a multi-node drag, an ungroup, Tidy with Any State's spot). A typed name or a
+    scrubbed number merges while you keep at it (machineHistory.ts).
+  - Undo goes back to the layer and group the step was made in, and keeps the selection while it is still there.
+  - A clip renamed or deleted from the Clips panel clears the animator's history: that change is already on the
+    model or its `.anim`, and older steps would point states at the old clip.
 - **A Sound node sets how its plays overlap.** Its new **Overlap** card: **Voices** (how many plays sound at
   once, 1 to 32; 1, the default, restarts it as before), **When full** (steal the oldest, the quietest or the
   farthest voice, faded out in 30 ms, or skip the new play), **Stay put** (a spatial voice stays where it was

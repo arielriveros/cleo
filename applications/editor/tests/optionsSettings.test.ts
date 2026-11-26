@@ -59,6 +59,18 @@ describe('project settings', () => {
     });
   });
 
+  it('keeps the published game\'s graphics API and the scenes it leaves out, out of the game\'s window config', () => {
+    expect(DEFAULT_PROJECT_SETTINGS.publish.graphicsBackend).toBe('editor');
+    expect(DEFAULT_PROJECT_SETTINGS.publish.excludedScenes).toEqual([]);
+    const s = parseProjectSettings({ publish: { graphicsBackend: 'webgpu', excludedScenes: ['menu', 'menu', 'not an id!', 3] } });
+    expect(s.publish.graphicsBackend).toBe('webgpu');
+    expect(s.publish.excludedScenes).toEqual(['menu']);
+    expect(parseProjectSettings({ publish: { graphicsBackend: 'vulkan' } }).publish.graphicsBackend).toBe('editor');
+    const window = projectSettingsConfig(s).window;
+    expect(window).not.toHaveProperty('graphicsBackend');
+    expect(window).not.toHaveProperty('excludedScenes');
+  });
+
   it('names the collision layers: 16, the engine four fixed, a project from before them on the defaults', () => {
     const before = parseProjectSettings({ version: 5, engine: {} });
     expect(before.collisionLayers).toEqual(['Default', 'Ragdoll', 'See Through', 'No Camera', ...Array(12).fill('')]);

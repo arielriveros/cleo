@@ -157,6 +157,43 @@ The toolbar carries a layer dropdown — **Base**, or one of the machine's layer
 [layer](#layers-and-bone-masks) the canvas shows, with **+ Layer** beside it. The highlighted state is that
 layer's current one.
 
+### Undo
+
+**Ctrl+Z** undoes an edit to the animator and **Ctrl+Shift+Z** (or Ctrl+Y) redoes it, on the animator tab's own
+history. That covers the graph and the panels beside it: a state, transition, condition, group, fork, parameter,
+layer or slot added, changed or removed, a node moved, a reroute point added, dragged, turned or deleted, and
+**Tidy**. **Edit ▸ Undo** names the step ("Undo Rename group").
+
+- **One step per action.** A drag of several selected nodes, a group ungrouped, or Tidy (Any State included) undoes
+  whole. A name typed letter by letter, or a number scrubbed, is one step while you keep at it.
+- **Undo shows where the step was made.** It switches to that layer and opens that group, and keeps the selection
+  while what it names is still there.
+- **Text fields keep their own undo.** Ctrl+Z while typing in a field undoes the typing, not the graph.
+- **A clip renamed or deleted from the Clips panel clears the animator's history.** That change is written to the
+  model, or the clip's `.anim`, at once, and the steps before it would put back states naming the old clip.
+
+Undo changes the working copy, not the saved animator: an undone edit still needs **Save** (Ctrl+S).
+
+### Reroute points
+
+A busy graph's lines cross its nodes and each other. A **reroute point** routes a line, as a reroute node does in a
+Blueprint: **double-click a line** to put one where you clicked, then drag it. The line runs through each of its
+points in turn, and passes through a point either **left to right** (-o-) or **top to bottom** (| o |), whichever
+way it is heading there. Hover a point for its two buttons: the first turns it from one to the other, the second
+deletes it (so does Delete with it selected). Double-clicking a line never adds a state.
+
+The points are layout, like a state's position: saved with the animator, by layer, and ignored by the game. A line
+drawn at the top and the same pair's line inside an opened [group](#state-groups) keep their own. A line that goes
+away (its transitions removed, a state deleted or moved into a group) takes its points with it; a rename keeps them.
+
+### Tidy
+
+**Tidy** (the columns button in the graph toolbar's icon group) lays the view out for you: the whole layer, or the
+group that is open. Each node takes the column of the fewest lines from the entry to it (the entry, and Any State,
+in the first), each column ordered to keep the lines between neighbouring columns short, the columns spaced by
+their widest node. It clears the view's reroute points, which were placed for where its nodes were. Then route the
+lines that still cross a node.
+
 ### State groups
 
 A graph with every turn, stop and landing drawn out is a tangle: each of them has its own way into the air

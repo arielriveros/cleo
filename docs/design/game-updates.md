@@ -16,7 +16,7 @@ settings page, and stores (Steam, itch.io) bring updaters of their own.
 
 ## 1. Identity — what an update must agree with (done)
 
-Options ▸ Project ▸ General ▸ Published game, `ProjectIdentitySettings` in
+Options ▸ Project ▸ Published game, `ProjectIdentitySettings` in
 `applications/editor/src/features/options/projectSettings.ts` (settings format 7).
 
 | Field | What it is | Why it matters to updates |

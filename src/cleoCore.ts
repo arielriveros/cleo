@@ -345,6 +345,8 @@ export type {
     AnimationLayer,
     AnimationStateGroup,
     AnimationFork,
+    AnimationReroute,
+    AnimationReroutes,
     AnimationSlotDef,
     AnimationBlendMode,
     AnimationPose,

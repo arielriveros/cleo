@@ -27,7 +27,7 @@ are taken live from the renderer, the others as last saved.
 
 | Kept | Dropped |
 |---|---|
-| Every scene, with the **main scene** as the entry point | Editor-only nodes: the grid, gizmos, light icons, collision wireframes, the navmesh preview |
+| Every scene the project ships (Options ▸ Project ▸ Published game ▸ **Scenes**), with the **start scene** as the entry point | Editor-only nodes: the grid, gizmos, light icons, collision wireframes, the navmesh preview; the scenes left out, and what only they used |
 | Textures that something references | Textures nothing references |
 | Audio sources and sound samples, with their loop points, fades, buses and effects | The AI brain library — brains are embedded on their controllers |
 | Terrain data, DEFLATE-compressed | The authoring data for the **unused dimension** |
@@ -46,8 +46,17 @@ back on.
 ## The main scene
 
 A build starts in the project's main scene, set in
-[Scene settings](scene-authoring.md#scene-settings). Scripts move between scenes with
-`Game.loadScene(name)`.
+[Scene settings](scene-authoring.md#scene-settings) or as the **Start scene** of Options ▸ Project ▸
+[Published game](options.md#published-game). Scripts move between scenes with `Game.loadScene(name)`. That page also
+picks which scenes the build carries.
+
+## What it runs on
+
+The build runs on the graphics API and the physics backend the project chooses, on every target: Options ▸
+Project ▸ [Published game](options.md#published-game) ▸ **Graphics API** (by default the one this editor runs on, read
+when you publish) and **Physics backend** (the project's). As it starts, the game writes what it runs on to the
+browser console (the desktop build's developer tools), and the reason when it is not what it asked for: a WebGPU
+game on a machine without WebGPU, or a physics backend that could not load, falls back and says so.
 
 A common shape is three scenes: a menu, the game, and an end screen — with a two-line button script
 in each.
@@ -143,7 +152,7 @@ through four calls that take slot names, never paths.
 
 ### Identity, icon and updates
 
-What a build says about itself comes from Options ▸ Project ▸ General ▸ Published game:
+What a build says about itself comes from Options ▸ Project ▸ Published game:
 
 | Setting | Where it goes |
 |---|---|

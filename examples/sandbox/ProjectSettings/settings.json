@@ -15,8 +15,10 @@
     "height": 720,
     "fullscreen": false,
     "resizable": true,
-    "onlyUsedShaders": true,
-    "webgl2Fallback": true
+    "onlyUsedShaders": false,
+    "webgl2Fallback": false,
+    "graphicsBackend": "editor",
+    "excludedScenes": []
   },
   "identity": {
     "version": "1.0.0",

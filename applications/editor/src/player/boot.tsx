@@ -100,6 +100,16 @@ async function requireWebGPU(): Promise<void> {
   if (!adapter) throw new Error(NEEDS_WEBGPU);
 }
 
+/** The graphics and physics the engine started on, to the console, with why when either is not the one asked for. */
+function reportBackends(engine: CleoEngine, graphicsAsked: string | undefined): void {
+  const renderer = engine.renderer, physics = engine.physics;
+  console.info(`[Cleo] graphics: ${renderer.backend}, physics: ${physics.backend}`);
+  if (renderer.backendFallbackReason)
+    console.warn(`[Cleo] graphics runs on ${renderer.backend} instead of ${graphicsAsked ?? 'webgpu'}: ${renderer.backendFallbackReason}`);
+  if (physics.backendFallbackReason)
+    console.warn(`[Cleo] physics runs on ${physics.backend} instead of ${physics.requestedBackend}: ${physics.backendFallbackReason}`);
+}
+
 /** Boot the game in `buffer` and start its entry scene. Resolves once that scene has started. */
 export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHandle> {
   // Before anything else, so nothing logs past a shipped game's switch-off.
@@ -151,8 +161,10 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
   // cannot start, the step stays on the main thread.
   PhysicsSystem.workerFactory = options.physicsWorkerFactory;
   const graphics = data?.config?.graphics ?? { clearColor: [0, 0, 0, 1] };
-  // A WebGPU-only game asks for WebGPU whatever the page prefers: it has no WebGL 2 shaders to fall back on.
-  const backend = graphics.webgl2 === false ? 'webgpu' : options.graphicsBackend;
+  // The graphics API: the one the page asks for (Play in window: the editor's), else the one the game was published
+  // to run on (Options ▸ Project ▸ Published game). A WebGPU-only game asks for WebGPU whatever the page prefers: it
+  // has no WebGL 2 shaders to fall back on. A game from before either runs on the engine's default.
+  const backend = graphics.webgl2 === false ? 'webgpu' : (options.graphicsBackend ?? graphics.backend);
   const engine = new CleoEngine({
     graphics: backend ? { ...graphics, backend } : graphics,
     // Gravity, max substeps, the physics backend, and the frame-delta cap: the project's engine options
@@ -188,6 +200,9 @@ export async function bootPlayer(options: PlayerBootOptions): Promise<PlayerHand
     },
   });
   setLoadingText('Loading…');
+  // What the game runs on, said even with the Logger off (a shipped game's): a backend it fell back from would
+  // otherwise go unnoticed.
+  reportBackends(engine, backend);
 
   engine.renderer.applyRenderSettings(data?.config?.render);
   // Before engine.run(), so frame one already has bindings. An older build's bin carries no

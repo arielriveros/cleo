@@ -5,6 +5,7 @@ import { gameIconFiles, type GameIconFiles } from "./publish/gameIcons";
 import { useCleoEngine, KIND_LABEL } from "./EngineContext";
 import { useVfs } from "./assets/VfsContext";
 import { buildMultiSceneGameData, PublishCanceledError } from "./publish/buildMultiSceneGameData";
+import { readBackendPreference } from '@cleo/app-kit/renderer/backendPreference';
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
 import FolderStatusChip from "./projectFolder/FolderStatusChip";
 import { openFolderDialog, openProjectInCodeEditor, showProjectFolder } from "./projectFolder/folderActions";
@@ -256,6 +257,10 @@ export default function MenuBar() {
       if (!projectSettings.identity.appId)
         setProjectSettings(prev => (prev.identity.appId ? prev : { ...prev, identity: { ...prev.identity, appId } }));
       const game = { name: gameName || 'Cleo Game', version: projectSettings.identity.version, appId };
+      // The graphics API the game runs on (Options ▸ Project ▸ Published game): "same as the editor" is the one this
+      // editor was set to run on (Options ▸ Engine ▸ Renderer), as it is now.
+      const chosen = projectSettings.publish.graphicsBackend;
+      const graphicsBackend = chosen === 'editor' ? readBackendPreference() : chosen;
 
       task.setStep(0, { status: 'running', detail: 'Embedding textures' });
       let data: any;
@@ -288,6 +293,7 @@ export default function MenuBar() {
           // the game was played (Play or Simulate) before publishing, the more of them there are.
           pipelines: instance?.renderer.pipelineRecipes(),
           game,
+          graphicsBackend,
           // The game uses a feature the project leaves out (Project ▸ Features): ask. Turning one back on is
           // for good, as if done in Project ▸ Features.
           onDisabledFeatureUse: uses => new Promise<string[] | null>(resolve => {

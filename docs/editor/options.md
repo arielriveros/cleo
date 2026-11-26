@@ -127,20 +127,67 @@ The game's hold on the mouse and keyboard in Play, in the viewport and in a Play
 
 ## Project
 
-What belongs to this game and travels with it in a project bundle: its name, the scene it starts in,
-how a published build presents itself, online play, the input map and the names of its collision layers.
+What belongs to this game and travels with it in a project bundle: its name, its saves, its published game,
+online play, the input map and the names of its collision layers.
 
 ### General
 
-The project's name and main scene, and how a published build presents itself.
+The project's name and main scene, and how its saves are kept.
 
 - **Name** — the project's name in the projects list and on the menu bar's logo button.
-- **Main scene** — the scene a published game starts in. Scenes load each other from scripts after
-  that.
+- **Main scene** — the scene a published game starts in (the **Start scene** of the Published game page). Scenes
+  load each other from scripts after that.
 
-**Published game**
+**Saves**
 
-How a published build presents itself. The window size and flags apply to the desktop build; a web
+How the game's saves are kept (see [Saving and loading](../scripting/save-game.md)). Every build of the
+game must agree on these, or a player's saves would vanish with an update.
+
+- **Save version** — the game's own save version, written into every save. Raise it when what the game
+  saves changes shape; `SaveGame.onMigrate` then upgrades older saves as they load. 0 by default.
+- **Save folder** — where a published game keeps its saves: `<app data>/<folder>/saves` on the desktop
+  (`%APPDATA%` on Windows), the storage namespace on the web. Empty = the title, or the project name.
+  Set it before the first release and keep it: renaming it loses the saves players already have.
+
+### Published game
+
+Everything a publish (Project ▸ Publish: web, desktop or desktop installer) makes the game from that is not
+its content: the scene it starts in and the scenes it carries, what it runs on, and how it presents itself.
+**Reset publish options** sets the page back to its defaults (the start scene and the physics backend are
+the project's own settings and stay).
+
+**Start**
+
+Where the game starts, and which of the project's scenes it carries.
+
+- **Start scene** — the scene the game starts in: the project's main scene, the same setting as General's.
+- **Scenes** — the scenes the published game carries, one switch each. A new scene ships until it is switched
+  off; the start scene always ships. A scene left out takes the textures, sounds and lighting bakes only it
+  used with it, so the game is smaller, and a script's `Game.loadScene` does not find it.
+
+**Rendering and physics**
+
+What the game runs on, whoever plays it: the same on the web and on the desktop.
+
+- **Graphics API** — what the game draws with. *Same as the editor* is the one this editor is set to run on
+  (Options ▸ Engine ▸ Renderer ▸ Graphics API, a setting of this machine), read when you publish; *WebGPU* or
+  *WebGL 2* fixes it for the project, whoever publishes. A game asked to run on WebGPU where there is none runs on
+  WebGL 2 if it carries the WebGL 2 shaders (below), and says it needs WebGPU if not. The game writes what it runs
+  on to the browser console as it starts, with the reason when it is not what it was asked for.
+- **WebGL 2 fallback** — ship the WebGL 2 versions of the shaders too, so a WebGPU game also runs where WebGPU
+  does not. Off makes a WebGPU-only game, lighter by its GLSL shaders, which tells a player whose browser or
+  graphics card has no WebGPU that it needs it. Always on for a WebGL 2 game.
+- **Only used shaders** — compile just the shaders this game uses at startup, not all of them: a much
+  shorter first launch, and a smaller game: of each shader's variants it ships only those. Anything missed
+  still runs when first needed, drawn by the shader's general version (a parallax material then draws
+  flat).
+- **Physics backend** — the physics engine the game simulates with: the project's, the same setting as Options ▸
+  Engine ▸ Runtime. The editor reads it when the project opens; a publish always uses it. A backend that cannot
+  load where the game runs falls back to cannon-es, said in the console.
+
+**Window and identity**
+
+How the published build presents itself. The window size and flags apply to the desktop build; a web
 build fills the page it is embedded in, so only the title applies there.
 
 - **Title** — the window or browser-tab title, the desktop installer's product name and the folder a
@@ -163,24 +210,6 @@ build fills the page it is embedded in, so only the title applies there.
 - **Window size** — the desktop window's size at launch, in pixels.
 - **Start fullscreen** / **Resizable window** — how the desktop window opens, and whether the player
   may resize it.
-- **Only used shaders** — compile just the shaders this game uses at startup, not all of them: a much
-  shorter first launch, and a smaller game: of each shader's variants it ships only those. Anything missed
-  still runs when first needed, drawn by the shader's general version (a parallax material then draws
-  flat).
-- **WebGL 2 fallback** — ship the WebGL 2 versions of the shaders too, so the game also runs where WebGPU
-  does not. Off makes a WebGPU-only game, lighter by its GLSL shaders, which tells a player whose browser
-  or graphics card has no WebGPU that it needs it.
-
-**Saves**
-
-How the game's saves are kept (see [Saving and loading](../scripting/save-game.md)). Every build of the
-game must agree on these, or a player's saves would vanish with an update.
-
-- **Save version** — the game's own save version, written into every save. Raise it when what the game
-  saves changes shape; `SaveGame.onMigrate` then upgrades older saves as they load. 0 by default.
-- **Save folder** — where a published game keeps its saves: `<app data>/<folder>/saves` on the desktop
-  (`%APPDATA%` on Windows), the storage namespace on the web. Empty = the title, or the project name.
-  Set it before the first release and keep it: renaming it loses the saves players already have.
 
 ### NetSync
 

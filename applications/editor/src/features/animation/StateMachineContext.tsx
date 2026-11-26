@@ -25,6 +25,9 @@ import {
   addFork as addForkIn, setForkFields, removeFork as removeForkIn, dissolveFork as dissolveForkIn,
   moveTransition as moveTransitionIn,
 } from './forks'
+import { clearView, pruneReroutes, renameInReroutes, withPoints, type ReroutePoint } from './reroutes'
+import { machineRecorder, selectionHolds, viewIn, type MachineEditOpts, type MachineView } from './machineHistory'
+import { useHistory } from '../HistoryContext'
 
 export { layerView, writeLayer }
 
@@ -125,6 +128,13 @@ interface StateMachineContextValue {
   stateIndex: (name: string) => number
   /** Assign x/y to several states in one update (used for first-time graph auto-layout). */
   commitLayout: (coords: Record<string, { x: number; y: number }>) => void
+  /**
+   * Tidy one view of the active layer: states, groups and forks to `coords`, the view's reroute points cleared (they
+   * were placed for where the nodes were). An edit: it marks the tab unsaved.
+   */
+  tidyView: (coords: Record<string, { x: number; y: number }>, view: string | null, also?: MachineEditOpts['also']) => void
+  /** A drawn line's reroute points (reroutes.ts), by its reroute key; none removes them. */
+  setReroutes: (key: string, points: ReroutePoint[] | null, label?: string) => void
   /**
    * Atomically remove states and groups (by name), whole links, and exact transitions (`from`/`to` pairs) in a
    * single update (graph delete). A group goes with its states.
@@ -283,7 +293,11 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const target = getAnimationTarget(editorScene, stateMachineTargetId)
   const hasBoneNames = !!(target && target.skin.nodeNames && target.skin.nodeNames.size > 0)
 
-  const [fullSm, setSm] = useState<AnimationStateMachine>(EMPTY)
+  const [fullSm, setSmState] = useState<AnimationStateMachine>(EMPTY)
+  // The machine as of the last write, ahead of the render that shows it: two mutators in one handler each build
+  // on the one before, and the undo step of that handler reads its result here.
+  const smRef = useRef<AnimationStateMachine>(EMPTY)
+  const setSm = (next: AnimationStateMachine) => { smRef.current = next; setSmState(next) }
   const [activeLayer, setActiveLayerState] = useState(0)
   const [selection, setSelection] = useState<SMSelection>(null)
   // The active layer's view. A layer index past the end (one just removed) falls back to the base.
@@ -293,6 +307,11 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const [openGroupState, setOpenGroup] = useState<string | null>(null)
   // A group that is no longer there (removed, or on another layer) closes by itself.
   const openGroup = openGroupState && isGroupName(sm, openGroupState) ? openGroupState : null
+  // Where an edit is made, for its undo step (machineHistory.ts). Kept by the setters as well as each render: the
+  // step closes in a microtask, which may run before the render that a layer switch in the same handler asks for.
+  const viewRef = useRef<MachineView>({ layer: layerIdx, group: openGroup })
+  viewRef.current = { layer: layerIdx, group: openGroup }
+  const showGroup = (name: string | null) => { viewRef.current = { ...viewRef.current, group: name }; setOpenGroup(name) }
   const [simulate, setSimulate] = useState(false)
   const [, force] = useState(0)
   // Bumped when physics changes (a Collider added or removed above the character), to invalidate accessVars.
@@ -351,22 +370,55 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     return () => { eventEmitter.off('ANIM_CLIPS_CHANGED', onClips) }
   }, [eventEmitter])
 
-  // Must stay functional: two mutators firing in one tick must not both derive from the same stale `sm`.
-  // Marking the tab dirty also has to happen here — the working copy is React state, so editing it touches
-  // no Scene and emits no SCENE_CHANGED. `silent` is for machine changes the user did not make.
-  const update = (fn: (prev: AnimationStateMachine) => AnimationStateMachine, opts?: { silent?: boolean }) => {
-    setSm(prev => {
-      const next = { ...fn(prev) }
-      smCacheRef.current.set(activeTabId, next) // survive a switch away from this tab
-      return next
-    })
+  // ---- Undo ----
+  // Each edit is an undo step on this tab's stack; the steps of one handler are one (machineHistory.ts). Undo
+  // puts the whole machine back, so a step needs no inverse of its own, and shows the layer and group it was
+  // made in. What is selected stays selected while it is still there.
+  const { push } = useHistory()
+  const pushRef = useRef(push)
+  pushRef.current = push
+  const tabRef = useRef(activeTabId)
+  tabRef.current = activeTabId
+  const dirtyRef = useRef(markTabDirty)
+  dirtyRef.current = markTabDirty
+  const recorder = useMemo(() => machineRecorder({
+    machine: () => smRef.current,
+    view: () => ({ ...viewRef.current }),
+    push: step => pushRef.current(step),
+    restore: (tabId, machine, view) => {
+      smCacheRef.current.set(tabId, machine)
+      dirtyRef.current(tabId, 'anim-sm-undo')
+      // Another animation tab's step only rewrites its working copy; that tab loads it when shown again.
+      if (tabId !== tabRef.current) return
+      setSm(machine)
+      const at = viewIn(machine, view)
+      viewRef.current = at
+      setActiveLayerState(at.layer)
+      setOpenGroup(at.group)
+      setSelection(sel => (selectionHolds(layerView(machine, at.layer), sel) ? sel : null))
+    },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [])
+
+  // Builds on the last write, not on the rendered `sm`: two mutators firing in one tick must not both derive from
+  // the same stale machine. Marking the tab dirty also has to happen here, since the working copy is React state:
+  // editing it touches no Scene and emits no SCENE_CHANGED. `silent` is for machine changes the user did not
+  // make; `label` and `merge` name the undo step (machineHistory.ts).
+  const update = (fn: (prev: AnimationStateMachine) => AnimationStateMachine, opts?: MachineEditOpts) => {
+    const before = smRef.current
+    const next = { ...fn(before) }
+    recorder.edit(activeTabId, before, opts)
+    setSm(next)
+    smCacheRef.current.set(activeTabId, next) // survive a switch away from this tab
     if (!opts?.silent) markTabDirty(activeTabId, 'anim-sm-edit')
   }
-  // The same, for the states and transitions of the ACTIVE layer: `fn` sees and returns that layer's view.
-  const updateLayer = (fn: (prev: AnimationStateMachine) => AnimationStateMachine, opts?: { silent?: boolean }) =>
-    update(prev => writeLayer(prev, layerIdx, fn(layerView(prev, layerIdx))), opts)
+  // The same, for the states and transitions of the ACTIVE layer: `fn` sees and returns that layer's view. The
+  // reroute points of a line the edit took away (a transition removed, a state deleted or grouped) go with it.
+  const updateLayer = (fn: (prev: AnimationStateMachine) => AnimationStateMachine, opts?: MachineEditOpts) =>
+    update(prev => writeLayer(prev, layerIdx, pruneReroutes(fn(layerView(prev, layerIdx)))), opts)
 
   const setActiveLayer = (i: number) => {
+    viewRef.current = { layer: i, group: null }
     setActiveLayerState(i)
     setSelection(null)
     setOpenGroup(null)
@@ -377,11 +429,12 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     update(prev => ({
       ...prev,
       layers: [...(prev.layers ?? []), { name, states: [{ name: 'Empty', clipName: '', loop: true, speed: 1, isEntry: true, x: 40, y: 40 }], transitions: [], weight: 1, blend: 'override' }],
-    }))
+    }), { label: 'Add layer' })
     setActiveLayer((fullSm.layers?.length ?? 0) + 1)
   }
   const setLayer = (i: number, patch: Partial<AnimationLayer>) =>
-    update(prev => ({ ...prev, layers: (prev.layers ?? []).map((l, idx) => (idx === i - 1 ? { ...l, ...patch } : l)) }))
+    update(prev => ({ ...prev, layers: (prev.layers ?? []).map((l, idx) => (idx === i - 1 ? { ...l, ...patch } : l)) }),
+      { label: 'Layer settings', merge: `layer:${i}:${Object.keys(patch).sort().join()}` })
   const removeLayer = (i: number) => {
     update(prev => {
       const layers = (prev.layers ?? []).filter((_, idx) => idx !== i - 1)
@@ -390,21 +443,22 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       const next: AnimationStateMachine = { ...prev, layers: layers.length ? layers : undefined, ...(slots ? { slots } : {}) }
       if (!layers.length) delete next.layers
       return next
-    })
+    }, { label: 'Remove layer' })
     setActiveLayer(0)
   }
   const addSlot = () => update(prev => ({
     ...prev,
     slots: [...(prev.slots ?? []), { name: uniqueName('Slot', (prev.slots ?? []).map(sl => sl.name)) }],
-  }))
+  }), { label: 'Add slot' })
   const setSlot = (i: number, patch: Partial<AnimationSlotDef>) =>
-    update(prev => ({ ...prev, slots: (prev.slots ?? []).map((sl, idx) => (idx === i ? { ...sl, ...patch } : sl)) }))
+    update(prev => ({ ...prev, slots: (prev.slots ?? []).map((sl, idx) => (idx === i ? { ...sl, ...patch } : sl)) }),
+      { label: 'Slot settings', merge: `slot:${i}:${Object.keys(patch).sort().join()}` })
   const removeSlot = (i: number) => update(prev => {
     const slots = (prev.slots ?? []).filter((_, idx) => idx !== i)
     const next: AnimationStateMachine = { ...prev, slots }
     if (!slots.length) delete next.slots
     return next
-  })
+  }, { label: 'Remove slot' })
 
   const apply = () => {
     if (!target) return
@@ -473,7 +527,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     update(prev => ({
       ...prev,
       parameters: [...prev.parameters, { name: uniqueName('param', prev.parameters.map(p => p.name)), type: 'float', default: 0 }],
-    }))
+    }), { label: 'Add parameter' })
   }
   const setParam = (i: number, patch: Partial<AnimationParameter>) => {
     update(prev => {
@@ -513,14 +567,19 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
           })),
         } : {}),
       }
+    }, {
+      label: patch.name !== undefined && patch.name !== sm.parameters[i]?.name ? 'Rename parameter' : 'Parameter settings',
+      merge: `param:${i}:${Object.keys(patch).sort().join()}`,
     })
   }
-  const removeParam = (i: number) => update(prev => ({ ...prev, parameters: prev.parameters.filter((_, idx) => idx !== i) }))
-  const setEventActions = (next: EventActionBinding[]) => update(prev => ({ ...prev, eventActions: next }))
+  const removeParam = (i: number) => update(prev => ({ ...prev, parameters: prev.parameters.filter((_, idx) => idx !== i) }),
+    { label: 'Remove parameter' })
+  const setEventActions = (next: EventActionBinding[]) => update(prev => ({ ...prev, eventActions: next }),
+    { label: 'Event actions', merge: 'eventActions' })
   const addTriggerParam = (name: string) => {
     if (!name) return
     update(prev => prev.parameters.some(p => p.name === name) ? prev
-      : { ...prev, parameters: [...prev.parameters, { name, type: 'trigger', default: false }] })
+      : { ...prev, parameters: [...prev.parameters, { name, type: 'trigger', default: false }] }, { label: 'Add parameter' })
   }
 
   // ---- States ----
@@ -534,7 +593,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
         states: [...prev.states, { name, clipName: clips[0] ?? '', loop: true, speed: 1, isEntry: prev.states.length === 0, x: pos?.x, y: pos?.y }],
       }
       return into ? moveToGroupIn(next, name, into) : next
-    })
+    }, { label: 'Add state' })
     setSelection({ kind: 'state', name })
   }
   const setState = (i: number, patch: Partial<AnimationState>) => {
@@ -551,7 +610,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       if (!patch.name || patch.name === oldName) return { ...prev, states }
       const groups = renameStateInGroups(prev.groups, oldName, patch.name)
       return {
-        ...prev,
+        ...renameInReroutes(prev, oldName, patch.name),
         states,
         ...(groups ? { groups } : {}),
         transitions: prev.transitions.map(t => ({
@@ -560,7 +619,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
           to: t.to === oldName ? patch.name! : t.to,
         })),
       }
-    })
+    }, { label: stateEditLabel(patch, oldName), merge: `state:${layerIdx}:${i}:${Object.keys(patch).sort().join()}` })
     if (patch.name && patch.name !== oldName) {
       if (selection?.kind === 'state' && selection.name === oldName) setSelection({ kind: 'state', name: patch.name })
       // A link's identity is its two names, so a rename re-points the selection too.
@@ -580,7 +639,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
         transitions: prev.transitions.filter(t => t.from !== name && t.to !== name),
         ...(groups ? { groups } : {}),
       }
-    })
+    }, { label: 'Delete state' })
     if (selection?.kind === 'state' && selection.name === name) setSelection(null)
     if (selection?.kind === 'transition' && (selection.a === name || selection.b === name)) setSelection(null)
   }
@@ -594,6 +653,15 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       const forks = prev.forks?.map(f => coords[f.name] ? { ...f, x: coords[f.name].x, y: coords[f.name].y } : f)
       return { ...prev, states, ...(groups ? { groups } : {}), ...(forks ? { forks } : {}) }
     }, { silent: true })
+  const tidyView = (coords: Record<string, { x: number; y: number }>, view: string | null, also?: MachineEditOpts['also']) =>
+    updateLayer(prev => {
+      const states = prev.states.map(s => coords[s.name] ? { ...s, x: coords[s.name].x, y: coords[s.name].y } : s)
+      const groups = prev.groups?.map(g => coords[g.name] ? { ...g, x: coords[g.name].x, y: coords[g.name].y } : g)
+      const forks = prev.forks?.map(f => coords[f.name] ? { ...f, x: coords[f.name].x, y: coords[f.name].y } : f)
+      return clearView({ ...prev, states, ...(groups ? { groups } : {}), ...(forks ? { forks } : {}) }, view)
+    }, { label: 'Tidy', also })
+  const setReroutes = (key: string, points: ReroutePoint[] | null, label = 'Reroute point') =>
+    updateLayer(prev => withPoints(prev, key, points), { label })
   const deleteElements = (stateNames: string[], removedLinks: [string, string][], exact: [string, string][] = []) => {
     // The Any State node is not a state: selecting it with others and pressing Delete keeps it (and its
     // transitions); they are removed one link at a time. A group goes with its states.
@@ -618,7 +686,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       if (!groups?.length) delete next.groups
       if (!forks?.length) delete next.forks
       return next
-    })
+    }, { label: 'Delete' })
     const gone = (n: string) => names.has(n)
     if ((selection?.kind === 'state' && gone(selection.name)) ||
         (selection?.kind === 'group' && gone(selection.name)) ||
@@ -635,7 +703,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const createGroup = (members: string[]): string | null => {
     const made = createGroupIn(sm, members)
     if (!made) return null
-    updateLayer(prev => createGroupIn(prev, members, made.name)?.view ?? prev)
+    updateLayer(prev => createGroupIn(prev, members, made.name)?.view ?? prev, { label: 'Group' })
     setSelection({ kind: 'group', name: made.name })
     return made.name
   }
@@ -644,10 +712,11 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     if (rename && (!patch.name || nameTaken(sm, patch.name, name))) {
       // Typed into a clash (or emptied): keep everything else the patch says.
       const { name: _taken, ...rest } = patch
-      if (Object.keys(rest).length) updateLayer(prev => setGroupFields(prev, name, rest))
+      if (Object.keys(rest).length) updateLayer(prev => setGroupFields(prev, name, rest), nodeEdit('group', groupsOf(sm).findIndex(g => g.name === name), rest))
       return
     }
-    updateLayer(prev => setGroupFields(prev, name, patch))
+    updateLayer(prev => (rename ? renameInReroutes(setGroupFields(prev, name, patch), name, patch.name!) : setGroupFields(prev, name, patch)),
+      nodeEdit('group', groupsOf(sm).findIndex(g => g.name === name), patch, rename))
     if (!rename) return
     const to = patch.name!
     const swap = (n: string) => (n === name ? to : n)
@@ -658,20 +727,21 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       const [a, b] = linkKey(swap(selection.a), swap(selection.b))
       setSelection({ kind: 'transition', a, b })
     }
-    if (openGroup === name) setOpenGroup(to)
+    if (openGroup === name) showGroup(to)
   }
   const removeGroup = (name: string, mode: 'ungroup' | 'delete') => {
     const members = new Set(groupsOf(sm).find(g => g.name === name)?.states ?? [])
-    updateLayer(prev => removeGroupIn(prev, name, mode))
+    updateLayer(prev => removeGroupIn(prev, name, mode), { label: mode === 'ungroup' ? 'Ungroup' : 'Delete group' })
     const touches = (n: string) => n === name || (mode === 'delete' && members.has(n))
     if ((selection?.kind === 'group' && selection.name === name) ||
         (selection?.kind === 'state' && touches(selection.name)) ||
         (selection?.kind === 'summary' && (touches(selection.from) || touches(selection.to))) ||
         (selection?.kind === 'transition' && (touches(selection.a) || touches(selection.b))))
       setSelection(null)
-    if (openGroup === name) setOpenGroup(null)
+    if (openGroup === name) showGroup(null)
   }
-  const moveToGroup = (state: string, group: string | null) => updateLayer(prev => moveToGroupIn(prev, state, group))
+  const moveToGroup = (state: string, group: string | null) => updateLayer(prev => moveToGroupIn(prev, state, group),
+    { label: group ? 'Move into group' : 'Move out of group' })
 
   // ---- Forks ----
   const forks = forksOf(sm)
@@ -680,7 +750,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     const { name } = addForkIn(sm, pos, openGroup)
     // Added while a group is open, it is one of that group's.
     const into = openGroup
-    updateLayer(prev => addForkIn(prev, pos, into).view)
+    updateLayer(prev => addForkIn(prev, pos, into).view, { label: 'Add fork' })
     setSelection({ kind: 'fork', name })
     return name
   }
@@ -689,10 +759,11 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     if (rename && (!patch.name || nameTaken(sm, patch.name, name))) {
       // Typed into a clash (or emptied): keep everything else the patch says.
       const { name: _taken, ...rest } = patch
-      if (Object.keys(rest).length) updateLayer(prev => setForkFields(prev, name, rest))
+      if (Object.keys(rest).length) updateLayer(prev => setForkFields(prev, name, rest), nodeEdit('fork', forksOf(sm).findIndex(f => f.name === name), rest))
       return
     }
-    updateLayer(prev => setForkFields(prev, name, patch))
+    updateLayer(prev => (rename ? renameInReroutes(setForkFields(prev, name, patch), name, patch.name!) : setForkFields(prev, name, patch)),
+      nodeEdit('fork', forksOf(sm).findIndex(f => f.name === name), patch, rename))
     if (!rename) return
     const to = patch.name!
     const swap = (n: string) => (n === name ? to : n)
@@ -711,14 +782,15 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       setSelection(null)
   }
   const removeFork = (name: string) => {
-    updateLayer(prev => removeForkIn(prev, name))
+    updateLayer(prev => removeForkIn(prev, name), { label: 'Delete fork' })
     dropForkSelection(name)
   }
   const dissolveFork = (name: string) => {
-    updateLayer(prev => dissolveForkIn(prev, name))
+    updateLayer(prev => dissolveForkIn(prev, name), { label: 'Dissolve fork' })
     dropForkSelection(name)
   }
-  const moveTransition = (from: string, to: string, dir: -1 | 1) => updateLayer(prev => moveTransitionIn(prev, from, to, dir))
+  const moveTransition = (from: string, to: string, dir: -1 | 1) => updateLayer(prev => moveTransitionIn(prev, from, to, dir),
+    { label: 'Reorder transitions' })
 
   // ---- Transitions (addressed by from/to; the array index never leaves this file) ----
   const findT = (list: AnimationTransition[], from: string, to: string) => list.findIndex(t => t.from === from && t.to === to)
@@ -749,7 +821,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       const transitions = [...prev.transitions]
       transitions.splice(at < 0 ? transitions.length : at, 0, t)
       return { ...prev, transitions }
-    })
+    }, { label: 'Add transition' })
     const [a, b] = linkKey(from, to)
     setSelection({ kind: 'transition', a, b })
   }
@@ -758,9 +830,10 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       const i = findT(prev.transitions, from, to)
       if (i < 0) return prev
       return { ...prev, transitions: prev.transitions.map((t, idx) => idx === i ? { ...t, ...patch } : t) }
-    })
+    }, { label: 'Transition settings', merge: `transition:${layerIdx}:${from}>${to}:${Object.keys(patch).sort().join()}` })
   const removeTransition = (from: string, to: string) => {
-    updateLayer(prev => ({ ...prev, transitions: prev.transitions.filter(t => !(t.from === from && t.to === to)) }))
+    updateLayer(prev => ({ ...prev, transitions: prev.transitions.filter(t => !(t.from === from && t.to === to)) }),
+      { label: 'Delete transition' })
     // Only drop the selection when the whole link is gone; the other direction may still be there to edit.
     const link = linkOf(from, to)
     const remaining = link && ((link.forward && !(link.forward.from === from && link.forward.to === to)) ||
@@ -769,19 +842,21 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }
   const removeLink = (x: string, y: string) => {
     const [a, b] = linkKey(x, y)
-    updateLayer(prev => ({ ...prev, transitions: prev.transitions.filter(t => linkKey(t.from, t.to).join('|') !== `${a}|${b}`) }))
+    updateLayer(prev => ({ ...prev, transitions: prev.transitions.filter(t => linkKey(t.from, t.to).join('|') !== `${a}|${b}`) }),
+      { label: 'Delete transitions' })
     if (sameLink(selection, a, b)) setSelection(null)
   }
 
   // ---- Conditions (a tree per direction, addressed by path) ----
-  const editCondition = (from: string, to: string, path: CondPath, fn: (n: AnimationConditionNode) => AnimationConditionNode | null) =>
+  const editCondition = (from: string, to: string, path: CondPath, fn: (n: AnimationConditionNode) => AnimationConditionNode | null,
+    opts: MachineEditOpts = { label: 'Condition' }) =>
     updateLayer(prev => {
       const i = findT(prev.transitions, from, to)
       if (i < 0) return prev
       const t = prev.transitions[i]
       const next = editTree(treeOf(t), path, fn)
       return { ...prev, transitions: prev.transitions.map((x, idx) => idx === i ? { ...x, condition: next, conditions: [] } : x) }
-    })
+    }, opts)
 
   /**
    * Replace a transition's whole condition tree.
@@ -802,27 +877,28 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
         ...prev,
         transitions: prev.transitions.map((x, idx) => idx === i ? { ...x, condition: next, conditions: [] } : x),
       }
-    })
+    }, { label: 'Conditions', merge: `conditions:${layerIdx}:${from}>${to}` })
 
   const addCondition = (from: string, to: string, path: CondPath) => {
     const p = sm.parameters[0]
     if (!p) return
     const leaf: AnimationCondition = { param: p.name, op: OPS_FOR[effectiveType(p)][0], value: 0 }
-    editCondition(from, to, path, n => isConditionGroup(n) ? { ...n, children: [...n.children, leaf] } : n)
+    editCondition(from, to, path, n => isConditionGroup(n) ? { ...n, children: [...n.children, leaf] } : n, { label: 'Add condition' })
   }
   const addGroup = (from: string, to: string, path: CondPath) =>
     // Nest the OPPOSITE gate: a lone group inside an AND that is also an AND says nothing new, and mixing
     // the two is the only reason to nest at all.
     editCondition(from, to, path, n => isConditionGroup(n)
       ? { ...n, children: [...n.children, { op: n.op === 'and' ? 'or' : 'and', children: [] } as AnimationConditionGroup] }
-      : n)
+      : n, { label: 'Add condition group' })
   const setCondition = (from: string, to: string, path: CondPath, patch: Partial<AnimationCondition>) =>
-    editCondition(from, to, path, n => isConditionGroup(n) ? n : { ...n, ...patch })
+    editCondition(from, to, path, n => isConditionGroup(n) ? n : { ...n, ...patch },
+      { label: 'Condition', merge: `condition:${layerIdx}:${from}>${to}:${path.join('.')}:${Object.keys(patch).sort().join()}` })
   const setGroupOp = (from: string, to: string, path: CondPath, op: 'and' | 'or') =>
-    editCondition(from, to, path, n => isConditionGroup(n) ? { ...n, op } : n)
+    editCondition(from, to, path, n => isConditionGroup(n) ? { ...n, op } : n, { label: 'Condition gate' })
   const removeNode = (from: string, to: string, path: CondPath) => {
     if (path.length === 0) return // the root group is the transition's gate; emptying it is what ✕ on its children does
-    editCondition(from, to, path, () => null)
+    editCondition(from, to, path, () => null, { label: 'Remove condition' })
   }
 
   // ---- Clips (rename / delete on the model, keeping state references — and any legacy markers — in sync) ----
@@ -841,7 +917,8 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       states: swap(prev.states),
       ...(prev.layers ? { layers: prev.layers.map(l => ({ ...l, states: swap(l.states) })) } : {}),
       events: prev.events.map(ev => ev.clipName === oldName ? { ...ev, clipName: finalName } : ev),
-    }))
+    }), { label: 'Rename clip' })
+    forgetHistory()
   }
   const deleteClip = (name: string) => {
     removeAnimationClip(name)
@@ -851,7 +928,15 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       states: clear(prev.states),
       ...(prev.layers ? { layers: prev.layers.map(l => ({ ...l, states: clear(l.states) })) } : {}),
       events: prev.events.filter(ev => ev.clipName !== name),
-    }))
+    }), { label: 'Delete clip' })
+    forgetHistory()
+  }
+  // A clip renamed or deleted is written to the model (or its `.anim`) at once, which undo cannot take back. A step
+  // from before it would put back states naming a clip by a name it no longer has, so the tab's steps go.
+  // After the microtask that closes this edit's own step, so that one goes too.
+  const forgetHistory = () => {
+    const tabId = activeTabId
+    queueMicrotask(() => queueMicrotask(() => eventEmitter.emit('HISTORY_RESET', tabId)))
   }
 
   /**
@@ -868,12 +953,12 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     const rigId = modelId ? models.find(m => m.id === modelId)?.rigId : undefined
     const asset = buildControllerAsset(name, fullSm, rigId)
     addAnimController(asset)
-    update(prev => ({ ...prev, controllerId: asset.id }))
+    update(prev => ({ ...prev, controllerId: asset.id }), { label: 'Save as controller' })
   }
   const detachController = () => update(prev => {
     const { controllerId: _c, clipOverrides: _o, ...own } = prev
     return own as AnimationStateMachine
-  })
+  }, { label: 'Detach controller' })
 
   // Must read the SOURCE node, not the preview clone: enterStateMachineEditor clones the character into a
   // throwaway scene, and adopting from the clone would put that copy in the library.
@@ -888,8 +973,8 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     selection, setSelection, graphView, setGraphView, simulate, setSimulate: setSimulateLive,
     apply, paramOf,
     addParam, setParam, removeParam, setEventActions, addTriggerParam,
-    addState, setState, removeState, stateIndex, commitLayout, deleteElements,
-    groups, groupOf, createGroup, setGroup, removeGroup, moveToGroup, openGroup, setOpenGroup,
+    addState, setState, removeState, stateIndex, commitLayout, tidyView, setReroutes, deleteElements,
+    groups, groupOf, createGroup, setGroup, removeGroup, moveToGroup, openGroup, setOpenGroup: showGroup,
     forks, isFork, addFork, setFork, removeFork, dissolveFork, moveTransition,
     links, linkOf, addTransition, setTransition, removeTransition, removeLink,
     addCondition, addGroup, setCondition, setGroupOp, removeNode, setTransitionCondition,
@@ -898,6 +983,25 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+}
+
+/** Undo's name for a state edit: a drag is a move, a typed name a rename. */
+function stateEditLabel(patch: Partial<AnimationState>, oldName: string | undefined): string {
+  const keys = Object.keys(patch)
+  if (keys.every(k => k === 'x' || k === 'y')) return 'Move'
+  if (patch.name !== undefined && patch.name !== oldName) return 'Rename state'
+  if (patch.isEntry) return 'Set entry state'
+  return 'State settings'
+}
+
+/**
+ * The undo label and merge key of a group or fork edit (moved, renamed, or a field set). Keyed by its place in
+ * the list, not its name: a name field renames at every letter typed, and those letters are one step.
+ */
+function nodeEdit(kind: 'group' | 'fork', at: number, patch: object, rename = false): MachineEditOpts {
+  const keys = Object.keys(patch).sort()
+  if (keys.every(k => k === 'x' || k === 'y')) return { label: 'Move' }
+  return { label: rename ? `Rename ${kind}` : `${kind === 'group' ? 'Group' : 'Fork'} settings`, merge: `${kind}:${at}:${keys.join()}` }
 }
 
 export function uniqueName(base: string, existing: string[]): string {

@@ -13158,8 +13158,8 @@
                   "clipName": "Idle",
                   "loop": true,
                   "speed": 1,
-                  "x": 300,
-                  "y": 260,
+                  "x": 306,
+                  "y": 857,
                   "isEntry": true,
                   "footLock": false
                 },
@@ -13336,16 +13336,16 @@
                   "speed": 1,
                   "ikWeightParam": "FootPlacement",
                   "syncGroup": "Gait",
-                  "x": 640,
-                  "y": 260
+                  "x": 306,
+                  "y": 905
                 },
                 {
                   "name": "Turn90L",
                   "clipName": "Turn90L",
                   "loop": false,
                   "speed": 1,
-                  "x": 60,
-                  "y": 60,
+                  "x": 612,
+                  "y": 178,
                   "footLock": false
                 },
                 {
@@ -13353,8 +13353,8 @@
                   "clipName": "Turn90R",
                   "loop": false,
                   "speed": 1,
-                  "x": 300,
-                  "y": 40,
+                  "x": 612,
+                  "y": 370,
                   "footLock": false
                 },
                 {
@@ -13362,8 +13362,8 @@
                   "clipName": "Turn180L",
                   "loop": false,
                   "speed": 1,
-                  "x": 60,
-                  "y": 140,
+                  "x": 306,
+                  "y": 96,
                   "footLock": false
                 },
                 {
@@ -13371,8 +13371,8 @@
                   "clipName": "Turn180R",
                   "loop": false,
                   "speed": 1,
-                  "x": 540,
-                  "y": 60,
+                  "x": 306,
+                  "y": 0,
                   "footLock": false
                 },
                 {
@@ -13380,24 +13380,24 @@
                   "clipName": "Stop",
                   "loop": false,
                   "speed": 1,
-                  "x": 520,
-                  "y": 420
+                  "x": 306,
+                  "y": 233
                 },
                 {
                   "name": "StopMirror",
                   "clipName": "StopMirror",
                   "loop": false,
                   "speed": 1,
-                  "x": 700,
-                  "y": 420
+                  "x": 306,
+                  "y": 137
                 },
                 {
                   "name": "Start",
                   "clipName": "Start",
                   "loop": false,
                   "speed": 1,
-                  "x": 470,
-                  "y": 140,
+                  "x": 342,
+                  "y": 0,
                   "startTime": 0.083
                 },
                 {
@@ -13405,24 +13405,24 @@
                   "clipName": "RunTurnL",
                   "loop": false,
                   "speed": 1,
-                  "x": 860,
-                  "y": 140
+                  "x": 306,
+                  "y": 41
                 },
                 {
                   "name": "RunTurnR",
                   "clipName": "RunTurnR",
                   "loop": false,
                   "speed": 1,
-                  "x": 860,
-                  "y": 380
+                  "x": 306,
+                  "y": 137
                 },
                 {
                   "name": "JumpStand",
                   "clipName": "JumpAir",
                   "loop": false,
                   "speed": 0.67,
-                  "x": 300,
-                  "y": 520,
+                  "x": 572,
+                  "y": 329,
                   "ikWeight": 0
                 },
                 {
@@ -13430,8 +13430,8 @@
                   "clipName": "JumpRunAir",
                   "loop": false,
                   "speed": 0.794,
-                  "x": 760,
-                  "y": 520,
+                  "x": 572,
+                  "y": 809,
                   "ikWeight": 0
                 },
                 {
@@ -13439,8 +13439,8 @@
                   "clipName": "Fall",
                   "loop": true,
                   "speed": 1,
-                  "x": 540,
-                  "y": 680,
+                  "x": 572,
+                  "y": 617,
                   "ikWeight": 0
                 },
                 {
@@ -13448,8 +13448,8 @@
                   "clipName": "Fall",
                   "loop": true,
                   "speed": 1.25,
-                  "x": 540,
-                  "y": 820,
+                  "x": 1184,
+                  "y": 617,
                   "ikWeight": 0
                 },
                 {
@@ -13457,32 +13457,32 @@
                   "clipName": "JumpLand",
                   "loop": false,
                   "speed": 1,
-                  "x": 120,
-                  "y": 680
+                  "x": 0,
+                  "y": 288
                 },
                 {
                   "name": "LandRun",
                   "clipName": "JumpRunLand",
                   "loop": false,
                   "speed": 1,
-                  "x": 900,
-                  "y": 680
+                  "x": 612,
+                  "y": 528
                 },
                 {
                   "name": "LandSoft",
                   "clipName": "LandSoft",
                   "loop": false,
                   "speed": 1,
-                  "x": 300,
-                  "y": 820
+                  "x": 306,
+                  "y": 658
                 },
                 {
                   "name": "LandHard",
                   "clipName": "LandHard",
                   "loop": false,
                   "speed": 1,
-                  "x": 760,
-                  "y": 900,
+                  "x": 306,
+                  "y": 754,
                   "holdMovement": true
                 },
                 {
@@ -13490,16 +13490,16 @@
                   "clipName": "LandRoll",
                   "loop": false,
                   "speed": 1.6,
-                  "x": 940,
-                  "y": 900
+                  "x": 306,
+                  "y": 850
                 },
                 {
                   "name": "CarEnter",
                   "clipName": "CarEnter",
                   "loop": false,
                   "speed": 1,
-                  "x": 1300,
-                  "y": 120,
+                  "x": 0,
+                  "y": 0,
                   "triggers": [
                     {
                       "trigger": "EnterCar",
@@ -13515,8 +13515,8 @@
                   "clipName": "CarDrive",
                   "loop": true,
                   "speed": 1,
-                  "x": 1300,
-                  "y": 260,
+                  "x": 306,
+                  "y": 68,
                   "footLock": false,
                   "ikWeight": 0,
                   "holdMovement": true
@@ -13526,8 +13526,8 @@
                   "clipName": "CarExit",
                   "loop": false,
                   "speed": 1,
-                  "x": 1300,
-                  "y": 400,
+                  "x": 0,
+                  "y": 212,
                   "triggers": [
                     {
                       "trigger": "ExitCar",
@@ -13612,8 +13612,8 @@
                   "ikWeight": 1,
                   "plantInWindows": true,
                   "syncGroup": "Gait",
-                  "x": 1080,
-                  "y": 260
+                  "x": 342,
+                  "y": 648
                 },
                 {
                   "name": "Crouch",
@@ -13626,8 +13626,8 @@
                   "loop": true,
                   "speed": 1,
                   "ikWeight": 1,
-                  "x": 300,
-                  "y": 1060,
+                  "x": 0,
+                  "y": 0,
                   "field": {
                     "mode": "2d",
                     "xAxis": {
@@ -13751,8 +13751,8 @@
                   "clipName": "CrouchTurn90L",
                   "loop": false,
                   "speed": 1,
-                  "x": 80,
-                  "y": 1180,
+                  "x": 612,
+                  "y": 329,
                   "footLock": false
                 },
                 {
@@ -13760,8 +13760,8 @@
                   "clipName": "CrouchTurn90R",
                   "loop": false,
                   "speed": 1,
-                  "x": 520,
-                  "y": 1180,
+                  "x": 612,
+                  "y": 617,
                   "footLock": false
                 },
                 {
@@ -13769,8 +13769,8 @@
                   "clipName": "Handgun Idle",
                   "loop": true,
                   "speed": 1,
-                  "x": 340,
-                  "y": 330,
+                  "x": 306,
+                  "y": 953,
                   "footLock": false
                 },
                 {
@@ -13778,8 +13778,8 @@
                   "clipName": "Rifle Idle",
                   "loop": true,
                   "speed": 1,
-                  "x": 380,
-                  "y": 400,
+                  "x": 306,
+                  "y": 1049,
                   "footLock": false
                 },
                 {
@@ -13794,8 +13794,8 @@
                   "speed": 1,
                   "ikWeightParam": "FootPlacement",
                   "syncGroup": "Gait",
-                  "x": 680,
-                  "y": 330,
+                  "x": 306,
+                  "y": 1001,
                   "field": {
                     "mode": "2d",
                     "xAxis": {
@@ -14004,8 +14004,8 @@
                   "speed": 1,
                   "ikWeightParam": "FootPlacement",
                   "syncGroup": "Gait",
-                  "x": 720,
-                  "y": 400,
+                  "x": 306,
+                  "y": 1097,
                   "field": {
                     "mode": "2d",
                     "xAxis": {
@@ -14213,8 +14213,8 @@
                   "loop": true,
                   "speed": 1,
                   "ikWeight": 1,
-                  "x": 340,
-                  "y": 1130,
+                  "x": 306,
+                  "y": 261,
                   "syncGroup": "Crouch",
                   "field": {
                     "mode": "2d",
@@ -14344,8 +14344,8 @@
                   "loop": true,
                   "speed": 1,
                   "ikWeight": 1,
-                  "x": 380,
-                  "y": 1200,
+                  "x": 306,
+                  "y": 165,
                   "syncGroup": "Crouch",
                   "field": {
                     "mode": "2d",
@@ -14469,8 +14469,8 @@
                   "clipName": "Rifle Turn90L",
                   "loop": false,
                   "speed": 1,
-                  "x": 100,
-                  "y": 130,
+                  "x": 612,
+                  "y": 274,
                   "footLock": false
                 },
                 {
@@ -14478,8 +14478,8 @@
                   "clipName": "Rifle Turn90R",
                   "loop": false,
                   "speed": 1,
-                  "x": 340,
-                  "y": 110,
+                  "x": 612,
+                  "y": 466,
                   "footLock": false
                 },
                 {
@@ -14487,8 +14487,8 @@
                   "clipName": "Rifle CrouchTurn90L",
                   "loop": false,
                   "speed": 1,
-                  "x": 120,
-                  "y": 1250,
+                  "x": 612,
+                  "y": 425,
                   "footLock": false
                 },
                 {
@@ -14496,8 +14496,8 @@
                   "clipName": "Rifle CrouchTurn90R",
                   "loop": false,
                   "speed": 1,
-                  "x": 560,
-                  "y": 1250,
+                  "x": 612,
+                  "y": 713,
                   "footLock": false
                 },
                 {
@@ -14505,8 +14505,8 @@
                   "clipName": "Handgun JumpAir",
                   "loop": false,
                   "speed": 0.67,
-                  "x": 340,
-                  "y": 590,
+                  "x": 572,
+                  "y": 425,
                   "ikWeight": 0
                 },
                 {
@@ -14514,8 +14514,8 @@
                   "clipName": "Rifle JumpAir",
                   "loop": false,
                   "speed": 0.67,
-                  "x": 380,
-                  "y": 660,
+                  "x": 572,
+                  "y": 521,
                   "ikWeight": 0
                 },
                 {
@@ -14523,8 +14523,8 @@
                   "clipName": "Handgun JumpRunAir",
                   "loop": false,
                   "speed": 0.794,
-                  "x": 800,
-                  "y": 590,
+                  "x": 572,
+                  "y": 905,
                   "ikWeight": 0
                 },
                 {
@@ -14532,8 +14532,8 @@
                   "clipName": "Rifle JumpRunAir",
                   "loop": false,
                   "speed": 0.794,
-                  "x": 840,
-                  "y": 660,
+                  "x": 572,
+                  "y": 1001,
                   "ikWeight": 0
                 },
                 {
@@ -14541,8 +14541,8 @@
                   "clipName": "Rifle Fall",
                   "loop": true,
                   "speed": 1,
-                  "x": 580,
-                  "y": 750,
+                  "x": 572,
+                  "y": 713,
                   "ikWeight": 0
                 },
                 {
@@ -14550,8 +14550,8 @@
                   "clipName": "Rifle Fall",
                   "loop": true,
                   "speed": 1.25,
-                  "x": 580,
-                  "y": 890,
+                  "x": 1184,
+                  "y": 713,
                   "ikWeight": 0
                 },
                 {
@@ -14559,32 +14559,32 @@
                   "clipName": "Handgun JumpLand",
                   "loop": false,
                   "speed": 1,
-                  "x": 160,
-                  "y": 750
+                  "x": 612,
+                  "y": 336
                 },
                 {
                   "name": "Rifle JumpLand",
                   "clipName": "Rifle JumpLand",
                   "loop": false,
                   "speed": 1,
-                  "x": 200,
-                  "y": 820
+                  "x": 612,
+                  "y": 432
                 },
                 {
                   "name": "Pistol LandRun",
                   "clipName": "Handgun JumpRunLand",
                   "loop": false,
                   "speed": 1,
-                  "x": 940,
-                  "y": 750
+                  "x": 612,
+                  "y": 624
                 },
                 {
                   "name": "Rifle LandRun",
                   "clipName": "Rifle JumpRunLand",
                   "loop": false,
                   "speed": 1,
-                  "x": 980,
-                  "y": 820
+                  "x": 612,
+                  "y": 720
                 },
                 {
                   "name": "Pistol KneelDown",
@@ -14592,8 +14592,8 @@
                   "loop": false,
                   "speed": 1.5,
                   "footLock": false,
-                  "x": 60,
-                  "y": 1300
+                  "x": 612,
+                  "y": 521
                 },
                 {
                   "name": "Pistol KneelUp",
@@ -14601,16 +14601,16 @@
                   "loop": false,
                   "speed": 1.6,
                   "footLock": false,
-                  "x": 260,
-                  "y": 1300
+                  "x": 612,
+                  "y": 233
                 },
                 {
                   "name": "CrouchStand",
                   "clipName": "CrouchStand",
                   "loop": false,
                   "speed": 1.8,
-                  "x": 460,
-                  "y": 1300
+                  "x": 306,
+                  "y": 69
                 }
               ],
               "transitions": [
@@ -17622,8 +17622,8 @@
                     "Pick Turn90R"
                   ],
                   "entry": "Pick Turn",
-                  "x": 80,
-                  "y": 120
+                  "x": 330,
+                  "y": 96
                 },
                 {
                   "name": "Stopping",
@@ -17634,8 +17634,8 @@
                     "Settle"
                   ],
                   "entry": "Pick Stop",
-                  "x": 470,
-                  "y": 440
+                  "x": 660,
+                  "y": 244
                 },
                 {
                   "name": "Running Turn",
@@ -17645,8 +17645,8 @@
                     "RunTurnR"
                   ],
                   "entry": "Pick Run Turn",
-                  "x": 880,
-                  "y": 260
+                  "x": 660,
+                  "y": 500
                 },
                 {
                   "name": "Air",
@@ -17668,8 +17668,8 @@
                     "Pick FallFar"
                   ],
                   "entry": "Take Off",
-                  "x": 300,
-                  "y": 620
+                  "x": 330,
+                  "y": 232
                 },
                 {
                   "name": "Landing",
@@ -17686,8 +17686,8 @@
                     "Rifle LandRun",
                     "Pick LandRun"
                   ],
-                  "x": 680,
-                  "y": 620
+                  "x": 660,
+                  "y": 380
                 },
                 {
                   "name": "Car",
@@ -17696,8 +17696,8 @@
                     "CarDrive",
                     "CarExit"
                   ],
-                  "x": 1080,
-                  "y": 520
+                  "x": 0,
+                  "y": 328
                 },
                 {
                   "name": "Crouching",
@@ -17717,8 +17717,8 @@
                     "Pistol KneelUp",
                     "CrouchStand"
                   ],
-                  "x": 300,
-                  "y": 1000
+                  "x": 330,
+                  "y": 744
                 },
                 {
                   "name": "Standing",
@@ -17729,8 +17729,8 @@
                     "Pick Idle"
                   ],
                   "entry": "Pick Idle",
-                  "x": 300,
-                  "y": 200
+                  "x": 0,
+                  "y": 416
                 },
                 {
                   "name": "Moving",
@@ -17741,105 +17741,105 @@
                     "Pick Locomotion"
                   ],
                   "entry": "Pick Locomotion",
-                  "x": 640,
-                  "y": 200
+                  "x": 330,
+                  "y": 448
                 }
               ],
               "forks": [
                 {
                   "name": "Take Off",
-                  "x": 530,
-                  "y": 400
-                },
-                {
-                  "name": "Pick Turn",
-                  "x": 300,
-                  "y": 160
-                },
-                {
-                  "name": "Pick Stop",
-                  "x": 610,
-                  "y": 320
-                },
-                {
-                  "name": "Settle",
-                  "x": 610,
-                  "y": 530
-                },
-                {
-                  "name": "Pick Run Turn",
-                  "x": 700,
-                  "y": 260
-                },
-                {
-                  "name": "Pick Idle",
-                  "x": 180,
-                  "y": 220
-                },
-                {
-                  "name": "Pick Locomotion",
-                  "x": 520,
-                  "y": 220
-                },
-                {
-                  "name": "Pick Crouch",
-                  "x": 180,
-                  "y": 1020
-                },
-                {
-                  "name": "Pick Turn90L",
-                  "x": -60,
-                  "y": 20
-                },
-                {
-                  "name": "Pick Turn90R",
-                  "x": 180,
+                  "x": 20,
                   "y": 0
                 },
                 {
+                  "name": "Pick Turn",
+                  "x": 20,
+                  "y": 137
+                },
+                {
+                  "name": "Pick Stop",
+                  "x": 20,
+                  "y": 0
+                },
+                {
+                  "name": "Settle",
+                  "x": 632,
+                  "y": 192
+                },
+                {
+                  "name": "Pick Run Turn",
+                  "x": 20,
+                  "y": 0
+                },
+                {
+                  "name": "Pick Idle",
+                  "x": 20,
+                  "y": 0
+                },
+                {
+                  "name": "Pick Locomotion",
+                  "x": 20,
+                  "y": 0
+                },
+                {
+                  "name": "Pick Crouch",
+                  "x": 632,
+                  "y": 151
+                },
+                {
+                  "name": "Pick Turn90L",
+                  "x": 326,
+                  "y": 192
+                },
+                {
+                  "name": "Pick Turn90R",
+                  "x": 326,
+                  "y": 274
+                },
+                {
                   "name": "Pick CrouchTurn90L",
-                  "x": -40,
-                  "y": 1140
+                  "x": 326,
+                  "y": 439
                 },
                 {
                   "name": "Pick CrouchTurn90R",
-                  "x": 400,
-                  "y": 1140
+                  "x": 326,
+                  "y": 617
                 },
                 {
                   "name": "Pick JumpStand",
-                  "x": 180,
-                  "y": 480
+                  "x": 306,
+                  "y": 590
                 },
                 {
                   "name": "Pick JumpRun",
-                  "x": 640,
-                  "y": 480
+                  "x": 306,
+                  "y": 754
                 },
                 {
                   "name": "Pick Fall",
-                  "x": 420,
-                  "y": 640
+                  "x": 306,
+                  "y": 672
                 },
                 {
                   "name": "Pick FallFar",
-                  "x": 420,
-                  "y": 780
+                  "x": 898,
+                  "y": 624
                 },
                 {
                   "name": "Pick JumpLand",
-                  "x": 0,
-                  "y": 640
+                  "x": 326,
+                  "y": 206
                 },
                 {
                   "name": "Pick LandRun",
-                  "x": 780,
-                  "y": 640
+                  "x": 326,
+                  "y": 576
                 },
                 {
                   "name": "Crouch Down",
-                  "x": 140,
-                  "y": 960
+                  "x": 326,
+                  "y": 357
                 }
               ],
               "events": [],
@@ -17902,8 +17902,8 @@
                       "speed": 1,
                       "meshSpace": 0.5,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 160
+                      "x": 0,
+                      "y": 240
                     },
                     {
                       "name": "Crouch",
@@ -17911,8 +17911,8 @@
                       "loop": true,
                       "speed": 1,
                       "meshSpace": 0.5,
-                      "x": 300,
-                      "y": 420
+                      "x": 306,
+                      "y": 0
                     },
                     {
                       "name": "Sprint",
@@ -17921,8 +17921,8 @@
                       "speed": 1,
                       "meshSpace": 0.5,
                       "syncGroup": "Gait",
-                      "x": 60,
-                      "y": 160
+                      "x": 306,
+                      "y": 96
                     },
                     {
                       "name": "Aim",
@@ -17930,8 +17930,8 @@
                       "loop": true,
                       "speed": 1,
                       "meshSpace": 1,
-                      "x": 560,
-                      "y": 160
+                      "x": 306,
+                      "y": 192
                     },
                     {
                       "name": "Crouch Aim",
@@ -17939,8 +17939,8 @@
                       "loop": true,
                       "speed": 1,
                       "meshSpace": 1,
-                      "x": 560,
-                      "y": 420
+                      "x": 306,
+                      "y": 288
                     },
                     {
                       "name": "Reload",
@@ -17952,8 +17952,8 @@
                       "loop": true,
                       "speed": 1,
                       "meshSpace": 0.5,
-                      "x": 820,
-                      "y": 290,
+                      "x": 306,
+                      "y": 384,
                       "pose": {
                         "name": "Reload",
                         "bones": [
@@ -18643,6 +18643,43 @@
                     "hand": "left",
                     "socket": "Pistol Support",
                     "weightParam": "SupportHand"
+                  },
+                  "reroutes": {
+                    "::Crouch|Reload": [
+                      {
+                        "x": 498,
+                        "y": 218,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Reload|Sprint": [
+                      {
+                        "x": 498,
+                        "y": 266,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Aim|Reload": [
+                      {
+                        "x": 498,
+                        "y": 314,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Crouch|Crouch Aim": [
+                      {
+                        "x": 498,
+                        "y": 170,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Aim|Crouch": [
+                      {
+                        "x": 498,
+                        "y": 122,
+                        "axis": "v"
+                      }
+                    ]
                   }
                 },
                 {
@@ -18703,8 +18740,8 @@
                       "speed": 1,
                       "meshSpace": 0.5,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 160
+                      "x": 0,
+                      "y": 240
                     },
                     {
                       "name": "Crouch",
@@ -18712,8 +18749,8 @@
                       "loop": true,
                       "speed": 1,
                       "meshSpace": 0.5,
-                      "x": 300,
-                      "y": 420
+                      "x": 306,
+                      "y": 0
                     },
                     {
                       "name": "Sprint",
@@ -18722,8 +18759,8 @@
                       "speed": 1,
                       "meshSpace": 0.5,
                       "syncGroup": "Gait",
-                      "x": 60,
-                      "y": 160
+                      "x": 306,
+                      "y": 96
                     },
                     {
                       "name": "Aim",
@@ -18731,8 +18768,8 @@
                       "loop": true,
                       "speed": 1,
                       "meshSpace": 1,
-                      "x": 560,
-                      "y": 160
+                      "x": 306,
+                      "y": 192
                     },
                     {
                       "name": "Crouch Aim",
@@ -18740,8 +18777,8 @@
                       "loop": true,
                       "speed": 1,
                       "meshSpace": 1,
-                      "x": 560,
-                      "y": 420
+                      "x": 306,
+                      "y": 288
                     },
                     {
                       "name": "Reload",
@@ -18749,8 +18786,8 @@
                       "loop": false,
                       "speed": 0.75,
                       "meshSpace": 0.5,
-                      "x": 820,
-                      "y": 290
+                      "x": 306,
+                      "y": 384
                     }
                   ],
                   "transitions": [
@@ -19258,6 +19295,43 @@
                   "handIk": {
                     "hand": "left",
                     "socket": "Rifle Support"
+                  },
+                  "reroutes": {
+                    "::Crouch|Reload": [
+                      {
+                        "x": 498,
+                        "y": 218,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Reload|Sprint": [
+                      {
+                        "x": 498,
+                        "y": 266,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Aim|Reload": [
+                      {
+                        "x": 498,
+                        "y": 314,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Crouch|Crouch Aim": [
+                      {
+                        "x": 498,
+                        "y": 170,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Aim|Crouch": [
+                      {
+                        "x": 498,
+                        "y": 122,
+                        "axis": "v"
+                      }
+                    ]
                   }
                 },
                 {
@@ -19318,8 +19392,8 @@
                       "speed": 1,
                       "meshSpace": 0.5,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 160
+                      "x": 0,
+                      "y": 240
                     },
                     {
                       "name": "Crouch",
@@ -19327,8 +19401,8 @@
                       "loop": true,
                       "speed": 1,
                       "meshSpace": 0.5,
-                      "x": 300,
-                      "y": 420
+                      "x": 306,
+                      "y": 0
                     },
                     {
                       "name": "Sprint",
@@ -19337,8 +19411,8 @@
                       "speed": 1,
                       "meshSpace": 0.5,
                       "syncGroup": "Gait",
-                      "x": 60,
-                      "y": 160
+                      "x": 306,
+                      "y": 96
                     },
                     {
                       "name": "Aim",
@@ -19346,8 +19420,8 @@
                       "loop": true,
                       "speed": 1,
                       "meshSpace": 1,
-                      "x": 560,
-                      "y": 160
+                      "x": 306,
+                      "y": 192
                     },
                     {
                       "name": "Crouch Aim",
@@ -19355,8 +19429,8 @@
                       "loop": true,
                       "speed": 1,
                       "meshSpace": 1,
-                      "x": 560,
-                      "y": 420
+                      "x": 306,
+                      "y": 288
                     },
                     {
                       "name": "Reload",
@@ -19364,8 +19438,8 @@
                       "loop": false,
                       "speed": 0.917,
                       "meshSpace": 0.5,
-                      "x": 820,
-                      "y": 290
+                      "x": 306,
+                      "y": 384
                     }
                   ],
                   "transitions": [
@@ -19873,6 +19947,43 @@
                   "handIk": {
                     "hand": "left",
                     "socket": "Shotgun Support"
+                  },
+                  "reroutes": {
+                    "::Crouch|Reload": [
+                      {
+                        "x": 498,
+                        "y": 218,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Reload|Sprint": [
+                      {
+                        "x": 498,
+                        "y": 266,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Aim|Reload": [
+                      {
+                        "x": 498,
+                        "y": 314,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Crouch|Crouch Aim": [
+                      {
+                        "x": 498,
+                        "y": 170,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Aim|Crouch": [
+                      {
+                        "x": 498,
+                        "y": 122,
+                        "axis": "v"
+                      }
+                    ]
                   }
                 },
                 {
@@ -19899,8 +20010,8 @@
                       "loop": true,
                       "speed": 1,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 280
+                      "x": 0,
+                      "y": 0
                     },
                     {
                       "name": "Pistol",
@@ -19911,8 +20022,8 @@
                       },
                       "loop": true,
                       "speed": 1,
-                      "x": 560,
-                      "y": 160,
+                      "x": 306,
+                      "y": 0,
                       "pose": {
                         "name": "Low Ready",
                         "bones": [
@@ -20282,8 +20393,8 @@
                       },
                       "loop": true,
                       "speed": 1,
-                      "x": 560,
-                      "y": 400,
+                      "x": 306,
+                      "y": 96,
                       "pose": {
                         "name": "Low Ready",
                         "bones": [
@@ -20824,8 +20935,8 @@
                       "loop": false,
                       "speed": 1,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 200
+                      "x": 0,
+                      "y": 0
                     }
                   ],
                   "transitions": []
@@ -20856,8 +20967,8 @@
                       "loop": false,
                       "speed": 1,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 200
+                      "x": 0,
+                      "y": 0
                     }
                   ],
                   "transitions": []
@@ -20888,8 +20999,8 @@
                       "loop": false,
                       "speed": 1,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 200
+                      "x": 0,
+                      "y": 0
                     }
                   ],
                   "transitions": []
@@ -21692,8 +21803,8 @@
                       "loop": true,
                       "speed": 0,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 200
+                      "x": 0,
+                      "y": 0
                     }
                   ],
                   "transitions": []
@@ -22496,8 +22607,8 @@
                       "loop": true,
                       "speed": 0,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 200
+                      "x": 0,
+                      "y": 0
                     }
                   ],
                   "transitions": []
@@ -22533,8 +22644,8 @@
                       "loop": true,
                       "speed": 0,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 200,
+                      "x": 0,
+                      "y": 0,
                       "field": {
                         "mode": "2d",
                         "xAxis": {
@@ -23332,8 +23443,8 @@
                       "loop": true,
                       "speed": 1,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 280
+                      "x": 0,
+                      "y": 0
                     },
                     {
                       "name": "Pistol Fire",
@@ -23346,8 +23457,8 @@
                           "blendTime": 0.02
                         }
                       ],
-                      "x": 560,
-                      "y": 160
+                      "x": 0,
+                      "y": 192
                     },
                     {
                       "name": "Rifle Fire",
@@ -23360,8 +23471,8 @@
                           "blendTime": 0.02
                         }
                       ],
-                      "x": 560,
-                      "y": 280
+                      "x": 0,
+                      "y": 308
                     },
                     {
                       "name": "Shotgun Fire",
@@ -23374,8 +23485,8 @@
                           "blendTime": 0.02
                         }
                       ],
-                      "x": 560,
-                      "y": 400
+                      "x": 0,
+                      "y": 424
                     }
                   ],
                   "transitions": [
@@ -23403,7 +23514,30 @@
                       "exitTime": 0.9,
                       "blendTime": 0.08
                     }
-                  ]
+                  ],
+                  "reroutes": {
+                    "::Off|Pistol Fire": [
+                      {
+                        "x": 192,
+                        "y": 127,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Off|Rifle Fire": [
+                      {
+                        "x": 192,
+                        "y": 185,
+                        "axis": "v"
+                      }
+                    ],
+                    "::Off|Shotgun Fire": [
+                      {
+                        "x": 192,
+                        "y": 243,
+                        "axis": "v"
+                      }
+                    ]
+                  }
                 },
                 {
                   "name": "Look",
@@ -23501,8 +23635,8 @@
                       "loop": true,
                       "speed": 0,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 200
+                      "x": 0,
+                      "y": 0
                     }
                   ],
                   "transitions": []
@@ -23528,8 +23662,8 @@
                       "loop": true,
                       "speed": 0,
                       "isEntry": true,
-                      "x": 300,
-                      "y": 200,
+                      "x": 0,
+                      "y": 0,
                       "field": {
                         "mode": "2d",
                         "xAxis": {
@@ -23607,6 +23741,830 @@
                   "transitions": []
                 }
               ],
+              "reroutes": {
+                "::Stairs|Start": [
+                  {
+                    "x": 546,
+                    "y": 350,
+                    "axis": "v"
+                  }
+                ],
+                "::Moving>Crouching": [
+                  {
+                    "x": 546,
+                    "y": 654,
+                    "axis": "v"
+                  }
+                ],
+                "::Standing>Start": [
+                  {
+                    "x": 420,
+                    "y": -22
+                  }
+                ],
+                "::Turning>Stairs": [
+                  {
+                    "x": 546,
+                    "y": 408,
+                    "axis": "v"
+                  }
+                ],
+                "::Turning>Moving": [
+                  {
+                    "x": 546,
+                    "y": 334,
+                    "axis": "v"
+                  }
+                ],
+                "::Start>Air": [
+                  {
+                    "x": 546,
+                    "y": 172,
+                    "axis": "v"
+                  }
+                ],
+                "::Start>Standing": [
+                  {
+                    "x": 420,
+                    "y": -22
+                  }
+                ],
+                "::Start>Moving": [
+                  {
+                    "x": 546,
+                    "y": 276,
+                    "axis": "v"
+                  }
+                ],
+                "::Running Turn>Standing": [
+                  {
+                    "x": 420,
+                    "y": 426
+                  }
+                ],
+                "::Landing>Standing": [
+                  {
+                    "x": 420,
+                    "y": 426
+                  }
+                ],
+                "::Stairs>Air": [
+                  {
+                    "x": 546,
+                    "y": 496,
+                    "axis": "v"
+                  }
+                ],
+                "::Stopping>Standing": [
+                  {
+                    "x": 420,
+                    "y": 426
+                  }
+                ],
+                "::Crouching>Air": [
+                  {
+                    "x": 546,
+                    "y": 550,
+                    "axis": "v"
+                  }
+                ],
+                "::Crouching>Moving": [
+                  {
+                    "x": 546,
+                    "y": 654,
+                    "axis": "v"
+                  }
+                ],
+                "Turning::Pick Idle|Turn90R": [
+                  {
+                    "x": 804,
+                    "y": 252,
+                    "axis": "v"
+                  }
+                ],
+                "Turning::Pistol Idle>Turning": [
+                  {
+                    "x": 192,
+                    "y": 249,
+                    "axis": "v"
+                  }
+                ],
+                "Turning::Rifle Idle>Turning": [
+                  {
+                    "x": 192,
+                    "y": 345,
+                    "axis": "v"
+                  }
+                ],
+                "Turning::Pick Idle|Rifle Turn90R": [
+                  {
+                    "x": 804,
+                    "y": 300,
+                    "axis": "v"
+                  }
+                ],
+                "Turning::Pick Idle|Rifle Turn90L": [
+                  {
+                    "x": 804,
+                    "y": 204,
+                    "axis": "v"
+                  }
+                ],
+                "Stopping::Locomotion>Stopping": [
+                  {
+                    "x": 192,
+                    "y": 160,
+                    "axis": "v"
+                  }
+                ],
+                "Stopping::Pistol Locomotion>Stopping": [
+                  {
+                    "x": 192,
+                    "y": 208,
+                    "axis": "v"
+                  }
+                ],
+                "Stopping::Rifle Locomotion>Stopping": [
+                  {
+                    "x": 192,
+                    "y": 256,
+                    "axis": "v"
+                  }
+                ],
+                "Running Turn::Pistol Locomotion>Running Turn": [
+                  {
+                    "x": 192,
+                    "y": 160,
+                    "axis": "v"
+                  }
+                ],
+                "Running Turn::Rifle Locomotion>Running Turn": [
+                  {
+                    "x": 192,
+                    "y": 208,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Idle>Air": [
+                  {
+                    "x": 192,
+                    "y": 112,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Locomotion>Air": [
+                  {
+                    "x": 192,
+                    "y": 160,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Turning>Air": [
+                  {
+                    "x": 192,
+                    "y": 208,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Start>Air": [
+                  {
+                    "x": 192,
+                    "y": 256,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Running Turn>Air": [
+                  {
+                    "x": 192,
+                    "y": 304,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Stopping>Air": [
+                  {
+                    "x": 192,
+                    "y": 352,
+                    "axis": "v"
+                  }
+                ],
+                "Air::JumpStand|Pick Fall": [
+                  {
+                    "x": 650,
+                    "y": 307
+                  }
+                ],
+                "Air::Landing>Air": [
+                  {
+                    "x": 192,
+                    "y": 400,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Stairs>Air": [
+                  {
+                    "x": 192,
+                    "y": 448,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Pick JumpRun|Take Off": [
+                  {
+                    "x": 364,
+                    "y": 732
+                  },
+                  {
+                    "x": 78,
+                    "y": -22
+                  }
+                ],
+                "Air::Pick JumpStand|Take Off": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  }
+                ],
+                "Air::Pick Fall|Take Off": [
+                  {
+                    "x": 364,
+                    "y": 650
+                  },
+                  {
+                    "x": 78,
+                    "y": -22
+                  }
+                ],
+                "Air::Crouching>Air": [
+                  {
+                    "x": 192,
+                    "y": 496,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Pistol Idle>Air": [
+                  {
+                    "x": 192,
+                    "y": 544,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Rifle Idle>Air": [
+                  {
+                    "x": 192,
+                    "y": 592,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Pistol Locomotion>Air": [
+                  {
+                    "x": 192,
+                    "y": 640,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Rifle Locomotion>Air": [
+                  {
+                    "x": 192,
+                    "y": 688,
+                    "axis": "v"
+                  }
+                ],
+                "Air::Pick Fall|Rifle JumpRun": [
+                  {
+                    "x": 650,
+                    "y": 979
+                  }
+                ],
+                "Landing::LandSoft|Pick Locomotion": [
+                  {
+                    "x": 498,
+                    "y": 499,
+                    "axis": "v"
+                  }
+                ],
+                "Landing::LandHard|Pick Locomotion": [
+                  {
+                    "x": 498,
+                    "y": 547,
+                    "axis": "v"
+                  }
+                ],
+                "Landing::LandRoll|Pick Locomotion": [
+                  {
+                    "x": 498,
+                    "y": 595,
+                    "axis": "v"
+                  }
+                ],
+                "Landing::Pick Locomotion|Rifle LandRun": [
+                  {
+                    "x": 384,
+                    "y": 266
+                  },
+                  {
+                    "x": 690,
+                    "y": 698
+                  }
+                ],
+                "Crouching::Crouch|Pick Idle": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  },
+                  {
+                    "x": 384,
+                    "y": 499
+                  }
+                ],
+                "Crouching::Crouch|Pick CrouchTurn90L": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  },
+                  {
+                    "x": 384,
+                    "y": 417
+                  }
+                ],
+                "Crouching::Crouch|Pick CrouchTurn90R": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  },
+                  {
+                    "x": 384,
+                    "y": 595
+                  }
+                ],
+                "Crouching::CrouchTurn90L|Pick Crouch": [
+                  {
+                    "x": 804,
+                    "y": 263,
+                    "axis": "v"
+                  }
+                ],
+                "Crouching::CrouchTurn90R|Pick Crouch": [
+                  {
+                    "x": 804,
+                    "y": 407,
+                    "axis": "v"
+                  }
+                ],
+                "Crouching::Crouch|Pick Crouch": [
+                  {
+                    "x": 384,
+                    "y": 143
+                  }
+                ],
+                "Crouching::Pick Idle|Pistol Crouch": [
+                  {
+                    "x": 498,
+                    "y": 417,
+                    "axis": "v"
+                  }
+                ],
+                "Crouching::Pick Idle|Rifle Crouch": [
+                  {
+                    "x": 498,
+                    "y": 369,
+                    "axis": "v"
+                  }
+                ],
+                "Crouching::Pick CrouchTurn90L|Pistol Crouch": [
+                  {
+                    "x": 478,
+                    "y": 373,
+                    "axis": "v"
+                  }
+                ],
+                "Crouching::Pick CrouchTurn90L|Rifle Crouch": [
+                  {
+                    "x": 498,
+                    "y": 325,
+                    "axis": "v"
+                  }
+                ],
+                "Crouching::Pick CrouchTurn90R|Pistol Crouch": [
+                  {
+                    "x": 498,
+                    "y": 462,
+                    "axis": "v"
+                  }
+                ],
+                "Crouching::Pick CrouchTurn90R|Rifle Crouch": [
+                  {
+                    "x": 498,
+                    "y": 414,
+                    "axis": "v"
+                  }
+                ],
+                "Crouching::Pick Crouch|Rifle CrouchTurn90L": [
+                  {
+                    "x": 804,
+                    "y": 311,
+                    "axis": "v"
+                  }
+                ],
+                "Crouching::Pick Crouch|Rifle CrouchTurn90R": [
+                  {
+                    "x": 804,
+                    "y": 455,
+                    "axis": "v"
+                  }
+                ],
+                "Crouching::Pick Locomotion|Pistol KneelUp": [
+                  {
+                    "x": 804,
+                    "y": 170,
+                    "axis": "v"
+                  }
+                ],
+                "Crouching::CrouchStand|Pick Idle": [
+                  {
+                    "x": 498,
+                    "y": 321,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Locomotion|Pick Idle": [
+                  {
+                    "x": 192,
+                    "y": 112,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Turn90R": [
+                  {
+                    "x": 192,
+                    "y": 160,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Turn180R": [
+                  {
+                    "x": 192,
+                    "y": 208,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Turn90L": [
+                  {
+                    "x": 192,
+                    "y": 256,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Turn180L": [
+                  {
+                    "x": 192,
+                    "y": 304,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Start": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  },
+                  {
+                    "x": 690,
+                    "y": 979
+                  }
+                ],
+                "Standing::Pick Idle|Running Turn": [
+                  {
+                    "x": 192,
+                    "y": 352,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Landing|Pick Idle": [
+                  {
+                    "x": 192,
+                    "y": 400,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Stairs": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  },
+                  {
+                    "x": 690,
+                    "y": 883
+                  }
+                ],
+                "Standing::CarExit|Pick Idle": [
+                  {
+                    "x": 192,
+                    "y": 448,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Settle": [
+                  {
+                    "x": 192,
+                    "y": 496,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Crouch|Pick Idle": [
+                  {
+                    "x": 192,
+                    "y": 544,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Rifle Idle": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  },
+                  {
+                    "x": 384,
+                    "y": 1027
+                  }
+                ],
+                "Standing::Pick Idle|Pistol Idle": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  },
+                  {
+                    "x": 384,
+                    "y": 931
+                  }
+                ],
+                "Standing::Idle|Pick Idle": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  }
+                ],
+                "Standing::Pick Idle|Pistol Locomotion": [
+                  {
+                    "x": 192,
+                    "y": 592,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Rifle Locomotion": [
+                  {
+                    "x": 192,
+                    "y": 640,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Rifle Turn90R": [
+                  {
+                    "x": 192,
+                    "y": 688,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Rifle Turn90L": [
+                  {
+                    "x": 192,
+                    "y": 736,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Pistol Crouch": [
+                  {
+                    "x": 192,
+                    "y": 784,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Rifle Crouch": [
+                  {
+                    "x": 192,
+                    "y": 832,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Idle|Rifle Idle": [
+                  {
+                    "x": 498,
+                    "y": 979,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Pistol KneelDown": [
+                  {
+                    "x": 192,
+                    "y": 880,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::Pick Idle|Pistol KneelUp": [
+                  {
+                    "x": 192,
+                    "y": 928,
+                    "axis": "v"
+                  }
+                ],
+                "Standing::CrouchStand|Pick Idle": [
+                  {
+                    "x": 192,
+                    "y": 976,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Idle|Pick Locomotion": [
+                  {
+                    "x": 192,
+                    "y": 112,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|Turning": [
+                  {
+                    "x": 192,
+                    "y": 160,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|Start": [
+                  {
+                    "x": 192,
+                    "y": 208,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|RunTurnL": [
+                  {
+                    "x": 192,
+                    "y": 256,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|RunTurnR": [
+                  {
+                    "x": 192,
+                    "y": 304,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|Running Turn": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  },
+                  {
+                    "x": 690,
+                    "y": 1027
+                  }
+                ],
+                "Moving::Pick Locomotion|Stop": [
+                  {
+                    "x": 192,
+                    "y": 352,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|StopMirror": [
+                  {
+                    "x": 192,
+                    "y": 400,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::JumpLand|Pick Locomotion": [
+                  {
+                    "x": 192,
+                    "y": 448,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::LandRun|Pick Locomotion": [
+                  {
+                    "x": 192,
+                    "y": 496,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::LandSoft|Pick Locomotion": [
+                  {
+                    "x": 192,
+                    "y": 544,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::LandHard|Pick Locomotion": [
+                  {
+                    "x": 192,
+                    "y": 592,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::LandRoll|Pick Locomotion": [
+                  {
+                    "x": 192,
+                    "y": 640,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|Stairs": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  },
+                  {
+                    "x": 690,
+                    "y": 931
+                  }
+                ],
+                "Moving::Pick Locomotion|Rifle Locomotion": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  },
+                  {
+                    "x": 384,
+                    "y": 1075
+                  }
+                ],
+                "Moving::Pick Locomotion|Pistol Locomotion": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  },
+                  {
+                    "x": 384,
+                    "y": 979
+                  }
+                ],
+                "Moving::Locomotion|Pick Locomotion": [
+                  {
+                    "x": 78,
+                    "y": -22
+                  }
+                ],
+                "Moving::Pick Locomotion|Pistol Idle": [
+                  {
+                    "x": 192,
+                    "y": 688,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|Rifle Idle": [
+                  {
+                    "x": 192,
+                    "y": 736,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|Pistol JumpLand": [
+                  {
+                    "x": 192,
+                    "y": 784,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|Rifle JumpLand": [
+                  {
+                    "x": 192,
+                    "y": 832,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|Pistol LandRun": [
+                  {
+                    "x": 192,
+                    "y": 880,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|Rifle LandRun": [
+                  {
+                    "x": 192,
+                    "y": 928,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Locomotion|Rifle Locomotion": [
+                  {
+                    "x": 498,
+                    "y": 1027,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::Pick Locomotion|Pistol KneelUp": [
+                  {
+                    "x": 192,
+                    "y": 976,
+                    "axis": "v"
+                  }
+                ],
+                "Moving::CrouchStand|Pick Locomotion": [
+                  {
+                    "x": 192,
+                    "y": 1024,
+                    "axis": "v"
+                  }
+                ]
+              },
               "controllerId": "a91b10180b5ac9a611269fd6845c4a6c"
             },
             "ragdoll": null

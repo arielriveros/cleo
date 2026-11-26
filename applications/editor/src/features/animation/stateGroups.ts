@@ -187,15 +187,19 @@ const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v))
 
 // ----- layer views ---------------------------------------------------------------------------------------
 
-/** Layer `i`'s view of a machine: its states, transitions, groups and forks over the machine's shared everything-else. */
+/**
+ * Layer `i`'s view of a machine: its states, transitions, groups, forks and reroute points over the machine's shared
+ * everything-else.
+ */
 export function layerView(sm: AnimationStateMachine, i: number): AnimationStateMachine {
   if (i <= 0) return sm
   const layer = sm.layers?.[i - 1]
   if (!layer) return sm
-  const view: AnimationStateMachine = { ...sm, states: layer.states, transitions: layer.transitions, groups: layer.groups, forks: layer.forks }
+  const view: AnimationStateMachine = { ...sm, states: layer.states, transitions: layer.transitions, groups: layer.groups, forks: layer.forks, reroutes: layer.reroutes }
   // The base's own are not the layer's: a layer without any has none.
   if (!layer.groups) delete view.groups
   if (!layer.forks) delete view.forks
+  if (!layer.reroutes) delete view.reroutes
   return view
 }
 
@@ -204,12 +208,13 @@ export function writeLayer(sm: AnimationStateMachine, i: number, view: Animation
   if (i <= 0) return { ...view, layers: sm.layers, slots: view.slots ?? sm.slots }
   const layers = (sm.layers ?? []).map((l, idx) => {
     if (idx !== i - 1) return l
-    const next = { ...l, states: view.states, transitions: view.transitions, groups: view.groups, forks: view.forks }
+    const next = { ...l, states: view.states, transitions: view.transitions, groups: view.groups, forks: view.forks, reroutes: view.reroutes }
     if (!view.groups?.length) delete next.groups
     if (!view.forks?.length) delete next.forks
+    if (!view.reroutes || !Object.keys(view.reroutes).length) delete next.reroutes
     return next
   })
-  // Everything that is not the layer's own states/transitions/groups stays the machine's.
+  // Everything that is not the layer's own states/transitions/groups/reroutes stays the machine's.
   return { ...sm, parameters: view.parameters, events: view.events, layers }
 }
 

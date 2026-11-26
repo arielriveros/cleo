@@ -30,6 +30,11 @@ export interface SmokeCase {
   programList: boolean;
   /** Keep the WebGL 2 shaders (WebGL 2 fallback). */
   webgl2: boolean;
+  /**
+   * The graphics API the game was published to run on (Options ▸ Project ▸ Published game ▸ Graphics API), which
+   * the player must start the engine on. Absent: none written, as a game from before it had one.
+   */
+  graphics?: 'webgpu' | 'webgl2';
   /** A features preset the game is built with (Project ▸ Features): its left-out shaders are not shipped. */
   preset?: string;
 }
@@ -39,6 +44,9 @@ export const CASES: SmokeCase[] = [
   { name: 'cannon-inline', backend: 'cannon', worker: 'off', programList: false, webgl2: true },
   { name: 'rapier-worker', backend: 'rapier', worker: 'on', programList: true, webgl2: true },
   { name: 'jolt-webgpu', backend: 'jolt', worker: 'on', programList: true, webgl2: false },
+  // Published to run on a graphics API, its WebGL 2 shaders carried either way: it must start on that one.
+  { name: 'jolt-chosen-webgpu', backend: 'jolt', worker: 'on', programList: true, webgl2: true, graphics: 'webgpu' },
+  { name: 'rapier-chosen-webgl2', backend: 'rapier', worker: 'on', programList: true, webgl2: true, graphics: 'webgl2' },
   { name: 'cannon-2d-preset', backend: 'cannon', worker: 'on', programList: true, webgl2: true, preset: '2d' },
   { name: 'cannon-3d-preset', backend: 'cannon', worker: 'on', programList: true, webgl2: true, preset: '3d' },
 ];
@@ -217,7 +225,7 @@ function gameData(c: SmokeCase, enabled: ReadonlySet<string>) {
       second: { name: 'Second', scene: node({ name: 'root', type: 'node', id: 'root-second', children: [node({ type: 'node', name: 'Empty', id: 'empty' })] }) },
     },
     config: {
-      graphics: { clearColor: [0.1, 0.1, 0.12, 1], ...(c.webgl2 ? {} : { webgl2: false }) } as Record<string, any>,
+      graphics: { clearColor: [0.1, 0.1, 0.12, 1], ...(c.webgl2 ? {} : { webgl2: false }), ...(c.graphics ? { backend: c.graphics } : {}) } as Record<string, any>,
       render: { exposure: 1 },
       physics: { gravity: [0, -9.81, 0], backend: c.backend, worker: c.worker },
     },

@@ -1,22 +1,25 @@
 import { useEffect, useState } from 'react'
+import { PHYSICS_BACKENDS } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import InputMapPanel from '../input/InputMapPanel'
-import { Button, Field, NumberInput, Section, Select, TextInput, Toggle, cn } from '@cleo/app-kit/ui'
+import { Button, Field, Hint, NumberInput, Section, Select, TextInput, Toggle, cn } from '@cleo/app-kit/ui'
+import { readBackendPreference } from '@cleo/app-kit/renderer/backendPreference'
 import { loadProjects, renameProject } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
 import { OptionsPageBody, OptionsShell, OPTION_LABEL, useMarkOptionPageShown, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
 import {
   BUILT_IN_COLLISION_LAYERS, COLLISION_LAYER_NAME_MAX, DEFAULT_PROJECT_SETTINGS, cleanSaveFolder, resolveSaveFolder,
-  type ProjectNetSyncSettings, type ProjectSaveSettings, type PublishWindowSettings,
+  type ProjectNetSyncSettings, type ProjectSaveSettings, type PublishWindowSettings, type PhysicsBackendSetting,
+  type PublishGraphicsSetting,
 } from './projectSettings'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import GameIdentityRows from './GameIdentityRows'
 
-// Options ▸ Project: what belongs to THIS game and travels with it — its name, the scene it starts in,
-// how a published build presents itself, online play, the input map and the collision layers' names. Carried in
-// project bundles.
+// Options ▸ Project: what belongs to THIS game and travels with it — its name, its saves, its published game (the
+// scene it starts in and the scenes it carries, what it runs on, how it presents itself), online play, the input map
+// and the collision layers' names. Carried in project bundles.
 
-type Page = 'general' | 'netsync' | 'input' | 'layers'
+type Page = 'general' | 'publish' | 'netsync' | 'input' | 'layers'
 
 /** The id the viewport watches to preview on-screen touch controls while the input map is open. */
 export const INPUT_PAGE_ID = 'project.input'
@@ -29,12 +32,14 @@ export default function ProjectOptionsPanel() {
       onPage={setPage}
       pages={[
         { value: 'general', label: 'General', doc: 'editor/options#general' },
+        { value: 'publish', label: 'Published game', doc: 'editor/options#published-game' },
         { value: 'netsync', label: 'NetSync', doc: 'editor/options#netsync' },
         { value: 'input', label: 'Input', doc: 'editor/options#input' },
         { value: 'layers', label: 'Layers', doc: 'editor/options#layers' },
       ]}
     >
       {page === 'general' && <GeneralOptions />}
+      {page === 'publish' && <PublishedGameOptions />}
       {page === 'netsync' && <NetSyncOptions />}
       {page === 'input' && <InputPage />}
       {page === 'layers' && <CollisionLayersPage />}
@@ -77,10 +82,6 @@ function CollisionLayersPage() {
 
 function GeneralOptions() {
   const { sceneList, mainSceneId, setMainScene, projectSettings, setProjectSettings } = useCleoEngine()
-  const w = projectSettings.publish
-  const setWindow = (patch: Partial<PublishWindowSettings>) =>
-    setProjectSettings(prev => ({ ...prev, publish: { ...prev.publish, ...patch } }))
-  const d = DEFAULT_PROJECT_SETTINGS.publish
   const setSaves = (patch: Partial<ProjectSaveSettings>) =>
     setProjectSettings(prev => ({ ...prev, saves: { ...prev.saves, ...patch } }))
 
@@ -120,7 +121,129 @@ function GeneralOptions() {
         </Field>
       </Section>
 
-      <Section title='Published game'>
+      <Section title='Saves'>
+        <Field label='Save version' labelClassName={OPTION_LABEL}>
+          <NumberInput value={projectSettings.saves.version} min={0} max={1_000_000} step={1}
+            onChange={v => setSaves({ version: clampInt(v, 0, 1_000_000) })} />
+        </Field>
+        <Field label='Save folder' labelClassName={OPTION_LABEL}>
+          <TextInput value={projectSettings.saves.folder} maxLength={64}
+            placeholder={resolveSaveFolder({ ...projectSettings, saves: { ...projectSettings.saves, folder: '' } }, name)}
+            onChange={v => setSaves({ folder: v })}
+            onBlur={() => setSaves({ folder: cleanSaveFolder(projectSettings.saves.folder) })} />
+        </Field>
+      </Section>
+    </OptionsPageBody>
+  )
+}
+
+/** The project's name, as the project record has it (machine-local metadata, not project storage). */
+function useProjectName(): string {
+  const projectId = activeProjectId()
+  const [name, setName] = useState('')
+  useEffect(() => {
+    void loadProjects().then(list => setName(list.find(p => p.id === projectId)?.name ?? ''))
+    const renamed = (e: Event) => setName(String((e as CustomEvent).detail ?? ''))
+    window.addEventListener('cleo:project-renamed', renamed)
+    return () => window.removeEventListener('cleo:project-renamed', renamed)
+  }, [projectId])
+  return name
+}
+
+/**
+ * Options ▸ Project ▸ Published game: everything a publish (web, desktop, desktop installer) makes the game from that
+ * is not its content. The scene it starts in and the scenes it carries; the graphics API and the physics it runs on;
+ * how its window and its installer present it.
+ */
+function PublishedGameOptions() {
+  const { sceneList, mainSceneId, setMainScene, projectSettings, setProjectSettings, instance } = useCleoEngine()
+  const name = useProjectName()
+  const w = projectSettings.publish
+  const setWindow = (patch: Partial<PublishWindowSettings>) =>
+    setProjectSettings(prev => ({ ...prev, publish: { ...prev.publish, ...patch } }))
+  const d = DEFAULT_PROJECT_SETTINGS.publish
+  const excluded = new Set(w.excludedScenes)
+  const startId = sceneList.some(s => s.id === mainSceneId) ? mainSceneId : sceneList[0]?.id
+  const include = (id: string, on: boolean) => setProjectSettings(prev => {
+    const rest = prev.publish.excludedScenes.filter(x => x !== id)
+    return { ...prev, publish: { ...prev.publish, excludedScenes: on ? rest : [...rest, id] } }
+  })
+  const shipped = sceneList.filter(s => s.id === startId || !excluded.has(s.id)).length
+  const leftOut = sceneList.length - shipped
+  // The editor's own graphics API, which "same as the editor" publishes with.
+  const editorBackend = readBackendPreference()
+  const apiName = (b: 'webgpu' | 'webgl2') => (b === 'webgpu' ? 'WebGPU' : 'WebGL 2')
+  const runsOn = w.graphicsBackend === 'editor' ? editorBackend : w.graphicsBackend
+  const physicsBackend = projectSettings.engine.physicsBackend
+  const setPhysics = (b: PhysicsBackendSetting) =>
+    setProjectSettings(prev => ({ ...prev, engine: { ...prev.engine, physicsBackend: b } }))
+  const physics = instance?.physics
+  const physicsNote = physics && physics.backend !== physicsBackend
+    ? `The editor runs on ${PHYSICS_BACKENDS.find(b => b.request === physics.backend)?.label ?? physics.backend} until the project is opened again; a publish uses this.`
+    : null
+
+  return (
+    <OptionsPageBody>
+      {/* The explanations live in docs/editor/options.md › Project › Published game: each Field label's card is its line there. */}
+      <Section title='Start'>
+        <Field label='Start scene' labelClassName={OPTION_LABEL}>
+          <Select className='flex-1' value={mainSceneId} onChange={e => setMainScene(e.target.value)}
+            disabled={sceneList.length === 0}>
+            {!sceneList.some(s => s.id === mainSceneId) && <option value=''>—</option>}
+            {sceneList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </Select>
+        </Field>
+        <Field label='Scenes' labelClassName={OPTION_LABEL} as='div'>
+          <span className='flex-1 text-ui-xs text-muted'>{shipped} of {sceneList.length} ship</span>
+        </Field>
+        <div className='flex flex-col gap-0.5 pl-2'>
+          {sceneList.map(s => {
+            const start = s.id === startId
+            return (
+              <div key={s.id} className={cn('flex items-center gap-2 text-ui-sm', start && 'opacity-70')}
+                title={start ? 'The start scene always ships' : excluded.has(s.id) ? 'Left out of the published game' : 'Ships in the published game'}>
+                <span className={cn('flex', start && 'pointer-events-none')}>
+                  <Toggle checked={start || !excluded.has(s.id)} onChange={v => include(s.id, v)} />
+                </span>
+                <span className='truncate'>{s.name}</span>
+                {start && <span className='text-ui-xs text-dim'>start</span>}
+              </div>
+            )
+          })}
+        </div>
+        {leftOut > 0 && <Hint>A script that loads a scene left out (Game.loadScene) does not find it in the published game.</Hint>}
+      </Section>
+
+      <Section title='Rendering and physics'>
+        <Field label='Graphics API' labelClassName={OPTION_LABEL}>
+          <Select className='flex-1' value={w.graphicsBackend}
+            onChange={e => setWindow({ graphicsBackend: e.target.value as PublishGraphicsSetting })}>
+            <option value='editor'>Same as the editor ({apiName(editorBackend)})</option>
+            <option value='webgpu'>WebGPU</option>
+            <option value='webgl2'>WebGL 2</option>
+          </Select>
+        </Field>
+        <Field label='WebGL 2 fallback' labelClassName={OPTION_LABEL}>
+          <span className={cn('flex flex-1', runsOn === 'webgl2' && 'pointer-events-none opacity-60')}>
+            <Toggle checked={runsOn === 'webgl2' || w.webgl2Fallback} onChange={v => setWindow({ webgl2Fallback: v })} />
+          </span>
+        </Field>
+        <Field label='Only used shaders' labelClassName={OPTION_LABEL}>
+          <span className='flex flex-1'><Toggle checked={w.onlyUsedShaders} onChange={v => setWindow({ onlyUsedShaders: v })} /></span>
+        </Field>
+        <Field label='Physics backend' labelClassName={OPTION_LABEL}>
+          <Select className='flex-1' value={physicsBackend} onChange={e => setPhysics(e.target.value as PhysicsBackendSetting)}>
+            {PHYSICS_BACKENDS.map(b => (
+              <option key={b.request} value={b.request} disabled={!b.implemented}>
+                {b.implemented ? b.label : `${b.label} (not implemented yet)`}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {physicsNote && <div className='text-ui-xs text-warning leading-snug'>{physicsNote}</div>}
+      </Section>
+
+      <Section title='Window and identity'>
         <Field label='Title' labelClassName={OPTION_LABEL}>
           <TextInput value={w.title} placeholder={name || 'Project name'} maxLength={120}
             onChange={v => setWindow({ title: v })} />
@@ -143,30 +266,11 @@ function GeneralOptions() {
             <Toggle checked={w.resizable} onChange={v => setWindow({ resizable: v })} />
           </span>
         </Field>
-        <Field label='Only used shaders' labelClassName={OPTION_LABEL}>
-          <span className='flex flex-1'><Toggle checked={w.onlyUsedShaders} onChange={v => setWindow({ onlyUsedShaders: v })} /></span>
-        </Field>
-        <Field label='WebGL 2 fallback' labelClassName={OPTION_LABEL}>
-          <span className='flex flex-1'><Toggle checked={w.webgl2Fallback} onChange={v => setWindow({ webgl2Fallback: v })} /></span>
-        </Field>
       </Section>
 
       <Button size='sm' variant='ghost' onClick={() => setWindow({ ...d })}>
         Reset publish options
       </Button>
-
-      <Section title='Saves'>
-        <Field label='Save version' labelClassName={OPTION_LABEL}>
-          <NumberInput value={projectSettings.saves.version} min={0} max={1_000_000} step={1}
-            onChange={v => setSaves({ version: clampInt(v, 0, 1_000_000) })} />
-        </Field>
-        <Field label='Save folder' labelClassName={OPTION_LABEL}>
-          <TextInput value={projectSettings.saves.folder} maxLength={64}
-            placeholder={resolveSaveFolder({ ...projectSettings, saves: { ...projectSettings.saves, folder: '' } }, name)}
-            onChange={v => setSaves({ folder: v })}
-            onBlur={() => setSaves({ folder: cleanSaveFolder(projectSettings.saves.folder) })} />
-        </Field>
-      </Section>
     </OptionsPageBody>
   )
 }

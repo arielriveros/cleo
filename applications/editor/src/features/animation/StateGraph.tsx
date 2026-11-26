@@ -4,9 +4,11 @@ import { useStateMachine, OP_LABEL, effectiveType, ANY_STATE, linkKey } from './
 import {
   BoltIcon, Button, ChevronLeftIcon, cn, JOINED_DIVIDER_CLASS, JOINED_GROUP_CLASS, SegmentedControl,
 } from '@cleo/app-kit/ui'
-import MachineGraph from '../../components/MachineGraph'
+import MachineGraph, { GraphTidyButton } from '../../components/MachineGraph'
 import { LayerPicker } from './LayerPanels'
-import type { GraphLinkModel, GraphMenuItem, GraphNodeModel } from '../../components/MachineGraph'
+import type { GraphLinkModel, GraphMenuItem, GraphNodeModel, LinkPointRef } from '../../components/MachineGraph'
+import { addedPoint, movedPoint, pointsOf, removedPoint, rerouteKey, toggledPoint, type ReroutePoint } from './reroutes'
+import { tidyLayout } from './tidyLayout'
 import { isConditionGroup } from 'cleo'
 import type { AnimationTransition, AnimationCondition, AnimationConditionNode } from 'cleo'
 import { graphPlan, inPort, outPort, realName, entryOf, PROXY_PREFIX, SELF_PREFIX, type PlanLink } from './stateGroups'
@@ -33,6 +35,12 @@ import { rankOf, waysIn, waysOut } from './forks'
  * A fork is drawn as a small diamond pill: transitions go in and come out, and the machine goes straight through
  * to the first way out that holds. Its ways out are labelled with their rank (1, 2, …), because that order is what
  * decides. A fork in a group is drawn inside it (a group's entry may be one), and stands for its group outside.
+ *
+ * ## Reroute points and Tidy
+ *
+ * A line's reroute points (reroutes.ts) are kept on the layer by the view they are drawn in: double-click a line to
+ * add one, drag it, turn it or delete it from its hover buttons. Tidy lays the view out in columns the way its lines
+ * run (tidyLayout.ts) and clears the view's points, which were placed for where its nodes were.
  */
 
 const AUTO_COLS = 4
@@ -92,7 +100,7 @@ export default function StateGraph() {
     addState, setState, addTransition, apply, stateIndex, commitLayout, deleteElements, paramOf,
     removeState, animationFields, fieldOf, fullSm, activeLayer,
     groups, groupOf, createGroup, setGroup, removeGroup, moveToGroup, openGroup, setOpenGroup,
-    forks, isFork, addFork, setFork, removeFork, dissolveFork,
+    forks, isFork, addFork, setFork, removeFork, dissolveFork, tidyView, setReroutes,
   } = useStateMachine()
   // The highlighted state is the ACTIVE layer's: the base reads `currentStateName`, a layer its own.
   const layerName = activeLayer > 0 ? fullSm.layers?.[activeLayer - 1]?.name ?? null : null
@@ -310,8 +318,9 @@ export default function StateGraph() {
     dashed: l.dashed,
     // A summary stands for transitions it does not name: those are removed from the inspector, one by one.
     deletable: !l.summary,
+    points: pointsOf(sm, openGroup, l.key),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  })), [plan, sm.parameters, sm.transitions])
+  })), [plan, sm.parameters, sm.transitions, sm.reroutes, openGroup])
 
   // The highlighted line: the selected link's (either order), or the summary's.
   const selectedLinkKey = useMemo(() => {
@@ -423,6 +432,45 @@ export default function StateGraph() {
 
   const iconButton = 'flex items-center justify-center px-1.5 py-1 text-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:pointer-events-none'
 
+  /** Change some lines' reroute points: each line's list through `edit`, once per line. */
+  const editPoints = (label: string, refs: LinkPointRef[], edit: (points: ReroutePoint[], ref: LinkPointRef) => ReroutePoint[]) => {
+    const byLine = new Map<string, LinkPointRef[]>()
+    for (const ref of refs) if (ref.link.key) byLine.set(ref.link.key, [...(byLine.get(ref.link.key) ?? []), ref])
+    for (const [key, list] of byLine) {
+      let points = pointsOf(sm, openGroup, key)
+      // Highest first, so a removal does not move the ones still to come.
+      for (const ref of [...list].sort((x, y) => y.index - x.index)) points = edit(points, ref)
+      setReroutes(rerouteKey(openGroup, key), points, label)
+    }
+  }
+
+  /** Tidy: this view's nodes in columns the way its lines run (sizes as measured), its reroute points cleared. */
+  const tidy = (sizes: Record<string, { w: number; h: number }>) => {
+    const tnodes = nodes.map(n => ({ id: n.id, w: sizes[n.id]?.w ?? 156, h: sizes[n.id]?.h ?? 52 }))
+    // Any State's lines lead everywhere: left out, it sits at the head of the first column.
+    const tedges = plan.links.filter(l => l.nodeA !== ANY_STATE).flatMap(l => [
+      ...(l.forward.length ? [{ from: l.nodeA, to: l.nodeB }] : []),
+      ...(l.backward.length ? [{ from: l.nodeB, to: l.nodeA }] : []),
+    ])
+    const group = openGroup ? groups.find(g => g.name === openGroup) : undefined
+    // The entry, or at the top the group it is drawn as.
+    const entryState = group ? entryOf(group) : sm.states.find(s => s.isEntry)?.name
+    const entry = entryState && !group ? (groupOf(entryState)?.name ?? entryState) : entryState
+    const roots = [entry, openGroup ? plan.self : ANY_STATE].filter((r): r is string => !!r)
+    const pos = tidyLayout(tnodes, tedges, { roots })
+    const coords: Record<string, { x: number; y: number }> = {}
+    const session: Record<string, { x: number; y: number }> = {}
+    for (const [id, p] of Object.entries(pos)) {
+      if (id === ANY_STATE || id.startsWith(PROXY_PREFIX) || id.startsWith(SELF_PREFIX)) session[movedKey(id)] = p
+      else coords[id] = p
+    }
+    // Any State and the stand-ins are placed for the session only; the Tidy step puts them back as well.
+    const was = moved
+    const now = { ...moved, ...session }
+    tidyView(coords, openGroup, { undo: () => setMoved(was), redo: () => setMoved(now) })
+    setMoved(now)
+  }
+
   return (
     <MachineGraph
       nodes={nodes}
@@ -461,6 +509,13 @@ export default function StateGraph() {
       })}
       menuItems={menuItems}
       onAddNode={(x, y) => addState({ x, y })}
+      onAddLinkPoint={(ref, point) => editPoints('Add reroute point', [ref], points => addedPoint(points, ref.index, point))}
+      onMoveLinkPoints={moves => editPoints('Move reroute point', moves, (points, ref) => {
+        const m = moves.find(x => x.link.key === ref.link.key && x.index === ref.index)!
+        return movedPoint(points, ref.index, m.x, m.y)
+      })}
+      onToggleLinkPoint={ref => editPoints('Turn reroute point', [ref], points => toggledPoint(points, ref.index))}
+      onRemoveLinkPoints={refs => editPoints('Delete reroute point', refs, (points, ref) => removedPoint(points, ref.index))}
       onSetEntry={(id) => {
         const i = stateIndex(id)
         if (i >= 0) setState(i, { isEntry: true })
@@ -472,8 +527,8 @@ export default function StateGraph() {
         if (i >= 0) removeState(i)
       }}
       hint={openGroup
-        ? 'double-click a stand-in to go to it · drag from “Any state in …” for a group transition'
-        : 'drag handle → handle to connect · double-click a group to open it · Ctrl+click several, then group them'}
+        ? 'double-click a stand-in to go to it · drag from “Any state in …” for a group transition · double-click a line for a reroute point'
+        : 'drag handle → handle to connect · double-click a group to open it · double-click a line for a reroute point · Ctrl+click several, then group them'}
       toolbar={
         <>
           <SegmentedControl<'3d' | 'graph'>
@@ -509,6 +564,10 @@ export default function StateGraph() {
               onClick={() => selectedGroup && dive(selectedGroup)}>
               <span className='w-4 h-4'><IntoGroupIcon /></span>
             </button>
+            <GraphTidyButton className={cn(iconButton, JOINED_DIVIDER_CLASS)} onTidy={tidy}
+              title={openGroup
+                ? `Tidy ${openGroup}: its states in columns the way its lines run (its reroute points are cleared)`
+                : 'Tidy: the graph in columns the way its lines run, from Any State and the entry (the reroute points are cleared)'} />
           </div>
           {openGroup && (
             <div className={cn(JOINED_GROUP_CLASS, 'items-center text-ui-xs shrink-0 whitespace-nowrap')}>

@@ -80,6 +80,9 @@ async function run(c, port) {
       if (s.smoke) {
         const why = [];
         if (s.smoke.backend !== c.backend) why.push(`ran on ${s.smoke.backend} (${s.smoke.fallback ?? 'no reason'})`);
+        // The graphics API it was published to run on (a WebGPU-only game: WebGPU).
+        const wantGraphics = c.graphics ?? (c.webgl2 ? null : 'webgpu');
+        if (wantGraphics && s.smoke.graphics !== wantGraphics) why.push(`drew with ${s.smoke.graphics ?? 'nothing'} instead of ${wantGraphics}`);
         if (s.smoke.executor !== (c.worker === 'on' ? 'worker' : 'inline')) why.push(`stepped ${s.smoke.executor}${s.smoke.fallback ? ` (${s.smoke.fallback})` : ""}`);
         if (!(Math.abs(s.smoke.crateY - 0.5) < 0.1)) why.push(`crate at y=${s.smoke.crateY}`);
         // Each optional feature's node came through its chunk; a left-out one's names tell a script why.

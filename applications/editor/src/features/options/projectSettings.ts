@@ -39,6 +39,13 @@ const PHYSICS_WORKER_SETTINGS: PhysicsWorkerSetting[] = ['off', 'on', 'auto'];
 export type PhysicsBackendSetting = 'cannon' | 'rapier' | 'jolt';
 const PHYSICS_BACKEND_SETTINGS: PhysicsBackendSetting[] = ['cannon', 'rapier', 'jolt'];
 
+/**
+ * The graphics API a published game runs on. `editor`: the one this editor runs on (Options > Engine > Renderer, a
+ * choice of this machine's), read when the game is published.
+ */
+export type PublishGraphicsSetting = 'editor' | 'webgpu' | 'webgl2';
+const PUBLISH_GRAPHICS_SETTINGS: PublishGraphicsSetting[] = ['editor', 'webgpu', 'webgl2'];
+
 export interface PublishWindowSettings {
   /** The game's name: window / tab title, installer product name and published folder name. Empty = the project name. */
   title: string;
@@ -60,6 +67,13 @@ export interface PublishWindowSettings {
    * game, a fifth or so of its shader text lighter, which tells a player without WebGPU so.
    */
   webgl2Fallback: boolean;
+  /** The graphics API the game runs on (see PublishGraphicsSetting). */
+  graphicsBackend: PublishGraphicsSetting;
+  /**
+   * Scenes left out of the published game, by id: a new scene ships unless taken out here. The start scene always
+   * ships, whatever this says.
+   */
+  excludedScenes: string[];
 }
 
 /**
@@ -203,7 +217,7 @@ export const LEGACY_ADDONS: readonly string[] = ['mcp-server', 'claude-code'];
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   version: PROJECT_SETTINGS_VERSION,
   engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'on', physicsBackend: 'jolt', maxFrameDelta: 0.1, masterVolume: 1 },
-  publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true, webgl2Fallback: true },
+  publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true, webgl2Fallback: true, graphicsBackend: 'editor', excludedScenes: [] },
   identity: { version: '1.0.0', appId: '', icon: '', cover: '' },
   features: { disabled: [] },
   addons: { enabled: [...LEGACY_ADDONS], settings: {} },
@@ -317,6 +331,8 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       resizable: typeof p.resizable === 'boolean' ? p.resizable : d.publish.resizable,
       onlyUsedShaders: typeof p.onlyUsedShaders === 'boolean' ? p.onlyUsedShaders : d.publish.onlyUsedShaders,
       webgl2Fallback: typeof p.webgl2Fallback === 'boolean' ? p.webgl2Fallback : d.publish.webgl2Fallback,
+      graphicsBackend: PUBLISH_GRAPHICS_SETTINGS.includes(p.graphicsBackend) ? p.graphicsBackend : d.publish.graphicsBackend,
+      excludedScenes: idList(p.excludedScenes) ?? [],
     },
     identity: {
       version: cleanGameVersion(id.version) || d.identity.version,
@@ -378,9 +394,9 @@ export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
     // SaveGame: the version every save records, and (web) the namespace saves are kept under. An empty one
     // falls back to the window title in the player.
     saves: { version: s.saves.version, namespace: cleanSaveFolder(s.saves.folder) },
-    // Publish-time switches, not something the running game reads (the WebGL 2 one reaches it through
-    // config.graphics, see buildMultiSceneGameData).
-    window: (({ onlyUsedShaders: _shaders, webgl2Fallback: _webgl2, ...w }) => w)(s.publish),
+    // Publish-time switches, not something the running game reads (the graphics API and the WebGL 2 fallback reach
+    // it through config.graphics, see buildMultiSceneGameData; the scenes left out are simply not in it).
+    window: (({ onlyUsedShaders: _shaders, webgl2Fallback: _webgl2, graphicsBackend: _graphics, excludedScenes: _scenes, ...w }) => w)(s.publish),
     // Online play: the host reads these (its flags and environment win), the page reads allocator and mode.
     ...(s.netsync.enabled ? { netsync: {
       tickRate: s.netsync.tickRate, maxPeers: s.netsync.maxPeers, spawn: [...s.netsync.spawn], trust: s.netsync.trust,
