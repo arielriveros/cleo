@@ -228,7 +228,11 @@ types under their historical `Animation*` names.
 | `Shape` | Collider factories: `Box`, `Sphere`, `Capsule`, `Cylinder`, `Plane`, `ConvexHull`, `TriMesh`, `Heightfield`. |
 | `PhysicsRaycastHit` / `PhysicsRaycastOptions` *(types)* | |
 | `OverlapHit` / `OverlapOptions` *(types)* | Results and filters of the shape queries. |
-| `Ragdoll`, `RAGDOLL_DEFAULTS`, `RagdollOptions` *(type)* | |
+| `Ragdoll`, `RAGDOLL_DEFAULTS`, `RagdollOptions` *(type)* | `mode: 'powered'` gives its joints muscles: `parts`, `setMuscle`, `setTarget`, `setPin`, `setMapping`, `followAnimation`. |
+| `ReactionController`, `ReactionHit` / `ReactionEventInfo` / `ModelReactionConfig` / `ReactionState` / `ReactionWound` *(types)* | A character's reactions: `physics.reactionsOf(model)`, `model.reactions`, `character.reactions`. See [Reactions](../scripting/reactions.md). |
+| `defaultReactionSet`, `parseReactionSet`, `parseReactionSets`, `pickReactionSet`, `reactionParamKeys`, `REACTION_PRESETS`, `BEHAVIOUR_SPECS`, `BEHAVIOUR_IDS`, `MUSCLE_SPECS`, `MUSCLE_DEFAULTS`, `MUSCLE_REGIONS`, `PIN_SPECS`, `THRESHOLD_SPECS`, `ReactionSet` / `ReactionSets` / `BehaviourConfig` / `ReactionParamSpec` *(types)* | Reaction sets: their spec tables, presets and tolerant parse. |
+| `ReactionBody`, `posePartTargets`, `BodySensors`, `PredictedImpact` / `TerrainKind` *(types)* | What a reaction drives and measures. |
+| `JointDrive` / `BodyPin` *(types)* | A muscle and a string, as the physics layer takes them. |
 | `convexHull`, `hullFromPositions`, `HULL_BUDGETS`, `Hull` / `HullQuality` *(types)* | Hull fitting. |
 | `physicsStats`, `PhysicsStats` *(type)* | |
 | `createMotionRecord`, `sampleMotion`, `planarSplit`, `facingComponents`, `headingAngle`, `signedAngleBetween`, `wrapDegrees`, `motionConfig`, `MOTION_DEFAULTS`, `MotionRecord` / `MotionConfig` *(types)* | The measured-motion machinery behind `planarSpeed` and friends. |

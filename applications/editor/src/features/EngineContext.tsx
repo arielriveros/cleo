@@ -47,7 +47,8 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds, syncSlotMaterialInTerrain, withSyncedSlotMaterial } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, recenterIfOffOrigin, rescaleLodDistances, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, assetWithRagdollProfile, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, lodLevelMaterialLinks, withLevelLinks, type ModelPart } from "../utils/models";
+import { runtimeReactionSets, reactionsUsePose } from '../utils/reactionSets';
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, recenterIfOffOrigin, rescaleLodDistances, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, assetWithRagdollProfile, assetWithReactionSets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, lodLevelMaterialLinks, withLevelLinks, type ModelPart } from "../utils/models";
 import { downscaleTextures, levelTextureIds, maskTextureIds } from "../utils/lodTextures";
 import { detachForeignChildren, reattachForeignChildren } from "../utils/foreignChildren";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, defaultScriptModule, seedScriptFields, scriptKindOfAsset, SCRIPT_REFLECT_VERSION } from "../utils/scripts";
@@ -1938,6 +1939,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
   };
   useEffect(() => { reembedLivePoses(); }, [poseAssets]);
+  // A pose a rig's reactions reach for, edited: those rigs' sets embed again (nothing is written when equal).
+  useEffect(() => {
+    const ids = new Set(poseAssets.flatMap(a => a.poses.map(p => p.id)));
+    for (const rig of rigsRef.current) if (rig.reactions && reactionsUsePose(rig.reactions, ids)) syncRigSockets(rig);
+  }, [poseAssets]);
 
   // The trigger names the project's animators declare, published for the script editors to check scripts
   // against (utils/projectTriggers.ts): every animator asset's, every template's embedded machines', and
@@ -3225,14 +3231,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const targets = onlyModels
       ? modelsRef.current.filter(m => onlyModels.includes(m.id))
       : modelsRef.current.filter(m => (m.nativeRigId ?? m.rigId) === rig.id);
-    // The ragdoll profile rides along the same way: authored on the rig, read from the skin.
+    // The ragdoll profile rides along the same way: authored on the rig, read from the skin. So do the reaction
+    // sets, their pose slots resolved to the poses' bones (utils/reactionSets.ts).
     const ragdoll = rig.ragdoll?.parts?.length ? rig.ragdoll : null;
+    const reactions = runtimeReactionSets(rig.reactions, poseAssetsRef.current);
     // So does foot placement, once the rig carries it (`null` = deliberately off). A rig that has never had
     // it set leaves each model's own copy alone.
     const hasIk = rig.ikRig !== undefined;
     const ikRig = rig.ikRig ?? null;
     for (const model of targets) {
-      let updated = assetWithRagdollProfile(assetWithSockets(model, sockets), ragdoll);
+      let updated = assetWithReactionSets(assetWithRagdollProfile(assetWithSockets(model, sockets), ragdoll), reactions);
       if (hasIk) updated = assetWithIkRig(updated, ikRig);
       if (updated !== model) {
         modelsRef.current = modelsRef.current.map(m => (m.id === model.id ? updated : m));
@@ -3243,6 +3251,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         if (!m.skin) return;
         m.skin.sockets = sockets.length ? sockets.map(s => ({ ...s })) : undefined;
         m.skin.ragdollProfile = ragdoll ? JSON.parse(JSON.stringify(ragdoll)) : undefined;
+        m.skin.reactionSets = reactions ? JSON.parse(JSON.stringify(reactions)) : undefined;
         if (hasIk) m.skin.ikRig = ikRig ? JSON.parse(JSON.stringify(ikRig)) : undefined;
       });
     }

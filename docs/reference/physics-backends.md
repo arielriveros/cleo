@@ -173,6 +173,57 @@ the physics worker (vehicles copy like joints; each frame's input goes with the 
 wheel states come back with the bodies). It also checks that the backends ride within 1 cm of each other,
 reach speeds within 25% of each other, and stop within 15% of each other's distance.
 
+## Joint drives
+
+*(unreleased)* Joint drives (muscles) and body pins (strings) are what a [reactive ragdoll](reactive-ragdolls.md)
+moves by. They are part of the `PhysicsWorld` interface (`pal/types.ts` `JointDrive`, `BodyPin`):
+
+| Call | What it does |
+|---|---|
+| `setJointDrive(joint, drive \| null, subtree?)` | Gives a joint a muscle: `{ frequency, damping, maxTorque, friction?, gravityCompensation? }`, frequency in Hz and damping a ratio. `subtree` is every body the joint holds up, for gravity compensation. `null` removes it. |
+| `setJointTarget(joint, qRel, ω?)` | The rotation the muscle reaches for: A's rotation relative to B's (`inv(qB)·qA`), and optionally the target's own spin. |
+| `readJointDrive(joint, out)` | Last step's torque, saturation (0..1 of `maxTorque`) and the angle still to go. |
+| `setBodyPin(body, pin \| null)` / `setBodyPinTarget(body, pose, velocity?)` | A spring on the body's world pose toward a target, capped in force and torque. |
+| `applyTorque(body, τ)` | A torque for one substep (world). |
+
+`capabilities.jointDrives` says how a backend drives them: `'native'` with its own motors, `'shared'` with the
+engine's solver (`pal/drive/driveSolver.ts`).
+
+| | Jolt | cannon | Rapier |
+|---|---|---|---|
+| `jointDrives` | native | native | shared |
+| Muscles on cone and hinge joints | `SwingTwistConstraint` / `HingeConstraint` Position motors, spring by stiffness and damping, `SetTargetOrientationBS(conj(qT))` | three `RotationalMotorEquation`s per joint (one on a hinge) retargeted every substep to the velocity the implicit spring asks for, capped by `maxTorque` | implicit spring torques, applied before the step |
+| Muscles on ball and fixed joints, gravity compensation, friction, pins | shared | shared | shared |
+| Substeps | as configured | as configured | doubled while a powered ragdoll exists |
+
+One set of numbers feels alike on every backend because the gains come from the same physics:
+
+- A drive is an implicit (stable) spring-damper on the joint's relative rotation,
+  `ω' = (ω + h·Ω²·e) / (1 + 2ζΩh + Ω²h²)` with `Ω = 2πf`, which cannot blow up however stiff it is.
+- Its inertia is the subtree's **about the pivot** (a hand and a thigh both reach the pose in the time the
+  frequency says), and Jolt's motors are handed the same stiffness and damping in N·m/rad (`k = I·Ω²`,
+  `c = 2ζIΩ`) along each motor axis.
+- Gravity compensation adds the subtree's weight times its lever about the pivot as a feed-forward torque, so a
+  loose muscle does not sag.
+- Jolt and Rapier sort a body's principal inertia axes, so each reports its inertia frame
+  (`DriveBodies.inertiaFrame`) and the solver rotates into it.
+
+`tests/pal/drives.test.ts` holds the backends to this: a pendulum reaches its target, a hinge turns only on
+its axis, the torque cap holds and saturates, a critically damped drive does not overshoot, gravity
+compensation stops the sag, a pin converges, a destroyed joint loses its drive, and an unused solver changes
+nothing (the golden traces stay bit for bit). The feel check drives the same hinge on all three: Jolt's motors
+and cannon's motor equations, solved with the joint, agree within 20% at a quarter of a second. Rapier's shared
+spring is torques the step adds, held back for stability, so it is slower there (at least 40% as far), which
+its doubled substeps make up for on a whole ragdoll.
+
+cannon's cone-twist measures twist from a perpendicular it picks itself, so a joint made in a turned pose
+started past its twist limit and fought the muscle for as long as it lived. `JointDesc.matchTwist` (opt-in;
+powered ragdolls set it) measures it from the pose the joint is made in, as Jolt and Rapier do
+(`pal/cannon/matchedConeTwist.ts`).
+
+Drives and pins copy into the [physics worker](physics-threading.md#joint-drives) and step there bit for bit
+as on the main thread.
+
 ## Rapier compared with cannon
 
 A project picks Rapier in Options ▸ Engine ▸ Runtime. What differs from cannon:

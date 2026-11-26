@@ -1,7 +1,7 @@
 import { Scene, Node, CameraNode, isInlineTilesetId } from 'cleo'
 import { getMaterialIdsOf, applyMaterialAsset, unlinkMaterialAt, MaterialAsset } from './materials'
 import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from './screenMaterials'
-import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig, assetSockets, assetRagdollProfile, applyModelTransformDelta, readModelBaseTrs, modelAssetHasLodBehavior, modelInstanceShape, lodLevelMaterialLinks } from './models'
+import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig, assetSockets, assetRagdollProfile, assetReactionSets, applyModelTransformDelta, readModelBaseTrs, modelAssetHasLodBehavior, modelInstanceShape, lodLevelMaterialLinks } from './models'
 import { detachForeignChildren, reattachForeignChildren, type ShapeNode } from './foreignChildren'
 import { TEMPLATE_ID_VAR, instantiateTemplate } from './templates'
 import { applyOverrides } from './templateOverrides'
@@ -10,7 +10,7 @@ import { applyTerrainMaterialToLayer } from './terrainMaterials'
 import { toRuntimeTileset } from './tilesets'
 import { getScriptIdOf, seedScriptFields, unlinkScript } from './scripts'
 import { hashAsset, assetHashKey, AssetLibs, hashesComparable } from './assetHash'
-import { captureAnimationState, restoreAnimationState, applyIkRig, applySockets, applyRagdollProfile } from './placedAnimation'
+import { captureAnimationState, restoreAnimationState, applyIkRig, applySockets, applyRagdollProfile, applyReactionSets } from './placedAnimation'
 import { disposeModelSubtree, ModelNode } from 'cleo'
 import { reembedMachine } from './animationControllers'
 import { reembedParticleSystems } from './particleSystems'
@@ -257,6 +257,7 @@ export function resyncScene(
     applyIkRig(live, assetIkRig(asset))
     applySockets(live, assetSockets(asset))
     applyRagdollProfile(live, assetRagdollProfile(asset))
+    applyReactionSets(live, assetReactionSets(asset))
   }
 
   // --- Animation controllers, bone masks and poses ---

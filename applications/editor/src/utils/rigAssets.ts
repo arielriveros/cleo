@@ -90,6 +90,8 @@ export type RigAsset = {
    * skin is what travels into templates, bundles and the published game; the runtime never sees a rig.
    */
   sockets?: RigSocket[]
+  /** How the skeleton reacts (see {@link RigReactions}): edited in the rig's Reactions tab. */
+  reactions?: RigReactions
   /**
    * Which axis the mirror plane is normal to, i.e. this rig's left/right axis.
    *
@@ -120,6 +122,13 @@ export type RigPose = { id: string; name: string; bones: StoredPoseBone[]; baseR
  * automatic profile at runtime.
  */
 export type RigRagdollProfile = { version: 1; parts: any[]; [key: string]: any }
+
+/**
+ * How the skeleton reacts when hit, pushed or falling (the engine's reaction sets, physics/reactive/): named sets
+ * of muscles, thresholds and behaviours, their pose slots naming pose assets. Embedded, poses resolved, into every
+ * model's skin as `skin.reactionSets` by `syncRigSockets` (utils/reactionSets.ts). Absent: the built-in set.
+ */
+export type RigReactions = import('./reactionSets').RigReactions
 
 export type RigSocket = {
   id: string

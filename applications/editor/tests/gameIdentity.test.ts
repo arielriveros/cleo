@@ -92,7 +92,8 @@ describe('the game in game.bin', () => {
     const manifest = unpackGameBin(packGameBin(data(game)).buffer).manifest;
     expect(manifest.game).toEqual(game);
     expect(manifest.contract).toBe(PLAYER_CONTRACT);
-    expect(PLAYER_CONTRACT).toBe(53);
+    // 54 is the reaction sets' (skin.reactionSets); the game's identity bumped nothing.
+    expect(PLAYER_CONTRACT).toBe(54);
   });
 
   it('is absent from a pack built without it (Play in window), and changes the content hash', () => {

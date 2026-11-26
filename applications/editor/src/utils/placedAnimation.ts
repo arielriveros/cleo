@@ -23,7 +23,7 @@ export interface NodeLike {
   animator?: AnimatorLike | null
   ragdollConfig?: any
   /** ModelNodes only; `skin` exists only on an AnimatedModel. */
-  model?: { skin?: { ikRig?: any; sockets?: any[]; ragdollProfile?: any } | null } | null
+  model?: { skin?: { ikRig?: any; sockets?: any[]; ragdollProfile?: any; reactionSets?: any } | null } | null
   children: NodeLike[]
 }
 
@@ -56,6 +56,14 @@ export function applyRagdollProfile(inst: NodeLike, profile: any | null): void {
   for (const node of animationNodesOf(inst)) {
     const skin = node.model?.skin
     if (skin) skin.ragdollProfile = profile?.parts?.length ? JSON.parse(JSON.stringify(profile)) : undefined
+  }
+}
+
+/** Push a model asset's reaction sets onto every skinned model in a placed subtree; see {@link applySockets}. */
+export function applyReactionSets(inst: NodeLike, reactions: any | null): void {
+  for (const node of animationNodesOf(inst)) {
+    const skin = node.model?.skin
+    if (skin) skin.reactionSets = reactions?.sets?.length ? JSON.parse(JSON.stringify(reactions)) : undefined
   }
 }
 

@@ -27,6 +27,7 @@ If you are new, read [Core concepts](../concepts.md) first, then
 | [Node inspector](node-inspector.md) | Every property editor, by node type |
 | [Models and materials](models-and-materials.md) | Importing meshes, retargeting animation, LODs, materials, textures |
 | [Physics](physics.md) | Rigid bodies, triggers, colliders, convex hulls, ragdolls |
+| [Reactions](reactions.md) | Reactive ragdolls: how characters take hits, stagger, fall, protect themselves and get up; the test bench |
 | [Terrain](terrain.md) | Landscapes, sculpting, painting, foliage |
 | [Tilemaps and 2D](tilemap-2d.md) | 2D scenes, tilesets, tile painting, sprites |
 | [UI](ui.md) | Screen and world canvases, anchors, widgets, touch controls |

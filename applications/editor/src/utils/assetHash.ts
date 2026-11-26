@@ -37,7 +37,7 @@ function fnv1a(str: string): string {
  * The bar for this list: changing the field cannot alter what instantiating the asset produces
  * STRUCTURALLY. Geometry, materials, hierarchy and clip lists all fail it and must stay hashed.
  */
-const NON_STRUCTURAL_KEYS = new Set(['thumbnail', 'ikRig', 'nodeNames', 'sockets', 'ragdollProfile'])
+const NON_STRUCTURAL_KEYS = new Set(['thumbnail', 'ikRig', 'nodeNames', 'sockets', 'ragdollProfile', 'reactionSets'])
 
 /**
  * Bump this whenever {@link hashAsset} changes what it hashes — including anything that changes the

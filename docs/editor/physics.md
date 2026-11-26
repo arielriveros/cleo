@@ -375,6 +375,10 @@ A character's own settings, in its Properties:
 A generic ragdoll's joints (ball or cone-twist, damping, bone mass, radius) keep what earlier projects stored
 on the node, but are no longer edited there: author parts on the rig instead.
 
+A ragdoll that tries to stay up, breaks its fall, covers its head and gets up again is a **reactive** one: the
+same bodies with muscles in their joints. It is authored in the skeleton's [Reactions](reactions.md) tab and
+needs a rig profile or the automatic humanoid.
+
 ### The Ragdoll panel (rig editor)
 
 The **Ragdoll** tab beside a skeleton's inspector — in the [Skeleton part](animation.md#the-skeleton-part)

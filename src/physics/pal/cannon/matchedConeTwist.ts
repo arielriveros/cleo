@@ -6,6 +6,11 @@ import { ConeTwistConstraint, PointToPointConstraint, Vec3, type Body } from 'ca
 // measure twist from the pose a joint is made in (jointFrames.ts matchedFrame); this gives cannon's the same:
 // B's perpendicular is A's, as the two bodies stand when the joint is made. Opt-in (JointDesc matchTwist),
 // so the joints made before it step exactly as they did.
+//
+// It also measures TWIST rather than the angle between the two perpendiculars, which a swing changes too: an arm
+// swung across the chest read as twisted past its limit, and the limit held it back from where its muscle was
+// taking it. B's perpendicular is carried back over the swing (the shortest arc from B's cone axis to A's) before
+// it is compared with A's, as a swing-twist decomposition does (Jolt's SwingTwistConstraint).
 
 type Matched = ConeTwistConstraint & { twistAxisA: Vec3; twistAxisB: Vec3 };
 
@@ -21,9 +26,26 @@ export function matchConeTwist(c: ConeTwistConstraint, twistA: ArrayLike<number>
         this.bodyB.vectorToWorldFrame(this.axisB, cone.axisB);
         this.bodyA.vectorToWorldFrame(this.twistAxisA, twist.axisA);
         this.bodyB.vectorToWorldFrame(this.twistAxisB, twist.axisB);
+        swingBack(cone.axisB, cone.axisA, twist.axisB);
         cone.angle = this.angle;
         twist.maxAngle = this.twistAngle;
     };
+}
+
+const _n = new Vec3(), _t = new Vec3();
+
+/** Turn `v` (in place) by the shortest arc that takes unit `from` onto unit `to`. */
+function swingBack(from: Vec3, to: Vec3, v: Vec3): void {
+    from.cross(to, _n);
+    const s = _n.length(), c = from.dot(to);
+    // Aligned (nothing to undo), or opposite (no one shortest arc: leave it).
+    if (s < 1e-9) return;
+    _n.scale(1 / s, _n);
+    // Rodrigues: v·c + (n×v)·s + n·(n·v)(1 − c).
+    const nv = _n.dot(v);
+    _n.cross(v, _t);
+    const k = nv * (1 - c);
+    v.set(v.x * c + _t.x * s + _n.x * k, v.y * c + _t.y * s + _n.y * k, v.z * c + _t.z * s + _n.z * k);
 }
 
 /** The perpendiculars that start a cone-twist untwisted with its bodies as they stand now. */

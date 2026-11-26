@@ -230,6 +230,7 @@ disturb your layout.
 | **Landscape Layers** | The landscape's base and paint layer stack (landscape mode). |
 | **Foot Placement** | The skeleton's foot placement: its legs, their tuning, foot locking and how a lock blends in and out (rig tab, beside Skeleton). See [Foot placement](animation.md#foot-placement). |
 | **Ragdoll** | The skeleton's ragdoll — its parts, their joints, and a Test drop (rig tab, beside Skeleton). See [The Ragdoll panel](physics.md#the-ragdoll-panel-rig-editor). |
+| **Reactions** | The skeleton's reaction sets — how its characters take hits, stagger, fall, protect themselves and get up — and a test bench to try them on (rig tab, beside Skeleton). See [Reactions](reactions.md). |
 | **Bone Masks** | The skeleton's bone masks, which animator layers and action slots pick from (rig tab, beside Skeleton). See [Bone masks](animation.md#bone-masks). |
 | **Engine** | Renderer, Performance and Runtime pages (options mode). |
 | **Editor** | Scripts and Viewport preferences (options mode). |

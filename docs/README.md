@@ -63,6 +63,7 @@ After that the two halves are independent, and you can read either first:
 | [Node inspector](editor/node-inspector.md) | Every property editor, by node type |
 | [Models and materials](editor/models-and-materials.md) | Importing meshes, retargeting animation, LODs, the material editor, textures |
 | [Physics](editor/physics.md) | Rigid bodies, triggers, colliders, convex hulls, ragdolls |
+| [Reactions](editor/reactions.md) | Reactive ragdolls: how characters take hits, stagger, fall, protect themselves and get up; the test bench |
 | [Vehicles](editor/vehicles.md) | Cars on virtual wheels: engine, gearbox, suspension, tyres, on every backend |
 | [Animation](editor/animation.md) | Clips, state machines and controllers, layers and bone masks, poses, action slots, blend spaces, foot IK, sockets, events, root motion |
 | [AI brains](editor/ai-brains.md) | The `.brain` asset and the Behaviour / Goals / Fuzzy canvases |
@@ -91,6 +92,7 @@ After that the two halves are independent, and you can read either first:
 | [Lifecycle](scripting/lifecycle.md) | Every hook, its ordering, timers, spawning and despawning |
 | [Node API](scripting/node-api.md) | Transforms, hierarchy, lookups, variables |
 | [Motion and physics](scripting/motion-and-physics.md) | Bodies, velocity, measured motion, raycasts, collisions |
+| [Reactions](scripting/reactions.md) | Hitting, shoving, tripping and bailing a character; its states and `reaction:*` events |
 | [Input](scripting/input.md) | Reading actions |
 | [Characters and controllers](scripting/characters-and-controllers.md) | The pawn/driver split, locomotion, camera rigs |
 | [AI](scripting/ai.md) | Goals, behaviour machines, fuzzy logic, perception, pathfinding |
@@ -117,6 +119,7 @@ After that the two halves are independent, and you can read either first:
 | [File formats](reference/file-formats.md) | Asset extensions, project bundles, published builds |
 | [Physics threading](reference/physics-threading.md) | The physics step on the main thread or in a Web Worker, and measurements |
 | [Physics backends](reference/physics-backends.md) | The layer physics runs behind (Jolt by default, Rapier, cannon-es), and how a backend is added |
+| [Reactive ragdolls](reference/reactive-ragdolls.md) | How reactions work, the systems they are modelled on (Euphoria, PuppetMaster) and where the code is |
 | [Hosting an online game](reference/netsync-hosting.md) | Dedicated hosts, the allocator and gateway, where to run them, every host setting |
 | [Glossary](reference/glossary.md) | Terms used throughout |
 

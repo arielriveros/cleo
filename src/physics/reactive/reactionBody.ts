@@ -32,6 +32,12 @@ export class ReactionBody {
     /** Per part: how firmly its strings hold it to the animation (0..1), and how much of it is drawn simulated. */
     public readonly pin: Float64Array;
     public readonly mapping: Float64Array;
+    /**
+     * Per part: a string to a point in the world rather than to the animation (`pull`), and how firmly (0..1 of the
+     * set's strings). What gets a hand onto a wound on every backend: the arm's muscles aim it, the string lands it.
+     */
+    public readonly goal: number[][] = [];
+    public readonly goalWeight: Float64Array;
     /** Each limb by side. */
     public readonly arms: Partial<Record<'L' | 'R', Limb>> = {};
     public readonly legs: Partial<Record<'L' | 'R', Limb>> = {};
@@ -47,8 +53,9 @@ export class ReactionBody {
         const n = parts.length;
         for (let i = 0; i < n; i++) {
             this.sim.push([0, 0, 0, 0, 0, 0, 1]); this.anim.push([0, 0, 0, 0, 0, 0, 1]);
-            this.target.push([0, 0, 0, 1]); this.spin.push([0, 0, 0]);
+            this.target.push([0, 0, 0, 1]); this.spin.push([0, 0, 0]); this.goal.push([0, 0, 0]);
         }
+        this.goalWeight = new Float64Array(n);
         this.frequency = new Float64Array(n); this.damping = new Float64Array(n); this.torque = new Float64Array(n);
         this.holdUp = new Float64Array(n); this.friction = new Float64Array(n);
         this.pin = new Float64Array(n); this.mapping = new Float64Array(n).fill(1);
@@ -79,6 +86,15 @@ export class ReactionBody {
             r.relativeRotation(this.anim, p.index, this.target[p.index]);
             const s = this.spin[p.index]; s[0] = s[1] = s[2] = 0;
         }
+        this.goalWeight.fill(0);
+    }
+
+    /** A string from part `i`'s centre to a world point, `w` (0..1) of the set's strings; its rotation left free. */
+    public pull(i: number, point: ArrayLike<number>, w: number): void {
+        if (!(w > 0) || i < 0) return;
+        const g = this.goal[i];
+        g[0] = point[0]; g[1] = point[1]; g[2] = point[2];
+        this.goalWeight[i] = Math.max(this.goalWeight[i], Math.min(1, w));
     }
 
     // ---- poses ----

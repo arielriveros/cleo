@@ -147,6 +147,7 @@ export const BEHAVIOUR_SPECS: readonly BehaviourSpec[] = [
             p('holdTime', 'Hold for', 2, 0, 10, 0.1, 's', 'How long a hand holds the wound.'),
             p('maxReach', 'Reach', 0.65, 0, 1.5, 0.01, 'm', 'The farthest a hand reaches for a wound (beyond, it does not try).'),
             p('reachStiffness', 'Reach stiffness', 3, 0, 20, 0.1, 'Hz', 'How firmly the reaching arm holds the wound.'),
+            p('reachPull', 'Reach pull', 0.5, 0, 1, 0.05, undefined, 'How firmly a string draws the hand onto the wound, as a share of the strings (0: the muscles of the arm alone).'),
             p('lookTime', 'Look for', 1, 0, 5, 0.05, 's', 'How long the head turns toward the wound.'),
             p('duration', 'Lasts', 1.2, 0.1, 10, 0.05, 's', 'How long a hit reaction runs before the character is back on its animation.'),
         ],
@@ -232,7 +233,7 @@ export const BEHAVIOUR_SPECS: readonly BehaviourSpec[] = [
             p('rollTorque', 'Roll', 0.6, 0, 3, 0.05, undefined, 'How much it is helped to keep rolling down the slope.'),
             p('slowDownSpeed', 'Spread below', 1.2, 0, 10, 0.05, 'm/s', 'Below this speed the arms spread to stop it.'),
         ],
-        poses: [{ slot: 'curl', label: 'Curl', doc: 'The tucked pose to tumble in (when set, instead of the curl).' }],
+        poses: [{ slot: 'curl', label: 'Curl pose', doc: 'The tucked pose to tumble in (when set, instead of the curl).' }],
         clips: [],
     },
     {

@@ -59,7 +59,9 @@ const OLD_DOCK_LAYOUT_KEYS = [
 // 27: the Saves panel (the project's Play saves) joined the bottom strip; a tree stored at 26 has nowhere for it.
 // 28: foot placement left the bone tree for a Foot Placement tab of its own beside Skeleton in the rig mode; a
 // tree stored at 27 has nowhere for it.
-const LAYOUT_VERSION = 28;
+// 29: the rig mode gained a Reactions tab (how the skeleton reacts when hit, pushed or falling); a tree stored at
+// 28 has nowhere for it.
+const LAYOUT_VERSION = 29;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -129,7 +131,7 @@ const LANDSCAPE_PANELS = ['landscapeTools', 'landscapeLayers'] as const;
  * (titled Skeleton) so each gets the whole rail instead of a stretch of one long inspector, while the bone tree
  * stays up on the left for the pick-a-bone gestures. Shown only in rig mode.
  */
-const RIG_PANELS = ['rigFootPlacement', 'rigRagdoll', 'rigBoneMasks'] as const;
+const RIG_PANELS = ['rigFootPlacement', 'rigRagdoll', 'rigReactions', 'rigBoneMasks'] as const;
 
 /** The two Add palettes, stacked as tabs above the Scene tree. Ordinary chrome, shown wherever the tree is. */
 const ADD_PANELS = ['sceneAdd', 'uiAdd'] as const;
@@ -684,7 +686,7 @@ export default function DockLayout() {
   useEffect(() => {
     if (!api) return;
     const onFocus = (e: { kind?: string } | undefined) => {
-      const tab = e?.kind === 'boneMask' ? 'rigBoneMasks' : e?.kind === 'pose' ? 'properties' : e?.kind === 'ragdoll' ? 'rigRagdoll' : null;
+      const tab = e?.kind === 'boneMask' ? 'rigBoneMasks' : e?.kind === 'pose' ? 'properties' : e?.kind === 'ragdoll' ? 'rigRagdoll' : e?.kind === 'reactions' ? 'rigReactions' : null;
       if (!tab) return;
       if (keyRef.current === 'rig' && !playingRef.current) api.getPanel(tab)?.api.setActive();
       else pendingRigTabRef.current = tab;

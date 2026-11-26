@@ -563,8 +563,19 @@ export class ReactionController {
                 r.setMuscle(i, d);
                 r.setTarget(i, body.target[i], body.spin[i]);
             }
-            const w = body.pin[i];
-            if (w > 1e-3) {
+            const w = body.pin[i], gw = body.goalWeight[i];
+            if (gw > 1e-3) {
+                // A string to a point (a hand onto a wound): position only, still.
+                pin.linearFrequency = pins.frequency * gw;
+                pin.angularFrequency = 0;
+                pin.damping = pins.damping;
+                pin.maxForce = pins.maxForce * gw * p.mass * n / total * massScale;
+                pin.maxTorque = 0;
+                r.setPin(i, pin);
+                const g = body.goal[i], s = body.sim[i], t = this._goalPose;
+                t[0] = g[0]; t[1] = g[1]; t[2] = g[2]; t[3] = s[3]; t[4] = s[4]; t[5] = s[5]; t[6] = s[6];
+                r.setPinTarget(i, t, null);
+            } else if (w > 1e-3) {
                 pin.linearFrequency = pins.frequency * w;
                 pin.angularFrequency = pins.frequency * w;
                 pin.damping = pins.damping;
@@ -583,6 +594,8 @@ export class ReactionController {
         const animator = this.node.animator;
         if (animator) animator.ikSuppressed = this._state !== 'hitReact';
     }
+
+    private readonly _goalPose = [0, 0, 0, 0, 0, 0, 1];
 
     private _massScale(r: Ragdoll): number {
         return r.parts.reduce((s, p) => s + p.mass, 0) / REFERENCE_MASS || 1;

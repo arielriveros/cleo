@@ -92,6 +92,24 @@ describe.each(BACKENDS)('reactions on %s', backend => {
         expect(s.r.partByRay([0.09, 0.7, 2], [0.09, 0.7, -2])?.part).toBe('Thigh L');
     });
 
+    it("takes a ray's hit on the limb along the shot, and pushes anything else", () => {
+        const s = setup();
+        // As a gun's ray reports a character's capsule: its owner, and a point on its surface in front of the chest.
+        const ground = s.physics.raycast([5, 5, 5], [5, -5, 5])!;
+        const took = s.physics.applyHit({ ...ground, point: [0, 1.4, 0.35], node: s.node } as any, [0, 0, -1], 12);
+        expect(took).toBe(true);
+        expect(s.r.ragdoll!.parts[s.r.wounds[0].part].name).toBe('Chest');
+        // Once it has a body, a ray that strikes a limb names it.
+        const arm = s.r.ragdoll!.parts[s.r.ragdoll!.findPart('foreArm.L')];
+        expect(s.physics.applyHit({ point: [arm.body.position.x, arm.body.position.y, arm.body.position.z], normal: [0, 0, 1], distance: 1, body: arm.body, node: null, ragdoll: s.r.ragdoll!, part: arm.index } as any, [0, 0, -1], 5)).toBe(true);
+        expect(s.r.wounds[1].part).toBe(arm.index);
+        // A crate is pushed, as before.
+        const crate = makeBody(box(0.3, 0.3, 0.3), { mass: 10, position: [4, 0.3, 0] });
+        s.physics.addBody(crate);
+        expect(s.physics.applyHit({ point: [4, 0.3, 0.3], normal: [0, 0, 1], distance: 1, body: crate, node: null } as any, [0, 0, -1], 10)).toBe(false);
+        expect(crate.velocity.z).toBeLessThan(-0.5);
+    });
+
     it('takes a small hit standing: flinches, then is back on its animation', () => {
         const s = setup();
         const events: string[] = [];
@@ -201,11 +219,13 @@ describe.each(BACKENDS)('reactions on %s', backend => {
     });
 });
 
-describe('a hand to the wound', () => {
-    beforeAll(async () => { await acquirePhysicsBackend('jolt'); });
+// The arm's muscles aim the hand and a string lands it (hitReact's Reach pull). On cannon the reaching arm meets
+// the chest it crosses, whose contacts are stiffer: it is held short (docs/editor/reactions.md#physics-backends).
+describe.each(['jolt', 'rapier'] as PhysicsBackendKind[])('a hand to the wound on %s', backend => {
+    beforeAll(async () => { await acquirePhysicsBackend(backend); });
 
     it('shot in the left forearm, brings it in and holds it with the right hand', () => {
-        const physics = groundWorld('jolt'), node = humanoidModel();
+        const physics = groundWorld(backend), node = humanoidModel();
         const r = physics.reactionsOf(node)!;
         let best = Infinity;
         for (let f = 0; f < 100; f++) {
@@ -218,7 +238,7 @@ describe('a hand to the wound', () => {
             }
         }
         expect(r.wounds.length === 0 || r.wounds[0].hand === 'R').toBe(true);
-        expect(best).toBeLessThan(0.2);
+        expect(best).toBeLessThan(backend === 'jolt' ? 0.12 : 0.2);
         physics.dispose();
     });
 });

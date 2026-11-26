@@ -17,6 +17,7 @@ Read [Getting started](getting-started.md) first — it is short and everything 
 | [Lifecycle](lifecycle.md) | Every hook, when it runs, timers, spawning and despawning |
 | [Node API](node-api.md) | Transforms, hierarchy, finding nodes, variables, visibility |
 | [Motion and physics](motion-and-physics.md) | Bodies, velocity, measured motion, grounding, raycasts, collisions, ragdolls |
+| [Reactions](reactions.md) | Hitting, shoving, tripping and bailing a character; its states, sensors and `reaction:*` events |
 | [Input](input.md) | Reading actions |
 | [Characters and controllers](characters-and-controllers.md) | The pawn/driver split, locomotion, camera rigs |
 | [AI](ai.md) | Goals, behaviour machines, fuzzy logic, perception, pathfinding |

@@ -66,6 +66,10 @@ what each character decides for itself:
 | **Clip overrides** | On a shared animator: how many of its clips this character swaps for others. Click to list them, each with the clip that plays instead, or **(same)**. |
 | **Ragdoll mass** | Multiplies the skeleton's ragdoll mass for this character. ✎ opens the skeleton, whose **Ragdoll** tab authors the bodies and joints. Not shown for a generic ragdoll. |
 | **Ragdoll push** | A velocity, in m/s, added to the upper body as it starts to fall, in the character's own frame (left, up, forward). |
+| **Reactions** | Which of the skeleton's [reaction sets](reactions.md) it takes hits, stumbles, falls and gets up with: the **Skeleton default**, a set by name, or **Off** (hits push its capsule and a fall goes limp, as before). ✎ opens the skeleton's **Reactions** tab. |
+| **Reaction strength** | Multiplies every muscle of its set: above 1 a tough character that shrugs hits off, below 1 a weak one. |
+| **Health** | 0 to 1, what each reaction starts from. Hits take it down; a wounded character staggers sooner and holds itself up less. |
+| **Gets up** | Off: a reaction that ends on the ground stays there. |
 
 > A node **attached to a socket** has its transform rewritten every frame, so editing its Transform
 > while attached does nothing visible. Move the socket's offset in the rig editor instead, or set the

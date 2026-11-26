@@ -292,6 +292,8 @@ interface PhysicsRaycastHit {
   point: vec3 ; normal: vec3 ; distance: number
   body: RigidBody
   node: Node | null
+  ragdoll?: Ragdoll    // a ragdoll's body: the ragdoll
+  part?: number        // and which of its parts
 }
 
 interface PhysicsRaycastOptions {
@@ -337,7 +339,8 @@ public groundAt(x: number, z: number): vec3 | null {
 ```
 
 `hit.node === null` meaning "this is terrain" is worth remembering — it is the cheapest terrain
-test there is.
+test there is. A ragdoll's bodies have no node either: a hit on one carries `hit.ragdoll` and `hit.part`
+(the index in `ragdoll.parts`), so test `!hit.ragdoll` too where a ragdoll may lie.
 
 For scattering points on a disc, use `R * Math.sqrt(u)`, not `R * u`. The latter piles two thirds
 of the samples into the middle third of the area.
@@ -499,6 +502,10 @@ const ragdoll = this.scene.physics.startRagdoll(modelNode, {
 
 Starting a ragdoll switches the animator into ragdoll mode; the bones are driven by physics instead
 of by clips. This is the usual stand-in for a death animation when you do not have one.
+
+A character that should react rather than collapse (flinch at a hit, stagger, break its fall, get up) has
+[reactions](reactions.md): `this.reactions?.hit({ point, direction, impulse })`, or `physics.applyHit(hit,
+direction, impulse)` for a ray's hit.
 
 > **Keep the twist limit loose.** cannon's twist constraint jitters when it is tight.
 

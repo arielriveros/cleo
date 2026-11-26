@@ -9,6 +9,7 @@ import AiBrainTabView from '../ai/AiBrainTabView';
 import AiBrainInspector from '../ai/AiBrainInspector';
 import RigInspector from '../rig/RigInspector';
 import RagdollPanel from '../rig/RagdollPanel';
+import ReactionsPanel from '../rig/reactions/ReactionsPanel';
 import FootPlacementPanel from '../rig/FootPlacementPanel';
 import BoneMasksPanel from '../rig/BoneMasksPanel';
 import ClipInspector from '../clip/ClipInspector';
@@ -335,6 +336,7 @@ function LandscapeLayersDockPanel(_: IDockviewPanelProps) { return <SidePanel><L
 // sit in; Foot Placement writes the skeleton through commitIkRig, as it did under the bone tree.
 function RigFootPlacementPanel(_: IDockviewPanelProps) { return <SidePanel><FootPlacementPanel /></SidePanel>; }
 function RigRagdollPanel(_: IDockviewPanelProps) { return <SidePanel><div className='p-2'><RagdollPanel /></div></SidePanel>; }
+function RigReactionsPanel(_: IDockviewPanelProps) { return <SidePanel><div className='p-2'><ReactionsPanel /></div></SidePanel>; }
 function RigBoneMasksPanel(_: IDockviewPanelProps) { return <SidePanel><div className='p-2'><BoneMasksPanel /></div></SidePanel>; }
 // The three Options-mode panels. Each owns its page switcher and scrolling, so none takes a SidePanel.
 function OptionsDockFrame({ children }: { children: ReactNode }) {
@@ -400,6 +402,7 @@ const panelComponents = {
   landscapeLayers: LandscapeLayersDockPanel,
   rigFootPlacement: RigFootPlacementPanel,
   rigRagdoll: RigRagdollPanel,
+  rigReactions: RigReactionsPanel,
   rigBoneMasks: RigBoneMasksPanel,
   optionsEngine: EngineOptionsDockPanel,
   optionsEditor: EditorOptionsDockPanel,

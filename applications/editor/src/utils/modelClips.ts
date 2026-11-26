@@ -185,6 +185,28 @@ export function assetWithRagdollProfile<T extends ClipBearingAsset>(asset: T, pr
   return { ...asset, nodeJson }
 }
 
+/**
+ * The reaction sets an asset's skeleton carries, embedded from its rig like the ragdoll profile (see
+ * `syncRigSockets`). Stored as `skin.reactionSets`; null removes them.
+ */
+export function assetWithReactionSets<T extends ClipBearingAsset>(asset: T, reactions: any | null | undefined): T {
+  const next = reactions && Array.isArray(reactions.sets) && reactions.sets.length ? reactions : null
+  if (JSON.stringify(assetReactionSets(asset) ?? null) === JSON.stringify(next)) return asset
+  const nodeJson = deepClone(asset.nodeJson)
+  const models = skinnedModelJsonsOf(nodeJson)
+  if (!models.length) return asset
+  for (const model of models) {
+    if (next) model.skin.reactionSets = deepClone(next)
+    else delete model.skin.reactionSets
+  }
+  return { ...asset, nodeJson }
+}
+
+/** The reaction sets an asset's skeleton carries, or null. */
+export function assetReactionSets(asset: ClipBearingAsset | undefined): any | null {
+  return skinnedModelJsonOf(asset?.nodeJson)?.skin?.reactionSets ?? null
+}
+
 /** The ragdoll profile an asset's skeleton carries, or null. */
 export function assetRagdollProfile(asset: ClipBearingAsset | undefined): any | null {
   return skinnedModelJsonOf(asset?.nodeJson)?.skin?.ragdollProfile ?? null

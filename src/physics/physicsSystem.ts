@@ -1701,7 +1701,19 @@ export class PhysicsSystem {
   public applyHit(hit: PhysicsRaycastHit, direction: ArrayLike<number>, impulse: number, options: Omit<ReactionHit, 'point' | 'direction' | 'impulse'> = {}): boolean {
     const reactions = this.reactionsFor(hit.body) ?? (hit.node ? this.reactionsFor(hit.node) : null);
     if (reactions) {
-      reactions.hit({ ...options, point: hit.point, direction, impulse, ...(hit.part !== undefined && hit.ragdoll === reactions.ragdoll ? { part: hit.part } : {}) });
+      if (hit.part !== undefined && hit.ragdoll === reactions.ragdoll) {
+        reactions.hit({ ...options, point: hit.point, direction, impulse, part: hit.part });
+        return true;
+      }
+      // The capsule round a character, not the character: the limb the shot goes on to meet, along its line
+      // (from a metre back, for a ray that started inside the capsule), where it meets it. A shot that passes
+      // the body by inside its capsule grazes the part nearest.
+      const n = Math.hypot(direction[0], direction[1], direction[2]) || 1, d = [direction[0] / n, direction[1] / n, direction[2] / n];
+      const p = hit.point;
+      const struck = options.part === undefined
+        ? reactions.partByRay([p[0] - d[0], p[1] - d[1], p[2] - d[2]], [p[0] + d[0] * 2, p[1] + d[1] * 2, p[2] + d[2] * 2])
+        : null;
+      reactions.hit({ ...options, point: struck ? struck.point : p, direction, impulse, ...(struck ? { part: struck.part } : {}) });
       return true;
     }
     const body = hit.body;

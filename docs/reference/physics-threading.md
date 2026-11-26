@@ -108,6 +108,16 @@ Code: `src/physics/executor/` (the inline and worker executors), `src/physics/wo
 worker's step loop, the shared-memory replies) and each backend's mirror and replica
 (`src/physics/pal/replication.ts`).
 
+## Joint drives
+
+*(unreleased)* A reactive ragdoll's muscles and strings ([joint drives](physics-backends.md#joint-drives)) go to
+the worker with each step: `pal/drive/driveCopy.ts` diffs them on the main thread (`DriveMirror`) into the
+drives added and removed and one row of numbers per drive and pin (target, gains, caps), and the worker's
+`DriveReplica` applies them to its copy of the world before it steps. Both sides run the drives in ascending
+joint id, so the worker steps exactly as the main thread would. A world with no drives sends no `drives` key at
+all. The reactions themselves (their sensors, states and behaviours) run on the main thread, in `endFrame`,
+from the bodies the worker sent back; the drives' torque readings are not sent back.
+
 ## Measurements
 
 The Valley example in the editor (dev server, Play, 8-core desktop, 130 bodies of which 12 moving,

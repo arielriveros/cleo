@@ -11,6 +11,7 @@ import SocketPreviews from "./sockets/SocketPreviews";
 import SocketGizmo from "./sockets/SocketGizmo";
 import PoseGizmo from "./rig/PoseGizmo";
 import RagdollPreview from './rig/RagdollPreview';
+import ReactionBench from './rig/reactions/ReactionBench';
 import useGizmoShortcuts from "./gizmo/useGizmoShortcuts";
 import type { TransformPatch } from "@cleo/app-kit/gizmo/gizmoDrag";
 import { GizmoModeControls } from "@cleo/app-kit/gizmo/GizmoModeControls";
@@ -579,6 +580,8 @@ export default function EngineViewport() {
                 <PoseGizmo viewportRef={viewportRef} />
                 {/* The rig's ragdoll: colliders and joint limits on the preview, and its test fall. */}
                 <RagdollPreview />
+                {/* Its reactions' test bench: scenarios, the mouse's shots and shoves, overlays. */}
+                <ReactionBench viewportRef={viewportRef} />
             </>}
 
             {/* The Clip Player draws the same bone overlay, but NOT `AnimationPlayer`: its transport is a

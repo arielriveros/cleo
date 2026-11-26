@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatedModel, ModelNode, Node, RAGDOLL_DEFAULTS, effectiveRagdollProfile } from 'cleo'
-import type { AnimationStateMachine, RagdollOptions } from 'cleo'
+import type { AnimationStateMachine, ModelReactionConfig, RagdollOptions, ReactionSets } from 'cleo'
 import { useEditorSessions } from '../../EditorSessionsContext'
 import { useAssetLibrary } from '../../AssetLibraryContext'
 import { useCleoEngine } from '../../EngineContext'
 import { useDocument } from '../../DocumentContext'
 import AxisInput from '@cleo/app-kit/ui/AxisInput'
-import { Button, Hint, NumberInput, PropertyRow, PropertyTable, SectionTitle, Select, cn } from '@cleo/app-kit/ui'
+import { Button, Hint, NumberInput, PropertyRow, PropertyTable, SectionTitle, Select, Toggle, cn } from '@cleo/app-kit/ui'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
 import { modelIdOf } from '../../../utils/models'
 import { instantiateController, machineClipNames } from '../../../utils/animationControllers'
@@ -19,6 +19,8 @@ import { instantiateController, machineClipNames } from '../../../utils/animatio
 //   way the node holds a resolved copy (that is what plays and what ships); `controllerId` is where it came from.
 // - **Ragdoll**: how heavy this character falls and how hard it is pushed (ModelNode.ragdollConfig). Which
 //   bodies and joints it falls with is the skeleton's ragdoll profile.
+// - **Reactions**: which of the skeleton's reaction sets it takes hits and falls with, how strong and how healthy
+//   it is, and whether it gets up (ragdollConfig.reactions). The sets themselves are the skeleton's Reactions tab.
 
 /** Whether `node` is a skinned model a ragdoll applies to: a ModelNode with a skinned AnimatedModel and an animator. */
 export function isRagdollModel(node: Node): node is ModelNode {
@@ -183,6 +185,76 @@ function RagdollRows({ node, rigId }: { node: ModelNode; rigId?: string }) {
         </div>
       </PropertyRow>
       {hint && <tr><td colSpan={2}><Hint>{hint}</Hint></td></tr>}
+      {source !== 'generic' && (
+        <ReactionRows node={node} rigId={rigId} config={ragdoll.reactions ?? {}}
+          onChange={reactions => setRagdoll({ ...ragdoll, reactions })} />
+      )}
+    </>
+  )
+}
+
+/** The set select's value for "no reactions": hits push the capsule, falls go limp, as before reactions. */
+const REACTIONS_OFF = '__off__'
+/** The set select's value for "whatever the skeleton marks default". */
+const REACTIONS_DEFAULT = ''
+
+/**
+ * Which of the skeleton's reaction sets this character uses, and how it carries it: ragdollConfig.reactions.
+ * Strength multiplies every muscle of the set (a tough guard, a weak one); health starts each reaction (a wounded
+ * character staggers sooner); with Gets up off a reaction that ends on the ground stays there.
+ */
+function ReactionRows({ node, rigId, config, onChange }: {
+  node: ModelNode; rigId?: string; config: ModelReactionConfig; onChange: (c: ModelReactionConfig) => void
+}) {
+  const { eventEmitter, enterRigEditor } = useCleoEngine()
+  const sets = (node.model instanceof AnimatedModel ? (node.model.skin as { reactionSets?: ReactionSets } | undefined)?.reactionSets : undefined)?.sets ?? []
+  const off = config.enabled === false
+  const value = off ? REACTIONS_OFF : (config.set ?? REACTIONS_DEFAULT)
+  // A set named that the skeleton no longer has falls back to the default: say so in the list, not silently.
+  const missing = !off && config.set && !sets.some(s => s.id === config.set || s.name === config.set)
+  const set = (c: Partial<ModelReactionConfig>) => {
+    const next: ModelReactionConfig = { ...config, ...c }
+    for (const k of Object.keys(next) as (keyof ModelReactionConfig)[]) if (next[k] === undefined) delete next[k]
+    onChange(next)
+  }
+  const edit = rigId && (
+    <Button variant='ghost' size='icon' className='text-highlight' onClick={() => { enterRigEditor(rigId); eventEmitter.emit('FOCUS_RIG_ASSET', { kind: 'reactions' }) }}
+      title='Edit the reaction sets in the skeleton: muscles, behaviours, poses and a test bench (the Reactions tab)'>✎</Button>
+  )
+  return (
+    <>
+      <PropertyRow label='Reactions'>
+        <div className='flex items-center gap-1'>
+          <Select className='flex-1 min-w-0' value={value}
+            onChange={e => {
+              const v = e.target.value
+              if (v === REACTIONS_OFF) set({ enabled: false, set: undefined })
+              else set({ enabled: undefined, set: v === REACTIONS_DEFAULT ? undefined : v })
+            }}>
+            <option value={REACTIONS_DEFAULT}>{sets.length ? 'Skeleton default' : 'Built-in default'}</option>
+            {sets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {missing && <option value={config.set!}>{config.set} (missing)</option>}
+            <option value={REACTIONS_OFF}>Off</option>
+          </Select>
+          {edit}
+        </div>
+      </PropertyRow>
+      {!off && (
+        <>
+          <PropertyRow label='Reaction strength'>
+            <NumberInput step={0.05} min={0.1} max={4} value={config.strength ?? 1}
+              onChange={v => set({ strength: v === 1 ? undefined : Math.max(0.1, Math.min(4, v)) })} />
+          </PropertyRow>
+          <PropertyRow label='Health'>
+            <NumberInput step={0.05} min={0} max={1} value={config.health ?? 1}
+              onChange={v => set({ health: v === 1 ? undefined : Math.max(0, Math.min(1, v)) })} />
+          </PropertyRow>
+          <PropertyRow label='Gets up'>
+            <Toggle checked={config.getUp !== false} doc={false} title='Off: a reaction that ends on the ground stays there'
+              onChange={v => set({ getUp: v ? undefined : false })} />
+          </PropertyRow>
+        </>
+      )}
     </>
   )
 }

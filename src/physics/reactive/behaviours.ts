@@ -157,6 +157,8 @@ const hitReact: ReactionBehaviour = {
                     ? add(add(shoulder, ctx.sensors.forward, 0.45), [0, -0.25, 0])
                     : add(add(shoulder, ctx.sensors.left, 0.3 * sideSign), [0, -0.3, 0]);
                 body.reach(arm, toWrist, w * ramp, pole);
+                // And a string to land the hand there, however the backend's muscles carry the arm.
+                body.pull(arm.end, palmAt, P.reachPull * w * ramp);
                 // The chest turns a little toward the reach, as a body does reaching across itself.
                 if (across && body.chest >= 0 && body.chest !== body.pelvis) body.turn(body.chest, axisAngle(UP, -0.35 * sideSign), w * ramp);
                 for (const i of [arm.root, arm.mid, arm.end]) {

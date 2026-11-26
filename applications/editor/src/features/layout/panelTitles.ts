@@ -13,7 +13,7 @@ export const PANEL_TITLES: Record<string, string> = {
   particleTransport: 'Particle Preview',
   tilePalette: 'Tiles', tilemapLayers: 'Layers',
   landscapeTools: 'Landscape Tools', landscapeLayers: 'Landscape Layers',
-  rigFootPlacement: 'Foot Placement', rigRagdoll: 'Ragdoll', rigBoneMasks: 'Bone Masks',
+  rigFootPlacement: 'Foot Placement', rigRagdoll: 'Ragdoll', rigReactions: 'Reactions', rigBoneMasks: 'Bone Masks',
   optionsEngine: 'Engine', optionsEditor: 'Editor', optionsProject: 'Project',
   sequencer: 'Sequencer',
 };
@@ -80,7 +80,7 @@ const PANEL_DOC_PAGE: Record<string, string> = {
   tilePalette: 'editor/tilemap-2d', tilemapLayers: 'editor/tilemap-2d',
   landscapeTools: 'editor/terrain', landscapeLayers: 'editor/terrain',
   // The ragdoll is documented with the rest of physics.
-  rigFootPlacement: 'editor/animation', rigRagdoll: 'editor/physics', rigBoneMasks: 'editor/animation',
+  rigFootPlacement: 'editor/animation', rigRagdoll: 'editor/physics', rigReactions: 'editor/reactions', rigBoneMasks: 'editor/animation',
   optionsEngine: 'editor/options', optionsEditor: 'editor/options', optionsProject: 'editor/options',
   sequencer: 'editor/sequencer',
 };
