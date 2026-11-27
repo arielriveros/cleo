@@ -3,7 +3,7 @@ import type { Skin } from '../../animation/animatedModel';
 import type { AnimationPose } from '../../animation/animationPose';
 import { solveTwoBone } from '../../animation/ik';
 import { normalizeBoneName } from '../../animation/boneNames';
-import { quatFromToTuple, quatMultiplyTuple, quatConjugateTuple, quatRotateTuple, quatSlerpTuple } from '../../core/math';
+import { quatFromToTuple, quatMultiplyTuple, quatConjugateTuple, quatRotateTuple, quatSlerpTuple, quatToRotationVector } from '../../core/math';
 import type { Ragdoll, RagdollPartInfo } from '../ragdoll';
 import { rigidRotation } from '../ragdollProfile';
 
@@ -21,8 +21,16 @@ export class ReactionBody {
     public readonly anim: number[][] = [];
     /** The muscles' target per part: its rotation in its parent's frame. */
     public readonly target: number[][] = [];
-    /** The target's own spin, per part, in its parent's frame. */
+    /**
+     * The target's own spin, per part, in its parent's frame: the animation's, measured between this frame's pose and
+     * the last (begin), so a muscle follows a swinging arm rather than trailing it; less as a behaviour blends the
+     * target away from the animation.
+     */
     public readonly spin: number[][] = [];
+    /** Per part, the animation's world velocity [vx vy vz wx wy wz] (what a kinematic part is moved by). */
+    public readonly animVel: number[][] = [];
+    /** Per part: 1 while it is kinematic on the animation (the legs of a character on its feet). */
+    public readonly kinematic: Uint8Array;
     /** Per part: stiffness (Hz), damping ratio, strength (N·m), gravity compensation, friction. */
     public readonly frequency: Float64Array;
     public readonly damping: Float64Array;
@@ -65,7 +73,9 @@ export class ReactionBody {
         for (let i = 0; i < n; i++) {
             this.sim.push([0, 0, 0, 0, 0, 0, 1]); this.anim.push([0, 0, 0, 0, 0, 0, 1]);
             this.target.push([0, 0, 0, 1]); this.spin.push([0, 0, 0]); this.goal.push([0, 0, 0]);
+            this.animVel.push([0, 0, 0, 0, 0, 0]); this._prevAnim.push([0, 0, 0, 0, 0, 0, 1]); this._prevRel.push([0, 0, 0, 1]);
         }
+        this.kinematic = new Uint8Array(n);
         this.goalWeight = new Float64Array(n);
         this.passThrough = new Uint8Array(n);
         this.frequency = new Float64Array(n); this.damping = new Float64Array(n); this.torque = new Float64Array(n);
@@ -93,18 +103,45 @@ export class ReactionBody {
         this.head = [role('neck'), role('head')].find(i => i >= 0) ?? -1;
     }
 
-    /** Read the simulated and animated poses, and start the targets from the animation's. */
-    public begin(): void {
+    /**
+     * Read the simulated and animated poses, and start the targets from the animation's. Given the frame's `dt`, the
+     * animation's motion since the last call too: each target's spin and each part's animated velocity (none across
+     * a jump of the animated hips of half a metre or more: a teleport, a new clip's first frame).
+     */
+    public begin(dt = 0): void {
         const r = this.ragdoll;
         for (const p of this.parts) r.simulatedPose(p.index, this.sim[p.index]);
         r.animatedPartPoses(this.anim);
+        const pa = this.anim[this.pelvis], pp = this._prevAnim[this.pelvis];
+        const moving = dt > 1e-4 && this._begun && Math.hypot(pa[0] - pp[0], pa[1] - pp[1], pa[2] - pp[2]) < 0.5;
         for (const p of this.parts) {
-            r.relativeRotation(this.anim, p.index, this.target[p.index]);
-            const s = this.spin[p.index]; s[0] = s[1] = s[2] = 0;
+            const i = p.index, t = this.target[i], s = this.spin[i], v = this.animVel[i];
+            r.relativeRotation(this.anim, i, t);
+            s[0] = s[1] = s[2] = 0;
+            for (let k = 0; k < 6; k++) v[k] = 0;
+            const prevRel = this._prevRel[i], prev = this._prevAnim[i], a = this.anim[i];
+            if (moving) {
+                // ω in the parent's frame: rel_now = exp(ω·dt)·rel_prev, so ω = log(rel_now·inv(rel_prev)) / dt.
+                if (p.parent >= 0) {
+                    const w = quatToRotationVector(quatMultiplyTuple(t, quatConjugateTuple(prevRel)));
+                    clampInto(s, w[0] / dt, w[1] / dt, w[2] / dt, MAX_SPIN);
+                }
+                v[0] = (a[0] - prev[0]) / dt; v[1] = (a[1] - prev[1]) / dt; v[2] = (a[2] - prev[2]) / dt;
+                const ww = quatToRotationVector(quatMultiplyTuple([a[3], a[4], a[5], a[6]], quatConjugateTuple([prev[3], prev[4], prev[5], prev[6]])));
+                const sv = [0, 0, 0];
+                clampInto(sv, ww[0] / dt, ww[1] / dt, ww[2] / dt, MAX_SPIN);
+                v[3] = sv[0]; v[4] = sv[1]; v[5] = sv[2];
+            }
+            for (let k = 0; k < 4; k++) prevRel[k] = t[k];
+            for (let k = 0; k < 7; k++) prev[k] = a[k];
         }
+        this._begun = true;
         this.goalWeight.fill(0);
         this.passThrough.fill(0);
     }
+    private readonly _prevAnim: number[][] = [];
+    private readonly _prevRel: number[][] = [];
+    private _begun = false;
 
     /** A string from part `i`'s centre to a world point, `w` (0..1) of the set's strings; its rotation left free. */
     public pull(i: number, point: ArrayLike<number>, w: number): void {
@@ -144,6 +181,9 @@ export class ReactionBody {
         const t = this.target[i];
         const q = w >= 1 ? [rel[0], rel[1], rel[2], rel[3]] : quatSlerpTuple(t, rel, w);
         t[0] = q[0]; t[1] = q[1]; t[2] = q[2]; t[3] = q[3];
+        // The animation's spin goes with as much of the target as is still the animation's.
+        const s = this.spin[i], k = 1 - Math.min(1, w);
+        s[0] *= k; s[1] *= k; s[2] *= k;
     }
 
     /**
@@ -225,7 +265,7 @@ export class ReactionBody {
      * Turn the head (and a little of the chest) to face a world point, by `w`, at most `maxAngle` from where it
      * faces now. Part frames face +Z.
      */
-    public look(point: ArrayLike<number>, w: number, maxAngle = 1.1): void {
+    public look(point: ArrayLike<number>, w: number, maxAngle = 1.1, chestShare = 0.35): void {
         if (!(w > 0) || this.head < 0) return;
         const h = this.sim[this.head];
         const to = [point[0] - h[0], point[1] - h[1], point[2] - h[2]];
@@ -236,9 +276,9 @@ export class ReactionBody {
         let turn = quatFromToTuple(fwd, dir);
         const angle = 2 * Math.acos(Math.min(1, Math.abs(turn[3])));
         if (angle > maxAngle) turn = quatSlerpTuple([0, 0, 0, 1], turn, maxAngle / angle);
-        const headTurn = quatSlerpTuple([0, 0, 0, 1], turn, 0.65), chestTurn = quatSlerpTuple([0, 0, 0, 1], turn, 0.35);
+        const headTurn = quatSlerpTuple([0, 0, 0, 1], turn, 1 - chestShare), chestTurn = quatSlerpTuple([0, 0, 0, 1], turn, chestShare);
         this.blendWorld(this.head, quatMultiplyTuple(headTurn, this.simRotation(this.head)), w);
-        if (this.chest >= 0 && this.chest !== this.pelvis) this.blendWorld(this.chest, quatMultiplyTuple(chestTurn, this.simRotation(this.chest)), w);
+        if (chestShare > 0 && this.chest >= 0 && this.chest !== this.pelvis) this.blendWorld(this.chest, quatMultiplyTuple(chestTurn, this.simRotation(this.chest)), w);
     }
 
     /**
@@ -317,6 +357,15 @@ export class ReactionBody {
     public partsOf(regions: readonly string[], side?: 'L' | 'R' | null): number[] {
         return this.parts.filter(p => regions.includes(p.region) && (!side || p.side === side)).map(p => p.index);
     }
+}
+
+/** The fastest an animation's part is taken to turn (rad/s): past it, a measurement across a cut, not a motion. */
+const MAX_SPIN = 20;
+
+function clampInto(out: number[], x: number, y: number, z: number, max: number): void {
+    const n = Math.hypot(x, y, z);
+    const k = n > max ? max / n : 1;
+    out[0] = Number.isFinite(x) ? x * k : 0; out[1] = Number.isFinite(y) ? y * k : 0; out[2] = Number.isFinite(z) ? z * k : 0;
 }
 
 const POSE_CACHE = new WeakMap<AnimationPose, WeakMap<Ragdoll, (number[] | null)[]>>();

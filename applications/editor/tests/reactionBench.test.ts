@@ -35,6 +35,13 @@ describe('bench scenarios', () => {
     }
   })
 
+  it('walks the character on, at the speed set, in the Walking scenario', () => {
+    const layout = benchLayout('walking', { ...BENCH_DEFAULTS, walkSpeed: 2 })
+    expect(layout.walks).toEqual([0, 0, 2])
+    expect(layout.action).toBe('none')
+    expect(benchLayout('flat').walks).toBeUndefined()
+  })
+
   it('stands the character on something in every scenario', () => {
     for (const { id } of BENCH_SCENARIOS) {
       const { boxes, start } = benchLayout(id)

@@ -2,10 +2,11 @@
 // moving vehicle to bail from, a wall), as plain boxes around the preview character, and what starts it. Pure:
 // what is built from it lives in ReactionBench.tsx; tests/reactionBench.test.ts checks the geometry.
 
-export type BenchScenario = 'flat' | 'stairs' | 'ramp' | 'ledge' | 'vehicle' | 'wall'
+export type BenchScenario = 'flat' | 'walking' | 'stairs' | 'ramp' | 'ledge' | 'vehicle' | 'wall'
 
 export const BENCH_SCENARIOS: { id: BenchScenario; label: string; doc: string }[] = [
   { id: 'flat', label: 'Flat ground', doc: 'Open ground: shoot it, push it, trip it, throw it.' },
+  { id: 'walking', label: 'Walking', doc: 'Walking forward on its animation at the speed set while you shoot or shove it: it keeps walking through a flinch or a stagger.' },
   { id: 'stairs', label: 'Stairs', doc: 'Standing at the top of a flight of stairs, tripped down them.' },
   { id: 'ramp', label: 'Ramp', doc: 'Standing at the top of a slope, tripped down it.' },
   { id: 'ledge', label: 'Ledge', doc: 'Stepping off a ledge: a drop of the height set.' },
@@ -20,9 +21,11 @@ export interface BenchOptions {
   rampAngle: number
   ledgeHeight: number
   vehicleSpeed: number
+  /** The Walking scenario's speed (m/s): play a walk on the preview to match it. */
+  walkSpeed: number
 }
 
-export const BENCH_DEFAULTS: BenchOptions = { stairCount: 10, stairRise: 0.18, stairRun: 0.3, rampAngle: 25, ledgeHeight: 3, vehicleSpeed: 10 }
+export const BENCH_DEFAULTS: BenchOptions = { stairCount: 10, stairRise: 0.18, stairRun: 0.3, rampAngle: 25, ledgeHeight: 3, vehicleSpeed: 10, walkSpeed: 1.4 }
 
 export interface BenchBox {
   center: [number, number, number]
@@ -45,6 +48,8 @@ export interface BenchLayout {
   exit?: [number, number, number]
   /** It stands on the moving prop and rides along with it until the action (the vehicle). */
   rides?: boolean
+  /** It walks at this velocity (m/s) for as long as it is on its feet (the Walking scenario). */
+  walks?: [number, number, number]
 }
 
 /** The props of a scenario around a character whose feet are at height `floor`, facing +Z. */
@@ -53,6 +58,8 @@ export function benchLayout(scenario: BenchScenario, o: BenchOptions = BENCH_DEF
   switch (scenario) {
     case 'flat':
       return { boxes: [ground], start: [0, floor, 0], action: 'none' }
+    case 'walking':
+      return { boxes: [ground], start: [0, floor, 0], action: 'none', walks: [0, 0, Math.max(0, o.walkSpeed)] }
     case 'stairs': {
       // Down along +Z from a platform `count × rise` high: step i's top is a rise lower than the one before.
       const n = Math.max(1, Math.round(o.stairCount)), rise = Math.max(0.02, o.stairRise), run = Math.max(0.1, o.stairRun)

@@ -60,6 +60,13 @@ export interface PhysicsMappingSource {
      * muscles, so it is posed every other frame (its clock still runs every frame).
      */
     readonly loose?: boolean;
+    /**
+     * A part the others are drawn against (absent or -1: none): each simulated part is placed by its pose relative
+     * to the anchor's body, on the anchor as the animation has it NOW. A character on its feet has its hips
+     * kinematic on its animation, which the body reaches a step later: drawn this way, its simulated upper body sits
+     * on the animated hips without a tear at the waist.
+     */
+    readonly anchorPart?: number;
 }
 
 /** Trigger-based animation playback. Superseded by the state machine below. */
@@ -1206,6 +1213,12 @@ export class Animator {
     public ikSuppressed = false;
     /** No support-hand IK while bodies carry the arms: a hand pinned to a weapon fights the arm's reaction. */
     public handIkSuppressed = false;
+    /**
+     * The hand a layer's support-hand IK holds on a weapon in the other (more than half on, before any suppression),
+     * or null: what tells a character's reactions its hands are busy.
+     */
+    public get handIkActive(): 'left' | 'right' | null { return this._handIkActive; }
+    private _handIkActive: 'left' | 'right' | null = null;
     /** How much of foot and hand IK is on, as the two switches above fade it (1 on, 0 off). */
     private _footIkReaction = 1;
     private _handIkReaction = 1;
@@ -2950,6 +2963,7 @@ export class Animator {
         // feet ended up, and writing corrected LOCALS lets the loop above be re-run verbatim.
         // Each IK change re-accumulates the subtree it moved, so nothing is left to redo afterwards.
         // The support hands first: foot IK's pelvis drop then carries both hands together.
+        this._handIkActive = null;
         if (this._overlays.length) this._applyHandIk(localTransforms, globalTransforms, topo);
         this._applyFootIk(localTransforms, globalTransforms, topo);
         this._ikDelta = 0;
@@ -3069,7 +3083,9 @@ export class Animator {
                 if (typeof v === 'number') w = v;
                 else if (typeof v === 'boolean') w = v ? 1 : 0;
             }
-            w = clamp(w, 0, 1) * this._overlayWeight(o) * o.presence * this._handIkReaction;
+            w = clamp(w, 0, 1) * this._overlayWeight(o) * o.presence;
+            if (w > 0.5) this._handIkActive = ik.hand;
+            w *= this._handIkReaction;
             if (!(w > 1e-4)) continue;
             const chains = this._handChains(topo);
             if (!chains) return;
@@ -5465,6 +5481,8 @@ export class Animator {
 
     private readonly _mapAnim = [0, 0, 0, 0, 0, 0, 1];
     private readonly _mapSim = [0, 0, 0, 0, 0, 0, 1];
+    private readonly _mapX = [0, 0, 0, 0, 0, 0, 1];
+    private readonly _mapQ = quat.create();
     private _mapParts: mat4[] = [];
     private readonly _mapInv = mat4.create();
     private readonly _mapA = mat4.create();
@@ -5487,12 +5505,31 @@ export class Animator {
         while (this._mapParts.length < parts) this._mapParts.push(mat4.create());
         const active: boolean[] = [];
         const anim = this._mapAnim, sim = this._mapSim;
+        // Drawn against an anchor: X = A·inv(S), the anchor as animated over the anchor as simulated, on every part.
+        const anchor = src.anchorPart ?? -1, X = this._mapX;
+        let anchored = false;
+        if (anchor >= 0 && anchor < parts) {
+            src.animatedPose(anchor, this._targetBones, nodeWorld, anim);
+            src.simulatedPose(anchor, sim);
+            const qx = quat.multiply(this._mapQ, [anim[3], anim[4], anim[5], anim[6]] as quat, quat.conjugate(quat.create(), [sim[3], sim[4], sim[5], sim[6]] as quat));
+            const ps = vec3.transformQuat(vec3.create(), [sim[0], sim[1], sim[2]], qx);
+            X[0] = anim[0] - ps[0]; X[1] = anim[1] - ps[1]; X[2] = anim[2] - ps[2];
+            X[3] = qx[0]; X[4] = qx[1]; X[5] = qx[2]; X[6] = qx[3];
+            anchored = X.every(v => Number.isFinite(v));
+        }
         for (let p = 0; p < parts; p++) {
             const w = src.mappingWeight(p);
             active[p] = w > 0;
             if (!active[p]) continue;
             src.animatedPose(p, this._targetBones, nodeWorld, anim);
             src.simulatedPose(p, sim);
+            if (anchored && p !== anchor) {
+                const q = [X[3], X[4], X[5], X[6]] as quat;
+                const at = vec3.transformQuat(vec3.create(), [sim[0], sim[1], sim[2]], q);
+                const r = quat.multiply(quat.create(), q, [sim[3], sim[4], sim[5], sim[6]] as quat);
+                sim[0] = at[0] + X[0]; sim[1] = at[1] + X[1]; sim[2] = at[2] + X[2];
+                sim[3] = r[0]; sim[4] = r[1]; sim[5] = r[2]; sim[6] = r[3];
+            }
             let ok = true;
             for (let i = 0; i < 7; i++) if (!Number.isFinite(sim[i])) ok = false;
             if (!ok) { active[p] = false; continue; }

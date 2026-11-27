@@ -47,6 +47,15 @@ export interface ReactionContext {
     playClip(clip: string | null, loop?: boolean): void;
     /** Give part `i` a spin (rad/s, world), as a hand from outside would (a tumble kept rolling). */
     spin(i: number, x: number, y: number, z: number): void;
+    /**
+     * On its feet with its control (hitReact, stagger, a recovery from them): the legs are the animation's, the upper
+     * body follows it on firm muscles, and a reaction is a sway on top of what the animation does.
+     */
+    standing: boolean;
+    /** The shove it is walking out of (world m/s, fading): what a stagger leans away from. */
+    knock: readonly number[];
+    /** Whether a hand may leave what it is doing to hold a wound (a hand on a weapon may not). */
+    handFree(side: 'L' | 'R'): boolean;
 }
 
 export interface ReactionBehaviour {
@@ -105,9 +114,10 @@ const hitReact: ReactionBehaviour = {
             const age = ctx.time - wound.at;
             const part = body.parts[wound.part];
             if (!part) continue;
-            // The struck part and its neighbours lose strength, and their strings, then get them back.
+            // The struck part loses strength for a moment, then gets it back: on its feet only that part gives, so the
+            // hit reads as a sway on what the animation is doing. Off them its neighbours give a little too.
             const keep = P.weakness + (1 - P.weakness) * smooth(age / Math.max(1e-3, P.weaknessTime));
-            for (const i of [wound.part, part.parent, ...part.children]) {
+            for (const i of ctx.standing ? [wound.part] : [wound.part, part.parent, ...part.children]) {
                 if (i < 0) continue;
                 const k = i === wound.part ? keep : 0.5 + 0.5 * keep;
                 body.torque[i] *= k;
@@ -125,14 +135,17 @@ const hitReact: ReactionBehaviour = {
             if (flinch && age < 0.5) body.pose(flinch, body.partsOf(['spine', 'neck', 'arms']), w * (1 - age / 0.5) * 0.6);
             const point = body.simPoint(wound.part, wound.local);
             // The head turns to it.
-            if (age < P.lookTime) body.look(point, w * (1 - smooth((age - P.lookTime * 0.6) / (P.lookTime * 0.4))));
-            // A hand to it, after a moment, for a while.
-            if (wound.hand && age > P.reachDelay && age < P.reachDelay + P.holdTime) {
+            // On its feet a glance, the head alone and not far (the chest stays on what the animation does); off them
+            // the chest turns with it.
+            const glance = w * (1 - smooth((age - P.lookTime * 0.6) / (P.lookTime * 0.4)));
+            if (age < P.lookTime) body.look(point, ctx.standing ? glance * 0.6 : glance, ctx.standing ? 0.5 : 1.1, ctx.standing ? 0 : 0.35);
+            // A hand to it, after a moment, for a while: a free hand (one on a weapon stays there).
+            if (wound.hand && ctx.handFree(wound.hand) && age > P.reachDelay && age < P.reachDelay + P.holdTime) {
                 const arm = body.arms[wound.hand];
                 if (!arm) continue;
                 const ramp = smooth((age - P.reachDelay) / 0.25) * (1 - smooth((age - P.reachDelay - P.holdTime + 0.3) / 0.3));
                 // A wounded arm is brought in front of the chest to meet the hand that holds it.
-                const hurtArm = (part.region === 'arms' || part.region === 'hands') && part.side ? body.arms[part.side] : undefined;
+                const hurtArm = (part.region === 'arms' || part.region === 'hands') && part.side && ctx.handFree(part.side) ? body.arms[part.side] : undefined;
                 if (hurtArm && body.chest >= 0) {
                     const meet = add(add(body.simPosition(body.chest), ctx.sensors.forward, 0.3), [0, -0.12, 0]);
                     const s = part.side === 'L' ? 1 : -1;
@@ -165,7 +178,7 @@ const hitReact: ReactionBehaviour = {
                 // About the body's own up (its pelvis's), so a body lying down does not twist its spine for it.
                 if (across && body.chest >= 0 && body.chest !== body.pelvis) {
                     const up = quatRotateTuple(body.simRotation(body.pelvis), UP);
-                    body.turnWorld(body.chest, axisAngle(up, -0.35 * sideSign), w * ramp);
+                    body.turnWorld(body.chest, axisAngle(up, (ctx.standing ? -0.15 : -0.35) * sideSign), w * ramp);
                 }
                 for (const i of [arm.root, arm.mid, arm.end]) {
                     body.tune(i, w * ramp, { frequency: P.reachStiffness, holdUp: 1 });
@@ -176,95 +189,23 @@ const hitReact: ReactionBehaviour = {
     },
 };
 
-/** Physical stepping: the legs go where the capture point says, until it is inside the feet or it gives up. */
-interface StepState { swing: 'L' | 'R' | null; t: number; from: [number, number, number]; to: [number, number, number]; steps: number; last: 'L' | 'R' | null; stance: Record<'L' | 'R', [number, number, number] | null> }
-const STEP = new WeakMap<ReactionBody, StepState>();
-
-export function stepState(body: ReactionBody): StepState {
-    let s = STEP.get(body);
-    if (!s) { s = { swing: null, t: 0, from: [0, 0, 0], to: [0, 0, 0], steps: 0, last: null, stance: { L: null, R: null } }; STEP.set(body, s); }
-    return s;
-}
-
+/**
+ * Knocked back on its feet (a stagger): the character's capsule carries the shove (CharacterNode.knockback) and its
+ * legs walk it out on their animation; the upper body, on its muscles, sways after the hit and leans back the way it
+ * is shoved, by as much of the lean as the shove is of a stumble.
+ */
 const stepBalance: ReactionBehaviour = {
-    id: 'stepBalance', states: ['stagger'], fade: 0.05,
+    id: 'stepBalance', states: ['stagger'], fade: 0.08,
     wants: () => true,
-    start(ctx) { const s = stepState(ctx.body); s.swing = null; s.steps = 0; s.last = null; s.stance.L = s.stance.R = null; },
     update(ctx, c, w) {
-        const P = c.params, body = ctx.body, sense = ctx.sensors, s = stepState(body);
-        const legs = body.legs;
-        if (!legs.L || !legs.R) return;
-        const groundY = Number.isFinite(sense.groundY) ? sense.groundY : sense.com[1] - 1;
-        const tire = Math.pow(P.perStepReduction, s.steps);
-        // Stance feet: on the ground, held there.
-        for (const side of ['L', 'R'] as const) {
-            const leg = legs[side]!;
-            const onGround = sense.touching.has(leg.end);
-            if (s.swing === side) continue;
-            if (onGround && !s.stance[side]) s.stance[side] = body.pivot(leg.end);
-            if (!onGround && s.stance[side] && s.swing !== side) s.stance[side] = null;
-        }
-        // Start a step when the capture point is out of the feet.
-        if (!s.swing && sense.captureMargin > P.captureMargin && s.steps < P.maxSteps) {
-            const cp = sense.capture;
-            const toward = [cp[0] - sense.com[0], cp[1] - sense.com[2]];
-            const lateral = toward[0] * sense.left[0] + toward[1] * sense.left[2];
-            const fwd = toward[0] * sense.forward[0] + toward[1] * sense.forward[2];
-            // The leg on the side it falls toward when that is mostly sideways; else the leg farther from the point.
-            let side: 'L' | 'R';
-            if (Math.abs(lateral) > Math.abs(fwd) * 0.8) side = lateral > 0 ? 'L' : 'R';
-            else {
-                const d = (l: Limb) => { const f = body.pivot(l.end); return Math.hypot(f[0] - cp[0], f[2] - cp[1]); };
-                side = d(legs.L) > d(legs.R) ? 'L' : 'R';
-            }
-            if (side === s.last && s.steps > 0) side = side === 'L' ? 'R' : 'L';
-            const leg = legs[side]!, other = legs[side === 'L' ? 'R' : 'L']!;
-            const foot = body.pivot(leg.end), stance = s.stance[side === 'L' ? 'R' : 'L'] ?? body.pivot(other.end);
-            // Where to put it: past the capture point, no farther than a step from the other foot, never across it.
-            let tx = cp[0] + (cp[0] - sense.com[0]) * 0.15, tz = cp[1] + (cp[1] - sense.com[2]) * 0.15;
-            const dx = tx - stance[0], dz = tz - stance[2], d = Math.hypot(dx, dz);
-            if (d > P.maxStepLength) { tx = stance[0] + dx / d * P.maxStepLength; tz = stance[2] + dz / d * P.maxStepLength; }
-            const sideSign = side === 'L' ? 1 : -1;
-            const across = (tx - stance[0]) * sense.left[0] + (tz - stance[2]) * sense.left[2];
-            if (across * sideSign < 0.14) { tx += sense.left[0] * (0.14 * sideSign - across); tz += sense.left[2] * (0.14 * sideSign - across); }
-            s.swing = side; s.t = 0; s.from = foot; s.to = [tx, groundY + (foot[1] - groundY > 0 ? Math.min(0.1, foot[1] - groundY) : 0.08), tz];
-            s.stance[side] = null;
-        }
-        // The swing.
-        if (s.swing) {
-            const leg = legs[s.swing]!;
-            s.t += ctx.dt / Math.max(0.05, P.stepTime);
-            const t = Math.min(1, s.t);
-            const at: [number, number, number] = [
-                s.from[0] + (s.to[0] - s.from[0]) * t,
-                s.from[1] + (s.to[1] - s.from[1]) * t + P.stepHeight * Math.sin(Math.PI * t),
-                s.from[2] + (s.to[2] - s.from[2]) * t,
-            ];
-            const knee = add(body.pivot(leg.mid), sense.forward, 0.5);
-            body.reach(leg, at, w, knee, flatFoot(ctx, leg));
-            body.tuneAll([leg.root, leg.mid, leg.end], w, { frequency: P.legStiffness * 1.4 * tire });
-            body.pin[leg.end] = 0;
-            if (t >= 1 || (t > 0.6 && sense.touching.has(leg.end))) {
-                s.last = s.swing; s.steps++; s.stance[s.swing] = body.pivot(leg.end); s.swing = null;
-            }
-        }
-        // Stance legs hold the body up over their feet.
-        for (const side of ['L', 'R'] as const) {
-            if (s.swing === side) continue;
-            const leg = legs[side]!, at = s.stance[side];
-            body.tuneAll([leg.root, leg.mid, leg.end], w, { frequency: P.legStiffness * tire, holdUp: 1 });
-            if (at) { body.reach(leg, at, w * 0.7, add(body.pivot(leg.mid), sense.forward, 0.5), flatFoot(ctx, leg)); body.pin[leg.end] = w; }
-        }
-        // Loose arms, a lean into it, help staying upright that runs out by the last step.
-        body.tuneAll(body.partsOf(['arms', 'hands']), w, { frequency: P.armStiffness, holdUp: 0.3 });
-        const v = sense.velocity, flat = Math.hypot(v[0], v[2]);
-        if (flat > 0.1 && P.leanInto > 0) {
-            const axis = [v[2] / flat, 0, -v[0] / flat];
-            for (const i of body.partsOf(['spine'])) body.turnWorld(i, axisAngle(axis, P.leanInto * 0.5 * Math.min(1, flat)), w);
-        }
-        const assist = P.uprightAssist * Math.max(0, 1 - s.steps / Math.max(1, P.maxSteps));
-        body.pin[body.pelvis] = Math.max(body.pin[body.pelvis], assist * w);
-        if (body.chest >= 0) body.pin[body.chest] = Math.max(body.pin[body.chest], assist * w);
+        const P = c.params, body = ctx.body, k = ctx.knock;
+        const flat = Math.hypot(k[0], k[2]);
+        if (!(flat > 0.05) || !(P.leanInto > 0)) return;
+        // About the axis square to the shove and up: the top of the trunk goes the shove's way.
+        const axis = [k[2] / flat, 0, -k[0] / flat];
+        const amount = P.leanInto * Math.min(1, flat / Math.max(0.1, ctx.set.thresholds.stumbleSpeed));
+        const spine = body.partsOf(['spine']);
+        for (const i of spine) body.turnWorld(i, axisAngle(axis, amount / Math.max(1, spine.length)), w);
     },
 };
 

@@ -8,13 +8,13 @@ import type { PhysicsBody } from '../physicsBody';
 import { LAYER } from '../collisionLayers';
 import type { Ragdoll } from '../ragdoll';
 import { resolveEvent } from '../../core/events/hub';
-import { closestSegmentSegment, quatConjugateTuple, quatRotateTuple, yawFromDirection } from '../../core/math';
+import { closestSegmentSegment, quatConjugateTuple, quatMultiplyTuple, quatRotateTuple, quatToRotationVector, rotationVectorToQuat, yawFromDirection } from '../../core/math';
 import { cachedRagdollLayout, ragdollPartPoseInto, skinRagdollProfile, type RagdollLayout } from '../ragdollProfile';
 import { physicsStats } from '../physicsStats';
 import type { mat4 } from 'gl-matrix';
 import { BodySensors, type ContactList, type Raycaster, type SensorDetail } from './bodySensors';
 import { ReactionBody } from './reactionBody';
-import { BAILS, BEHAVIOURS, STRUCK, stepState, type ReactionBehaviour, type ReactionContext, type ReactionState, type ReactionWound } from './behaviours';
+import { BAILS, BEHAVIOURS, STRUCK, type ReactionBehaviour, type ReactionContext, type ReactionState, type ReactionWound } from './behaviours';
 import type { AnimationActionHandle } from '../../animation/animator';
 import { pickReactionSet, parseReactionSets, type ReactionSet } from './reactionSet';
 
@@ -24,15 +24,21 @@ export type { ReactionState, ReactionWound } from './behaviours';
 // a reaction runs (physics/ragdoll.ts — the animation keeps playing underneath as the muscles' target) and
 // moves it through a few states:
 //
-//   animated ─hit─► hitReact ─knocked over─► stagger ─gives up─► falling ─lands─► tumble ─► down ─► getUp ─► recover ─► animated
-//                      └───────────────── recover ◄─ balanced ◄───┘           (dead: no getting up)
+//   animated ─hit─► hitReact ─shoved─► stagger ─tipped over─► falling ─lands─► tumble ─► down ─► getUp ─► recover ─► animated
+//                      └──────── recover ◄─ walked it out ◄──┘                (dead: no getting up)
 //
-// Each state lets some behaviours run (behaviours.ts: protect the head, catch the fall, step to balance...),
+// ON ITS FEET (hitReact, stagger and a recovery from them) a reaction is PHYSICAL ANIMATION, as Unreal's Physical
+// Animation and PuppetMaster do it: the character keeps its Collider and its control, its legs and hips are
+// kinematic on the animation (moved to where it has them every step), and its upper body is dynamic on firm muscles
+// that follow the animation with its motion, so a hit is a sway on whatever the animation does and a stagger is a
+// shove on the capsule (CharacterNode.knockback) the legs walk out of. OFF THEM (falling, tumble, down, getUp, dead)
+// the body has every part, alive: its muscles brace and protect and tire on the ground; the Collider is out of the
+// world and follows the hips, so cameras and AI follow the body; getting up puts it back.
+//
+// Each state lets some behaviours run (behaviours.ts: protect the head, catch the fall, lean into a shove...),
 // which compose the muscles' targets and stiffness; the controller sends them on before every physics step and
-// measures the body (bodySensors.ts) after it. While a reaction has the body down, the character's Collider
-// is out of the world and follows the hips, so cameras and AI follow the body; getting up puts it back. It
-// fires `reaction:*` events at the model node (they bubble to the Character): Hit, Started, Stagger, Fell,
-// Landed, Down, Settled, GettingUp, GotUp, Recovered, Died.
+// measures the body (bodySensors.ts) after it. It fires `reaction:*` events at the model node (they bubble to the
+// Character): Hit, Started, Stagger, Fell, Landed, Down, Settled, GettingUp, GotUp, Recovered, Died.
 
 /** A hit, as a script reports it (a bullet, a punch, a car). */
 export interface ReactionHit {
@@ -81,6 +87,16 @@ export interface ModelReactionConfig {
 const REACTION_SLOT = 'Reaction';
 /** The body mass the sets' strengths are given for. */
 const REFERENCE_MASS = 70;
+/** On its feet, how fast a part's drawing moves between the animation and the body (of the whole way, per second). */
+const MAP_RATE = 1 / 0.15;
+/** On its feet, the most a hit may change the struck part's velocity (m/s): what is left of it is the shove's. */
+const MAX_KICK_SPEED = 1.2;
+/** The upper body counts as back on its animation once no part of it is farther from it than this (radians). */
+const TRACKED = 6 * Math.PI / 180;
+/** A hit's impulse counts toward a stagger or a fall for this long (s): a burst adds up. */
+const RECENT_HITS = 1;
+/** A part of the body that is the animation's while the character stands (kinematic on it). */
+const LOWER = (region: string) => region === 'pelvis' || region === 'legs' || region === 'feet';
 
 export class ReactionController {
     public readonly node: ModelNode;
@@ -116,6 +132,23 @@ export class ReactionController {
     private readonly _vel = [0, 0, 0, 0, 0, 0];
     /** What every behaviour was doing last frame, by part: for the bench's timeline. */
     public readonly owners: (string | null)[] = [];
+    /**
+     * Which hands are busy (on a weapon, a wheel) and so never leave it for a wound: set by a script each frame or
+     * once. Null: both while the animator's support-hand IK holds a weapon in two hands, neither otherwise.
+     */
+    public busyHands: { L: boolean; R: boolean } | null = null;
+    /** The legs and hips kinematic on the animation (the character on its feet). */
+    private _split = false;
+    /** Per part, how much of it is drawn simulated now (moved toward the state's by MAP_RATE). */
+    private _mapNow = new Float64Array(0);
+    private _tiltFor = 0;
+    private _fallStart = 0;
+    /** The shove it walks out of (world m/s), fading with a half-life of `_knockHalfLife` (also given to the Character). */
+    private readonly _knockV = [0, 0, 0];
+    private _knockHalfLife = 0.35;
+    /** Recent hits' impulses and when (reaction clock): a burst adds up to a stagger or a fall. */
+    private readonly _recent: { at: number; impulse: number }[] = [];
+    private readonly _q = [0, 0, 0, 1];
 
     constructor(node: ModelNode, physics: PhysicsSystem) {
         this.node = node;
@@ -135,6 +168,13 @@ export class ReactionController {
     public get reacting(): boolean { return this._state !== 'animated'; }
     /** Off its feet: falling, tumbling, down, getting up or dead. */
     public get isDown(): boolean { return ['falling', 'tumble', 'down', 'getUp', 'dead'].includes(this._state); }
+    /**
+     * The character keeps its control: on its feet, flinching or staggering (its Collider live, its legs on its
+     * animation); a script goes on moving, aiming and firing it. False only off its feet ({@link isDown}).
+     */
+    public get hasControl(): boolean { return !this.isDown; }
+    /** On its feet with a reaction running: the legs on the animation, the upper body following it. */
+    public get standing(): boolean { return this._standingState(); }
     public get faceUp(): boolean { return this.sensors.faceUp; }
     public get alive(): boolean { return this._alive; }
     public get health(): number { return this._health; }
@@ -156,23 +196,8 @@ export class ReactionController {
      * no bodies to hit) — and where along the ray. What a gun asks before it has a body to shoot.
      */
     public partByRay(from: ArrayLike<number>, to: ArrayLike<number>): { part: string; point: [number, number, number]; distance: number } | null {
-        const skin = this._skin, animator = this.node.animator;
-        if (!skin || !animator) return null;
-        const segs: { name: string; c: [number, number, number]; y: [number, number, number]; half: number; r: number }[] = [];
-        if (this.ragdoll && !this.ragdoll.destroyed) {
-            for (const p of this.ragdoll.parts) {
-                const b = p.body, q = b.quaternion;
-                segs.push({ name: p.name, c: [b.position.x, b.position.y, b.position.z], y: quatRotateTuple([q.x, q.y, q.z, q.w], [0, 1, 0]), half: p.halfLength, r: p.radius });
-            }
-        } else {
-            const layout = this._layout();
-            if (!layout) return null;
-            const bones = animator.getFinalBoneMatrices(), world = this.node.worldTransform as mat4, pose = [0, 0, 0, 0, 0, 0, 1];
-            for (const lp of layout.parts) {
-                const scale = ragdollPartPoseInto(skin, lp, world, bones[lp.joint] as mat4, pose);
-                segs.push({ name: lp.part.name, c: [pose[0], pose[1], pose[2]], y: quatRotateTuple([pose[3], pose[4], pose[5], pose[6]], [0, 1, 0]), half: lp.length * scale / 2, r: lp.radius * scale });
-            }
-        }
+        const segs = this._segments();
+        if (!segs.length) return null;
         const a: [number, number, number] = [from[0], from[1], from[2]], b: [number, number, number] = [to[0], to[1], to[2]];
         const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) || 1;
         let best: { part: string; point: [number, number, number]; distance: number } | null = null;
@@ -191,6 +216,31 @@ export class ReactionController {
         return best;
     }
 
+    /**
+     * The body's parts as capsule segments (centre, long axis, half-length, radius): the simulated parts while a
+     * reaction has it, else the parts as the animation poses them.
+     */
+    private _segments(): { name: string; c: [number, number, number]; y: [number, number, number]; half: number; r: number }[] {
+        const skin = this._skin, animator = this.node.animator;
+        const segs: { name: string; c: [number, number, number]; y: [number, number, number]; half: number; r: number }[] = [];
+        if (!skin || !animator) return segs;
+        if (this.ragdoll && !this.ragdoll.destroyed) {
+            for (const p of this.ragdoll.parts) {
+                const b = p.body, q = b.quaternion;
+                segs.push({ name: p.name, c: [b.position.x, b.position.y, b.position.z], y: quatRotateTuple([q.x, q.y, q.z, q.w], [0, 1, 0]), half: p.halfLength, r: p.radius });
+            }
+            return segs;
+        }
+        const layout = this._layout();
+        if (!layout) return segs;
+        const bones = animator.getFinalBoneMatrices(), world = this.node.worldTransform as mat4, pose = [0, 0, 0, 0, 0, 0, 1];
+        for (const lp of layout.parts) {
+            const scale = ragdollPartPoseInto(skin, lp, world, bones[lp.joint] as mat4, pose);
+            segs.push({ name: lp.part.name, c: [pose[0], pose[1], pose[2]], y: quatRotateTuple([pose[3], pose[4], pose[5], pose[6]], [0, 1, 0]), half: lp.length * scale / 2, r: lp.radius * scale });
+        }
+        return segs;
+    }
+
     /** The ragdoll layout a reaction would build, for hits before it has (cached per skin and profile). */
     private _layout(): RagdollLayout | null {
         const skin = this._skin;
@@ -204,7 +254,11 @@ export class ReactionController {
 
     // ---- what scripts ask of it ----
 
-    /** A hit: a bullet, a punch. Small hits flinch, harder ones stagger, the hardest knock it down. */
+    /**
+     * A hit: a bullet, a punch. On its feet a hit is a flinch of the upper body on whatever the animation does; a
+     * harder one (or a burst adding up) shoves the character back on its feet, a stagger it keeps its control
+     * through; the hardest knock it down.
+     */
     public hit(h: ReactionHit = {}): void {
         if (this.config.enabled === false) return;
         const T = this.set.thresholds;
@@ -213,47 +267,104 @@ export class ReactionController {
         if (h.damage) this._health = Math.max(0, this._health - h.damage);
         const dying = this._alive && this._health <= 0;
         if (impulse < T.minHitImpulse && !dying) return;
+        const recent = this._addRecent(impulse);
+        const onFeet = this._onFeetState();
+        const falls = dying || impulse >= T.fallImpulse || (onFeet && recent >= T.fallImpulse);
+        const stepping = this.set.behaviours.stepBalance.enabled;
         // A hit it would only flinch or stumble from asks for a body within the budget (PhysicsSystem.maxPoweredRagdolls);
-        // refused, the hit still counts (its Hit event), the body only does not move.
-        const severe = dying || impulse >= Math.min(T.staggerImpulse, T.fallImpulse);
-        const r = this._ensure(severe ? 'fall' : 'flinch');
+        // refused, the hit still counts (its Hit event), and a stumble still shoves the capsule.
+        const r = this._ensure(falls ? 'fall' : 'flinch');
+        // Rocked back by a hard hit, a burst adding up, or a heavy round in the trunk: a stagger, kept on its feet.
+        const region = this._regionOf(h.part, h.point);
+        const staggers = onFeet && stepping && !falls && (impulse >= T.staggerImpulse || recent >= T.staggerImpulse
+            || ((region === 'pelvis' || region === 'spine') && T.stumbleImpulse > 0 && impulse >= T.stumbleImpulse));
         if (!r) {
             if (!this.ragdoll && this.node.animator && this._skin) {
                 const point = h.point ? [h.point[0], h.point[1], h.point[2]] as [number, number, number] : [0, 0, 0] as [number, number, number];
                 this._emit('Hit', { part: -1, partName: this._partNameOf(h.part), impulse, point });
             }
+            if (staggers) this._knockBack(dir, impulse);
             return;
         }
-        const part = this._resolvePart(h.part, h.point);
+        // Off its feet first, so the whole hit lands on a body that has every part.
+        if (falls || this._state === 'getUp') this._go('falling');
+        const kept = onFeet && this._state !== 'falling';
+        let part = this._resolvePart(h.part, h.point);
         const p = r.parts[part];
         const point = h.point ? [h.point[0], h.point[1], h.point[2]] : [p.body.position.x, p.body.position.y, p.body.position.z];
-        r.applyImpulse([dir[0] * impulse, dir[1] * impulse, dir[2] * impulse], point, part);
+        if (kept && this._physicsCanStand()) {
+            // On its feet the struck part takes a kick, no more: what is left of the hit is the shove's. A part that is
+            // the animation's (a leg, the hips) passes it to the trunk.
+            if (LOWER(p.region)) part = this._body!.chest;
+            const q = r.parts[part], P = this.set.behaviours.hitReact.params;
+            const kick = Math.min(impulse, P.maxKick, MAX_KICK_SPEED * q.mass);
+            r.applyImpulse([dir[0] * kick, dir[1] * kick, dir[2] * kick], point, part);
+        } else r.applyImpulse([dir[0] * impulse, dir[1] * impulse, dir[2] * impulse], point, part);
         this._wound(part, point, dir, impulse);
-        this._emit('Hit', { part, partName: p.name, impulse, point: point as [number, number, number] });
+        this._emit('Hit', { part, partName: r.parts[part].name, impulse, point: point as [number, number, number] });
         if (dying) { this.kill(); return; }
-        const stepping = this.set.behaviours.stepBalance.enabled;
-        // How far it goes.
-        if (impulse >= T.fallImpulse) { this._go('falling'); return; }
-        // Getting up, any hit that counts knocks it back: off its feet or off balance, by how far up it got.
-        if (this._state === 'getUp') { this._go(stepping && this._standing() ? 'stagger' : 'falling'); return; }
-        const standing = this._state === 'animated' || this._state === 'hitReact' || this._state === 'recover';
-        if (impulse >= T.staggerImpulse && stepping && standing) { this._go('stagger'); return; }
-        // A round in the trunk rocks the hips back: it stumbles a step or two, the hand going to the wound.
-        const trunk = p.region === 'pelvis' || p.region === 'spine';
-        if (trunk && stepping && standing && T.stumbleImpulse > 0 && impulse >= T.stumbleImpulse) {
-            const flat = Math.hypot(dir[0], dir[2]);
-            if (flat > 1e-3) {
-                const k = T.stumbleSpeed * Math.min(1.5, impulse / Math.max(1e-3, T.stumbleImpulse * 1.5));
-                const v = [dir[0] / flat * k, 0, dir[2] / flat * k];
-                for (const q of r.parts) {
-                    const share = q.region === 'pelvis' || q.region === 'spine' ? 1 : q.region === 'legs' ? 0.6 : q.region === 'feet' ? 0 : 0.8;
-                    if (share > 0) q.body.applyImpulse([v[0] * share * q.mass, 0, v[2] * share * q.mass]);
-                }
+        if (kept && !this._standingState()) this._go('hitReact');
+        if (staggers) { this._knockBack(dir, impulse); this._go('stagger'); }
+    }
+
+    /** The body region a hit lands on: its part's, on the body or, before there is one, on the layout as animated. */
+    private _regionOf(part: number | string | undefined, point: ArrayLike<number> | null | undefined): string {
+        if (this.ragdoll && !this.ragdoll.destroyed) return this.ragdoll.parts[this._resolvePart(part, point)]?.region ?? '';
+        let name = typeof part === 'string' ? part : this._partNameOf(part);
+        if (!name && point) {
+            let best = Infinity;
+            for (const s of this._segments()) {
+                const k = Math.max(0, s.half - s.r);
+                const hit = closestSegmentSegment([point[0], point[1], point[2]], [point[0], point[1], point[2]],
+                    [s.c[0] - s.y[0] * k, s.c[1] - s.y[1] * k, s.c[2] - s.y[2] * k], [s.c[0] + s.y[0] * k, s.c[1] + s.y[1] * k, s.c[2] + s.y[2] * k]);
+                const d = Math.sqrt(hit.dist2) - s.r;
+                if (d < best) { best = d; name = s.name; }
             }
-            this._go('stagger');
-            return;
         }
-        if (this._state === 'animated' || this._state === 'recover') this._go('hitReact');
+        const layout = this._layout();
+        const lp = layout?.parts.find(p => p.part.name === name);
+        if (lp) return lp.parent < 0 ? 'pelvis' : /spine|chest|abdomen|torso/i.test(name) ? 'spine' : '';
+        return /pelvis|hips|spine|chest|abdomen|torso/i.test(name) ? 'spine' : '';
+    }
+
+    /** The backend can keep a character on its feet through a reaction (its legs kinematic on the animation). */
+    private _physicsCanStand(): boolean {
+        return !!this._physics.capabilities?.kinematicParts;
+    }
+
+    /** On its feet: plain animation, a flinch, a stagger, or a recovery from them (not from a get-up). */
+    private _onFeetState(): boolean {
+        const s = this._state;
+        return s === 'animated' || s === 'hitReact' || s === 'stagger' || (s === 'recover' && !this._recoverFromGetUp);
+    }
+
+    /** A hit's impulse added to the recent ones; their sum over the last second (the physics' clock). */
+    private _addRecent(impulse: number): number {
+        const now = this._physics.simulatedTime, list = this._recent;
+        while (list.length && now - list[0].at > RECENT_HITS) list.shift();
+        list.push({ at: now, impulse });
+        let sum = 0;
+        for (const x of list) sum += x.impulse;
+        return sum;
+    }
+
+    /**
+     * Shoved back on its feet: a fading velocity along `dir` (flat) on the character's capsule
+     * (CharacterNode.knockback) — its walk and its legs carry it — or, with no Character over it, on the model.
+     */
+    private _knockBack(dir: ArrayLike<number>, impulse: number): void {
+        const T = this.set.thresholds, P = this.set.behaviours.stepBalance.params;
+        const flat = Math.hypot(dir[0], dir[2]);
+        if (flat < 1e-3) return;
+        const speed = T.stumbleSpeed * Math.min(2.5, impulse / Math.max(1, T.stumbleImpulse));
+        this._knock([dir[0] / flat * speed, 0, dir[2] / flat * speed], P.knockTime);
+    }
+
+    private _knock(v: ArrayLike<number>, halfLife: number): void {
+        this._knockHalfLife = Math.max(0.05, halfLife);
+        this._knockV[0] += v[0]; this._knockV[2] += v[2];
+        const character = this._character() as { knockback?: (v: ArrayLike<number>, halfLife?: number) => void } | null;
+        if (character && typeof character.knockback === 'function') character.knockback([v[0], 0, v[2]], this._knockHalfLife);
     }
 
     /**
@@ -289,29 +400,33 @@ export class ReactionController {
         this._go('falling');
     }
 
-    /** A shove: every part (or one) given this velocity change (m/s, world). */
+    /**
+     * A shove: every part (or one) given this velocity change (m/s, world). On its feet the capsule takes it (the
+     * character walks it out, keeping its control) and the upper body sways; one hard enough knocks it down.
+     */
     public push(velocity: ArrayLike<number>, part?: number | string): void {
         if (this.config.enabled === false) return;
         const r = this._ensure();
         if (!r) return;
+        const T = this.set.thresholds;
+        const speed = Math.hypot(velocity[0], velocity[1], velocity[2]);
         const parts = part === undefined ? r.parts : [r.parts[this._resolvePart(part, null)]];
         let impulse = 0;
-        for (const p of parts) {
-            p.body.applyImpulse([velocity[0] * p.mass, velocity[1] * p.mass, velocity[2] * p.mass]);
-            impulse += Math.hypot(velocity[0], velocity[1], velocity[2]) * p.mass;
-        }
-        const T = this.set.thresholds;
+        for (const p of parts) impulse += speed * p.mass;
+        const onFeet = this._onFeetState();
         const stepping = this.set.behaviours.stepBalance.enabled;
-        if (impulse >= T.fallImpulse) this._go('falling');
-        else if (this._state === 'getUp') { if (impulse >= T.minHitImpulse) this._go(stepping && this._standing() ? 'stagger' : 'falling'); }
-        else if (impulse >= T.staggerImpulse && stepping) this._go('stagger');
-        else if (this._state === 'animated' || this._state === 'recover') this._go('hitReact');
-    }
-
-    /** Far enough up off the ground to stagger rather than fall (a get-up knocked partway). */
-    private _standing(): boolean {
-        const s = this.sensors;
-        return s.uprightness > 0.7 && Number.isFinite(s.height) && s.height > 0.75;
+        if (impulse >= T.fallImpulse || !onFeet || !stepping) {
+            if (impulse >= T.fallImpulse || this._state === 'getUp' && impulse >= T.minHitImpulse) this._go('falling');
+            for (const p of parts) p.body.applyImpulse([velocity[0] * p.mass, velocity[1] * p.mass, velocity[2] * p.mass]);
+            if (onFeet && !this._standingState() && this._state !== 'falling') this._go('hitReact');
+            return;
+        }
+        if (!this._standingState()) this._go('hitReact');
+        // The upper body sways (no part changed by more than a kick); the capsule carries the rest.
+        const v = Math.min(speed, MAX_KICK_SPEED), k = speed > 0 ? v / speed : 0;
+        for (const p of parts) if (!this._body?.kinematic[p.index]) p.body.applyImpulse([velocity[0] * k * p.mass, velocity[1] * k * p.mass, velocity[2] * k * p.mass]);
+        this._knock([velocity[0], 0, velocity[2]], this.set.behaviours.stepBalance.params.knockTime);
+        if (impulse >= T.staggerImpulse) this._go('stagger');
     }
 
     /** Fall now (off a ledge, a floor giving way): the body takes over, falling as it was moving. */
@@ -399,7 +514,8 @@ export class ReactionController {
         if (!r || !body || r.destroyed || r.frozen) return;
         // The get-up clip waits on its first frame while the skin blends onto it.
         if (this._state === 'getUp' && this._getUpAction && this._stateTime < this._getUpHold()) this._getUpAction.seek(0);
-        body.begin();
+        body.begin(dt);
+        if (this._split) this._driveKinematic(body, dt);
         this._base(body, dt);
         const ctx = this._context(dt);
         for (const b of BEHAVIOURS) {
@@ -407,6 +523,35 @@ export class ReactionController {
             if (w > 0) b.update(ctx, this.set.behaviours[b.id], w);
         }
         this._upload(body, dt);
+    }
+
+    /**
+     * The legs and hips on their animation: each kinematic part given the velocity that takes it, over this step, to
+     * where the animation will have it a frame on (its pose, moved on by its own motion: the animator poses after the
+     * physics steps). Far from it (a teleport), put there.
+     */
+    private _driveKinematic(body: ReactionBody, dt: number): void {
+        if (!(dt > 1e-4)) return;
+        const r = this.ragdoll!;
+        for (const p of body.parts) {
+            const i = p.index;
+            if (!body.kinematic[i]) continue;
+            const a = body.anim[i], v = body.animVel[i], s = body.sim[i], b = p.body;
+            const tx = a[0] + v[0] * dt, ty = a[1] + v[1] * dt, tz = a[2] + v[2] * dt;
+            const qa = rotationVectorToQuat([v[3] * dt, v[4] * dt, v[5] * dt]);
+            const qt = quatMultiplyTuple(qa, [a[3], a[4], a[5], a[6]]);
+            if (Math.hypot(tx - s[0], ty - s[1], tz - s[2]) > 0.3) {
+                b.position.set(a[0], a[1], a[2]);
+                b.quaternion.set(a[3], a[4], a[5], a[6]);
+                b.velocity.set(v[0], v[1], v[2]);
+                b.angularVelocity.set(v[3], v[4], v[5]);
+                continue;
+            }
+            b.velocity.set((tx - s[0]) / dt, (ty - s[1]) / dt, (tz - s[2]) / dt);
+            const w = quatToRotationVector(quatMultiplyTuple(qt, quatConjugateTuple([s[3], s[4], s[5], s[6]])));
+            b.angularVelocity.set(w[0] / dt, w[1] / dt, w[2] / dt);
+        }
+        void r;
     }
 
     /** After the physics step: measure the body, move between states, fade behaviours, follow with the Collider. */
@@ -426,7 +571,8 @@ export class ReactionController {
             this.sensors.update(r, dt, contacts, this.set.thresholds.settleSpeed, this._raycaster, d);
         } else this.sensors.stillFor += dt;
         if (this._clearBody && this._time >= this._clearUntil) this._restoreClear();
-        this._transitions();
+        this._fadeKnock(dt);
+        this._transitions(dt);
         if (!this.ragdoll || !this._body) return;
         this._fade(dt);
         this._follow();
@@ -440,25 +586,23 @@ export class ReactionController {
 
     // ---- states ----
 
-    private _transitions(): void {
+    private _transitions(dt: number): void {
         const s = this.sensors, T = this.set.thresholds, B = this.set.behaviours;
         const t = this._stateTime;
-        if (this._time - this._reactionStart > T.maxReactionSeconds && ['hitReact', 'stagger', 'falling', 'tumble'].includes(this._state)) { this._go('down'); return; }
+        if (this._time - this._reactionStart > T.maxReactionSeconds && ['falling', 'tumble'].includes(this._state)) { this._go('down'); return; }
         switch (this._state) {
             case 'hitReact': {
-                const body = this._body!;
-                const knocked = vec3.distance(body.simPosition(body.pelvis), [body.anim[body.pelvis][0], body.anim[body.pelvis][1], body.anim[body.pelvis][2]]) > T.knockOutDistance;
-                if (knocked) this._go(B.stepBalance.enabled ? 'stagger' : 'falling');
-                else if (t > B.hitReact.params.duration) this._go('recover');
+                if (this._tippedOver(dt)) this._go('falling');
+                else if (t > B.hitReact.params.duration || this._time - this._reactionStart > T.maxReactionSeconds) this._go('recover');
                 break;
             }
             case 'stagger': {
-                const P = B.stepBalance.params, step = stepState(this._body!);
-                if (s.uprightness < P.giveUpUprightness || s.uprightness < T.fallUprightness
-                    || (step.steps >= P.maxSteps && !step.swing && s.captureMargin > P.captureMargin)
-                    || (s.feetDown > 0 && s.captureMargin > 2.5 * P.maxStepLength) || (s.feetDown === 0 && t > 0.6) || t > 6) { this._go('falling'); break; }
-                if (s.captureMargin < 0 && s.speed < 0.35 && !step.swing) { if ((this._balancedFor += 1 / 60) > P.recoverTime) this._go('recover'); }
+                const P = B.stepBalance.params;
+                if (this._tippedOver(dt)) { this._go('falling'); break; }
+                // Walked out of the shove: back on its animation once it has faded for a moment.
+                if (Math.hypot(this._knockV[0], this._knockV[2]) < 0.15) { if ((this._balancedFor += dt) > P.recoverTime) this._go('recover'); }
                 else this._balancedFor = 0;
+                if (t > 6) this._go('recover');
                 break;
             }
             case 'falling': {
@@ -499,7 +643,9 @@ export class ReactionController {
                 break;
             }
             case 'recover':
-                if (t >= Math.max(0.05, B.getUp.params.blendTime)) {
+                // On its feet: back once the drawing is the animation's again (the upper body let go only once it
+                // follows the animation closely, see _base), or after a second whatever. From a get-up: the blend.
+                if (this._split ? this._mapNow.every(m => m <= 1e-3) || t > 1.2 : t >= Math.max(0.05, B.getUp.params.blendTime)) {
                     this._release();
                     this._go('animated');
                 }
@@ -510,6 +656,87 @@ export class ReactionController {
         }
     }
     private _balancedFor = 0;
+
+    /**
+     * On its feet, tipped too far to stay up: the chest farther from where the animation has it (against the hips)
+     * than the stagger's Falls past, for its For.
+     */
+    private _tippedOver(dt: number): boolean {
+        const P = this.set.behaviours.stepBalance.params;
+        const tilt = this._chestTilt();
+        this._tiltFor = tilt > P.giveUpTilt ? this._tiltFor + dt : 0;
+        return this._tiltFor > P.giveUpTime && this._tiltFor > 0;
+    }
+
+    /** The angle (radians) between the chest's up as simulated and as animated, each against its hips. */
+    private _chestTilt(): number {
+        const body = this._body;
+        if (!body || body.chest < 0 || body.chest === body.pelvis) return 0;
+        const up = (pelvis: number[], chest: number[]) => quatRotateTuple(
+            quatMultiplyTuple(quatConjugateTuple([pelvis[3], pelvis[4], pelvis[5], pelvis[6]]), [chest[3], chest[4], chest[5], chest[6]]), [0, 1, 0]);
+        const a = up(body.sim[body.pelvis], body.sim[body.chest]), b = up(body.anim[body.pelvis], body.anim[body.chest]);
+        return Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])));
+    }
+
+    /** The farthest any simulated upper-body part is from its animation (radians, each against the hips). */
+    private _trackingError(): number {
+        const body = this._body;
+        if (!body) return 0;
+        const ps = body.sim[body.pelvis], pa = body.anim[body.pelvis];
+        const isp = quatConjugateTuple([ps[3], ps[4], ps[5], ps[6]]), iap = quatConjugateTuple([pa[3], pa[4], pa[5], pa[6]]);
+        let worst = 0;
+        for (const p of body.parts) {
+            if (body.kinematic[p.index] || p.index === body.pelvis) continue;
+            const s = body.sim[p.index], a = body.anim[p.index];
+            const rs = quatMultiplyTuple(isp, [s[3], s[4], s[5], s[6]]), ra = quatMultiplyTuple(iap, [a[3], a[4], a[5], a[6]]);
+            const d = Math.abs(rs[0] * ra[0] + rs[1] * ra[1] + rs[2] * ra[2] + rs[3] * ra[3]);
+            worst = Math.max(worst, 2 * Math.acos(Math.min(1, d)));
+        }
+        return worst;
+    }
+
+    /** hitReact, stagger, or a recovery from them: on its feet, its legs kinematic on the animation. */
+    private _standingState(): boolean {
+        return this._split && (this._state === 'hitReact' || this._state === 'stagger' || this._state === 'recover');
+    }
+
+    /**
+     * The legs and hips kinematic on the animation (on: a character on its feet; the backend must move kinematic
+     * parts, capabilities.kinematicParts) or every part simulated again (off: it falls). The upper body is drawn
+     * against the hips while on (Ragdoll.anchorPart), so the legs' frame-late step never shows at the waist.
+     */
+    private _setSplit(on: boolean): void {
+        const r = this.ragdoll, body = this._body;
+        if (!r || !body || r.frozen) { this._split = false; return; }
+        if (on && !this._physics.capabilities?.kinematicParts) on = false;
+        if (on === this._split) return;
+        let ok = on;
+        for (const p of body.parts) {
+            if (!LOWER(p.region)) continue;
+            const set = r.setKinematic(p.index, on);
+            if (on && !set) ok = false;
+            body.kinematic[p.index] = on && set ? 1 : 0;
+        }
+        if (on && !ok) {
+            for (const p of body.parts) if (body.kinematic[p.index]) { r.setKinematic(p.index, false); body.kinematic[p.index] = 0; }
+        }
+        this._split = on && ok;
+        r.anchorPart = this._split ? body.pelvis : -1;
+    }
+
+    /** The shove fading (its half-life); the model itself carried by it when no Character is over it. */
+    private _fadeKnock(dt: number): void {
+        const k = this._knockV;
+        if (k[0] === 0 && k[2] === 0) return;
+        if (!this._character() && this._standingState()) {
+            const p = this.node.worldPosition;
+            this.node.setWorldPosition([p[0] + k[0] * dt, p[1], p[2] + k[2] * dt]);
+            this.node.updateTransforms(this.node.parent ? this.node.parent.worldTransform : null);
+        }
+        const f = Math.pow(0.5, dt / this._knockHalfLife);
+        k[0] *= f; k[2] *= f;
+        if (Math.hypot(k[0], k[2]) < 0.02) k[0] = k[2] = 0;
+    }
 
     private _go(next: ReactionState): void {
         const from = this._state;
@@ -523,16 +750,29 @@ export class ReactionController {
         // A get-up cut short (a hit, a push): its clip stops, and the body is the body's again.
         if (from === 'getUp' && next !== 'recover') this._stopGetUp();
         if (next === 'recover') this._recoverFromGetUp = from === 'getUp' && !!this._getUpAction;
+        // On its feet the legs are the animation's and the Collider stays; off them every part is the body's.
+        const onFeet = next === 'hitReact' || next === 'stagger' || (next === 'recover' && (from === 'hitReact' || from === 'stagger'));
+        if (onFeet) this._setSplit(true);
+        else if (next !== 'animated') this._setSplit(false);
+        this._tiltFor = 0;
         switch (next) {
             case 'hitReact':
                 break;
             case 'stagger':
-                this._suspend();
                 this._emit('Stagger', { from });
                 break;
             case 'falling':
                 this._suspend();
                 this._landed = false;
+                // Firm at first only off its feet: a body shoved along the ground falls as limp as it lay.
+                this._fallStart = from === 'animated' || from === 'hitReact' || from === 'stagger' || from === 'recover' ? this._time : -Infinity;
+                this._knockV[0] = this._knockV[2] = 0;
+                {
+                    // The shove is the body's now: off the capsule, which leaves the world.
+                    const c = this._character() as { knockbackVelocity?: readonly number[]; knockback?: (v: ArrayLike<number>, h?: number) => void } | null;
+                    const k = c?.knockbackVelocity;
+                    if (k && c?.knockback && (k[0] !== 0 || k[2] !== 0)) c.knockback([-k[0], 0, -k[2]]);
+                }
                 this._emit('Fell', { from, fallHeight: this.sensors.fallHeight });
                 break;
             case 'tumble':
@@ -549,8 +789,8 @@ export class ReactionController {
                 this._emit('GettingUp', { from, faceUp: this.sensors.faceUp });
                 break;
             case 'recover':
-                // Standing where the body is: the Collider back under it, the animation there.
-                if (from !== 'hitReact') this._placeCharacterAtBody(from !== 'getUp');
+                // Up from the ground: the Collider back under the body, the animation there. On its feet it never left.
+                if (from === 'getUp') this._placeCharacterAtBody(false);
                 this._resume();
                 break;
             case 'animated':
@@ -589,6 +829,9 @@ export class ReactionController {
         this.owners.fill(null);
         this.sensors.reset();
         this._time = 0;
+        this._split = false;
+        this._mapNow = new Float64Array(r.parts.length);
+        this._recent.length = 0;
         // Where the feet are below the Collider's origin: what following the hips puts back.
         const character = this._character();
         const collider = character?.collider;
@@ -598,6 +841,8 @@ export class ReactionController {
     }
 
     private _release(): void {
+        this._setSplit(false);
+        this._knockV[0] = this._knockV[2] = 0;
         this._playClip(null);
         if (this.ragdoll && !this.ragdoll.destroyed) this._physics.stopRagdoll(this.node);
         this._forget();
@@ -617,25 +862,47 @@ export class ReactionController {
         const set = this.set, state = this._state;
         const health = 0.4 + 0.6 * this._health;
         const k = set.strength * this._strength * health;
-        const loose = state === 'falling' || state === 'tumble' || state === 'down' || state === 'dead';
         const pins = set.pins;
-        const G = set.behaviours.getUp.params;
+        const G = set.behaviours.getUp.params, H = set.behaviours.hitReact.params;
         const hold = this._getUpHold();
+        const standing = this._standingState();
+        // Falling, the body is alive: its muscles as firm as on its feet at first, tiring toward the set's over a
+        // couple of seconds (and on the ground, below).
+        const fatigue = (state === 'falling' || state === 'tumble') && Number.isFinite(this._fallStart) ? Math.max(0.25, Math.exp(-(this._time - this._fallStart) / 1.8)) : 0;
+        // Back on its animation once the upper body follows it closely: until then the drawing stays the body's.
+        const letGo = state === 'recover' && standing && (this._stateTime > 0.6 || this._trackingError() < TRACKED);
         for (const p of body.parts) {
             const i = p.index;
             const m = p.region === 'pelvis' ? set.muscles.spine : set.muscles[p.region as keyof typeof set.muscles];
+            const track = H.trackStiffness * (p.region === 'arms' ? 0.85 : p.region === 'hands' ? 0.7 : 1) * Math.sqrt(k);
             body.frequency[i] = m.frequency * Math.sqrt(k);
             body.damping[i] = m.damping;
             body.torque[i] = m.maxTorque * k;
             body.holdUp[i] = m.gravityCompensation;
             body.friction[i] = 0;
-            // Off its feet the muscles hold what the body does rather than pull it back to standing. Once it is on
-            // the ground (rolling, lying) they let it lie with its weight: they hold up little of it, and tire. Not
-            // while it falls: that is when the arms and the neck must be quick.
-            if (loose) body.hold(i, 1);
+            if (standing) {
+                // On its feet: firm muscles following the animation with its motion (the target's spin).
+                body.frequency[i] = Math.max(body.frequency[i], track);
+                body.damping[i] = 1;
+                body.torque[i] *= Math.max(1, H.trackStrength);
+                body.holdUp[i] = 1;
+            } else if (fatigue > 0) {
+                // Half as firm as on its feet at most: a trunk any firmer falls like a plank, its head first.
+                body.frequency[i] = Math.max(body.frequency[i], 0.5 * track * fatigue);
+                body.torque[i] *= Math.max(1, 0.5 * H.trackStrength * fatigue);
+            }
+            // Off its feet the muscles hold what the body does rather than pull it back to standing (the behaviours
+            // brace, protect and land on top); on the ground (rolling, lying) they let it lie with its weight: they
+            // hold up little, and tire.
+            if (state === 'falling' || state === 'tumble' || state === 'down' || state === 'dead') body.hold(i, 1);
             if (state === 'tumble' || state === 'down') { body.holdUp[i] *= 0.3; body.torque[i] *= 0.6; }
             let pin = 0, map = 1;
-            if (state === 'hitReact') {
+            if (standing) {
+                // The legs and hips are the animation's; the upper body is drawn simulated (a hand on a weapon a
+                // little less, so it stays on its grip), until it is let go back to the animation.
+                const arm = (p.region === 'arms' || p.region === 'hands') && p.side ? p.side : null;
+                map = body.kinematic[i] ? 0 : letGo ? 0 : arm && !this._handFree(arm) ? 0.6 : 1;
+            } else if (state === 'hitReact') {
                 const legs = p.region === 'legs' || p.region === 'feet';
                 pin = legs ? pins.legs : 1;
                 // Legs held on the animation are drawn from it, and so are the hips they hang from, the trunk blending
@@ -662,6 +929,13 @@ export class ReactionController {
         void dt;
     }
 
+    /** Whether a hand may leave what it holds for a wound (see {@link busyHands}). */
+    private _handFree(side: 'L' | 'R'): boolean {
+        if (this.busyHands) return !this.busyHands[side];
+        const animator = this.node.animator as { handIkActive?: 'left' | 'right' | null } | null | undefined;
+        return !animator?.handIkActive;
+    }
+
     /** Targets, gains, strings and drawing, to the ragdoll. */
     private _upload(body: ReactionBody, dt: number): void {
         const r = this.ragdoll!, pins = this.set.pins, d = this._drive, pin = this._pin;
@@ -669,9 +943,17 @@ export class ReactionController {
         const n = body.parts.length;
         const total = body.parts.reduce((s, p) => s + p.mass, 0) || 1;
         while (this._prevAnim.length < n) this._prevAnim.push(body.anim[this._prevAnim.length].slice());
+        const lead = this._split ? dt : 0;
         for (const p of body.parts) {
             const i = p.index;
             if (p.joint !== null) {
+                // A frame ahead along the animation's own motion: the animator poses after the physics steps, so the
+                // pose read is a frame old, and a muscle aimed at it would trail a swinging arm.
+                const s = body.spin[i];
+                if (lead > 0 && (s[0] !== 0 || s[1] !== 0 || s[2] !== 0)) {
+                    const t = body.target[i], q = quatMultiplyTuple(rotationVectorToQuat([s[0] * lead, s[1] * lead, s[2] * lead]), t);
+                    t[0] = q[0]; t[1] = q[1]; t[2] = q[2]; t[3] = q[3];
+                }
                 body.clampTarget(i);
                 d.frequency = Math.max(0, body.frequency[i]);
                 d.damping = Math.max(0, body.damping[i]);
@@ -681,7 +963,7 @@ export class ReactionController {
                 r.setMuscle(i, d);
                 r.setTarget(i, body.target[i], body.spin[i]);
             }
-            const w = body.pin[i], gw = body.goalWeight[i];
+            const w = body.kinematic[i] ? 0 : body.pin[i], gw = body.kinematic[i] ? 0 : body.goalWeight[i];
             if (gw > 1e-3) {
                 // A string to a point (a hand onto a wound): position only, still.
                 pin.linearFrequency = pins.frequency * gw;
@@ -705,10 +987,18 @@ export class ReactionController {
                 if (dt > 1e-4) { v[0] = (a[0] - b[0]) / dt; v[1] = (a[1] - b[1]) / dt; v[2] = (a[2] - b[2]) / dt; }
                 r.setPinTarget(i, a, v);
             } else r.setPin(i, null);
-            r.setMapping(i, body.mapping[i]);
-            // Self-collision off for a part that asks to pass through the body (and back on after).
+            // The drawing moves toward the state's at a rate, never in a step (from the legs' animation to their body
+            // as it falls, the upper body's back to its animation).
+            const was = this._mapNow[i] ?? body.mapping[i], want = body.mapping[i], rate = MAP_RATE * Math.max(dt, 1 / 240);
+            const now = this._state === 'getUp' || this._state === 'dead' || this._state === 'down' ? want
+                : want > was ? Math.min(want, was + rate) : Math.max(want, was - rate);
+            this._mapNow[i] = now;
+            r.setMapping(i, now);
+            // Self-collision off for a part that asks to pass through the body (and back on after), and for the legs
+            // and hips while they are the animation's: kinematic, they would shove an arm hanging beside them out of
+            // the way with no give at all (the animation's own arm passes them by).
             const b = p.body, own = this._ownMask[i] ??= b.collisionFilterMask;
-            const mask = body.passThrough[i] ? own & ~LAYER.RAGDOLL : own;
+            const mask = body.passThrough[i] || body.kinematic[i] ? own & ~LAYER.RAGDOLL : own;
             if (b.collisionFilterMask !== mask) b.collisionFilterMask = mask;
             const prev = this._prevAnim[i];
             for (let k = 0; k < 7; k++) prev[k] = body.anim[i][k];
@@ -717,10 +1007,11 @@ export class ReactionController {
         r.loose = st === 'falling' || st === 'tumble' || st === 'down' || st === 'dead';
         const animator = this.node.animator;
         if (animator) {
-            // The feet planted by IK while the body carries the legs fight it: off (faded) unless only flinching.
-            // The support hand on a weapon, always: a hand reaching for a wound must not be pinned to a grip.
-            animator.ikSuppressed = this._state !== 'hitReact';
-            animator.handIkSuppressed = true;
+            // On its feet the legs are the animation's, feet planted by its IK, and a hand on a weapon stays on it
+            // (only a free hand reaches for a wound). Off them the body carries the legs and the hands: IK off.
+            const standing = this._standingState();
+            animator.ikSuppressed = !standing;
+            animator.handIkSuppressed = !standing;
         }
     }
 
@@ -739,6 +1030,8 @@ export class ReactionController {
             massScale: this.ragdoll ? this._massScale(this.ragdoll) : 1,
             playClip: (clip, loop) => this._playClip(clip, loop),
             spin: (i, x, y, z) => { const b = this._body?.parts[i]?.body; if (b) b.angularVelocity.vadd({ x, y, z }, b.angularVelocity); },
+            standing: this._standingState(), knock: this._knockV,
+            handFree: side => this._handFree(side),
         };
     }
 
@@ -784,7 +1077,7 @@ export class ReactionController {
         const normal = quatRotateTuple(q, [-dir[0], -dir[1], -dir[2]]);
         // A hand that can reach it: never the struck arm's own.
         let hand: 'L' | 'R' | null = null;
-        const sides = (['L', 'R'] as const).filter(s => body.arms[s] && !(p.side === s && (p.region === 'arms' || p.region === 'hands')));
+        const sides = (['L', 'R'] as const).filter(s => body.arms[s] && !(p.side === s && (p.region === 'arms' || p.region === 'hands')) && this._handFree(s));
         if (sides.length === 1) hand = sides[0];
         else if (sides.length === 2) {
             const d = (s: 'L' | 'R') => vec3.distance(body.pivot(body.arms[s]!.end), point as vec3);
@@ -824,21 +1117,12 @@ export class ReactionController {
 
     /** While down, the Collider over the hips (cameras, AI and the HUD follow the body). */
     private _follow(): void {
-        if (!['stagger', 'falling', 'tumble', 'down', 'dead'].includes(this._state)) return;
+        if (!['falling', 'tumble', 'down', 'dead'].includes(this._state)) return;
         const character = this._character(), collider = this._collider();
         if (!character || !collider || collider.physicsEnabled) return;
         const body = this._body!, p = body.simPosition(body.pelvis);
         const g = Number.isFinite(this.sensors.groundY) && this.sensors.height < 3 ? this.sensors.groundY : p[1] - 1;
         collider.setWorldPosition([p[0], g + this._feetOffset, p[2]]);
-        // Staggering, the animation (what the muscles reach for) turns with the hips: left facing the way it did
-        // before the hit, it twists the trunk against them.
-        if (this._state === 'stagger' && typeof (character as { setWorldYaw?: unknown }).setWorldYaw === 'function') {
-            const f = this.sensors.forward, now = this._yawNow();
-            const want = yawFromDirection(f[0], f[2]);
-            const d = ((want - now + 540) % 360) - 180;
-            const step = Math.max(-6, Math.min(6, d * 0.2));
-            if (Math.abs(step) > 0.05) (character as unknown as { setWorldYaw(y: number): void }).setWorldYaw(now + step);
-        }
     }
 
     /** Stand the character (or, without one, the model itself) at `p` on the ground, facing `yaw` degrees when given. */

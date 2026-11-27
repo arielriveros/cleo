@@ -78,6 +78,25 @@ export const IDLE = (): Animation => poseClip('Idle', {
 });
 
 /**
+ * Standing, the arms swinging up and down at the sides by `amplitude` degrees about half-raised (inside the
+ * shoulders' cones), one swing every `period` seconds, no twist: a moving animation for reactions to follow.
+ */
+export const ARM_SWING = (amplitude = 25, period = 1): Animation => {
+    const samplers: Animation['samplers'] = [], channels: Animation['channels'] = [];
+    const times = [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1].map(t => t * period);
+    for (const [bone, down, sign] of [['LeftArm', -45, 1], ['RightArm', 45, -1]] as const) {
+        const output: number[] = [];
+        for (const t of times) {
+            const deg = down + sign * amplitude * Math.sin(2 * Math.PI * t / period);
+            output.push(...quat.setAxisAngle(quat.create(), [0, 0, 1], deg * Math.PI / 180));
+        }
+        samplers.push({ input: times, output, interpolation: 'LINEAR' });
+        channels.push({ samplerIndex: samplers.length - 1, targetNodeIndex: boneIndex(bone), targetPath: 'rotation' });
+    }
+    return { name: 'Arm swing', samplers, channels };
+};
+
+/**
  * A ModelNode on the procedural skin, with `clips`, standing at `position`. An AnimatedModel without its mesh
  * (a real one builds a GPU mesh): what the animator and the ragdoll read is the skin and the clips.
  */

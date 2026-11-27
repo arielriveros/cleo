@@ -261,6 +261,12 @@ export default function ReactionBench({ viewportRef }: { viewportRef: RefObject<
           withoutDirty(() => run.node.setPosition([n[0] + p.velocity![0] * dt, n[1] + p.velocity![1] * dt, n[2] + p.velocity![2] * dt]))
         }
       }
+      // Walking: on along its way while it is on its feet (a flinch or a stagger keeps it walking; the shove adds).
+      const walk = run.action.walks
+      if (walk && dt > 0 && run.reactions.hasControl) {
+        const n = run.node.position
+        withoutDirty(() => run.node.setPosition([n[0] + walk[0] * dt, n[1] + walk[1] * dt, n[2] + walk[2] * dt]))
+      }
       if (!run.acted && now - run.startAt > 400 && run.action.action !== 'none') { run.acted = true; act(run.action.action, run) }
       const r = run.reactions, s = r.sensors, { overlays } = benchStore.get()
       const away: [number, number, number] = [0, -1000, 0]

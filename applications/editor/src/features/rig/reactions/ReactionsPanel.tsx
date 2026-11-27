@@ -220,6 +220,7 @@ export default function ReactionsPanel() {
             {bench.scenario === 'ramp' && <Slider label='Slope' min={5} max={60} step={1} value={o.rampAngle} readout={v => `${v.toFixed(0)}°`} onChange={v => setOption('rampAngle', v)} />}
             {bench.scenario === 'ledge' && <Slider label='Drop' min={0.5} max={15} step={0.1} value={o.ledgeHeight} readout={v => `${v.toFixed(1)} m`} onChange={v => setOption('ledgeHeight', v)} />}
             {bench.scenario === 'vehicle' && <Slider label='Speed' min={0} max={40} step={0.5} value={o.vehicleSpeed} readout={v => `${v.toFixed(1)} m/s`} onChange={v => setOption('vehicleSpeed', v)} />}
+            {bench.scenario === 'walking' && <Slider label='Speed' min={0} max={8} step={0.1} value={o.walkSpeed} readout={v => `${v.toFixed(1)} m/s`} onChange={v => setOption('walkSpeed', v)} />}
 
             <div className='flex gap-1 items-center'>
               <Button variant={bench.running ? 'primary' : 'subtle'} size='sm' className='px-1' title={bench.running ? 'Run the scenario again from the start' : 'Run the scenario'}

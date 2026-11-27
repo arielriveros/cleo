@@ -6,6 +6,13 @@ muscles: it falls, tumbles and lands as physics says, but it tries, the way a pe
 break its fall and to protect its head. Reactions run on the Jolt backend only (`capabilities.reactions`; see
 [Physics backends](physics-backends.md#joint-drives)).
 
+On its feet a reaction is physical animation (Unreal's Physical Animation component, RootMotion's PuppetMaster):
+the legs and hips kinematic on the animation (`Ragdoll.setKinematic`, moved by velocity each step to the
+animation's pose a frame on), the upper body dynamic on firm muscles whose targets carry the animation's spin
+(`ReactionBody.spin`, measured between frames; Jolt's motors in position-and-velocity mode), drawn against the
+hips as animated that frame (`PhysicsMappingSource.anchorPart`), a stagger a fading shove on the capsule
+(`CharacterNode.knockback`). The character keeps its control (`ReactionController.hasControl`).
+
 ## Background
 
 ### Euphoria

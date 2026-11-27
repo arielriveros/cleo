@@ -15,6 +15,11 @@ const reactions = this.scene.physics.reactionsOf(model)   // the same, from anyw
 const reactions = this.scene.physics.reactionsFor(node)   // a Character, its model, a ragdoll body or capsule
 ```
 
+While a character is on its feet (`reactions.hasControl`: flinching or staggering, not `isDown`) it keeps its
+Collider and its control: a script goes on moving, aiming and firing it. `reactions.busyHands = { L, R }` tells it
+which hands hold something and must not leave it for a wound (null, the default: both while the animator's
+support-hand IK holds a weapon in two hands).
+
 Each is a `ReactionController`, or `null` when the model has no skeleton a powered ragdoll fits (see
 [What you need](../editor/reactions.md#what-you-need)), its reactions are turned **Off**, outside Play, or when the
 game does not run on the Jolt physics backend ([reactions are Jolt's](../editor/reactions.md#physics-backends);

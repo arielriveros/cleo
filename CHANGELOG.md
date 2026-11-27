@@ -95,6 +95,17 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   without. Opening a template brings them up to its model's, and saving it keeps them.
 - **Fix: linking a material to a model with a one-entry material list left the list naming the old material.** The
   node then matched the old material's edits and missed its own.
+- **A character reacting on its feet keeps its control, and its reactions follow what it is doing.** A flinch or
+  a stagger no longer takes the character out of the game: it keeps its Collider and its control (`hasControl`),
+  so it goes on walking, aiming and firing. On its feet a reaction is physical animation: the legs and hips
+  kinematic on the animation (foot IK stays on), the upper body following it on firm muscles (**Tracking**) that
+  are given the animation's own motion, so a hit is a sway on a run or an aim instead of a pull against it; the
+  upper body drawn against the animated hips. A stagger is a fading shove on the capsule
+  (`CharacterNode.knockback`, the stagger's **Shove lasts**) its legs walk out of, falling only when tipped past
+  **Falls past**; the physical stepping is gone (Step to balance's settings with it, and **Knocked out**). Hits add
+  up over a second. Only a free hand goes to a wound (`busyHands`, or the support-hand IK's weapon), for 1.2 s. A
+  fall stays alive, its muscles tiring over two seconds. Defaults: **Stagger at** 60, **Stumble at** 30,
+  **Weakness** 0.5 for 0.25 s on the struck part alone, **Kick** 6 N·s.
 - **Reactive ragdolls get Jolt's ragdoll tools.** On Jolt (`capabilities.ragdollPlanning`) a powered ragdoll is
   planned with Jolt's `RagdollSettings` before it is built (`PhysicsWorld.planRagdoll`): its parents' inertias raised
   by `Stabilize()` (its anatomical masses kept), self-collision filtered by part pairs from

@@ -1,16 +1,15 @@
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { Logger } from '../src/core/logger';
-import { vec3 } from 'gl-matrix';
+import { mat4, vec3 } from 'gl-matrix';
 import { acquirePhysicsBackend } from '../src/physics/pal/createWorld';
 import type { PhysicsBackendKind } from '../src/physics/pal/types';
 import type { PhysicsSystem } from '../src/physics/physicsSystem';
 import type { ModelNode } from '../src/core/scene/nodes/modelNode';
 import type { ReactionController, ReactionEventInfo } from '../src/physics/reactive/reactionController';
-import { stepState } from '../src/physics/reactive/behaviours';
 import { defaultReactionSet, parseReactionSets, pickReactionSet, reactionParamKeys, REACTION_PRESETS } from '../src/physics/reactive/reactionSet';
 import { getChannel, resetScriptChannels } from '../src/core/events/hub';
 import { LoopbackPort } from '../src/physics/worker/ports';
-import { groundWorld, humanoidModel, IDLE, boneIndex } from './helpers/humanoidRig';
+import { groundWorld, humanoidModel, IDLE, ARM_SWING, boneIndex } from './helpers/humanoidRig';
 import type { Animation } from '../src/animation/animatedModel';
 import { quat } from 'gl-matrix';
 import { makeBody, box } from './helpers/physicsBodies';
@@ -54,7 +53,7 @@ describe('reaction sets', () => {
             const s = p.make();
             expect(parseReactionSets({ sets: [JSON.parse(JSON.stringify(s))] })!.sets[0]).toEqual(s);
         }
-        expect(reactionParamKeys()).toContain('behaviours.stepBalance.maxSteps');
+        expect(reactionParamKeys()).toContain('behaviours.stepBalance.giveUpTilt');
         expect(new Set(reactionParamKeys()).size).toBe(reactionParamKeys().length);
     });
 });
@@ -172,22 +171,23 @@ describe.each(BACKENDS)('reactions on %s', backend => {
         expect(finite(s.r)).toBe(true);
     });
 
-    it('steps to keep its balance when pushed, more the harder, and falls past it', () => {
+    it('shoved, is carried back on its feet, farther the harder, keeping its control, and knocked down past the fall threshold', () => {
         const pushes = [40, 80, 200].map(J => {
             const s = setup();
-            let fell = false, steps = 0;
+            let fell = false, control = true;
             run(s, 240, f => {
                 if (f === 5) s.r.push([0, 0, -J / 70]);
                 if (s.r.state === 'falling') fell = true;
-                if (s.r.body) steps = Math.max(steps, stepState(s.r.body).steps);
+                if (f > 5 && !fell && !s.r.hasControl) control = false;
             });
-            return { J, fell, steps, state: s.r.state };
+            return { J, fell, control, moved: -s.node.worldPosition[2] };
         });
         expect(pushes[0].fell).toBe(false);
-        expect(pushes[0].steps).toBeGreaterThan(0);
+        expect(pushes[1].fell).toBe(false);
+        expect(pushes[0].control && pushes[1].control).toBe(true);
+        expect(pushes[0].moved).toBeGreaterThan(0.1);
+        expect(pushes[1].moved).toBeGreaterThan(pushes[0].moved);
         expect(pushes[2].fell).toBe(true);
-        for (const p of pushes) expect(p.steps).toBeLessThanOrEqual(defaultReactionSet().behaviours.stepBalance.params.maxSteps);
-        if (backend === 'jolt') expect(pushes[1].steps).toBeGreaterThanOrEqual(pushes[0].steps);
     });
 
     it('bails from a vehicle at 10 m/s: tumbles, comes to rest, gets up', () => {
@@ -534,6 +534,133 @@ describe.each(BACKENDS)('reactions that look right on %s', backend => {
 // What reacting costs, kept in check: a budget of reacting bodies (a flinch past it moves nothing, a fall takes the
 // farthest flinch's body), a body lying still out of the world, solver iterations for its own island, and senses
 // cast only as its state needs them.
+// On its feet a reaction is physical animation: the legs and hips kinematic on the animation, the upper body
+// following it on firm muscles with its motion, a stagger a shove on the capsule. The character keeps its control.
+describe('physical animation on its feet (jolt)', () => {
+    beforeAll(async () => { await acquirePhysicsBackend('jolt'); });
+    const made: PhysicsSystem[] = [];
+    afterEach(() => { for (const p of made.splice(0)) p.dispose(); resetScriptChannels(); });
+    const person = (clips?: Animation[]) => {
+        const physics = groundWorld('jolt');
+        made.push(physics);
+        const node = humanoidModel(clips);
+        return { physics, node, r: physics.reactionsOf(node)! };
+    };
+    const step = (s: { physics: PhysicsSystem; node: ModelNode }) => { s.physics.update(H); s.node.animator!.update(H); s.physics.endFrame?.(H); };
+    const angle = (a: ArrayLike<number>, b: ArrayLike<number>) => 2 * Math.acos(Math.min(1, Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3])));
+    /** Part `i`'s rotation against the hips, from a pose list (body.sim or body.anim). */
+    const rel = (poses: number[][], pelvis: number, i: number) => quat.multiply(quat.create(),
+        quat.conjugate(quat.create(), [poses[pelvis][3], poses[pelvis][4], poses[pelvis][5], poses[pelvis][6]]), [poses[i][3], poses[i][4], poses[i][5], poses[i][6]]);
+    /** The skin's joints in the world, as drawn. */
+    const drawn = (node: ModelNode) => {
+        const skin = (node.model as any).skin, bones = node.animator!.getFinalBoneMatrices(), world = node.worldTransform as any;
+        return skin.joints.map((j: any, i: number) => {
+            const bind = mat4.invert(mat4.create(), j.inverseBindMatrix)!;
+            const at = vec3.transformMat4(vec3.create(), mat4.getTranslation(vec3.create(), bind), bones[i] as any);
+            return vec3.transformMat4(at, at, world);
+        });
+    };
+
+    it('shot standing: the legs and hips stay on the animation, the upper body sways and comes back, and it never leaves its feet', () => {
+        const s = person();
+        const states: string[] = [];
+        let legs = 0, sway = 0, control = true, anchored = false;
+        for (let f = 0; f < 200; f++) {
+            if (f === 5) s.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 12 });
+            step(s);
+            if (states[states.length - 1] !== s.r.state) states.push(s.r.state);
+            if (!s.r.hasControl) control = false;
+            const b = s.r.body;
+            if (!b || s.r.state !== 'hitReact') continue;
+            anchored ||= s.r.ragdoll!.anchorPart === b.pelvis;
+            for (const p of b.parts) if (b.kinematic[p.index]) legs = Math.max(legs, Math.hypot(b.sim[p.index][0] - b.anim[p.index][0], b.sim[p.index][1] - b.anim[p.index][1], b.sim[p.index][2] - b.anim[p.index][2]));
+            sway = Math.max(sway, angle(rel(b.sim, b.pelvis, b.chest), rel(b.anim, b.pelvis, b.chest)));
+        }
+        expect(states).toEqual(['animated', 'hitReact', 'recover', 'animated']);
+        expect(control).toBe(true);
+        expect(anchored).toBe(true);
+        expect(legs).toBeLessThan(0.02);
+        expect(sway).toBeGreaterThan(0.02);
+        expect(sway).toBeLessThan(0.6);
+        expect(s.node.animator!.ikSuppressed).toBe(false);
+    });
+
+    it('follows a moving animation on its feet: a swinging arm is tracked within degrees, not trailed', () => {
+        const s = person([ARM_SWING(25, 1)]);
+        // Both hands on something (no reach for the wound: that is a target of its own, not the animation).
+        s.r.busyHands = { L: true, R: true };
+        const errors: number[] = [];
+        for (let f = 0; f < 90; f++) {
+            if (f === 10) s.r.hit({ part: 'Spine', direction: [0, 0, -1], impulse: 4 });
+            step(s);
+            const b = s.r.body;
+            if (!b || s.r.state !== 'hitReact' || f < 25) continue;
+            // Against its own parent (the chest, which turns too as the head looks to the wound).
+            const arm = b.arms.R!.root, parent = b.parts[arm].parent;
+            errors.push(angle(rel(b.sim, parent, arm), rel(b.anim, parent, arm)));
+        }
+        expect(errors.length).toBeGreaterThan(20);
+        const rms = Math.sqrt(errors.reduce((a, e) => a + e * e, 0) / errors.length);
+        // The arm swings at up to 2.7 rad/s: a second's lag (Euphoria's loose muscles) would be tens of degrees.
+        expect(rms * 180 / Math.PI).toBeLessThan(10);
+        expect(Math.max(...errors) * 180 / Math.PI).toBeLessThan(20);
+    });
+
+    it('a stumble shoves it back on its feet: carried, keeping its control, then back on its animation', () => {
+        const s = person();
+        const states = new Set<string>();
+        for (let f = 0; f < 300; f++) {
+            if (f === 5) s.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 40 });
+            step(s);
+            states.add(s.r.state);
+        }
+        expect(states.has('stagger')).toBe(true);
+        expect(states.has('falling')).toBe(false);
+        expect(-s.node.worldPosition[2]).toBeGreaterThan(0.15);
+        expect(s.r.state).toBe('animated');
+    });
+
+    it('a burst adds up: a few rounds stagger it, more knock it down', () => {
+        const s = person();
+        const seen: string[] = [];
+        for (let f = 0; f < 120; f++) {
+            if (f >= 5 && f % 6 === 5 && f < 5 + 6 * 7) s.r.hit({ part: 'Spine', direction: [0, 0, -1], impulse: 25 });
+            step(s);
+            if (seen[seen.length - 1] !== s.r.state) seen.push(s.r.state);
+        }
+        expect(seen.indexOf('stagger')).toBeGreaterThan(0);
+        expect(seen.indexOf('falling')).toBeGreaterThan(seen.indexOf('stagger'));
+    });
+
+    it('starts and goes back to its animation without a pop: no drawn joint jumps against its own motion', () => {
+        const s = person();
+        const seen: vec3[][] = [];
+        let worst = 0;
+        for (let f = 0; f < 200; f++) {
+            if (f === 5) s.r.hit({ part: 'Chest', direction: [-1, 0, 0], impulse: 14 });
+            step(s);
+            seen.push(drawn(s.node));
+            if (seen.length < 3) continue;
+            // The second difference (x[t] − 2·x[t−1] + x[t−2]): a joint moving at any speed changes it little; one
+            // jumping where it is drawn (the skin swapped between the body and the animation) changes it a lot.
+            const [a, b, c] = seen.slice(-3);
+            for (let i = 0; i < c.length; i++) worst = Math.max(worst, Math.hypot(c[i][0] - 2 * b[i][0] + a[i][0], c[i][1] - 2 * b[i][1] + a[i][1], c[i][2] - 2 * b[i][2] + a[i][2]));
+        }
+        expect(s.r.state).toBe('animated');
+        expect(worst).toBeLessThan(0.025);
+    });
+
+    it("lets a hand on a weapon stay there: a busy hand never reaches for a wound", () => {
+        const s = person();
+        s.r.busyHands = { L: true, R: true };
+        for (let f = 0; f < 60; f++) {
+            if (f === 5) s.r.hit({ part: 'Spine', direction: [0, 0, -1], impulse: 12 });
+            step(s);
+        }
+        expect(s.r.wounds.every(w => w.hand === null)).toBe(true);
+    });
+});
+
 describe.each(BACKENDS)('reacting bodies on a budget on %s', backend => {
     beforeAll(async () => { await acquirePhysicsBackend(backend); });
     const made: PhysicsSystem[] = [];

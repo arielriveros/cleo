@@ -195,6 +195,10 @@ export class CharacterNode extends Node {
     private _controller: ControllerNode | null = null;
     /** Something wrote intent this frame. Cleared after every step — see {@link drive}. */
     private _driven: boolean = false;
+    /** A shove it walks out of (world m/s, flat), fading by half every `_knockHalfLife` seconds: see {@link knockback}. */
+    private readonly _knock: [number, number, number] = [0, 0, 0];
+    private readonly _knockApplied: [number, number, number] = [0, 0, 0];
+    private _knockHalfLife = 0.35;
     private _warnedNoBody: boolean = false;
     private _warnedConstrained: boolean = false;
     private _warnedAnimatorAncestor: boolean = false;
@@ -269,7 +273,36 @@ export class CharacterNode extends Node {
         this._stepLocomotion(delta);
     }
 
+    /**
+     * Shove the character: `velocity` (world m/s; flat, its vertical part is dropped) added to its walk and fading
+     * by half every `halfLife` seconds. Its locomotion neither brakes the shove nor carries it on (it steers its own
+     * walk under it), so a character knocked back by a hit (its reactions' stagger) is carried, its legs on their
+     * animation, and keeps its control. Shoves add up.
+     */
+    public knockback(velocity: ArrayLike<number>, halfLife = 0.35): void {
+        this._knock[0] += velocity[0];
+        this._knock[2] += velocity[2];
+        this._knockHalfLife = Math.max(0.05, halfLife);
+    }
+
+    /** The shove it is walking out of now (world m/s): see {@link knockback}. */
+    public get knockbackVelocity(): readonly number[] { return this._knock; }
+
     private _stepLocomotion(delta: number): void {
+        this._stepKnock(delta);
+        this._stepLocomotionInner(delta);
+    }
+
+    /** The shove fading; what of it went on the body last frame taken back first, what is left given now. */
+    private _stepKnock(delta: number): void {
+        const k = this._knock;
+        if (k[0] === 0 && k[2] === 0) return;
+        const f = Math.pow(0.5, Math.max(0, delta) / this._knockHalfLife);
+        k[0] *= f; k[2] *= f;
+        if (Math.hypot(k[0], k[2]) < 0.02) { k[0] = 0; k[2] = 0; }
+    }
+
+    private _stepLocomotionInner(delta: number): void {
         // Carried with its body out of the world (a seat in a car): it neither walks nor falls, and nothing it was
         // asked before it sat down (a buffered jump) waits for it to stand up.
         if (this.collider?._bodySuspended) {
@@ -290,7 +323,16 @@ export class CharacterNode extends Node {
             this._riding = false;
             this._locomotion = createLocomotionState();
         }
-        if (!this._driven && !this.driveWhenUnpossessed) return;
+        if (!this._driven && !this.driveWhenUnpossessed) {
+            // Not walking: the shove alone moves it, by how much it changed since last frame.
+            const k = this._knock, a = this._knockApplied;
+            if (k[0] !== a[0] || k[2] !== a[2]) {
+                const v = this.velocity;
+                this.velocity = [v[0] + k[0] - a[0], v[1], v[2] + k[2] - a[2]] as [number, number, number];
+                a[0] = k[0]; a[2] = k[2];
+            }
+            return;
+        }
         this._driven = false;
 
         const body = this.body;
@@ -316,10 +358,20 @@ export class CharacterNode extends Node {
             : this.crouched ? { ...this._intent, sprint: false, speedScale: this._intent.speedScale * Math.max(0, this.crouchSpeed) }
             : this._intent;
         const tuning = held ? { ...this.tuning, acceleration: 0, facingMode: 'none' as const } : this.tuning;
-        const out = stepLocomotion(intent, this._sense(delta), tuning, this._locomotion);
+        // The shove: taken out of the velocity the walk senses, put back on the one it gives.
+        const k = this._knock, applied = this._knockApplied;
+        let sense = this._sense(delta);
+        if (applied[0] !== 0 || applied[2] !== 0) {
+            const v = sense.velocity;
+            sense = { ...sense, velocity: [v[0] - applied[0], v[1], v[2] - applied[2]] };
+        }
+        const out = stepLocomotion(intent, sense, tuning, this._locomotion);
         this._locomotion = out.next;
+        applied[0] = k[0]; applied[2] = k[2];
 
-        this.velocity = out.velocity as [number, number, number];
+        this.velocity = (k[0] !== 0 || k[2] !== 0
+            ? [out.velocity[0] + k[0], out.velocity[1], out.velocity[2] + k[2]]
+            : out.velocity) as [number, number, number];
         // On walkable ground, held there over the next step: never in the air, and not as it takes off (the jump
         // lockout), when gravity must have it all.
         if (this.slopeLimit > 0 && this.isGrounded && !out.jumped && out.next.jumpLockout <= 0)

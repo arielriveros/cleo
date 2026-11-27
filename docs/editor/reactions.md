@@ -42,23 +42,46 @@ it, a powered ragdoll is made from the pose it holds, and the reaction moves thr
 | State | What happens |
 |---|---|
 | animated | Plain animation. No bodies exist. |
-| hitReact | A hit it stays standing through: the animation keeps the legs and the hips, the struck part goes weak and snaps away, a hand goes to the wound. |
-| stagger | Off balance: the legs step to stay up, tiring with each step, until it stands or falls. |
+| hitReact | A hit it stays standing through: the legs and hips stay on the animation, the upper body sways after the hit on top of what the animation does, a free hand goes to the wound. It keeps its control. |
+| stagger | Knocked back on its feet: the character is shoved (its capsule carries it, its legs walking it out on their animation), the upper body leaning after the hit. It keeps its control; tipped too far, it falls. |
 | falling | Off its feet: it braces, covers its head, lands on bent knees or flails on a long drop. |
 | tumble | Rolling down stairs, a slope or away from a vehicle: curled up, head covered. |
 | down | Lying on the ground. It may writhe for a while if it was hurt. |
-| getUp | Getting up, face up or face down, on a get-up clip or pulled up by its strings. A hit or a shove knocks it back: it staggers, or falls if it was not up yet. |
-| recover | Back on its feet: the skin blends from the body to the animation. |
+| getUp | Getting up, face up or face down, on a get-up clip or pulled up by its strings. A hit or a shove knocks it back down. |
+| recover | Back on its feet: the skin blends from the body to the animation (on its feet, once the upper body follows the animation closely). |
 | dead | Killed: limp, and stays down. |
 
-While a character is off its feet its Collider is turned off and follows its hips along the ground, so a
-camera that follows the character follows the body. It is turned back on where the body stands up. Staggering,
-the character also turns with its hips, so the animation the muscles reach for turns with the body.
+### On its feet: physical animation
 
-While a reaction has the body, foot placement and foot locking fade out (in 0.15 s), and so does the support
-hand's IK: feet planted by IK, or a hand held on a weapon's grip, would fight the body. They fade back in (in
-0.35 s) once it is back on its animation, starting over rather than from where they were. A flinch it stands
-through keeps foot placement.
+A character flinching or staggering is never taken out of the game: it keeps its Collider and its control, so
+it goes on walking, running, aiming and firing while it reacts. It is the model of Unreal's Physical Animation
+and of PuppetMaster, on Jolt's ragdoll tools:
+
+- **The legs and hips are the animation's.** They are kinematic bodies moved every step to where the animation
+  has them (`PhysicsBody.setType`, Jolt's kinematic motion), so they push what they meet and nothing pushes them,
+  and foot placement and foot locking stay on. Nothing of the reaction fights the legs.
+- **The upper body follows the animation on firm muscles** (**Tracking**, 6 Hz by default), with the animation's
+  own motion: each muscle is given the speed its target turns at, and Jolt's motors drive position and velocity
+  together, so a swinging arm or an aim is followed within a few degrees instead of trailed. A hit is a kick to
+  the struck part (no more than **Kick**) and a short weakness of that part alone: a sway on whatever the animation
+  does, that the muscles take back.
+- **The upper body is drawn against the hips.** The simulated chest, arms and head are placed on the hips as the
+  animation has them that frame, so the waist never tears however the physics lags the skin.
+- **A stagger is a shove on the capsule** (`CharacterNode.knockback`): a velocity added to the character's walk
+  that fades by half every **Shove lasts**; its locomotion goes on steering under it and its legs animate the
+  steps. The upper body leans after it. Tipped past **Falls past** for **For**, it falls.
+- **Hits add up.** A burst counts its last second's hits together: enough of them stagger it like one hard hit,
+  more knock it down.
+- **A hand on a weapon stays there.** Only a free hand reaches for a wound. A hand is busy while the animator's
+  support-hand IK holds a weapon in two hands, or as a script says (`reactions.busyHands`); a busy arm is drawn a
+  little closer to its animation so it stays on its grip.
+
+Off its feet (falling, rolling, lying, getting up) the body has every part. Its Collider is turned off and
+follows its hips along the ground, so a camera that follows the character follows the body; it is turned back
+on where the body stands up. A falling body stays alive: its muscles start as firm as they were on its feet and
+tire over a couple of seconds, while it braces, covers its head or lands. Foot placement and foot locking fade
+out (in 0.15 s), and so does the support hand's IK; they fade back in (in 0.35 s) once it is back on its
+animation.
 
 Scripts hear each step as a `reaction:*` event (see [Reactions (scripting)](../scripting/reactions.md#events)).
 
@@ -162,11 +185,10 @@ What a hit, a shove or a fall must reach to move a reaction on to its next state
 | Setting | What it does |
 |---|---|
 | **Smallest hit** | A hit softer than this, in N·s, is ignored. |
-| **Stagger at** | A hit at least this hard knocks the character off balance: it steps to stay up. |
-| **Stumble at** | A hit on the trunk at least this hard, in N·s (a rifle round), rocks the hips back: it stumbles a step or two to stay up while its hand goes to the wound. 0 turns it off. |
-| **Stumble speed** | How fast a stumbling hit sends the hips back, in m/s. |
+| **Stagger at** | A hit at least this hard, in N·s (or a burst adding up to it within a second), knocks the character back on its feet: it is shoved, its legs carrying it, and keeps its control. |
+| **Stumble at** | A hit on the trunk at least this hard, in N·s (a heavy round), rocks the body back: a short shove it walks out of. 0 turns it off. |
+| **Stumble speed** | How fast a stumbling hit shoves the character back, in m/s. |
 | **Fall at** | A hit at least this hard knocks it straight down. |
-| **Knocked out** | How far, in metres, the hips may be pushed from where the animation has them before the character falls. |
 | **Fallen** | Below this uprightness (1 standing, 0 lying) a character that is off balance counts as falling. |
 | **High fall** | A drop at least this high, in metres, is a fall from height: arms and legs flail on the way down. |
 | **Tumbling** | Turning faster than this on the ground, in rad/s, counts as tumbling (stairs, a slope, a bail at speed). |
@@ -188,16 +210,20 @@ from the skeleton's pose library, and those that take a **clip** one of the skel
 
 ### Hit reaction
 
-A hit the character stays standing through: the struck part goes weak and snaps away from the hit, the head
-turns to the wound and the free hand reaches for it and holds it.
+A hit the character stays standing through: the struck part sways from the hit and goes weak for a moment, the
+spine snaps away from it, the head turns to the wound and a free hand reaches for it and holds it, all on top of
+what the animation does.
 
 | Setting | What it does |
 |---|---|
-| **Weakness** | How much strength the struck part keeps at first, 0 to 1 (1 is none lost). |
+| **Weakness** | How much strength the struck part keeps at first, 0 to 1 (1 is none lost). On its feet only that part weakens. |
 | **Recover in** | How long the struck part takes to get its strength back. |
+| **Tracking** | How firmly, in Hz, the upper body follows the animation while the character stands (the arms a little less, the hands less again). |
+| **Tracking strength** | The muscles' strength while it stands, as a multiple of the set's **Strength**. |
+| **Kick** | The most of a hit's impulse, in N·s, the struck part takes while the character stands; the whole hit still decides whether it stumbles or falls. |
 | **Snap** | An extra jolt to the spine and neck, away from the hit. |
 | **Reach after** | How long before a hand goes to the wound. |
-| **Hold for** | How long a hand holds the wound. |
+| **Hold for** | How long a free hand holds the wound (a hand on a weapon does not leave it). |
 | **Reach** | The farthest a hand reaches for a wound, in metres; beyond it, it does not try. |
 | **Reach stiffness** | How firmly the reaching arm holds the wound. |
 | **Reach pull** | How firmly a string draws the hand onto the wound, as a share of the **Strings** (0: the muscles of the arm alone). While it reaches, the forearm and the hand pass through the rest of the body. |
@@ -207,28 +233,23 @@ turns to the wound and the free hand reaches for it and holds it.
 
 A wounded arm is not used to reach: the other hand goes to it, across the body if it has to.
 
-### Step to balance
+### Stagger
 
-Off balance but not falling: the legs step to where the body's momentum says it must stand (its capture
-point), up to a few steps, the legs tiring with each one, then it falls.
+Knocked back but on its feet: the character is shoved, its capsule carrying it and its legs walking it out on
+their animation, its upper body swaying after the hit and leaning back the way it is shoved. It keeps its
+control throughout. Turning it off makes every hit that would stagger a flinch.
 
 | Setting | What it does |
 |---|---|
-| **Steps** | How many steps it takes before it gives up and falls. |
-| **Step time** | How long one step takes. |
-| **Step height** | How high a stepping foot lifts. |
-| **Longest step** | The longest step a leg can take. |
-| **Margin** | How far inside its feet, in metres, the capture point must stay before no step is needed. |
-| **Leg stiffness** | How firmly the legs hold their steps at first. |
-| **Tiring** | Leg stiffness kept after each step: 0.8 loses a fifth per step. |
-| **Arm stiffness** | How loose the arms go while it staggers. |
-| **Upright help** | How much the hips and chest are helped to stay upright, gone by the last step. |
-| **Lean** | How far the body leans the way it is going, in radians. |
-| **Give up at** | Below this uprightness it stops stepping and falls. |
-| **Recovered after** | How long it must stand balanced to be back on its animation. |
+| **Shove lasts** | How long the shove takes to fade by half, in seconds: longer carries it farther. |
+| **Lean** | How far the upper body leans back the way it is shoved, in radians. |
+| **Falls past** | How far, in radians, the chest may be tipped from where the animation has it (against the hips) before the character falls. |
+| **For** | How long it must be tipped that far to fall. |
+| **Recovered after** | How long after the shove has faded it is back on its animation. |
 
-The **capture point** is where a body must put its foot to stop: its centre of mass plus its velocity times
-√(height ÷ g). The bench's **Balance** overlay draws it.
+How fast a stagger shoves it is the thresholds' **Stumble speed**, more for a harder hit (up to two and a half
+times). The bench's **Balance** overlay draws the body's centre of mass and its **capture point** (where a body
+must put its foot to stop: its centre of mass plus its velocity times √(height ÷ g)).
 
 ### Catch the fall
 
@@ -400,6 +421,7 @@ Jolt, with the physics worker on or off.
 | Scenario | What it is |
 |---|---|
 | Flat ground | Open ground: shoot it, push it, trip it, throw it. |
+| Walking | Walking forward at the speed set while you shoot or shove it (play a walk on the preview to match): it keeps walking through a flinch or a stagger, the shove adding to its walk. |
 | Stairs | Standing at the top of a flight of stairs, tripped down them. |
 | Ramp | Standing at the top of a slope, tripped down it. |
 | Ledge | Stepping off a ledge of the height set. |
