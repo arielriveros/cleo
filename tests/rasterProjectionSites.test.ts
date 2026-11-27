@@ -81,6 +81,9 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // exactly like the G-buffer and scene depth it is compared with, or the two disagree by a
             // TAA offset at every slope and the brush frays.
             'decalReceiverPass',
+            // The depth of the surfaces that refuse decals (a material's Receive decals off), which every decal
+            // box compares against to stop at them: jittered like the scene depth it is read beside.
+            '_decalExclusionPass',
             // Every decal box: the DBuffer and emissive passes (before the resolve, jittered) AND the
             // editor overlay (after it, not) — the `beginModel` situation, decided by the flag.
             '_setDecalUniforms',

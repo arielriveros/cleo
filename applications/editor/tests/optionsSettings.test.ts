@@ -49,7 +49,7 @@ describe('project settings', () => {
     expect(isDefaultProjectSettings(s)).toBe(false);
     expect(projectSettingsConfig(s)).toEqual({
       physics: {
-        gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0, worker: 'on', backend: 'jolt',
+        gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0, maxPoweredRagdolls: 6, worker: 'on', backend: 'jolt',
         layers: ['Default', 'Ragdoll', 'See Through', 'No Camera', ...Array(12).fill('')],
       },
       runtime: { maxFrameDelta: 0.05 },
@@ -166,7 +166,8 @@ describe('project settings', () => {
     const mixer = { masterVolume: 1 };
     const s = { gravity: [0, -1.62, 0] as [number, number, number], maxSubsteps: 3, simulationRange: 90, maxFrameDelta: 0.2, masterVolume: 0.25 };
     applyEngineRuntime(engine, s, mixer);
-    expect(engine).toEqual({ maxFrameDelta: 0.2, physics: { gravity: [0, -1.62, 0], maxSubsteps: 3, simulationRange: 90 } });
+    // Reacting bodies unset: the engine's default.
+    expect(engine).toEqual({ maxFrameDelta: 0.2, physics: { gravity: [0, -1.62, 0], maxSubsteps: 3, simulationRange: 90, maxPoweredRagdolls: 6 } });
     expect(engine.physics.gravity).not.toBe(s.gravity);   // copied, not aliased
     expect(mixer.masterVolume).toBe(0.25);
     // No physics world (a 2D scene before one exists) is not an error.

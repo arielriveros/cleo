@@ -16,9 +16,10 @@ export interface EngineRuntimeSettings {
   simulationRange: number;
   /**
    * The most reacting bodies (powered ragdolls) simulating at once (PhysicsSystem.maxPoweredRagdolls): a flinch past
-   * it makes no ragdoll (the hit still counts), a fall takes the place of the farthest flinch.
+   * it makes no ragdoll (the hit still counts), a fall takes the place of the farthest flinch. Stored only once set:
+   * absent, {@link DEFAULT_REACTING_BODIES} (so a project saved before it is not rewritten on opening).
    */
-  maxPoweredRagdolls: number;
+  maxPoweredRagdolls?: number;
   /**
    * Where the physics step runs (PhysicsSystem.setWorkerMode): 'on' in a Web Worker (the default; a device
    * that cannot run one steps on the main thread instead), 'off' on the main thread, 'auto' moves it to the
@@ -228,9 +229,12 @@ export function parseCollisionLayers(raw: unknown): string[] {
 /** The addons a project from before addons had: the Claude Code panel and its agent link were always there. */
 export const LEGACY_ADDONS: readonly string[] = ['mcp-server', 'claude-code'];
 
+/** Reacting bodies (Options ▸ Engine ▸ Physics) where a project has not set it: PhysicsSystem.maxPoweredRagdolls' default. */
+export const DEFAULT_REACTING_BODIES = 6;
+
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   version: PROJECT_SETTINGS_VERSION,
-  engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, maxPoweredRagdolls: 6, physicsWorker: 'on', physicsBackend: 'jolt', maxFrameDelta: 0.1, masterVolume: 1 },
+  engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'on', physicsBackend: 'jolt', maxFrameDelta: 0.1, masterVolume: 1 },
   publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true, webgl2Fallback: true },
   identity: { version: '1.0.0', appId: '', icon: '', cover: '' },
   features: { disabled: [] },
@@ -332,7 +336,7 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       gravity: g,
       maxSubsteps: Math.round(num(e.maxSubsteps, d.engine.maxSubsteps, 1, 32)),
       simulationRange: num(e.simulationRange, d.engine.simulationRange, 0, 100000),
-      maxPoweredRagdolls: Math.round(num(e.maxPoweredRagdolls, d.engine.maxPoweredRagdolls, 0, 64)),
+      ...(typeof e.maxPoweredRagdolls === 'number' ? { maxPoweredRagdolls: Math.round(num(e.maxPoweredRagdolls, DEFAULT_REACTING_BODIES, 0, 64)) } : {}),
       physicsWorker: worker,
       physicsBackend: backend,
       maxFrameDelta: num(e.maxFrameDelta, d.engine.maxFrameDelta, 1 / 240, 0.5),
@@ -403,7 +407,7 @@ export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
     // The backend always: a game keeps the one it was made with even if the engine's default changes.
     physics: {
       gravity: [...s.engine.gravity], maxSubsteps: s.engine.maxSubsteps, simulationRange: s.engine.simulationRange,
-      maxPoweredRagdolls: s.engine.maxPoweredRagdolls,
+      maxPoweredRagdolls: s.engine.maxPoweredRagdolls ?? DEFAULT_REACTING_BODIES,
       worker: s.engine.physicsWorker, backend: s.engine.physicsBackend,
       layers: [...s.collisionLayers],
     },
@@ -495,7 +499,7 @@ export function applyEngineRuntime(
     engine.physics.gravity = [...s.gravity] as [number, number, number];
     engine.physics.maxSubsteps = s.maxSubsteps;
     engine.physics.simulationRange = s.simulationRange;
-    engine.physics.maxPoweredRagdolls = s.maxPoweredRagdolls;
+    engine.physics.maxPoweredRagdolls = s.maxPoweredRagdolls ?? DEFAULT_REACTING_BODIES;
     const mode = physicsWorkerOverride() ?? s.physicsWorker;
     if (engine.physics.setWorkerMode && engine.physics.workerMode !== mode) engine.physics.setWorkerMode(mode);
   }

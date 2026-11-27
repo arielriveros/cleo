@@ -6,7 +6,7 @@ import PerformancePanel from '@cleo/app-kit/renderer/PerformancePanel'
 import { Button, Field, NumberInput, Section, Select, Slider, VectorInput } from '@cleo/app-kit/ui'
 import { OptionsPageBody, OptionsShell, OPTION_LABEL, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
 import {
-  DEFAULT_PROJECT_SETTINGS, physicsWorkerOverrideSource, storePhysicsWorkerOverride,
+  DEFAULT_PROJECT_SETTINGS, DEFAULT_REACTING_BODIES, physicsWorkerOverrideSource, storePhysicsWorkerOverride,
   type EngineRuntimeSettings, type PhysicsBackendSetting, type PhysicsWorkerSetting,
 } from './projectSettings'
 import { editorPrefsStore, useEditorPrefs } from './editorPrefs'
@@ -83,7 +83,7 @@ function RuntimeOptions() {
             onChange={v => set({ simulationRange: Math.max(0, v) })} />
         </Field>
         <Field label='Reacting bodies' labelClassName={OPTION_LABEL}>
-          <NumberInput value={e.maxPoweredRagdolls} min={0} max={64} step={1}
+          <NumberInput value={e.maxPoweredRagdolls ?? DEFAULT_REACTING_BODIES} min={0} max={64} step={1}
             onChange={v => set({ maxPoweredRagdolls: Math.max(0, Math.min(64, Math.round(v))) })} />
         </Field>
         <Field label='Physics backend' labelClassName={OPTION_LABEL}>
