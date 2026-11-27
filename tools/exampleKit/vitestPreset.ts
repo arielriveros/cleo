@@ -13,7 +13,8 @@
 //   @host-tests/X       applications/host/tests/X  @tools/X          tools/X
 //
 // example.json "tests" says what else an example's suites need: `physicsSuites`, the files that run again on
-// every other physics backend (as the root's PHYSICS_SUITES do), and `heapMb`.
+// every other physics backend (as the root's PHYSICS_SUITES do); `joltSuites`, the files that run on Jolt alone
+// (what only Jolt has: characters' reactions), left out of the default run and the other backends'; and `heapMb`.
 //
 // Before an example's tests run, its data lock is brought up to the folder (lockSetup.ts), so the data an edit in
 // the desktop editor stored is what its tests check.
@@ -31,7 +32,7 @@ const at = (...p: string[]) => path.join(ROOT, ...p).split(path.sep).join('/')
 /** The backends besides cannon that an example's physics suites run on again. */
 const OTHER_BACKENDS = ['rapier', 'jolt']
 
-interface ExampleTests { physicsSuites?: string[]; heapMb?: number }
+interface ExampleTests { physicsSuites?: string[]; joltSuites?: string[]; heapMb?: number }
 
 function testsOf(dir: string): ExampleTests {
   try { return JSON.parse(fs.readFileSync(path.join(dir, 'example.json'), 'utf8')).tests ?? {} } catch { return {} }
@@ -91,17 +92,20 @@ export function exampleProjects(dir: string): any[] {
   // runners are too busy for their budgets; the host's own suites never ran in CI either).
   const hostSuites = process.env.CLEO_TEST_HOST !== '0'
   // The main project locks the example's data first (lockSetup.ts): an edit's new data is in the lock it tests.
+  const joltOnly = (tests.joltSuites ?? []).map(s => `tests/${s}.test.ts`)
   const projects = [base(`example:${slug}`, {
-    include: ['tests/**/*.test.ts'], exclude: ['tests/net/**', 'tests/host/**'],
+    include: ['tests/**/*.test.ts'], exclude: ['tests/net/**', 'tests/host/**', ...joltOnly],
     globalSetup: [at('tools', 'exampleKit', 'lockSetup.ts')],
   })]
   // The host suites in a project of their own, run serially after everything else: they measure real time (tick
   // budgets, a host's busy time), and beside a full run's other forks they timed out or blew their budgets.
   if (hostSuites && fs.existsSync(path.join(dir, 'tests', 'host')))
     projects.push(base(`example:${slug} host`, { include: ['tests/host/**/*.test.ts'], serial: true }))
-  for (const backend of tests.physicsSuites?.length ? OTHER_BACKENDS : []) {
+  for (const backend of OTHER_BACKENDS) {
+    const include = [...(tests.physicsSuites ?? []).map(s => `tests/${s}.test.ts`), ...(backend === 'jolt' ? joltOnly : [])]
+    if (!include.length) continue
     projects.push(base(`example:${slug} on ${backend}`, {
-      include: tests.physicsSuites!.map(s => `tests/${s}.test.ts`),
+      include,
       env: { CLEO_TEST_PHYSICS: backend },
       setupFiles: [at('tests', 'helpers', 'backendSetup.ts')],
     }))

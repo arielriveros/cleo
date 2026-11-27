@@ -95,6 +95,12 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   without. Opening a template brings them up to its model's, and saving it keeps them.
 - **Fix: linking a material to a model with a one-entry material list left the list naming the old material.** The
   node then matched the old material's edits and missed its own.
+- **Reactions run on Jolt only.** On cannon-es and Rapier the reaction sets looked wrong, so there a character has
+  none (`PhysicsSystem.reactionsOf` gives `null`, `reactionsSupported`, `capabilities.reactions`): a hit moves only
+  what it strikes, and the log says once why. The rig's Reactions tab shows a warning there, every control off.
+  Ragdolls a script starts itself (a death) still fall on every backend. Rapier no longer doubles its substeps
+  while a powered ragdoll exists. An example's `tests.joltSuites` (example.json) run on Jolt alone: the
+  Sandbox's reactions and NPC suites.
 - **Reacting bodies and NPC brains cost a fraction of what they did.**
   - A budget of reacting bodies (Options ▸ Engine ▸ Physics ▸ **Reacting bodies**, 6 by default,
     `PhysicsSystem.maxPoweredRagdolls`): a hit that would only make a character flinch or stumble while that many

@@ -47,6 +47,7 @@ export const RAPIER_CAPABILITIES: PhysicsCapabilities = {
     // Its spherical joints' motors take per-axis angles, not a rotation: the shared spring drives them instead.
     jointDrives: 'shared',
     islandIterations: true,
+    reactions: false,
 };
 
 /** Rapier's interaction groups: 16 bits of membership over 16 of filter. */

@@ -187,14 +187,16 @@ moves by. They are part of the `PhysicsWorld` interface (`pal/types.ts` `JointDr
 | `applyTorque(body, τ)` | A torque for one substep (world). |
 
 `capabilities.jointDrives` says how a backend drives them: `'native'` with its own motors, `'shared'` with the
-engine's solver (`pal/drive/driveSolver.ts`).
+engine's solver (`pal/drive/driveSolver.ts`). `capabilities.reactions` says whether characters react with their
+whole body there: Jolt only. Elsewhere `PhysicsSystem.reactionsOf` gives `null` (the drives themselves still work
+there, for a powered ragdoll started directly).
 
 | | Jolt | cannon | Rapier |
 |---|---|---|---|
 | `jointDrives` | native | native | shared |
 | Muscles on cone and hinge joints | `SwingTwistConstraint` / `HingeConstraint` Position motors, spring by stiffness and damping, `SetTargetOrientationBS(conj(qT))` | three `RotationalMotorEquation`s per joint (one on a hinge) retargeted every substep to the velocity the implicit spring asks for, capped by `maxTorque` | implicit spring torques, applied before the step |
 | Muscles on ball and fixed joints, gravity compensation, friction, pins | shared | shared | shared |
-| Substeps | as configured | as configured | doubled while a powered ragdoll exists |
+| Reactions (`capabilities.reactions`) | yes | no | no |
 
 One set of numbers feels alike on every backend because the gains come from the same physics:
 
@@ -213,13 +215,14 @@ its axis, the torque cap holds and saturates, a critically damped drive does not
 compensation stops the sag, a pin converges, a destroyed joint loses its drive, and an unused solver changes
 nothing (the golden traces stay bit for bit). The feel check drives the same hinge on all three: Jolt's motors
 and cannon's motor equations, solved with the joint, agree within 20% at a quarter of a second. Rapier's shared
-spring is torques the step adds, held back for stability, so it is slower there (at least 40% as far), which
-its doubled substeps make up for on a whole ragdoll.
+spring is torques the step adds, held back for stability, so it is slower there (at least 40% as far).
 
 cannon's cone-twist measures twist from a perpendicular it picks itself, so a joint made in a turned pose
 started past its twist limit and fought the muscle for as long as it lived. `JointDesc.matchTwist` (opt-in;
 powered ragdolls set it) measures it from the pose the joint is made in, as Jolt and Rapier do
-(`pal/cannon/matchedConeTwist.ts`).
+(`pal/cannon/matchedConeTwist.ts`). `JointDesc.rest` (A's rotation in B's frame) measures a hinge's angle and a
+cone-twist's twist from that pose instead, on every backend: a ragdoll put back into the world where it lies
+gives the pose its joints were first made in.
 
 Drives and pins copy into the [physics worker](physics-threading.md#joint-drives) and step there bit for bit
 as on the main thread.

@@ -44,6 +44,12 @@ export interface PhysicsCapabilities {
      * raises the whole world's count while it lives.
      */
     readonly islandIterations: boolean;
+    /**
+     * Whether characters react with their whole body here (physics/reactive/: powered ragdolls driven by muscles).
+     * Jolt only: its motors hold a body the way the reactions are tuned for; on cannon and Rapier the same sets looked
+     * wrong, so there `PhysicsSystem.reactionsOf` gives none. Passive (death) ragdolls run on every backend.
+     */
+    readonly reactions: boolean;
 }
 
 /** The boot log line: `physics cannon · capsule compound · groups 32-bit · ...`. */
@@ -55,6 +61,7 @@ export function describePhysicsCapabilities(c: PhysicsCapabilities): string {
         `cone limit ${c.coneLimit}`,
         `f${c.precision}`,
         `drives ${c.jointDrives}`,
+        c.reactions ? 'reactions' : 'no reactions',
         c.threadable ? 'worker capable' : 'main thread only',
     ].join(' · ');
 }

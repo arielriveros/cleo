@@ -357,16 +357,10 @@ export class PhysicsSystem {
    */
   public maxSubsteps: number = PhysicsSystem.MAX_SUBSTEPS;
 
-  /**
-   * Substeps a frame takes now: {@link substepsFor}, doubled while a powered ragdoll's muscles run on a backend
-   * that drives them with the shared spring (cannon, Rapier). Those are torques the step adds rather than
-   * motors it solves, and a step of 1/60 s holds a stiff limb back; 1/120 lets it move as the numbers say.
-   */
+  /** Substeps a frame takes now: {@link substepsFor}. */
   private _substeps(dt: number): number {
-    const n = PhysicsSystem.substepsFor(dt, this.maxSubsteps);
-    return this._fineSubsteps ? Math.min(n * 2, Math.max(1, Math.floor(this.maxSubsteps)) * 2) : n;
+    return PhysicsSystem.substepsFor(dt, this.maxSubsteps);
   }
-  private _fineSubsteps = false;
 
   /**
    * The project's simulation range, in metres from the active camera (project option "Simulation range").
@@ -1623,15 +1617,13 @@ export class PhysicsSystem {
     const world = this._world;
     if (!world) return;
     const islands = world.capabilities.islandIterations;
-    let want = 0, powered = false, live = 0;
+    let want = 0, live = 0;
     for (const r of this._ragdolls) {
       if (r.frozen || r.destroyed) continue;
       if (!islands) want = Math.max(want, r.solverIterations);
-      powered ||= r.powered;
       if (r.powered) live++;
     }
     physicsStats.poweredRagdolls = live;
-    this._fineSubsteps = powered && world.capabilities.jointDrives === 'shared';
     if (want > 0) {
       if (this._baseIterations === null) this._baseIterations = world.solverIterations;
       const n = Math.max(this._baseIterations, want);
@@ -1741,6 +1733,14 @@ export class PhysicsSystem {
     if (!node) return null;
     let reactions = this._reactions.get(node);
     if (reactions) return reactions;
+    // Jolt only (capabilities.reactions): the backend RUNNING, so a Jolt project that fell back to cannon has none.
+    if (!this.reactionsSupported) {
+      if (!this._saidNoReactions && this._world) {
+        this._saidNoReactions = true;
+        Logger.info(`Reactions run only on the Jolt physics backend; this game runs on ${this.backend}, so its characters do not react to hits with their bodies.`, 'Physics');
+      }
+      return null;
+    }
     const cfg = (node.ragdollConfig as { reactions?: { enabled?: boolean } } | null)?.reactions;
     if (!node.animator || cfg?.enabled === false) return null;
     const skin = (node.model as { skin?: unknown } | null)?.skin;
@@ -1749,6 +1749,10 @@ export class PhysicsSystem {
     this._reactions.set(node, reactions);
     return reactions;
   }
+
+  /** Whether characters can react here: the running backend's `capabilities.reactions` (Jolt). */
+  public get reactionsSupported(): boolean { return !!this._world?.capabilities.reactions; }
+  private _saidNoReactions = false;
 
   /** The reactions of a ragdoll body's model, a Character's or a model's (a ray's hit), or null. */
   public reactionsFor(target: Node | PhysicsBody | null | undefined): ReactionController | null {

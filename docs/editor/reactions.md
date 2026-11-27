@@ -7,6 +7,10 @@ flinch, stagger, brace for the ground, cover its head, bend its knees to land, h
 up. It is authored on the skeleton, in the **Reactions** tab beside its [Ragdoll](physics.md#the-ragdoll-panel-rig-editor)
 tab, and tried on the tab's [test bench](#the-test-bench).
 
+Reactions run on the **Jolt** physics backend only, the default (see [Physics backends](#physics-backends)). On
+cannon-es or Rapier characters do not react, and the Reactions tab shows a warning above its controls, every one
+of them off.
+
 The model is the one behind NaturalMotion's Euphoria (used by Rockstar's games) and similar systems:
 muscles per body region, reflexes called **behaviours** that run when their moment comes, and the
 animation the character was playing as the pose the muscles reach for. The
@@ -70,9 +74,9 @@ Many at once is a lot of work, so the engine keeps it in check:
 - **Rest.** A body lying still has nothing to do until it gets up: its parts leave the simulation, holding the pose
   where it lies, and come back the moment it gets up or something hits or shoves it. It does not count against the
   budget.
-- **Its own solver iterations.** A chain of 16 jointed parts needs more solver iterations than a crate. On Jolt and
-  Rapier its joints ask for them for their own island alone (the ragdoll profile's **Solver iterations**); on
-  cannon-es the world's count is raised while a body reacts.
+- **Its own solver iterations.** A chain of 16 jointed parts needs more solver iterations than a crate. Its
+  joints ask for them for their own island alone (the ragdoll profile's **Solver iterations**): the world's count
+  stays what it is.
 - **Senses on demand.** Where a fall will land (up to 20 rays) and the ground ahead (4) are measured only in the
   air or rolling; the ground under it every step while it stands or falls, every fourth lying or getting up. The
   step's contacts are sorted out once for every reacting body.
@@ -391,7 +395,7 @@ library: pause a fall at the moment the body looks right and capture it, then gi
 
 The bench runs the set being edited on the preview character in the viewport, live: pick a scenario, press
 play, and shoot, shove or trip the character; every change to the set applies to the next run. It works on
-every physics backend, with the physics worker on or off.
+Jolt, with the physics worker on or off.
 
 | Scenario | What it is |
 |---|---|
@@ -438,18 +442,18 @@ Each placed character decides for itself, in its Skeleton section's
 
 ## Physics backends
 
-Reactions run on all three physics backends and with the physics worker on or off.
+Reactions run on **Jolt** only, with the physics worker on or off. Jolt drives the muscles with its own joint
+motors, solved with the joints, which hold a body the way the sets are tuned for. On cannon-es and Rapier the same
+sets looked wrong (cannon's stiff contacts, Rapier's softer muscles), so there:
 
-- **Jolt** drives the muscles with its own joint motors.
-- **cannon-es** drives them with motor constraints solved with the joints. Its contacts are stiffer than the
-  others', so a hand reaching across the body for a wound passes through the chest on its way (on every backend)
-  rather than being held off it, and lands a little less exactly.
-- **Rapier** drives them with the engine's shared muscle solver, and doubles its substeps while a powered
-  ragdoll exists, which costs some time. Its muscles are a little softer than the other two's: a falling
-  body's arms brace a little later.
+- a character has no reactions (`physics.reactionsOf` gives `null`): a shot or a shove moves only what it strikes,
+  and the log says once why;
+- the Reactions tab shows a warning above its controls, every one of them off (its sets are kept, for when the
+  project is back on Jolt);
+- a ragdoll a script starts itself (a death's limp fall, `physics.startRagdoll`) still falls, on every backend.
 
-The three feel alike but are not identical: a set tuned on one may want small changes on another. See
-[Physics backends](../reference/physics-backends.md#joint-drives).
+Pick the backend in Options ▸ Engine ▸ Physics backend. A Jolt project that falls back to another backend (no
+WebAssembly) has no reactions either. See [Physics backends](../reference/physics-backends.md#joint-drives).
 
 ## Tips
 

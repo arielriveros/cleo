@@ -5,7 +5,9 @@
   "createdAt": 1795100000000,
   "tests": {
     "physicsSuites": [
-      "sandboxProject",
+      "sandboxProject"
+    ],
+    "joltSuites": [
       "reactions",
       "npcs"
     ]

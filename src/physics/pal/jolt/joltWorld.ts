@@ -59,6 +59,7 @@ export const JOLT_CAPABILITIES: PhysicsCapabilities = {
     // Hinge and cone joints by their own motors (SwingTwist and Hinge, Position mode); ball joints by the shared spring.
     jointDrives: 'native',
     islandIterations: true,
+    reactions: true,
 };
 
 /** cannon's damping, `v *= (1 − d)^dt`, as Jolt's rate `c` in `v *= 1 − c·dt`: the same decay for small dt. */

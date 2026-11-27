@@ -179,3 +179,19 @@ describe('docs/editor/reactions.md', () => {
     expect(reactionParamKeys().length).toBeGreaterThan(40)
   })
 })
+
+describe('the Reactions tab off Jolt', () => {
+  const panel = () => readFileSync(join(__dirname, '..', 'src', 'features', 'rig', 'reactions', 'ReactionsPanel.tsx'), 'utf8')
+  it("warns that reactions run on Jolt alone and turns every control off, by the running world's capability", () => {
+    const src = panel()
+    expect(src).toContain('physics.capabilities.reactions')
+    expect(src).toMatch(/Reactions run only on the Jolt physics backend/)
+    // Native controls off through the fieldset, the custom ones (sliders, toggles) through inert.
+    expect(src).toMatch(/<fieldset disabled=\{!supported\}/)
+    expect(src).toMatch(/inert: ''/)
+    // Everything after the title is inside it.
+    const body = src.slice(src.indexOf('<SectionTitle'))
+    expect(body.indexOf('<fieldset')).toBeLessThan(body.indexOf('Customize'))
+    expect(body.lastIndexOf('</fieldset>')).toBeGreaterThan(body.lastIndexOf('</Collapsable>'))
+  })
+})

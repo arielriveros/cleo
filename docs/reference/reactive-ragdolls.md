@@ -3,7 +3,8 @@
 How the engine's reactions ([editor](../editor/reactions.md), [scripting](../scripting/reactions.md)) work, the
 systems they are modelled on, and where the code is. A reactive ragdoll is a physics body whose joints have
 muscles: it falls, tumbles and lands as physics says, but it tries, the way a person does, to stay up, to
-break its fall and to protect its head.
+break its fall and to protect its head. Reactions run on the Jolt backend only (`capabilities.reactions`; see
+[Physics backends](physics-backends.md#joint-drives)).
 
 ## Background
 
@@ -82,8 +83,7 @@ Inline (physics on the main thread):
 1. `PhysicsSystem.update` asks every reacting controller for its targets (`_preStep`). It composes the
    animation's pose (from the last frame) with the running behaviours by weight, and sends the muscles' targets
    and gains and the strings to the world.
-2. The world steps. Each backend applies the drives at the start of every substep, before its own solver:
-   Jolt through its motors, cannon through motor equations, Rapier through the shared solver
+2. The world steps. Jolt applies the drives through its motors, solved with the joints
    ([Physics backends](physics-backends.md#joint-drives)).
 3. After the step (`_postStep`) the controller measures the body (`BodySensors`: centre of mass, uprightness,
    contacts, support polygon and capture point, a ballistic sweep for the coming impact, the terrain under it),
@@ -118,8 +118,8 @@ happens to it, and taken away once it is back on its animation.
 
 `tests/pal/drives.test.ts` holds the drives on every backend (see
 [Physics backends](physics-backends.md#joint-drives)); `tests/poweredRagdoll.test.ts` holds a powered ragdoll
-standing on its animation and its mapping; `tests/reactions.test.ts` runs the reactions on a procedural
-humanoid on cannon, Rapier and Jolt, inline and in the worker:
+standing on its animation and its mapping on every backend; `tests/reactions.test.ts` runs the reactions on a
+procedural humanoid on Jolt, inline and in the worker, and checks that cannon and Rapier give none:
 
 | Scenario | Held to |
 |---|---|

@@ -22,7 +22,8 @@ import { Node } from '../src/core/scene/nodes/node';
 // gets up. Measured on a procedural person (tests/helpers/humanoidRig.ts) on every backend; the finest gates on
 // Jolt, the default, whose motors meet the muscles exactly (Rapier's are the shared spring, a little softer).
 
-const BACKENDS: PhysicsBackendKind[] = ['jolt', 'cannon', 'rapier'];
+// Reactions run on Jolt alone (capabilities.reactions); 'no reactions on %s' below checks the others give none.
+const BACKENDS: PhysicsBackendKind[] = ['jolt'];
 const H = 1 / 60;
 const at = (b: { position: { x: number; y: number; z: number } }) => vec3.fromValues(b.position.x, b.position.y, b.position.z);
 
@@ -259,7 +260,7 @@ describe.each(BACKENDS)('a hand to the wound on %s', backend => {
 });
 
 describe('reactions with the physics worker', () => {
-    for (const backend of ['cannon', 'jolt'] as const) {
+    for (const backend of ['jolt'] as const) {
         it(`trip, lie and get up as inline on ${backend}`, async () => {
             await acquirePhysicsBackend(backend);
             const physics = groundWorld(backend);
@@ -282,7 +283,7 @@ describe('reactions with the physics worker', () => {
 
     // An editor action (the bench's End or Run) ends a reaction between frames: its bodies are gone before the step
     // the worker is running for them comes back. The step lands without them.
-    for (const backend of ['jolt', 'rapier', 'cannon'] as const) {
+    for (const backend of ['jolt'] as const) {
         it(`ends a reaction between frames on ${backend} without losing the step in flight`, async () => {
             await acquirePhysicsBackend(backend);
             const physics = groundWorld(backend);
@@ -308,6 +309,54 @@ describe('reactions with the physics worker', () => {
 // What made reactions look wrong: a spine bent and twisted by world axes taken as its parent's, a get-up that turned
 // the body round to meet a clip lined up with the idle rather than with itself, a get-up that a hit could not stop,
 // foot and hand IK left planting the animation the muscles reach for, and a body that slid where it should roll.
+// Elsewhere a model has none: a hit moves only what it strikes, and a ragdoll it is given (a death) still falls.
+describe.each(['cannon', 'rapier'] as PhysicsBackendKind[])('no reactions on %s', backend => {
+    beforeAll(async () => { await acquirePhysicsBackend(backend); });
+    const made: PhysicsSystem[] = [];
+    afterEach(() => { for (const p of made.splice(0)) p.dispose(); vi.restoreAllMocks(); });
+    const world = () => { const p = groundWorld(backend); made.push(p); return p; };
+
+    it('gives a skinned model none, and says why once', () => {
+        const info = vi.spyOn(Logger, 'info');
+        const p = world();
+        expect(p.capabilities?.reactions).toBe(false);
+        expect(p.reactionsSupported).toBe(false);
+        const node = humanoidModel();
+        expect(p.reactionsOf(node)).toBeNull();
+        const character = new Node('Character');
+        character.addChild(node);
+        expect(p.reactionsFor(character)).toBeNull();
+        expect(p.reactionsOf(humanoidModel())).toBeNull();
+        expect(info.mock.calls.filter(c => /only on the Jolt/.test(String(c[0]))).length).toBe(1);
+    });
+
+    it("pushes what a ray's hit strikes, and a model's own ragdoll still falls", () => {
+        const p = world();
+        const node = humanoidModel();
+        const crate = makeBody(box(0.3, 0.3, 0.3), { mass: 10, position: [4, 0.3, 0] });
+        p.addBody(crate);
+        expect(p.applyHit({ point: [0, 1.4, 0.35], normal: [0, 0, 1], distance: 1, body: null, node } as any, [0, 0, -1], 12)).toBe(false);
+        expect(p.applyHit({ point: [4, 0.3, 0.3], normal: [0, 0, 1], distance: 1, body: crate, node: null } as any, [0, 0, -1], 10)).toBe(false);
+        expect(crate.velocity.z).toBeLessThan(-0.5);
+        const ragdoll = p.startRagdoll(node)!;
+        const top = () => Math.max(...[...ragdoll.bodies.values()].map(b => b.position.y));
+        const standing = top();
+        for (let f = 0; f < 180; f++) p.update(H);
+        expect(standing - top()).toBeGreaterThan(0.5);
+    });
+});
+
+describe('the reactions capability', () => {
+    it("is Jolt's: there a skinned model has reactions", async () => {
+        await acquirePhysicsBackend('jolt');
+        const p = groundWorld('jolt');
+        expect(p.capabilities?.reactions).toBe(true);
+        expect(p.reactionsSupported).toBe(true);
+        expect(p.reactionsOf(humanoidModel())).not.toBeNull();
+        p.dispose();
+    });
+});
+
 describe.each(BACKENDS)('reactions that look right on %s', backend => {
     beforeAll(async () => { await acquirePhysicsBackend(backend); });
     const made: PhysicsSystem[] = [];

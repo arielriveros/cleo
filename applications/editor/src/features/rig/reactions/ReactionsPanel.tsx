@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { mat4 } from 'gl-matrix'
 import {
-  BEHAVIOUR_SPECS, MUSCLE_REGIONS, MUSCLE_SPECS, PIN_SPECS, REACTION_PRESETS, THRESHOLD_SPECS, defaultReactionSet, parseReactionSet,
+  BEHAVIOUR_SPECS, MUSCLE_REGIONS, MUSCLE_SPECS, PHYSICS_BACKENDS, PIN_SPECS, REACTION_PRESETS, THRESHOLD_SPECS, defaultReactionSet, parseReactionSet,
   type BehaviourConfig, type BehaviourId, type MuscleRegion, type ReactionParamSpec, type ReactionSet,
 } from 'cleo'
 import {
@@ -57,13 +57,18 @@ function SpecSlider({ spec, value, onChange, disabled }: { spec: ReactionParamSp
 }
 
 export default function ReactionsPanel() {
-  const { editorScene, skeletonTargetId } = useCleoEngine()
+  const { editorScene, skeletonTargetId, instance } = useCleoEngine()
   const { asset, patch } = useRig()
   const { animations, poseAssets } = useAssetLibrary()
   const writePose = usePoseAssetEdit()
   const pins = useCreatorPins()
   const bench = useBench()
   const [rename, setRename] = useState(false)
+  // Reactions run on Jolt alone (PhysicsCapabilities.reactions): on another backend the tab still shows the sets,
+  // every control off, under a warning that says why.
+  const physics = instance?.physics
+  const supported = !physics || (physics.capabilities ? physics.capabilities.reactions : physics.backend === 'jolt')
+  const backendName = physics ? PHYSICS_BACKENDS.find(b => b.request === physics.backend)?.label ?? physics.backend : ''
 
   const reactions: RigReactions | undefined = asset?.reactions
   const sets = reactions?.sets ?? []
@@ -155,6 +160,15 @@ export default function ReactionsPanel() {
     <DocScope page='editor/reactions'>
       <div>
         <SectionTitle title='Reactions' doc='editor/reactions' className='mb-1' />
+        {!supported && (
+          <div role='alert' data-testid='reactions-jolt-only' className='text-ui-xs text-warning border border-warning/40 rounded p-1 mb-1 leading-snug'>
+            Reactions run only on the Jolt physics backend. This project runs on {backendName}, so its characters do not
+            react to hits and nothing here can be changed. Switch the project to Jolt in the options' Physics backend.
+          </div>
+        )}
+        {/* Off as a whole: the fieldset turns off its native controls, `inert` the custom ones (sliders, toggles). */}
+        <fieldset disabled={!supported} {...(supported ? {} : { inert: '' } as React.HTMLAttributes<HTMLFieldSetElement>)}
+          className={cn('min-w-0 m-0 p-0 border-0', !supported && 'opacity-50 pointer-events-none select-none')}>
 
         {/* ----- the sets ----- */}
         {!authored ? (
@@ -320,6 +334,7 @@ export default function ReactionsPanel() {
             )
           })}
         </div>
+        </fieldset>
       </div>
     </DocScope>
   )

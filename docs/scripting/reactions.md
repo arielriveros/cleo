@@ -16,7 +16,9 @@ const reactions = this.scene.physics.reactionsFor(node)   // a Character, its mo
 ```
 
 Each is a `ReactionController`, or `null` when the model has no skeleton a powered ragdoll fits (see
-[What you need](../editor/reactions.md#what-you-need)), its reactions are turned **Off**, or outside Play. One
+[What you need](../editor/reactions.md#what-you-need)), its reactions are turned **Off**, outside Play, or when the
+game does not run on the Jolt physics backend ([reactions are Jolt's](../editor/reactions.md#physics-backends);
+`physics.reactionsSupported` says which). One
 exists per model, made the first time it is asked for; a character that is not reacting costs nothing.
 
 ## Hits from a gun

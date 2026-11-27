@@ -37,6 +37,7 @@ export const CANNON_CAPABILITIES: PhysicsCapabilities = {
     manualSleep: true,
     profilePhases: ['broadphase', 'narrowphase', 'solve', 'integrate'],
     islandIterations: false,
+    reactions: false,
     threadable: true,
     precision: 64,
     vehicleCasts: ['ray'],
