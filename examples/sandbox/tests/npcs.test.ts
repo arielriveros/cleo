@@ -359,6 +359,21 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
         expect(finite(p.player.worldPosition)).toBe(true);
     });
 
+    it('a round in a civilian throws sparks off it and leaves no hole, where one in the ground beside it does', async () => {
+        const p = await play({ npcs: { 'Civilian 1': { at: [32, 0, -24], yaw: 180 } }, player: { at: [32, 0.02, -34], yaw: 0 } });
+        const civ = p.npc('Civilian 1');
+        await p.run(1);
+        const count = (name: string) => [...p.r.scene.nodes].filter((n: any) => n.name === name).length;
+        const holes = count('Bullet Hole'), impacts = count('Bullet Impact');
+        const hit = shoot(p, [civ.worldPosition[0], civ.worldPosition[1] + 1.25, civ.worldPosition[2]]);
+        expect(hit, 'the round hits the civilian').toBeTruthy();
+        expect(count('Bullet Impact')).toBeGreaterThan(impacts);
+        expect(count('Bullet Hole'), 'a hole on the civilian').toBe(holes);
+        const ground = shoot(p, [civ.worldPosition[0] + 1.5, 0, civ.worldPosition[2] - 2]);
+        expect(ground, 'the round hits the ground').toBeTruthy();
+        expect(count('Bullet Hole'), 'a hole in the ground').toBe(holes + 1);
+    });
+
     it('knocked down and shot again while it gets up, a civilian goes back down and gets up again', async () => {
         const p = await play({ npcs: { 'Civilian 1': { at: [32, 0, -24], yaw: 180 } }, player: { at: [32, 0.02, -34], yaw: 0 } });
         const civ = p.npc('Civilian 1');

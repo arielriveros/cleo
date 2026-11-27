@@ -67,6 +67,7 @@ class Material {
     transparent?: boolean
     castShadow?: boolean
     probeable?: boolean
+    receiveDecals?: boolean         // false keeps every decal off it; stored only when false
     wireframe?: boolean
   }
 }

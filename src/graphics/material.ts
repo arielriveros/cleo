@@ -8,6 +8,12 @@ interface MaterialConfig {
     transparent?: boolean;
     castShadow?: boolean;
     probeable?: boolean;
+    /**
+     * Whether decals land on this surface. On (absent) by default; `false` keeps every decal off it (bullet holes off a
+     * character, say), on every decal route. Serialized only when false, so older materials keep their bytes.
+     * See `DecalPasses.decalReceiverPass`.
+     */
+    receiveDecals?: boolean;
     wireframe?: boolean;
     /**
      * Pull this surface toward the camera in CLIP space, for geometry that is coplanar with what it
@@ -688,7 +694,8 @@ export class Material {
             castShadow: config?.castShadow === undefined ? true : config.castShadow,
             probeable: config?.probeable === undefined ? true : config.probeable,
             wireframe: config?.wireframe || false,
-            depthNudge: config?.depthNudge || 0
+            depthNudge: config?.depthNudge || 0,
+            ...(config?.receiveDecals === false ? { receiveDecals: false } : {}),
         };
     }
 
@@ -956,6 +963,7 @@ export class Material {
             transparent: this.config.transparent,
             castShadow: this.config.castShadow,
             probeable: this.config.probeable,
+            ...(this.config.receiveDecals === false ? { receiveDecals: false } : {}),
         };
         const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic'
             : t === 'blinn_phongSkinned' ? 'blinn_phong'
@@ -1117,7 +1125,8 @@ export class Material {
             wireframe: m.config?.wireframe,
             transparent: m.config?.transparent,
             castShadow: m.config?.castShadow,
-            probeable: m.config?.probeable
+            probeable: m.config?.probeable,
+            receiveDecals: m.config?.receiveDecals,
         };
         const type: string = m.type || 'blinn_phong';
         if (type === 'basic') {
@@ -1877,6 +1886,7 @@ export class CustomMaterial extends Material {
                 transparent: this.config.transparent,
                 castShadow: this.config.castShadow,
                 probeable: this.config.probeable,
+                ...(this.config.receiveDecals === false ? { receiveDecals: false } : {}),
             },
         };
     }
@@ -1889,6 +1899,7 @@ export class CustomMaterial extends Material {
             transparent: m.config?.transparent,
             castShadow: m.config?.castShadow,
             probeable: m.config?.probeable,
+            receiveDecals: m.config?.receiveDecals,
         });
         cm.renderMode = m.renderMode === 'deferred' ? 'deferred' : m.renderMode === 'screen' ? 'screen' : 'forward';
         cm.baseType = m.baseType ?? null;

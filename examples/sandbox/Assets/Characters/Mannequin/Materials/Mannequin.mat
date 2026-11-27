@@ -18,7 +18,8 @@
       "wireframe": false,
       "transparent": false,
       "castShadow": true,
-      "probeable": true
+      "probeable": true,
+      "receiveDecals": false
     }
   },
   "textureIds": [

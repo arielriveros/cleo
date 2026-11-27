@@ -3,6 +3,7 @@ import { isEditorOnlyNode } from '../../core/scene/editorNodes';
 import { DecalNode, DECAL_RADIAL_CURVES, decalFlipbookFrame } from '../../core/scene/nodes/decalNode';
 import type { DecalFlipbookFrame } from '../../core/scene/nodes/decalNode';
 import { ModelNode } from '../../core/scene/nodes/modelNode';
+import { AnimatedModel } from '../../animation/animatedModel';
 import type { Scene } from '../../core/scene/scene';
 import { sizedTarget } from './featureSubsystems';
 import { Framebuffer } from '../framebuffer';
@@ -11,7 +12,7 @@ import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderPipeline } from '../rhi/resources';
 import type { BlendState, CullMode } from '../rhi/types';
 import { Texture } from '../texture';
-import { ShadowMapProgram, DecalSurfaceProgram, DecalResolveProgram, DecalColorProgram } from './programs';
+import { ShadowMapProgram, ShadowMapSkinnedProgram, DecalSurfaceProgram, DecalResolveProgram, DecalColorProgram } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -34,7 +35,8 @@ export interface DecalPassesHost {
 
 /**
  * Decal volumes in the frame: which decals draw where (`collectDecals`), the landscape-only receiver
- * depth that `receivers: 'terrain'` compares against, the DBuffer write and its resolve into the
+ * depth that `receivers: 'terrain'` compares against and the depth of the surfaces whose material receives
+ * no decals, which every other decal keeps off, the DBuffer write and its resolve into the
  * G-buffer, and the emissive and overlay colour passes. Their targets are allocated on first use, so
  * a scene without decals pays nothing. Split out of Renderer.
  */
@@ -60,6 +62,8 @@ export class DecalPasses {
     public dBufferFBO: Framebuffer | null = null;
     public gBufferCopyFBO: Framebuffer | null = null;
     public decalReceiverFBO: Framebuffer | null = null;
+    /** Depth of the surfaces whose material receives no decals (`receiveDecals: false`); see `_decalExclusionPass`. */
+    public decalExclusionFBO: Framebuffer | null = null;
 
     /** This frame's decals by route, sorted; see `collectDecals`. */
     public readonly surfaceDecals: DecalNode[] = [];
@@ -69,6 +73,12 @@ export class DecalPasses {
     /** Whether a collected decal filters to terrain, and whether the receiver depth exists this frame. */
     private _decalReceiversWanted = false;
     private _decalReceiversReady = false;
+    /** The bounding spheres (x, y, z, r) of this frame's decals that land on every surface, and whether the exclusion depth exists. */
+    private readonly _openDecalSpheres: number[] = [];
+    private _decalExclusionReady = false;
+    /** The surfaces drawn into the exclusion depth this frame, and the pipeline memo they are drawn with. */
+    private readonly _excluded: ModelNode[] = [];
+    private readonly _exclusionMemo = new PipelineMemo();
 
     /** What a decal with no material projects: plain white, full coverage. */
     private readonly _defaultDecalMaterial: Material = Material.PBR();
@@ -99,6 +109,8 @@ export class DecalPasses {
         this.overlayDecals.length = 0;
         this._decalReceiversWanted = false;
         this._decalReceiversReady = false;
+        this._openDecalSpheres.length = 0;
+        this._decalExclusionReady = false;
         for (const decal of scene.decals) {
             if (!decal.visible || this._sys.visibility.volumeCulled(decal)) continue;
             if (this._sys.visibility.frustumCulling) {
@@ -119,6 +131,10 @@ export class DecalPasses {
                 if (!this._host.thumbnailMode && decal.emits) { this.emissiveDecals.push(decal); drawn = true; }
             }
             if (drawn && decal.receivers === 'terrain') this._decalReceiversWanted = true;
+            else if (drawn) {
+                const s = decal.getBoundingSphere();
+                this._openDecalSpheres.push(s.center[0], s.center[1], s.center[2], s.radius);
+            }
         }
         const order = (a: DecalNode, b: DecalNode) =>
             a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -151,6 +167,7 @@ export class DecalPasses {
      * a scene with no landscape then draws nothing, instead of everywhere.
      */
     public decalReceiverPass(scene: Scene): void {
+        this._decalExclusionPass(scene);
         if (!this._decalReceiversWanted || !this._passes.beginPass('decals.receivers')) return;
         this.decalReceiverFBO = this.decalTarget(this.decalReceiverFBO, () => new Framebuffer({ usage: 'depth' }));
         const pass = this._passes.beginFullscreenPass(this.decalReceiverFBO.renderTarget, 'decalReceivers', true);
@@ -210,13 +227,113 @@ export class DecalPasses {
     }
 
     /**
+     * Depth of the surfaces that receive no decals (a material with `receiveDecals: false`: a character's skin, say),
+     * for every decal that lands on all surfaces to keep off: the same depth comparison as `receivers: 'terrain'`,
+     * the other way round (`decalReceiverMask`'s filter 2). The engine has no stencil and no G-buffer channel to spare
+     * for a per-surface flag.
+     *
+     * Only the surfaces some such decal's box can reach are drawn (their bounding spheres meet), so a scene that opts
+     * nothing out, or a frame whose decals are far from what it opted out, draws nothing and allocates nothing. Drawn
+     * like the terrain receiver depth: in the jittered phase, through the frame's raster projection; a skinned body
+     * through its bone palette, as a shadow caster is. A viewmodel is not: it is drawn at its own depth, which no
+     * decal reconstructs. A cut-out surface is drawn whole, its card and not its cutout.
+     */
+    private _decalExclusionPass(scene: Scene): void {
+        const spheres = this._openDecalSpheres;
+        if (!spheres.length) return;
+        const excluded = this._excluded;
+        excluded.length = 0;
+        for (const node of scene.modelsExceptTerrain) {
+            if (!node.visible || !node.initialized || node.viewmodel) continue;
+            if (!DecalPasses._optsOut(node)) continue;
+            if (this._sys.visibility.outsideFrustum(node)) continue;
+            const s = node.getBoundingSphere();
+            for (let i = 0; i < spheres.length; i += 4) {
+                const dx = s.center[0] - spheres[i], dy = s.center[1] - spheres[i + 1], dz = s.center[2] - spheres[i + 2];
+                const r = s.radius + spheres[i + 3];
+                if (dx * dx + dy * dy + dz * dz <= r * r) { excluded.push(node); break; }
+            }
+        }
+        if (!excluded.length || !this._passes.beginPass('decals.receivers')) return;
+        const target = this.decalExclusionFBO = this.decalTarget(this.decalExclusionFBO, () => new Framebuffer({ usage: 'depth' }));
+        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'decalExclusions', true);
+        const cam = this._view.camera;
+        mat4.multiply(this._decalReceiverViewProj, this._projection.rasterProjection(cam.projectionMatrix), cam.viewMatrix);
+        const objects = this._sys.objects, modelDraw = this._sys.modelDraw;
+        let bound: RenderPipeline | null = null;
+        let objectData = false, boundGeneration = -1;
+        for (const node of excluded) {
+            const model = node.model;
+            const material = model.material;
+            const skinned = model instanceof AnimatedModel && model.hasSkin && !!node.animator;
+            const program = skinned ? 'shadowMapSkinned' : 'shadowMap';
+            // Off the main thread on WebGPU, as the decals' own are: a body whose pipeline is still being built is left out
+            // for a frame or two rather than the frame waiting on the compile.
+            const pipeline = this._pipelines.memoizedOrDefer(this._exclusionMemo, node, program, skinned ? ShadowMapSkinnedProgram : ShadowMapProgram, {
+                cullMode: ModelDraw.cullFor(material.config.side),
+                depthStencil: DEPTH_WRITE,
+                targets: 0,
+                vertex: skinned ? 'model+skin' : 'model',
+                // The buffer under it was written for the material the node wears; see `_renderShadowCasters`.
+                builtFor: material.type,
+                target: target.renderTarget,
+            });
+            if (!pipeline) continue;
+            if (pipeline !== bound) {
+                this._shaderManager.bind(program);
+                pass.setPipeline(pipeline);
+                bound = pipeline;
+                boundGeneration = -1;
+                objectData = this._bindGroups.declaresObjectData(pipeline);
+                this._shaderManager.setUniform('u_lightSpace', this._decalReceiverViewProj);
+            }
+            let row = 0;
+            if (objectData) {
+                row = modelDraw.rowForNode(node);
+                if (boundGeneration !== objects.generation) {
+                    pass.setBindGroup(2, this._bindGroups.objectDataGroup(pipeline, objects.texture));
+                    boundGeneration = objects.generation;
+                }
+            } else {
+                this._shaderManager.setUniform('u_model', node.worldTransform);
+                if (skinned) modelDraw.uploadBoneMatrices(program, node);
+            }
+            // The submeshes that opt out, or the whole buffer when it has none.
+            if (!model.hasSubmeshes) this._passes.recordDraw(pass, model.mesh, 0, 0, -1, row);
+            else {
+                const materials = model.materials, submeshes = model.submeshes;
+                for (let i = 0; i < submeshes.length; i++) {
+                    const m = materials[i] ?? materials[0];
+                    if (m.config.receiveDecals === false && !m.config.transparent)
+                        this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count, -1, row);
+                }
+            }
+        }
+        this._passes.endFullscreenPass(pass);
+        this._decalExclusionReady = true;
+    }
+
+    /** Whether any opaque material `node` wears receives no decals. */
+    private static _optsOut(node: ModelNode): boolean {
+        for (const m of node.model.materials) if (m.config.receiveDecals === false && !m.config.transparent) return true;
+        return false;
+    }
+
+    /**
      * What a decal binds in its receiver slot: `fallback` (the depth it projects onto, with the filter
      * off) for an unfiltered decal, the landscape-only depth for a terrain one — or null when that depth
      * does not exist this frame, and the decal must then not draw at all rather than land on everything.
+     * A decal on every surface binds the depth of the surfaces that receive none, when some are in reach.
      */
     private _decalReceiverDepth(decal: DecalNode, fallback: Texture): Texture | null {
-        if (decal.receivers !== 'terrain') return fallback;
+        if (decal.receivers !== 'terrain') return this._decalExclusionReady && this.decalExclusionFBO ? this.decalExclusionFBO.depth : fallback;
         return this._decalReceiversReady && this.decalReceiverFBO ? this.decalReceiverFBO.depth : null;
+    }
+
+    /** `u_receiverFilter`: 1 for a terrain decal, 2 for one keeping off the surfaces that receive none, else 0. */
+    private _receiverFilterOf(decal: DecalNode): number {
+        if (decal.receivers === 'terrain') return 1;
+        return this._decalExclusionReady && this.decalExclusionFBO ? 2 : 0;
     }
 
     /**
@@ -383,7 +500,7 @@ export class DecalPasses {
         sm.setUniform('u_radialEmissive', r.emissive);
         sm.setUniform('u_pattern', decal.pattern === 'radial' ? 1 : 0);
         // Only reached with the receiver depth bound; see `_decalReceiverDepth`.
-        sm.setUniform('u_receiverFilter', decal.receivers === 'terrain' ? 1 : 0);
+        sm.setUniform('u_receiverFilter', this._receiverFilterOf(decal));
         sm.setUniform('u_affectAlbedo', decal.affects.albedo);
         sm.setUniform('u_affectNormal', decal.affects.normal);
         sm.setUniform('u_affectSurface', decal.affects.surface);

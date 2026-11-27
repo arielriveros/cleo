@@ -259,8 +259,17 @@ invert for depth maps and clipping at the UV border. See [Height and parallax](#
 **Wind**, **Interaction**, **Variation**, **Weather**, **Gusts** — Foliage only; see
 [Foliage materials](#foliage-materials).
 
-**Options** — side (front / back / both), transparency, shadow casting, probe participation,
+**Options** — side (front / back / both), transparency, shadow casting, probe participation, decals,
 wireframe.
+
+| Option | What it does |
+|---|---|
+| **Wireframe** | Draws the surface as its triangles' edges. |
+| **Transparent** | Blends the surface over what is behind it instead of drawing it opaque. For glass and water-like surfaces; prefer an alpha cutout for leaves and fences. |
+| **Cast Shadow** | The surface casts shadows. |
+| **Probeable** | Light probes and GI volumes see the surface when they capture the scene. Turn it off for something that moves or should not tint the light around it. |
+| **Receive decals** | Decals land on the surface. Off, no decal does, on any route: bullet holes, blood and the like stay on the ground and walls around it. A character's skin is the usual case (the Sandbox's Mannequins). It costs one depth pass over the surfaces with it off that a visible decal's box reaches; a frame with none pays nothing. |
+| **Side** | Which faces draw: the front, the back, or both. |
 
 ### Foliage materials
 

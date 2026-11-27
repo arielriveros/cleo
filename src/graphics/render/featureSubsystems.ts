@@ -37,12 +37,12 @@ export const RENDER_FACTORY = {
 // --- Decals (feature `decals`) ------------------------------------------------------------------------------------
 
 export type DecalSubsystem = Pick<DecalPasses,
-    'dBufferFBO' | 'gBufferCopyFBO' | 'decalReceiverFBO' | 'surfaceDecals' | 'emissiveDecals' | 'overlayDecals' |
+    'dBufferFBO' | 'gBufferCopyFBO' | 'decalReceiverFBO' | 'decalExclusionFBO' | 'surfaceDecals' | 'emissiveDecals' | 'overlayDecals' |
     'collectDecals' | 'decalReceiverPass' | 'surfaceDecalPass' | 'emissiveDecalPass' | 'drawColorDecals'>;
 
 export function createNullDecals(): DecalSubsystem {
     return {
-        dBufferFBO: null, gBufferCopyFBO: null, decalReceiverFBO: null,
+        dBufferFBO: null, gBufferCopyFBO: null, decalReceiverFBO: null, decalExclusionFBO: null,
         surfaceDecals: [], emissiveDecals: [], overlayDecals: [],
         collectDecals() {}, decalReceiverPass() {}, surfaceDecalPass() {}, emissiveDecalPass() {}, drawColorDecals() {},
     };

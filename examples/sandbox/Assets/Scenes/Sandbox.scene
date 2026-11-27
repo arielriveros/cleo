@@ -894,7 +894,7 @@
         }
       },
       {
-        "id": "6ec8173321a6f0d870bcd5fbc63171f1",
+        "id": "7ad55144cd0bd48360c892bc4d5a1e8e",
         "name": "Player Collider",
         "type": "collider",
         "position": [0, 0.019999999552965164, 0],
@@ -902,7 +902,7 @@
         "scale": [1, 1, 1],
         "children": [
           {
-            "id": "a5347fabad3c3b20c831cecb6af08443",
+            "id": "bc5f314f0fe57a350350d63a100f8d8f",
             "name": "Character",
             "type": "character",
             "position": [0, 0, 0],
@@ -910,7 +910,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "84d054bbad2b4fa304552ee468a54107",
+                "id": "32221492bb5e43b98a1534b87c8c317b",
                 "name": "Camera Rig",
                 "type": "cameraRig",
                 "position": [0, 1.5, 0],
@@ -918,7 +918,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "ffb3aa643a0bf6d5fe1846c7ec1bc411",
+                    "id": "61819508bf9b25c9489e11fefaa8d4cc",
                     "name": "Camera",
                     "type": "camera",
                     "position": [-0.5, 0.10000000149011612, -1.899999976158142],
@@ -926,7 +926,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "509d0da1ea7e05e2a547d511a9f4d0e8",
+                        "id": "9340051c570d78dd5d873148cdd57a10",
                         "name": "Viewmodels",
                         "type": "node",
                         "position": [0, 0, 0],
@@ -934,7 +934,7 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "59b75235c0b9dad1c2f85f4f89d3fc9f",
+                            "id": "2677ca054e719141c112718c3a83c33d",
                             "name": "Pistol Viewmodel",
                             "type": "model",
                             "position": [0, -1.6009999513626099, -0.02199999988079071],
@@ -942,7 +942,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "0deb722d7d97f3d9b0e8afeb326c82fd",
+                                "id": "eea948a5e30949a458b857c0359f3084",
                                 "name": "Muzzle",
                                 "type": "node",
                                 "position": [-0.08799999952316284, 1.4850000143051147, 0.6460000276565552],
@@ -4599,7 +4599,7 @@
                             "ragdoll": null
                           },
                           {
-                            "id": "d47c4ab485bc4136ebcb203c62fe09c7",
+                            "id": "cd5975a562bb9c18a59a4ffb3996e652",
                             "name": "AK-47 Viewmodel",
                             "type": "model",
                             "position": [0, -1.6009999513626099, -0.02199999988079071],
@@ -4607,7 +4607,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "13904ee645975b200ff987cb669bb2f6",
+                                "id": "ff1b401a3c285ed973867ec4add0baa1",
                                 "name": "Muzzle",
                                 "type": "node",
                                 "position": [-0.12200000137090683, 1.4700000286102295, 0.8320000171661377],
@@ -8218,7 +8218,7 @@
                             "ragdoll": null
                           },
                           {
-                            "id": "bde2c8c2d0c4fe3293f3469202049b34",
+                            "id": "df54ffef6ca3f8aec1d68f9dfed44782",
                             "name": "SAPS-12 Viewmodel",
                             "type": "model",
                             "position": [0, -1.6009999513626099, -0.02199999988079071],
@@ -8226,7 +8226,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "5c9b2b8edf372122f128f4317462abbd",
+                                "id": "91b6dcb96dcbdd933a788ad99549aca0",
                                 "name": "Muzzle",
                                 "type": "node",
                                 "position": [-0.09799999743700027, 1.4079999923706055, 0.875],
@@ -12052,7 +12052,7 @@
                   }
                 },
                 "spawnOnStart": true,
-                "followId": "8fe8f1117013aca5cb54b6cbf05ee39a",
+                "followId": "a153d87135570972f9f48de7b6e142da",
                 "lookAtId": null,
                 "cameraNodeId": null,
                 "followOffset": [0, 1.5, 0],
@@ -12100,7 +12100,7 @@
                 }
               },
               {
-                "id": "8fe8f1117013aca5cb54b6cbf05ee39a",
+                "id": "a153d87135570972f9f48de7b6e142da",
                 "name": "Mannequin",
                 "type": "model",
                 "position": [0, 0, 0],
@@ -12176,7 +12176,8 @@
                       "wireframe": false,
                       "transparent": false,
                       "castShadow": true,
-                      "probeable": true
+                      "probeable": true,
+                      "receiveDecals": false
                     }
                   },
                   "skin": {
@@ -25673,7 +25674,7 @@
                 "ragdoll": null
               },
               {
-                "id": "ebf8fada156fbe30cc5cc75dc794d3c2",
+                "id": "547b4a4961fbaf30395c283f0a566f34",
                 "name": "Weapons",
                 "type": "node",
                 "position": [0, 0, 0],
@@ -25681,7 +25682,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "9085a75521a457491cb8bbd61bdb31b5",
+                    "id": "cec93d58ae1113a31d42ccf24de7dbf4",
                     "name": "Pistol Grip",
                     "type": "node",
                     "position": [-0.8134288787841797, 1.4045332670211792, -0.0243177879601717],
@@ -25689,7 +25690,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "52afd120aeaada44f65136f02140cacd",
+                        "id": "8530804d06892f473481656a32fefa5e",
                         "name": "Pistol",
                         "type": "node",
                         "position": [0, 0, 0],
@@ -25697,7 +25698,7 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "0296e354a4b555fb481650d450ca7d5b",
+                            "id": "ea3d27e4a0c4e00c1ec085493f1d20df",
                             "name": "Pistol",
                             "type": "model",
                             "position": [0, 0, 0],
@@ -25793,7 +25794,7 @@
                         "spawnOnStart": true
                       },
                       {
-                        "id": "3a17c837468a8760f8a244df11a1207e",
+                        "id": "6cf01d7c1b6a1a327a88f0231c7a8a8e",
                         "name": "Muzzle",
                         "type": "node",
                         "position": [0, 0.09929999709129333, 0.23499999940395355],
@@ -25843,7 +25844,7 @@
                     }
                   },
                   {
-                    "id": "020ee1abd4b0519b4f34f41d75fd43eb",
+                    "id": "f9d7279efc9823c597dbdb703219715d",
                     "name": "Rifle Grip",
                     "type": "node",
                     "position": [-0.8134288787841797, 1.4045332670211792, -0.0243177879601717],
@@ -25851,7 +25852,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "6f1eb4535b8c1f69be1c2342f25d892a",
+                        "id": "7465f7c28f51b69be748408abb89079f",
                         "name": "Rifle",
                         "type": "node",
                         "position": [0.013829999603331089, -0.007340000011026859, -0.03099999949336052],
@@ -25859,7 +25860,7 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "a22ed45d9dffc2ce4edeb0c79baeebc6",
+                            "id": "88a837f5b6f42f7c6ad6198478d0e0ac",
                             "name": "Rifle",
                             "type": "model",
                             "position": [0, 0, 0],
@@ -26025,7 +26026,7 @@
                         "spawnOnStart": true
                       },
                       {
-                        "id": "f3246b393eb21c9c9157583a2a6efe23",
+                        "id": "44a97d9da4e2d65fa42de5a3dbb25161",
                         "name": "Muzzle",
                         "type": "node",
                         "position": [0.013829999603331089, 0.08686000108718872, 0.5827000141143799],
@@ -26075,7 +26076,7 @@
                     }
                   },
                   {
-                    "id": "a4bd0980bc097e33aa0b5d3e6bd34d51",
+                    "id": "107e43b071b3387612b472eeca2933c7",
                     "name": "Shotgun Grip",
                     "type": "node",
                     "position": [-0.8134288787841797, 1.4045332670211792, -0.0243177879601717],
@@ -26083,7 +26084,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "5669e3c84135ecd2198057aebd0383b8",
+                        "id": "9465483974c4be1f9409ce561afe4072",
                         "name": "Shotgun",
                         "type": "node",
                         "position": [0, 0, 0],
@@ -26091,7 +26092,7 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "87ad5e1732d715145372f4a0656ce085",
+                            "id": "c743af1461b31282f8b5467d042b2b53",
                             "name": "Shotgun",
                             "type": "model",
                             "position": [0, 0, 0],
@@ -26187,7 +26188,7 @@
                         "spawnOnStart": true
                       },
                       {
-                        "id": "79515d8acc75b47bd643aebcd7f06fd5",
+                        "id": "96be782c9816496dd2c38334d61857b2",
                         "name": "Muzzle",
                         "type": "node",
                         "position": [0, 0.09139999747276306, 0.7781000137329102],
@@ -26241,7 +26242,7 @@
                 "spawnOnStart": true
               },
               {
-                "id": "2c8cada62f9ddfebdbec043bfc545db0",
+                "id": "cb93e4d0a0bc51347e22fd9118bbfb56",
                 "name": "Sounds",
                 "type": "node",
                 "position": [0, 0, 0],
@@ -26249,7 +26250,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "22026c14ce8fcb3d41d7c5d82c8ba5d5",
+                    "id": "5646900f055e064f6841e3bc81b4facd",
                     "name": "ShotPistol",
                     "type": "sound",
                     "position": [0, 0, 0],
@@ -26275,7 +26276,7 @@
                     }
                   },
                   {
-                    "id": "0ae56f58a69695228fe0b5b02259f860",
+                    "id": "bbe39403c34b45b8e184b3672d7a14ee",
                     "name": "ShotRifle",
                     "type": "sound",
                     "position": [0, 0, 0],
@@ -26301,7 +26302,7 @@
                     }
                   },
                   {
-                    "id": "639bad507d33d476f29ba9788b37e64c",
+                    "id": "45ca3f617cfe6ae65e89eeab012aa524",
                     "name": "ShotShotgun",
                     "type": "sound",
                     "position": [0, 0, 0],
@@ -26331,7 +26332,7 @@
                 "spawnOnStart": true
               },
               {
-                "id": "1654482ddfe5aa6f8ef39cef6691ff54",
+                "id": "65bc3bd6559b84b036df655c966ed3bb",
                 "name": "HUD",
                 "type": "uiRoot",
                 "position": [0, 0, 0],
@@ -26339,7 +26340,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "0b849de41ff6c0bf3d6ca875190f6b02",
+                    "id": "eacc7076fb45d2d2d1b4ddf9089754db",
                     "name": "Crosshair",
                     "type": "uiPanel",
                     "position": [0, 0, 0],
@@ -26347,7 +26348,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "4ea92d08976a5ca6e7b6f943d32c37cf",
+                        "id": "a28744370dad0403122e5b856863d844",
                         "name": "Crosshair Dot",
                         "type": "uiPanel",
                         "position": [0, 0, 0],
@@ -26378,7 +26379,7 @@
                         }
                       },
                       {
-                        "id": "5bbfe90faf5a6bb1e8a834ba9a289676",
+                        "id": "a54f1178e2aa939839b6af39d34da954",
                         "name": "Crosshair Top",
                         "type": "uiPanel",
                         "position": [0, 0, 0],
@@ -26409,7 +26410,7 @@
                         }
                       },
                       {
-                        "id": "3c092e1e6f8cbcccc6ba9df6fc4851f2",
+                        "id": "f5dbcdc8eb51cf4c8574f90a57eef704",
                         "name": "Crosshair Bottom",
                         "type": "uiPanel",
                         "position": [0, 0, 0],
@@ -26440,7 +26441,7 @@
                         }
                       },
                       {
-                        "id": "367133a88495b0a872aa7017b0646f61",
+                        "id": "d3273ed78622a17f79230ca4a905e4c8",
                         "name": "Crosshair Left",
                         "type": "uiPanel",
                         "position": [0, 0, 0],
@@ -26471,7 +26472,7 @@
                         }
                       },
                       {
-                        "id": "d25438c565f57bbc182eb771d8d40821",
+                        "id": "2fca246d4f5b0db6fd54dcaaca7a1d45",
                         "name": "Crosshair Right",
                         "type": "uiPanel",
                         "position": [0, 0, 0],
@@ -26526,7 +26527,7 @@
                     }
                   },
                   {
-                    "id": "72361836db5332aea796d39e3bcac23d",
+                    "id": "a29f7ed0a8cc0fc06abde34aafc06d4b",
                     "name": "Ammunition",
                     "type": "uiPanel",
                     "position": [0, 0, 0],
@@ -26534,7 +26535,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "db4ef15e5a0c5e181c17081f6ae7a369",
+                        "id": "fcf056aa2919db3790ca6d3067d3dd2a",
                         "name": "Ammo",
                         "type": "uiText",
                         "position": [0, 0, 0],
@@ -26573,7 +26574,7 @@
                         }
                       },
                       {
-                        "id": "ae7671f0fba2492e18a17a7759347168",
+                        "id": "12c9158115b2e628936e84797b84aa26",
                         "name": "Reserve",
                         "type": "uiText",
                         "position": [0, 0, 0],
@@ -26612,7 +26613,7 @@
                         }
                       },
                       {
-                        "id": "030d51fa113c37f297b762dde4cc3523",
+                        "id": "b4363e95db932659db58f427d2b7c117",
                         "name": "Weapon Name",
                         "type": "uiText",
                         "position": [0, 0, 0],
@@ -26675,7 +26676,7 @@
                     }
                   },
                   {
-                    "id": "0daf3fe7ec564b1706cad8413f00e424",
+                    "id": "0febc94a8ecfcc51bd128083f25a2cb1",
                     "name": "Reloading",
                     "type": "uiText",
                     "position": [0, 0, 0],
@@ -26750,7 +26751,7 @@
                 }
               },
               {
-                "id": "89479ba5c95608348055c5c56efcd1c5",
+                "id": "f04cfa89a51c64f052dd6f4640b42763",
                 "name": "Player Controller",
                 "type": "controller",
                 "position": [0, 0, 0],
@@ -26759,8 +26760,8 @@
                 "children": [],
                 "variables": {},
                 "spawnOnStart": true,
-                "possessedId": "a5347fabad3c3b20c831cecb6af08443",
-                "aimSourceId": "84d054bbad2b4fa304552ee468a54107",
+                "possessedId": "bc5f314f0fe57a350350d63a100f8d8f",
+                "aimSourceId": "32221492bb5e43b98a1534b87c8c317b",
                 "navMeshId": null,
                 "controlSource": "player",
                 "moveAction": "Move",
@@ -35721,7 +35722,7 @@
         "scale": [1, 1, 1],
         "children": [
           {
-            "id": "3b817622c87ba33188bd5f21c2926c5a",
+            "id": "98e70662ad0ac8849108d9f003bfd8a8",
             "name": "Civilian 1",
             "type": "collider",
             "position": [7, 0, 5],
@@ -35729,7 +35730,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "7266dcbc7fc3b8ce8a68f1c7693cf372",
+                "id": "eff55dc1c87c3d4280a941a3fd4e5817",
                 "name": "Character",
                 "type": "character",
                 "position": [0, 0, 0],
@@ -35737,7 +35738,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "72bb1546a6e30f50100ca59b0df8ec64",
+                    "id": "f9c74f8b94eb791e1b87c37cb707e00a",
                     "name": "Mannequin",
                     "type": "model",
                     "position": [0, 0, 0],
@@ -35813,7 +35814,8 @@
                           "wireframe": false,
                           "transparent": false,
                           "castShadow": true,
-                          "probeable": true
+                          "probeable": true,
+                          "receiveDecals": false
                         }
                       },
                       "skin": {
@@ -49310,7 +49312,7 @@
                     "ragdoll": null
                   },
                   {
-                    "id": "147ba6969610a42e08f777df5d0761b0",
+                    "id": "aaa0b440ec5f597ab62c488d35367915",
                     "name": "AI Controller",
                     "type": "controller",
                     "position": [0, 0, 0],
@@ -49319,7 +49321,7 @@
                     "children": [],
                     "variables": {},
                     "spawnOnStart": true,
-                    "possessedId": "7266dcbc7fc3b8ce8a68f1c7693cf372",
+                    "possessedId": "eff55dc1c87c3d4280a941a3fd4e5817",
                     "aimSourceId": null,
                     "navMeshId": null,
                     "controlSource": "ai",
@@ -49506,7 +49508,7 @@
             }
           },
           {
-            "id": "0806343e1e2e6ccc1a09eca8c6b17539",
+            "id": "de0e424291daa8c1063d26e2a0815530",
             "name": "Enemy Pillars 1",
             "type": "collider",
             "position": [20, 0, -15],
@@ -49514,7 +49516,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "938f31f3f5a7f93fa917556dc062750d",
+                "id": "7736933ece724a5d7eac7a4554bc9dcc",
                 "name": "Character",
                 "type": "character",
                 "position": [0, 0, 0],
@@ -49522,7 +49524,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "b98c435782ac32b98ff968b92b528a7f",
+                    "id": "e6b2210ef8084d0fb8ddebc443fe8021",
                     "name": "Mannequin",
                     "type": "model",
                     "position": [0, 0, 0],
@@ -49598,7 +49600,8 @@
                           "wireframe": false,
                           "transparent": false,
                           "castShadow": true,
-                          "probeable": true
+                          "probeable": true,
+                          "receiveDecals": false
                         }
                       },
                       "skin": {
@@ -63095,7 +63098,7 @@
                     "ragdoll": null
                   },
                   {
-                    "id": "d4abc64004b25e099c6e74576a55caa1",
+                    "id": "a8ad494327aab27bd4a8e98faf6c610a",
                     "name": "Weapons",
                     "type": "node",
                     "position": [0, 0, 0],
@@ -63103,7 +63106,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "de067d41c8a7432acc158cc0b6f8097c",
+                        "id": "21f1acb9ccb667cdf1a6bea8e038cdf6",
                         "name": "Pistol Grip",
                         "type": "node",
                         "position": [-0.8134300708770752, 1.4045332670211792, -0.024319715797901154],
@@ -63111,7 +63114,7 @@
                         "scale": [1, 1.0000001192092896, 1.0000001192092896],
                         "children": [
                           {
-                            "id": "1844289ce5ef846b006e0ff0a5b177c6",
+                            "id": "09d9c31843eeafeb2fbe89768d05a04d",
                             "name": "Pistol",
                             "type": "node",
                             "position": [0, 0, 0],
@@ -63119,7 +63122,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "f832dd631449e6e22056c311267de520",
+                                "id": "fd6a9eb10c6b4d5336dd5a4f5451fb9a",
                                 "name": "Pistol",
                                 "type": "model",
                                 "position": [0, 0, 0],
@@ -63215,7 +63218,7 @@
                             "spawnOnStart": true
                           },
                           {
-                            "id": "8de345a2fe4e47f638c17536ae7f183e",
+                            "id": "c62fd5ca27caf4feb449564f21cd4db0",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [0, 0.09929999709129333, 0.23499999940395355],
@@ -63265,7 +63268,7 @@
                         }
                       },
                       {
-                        "id": "4d31adea218fb08c55a34f3142e28312",
+                        "id": "4d0e276f153dccf34b4c3e921386287c",
                         "name": "Rifle Grip",
                         "type": "node",
                         "position": [-0.8134300708770752, 1.4045332670211792, -0.024319715797901154],
@@ -63273,7 +63276,7 @@
                         "scale": [1, 1.0000001192092896, 1.0000001192092896],
                         "children": [
                           {
-                            "id": "653c19f46441ea4ae45f60b2c7102944",
+                            "id": "cd4ec0e3874361f7afc46a18d962089b",
                             "name": "Rifle",
                             "type": "node",
                             "position": [0.013829999603331089, -0.007340000011026859, -0.03099999949336052],
@@ -63281,7 +63284,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "a9a9a2d29c4bea1f31a2ca74a21f04e8",
+                                "id": "0dc179a509c31d084be18a37896bbef8",
                                 "name": "Rifle",
                                 "type": "model",
                                 "position": [0, 0, 0],
@@ -63447,7 +63450,7 @@
                             "spawnOnStart": true
                           },
                           {
-                            "id": "704d4138d3affd48ee31d4c61c86e5f9",
+                            "id": "09fef83d25c4606afe56a0172eb6a50e",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [0.013829999603331089, 0.08686000108718872, 0.5827000141143799],
@@ -63497,7 +63500,7 @@
                         }
                       },
                       {
-                        "id": "99b5ca6d8db3c722113390b27fe41960",
+                        "id": "1531c9d61a5b21517c96e6e5a0a712a7",
                         "name": "Shotgun Grip",
                         "type": "node",
                         "position": [-0.8134300708770752, 1.4045332670211792, -0.024319715797901154],
@@ -63505,7 +63508,7 @@
                         "scale": [1, 1.0000001192092896, 1.0000001192092896],
                         "children": [
                           {
-                            "id": "dabf48bbe9a9942d906ed0a0df3a3d2d",
+                            "id": "2bbd211c931930a45011ad1351940a89",
                             "name": "Shotgun",
                             "type": "node",
                             "position": [0, 0, 0],
@@ -63513,7 +63516,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "9afa1112a22686c2111adb3e8dc2e7c1",
+                                "id": "7632992fdef7a31c03ce17d3441664c4",
                                 "name": "Shotgun",
                                 "type": "model",
                                 "position": [0, 0, 0],
@@ -63609,7 +63612,7 @@
                             "spawnOnStart": true
                           },
                           {
-                            "id": "35f3a13088d8ca878483eb5d7785ad0d",
+                            "id": "d8377a275afe87d65cda49ae332a6e94",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [0, 0.09139999747276306, 0.7781000137329102],
@@ -63663,7 +63666,7 @@
                     "spawnOnStart": true
                   },
                   {
-                    "id": "1240e19e4c7b992f53ab11aadbc7c2d6",
+                    "id": "92704efbbfb27f284cfac9e321081730",
                     "name": "Sounds",
                     "type": "node",
                     "position": [0, 0, 0],
@@ -63671,7 +63674,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "359c9264cd9186264b0c3f55369d3951",
+                        "id": "8796671da517f69fba45f17de00dfbf7",
                         "name": "ShotPistol",
                         "type": "sound",
                         "position": [0, 0, 0],
@@ -63697,7 +63700,7 @@
                         }
                       },
                       {
-                        "id": "eea852fe5fb76882f18a9882ff365d44",
+                        "id": "5230c232d05c7e9188ed5ffa6c678062",
                         "name": "ShotRifle",
                         "type": "sound",
                         "position": [0, 0, 0],
@@ -63723,7 +63726,7 @@
                         }
                       },
                       {
-                        "id": "5a6579fec12ee4e9348f9d3e0ae8e120",
+                        "id": "46a1c328eb5aa9979aea32f75d39ebff",
                         "name": "ShotShotgun",
                         "type": "sound",
                         "position": [0, 0, 0],
@@ -63753,7 +63756,7 @@
                     "spawnOnStart": true
                   },
                   {
-                    "id": "5767606ce01022b7f1fe266fed3ed3bb",
+                    "id": "bbc0274ea234d7b8b5fb97c50b745076",
                     "name": "AI Controller",
                     "type": "controller",
                     "position": [0, 0, 0],
@@ -63762,7 +63765,7 @@
                     "children": [],
                     "variables": {},
                     "spawnOnStart": true,
-                    "possessedId": "938f31f3f5a7f93fa917556dc062750d",
+                    "possessedId": "7736933ece724a5d7eac7a4554bc9dcc",
                     "aimSourceId": null,
                     "navMeshId": null,
                     "controlSource": "ai",
@@ -63951,7 +63954,7 @@
             }
           },
           {
-            "id": "ff8db8436b16aeb1bece9d9954f16fba",
+            "id": "c970532b821ac23db7ab0e1eb3ce63f0",
             "name": "Civilian 2",
             "type": "collider",
             "position": [-7, 0, 4],
@@ -63959,7 +63962,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "851b14fdb4719598b66a17e198c8842e",
+                "id": "cc11993e7e2ea0c0b5f52203ffad4fb9",
                 "name": "Character",
                 "type": "character",
                 "position": [0, 0, 0],
@@ -63967,7 +63970,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "10072b3178393dd66bd537181b2f0204",
+                    "id": "044b920ccdf19b66ec75c056b5669577",
                     "name": "Mannequin",
                     "type": "model",
                     "position": [0, 0, 0],
@@ -64043,7 +64046,8 @@
                           "wireframe": false,
                           "transparent": false,
                           "castShadow": true,
-                          "probeable": true
+                          "probeable": true,
+                          "receiveDecals": false
                         }
                       },
                       "skin": {
@@ -77540,7 +77544,7 @@
                     "ragdoll": null
                   },
                   {
-                    "id": "f9d9ac062f24a66d994bf888a35748a5",
+                    "id": "dd36685ef6ea40eb896120d781c81a0d",
                     "name": "AI Controller",
                     "type": "controller",
                     "position": [0, 0, 0],
@@ -77549,7 +77553,7 @@
                     "children": [],
                     "variables": {},
                     "spawnOnStart": true,
-                    "possessedId": "851b14fdb4719598b66a17e198c8842e",
+                    "possessedId": "cc11993e7e2ea0c0b5f52203ffad4fb9",
                     "aimSourceId": null,
                     "navMeshId": null,
                     "controlSource": "ai",
@@ -77736,7 +77740,7 @@
             }
           },
           {
-            "id": "07e521c09732a23aa0552da1a517062c",
+            "id": "3b3d61cbe91ef40d9c66be5a7cb78f62",
             "name": "Civilian 3",
             "type": "collider",
             "position": [-14, 0, 20],
@@ -77744,7 +77748,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "ff8e602216f6d15fd609f69edcf66286",
+                "id": "3bceca2ba605745262308b92a60482af",
                 "name": "Character",
                 "type": "character",
                 "position": [0, 0, 0],
@@ -77752,7 +77756,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "435c7482b999bd4bac90a053005c5b85",
+                    "id": "904449a0759314a99a18fde55904ae0e",
                     "name": "Mannequin",
                     "type": "model",
                     "position": [0, 0, 0],
@@ -77828,7 +77832,8 @@
                           "wireframe": false,
                           "transparent": false,
                           "castShadow": true,
-                          "probeable": true
+                          "probeable": true,
+                          "receiveDecals": false
                         }
                       },
                       "skin": {
@@ -91325,7 +91330,7 @@
                     "ragdoll": null
                   },
                   {
-                    "id": "8676216282bfb78565973afe924e0ef9",
+                    "id": "dae18e35960a1d00e430d3d2c2dbff18",
                     "name": "AI Controller",
                     "type": "controller",
                     "position": [0, 0, 0],
@@ -91334,7 +91339,7 @@
                     "children": [],
                     "variables": {},
                     "spawnOnStart": true,
-                    "possessedId": "ff8e602216f6d15fd609f69edcf66286",
+                    "possessedId": "3bceca2ba605745262308b92a60482af",
                     "aimSourceId": null,
                     "navMeshId": null,
                     "controlSource": "ai",
@@ -91521,7 +91526,7 @@
             }
           },
           {
-            "id": "4c5b14f6b8d3efa921139420bc9b4a67",
+            "id": "dc1d9672344c7ea1460e23b89d837264",
             "name": "Civilian 4",
             "type": "collider",
             "position": [14, 0, 19],
@@ -91529,7 +91534,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "264b82ddac0a7e6d9467fadbe7c3c262",
+                "id": "b9c15db68bfec7266d85228048ee79ef",
                 "name": "Character",
                 "type": "character",
                 "position": [0, 0, 0],
@@ -91537,7 +91542,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "78105573ee20951ada2adf01f05d5d2d",
+                    "id": "a8b2c1af074fc7edc1ecc2f0988afdad",
                     "name": "Mannequin",
                     "type": "model",
                     "position": [0, 0, 0],
@@ -91613,7 +91618,8 @@
                           "wireframe": false,
                           "transparent": false,
                           "castShadow": true,
-                          "probeable": true
+                          "probeable": true,
+                          "receiveDecals": false
                         }
                       },
                       "skin": {
@@ -105110,7 +105116,7 @@
                     "ragdoll": null
                   },
                   {
-                    "id": "ca9b6efd19db5ba11bc93e04a07b571c",
+                    "id": "3d4b1caaf5befa67017b9f53ef1d62e8",
                     "name": "AI Controller",
                     "type": "controller",
                     "position": [0, 0, 0],
@@ -105119,7 +105125,7 @@
                     "children": [],
                     "variables": {},
                     "spawnOnStart": true,
-                    "possessedId": "264b82ddac0a7e6d9467fadbe7c3c262",
+                    "possessedId": "b9c15db68bfec7266d85228048ee79ef",
                     "aimSourceId": null,
                     "navMeshId": null,
                     "controlSource": "ai",
@@ -105306,7 +105312,7 @@
             }
           },
           {
-            "id": "0017bbcaf905e354b33fe1050499b66f",
+            "id": "37aae6407fc6b7739d6be7eeb26c4746",
             "name": "Civilian 5",
             "type": "collider",
             "position": [32, 0, 8],
@@ -105314,7 +105320,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "949d9f6b51162b2cae453aad91de0797",
+                "id": "f6cb9d9dcb0a9bb363647ebc627133c3",
                 "name": "Character",
                 "type": "character",
                 "position": [0, 0, 0],
@@ -105322,7 +105328,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "9c040f55afe5923d701b6d140fa3d4c9",
+                    "id": "ebcbd21f04ae068382577dfc211193c1",
                     "name": "Mannequin",
                     "type": "model",
                     "position": [0, 0, 0],
@@ -105398,7 +105404,8 @@
                           "wireframe": false,
                           "transparent": false,
                           "castShadow": true,
-                          "probeable": true
+                          "probeable": true,
+                          "receiveDecals": false
                         }
                       },
                       "skin": {
@@ -118895,7 +118902,7 @@
                     "ragdoll": null
                   },
                   {
-                    "id": "98aa3604c43a25cb292fe7fd3539b834",
+                    "id": "30a4a28194b8bf332f5be3aec220afe9",
                     "name": "AI Controller",
                     "type": "controller",
                     "position": [0, 0, 0],
@@ -118904,7 +118911,7 @@
                     "children": [],
                     "variables": {},
                     "spawnOnStart": true,
-                    "possessedId": "949d9f6b51162b2cae453aad91de0797",
+                    "possessedId": "f6cb9d9dcb0a9bb363647ebc627133c3",
                     "aimSourceId": null,
                     "navMeshId": null,
                     "controlSource": "ai",
@@ -119091,7 +119098,7 @@
             }
           },
           {
-            "id": "591d74095d0cfd49a0bb150db3d8030d",
+            "id": "b3638b340b026b45d4c125b6d0390c15",
             "name": "Civilian 6",
             "type": "collider",
             "position": [-3, 0, -22],
@@ -119099,7 +119106,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "34c622844a42d8c986ef2bd356ca08f2",
+                "id": "51fedda915cd74801f1de9a01bfbd24f",
                 "name": "Character",
                 "type": "character",
                 "position": [0, 0, 0],
@@ -119107,7 +119114,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "9942344501439aaa311fed80f3c0289b",
+                    "id": "6d1b79a66615c34047c86c9a568cec7d",
                     "name": "Mannequin",
                     "type": "model",
                     "position": [0, 0, 0],
@@ -119183,7 +119190,8 @@
                           "wireframe": false,
                           "transparent": false,
                           "castShadow": true,
-                          "probeable": true
+                          "probeable": true,
+                          "receiveDecals": false
                         }
                       },
                       "skin": {
@@ -132680,7 +132688,7 @@
                     "ragdoll": null
                   },
                   {
-                    "id": "2a661587f41822e97f4495932f97c0d0",
+                    "id": "cdedaab27cc0ffbf0b0332160120b6c3",
                     "name": "AI Controller",
                     "type": "controller",
                     "position": [0, 0, 0],
@@ -132689,7 +132697,7 @@
                     "children": [],
                     "variables": {},
                     "spawnOnStart": true,
-                    "possessedId": "34c622844a42d8c986ef2bd356ca08f2",
+                    "possessedId": "51fedda915cd74801f1de9a01bfbd24f",
                     "aimSourceId": null,
                     "navMeshId": null,
                     "controlSource": "ai",
@@ -132876,7 +132884,7 @@
             }
           },
           {
-            "id": "c26d85fbf80959453cf4715361fd886b",
+            "id": "cf47777ba5f5fcde24a5647ebc224384",
             "name": "Enemy Pillars 2",
             "type": "collider",
             "position": [21.5, 0, -13.5],
@@ -132884,7 +132892,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "a24a5b43264340d27c7ebd4fdfc1ea4c",
+                "id": "090b44f34e694b7a810ff44c42cf9474",
                 "name": "Character",
                 "type": "character",
                 "position": [0, 0, 0],
@@ -132892,7 +132900,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "b477b4aeeb99600b478394f87d0a4c6e",
+                    "id": "9a48e0cf0fac6d02c379b77c6c6d2383",
                     "name": "Mannequin",
                     "type": "model",
                     "position": [0, 0, 0],
@@ -132968,7 +132976,8 @@
                           "wireframe": false,
                           "transparent": false,
                           "castShadow": true,
-                          "probeable": true
+                          "probeable": true,
+                          "receiveDecals": false
                         }
                       },
                       "skin": {
@@ -146465,7 +146474,7 @@
                     "ragdoll": null
                   },
                   {
-                    "id": "933a3c845f24d0736166d337873c4e2f",
+                    "id": "3864df9973f148b078bd6af2f6ef00bd",
                     "name": "Weapons",
                     "type": "node",
                     "position": [0, 0, 0],
@@ -146473,7 +146482,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "f448e98b06eb1db2a1c8f0a9531504a3",
+                        "id": "f19ff4ab4f5f599c58bbfbf3c8ec767e",
                         "name": "Pistol Grip",
                         "type": "node",
                         "position": [-0.8134298324584961, 1.4045332670211792, -0.02431984432041645],
@@ -146481,7 +146490,7 @@
                         "scale": [1, 1.0000001192092896, 1.0000001192092896],
                         "children": [
                           {
-                            "id": "b6c760e9542e63fa7d0e6436addbf8a8",
+                            "id": "db1d1862f9f54a8e3feab916dc32bc86",
                             "name": "Pistol",
                             "type": "node",
                             "position": [0, 0, 0],
@@ -146489,7 +146498,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "90e310a163d2af222bd8cf2c2b665238",
+                                "id": "763db1de4066dbf70a046e28b0f956eb",
                                 "name": "Pistol",
                                 "type": "model",
                                 "position": [0, 0, 0],
@@ -146585,7 +146594,7 @@
                             "spawnOnStart": true
                           },
                           {
-                            "id": "9a8b4899eff39bf05dd87b4eb8230280",
+                            "id": "536b9eba0bd185b4b335f220ed5fd329",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [0, 0.09929999709129333, 0.23499999940395355],
@@ -146635,7 +146644,7 @@
                         }
                       },
                       {
-                        "id": "749ddf4029cc4db4e10f75bb03eda772",
+                        "id": "60ea55c79f6d7fd1e1a7a7a51d0d6a21",
                         "name": "Rifle Grip",
                         "type": "node",
                         "position": [-0.8134298324584961, 1.4045332670211792, -0.02431984432041645],
@@ -146643,7 +146652,7 @@
                         "scale": [1, 1.0000001192092896, 1.0000001192092896],
                         "children": [
                           {
-                            "id": "1d953e4107c89b865b9f2e4d5d25684c",
+                            "id": "cae09029f24921a9d008a16cc040fde6",
                             "name": "Rifle",
                             "type": "node",
                             "position": [0.013829999603331089, -0.007340000011026859, -0.03099999949336052],
@@ -146651,7 +146660,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "4fec73871e7f0cb6453c7e66fc7be021",
+                                "id": "36e164f9ef2f7bc04b6ff182eae327f5",
                                 "name": "Rifle",
                                 "type": "model",
                                 "position": [0, 0, 0],
@@ -146817,7 +146826,7 @@
                             "spawnOnStart": true
                           },
                           {
-                            "id": "60fff35f6f74c0dd37e6a6d57c625a81",
+                            "id": "b2daa627a5cb4e3a0efac8e709eef6dd",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [0.013829999603331089, 0.08686000108718872, 0.5827000141143799],
@@ -146867,7 +146876,7 @@
                         }
                       },
                       {
-                        "id": "7bc8c0a80c8613459a4ab787fc49fb20",
+                        "id": "e87eaa9c2373f02280d55b92c11d35f5",
                         "name": "Shotgun Grip",
                         "type": "node",
                         "position": [-0.8134298324584961, 1.4045332670211792, -0.02431984432041645],
@@ -146875,7 +146884,7 @@
                         "scale": [1, 1.0000001192092896, 1.0000001192092896],
                         "children": [
                           {
-                            "id": "715f79c2777cfb439235dd005c399218",
+                            "id": "320567e98926a92e40bbcc6ec2565cbb",
                             "name": "Shotgun",
                             "type": "node",
                             "position": [0, 0, 0],
@@ -146883,7 +146892,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "85d320b359d06987ecd1c99f3fe22880",
+                                "id": "a1db56faa9a6080c74ecd97f11a062b3",
                                 "name": "Shotgun",
                                 "type": "model",
                                 "position": [0, 0, 0],
@@ -146979,7 +146988,7 @@
                             "spawnOnStart": true
                           },
                           {
-                            "id": "9233e5fa5a6205390756439b4a67b44d",
+                            "id": "e6ab00290c73beb865d9e2854deef956",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [0, 0.09139999747276306, 0.7781000137329102],
@@ -147033,7 +147042,7 @@
                     "spawnOnStart": true
                   },
                   {
-                    "id": "a2f5f5348fcae96307d3c00b114ad0d2",
+                    "id": "4ae09dfe86169f58e38348db0b545d2a",
                     "name": "Sounds",
                     "type": "node",
                     "position": [0, 0, 0],
@@ -147041,7 +147050,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "d9ef5d340119d1ee1f4c9424c43cc90e",
+                        "id": "68758af8b6aee097af6729127aaeace2",
                         "name": "ShotPistol",
                         "type": "sound",
                         "position": [0, 0, 0],
@@ -147067,7 +147076,7 @@
                         }
                       },
                       {
-                        "id": "76e2b1aaf95d0c5e0626e4ed878ddc98",
+                        "id": "69b597c3edb38b9889fdaccd83879d6f",
                         "name": "ShotRifle",
                         "type": "sound",
                         "position": [0, 0, 0],
@@ -147093,7 +147102,7 @@
                         }
                       },
                       {
-                        "id": "6e18f03584b6df9cc2eaa52ee1a55d6e",
+                        "id": "0f28f347fb2a6ed7fa55f978d540df57",
                         "name": "ShotShotgun",
                         "type": "sound",
                         "position": [0, 0, 0],
@@ -147123,7 +147132,7 @@
                     "spawnOnStart": true
                   },
                   {
-                    "id": "e9afd207db0d291b769b8d2faada9aca",
+                    "id": "36a477f66e06beaf56df9db921b9f0f7",
                     "name": "AI Controller",
                     "type": "controller",
                     "position": [0, 0, 0],
@@ -147132,7 +147141,7 @@
                     "children": [],
                     "variables": {},
                     "spawnOnStart": true,
-                    "possessedId": "a24a5b43264340d27c7ebd4fdfc1ea4c",
+                    "possessedId": "090b44f34e694b7a810ff44c42cf9474",
                     "aimSourceId": null,
                     "navMeshId": null,
                     "controlSource": "ai",
@@ -147321,7 +147330,7 @@
             }
           },
           {
-            "id": "93f9ccf6fa8254e3d57cb1184172c320",
+            "id": "a9f12905196a1715061247aec1c95bb8",
             "name": "Enemy Crates 1",
             "type": "collider",
             "position": [-30, 0, -14],
@@ -147329,7 +147338,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "3f6d4b5769d2097811d3f2890e6d1ba4",
+                "id": "98021fcf036b50c745b2c9400acd7954",
                 "name": "Character",
                 "type": "character",
                 "position": [0, 0, 0],
@@ -147337,7 +147346,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "1ece9b26c19aa39cf5c908db861db3fa",
+                    "id": "534306cba361db9df4ba321417bee947",
                     "name": "Mannequin",
                     "type": "model",
                     "position": [0, 0, 0],
@@ -147413,7 +147422,8 @@
                           "wireframe": false,
                           "transparent": false,
                           "castShadow": true,
-                          "probeable": true
+                          "probeable": true,
+                          "receiveDecals": false
                         }
                       },
                       "skin": {
@@ -160910,7 +160920,7 @@
                     "ragdoll": null
                   },
                   {
-                    "id": "4de5725175bb8b9eddd6a28c9d521b65",
+                    "id": "1ed0887f29f0cd17f5982668f840da00",
                     "name": "Weapons",
                     "type": "node",
                     "position": [0, 0, 0],
@@ -160918,7 +160928,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "58c6069230f5fbbdf716e3e987534e93",
+                        "id": "a6b124c2d805b38598f01546d3e25d37",
                         "name": "Pistol Grip",
                         "type": "node",
                         "position": [-0.8134288787841797, 1.4045332670211792, -0.024317052215337753],
@@ -160926,7 +160936,7 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "0e760cce52291a7d66d90c485f8f0d2e",
+                            "id": "4737f13dcd1a1729470111d271beda62",
                             "name": "Pistol",
                             "type": "node",
                             "position": [0, 0, 0],
@@ -160934,7 +160944,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "71f3290d4b19534ae6f320fbe438fa82",
+                                "id": "7c34ac9ebeefef7bb22b25731871678d",
                                 "name": "Pistol",
                                 "type": "model",
                                 "position": [0, 0, 0],
@@ -161030,7 +161040,7 @@
                             "spawnOnStart": true
                           },
                           {
-                            "id": "794916769ecb6f81650bea91e3a7a558",
+                            "id": "98d76a127679a4a360c82b322a019b33",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [0, 0.09929999709129333, 0.23499999940395355],
@@ -161080,7 +161090,7 @@
                         }
                       },
                       {
-                        "id": "6e9b5c1a9d496a89c2384d83df94bba4",
+                        "id": "2daafc8bb49e9279a7ce7fafa8ad6fb7",
                         "name": "Rifle Grip",
                         "type": "node",
                         "position": [-0.8134288787841797, 1.4045332670211792, -0.024317052215337753],
@@ -161088,7 +161098,7 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "ec39b8dc6e74edda8679a40a23addbb7",
+                            "id": "76e94904d7532cd25f3927344aa04357",
                             "name": "Rifle",
                             "type": "node",
                             "position": [0.013829999603331089, -0.007340000011026859, -0.03099999949336052],
@@ -161096,7 +161106,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "af5c01c17a825cd978add0c3f3299cee",
+                                "id": "60f7c8b3c224b6b379610db28b002059",
                                 "name": "Rifle",
                                 "type": "model",
                                 "position": [0, 0, 0],
@@ -161262,7 +161272,7 @@
                             "spawnOnStart": true
                           },
                           {
-                            "id": "63076b7ee872732ea307e17d847a5501",
+                            "id": "0cace59ed1626eb97f08be26a2c74c16",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [0.013829999603331089, 0.08686000108718872, 0.5827000141143799],
@@ -161312,7 +161322,7 @@
                         }
                       },
                       {
-                        "id": "fedcdf8261d28c4b94a80f9078d2c74c",
+                        "id": "261abf4cd21730190ae5c6b549077ee0",
                         "name": "Shotgun Grip",
                         "type": "node",
                         "position": [-0.8134288787841797, 1.4045332670211792, -0.024317052215337753],
@@ -161320,7 +161330,7 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "c1ced0f23d07acb7babfc69b3fdf8171",
+                            "id": "bdd6177650b320f23c10ca3203f732c8",
                             "name": "Shotgun",
                             "type": "node",
                             "position": [0, 0, 0],
@@ -161328,7 +161338,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "c6c7f890eeff118f4e0db64b2ce93be9",
+                                "id": "7568954213c7a153813282b0c1e39674",
                                 "name": "Shotgun",
                                 "type": "model",
                                 "position": [0, 0, 0],
@@ -161424,7 +161434,7 @@
                             "spawnOnStart": true
                           },
                           {
-                            "id": "e2490298c1ab008a16b0ff03c9a7983f",
+                            "id": "404ad98ea52933545a82ee887008b66b",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [0, 0.09139999747276306, 0.7781000137329102],
@@ -161478,7 +161488,7 @@
                     "spawnOnStart": true
                   },
                   {
-                    "id": "c250c6721cee9d83a228de2bb2537250",
+                    "id": "60c953887be9a25fc81ff68a489e7357",
                     "name": "Sounds",
                     "type": "node",
                     "position": [0, 0, 0],
@@ -161486,7 +161496,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "000fb7c02d5133457ab4e035ea0fc51c",
+                        "id": "cab829b6d1bf8ccd2bb3ddc86fb248e0",
                         "name": "ShotPistol",
                         "type": "sound",
                         "position": [0, 0, 0],
@@ -161512,7 +161522,7 @@
                         }
                       },
                       {
-                        "id": "159aa75de2b129619af0bd15534f0a5c",
+                        "id": "1710fea8547129190674dd2c3e4e6154",
                         "name": "ShotRifle",
                         "type": "sound",
                         "position": [0, 0, 0],
@@ -161538,7 +161548,7 @@
                         }
                       },
                       {
-                        "id": "9d8e7135d5ced337db6f6e2421a74848",
+                        "id": "ace782a12413efa69ca8ed80ead3b0b4",
                         "name": "ShotShotgun",
                         "type": "sound",
                         "position": [0, 0, 0],
@@ -161568,7 +161578,7 @@
                     "spawnOnStart": true
                   },
                   {
-                    "id": "438dba62550e91f21e08556eebae9c0f",
+                    "id": "2e0628a3dc0890674a4ef1a4c3ffe4d6",
                     "name": "AI Controller",
                     "type": "controller",
                     "position": [0, 0, 0],
@@ -161577,7 +161587,7 @@
                     "children": [],
                     "variables": {},
                     "spawnOnStart": true,
-                    "possessedId": "3f6d4b5769d2097811d3f2890e6d1ba4",
+                    "possessedId": "98021fcf036b50c745b2c9400acd7954",
                     "aimSourceId": null,
                     "navMeshId": null,
                     "controlSource": "ai",
@@ -161766,7 +161776,7 @@
             }
           },
           {
-            "id": "5ede3cfee3a01bdcc5ad972901e5c9b5",
+            "id": "e0112c4c49dc71176aec89ef8cefd9a7",
             "name": "Enemy Crates 2",
             "type": "collider",
             "position": [-31, 0, -12.300000190734863],
@@ -161774,7 +161784,7 @@
             "scale": [1, 1, 1],
             "children": [
               {
-                "id": "8c1634ffd401832a09bde292c81f226b",
+                "id": "a98af69eca7cc774d4a6b4a7eb8d66aa",
                 "name": "Character",
                 "type": "character",
                 "position": [0, 0, 0],
@@ -161782,7 +161792,7 @@
                 "scale": [1, 1, 1],
                 "children": [
                   {
-                    "id": "a168c0cee022f99bf6f3de0b9dfa5b0c",
+                    "id": "f70237ae8605d914215f2216fd43b031",
                     "name": "Mannequin",
                     "type": "model",
                     "position": [0, 0, 0],
@@ -161858,7 +161868,8 @@
                           "wireframe": false,
                           "transparent": false,
                           "castShadow": true,
-                          "probeable": true
+                          "probeable": true,
+                          "receiveDecals": false
                         }
                       },
                       "skin": {
@@ -175355,7 +175366,7 @@
                     "ragdoll": null
                   },
                   {
-                    "id": "0b7c08587df57075a98c293431ef4c6f",
+                    "id": "ec37c6dc99c174e41030b793f5da3adb",
                     "name": "Weapons",
                     "type": "node",
                     "position": [0, 0, 0],
@@ -175363,7 +175374,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "b46fb1e2a904060af8191958b73b6c56",
+                        "id": "7893f3e23c8d23a6c5ee73662ee832ce",
                         "name": "Pistol Grip",
                         "type": "node",
                         "position": [-0.813429057598114, 1.4045332670211792, -0.024316992610692978],
@@ -175371,7 +175382,7 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "df785dca36a49393f9edaffdc6719acb",
+                            "id": "d4b0343410ce0726bef43d87b717e282",
                             "name": "Pistol",
                             "type": "node",
                             "position": [0, 0, 0],
@@ -175379,7 +175390,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "80e7f958f3045ba33084e0c5e97c82a7",
+                                "id": "0acaf7051736f5a3d03de379c0a0047e",
                                 "name": "Pistol",
                                 "type": "model",
                                 "position": [0, 0, 0],
@@ -175475,7 +175486,7 @@
                             "spawnOnStart": true
                           },
                           {
-                            "id": "54b41d19a6d2d587eff665c0cc2ba794",
+                            "id": "0cf5d20336a2ff599b482f730606482e",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [0, 0.09929999709129333, 0.23499999940395355],
@@ -175525,7 +175536,7 @@
                         }
                       },
                       {
-                        "id": "41de4bbba0449dda9f3a446fa2c62586",
+                        "id": "bd3fa744afa3d767d277cd1ba6094f44",
                         "name": "Rifle Grip",
                         "type": "node",
                         "position": [-0.813429057598114, 1.4045332670211792, -0.024316992610692978],
@@ -175533,7 +175544,7 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "2cab7a7d7566c7c7310d2ede045be21e",
+                            "id": "8fb29c10409a03e7049640b3778a4ed7",
                             "name": "Rifle",
                             "type": "node",
                             "position": [0.013829999603331089, -0.007340000011026859, -0.03099999949336052],
@@ -175541,7 +175552,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "0ab07be5c7fec847cb3bd23999340628",
+                                "id": "e1534b53f941f72ae94d447dfbe1553d",
                                 "name": "Rifle",
                                 "type": "model",
                                 "position": [0, 0, 0],
@@ -175707,7 +175718,7 @@
                             "spawnOnStart": true
                           },
                           {
-                            "id": "70cabae764ab543b533356206b06961a",
+                            "id": "6d22f6e5cd8a5ddee16c095431d9ffe5",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [0.013829999603331089, 0.08686000108718872, 0.5827000141143799],
@@ -175757,7 +175768,7 @@
                         }
                       },
                       {
-                        "id": "ccb0879be9d666b5f13dc7ff58045f65",
+                        "id": "0b86f283bb0b5f7b693e17e1b4fc707e",
                         "name": "Shotgun Grip",
                         "type": "node",
                         "position": [-0.813429057598114, 1.4045332670211792, -0.024316992610692978],
@@ -175765,7 +175776,7 @@
                         "scale": [1, 1, 1],
                         "children": [
                           {
-                            "id": "933f3f156a94be660c08d8e7bda1218d",
+                            "id": "98c3716ef61db511d57150227c692d0a",
                             "name": "Shotgun",
                             "type": "node",
                             "position": [0, 0, 0],
@@ -175773,7 +175784,7 @@
                             "scale": [1, 1, 1],
                             "children": [
                               {
-                                "id": "c9731d2aef6de9aff8f903ce35bbe3b5",
+                                "id": "96c58f07c6b85359a14cea194f039f28",
                                 "name": "Shotgun",
                                 "type": "model",
                                 "position": [0, 0, 0],
@@ -175869,7 +175880,7 @@
                             "spawnOnStart": true
                           },
                           {
-                            "id": "97d28eed23b5b9739ae5160595b5e36b",
+                            "id": "fff4db03d5d2ebf1d868634bc6bd3c4e",
                             "name": "Muzzle",
                             "type": "node",
                             "position": [0, 0.09139999747276306, 0.7781000137329102],
@@ -175923,7 +175934,7 @@
                     "spawnOnStart": true
                   },
                   {
-                    "id": "d0317818216dc516ecebd96d08fcd307",
+                    "id": "1ab5df56cbfa912bbd8c36d7328212fa",
                     "name": "Sounds",
                     "type": "node",
                     "position": [0, 0, 0],
@@ -175931,7 +175942,7 @@
                     "scale": [1, 1, 1],
                     "children": [
                       {
-                        "id": "2beb199ed356b25f2062d272c59f3553",
+                        "id": "d572697be6ac27032cd94629686c66fd",
                         "name": "ShotPistol",
                         "type": "sound",
                         "position": [0, 0, 0],
@@ -175957,7 +175968,7 @@
                         }
                       },
                       {
-                        "id": "19621920a5619aa88941c53ec16ed7f9",
+                        "id": "9be9398ea96d53b24f88ad4595247a3e",
                         "name": "ShotRifle",
                         "type": "sound",
                         "position": [0, 0, 0],
@@ -175983,7 +175994,7 @@
                         }
                       },
                       {
-                        "id": "e39b33615f804847a8fd59a4e3dcdd77",
+                        "id": "1c46719fcac8a7ca1b162bccfa807e59",
                         "name": "ShotShotgun",
                         "type": "sound",
                         "position": [0, 0, 0],
@@ -176013,7 +176024,7 @@
                     "spawnOnStart": true
                   },
                   {
-                    "id": "4d7879b07b4140cf95fd5c41a4610dba",
+                    "id": "7c5c030ad3ec7e5f0c4e21d6bca8e0a9",
                     "name": "AI Controller",
                     "type": "controller",
                     "position": [0, 0, 0],
@@ -176022,7 +176033,7 @@
                     "children": [],
                     "variables": {},
                     "spawnOnStart": true,
-                    "possessedId": "8c1634ffd401832a09bde292c81f226b",
+                    "possessedId": "a98af69eca7cc774d4a6b4a7eb8d66aa",
                     "aimSourceId": null,
                     "navMeshId": null,
                     "controlSource": "ai",
@@ -176724,7 +176735,7 @@
     }
   },
   "assetHashes": {
-    "material:7d5d0f4c630015f4730b0581f4bf9e31": "ffff9fb6",
+    "material:7d5d0f4c630015f4730b0581f4bf9e31": "a8f784de",
     "material:8aa2f149c706ee8d1dd0cc8a3d19251d": "4c878cb9",
     "material:30bd88eb2dd6719a3fbfe29ebc48047a": "2d00f4d8",
     "material:bd04219ff7f65ac980d1e5e2d9ed3bf0": "7cf2c2a6",
@@ -176740,8 +176751,8 @@
     "material:db0bf88dfbeaf384c94ad77505f69138": "cc1f9c3b",
     "material:b6f53e48187b425c8feb2e305d0c4e5e": "578b9b6b",
     "material:3a9e798f88941a388a8ac34d0946325b": "26c2fde2",
-    "material:31ebef24c54d10fdc2da9cad742b971d": "6d315325",
-    "material:b86cf43f7bf4938165e0551d16ea2618": "f3b8dd67",
+    "material:31ebef24c54d10fdc2da9cad742b971d": "02473aa1",
+    "material:b86cf43f7bf4938165e0551d16ea2618": "fb5b651b",
     "model:f4e65469c7facde87d17dcc31375ac01": "c08aec51",
     "model:d393e6c370ff544b0883f1a1225cec83": "79cc0d41",
     "model:cff74fd3ba284bef822bc97fe751259f": "8bbeb048",
@@ -176750,7 +176761,7 @@
     "model:21849aa132ecd3a7b365b111ac847623": "b7d6639b",
     "model:ce8c73093dfe61ca79f6c08b65e3f23a": "360f3fb4",
     "model:d14a508b1c5c7a3c0bc1a3e7eeabd157": "ae8bdb3e",
-    "template:085737d817f4571b3a12d5dce7d1547e": "fa105ebb",
+    "template:085737d817f4571b3a12d5dce7d1547e": "2d143590",
     "template:2983e4a9e16d64eec0b55da45504c9f3": "3bc690c7",
     "template:ab0eb5bd9652cf4a291917daba021bd3": "cf3d78d2",
     "template:b92fcc325b75b33cbf9bd68188900eda": "0af7f2ba",
@@ -176761,16 +176772,16 @@
     "template:57f479a114abaff1a18bb53347a8adca": "796cc2d5",
     "template:e640c029d951d900318944a09a069928": "5019b942",
     "template:a7cc575d963a02afaff9f73af8a280a1": "15d375b1",
-    "template:b2ad954ba96d58d83daaf35d67895759": "285247e6",
-    "template:340d43637a4c64a53a74231454c77748": "bb182445",
+    "template:b2ad954ba96d58d83daaf35d67895759": "5ac22dbd",
+    "template:340d43637a4c64a53a74231454c77748": "cc325741",
     "script:fe5e8d17ed7d4f9c554e56a29bd70869": "0f83a960",
-    "script:a3f1e498984fb88f51b1b4df74f690be": "6c4658a7",
+    "script:a3f1e498984fb88f51b1b4df74f690be": "7a99b777",
     "script:49ae6e9c93542477adbdf51b735ea2ce": "3eb53173",
-    "script:1ca79619fc18da18acdaf47a610810ac": "d03d8b23",
+    "script:1ca79619fc18da18acdaf47a610810ac": "33107c29",
     "script:76855038b44bde061513aa979cf1c0c8": "ef952b10",
     "script:cba0618c1d881f2aab5109bcc9fac012": "1820d6c8",
     "script:24fa9abfa9a72492d3fbe8519bc37ec2": "fb1435a2",
-    "script:d4c337d97faa6a10486009d4e8120dc2": "a3b1c084"
+    "script:d4c337d97faa6a10486009d4e8120dc2": "95980217"
   },
   "assetHashVersion": 7
 }

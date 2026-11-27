@@ -91,6 +91,12 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   without. Opening a template brings them up to its model's, and saving it keeps them.
 - **Fix: linking a material to a model with a one-entry material list left the list naming the old material.** The
   node then matched the old material's edits and missed its own.
+- **A material can refuse decals.** Its new **Receive decals** option (`config.receiveDecals`, on by default and
+  stored only when off) keeps every decal off the surface, on every route. With no stencil to carry the flag, the
+  surfaces that have it off and that a visible decal's box reaches are drawn into a depth of their own
+  (`decalExclusions`, under the `decals.receivers` scope), and a decal leaves alone the pixels that match it, as a
+  terrain-only decal does the other way round. A frame with no such surface near a decal draws nothing extra. The
+  Sandbox's three Mannequin materials have it off, and a shot at a character throws sparks without leaving a hole.
 
 - **Fix: shooting in the Sandbox logged WebGPU errors and showed black frames.** Once a bullet hole existed, every
   frame failed validation ("Attachment state of decalResolve is not compatible with decals.resolve") and was dropped.

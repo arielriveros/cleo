@@ -39,7 +39,8 @@ export interface SandboxShotView {
  *
  * A HIT on a dynamic body pushes it: the shot's `impulse` (shared by its pellets) along the shot at the point it hit
  * (so a crate hit high tips, a ball spins), no more than `maxPushSpeed` of speed at once. Every hit leaves sparks and
- * dust (`impactTemplate`) and a hole (`holeTemplate`), the hole moving with what it is on; the shot draws a tracer
+ * dust (`impactTemplate`) and, on anything but a character, a hole (`holeTemplate`), the hole moving with what it is
+ * on; the shot draws a tracer
  * (`tracerTemplate`). In third person the gun flashes at its muzzle (`flashTemplate`) and plays its shot (`shotSound`,
  * a cue in the character's `Sounds` group); in first person the viewmodel's fire clip does both. A template the scene
  * does not have is skipped, with a warning once.
@@ -350,12 +351,17 @@ export default class SandboxGunNode extends Node {
             [hit.point[0] - origin[0], hit.point[1] - origin[1], hit.point[2] - origin[2]])
     }
 
-    /** Sparks and dust off the surface, and a hole in it: one that moves with what it is on. */
+    /**
+     * Sparks and dust off the surface, and a hole in it: one that moves with what it is on. A character gets the sparks
+     * and no hole: a decal does not follow a skinned body's limbs, and its materials receive none besides (the
+     * Mannequin's have Receive decals off, so a hole in the ground at its feet does not paint its legs).
+     */
     private _impact(hit: any): void {
         const n = hit.normal
         const at = [hit.point[0] + n[0] * 0.01, hit.point[1] + n[1] * 0.01, hit.point[2] + n[2] * 0.01]
         const rotation = eulerOntoNormal(n)
         this._spawn(this.impactTemplate, at, rotation)
+        if (this._onCharacter(hit)) return
         const hole = this._spawn(this.holeTemplate, at, [rotation[0], rotation[1], Math.random() * 360])
         if (!hole) return
         // On a body that moves, the hole goes with it.
@@ -388,7 +394,6 @@ export default class SandboxGunNode extends Node {
         }
     }
 
-    /** Spawn an effect template, or nothing (and a warning, once) when the scene has none of that name. */
     /** Whether `hit` struck a character that shots do not move (its capsule, or a limb of its reacting body). */
     private _unmoved(physics: any, hit: any): boolean {
         const reactions = physics?.reactionsFor?.(hit.body) ?? (hit.node ? physics?.reactionsFor?.(hit.node) : null)
@@ -397,6 +402,15 @@ export default class SandboxGunNode extends Node {
         return !!character && character.reactsToShots === false
     }
 
+    /** Whether `hit` struck a character: a limb of a reacting body, its capsule, or anything on a skinned body. */
+    private _onCharacter(hit: any): boolean {
+        if (hit.ragdoll || (this.scene?.physics as any)?.ragdollPartOf?.(hit.body)) return true
+        if (hit.node?.character) return true
+        for (let n: any = hit.node ?? null; n; n = n.parent) if (n.nodeType === 'character' || n.model?.skin) return true
+        return false
+    }
+
+    /** Spawn an effect template, or nothing (and a warning, once) when the scene has none of that name. */
     private _spawn(template: string, position: number[], rotation: number[]): Node | null {
         if (!template || this._missing.has(template)) return null
         const node = (this.scene as any)?.instantiate(template, { position, rotation }) ?? null

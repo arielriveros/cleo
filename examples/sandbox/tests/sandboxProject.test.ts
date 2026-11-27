@@ -1541,6 +1541,10 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
             const v = mannequin(templates.get(name)).variables;
             expect(JSON.parse(v.__materialIds.value), name).toEqual([v.__materialId.value]);
         }
+        // No decal lands on a body: the three Mannequin materials have Receive decals off, and so does every copy.
+        for (const m of [civ, enemy, plain]) expect(m.material.config.receiveDecals, m.name).toBe(false);
+        for (const name of ['Player', 'Sandbox Character', 'Civilian', 'Enemy'])
+            expect(mannequin(templates.get(name)).model.material.config.receiveDecals, name).toBe(false);
         // The brains: an AI Controller each, possessing its Character, seeing as far and as wide as its script.
         for (const [name, range, fov] of [['Civilian', 16, 150], ['Enemy', 24, 120]] as const) {
             const t = templates.get(name);

@@ -161,6 +161,26 @@ describe('the receiver filter', () => {
         for (const method of ['surfaceDecalPass', 'drawColorDecals'])
             expect(methodBody(method), method).toMatch(/if \(!receivers\) continue;/);
     });
+
+    it('keeps every other decal off the surfaces whose material receives none, through a depth of their own', () => {
+        // Drawn with the terrain's, before the scene, through the same jittered projection the scene depth has.
+        expect(methodBody('decalReceiverPass')).toContain('this._decalExclusionPass(scene);');
+        const pass = methodBody('_decalExclusionPass');
+        expect(pass).toContain('this._projection.rasterProjection(cam.projectionMatrix)');
+        // Only what opts out and what a decal can reach; never a viewmodel, drawn at a depth no decal reconstructs.
+        expect(pass).toMatch(/node\.viewmodel\) continue;/);
+        expect(methodBody('_optsOut')).toContain('m.config.receiveDecals === false');
+        expect(pass).toMatch(/dx \* dx \+ dy \* dy \+ dz \* dz <= r \* r/);
+        // A skinned body through its bone palette, as a shadow caster is.
+        expect(pass).toContain("skinned ? 'shadowMapSkinned' : 'shadowMap'");
+        // A decal on every surface binds it, with the filter the other way round; a terrain decal keeps its own.
+        expect(methodBody('_decalReceiverDepth')).toMatch(/if \(decal\.receivers !== 'terrain'\) return this\._decalExclusionReady && this\.decalExclusionFBO \? this\.decalExclusionFBO\.depth : fallback;/);
+        expect(methodBody('_receiverFilterOf')).toMatch(/\? 2 : 0;/);
+        expect(methodBody('_setDecalUniforms')).toContain("sm.setUniform('u_receiverFilter', this._receiverFilterOf(decal));");
+        const chunk = WGSL('chunks/decal.wgsl');
+        expect(chunk).toContain('let mask = select(matched, 1.0 - matched, u_decal.u_receiverFilter == 2);');
+        expect(chunk).toContain('return select(mask, 1.0, u_decal.u_receiverFilter == 0);');
+    });
 });
 
 describe('the decal box', () => {

@@ -90,7 +90,7 @@ struct DecalUniforms {
     u_pattern: i32,                 // 0 = material, 1 = radial gradient
     u_radialCurve: i32,             // DECAL_RADIAL_CURVES index: 0 power, 1 smooth, 2 linear, 3 sphere, 4 tip
     u_radialShape: i32,             // 0 = circle, 1 = square
-    u_receiverFilter: i32,          // 1 = land only where the receiver depth says terrain
+    u_receiverFilter: i32,          // 1 = land only where the receiver depth is (terrain), 2 = everywhere but there
     u_affectAlbedo: i32,
     u_affectNormal: i32,
     u_affectSurface: i32,
@@ -238,8 +238,11 @@ fn decalReceiverMask(screenUv: vec2<f32>, pos: vec3<f32>) -> f32 {
     let rp = decalWorldPos(screenUv, rd);
     let d = distance(pos, u_decal.u_viewPos);
     let sameSurface = abs(d - distance(rp, u_decal.u_viewPos)) <= 0.02 + 0.002 * d;
-    let isReceiver = select(0.0, 1.0, sameSurface && rd < 1.0);
-    return select(isReceiver, 1.0, u_decal.u_receiverFilter == 0);
+    let matched = select(0.0, 1.0, sameSurface && rd < 1.0);
+    // 1: the receiver depth is the terrain's, the only surface to land on. 2: it is the depth of the surfaces whose
+    // material receives no decals, the ones to keep off.
+    let mask = select(matched, 1.0 - matched, u_decal.u_receiverFilter == 2);
+    return select(mask, 1.0, u_decal.u_receiverFilter == 0);
 }
 
 /**

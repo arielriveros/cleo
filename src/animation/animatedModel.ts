@@ -205,7 +205,8 @@ export class AnimatedModel {
             wireframe: m.config?.wireframe,
             transparent: m.config?.transparent,
             castShadow: m.config?.castShadow,
-            probeable: m.config?.probeable
+            probeable: m.config?.probeable,
+            receiveDecals: m.config?.receiveDecals,
         };
 
         let material: Material;
@@ -387,6 +388,7 @@ export class AnimatedModel {
             transparent: mat.config.transparent,
             castShadow: mat.config.castShadow,
             probeable: mat.config.probeable,
+            ...(mat.config.receiveDecals === false ? { receiveDecals: false } : {}),
         };
         const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic'
             : t === 'blinn_phongSkinned' ? 'blinn_phong'

@@ -635,7 +635,7 @@ darkens what it lands on while its roughness and normal still land whole: wet gr
 | **Affects Normal** | It writes the surface's normal (only when its material has a normal map). |
 | **Affects Roughness / Metal / AO** | It writes the surface's roughness, metallic and ambient occlusion, which share one coverage. |
 | **Affects Emissive** | It adds its emissive light. |
-| **Receivers** | **All surfaces**, or **Terrain only**, which keeps rocks, props and foliage standing in the box clean (one extra depth pass over the terrain while such a decal is on screen). |
+| **Receivers** | **All surfaces**, or **Terrain only**, which keeps rocks, props and foliage standing in the box clean (one extra depth pass over the terrain while such a decal is on screen). Either way, a surface whose material has **Receive decals** off takes none. |
 | **Pattern** | The linked **Material**, or the **Radial** gradient. |
 | **Animated** | Play the material's maps as a flipbook. |
 | **Columns** / **Rows** | The flipbook's grid of cells. |

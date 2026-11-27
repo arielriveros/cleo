@@ -104,13 +104,14 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     material.properties.get('opacity') ?? 1
   );
 
-  const [options, setOptions] = useState<{ wireframe: boolean; transparent: boolean; side: 'front' | 'back' | 'double'; castShadow: boolean; probeable: boolean;}>(
+  const [options, setOptions] = useState<{ wireframe: boolean; transparent: boolean; side: 'front' | 'back' | 'double'; castShadow: boolean; probeable: boolean; receiveDecals: boolean }>(
   {
     wireframe: material.config.wireframe ?? false,
     transparent: material.config.transparent ?? false,
     side: material.config.side ?? 'front',
     castShadow: material.config.castShadow ?? false,
     probeable: material.config.probeable ?? true,
+    receiveDecals: material.config.receiveDecals !== false,
   });
 
   useEffect(() => {
@@ -133,6 +134,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
       side: material.config.side ?? 'front',
       castShadow: material.config.castShadow ?? false,
       probeable: material.config.probeable ?? true,
+      receiveDecals: material.config.receiveDecals !== false,
     });
 
   }, [props.node])
@@ -216,6 +218,9 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     material.config.side = options.side;
     material.config.castShadow = options.castShadow;
     material.config.probeable = options.probeable;
+    // Stored only when off, as the engine serializes it: a material that receives decals keeps its bytes.
+    if (options.receiveDecals) delete material.config.receiveDecals;
+    else material.config.receiveDecals = false;
   }, [options, material])
 
   const eventEmitter = useEventBus();
@@ -610,6 +615,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             <Toggle label='Transparent' checked={options.transparent} onChange={(c) => updateOption({ transparent: c })} />
             <Toggle label='Cast Shadow' checked={options.castShadow} onChange={(c) => updateOption({ castShadow: c })} />
             <Toggle label='Probeable' checked={options.probeable} onChange={(c) => updateOption({ probeable: c })} />
+            <Toggle label='Receive decals' checked={options.receiveDecals} onChange={(c) => updateOption({ receiveDecals: c })} />
             <Field label='Side'>
               <Select value={options.side} onChange={(e) => updateOption({ side: e.target.value as 'front' | 'back' | 'double' })}>
                 <option value='front'>Front</option>

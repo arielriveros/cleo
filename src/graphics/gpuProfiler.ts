@@ -186,6 +186,8 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
 
     // Unambiguous sums: each runs inside the named scope.
     'decals.resolve': 'decals',
+    // The other receiver depth a decal compares against: the surfaces whose material receives none.
+    decalExclusions: 'decals.receivers',
     iblConvolve: 'ibl.bake',
     // A light probe's bake steps (render/probeBaker.ts): its G-buffer faces, sky, relight, forward-only
     // models and atlas filter, all inside the ibl.bake scope.

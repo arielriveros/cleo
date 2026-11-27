@@ -676,7 +676,7 @@ where it lies inside the box **and** faces the projector.
 | `angleFade` | `0.3` | Fade on surfaces turned away from the projector: the weight is `smoothstep(0, angleFade, dot(N, boxY))`, where `boxY` is the box's own +Y axis. `0` disables the test, and the decal then lands on walls and back faces inside the box too. |
 | `depthFade` | `0.2` | Feather toward the box's top and bottom faces, as a fraction of its half-height. `0` is a hard cut. |
 | `affects` | all `true` | `{ albedo, normal, surface, emissive }`. `surface` is roughness, metallic and AO under **one** coverage, as in Unreal's DBufferC. |
-| `receivers` | `'all'` | `'terrain'` keeps the decal off everything but landscapes. See below. |
+| `receivers` | `'all'` | `'terrain'` keeps the decal off everything but landscapes. Either way it keeps off a surface whose material has `receiveDecals: false`. See below. |
 | `pattern` | `'material'` | `'radial'` draws the procedural gradient in `radial` instead of the material. |
 | `radial` | see below | The gradient's parameters. The setter accepts a `Partial`. |
 | `albedoOpacity` | `1` | The albedo's share of the coverage, `0..1`. Roughness, metallic, AO and the normal keep the full coverage, so a near-black base colour at `0.3`–`0.5` darkens the ground under it while its roughness turns wet: a film of clear liquid. |
@@ -718,8 +718,8 @@ surface position from the depth buffer. That is what lets the camera stand insid
 | **Emissive** | After lighting, added to the image before fog. As bright as a mesh wearing the same material. It blooms wherever the surface underneath would, because the bloom mask is left untouched. | **Every opaque surface**, including forward-shaded ones. |
 | **Overlay** | Used **instead of** the other two routes for an editor-only decal (`markEditorOnly`). Drawn as unlit chrome in the editor overlay layer after the post chain, using the un-jittered camera so it does not shimmer under TAA. The landscape brush is drawn this way. | Every opaque surface. Never in a build. |
 
-The passes are labelled `decals.receivers`, `decals` and `decals.resolve`, `decals.emissive`, and
-`overlay.decals`. You can switch `decals` and `decals.emissive` off from the profiler.
+The passes are labelled `decals.receivers` (with `decalExclusions`), `decals` and `decals.resolve`,
+`decals.emissive`, and `overlay.decals`. You can switch `decals` and `decals.emissive` off from the profiler.
 
 **`receivers: 'terrain'`** keeps a rock or a grass blade standing inside the box clean, on every
 route. It costs one depth-only pass over the landscape chunks in any frame where such a decal is
@@ -768,8 +768,12 @@ will do.
 > - **No surface decals in the forward pipeline** (`graphics.deferred: false`), which has no
 >   G-buffer. Emissive and overlay decals still work there. **No decals at all in light-probe
 >   captures**, so a decal never shows up in a probe's reflections.
-> - **No per-object opt-out.** There is no stencil buffer to carry a "receives decals" flag, so
->   `receivers: 'terrain'` is the only filter.
+> - **The opt-out is per material.** A material with `config.receiveDecals: false` (**Receive decals**
+>   in the material editor) takes no decal on any route. There is no stencil buffer to carry the flag,
+>   so it works as `receivers: 'terrain'` does, the other way round: in a frame with a decal on every
+>   surface in view, the surfaces with the flag off that such a decal's box reaches are drawn into a
+>   depth of their own (`decalExclusions`), and a pixel matching it to within the same margin is left
+>   alone. A cut-out surface opts out as its whole card, not its cutout.
 > - **The image is shown once, never tiled.** Decal textures are sampled at least half a texel inside
 >   their edges, so a repeat-wrapped texture cannot bleed its opposite edge in along the box border.
 >   A texture's wrap mode has no effect on a decal.

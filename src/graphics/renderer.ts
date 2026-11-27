@@ -2154,6 +2154,7 @@ export class Renderer {
         this._decals.dBufferFBO?.resize(width, height);
         this._decals.gBufferCopyFBO?.resize(width, height);
         this._decals.decalReceiverFBO?.resize(width, height);
+        this._decals.decalExclusionFBO?.resize(width, height);
         this._targets.refraction?.resize(width, height);
         const mbK = TemporalPasses.MOTION_BLUR_TILE;
         this._targets.velocity.resize(width, height);

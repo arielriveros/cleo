@@ -175,7 +175,7 @@ export class RenderStats {
         addFbo(this._debugViews.overdrawFBO ?? undefined);
         addFbo(this._targets.velocity); addFbo(this._temporal.velocityTileFBO); addFbo(this._temporal.velocityNeighborFBO);
         addFbo(this._decals.dBufferFBO ?? undefined); addFbo(this._decals.gBufferCopyFBO ?? undefined);
-        addFbo(this._decals.decalReceiverFBO ?? undefined);
+        addFbo(this._decals.decalReceiverFBO ?? undefined); addFbo(this._decals.decalExclusionFBO ?? undefined);
         bytes += this._host.postPool.byteSize;
         bytes += this._host.objectTableBytes;
         for (const tex of TextureManager.Instance.textures.values()) bytes += tex.byteSize;

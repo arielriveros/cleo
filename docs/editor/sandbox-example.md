@@ -877,8 +877,11 @@ steps.
 **What a hit does.** A dynamic body hit takes an `impulse` along the shot at the point it was hit (14 N·s from the
 pistol, 18 from the AK-47, 27 shared by the shotgun's pellets, a few times a real bullet's), so a crate shoves and
 tips, a barrel rolls, a ball flies; no hit speeds anything up by more than `maxPushSpeed` (2.5 m/s), so a 3 kg ball
-is not shot off the course. Every hit sprays sparks and dust (**Bullet Impact**) and leaves a hole (**Bullet
-Hole**, a decal that fades after 40 s), which moves with the body it is on. The shot draws a **Tracer** from the
+is not shot off the course. Every hit sprays sparks and dust (**Bullet Impact**) and, on anything but a character,
+leaves a hole (**Bullet Hole**, a decal that fades after 40 s), which moves with the body it is on. A character gets
+the sparks and no hole, and no decal lands on one at all: the three Mannequin materials have **Receive decals** off
+(see [Models and materials](models-and-materials.md#sections)), so a hole in the ground at a character's feet stops at
+its shoes. The shot draws a **Tracer** from the
 muzzle and, in third person, a **Muzzle Flash** (particles and a point light) and the weapon's shot (its cue in the
 Player's **Sounds**); in first person the viewmodel's fire clip does both, through its animator's Event Actions.
 Each shot cue has 16 [voices](audio.md#overlap) (a new shot steals the quietest), half a semitone of random pitch
