@@ -1441,15 +1441,6 @@
         }
       },
       {
-        "name": "state",
-        "type": {
-          "kind": "string"
-        },
-        "access": "public",
-        "default": "idle",
-        "hidden": true
-      },
-      {
         "name": "_brain",
         "type": {
           "kind": "node",
@@ -1469,7 +1460,25 @@
         "hidden": true
       },
       {
+        "name": "_entered",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
         "name": "_stateTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_stateFor",
         "type": {
           "kind": "number"
         },
@@ -1579,6 +1588,24 @@
         "hidden": true
       },
       {
+        "name": "_goalRadius",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 1.2,
+        "hidden": true
+      },
+      {
+        "name": "_nowhere",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
         "name": "_bestDistance",
         "type": {
           "kind": "number"
@@ -1664,15 +1691,6 @@
         "hidden": true
       },
       {
-        "name": "_wasKnocked",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "private",
-        "default": false,
-        "hidden": true
-      },
-      {
         "name": "_dodgeUntil",
         "type": {
           "kind": "number"
@@ -1692,15 +1710,6 @@
         "hidden": true
       },
       {
-        "name": "_dodging",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "private",
-        "default": false,
-        "hidden": true
-      },
-      {
         "name": "preferredWeapon",
         "type": {
           "kind": "number"
@@ -1714,37 +1723,6 @@
           "max": 3,
           "step": 1,
           "tooltip": "The weapon it carries: 1 the pistol, 2 the rifle, 3 the shotgun."
-        }
-      },
-      {
-        "name": "nearest",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 8,
-        "hidden": false,
-        "attribute": {
-          "group": "Combat",
-          "min": 2,
-          "max": 40,
-          "step": 0.5,
-          "tooltip": "The distance it keeps from the player while it fights in the open (m)."
-        }
-      },
-      {
-        "name": "farthest",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 22,
-        "hidden": false,
-        "attribute": {
-          "group": "Combat",
-          "min": 2,
-          "max": 60,
-          "step": 0.5
         }
       },
       {
@@ -1852,7 +1830,7 @@
           "min": 0.2,
           "max": 10,
           "step": 0.1,
-          "tooltip": "Seconds behind cover before it looks out, and the most looks before it moves."
+          "tooltip": "Seconds behind cover before it looks out."
         }
       },
       {
@@ -1868,21 +1846,6 @@
           "min": 0.2,
           "max": 10,
           "step": 0.1
-        }
-      },
-      {
-        "name": "peeks",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 3,
-        "hidden": false,
-        "attribute": {
-          "group": "Combat",
-          "min": 1,
-          "max": 10,
-          "step": 1
         }
       },
       {
@@ -1918,15 +1881,6 @@
         "hidden": true
       },
       {
-        "name": "_pause",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
         "name": "_partner",
         "type": {
           "kind": "node",
@@ -1952,6 +1906,24 @@
         },
         "access": "private",
         "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_followAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_sweepYaw",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": 0,
         "hidden": true
       },
       {
@@ -2031,18 +2003,6 @@
         "hidden": true
       },
       {
-        "name": "_cover",
-        "type": {
-          "kind": "list",
-          "of": {
-            "kind": "number"
-          }
-        },
-        "access": "private",
-        "default": [],
-        "hidden": true
-      },
-      {
         "name": "_coverKey",
         "type": {
           "kind": "string"
@@ -2052,12 +2012,30 @@
         "hidden": true
       },
       {
-        "name": "_coverFor",
+        "name": "_coverCue",
         "type": {
-          "kind": "number"
+          "kind": "boolean"
         },
         "access": "private",
-        "default": 0,
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_noCover",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
+        "name": "_exposed",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
         "hidden": true
       },
       {
@@ -2070,7 +2048,16 @@
         "hidden": true
       },
       {
-        "name": "_followAt",
+        "name": "_alarmAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "_clearAt",
         "type": {
           "kind": "number"
         },
@@ -2079,12 +2066,12 @@
         "hidden": true
       },
       {
-        "name": "_pauseYaw",
+        "name": "_clear",
         "type": {
-          "kind": "number"
+          "kind": "boolean"
         },
         "access": "private",
-        "default": 0,
+        "default": true,
         "hidden": true
       }
     ],

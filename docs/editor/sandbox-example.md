@@ -607,11 +607,54 @@ Mannequin, machine, clips and reactions, its own material, and an **AI Controlle
 They are placed under the scene's **NPCs** node: six **Civilian**s over the map and four **Enemy**s, two by the
 pillars and two by the crates.
 
+**The brains.** What an NPC is doing, and when it changes, is its AI Controller's **AI Brain**: **Civilian Brain** and
+**Enemy Brain** in `/Characters/NPCs/AI`, behaviour machines you open and edit in their AI Brain tab like any other.
+Each state sets the controller's goal (stand, walk the nav mesh to a point, walk toward the player, keep away from
+it), and each transition is a condition on the brain's parameters: the controller's senses of the player (**In
+Sight**, **Distance**, **Since Seen**; the player on foot is the blackboard's `target`) and what the NPC's script
+measures (**Knocked**, **At Goal**, **Stuck**, **Restless** for a state whose time is up, the ages of a shot or a
+danger, the enemy's cover cues). The distances and times they compare against are the brain's. The scripts do what a
+graph cannot: on entering a state they choose where to go and how long to stay, and while in it how fast to go,
+whether to crouch, where to look, and, for an enemy, the aim and the trigger.
+
+| Civilian Brain | Goal | Leaves for |
+|---|---|---|
+| **wait** (entry) | stand | **roam** when its wait is over (3 to 8 s); **watch** with the player in sight within 6 m, not stared at for 20 s |
+| **roam** | the nav mesh to a point | **wait** there (or stuck); **watch** as from wait |
+| **watch** | stand | **roam** after a few seconds, or with the player past 9.6 m or driving |
+| **alert** | stand | **flee** after **Alert Seconds** if the shot was within 22 m, else **roam** |
+| **flee** | the nav mesh to a point | **cower** once there with the danger 7 s old |
+| **cower** | stand | **roam** after 2 to 4 s |
+| **knocked** | stand | **flee** once its reactions let it go |
+
+A danger (a near miss after its startle, a hit, a car) sends a civilian to **flee** from any state, a shot heard
+(after its startle) to **alert** from wait, roam and watch, and a knock-down to **knocked** from anywhere.
+
+| Enemy Brain | Goal | Leaves for |
+|---|---|---|
+| **patrol** (entry) | the nav mesh to its route's next point | **look** there; **alert** on a noise |
+| **look** | stand | **patrol** after 1.5 to 3.5 s |
+| **alert** | stand | **search** after a second |
+| **engage** | the script's (it stands and side-steps) | **close in** past 22 m, **back off** under 8 m, **search** with the player unseen 1.5 s |
+| **close in** | the nav mesh toward the player | **engage** under 18 m |
+| **back off** | away from the player | **engage** past 11 m |
+| **cover** | the nav mesh to the spot it picked | **in cover** there; **engage** with no cover to be had, or stuck |
+| **in cover** | stand, crouched | **peek** after 1.5 to 3 s, not reloading; **cover** again if the shooter can see it |
+| **peek** | stand, firing | **in cover** after 1.2 to 2 s; **engage** after three |
+| **search** | the nav mesh to where the player was last seen | **scan** there; **return** if stuck or after 20 s |
+| **scan** | stand, looking round | **return** after 6 s |
+| **return** | the nav mesh to its route | **patrol** |
+| **knocked** | stand | **cover** once its reactions let it go |
+
+The player in sight sends an enemy that is going about its patrol (patrol, look, alert, search, scan, return) to
+**engage**; being hit, or nearly hit twice, sends it to **cover** from anywhere.
+
 **The classes.** `SandboxNpc.ts` (`/Characters/NPCs/Scripts`) extends SandboxCharacter with what both kinds need:
 
-- **Moving.** `goTo(point, gait)` walks the nav mesh there (the AI Controller's path goal), `stop()` stands,
-  `moveWorld(x, z, gait)` steps the body itself (a strafe, a dodge), `face` and `lookAt` turn the head, and the body
-  past its turn delay, `crouch` crouches. It writes the Controller's intent each frame: the pace (walk, jog or
+- **Moving.** On entering a state, `goTo(point, gait)` sends it there (the brain's state walks the nav mesh to the
+  AI Controller's `goalPoint`; it is **At Goal** once within reach), `stop()` stands, and the state sets how long it
+  lasts. `moveWorld(x, z, gait)` steps the body itself (a strafe, a dodge), `face` and `lookAt` turn the head, and the
+  body past its turn delay, `crouch` crouches. It writes the Controller's intent each frame: the pace (walk, jog or
   sprint), the crouch and where it looks.
 - **Senses.** Sight is its AI Controller's perception (range, cone and reaction time from its **Senses**
   attributes), of the character whose `team` is the player's. A shot fired within **Hearing** (35 m) is heard, one
@@ -621,25 +664,25 @@ pillars and two by the crates.
 - **Knock-downs.** One round is a flinch. Hits add up (**Stagger Shock**, **Knockdown Shock**, fading by half every
   **Shock Half Life**): past the first it staggers, past the second, or hit in the legs running, it falls.
 - **It never dies.** Its health is kept full, a body lying longer than **Down Seconds** is got up, and one reacting
-  longer than **Stuck Seconds** is put back on its feet. While a reaction has the body the brain waits.
+  longer than **Stuck Seconds** is put back on its feet. While a reaction has the body the brain is **knocked**.
 
-`SandboxCivilian.ts` (blue) waits at a **Look Point** a few seconds, its head sweeping round what is there, then
-walks 10 to 40 m off to somewhere else, often another Look Point. The player close by (**Watch Distance**, 6 m) and
-in sight, on foot, is looked at for a few seconds, and not again for **Watch Cooldown**. It is an ordinary person,
-slow to react: it notices someone after **Notice Seconds** (0.9 s), and answers a shot heard or one that nearly hit
-it after a startle (**Startle Min** to **Startle Max**, 0.4 to 0.8 s). A shot heard makes it look toward it for
-**Alert Seconds**, then run if it was close (**Flee Distance**) or walk off quicker; a near miss, a hit or a car
-sends it sprinting away from the danger, somewhere reachable and not past it, and it crouches there facing the danger
-before it calms down. Once up after a fall, it runs.
+`SandboxCivilian.ts` (blue) waits at a **Look Point**, its head sweeping round what is there, then walks 10 to 40 m
+off to somewhere else, often another Look Point. The player close by and in sight, on foot, is looked at for
+**Watch Min** to **Watch Max** seconds. It is an ordinary person, slow to react: it notices someone after **Notice
+Seconds** (0.9 s), and answers a shot heard or one that nearly hit it after a startle (**Startle Min** to **Startle
+Max**, 0.4 to 0.8 s). A shot heard makes it look toward it for **Alert Seconds**, then run if it was close or walk
+off quicker; a near miss, a hit or a car sends it sprinting away from the danger (**Flee Min** to **Flee Max** m),
+somewhere reachable and not past it, on to somewhere farther while the danger is fresh, and it crouches there facing
+the danger before it calms down. Once up after a fall, it runs.
 
 `SandboxEnemy.ts` (red) carries its **Preferred Weapon** (the rifle) from the start, at the low ready.
 
 - **Patrol.** It walks the nav mesh route nearest where it was placed (or the one its **Route** names), stopping at
   each point to look round. Two placed within 10 m of each other patrol as a pair: one leads, the other keeps behind
   it to the right.
-- **Engage.** The player in sight: it aims, fires in bursts, keeps between **Nearest** and **Farthest** (8 to 22 m),
-  side-steps now and then, and holds fire with someone else in the line. It aims worse far away and at a moving
-  target, and better the longer it holds the player in its sights. It tells its partner.
+- **Engage.** The player in sight: it aims, fires in bursts, keeps between 8 and 22 m (its brain's **close in** and
+  **back off**), side-steps now and then, and holds fire with someone else in the line. It aims worse far away and
+  at a moving target, and better the longer it holds the player in its sights. It tells its partner.
 - **Cover.** Hit, or nearly hit twice: it sprints to the best spot the shooter cannot see (a **Cover Point** within
   15 m, or a ring of probes round it; hidden for a crouched head and a shoulder's width to either side, reachable
   without a long way round, not taken by another enemy), crouches, reloads, and stands up to fire a burst now and
@@ -662,7 +705,9 @@ fast enough, and warns whoever is ahead of it within **Warn Seconds** of its tra
 
 **To add one,** place a copy of the **Civilian** or **Enemy** template on the nav mesh (under NPCs, to keep them
 together). An enemy patrols the route nearest it: add a route to the NavMesh node, or name one in its **Route**. A
-new kind of NPC is a variant of Sandbox Character with a script that extends `SandboxNpc` and decides in `think`.
+new kind of NPC is a variant of Sandbox Character with an AI Brain of its own on its AI Controller, and a script
+that extends `SandboxNpc`: `enterState` and `inState` for what each of the brain's states does, and getters for
+anything the brain should read (a parameter whose source is **Builtin** names one).
 
 ## The weapons
 

@@ -47,13 +47,15 @@ interface Setup {
 }
 
 const planar = (a: ArrayLike<number>, b: ArrayLike<number>) => Math.hypot(a[0] - b[0], a[2] - b[2]);
+/** How often the NPCs perceive, probe and plan in the Sandbox itself (its Game Manager's `aiDetail`). */
+const SANDBOX_AI_DETAIL = { perceiveEvery: 1, probeEvery: 1, pathsPerFrame: 4 };
 const finite = (p: ArrayLike<number>) => Number.isFinite(p[0] + p[1] + p[2]);
 const ALL = ['Civilian 1', 'Civilian 2', 'Civilian 3', 'Civilian 4', 'Civilian 5', 'Civilian 6', 'Enemy Pillars 1', 'Enemy Pillars 2', 'Enemy Crates 1', 'Enemy Crates 2'];
 /** Far from every NPC's sight: where the player waits when a test is not about it. */
 const AWAY: Vec = [-45, 0.02, 45];
 
 /** The Sandbox, packed with only `setup.npcs` placed (where it says), and started on the host. */
-async function play(setup: Setup) {
+async function play(setup: Setup, options: { aiDetail?: { perceiveEvery: number; probeEvery: number; pathsPerFrame?: number } } = {}) {
     const bin = await packExampleGame(EXAMPLE, {
         edit: (data) => {
             const scene = data.scenes[data.entry].scene;
@@ -75,7 +77,7 @@ async function play(setup: Setup) {
     const r = await HostRuntime.open({ bin }, {
         tickRate: TICK, physicsBackend: TEST_PHYSICS,
         // Every agent perceives every tick, and every animator poses fully: the game as one player plays it.
-        aiDetail: { perceiveEvery: 1, probeEvery: 1, pathsPerFrame: 4 }, animationLod: false,
+        aiDetail: options.aiDetail ?? { perceiveEvery: 1, probeEvery: 1, pathsPerFrame: 4 }, animationLod: false,
     });
     open.push(r);
     const nodes = [...r.scene.nodes] as any[];
@@ -89,19 +91,23 @@ async function play(setup: Setup) {
     const watched: any[] = [];
     const watch = (...who: any[]) => { for (const w of who) { watched.push(w); states.set(w, [w.state]); } };
     /**
-     * Step `seconds` of game time, `each` before every tick (true from it stops early). It lets the test runner in
-     * every second of game time: a long run in one go starves its worker's messages and times them out.
+     * Step `seconds` of game time, `each` before every tick (true from it stops early), `after` after it. It lets the
+     * test runner in every second of game time: a long run in one go starves its worker's messages and times them out.
      */
-    const run = async (seconds: number, each?: (t: number) => boolean | void) => {
+    const played = { lastTickMs: 0 };
+    const run = async (seconds: number, each?: (t: number) => boolean | void, after?: () => void) => {
         const ticks = Math.round(seconds * TICK);
         for (let k = 0; k < ticks; k++) {
             if (each?.(k / TICK) === true) return;
+            const start = performance.now();
             r.step(1);
+            played.lastTickMs = performance.now() - start;
+            after?.();
             for (const w of watched) { const s = states.get(w)!; if (s[s.length - 1] !== w.state) s.push(w.state); }
             if (k % TICK === TICK - 1) await new Promise(done => setImmediate(done));
         }
     };
-    return { r, player, npc, named, run, watch, states };
+    return { r, player, npc, named, run, watch, states, get lastTickMs() { return played.lastTickMs; } };
 }
 type Played = Awaited<ReturnType<typeof play>>;
 
@@ -321,8 +327,10 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
             farthest = Math.max(farthest, planar(leader.worldPosition, from));
             if (t > 4) apart = Math.max(apart, planar(leader.worldPosition, follower.worldPosition));
         });
-        expect(p.states.get(a)!).toEqual(['patrol']);
-        expect(p.states.get(b)!).toEqual(['patrol']);
+        // The leader stops to look round at the points of its route; the follower keeps up behind it.
+        expect(p.states.get(leader)!).toContain('patrol');
+        expect(p.states.get(leader)!.every((s: string) => s === 'patrol' || s === 'look')).toBe(true);
+        expect(p.states.get(follower)!).toEqual(['patrol']);
         expect(farthest, 'the leader walks its route').toBeGreaterThan(8);
         expect(apart, 'the follower keeps close').toBeLessThan(8);
         expect([a.weapon, b.weapon]).toEqual([2, 2]);
@@ -372,6 +380,44 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
         const ground = shoot(p, [civ.worldPosition[0] + 1.5, 0, civ.worldPosition[2] - 2]);
         expect(ground, 'the round hits the ground').toBeTruthy();
         expect(count('Bullet Hole'), 'a hole in the ground').toBe(holes + 1);
+    });
+
+    it('stays within its frame budget in a firefight with all ten of them', async () => {
+        // The enemies at the pillars see the player and fight; the player shoots at every NPC in turn, a round every
+        // fifth of a second, for 12 s (flinches, stumbles, knock-downs); the car runs into the crowd. Counted each
+        // tick: the reacting bodies (powered ragdolls), the rays, the solver's iterations, and the tick's time.
+        const p = await play({ npcs: Object.fromEntries(ALL.map(n => [n, true])), player: { at: [6, 0.02, -15], yaw: 90 } },
+            { aiDetail: SANDBOX_AI_DETAIL });
+        const physics: any = p.r.scene.physics;
+        const npcs = ALL.map(n => p.npc(n));
+        const car = p.named('Car');
+        await p.run(1);
+        const ms: number[] = [], rays: number[] = [], powered: number[] = [], iterations: number[] = [], searches: number[] = [];
+        let shot = 0, struck = 0;
+        await p.run(16, (t) => {
+            if (t < 12 && t >= shot * 0.2) {
+                const target = npcs[shot % npcs.length];
+                shoot(p, [target.worldPosition[0], target.worldPosition[1] + 1.2, target.worldPosition[2]]);
+                shot++;
+            }
+            if (t >= 3 && !struck) { struck = 1; car._state = 'driving'; car.velocity = [8, 0, 0]; }
+        }, () => {
+            ms.push(p.lastTickMs);
+            rays.push(physics.stats.rayCount);
+            powered.push(physics.poweredRagdollCount ?? npcs.filter(n => n.reactions?.ragdoll && !n.reactions.ragdoll.frozen).length);
+            iterations.push(physics.solverIterations);
+            searches.push((p.r.scene as any).ai?.pathSearchesThisFrame ?? 0);
+        });
+        const sorted = (a: number[]) => [...a].sort((x, y) => x - y);
+        const pct = (a: number[], q: number) => sorted(a)[Math.min(a.length - 1, Math.floor(a.length * q))];
+        const report = {
+            ticks: ms.length, p50: pct(ms, 0.5), p95: pct(ms, 0.95), max: Math.max(...ms),
+            raysP95: pct(rays, 0.95), raysMax: Math.max(...rays), poweredMax: Math.max(...powered),
+            poweredMean: powered.reduce((a, b) => a + b, 0) / powered.length, iterationsMax: Math.max(...iterations),
+            searchesMax: Math.max(...searches), knocked: npcs.filter(n => p.states.get(n)?.includes('knocked')).length,
+        };
+        console.log(`[npc budget ${TEST_PHYSICS}] ${JSON.stringify(report)}`);
+        expect(report.ticks).toBeGreaterThan(400);
     });
 
     it('knocked down and shot again while it gets up, a civilian goes back down and gets up again', async () => {

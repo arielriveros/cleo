@@ -1,0 +1,429 @@
+{
+  "name": "Civilian Brain",
+  "kind": "behavior",
+  "machine": {
+    "parameters": [
+      {
+        "name": "Knocked",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "isKnocked"
+        }
+      },
+      {
+        "name": "At Goal",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "atGoal"
+        }
+      },
+      {
+        "name": "Stuck",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "isStuck"
+        }
+      },
+      {
+        "name": "Restless",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "restless"
+        }
+      },
+      {
+        "name": "In Sight",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "sense",
+          "name": "targetInSight"
+        }
+      },
+      {
+        "name": "Has Target",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "sense",
+          "name": "hasTarget"
+        }
+      },
+      {
+        "name": "Distance",
+        "type": "number",
+        "default": 0,
+        "source": {
+          "kind": "sense",
+          "name": "planarDistanceToTarget"
+        }
+      },
+      {
+        "name": "Since Shot",
+        "type": "number",
+        "default": 999,
+        "source": {
+          "kind": "builtin",
+          "name": "sinceShot"
+        }
+      },
+      {
+        "name": "Since Danger",
+        "type": "number",
+        "default": 999,
+        "source": {
+          "kind": "builtin",
+          "name": "sinceDanger"
+        }
+      },
+      {
+        "name": "Since Watched",
+        "type": "number",
+        "default": 999,
+        "source": {
+          "kind": "builtin",
+          "name": "sinceWatched"
+        }
+      },
+      {
+        "name": "Threat Distance",
+        "type": "number",
+        "default": 999,
+        "source": {
+          "kind": "builtin",
+          "name": "threatDistance"
+        }
+      }
+    ],
+    "states": [
+      {
+        "name": "wait",
+        "goal": "idle",
+        "speedScale": 1,
+        "x": 40,
+        "y": 160,
+        "isEntry": true
+      },
+      {
+        "name": "roam",
+        "goal": "path",
+        "speedScale": 1,
+        "x": 260,
+        "y": 160,
+        "targetKey": "point"
+      },
+      {
+        "name": "watch",
+        "goal": "idle",
+        "speedScale": 1,
+        "x": 260,
+        "y": 20
+      },
+      {
+        "name": "alert",
+        "goal": "idle",
+        "speedScale": 1,
+        "x": 480,
+        "y": 20
+      },
+      {
+        "name": "flee",
+        "goal": "path",
+        "speedScale": 1,
+        "x": 700,
+        "y": 160,
+        "targetKey": "point"
+      },
+      {
+        "name": "cower",
+        "goal": "idle",
+        "speedScale": 1,
+        "x": 700,
+        "y": 20
+      },
+      {
+        "name": "knocked",
+        "goal": "idle",
+        "speedScale": 1,
+        "x": 480,
+        "y": 300
+      }
+    ],
+    "transitions": [
+      {
+        "from": "*",
+        "to": "knocked",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Knocked",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "knocked",
+        "to": "flee",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Knocked",
+              "op": "false"
+            }
+          ]
+        }
+      },
+      {
+        "from": "*",
+        "to": "flee",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Since Danger",
+              "op": "lt",
+              "value": 1
+            },
+            {
+              "param": "Knocked",
+              "op": "false"
+            }
+          ]
+        }
+      },
+      {
+        "from": "wait",
+        "to": "alert",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Since Shot",
+              "op": "lt",
+              "value": 1
+            }
+          ]
+        }
+      },
+      {
+        "from": "roam",
+        "to": "alert",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Since Shot",
+              "op": "lt",
+              "value": 1
+            }
+          ]
+        }
+      },
+      {
+        "from": "watch",
+        "to": "alert",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Since Shot",
+              "op": "lt",
+              "value": 1
+            }
+          ]
+        }
+      },
+      {
+        "from": "alert",
+        "to": "flee",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Restless",
+              "op": "true"
+            },
+            {
+              "param": "Threat Distance",
+              "op": "lt",
+              "value": 22
+            }
+          ]
+        }
+      },
+      {
+        "from": "alert",
+        "to": "roam",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Restless",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "wait",
+        "to": "watch",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "Distance",
+              "op": "lt",
+              "value": 6
+            },
+            {
+              "param": "Since Watched",
+              "op": "gt",
+              "value": 20
+            }
+          ]
+        }
+      },
+      {
+        "from": "roam",
+        "to": "watch",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            },
+            {
+              "param": "Distance",
+              "op": "lt",
+              "value": 6
+            },
+            {
+              "param": "Since Watched",
+              "op": "gt",
+              "value": 20
+            }
+          ]
+        }
+      },
+      {
+        "from": "watch",
+        "to": "roam",
+        "condition": {
+          "op": "or",
+          "children": [
+            {
+              "param": "Restless",
+              "op": "true"
+            },
+            {
+              "param": "Distance",
+              "op": "gt",
+              "value": 9.6
+            },
+            {
+              "param": "Has Target",
+              "op": "false"
+            }
+          ]
+        }
+      },
+      {
+        "from": "wait",
+        "to": "roam",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Restless",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "roam",
+        "to": "wait",
+        "condition": {
+          "op": "or",
+          "children": [
+            {
+              "param": "At Goal",
+              "op": "true"
+            },
+            {
+              "param": "Stuck",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "flee",
+        "to": "cower",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "op": "or",
+              "children": [
+                {
+                  "param": "At Goal",
+                  "op": "true"
+                },
+                {
+                  "param": "Stuck",
+                  "op": "true"
+                }
+              ]
+            },
+            {
+              "param": "Since Danger",
+              "op": "gt",
+              "value": 7
+            }
+          ]
+        }
+      },
+      {
+        "from": "cower",
+        "to": "roam",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Restless",
+              "op": "true"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "graph": {
+    "goals": [],
+    "evaluators": [],
+    "arbitrationInterval": 0.5
+  },
+  "fuzzy": {
+    "variables": [],
+    "rules": [],
+    "defuzzification": "maxav"
+  },
+  "id": "adca9c4d963cf07335296ec9b468c97e"
+}

@@ -1,0 +1,702 @@
+{
+  "name": "Enemy Brain",
+  "kind": "behavior",
+  "machine": {
+    "parameters": [
+      {
+        "name": "Knocked",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "isKnocked"
+        }
+      },
+      {
+        "name": "At Goal",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "atGoal"
+        }
+      },
+      {
+        "name": "Stuck",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "isStuck"
+        }
+      },
+      {
+        "name": "Restless",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "restless"
+        }
+      },
+      {
+        "name": "In Sight",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "sense",
+          "name": "targetInSight"
+        }
+      },
+      {
+        "name": "Has Target",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "sense",
+          "name": "hasTarget"
+        }
+      },
+      {
+        "name": "Distance",
+        "type": "number",
+        "default": 0,
+        "source": {
+          "kind": "sense",
+          "name": "planarDistanceToTarget"
+        }
+      },
+      {
+        "name": "Since Seen",
+        "type": "number",
+        "default": 999,
+        "source": {
+          "kind": "sense",
+          "name": "timeSinceSeen"
+        }
+      },
+      {
+        "name": "Cover Cue",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "coverCue"
+        }
+      },
+      {
+        "name": "No Cover",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "noCover"
+        }
+      },
+      {
+        "name": "Exposed",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "exposed"
+        }
+      },
+      {
+        "name": "Reloading",
+        "type": "boolean",
+        "default": false,
+        "source": {
+          "kind": "builtin",
+          "name": "reloading"
+        }
+      },
+      {
+        "name": "Since Alarm",
+        "type": "number",
+        "default": 999,
+        "source": {
+          "kind": "builtin",
+          "name": "sinceAlarm"
+        }
+      },
+      {
+        "name": "Peeks Done",
+        "type": "number",
+        "default": 0,
+        "source": {
+          "kind": "builtin",
+          "name": "peeksDone"
+        }
+      }
+    ],
+    "states": [
+      {
+        "name": "patrol",
+        "goal": "path",
+        "speedScale": 1,
+        "x": 40,
+        "y": 160,
+        "targetKey": "point",
+        "isEntry": true
+      },
+      {
+        "name": "look",
+        "goal": "idle",
+        "speedScale": 1,
+        "x": 40,
+        "y": 300
+      },
+      {
+        "name": "alert",
+        "goal": "idle",
+        "speedScale": 1,
+        "x": 260,
+        "y": 300
+      },
+      {
+        "name": "engage",
+        "goal": "script",
+        "speedScale": 1,
+        "x": 480,
+        "y": 160
+      },
+      {
+        "name": "close in",
+        "goal": "path",
+        "speedScale": 1,
+        "x": 700,
+        "y": 60,
+        "targetKey": "target"
+      },
+      {
+        "name": "back off",
+        "goal": "flee",
+        "speedScale": 0.6,
+        "x": 700,
+        "y": 260,
+        "targetKey": "target"
+      },
+      {
+        "name": "cover",
+        "goal": "path",
+        "speedScale": 1,
+        "x": 480,
+        "y": 440,
+        "targetKey": "point"
+      },
+      {
+        "name": "in cover",
+        "goal": "idle",
+        "speedScale": 1,
+        "x": 700,
+        "y": 440
+      },
+      {
+        "name": "peek",
+        "goal": "idle",
+        "speedScale": 1,
+        "x": 920,
+        "y": 440
+      },
+      {
+        "name": "search",
+        "goal": "path",
+        "speedScale": 1,
+        "x": 260,
+        "y": 20,
+        "targetKey": "point"
+      },
+      {
+        "name": "scan",
+        "goal": "idle",
+        "speedScale": 1,
+        "x": 40,
+        "y": 20
+      },
+      {
+        "name": "return",
+        "goal": "path",
+        "speedScale": 1,
+        "x": 260,
+        "y": 160,
+        "targetKey": "point"
+      },
+      {
+        "name": "knocked",
+        "goal": "idle",
+        "speedScale": 1,
+        "x": 920,
+        "y": 160
+      }
+    ],
+    "transitions": [
+      {
+        "from": "*",
+        "to": "knocked",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Knocked",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "knocked",
+        "to": "cover",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Knocked",
+              "op": "false"
+            }
+          ]
+        }
+      },
+      {
+        "from": "*",
+        "to": "cover",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Cover Cue",
+              "op": "true"
+            },
+            {
+              "param": "Knocked",
+              "op": "false"
+            }
+          ]
+        }
+      },
+      {
+        "from": "cover",
+        "to": "engage",
+        "condition": {
+          "op": "or",
+          "children": [
+            {
+              "param": "No Cover",
+              "op": "true"
+            },
+            {
+              "param": "Stuck",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "cover",
+        "to": "in cover",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "At Goal",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "in cover",
+        "to": "cover",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Exposed",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "in cover",
+        "to": "peek",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Restless",
+              "op": "true"
+            },
+            {
+              "param": "Reloading",
+              "op": "false"
+            }
+          ]
+        }
+      },
+      {
+        "from": "peek",
+        "to": "engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Restless",
+              "op": "true"
+            },
+            {
+              "param": "Peeks Done",
+              "op": "gt",
+              "value": 2.5
+            }
+          ]
+        }
+      },
+      {
+        "from": "peek",
+        "to": "in cover",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Restless",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "patrol",
+        "to": "engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "look",
+        "to": "engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "alert",
+        "to": "engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "search",
+        "to": "engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "scan",
+        "to": "engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "return",
+        "to": "engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "In Sight",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "engage",
+        "to": "search",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Since Seen",
+              "op": "gt",
+              "value": 1.5
+            }
+          ]
+        }
+      },
+      {
+        "from": "close in",
+        "to": "search",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Since Seen",
+              "op": "gt",
+              "value": 1.5
+            }
+          ]
+        }
+      },
+      {
+        "from": "back off",
+        "to": "search",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Since Seen",
+              "op": "gt",
+              "value": 1.5
+            }
+          ]
+        }
+      },
+      {
+        "from": "engage",
+        "to": "close in",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Distance",
+              "op": "gt",
+              "value": 22
+            }
+          ]
+        }
+      },
+      {
+        "from": "engage",
+        "to": "back off",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Distance",
+              "op": "lt",
+              "value": 8
+            }
+          ]
+        }
+      },
+      {
+        "from": "close in",
+        "to": "engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Distance",
+              "op": "lt",
+              "value": 18
+            }
+          ]
+        }
+      },
+      {
+        "from": "back off",
+        "to": "engage",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Distance",
+              "op": "gt",
+              "value": 11
+            }
+          ]
+        }
+      },
+      {
+        "from": "patrol",
+        "to": "alert",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Since Alarm",
+              "op": "lt",
+              "value": 1
+            }
+          ]
+        }
+      },
+      {
+        "from": "look",
+        "to": "alert",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Since Alarm",
+              "op": "lt",
+              "value": 1
+            }
+          ]
+        }
+      },
+      {
+        "from": "return",
+        "to": "alert",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Since Alarm",
+              "op": "lt",
+              "value": 1
+            }
+          ]
+        }
+      },
+      {
+        "from": "alert",
+        "to": "search",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Restless",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "search",
+        "to": "scan",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "At Goal",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "search",
+        "to": "return",
+        "condition": {
+          "op": "or",
+          "children": [
+            {
+              "param": "Stuck",
+              "op": "true"
+            },
+            {
+              "param": "Restless",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "scan",
+        "to": "return",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Restless",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "return",
+        "to": "patrol",
+        "condition": {
+          "op": "or",
+          "children": [
+            {
+              "param": "At Goal",
+              "op": "true"
+            },
+            {
+              "param": "Stuck",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "patrol",
+        "to": "look",
+        "condition": {
+          "op": "or",
+          "children": [
+            {
+              "param": "At Goal",
+              "op": "true"
+            },
+            {
+              "param": "Stuck",
+              "op": "true"
+            }
+          ]
+        }
+      },
+      {
+        "from": "look",
+        "to": "patrol",
+        "condition": {
+          "op": "and",
+          "children": [
+            {
+              "param": "Restless",
+              "op": "true"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "graph": {
+    "goals": [],
+    "evaluators": [],
+    "arbitrationInterval": 0.5
+  },
+  "fuzzy": {
+    "variables": [],
+    "rules": [],
+    "defuzzification": "maxav"
+  },
+  "id": "b5cda8641ee98dfe5366b91357b567f1"
+}

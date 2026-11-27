@@ -1441,15 +1441,6 @@
         }
       },
       {
-        "name": "state",
-        "type": {
-          "kind": "string"
-        },
-        "access": "public",
-        "default": "idle",
-        "hidden": true
-      },
-      {
         "name": "_brain",
         "type": {
           "kind": "node",
@@ -1469,7 +1460,25 @@
         "hidden": true
       },
       {
+        "name": "_entered",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
         "name": "_stateTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_stateFor",
         "type": {
           "kind": "number"
         },
@@ -1579,6 +1588,24 @@
         "hidden": true
       },
       {
+        "name": "_goalRadius",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 1.2,
+        "hidden": true
+      },
+      {
+        "name": "_nowhere",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
         "name": "_bestDistance",
         "type": {
           "kind": "number"
@@ -1664,15 +1691,6 @@
         "hidden": true
       },
       {
-        "name": "_wasKnocked",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "private",
-        "default": false,
-        "hidden": true
-      },
-      {
         "name": "_dodgeUntil",
         "type": {
           "kind": "number"
@@ -1692,31 +1710,6 @@
         "hidden": true
       },
       {
-        "name": "_dodging",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "private",
-        "default": false,
-        "hidden": true
-      },
-      {
-        "name": "watchDistance",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 6,
-        "hidden": false,
-        "attribute": {
-          "group": "Behaviour",
-          "min": 0,
-          "max": 30,
-          "step": 0.5,
-          "tooltip": "The player this close (m) and in sight is looked at, for this long (s, a range), and not again for `watchCooldown` s."
-        }
-      },
-      {
         "name": "watchMin",
         "type": {
           "kind": "number"
@@ -1728,7 +1721,8 @@
           "group": "Behaviour",
           "min": 0,
           "max": 10,
-          "step": 0.1
+          "step": 0.1,
+          "tooltip": "How long it looks at the player (s, a range)."
         }
       },
       {
@@ -1747,37 +1741,6 @@
         }
       },
       {
-        "name": "watchCooldown",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 20,
-        "hidden": false,
-        "attribute": {
-          "group": "Behaviour",
-          "min": 0,
-          "max": 120,
-          "step": 1
-        }
-      },
-      {
-        "name": "fleeDistance",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 22,
-        "hidden": false,
-        "attribute": {
-          "group": "Behaviour",
-          "min": 0,
-          "max": 100,
-          "step": 1,
-          "tooltip": "A shot heard closer than this (m) makes it run; farther, it walks off quicker."
-        }
-      },
-      {
         "name": "fleeMin",
         "type": {
           "kind": "number"
@@ -1790,7 +1753,7 @@
           "min": 1,
           "max": 60,
           "step": 1,
-          "tooltip": "How far it runs (m, a range), and for how long at least (s)."
+          "tooltip": "How far it runs (m, a range)."
         }
       },
       {
@@ -1806,21 +1769,6 @@
           "min": 1,
           "max": 80,
           "step": 1
-        }
-      },
-      {
-        "name": "fleeSeconds",
-        "type": {
-          "kind": "number"
-        },
-        "access": "public",
-        "default": 7,
-        "hidden": false,
-        "attribute": {
-          "group": "Behaviour",
-          "min": 0,
-          "max": 30,
-          "step": 0.5
         }
       },
       {
@@ -1871,28 +1819,6 @@
         }
       },
       {
-        "name": "_lookPoints",
-        "type": {
-          "kind": "list",
-          "of": {
-            "kind": "node",
-            "className": "Node"
-          }
-        },
-        "access": "private",
-        "default": [],
-        "hidden": true
-      },
-      {
-        "name": "_waitFor",
-        "type": {
-          "kind": "number"
-        },
-        "access": "private",
-        "default": 0,
-        "hidden": true
-      },
-      {
         "name": "_waitAt",
         "type": {
           "kind": "list",
@@ -1914,12 +1840,21 @@
         "hidden": true
       },
       {
-        "name": "_watchFor",
+        "name": "_shotAt",
         "type": {
           "kind": "number"
         },
         "access": "private",
-        "default": 0,
+        "default": -999,
+        "hidden": true
+      },
+      {
+        "name": "_dangerAt",
+        "type": {
+          "kind": "number"
+        },
+        "access": "private",
+        "default": -999,
         "hidden": true
       },
       {
@@ -1932,7 +1867,7 @@
         "hidden": true
       },
       {
-        "name": "_fleeUntil",
+        "name": "_calmUntil",
         "type": {
           "kind": "number"
         },
@@ -1941,12 +1876,21 @@
         "hidden": true
       },
       {
-        "name": "_calmUntil",
+        "name": "_replanAt",
         "type": {
           "kind": "number"
         },
         "access": "private",
         "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_first",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": true,
         "hidden": true
       },
       {

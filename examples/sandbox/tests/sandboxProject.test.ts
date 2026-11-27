@@ -1545,14 +1545,32 @@ describe.skipIf(!present)('the Sandbox example project', { timeout: 300_000 }, (
         for (const m of [civ, enemy, plain]) expect(m.material.config.receiveDecals, m.name).toBe(false);
         for (const name of ['Player', 'Sandbox Character', 'Civilian', 'Enemy'])
             expect(mannequin(templates.get(name)).model.material.config.receiveDecals, name).toBe(false);
-        // The brains: an AI Controller each, possessing its Character, seeing as far and as wide as its script.
-        for (const [name, range, fov] of [['Civilian', 16, 150], ['Enemy', 24, 120]] as const) {
+        // The brains: an AI Controller each, possessing its Character, seeing as far and as wide as its script, and
+        // thinking with its AI Brain asset (Characters/NPCs/AI): a behaviour machine whose states the scripts answer.
+        const brains = new Map(library('aiBrains').map((b: any) => [b.id, b]));
+        for (const [name, range, fov, brainName] of [['Civilian', 16, 150, 'Civilian Brain'], ['Enemy', 24, 120, 'Enemy Brain']] as const) {
             const t = templates.get(name);
             const ctrl = allNodes(t.nodeJson).find((n: any) => n.type === 'controller');
             const character = characterOf(t);
-            expect([ctrl.name, ctrl.controlSource, ctrl.brain, ctrl.autoAcquire, ctrl.possessedId], name).toEqual(['AI Controller', 'ai', 'none', false, character.id]);
+            expect([ctrl.name, ctrl.controlSource, ctrl.brain, ctrl.autoAcquire, ctrl.targetKey, ctrl.possessedId], name).toEqual(['AI Controller', 'ai', 'machine', false, 'target', character.id]);
             expect([ctrl.perception.range, ctrl.perception.fieldOfView], name).toEqual([range, fov]);
             expect([character.scriptVars.sightRange, character.scriptVars.sightAngle], name).toEqual([range, fov]);
+            const brain = brains.get(ctrl.brainId) as any;
+            expect(brain?.name, name).toBe(brainName);
+            expect(brain.kind).toBe('behavior');
+            // The controller's copy is the asset's (read back through the engine's parser, so compared by shape).
+            const shape = (m: any) => [m.parameters.map((p: any) => `${p.name}:${p.source.kind}:${p.source.name ?? ''}`),
+                m.states.map((s: any) => `${s.name}:${s.goal}:${s.targetKey ?? ''}`), m.transitions.map((t: any) => `${t.from}>${t.to}`)];
+            expect(shape(ctrl.behavior), name).toEqual(shape(brain.machine));
+        }
+        const states = (name: string) => [...brains.values()].find((b: any) => b.name === name).machine.states.map((s: any) => s.name);
+        expect(states('Civilian Brain')).toEqual(['wait', 'roam', 'watch', 'alert', 'flee', 'cower', 'knocked']);
+        expect(states('Enemy Brain')).toEqual(['patrol', 'look', 'alert', 'engage', 'close in', 'back off', 'cover', 'in cover', 'peek', 'search', 'scan', 'return', 'knocked']);
+        // Every builtin a machine reads is a getter (or a field) its NPC script declares.
+        for (const [brainName, scripts] of [['Civilian Brain', ['SandboxNpc', 'SandboxCivilian']], ['Enemy Brain', ['SandboxNpc', 'SandboxEnemy', 'SandboxCharacter']]] as const) {
+            const text = scripts.map(source).join('\n');
+            for (const p of [...brains.values()].find((b: any) => b.name === brainName).machine.parameters)
+                if (p.source.kind === 'builtin') expect(text, `${brainName}: ${p.source.name}`).toMatch(new RegExp(`public (get )?${p.source.name}\\b`));
         }
         // An enemy carries the rifle, and its shots sound where it is.
         expect(characterOf(templates.get('Enemy')).scriptVars.preferredWeapon).toBe(2);

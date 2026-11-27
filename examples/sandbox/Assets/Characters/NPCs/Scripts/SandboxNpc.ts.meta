@@ -1441,15 +1441,6 @@
         }
       },
       {
-        "name": "state",
-        "type": {
-          "kind": "string"
-        },
-        "access": "public",
-        "default": "idle",
-        "hidden": true
-      },
-      {
         "name": "_brain",
         "type": {
           "kind": "node",
@@ -1469,7 +1460,25 @@
         "hidden": true
       },
       {
+        "name": "_entered",
+        "type": {
+          "kind": "string"
+        },
+        "access": "private",
+        "default": "",
+        "hidden": true
+      },
+      {
         "name": "_stateTime",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 0,
+        "hidden": true
+      },
+      {
+        "name": "_stateFor",
         "type": {
           "kind": "number"
         },
@@ -1579,6 +1588,24 @@
         "hidden": true
       },
       {
+        "name": "_goalRadius",
+        "type": {
+          "kind": "number"
+        },
+        "access": "protected",
+        "default": 1.2,
+        "hidden": true
+      },
+      {
+        "name": "_nowhere",
+        "type": {
+          "kind": "boolean"
+        },
+        "access": "private",
+        "default": false,
+        "hidden": true
+      },
+      {
         "name": "_bestDistance",
         "type": {
           "kind": "number"
@@ -1664,15 +1691,6 @@
         "hidden": true
       },
       {
-        "name": "_wasKnocked",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "private",
-        "default": false,
-        "hidden": true
-      },
-      {
         "name": "_dodgeUntil",
         "type": {
           "kind": "number"
@@ -1689,15 +1707,6 @@
         },
         "access": "protected",
         "default": [0, 0],
-        "hidden": true
-      },
-      {
-        "name": "_dodging",
-        "type": {
-          "kind": "boolean"
-        },
-        "access": "private",
-        "default": false,
         "hidden": true
       }
     ],

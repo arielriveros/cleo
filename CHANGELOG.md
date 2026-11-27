@@ -57,6 +57,10 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     and lets only the player drive.
   - Every body gets up on Mixamo's *Getting Up* (face down) and *Stand Up* (face up), the Mannequin rig's Default set.
   - tests/npcs.test.ts plays them headless on every physics backend.
+  - Their brains are AI Brain assets (**Civilian Brain**, **Enemy Brain** in `/Characters/NPCs/AI`): behaviour
+    machines whose states set the AI Controller's goal and whose transitions read its senses of the player and the
+    getters their scripts publish. The scripts keep what a graph cannot do: where to go, how long to stay, the pace,
+    the look, the aim and the trigger.
 
 - **Reactions look like a body's.**
   - A rifle round in the trunk stumbles a character a step or two (the set's **Stumble at**, **Stumble speed**), its
