@@ -177,9 +177,10 @@ export function applyMaterialAsset(node: Node, asset: MaterialAsset, submesh = 0
   setNodeMaterial(node, Material.parse(asset.material), submesh)
   if (submesh === 0) node.setVariable(MATERIAL_ID_VAR, asset.id, 'string')
 
-  // Keep the per-submesh list in step whenever the node has one; the two links must never disagree.
+  // Keep the per-submesh list in step whenever the node has one; the two links must never disagree. A list of
+  // one entry is a list too: left alone it goes on naming the old asset, which is what getMaterialIdsOf reads.
   const ids = getMaterialIdsOf(node)
-  if (ids.length > 1 || submesh > 0) {
+  if (ids.length > 1 || submesh > 0 || !!node.getVariable(MATERIAL_IDS_VAR)) {
     while (ids.length <= submesh) ids.push(undefined)
     ids[submesh] = asset.id
     node.setVariable(MATERIAL_IDS_VAR, JSON.stringify(ids), 'string')

@@ -40,6 +40,21 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     reactions.
   - Player contract 54 (reaction sets travel in the skin).
 
+- **Fix: saving a base template and reloading the scene drew the player as a ball and the NPCs in the base's
+  colour.** A model inside a placed template copy, rebuilt from its changed model asset (as a Reload rebuilds every
+  one), took the asset's own material instead of the one its template gave it (a variant's colour), and the rebuilt
+  bodies were left unposed. It keeps its own material now, and copies rebuilt by a Reload, a template save or a model
+  save are posed.
+- **Fix: a character's reactions were its first-person viewmodel's.** The player carries skinned viewmodels under its
+  camera, and the search for a character's model went depth first into the camera before reaching the body, so a shot
+  on the player's capsule went to an arms-only model that cannot ragdoll and nothing happened. It now searches breadth
+  first, the body right under the character first.
+- **Fix: a template made before a rig edit kept its old foot IK, sockets, ragdoll and reactions.** A placed copy got
+  the model's when its scene opened, but the template itself never did, so a copy spawned or packed from it came
+  without. Opening a template brings them up to its model's, and saving it keeps them.
+- **Fix: linking a material to a model with a one-entry material list left the list naming the old material.** The
+  node then matched the old material's edits and missed its own.
+
 - **Fix: shooting in the Sandbox logged WebGPU errors and showed black frames.** Once a bullet hole existed, every
   frame failed validation ("Attachment state of decalResolve is not compatible with decals.resolve") and was dropped.
   The decal pipelines were asked for before their passes opened, so they were built for the previous pass's

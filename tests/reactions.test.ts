@@ -12,6 +12,7 @@ import { getChannel, resetScriptChannels } from '../src/core/events/hub';
 import { LoopbackPort } from '../src/physics/worker/ports';
 import { groundWorld, humanoidModel } from './helpers/humanoidRig';
 import { makeBody, box } from './helpers/physicsBodies';
+import { Node } from '../src/core/scene/nodes/node';
 
 // Reactions (physics/reactive/): a character that is hit flinches and clutches the wound, one pushed steps to keep
 // its balance, one that trips or drops catches itself, bends its knees and protects its head, lies still, and
@@ -81,6 +82,16 @@ describe.each(BACKENDS)('reactions on %s', backend => {
         expect(s.r).not.toBeNull();
         expect(s.r.state).toBe('animated');
         expect(s.physics.reactionsOf(null)).toBeNull();
+    });
+
+    it("are a character's body's, not a skinned model it carries deeper down (a viewmodel under its camera)", () => {
+        const s = setup();
+        const character = new Node('Character');
+        const camera = new Node('Camera Rig');
+        camera.addChild(humanoidModel());
+        character.addChild(camera);
+        character.addChild(s.node);
+        expect(s.physics.reactionsFor(character)).toBe(s.r);
     });
 
     it('finds the part a ray strikes, before it has a body and after', () => {

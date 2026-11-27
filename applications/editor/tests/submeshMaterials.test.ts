@@ -71,6 +71,19 @@ describe('per-submesh material links', () => {
     expect(node.model.materials[1].tag).toBe('mat-b');
   });
 
+  it('relinks a model whose list has one entry: the list follows, not just the scalar', () => {
+    // A copy of a model saved with a one-entry list, linked to another asset (a template variant's own
+    // material): the list kept naming the old asset, so the node matched the old asset's edits and not its own.
+    const node = fakeNode(1);
+    node.setVariable(MATERIAL_ID_VAR, 'old');
+    node.setVariable(MATERIAL_IDS_VAR, JSON.stringify(['old']));
+    applyMaterialAsset(node, asset('new'), 0);
+    expect(getMaterialIdsOf(node)).toEqual(['new']);
+    expect(node.getVariable(MATERIAL_ID_VAR)).toBe('new');
+    expect(materialSlotsReferencing(node, 'old')).toEqual([]);
+    expect(materialSlotsReferencing(node, 'new')).toEqual([0]);
+  });
+
   it('leaves an unmerged model with no list variable at all', () => {
     const node = fakeNode(1);
     applyMaterialAsset(node, asset('only'), 0);

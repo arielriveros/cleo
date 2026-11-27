@@ -1681,16 +1681,20 @@ export class PhysicsSystem {
     if (node instanceof ModelNode && node.animator) return this.reactionsOf(node);
     const character = (node as { character?: Node | null }).character ?? null;
     const root = character ?? node;
-    const find = (n: Node): ModelNode | null => {
-      for (const c of n.children) {
-        if (c instanceof ModelNode && c.animator && (c.model as { skin?: unknown } | null)?.skin) return c;
-        const deeper = c.nodeType === 'collider' || c.nodeType === 'character' ? null : find(c);
-        if (deeper) return deeper;
+    // Breadth first: the character's own body (a skinned model right under it) before one it carries deeper down,
+    // such as a first-person viewmodel under its camera. Not into another Collider or Character.
+    let level: Node[] = [root];
+    while (level.length) {
+      const next: Node[] = [];
+      for (const n of level) {
+        for (const c of n.children) {
+          if (c instanceof ModelNode && c.animator && (c.model as { skin?: unknown } | null)?.skin) return this.reactionsOf(c);
+          if (c.nodeType !== 'collider' && c.nodeType !== 'character') next.push(c);
+        }
       }
-      return null;
-    };
-    const model = find(root);
-    return model ? this.reactionsOf(model) : null;
+      level = next;
+    }
+    return null;
   }
 
   /**

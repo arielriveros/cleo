@@ -40,7 +40,7 @@ import { createAnimationEditorScene } from './demoScene/createAnimationEditorSce
 import { createAssetEditScene, yieldPreviewLight } from './demoScene/createAssetEditScene';
 import { parseByType, regenerateIds, stripDebug } from "../utils/nodeSubtree";
 import { cryptoRandomId } from "../utils/ids";
-import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR, templateInstanceRootOf } from "../utils/templates";
+import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR, templateInstanceRootOf, isWithinTemplateInstance } from "../utils/templates";
 import { cascadeFrom, cloneJson, createVariant, flattenVariant, materializeVariant, rebaseVariant, revertInDiff, saveVariant, variantFromContent, type TemplateDiff } from "../utils/templateVariants";
 import { clearOverride, writeOverrides, pathOf, nodeAtPath, OVERRIDES_VAR } from "../utils/templateOverrides";
 import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getMaterialIdsOf, getNodeMaterial, unlinkToFallback, unlinkMaterialAt, materialSlotsReferencing, resolveMaterialRefs, serializedVar, MATERIAL_ID_VAR, MATERIAL_IDS_VAR } from "../utils/materials";
@@ -51,7 +51,7 @@ import { runtimeReactionSets, reactionsUsePose } from '../utils/reactionSets';
 import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, recenterIfOffOrigin, rescaleLodDistances, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, assetWithRagdollProfile, assetWithReactionSets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, lodLevelMaterialLinks, withLevelLinks, type ModelPart } from "../utils/models";
 import { downscaleTextures, levelTextureIds, maskTextureIds } from "../utils/lodTextures";
 import { detachForeignChildren, reattachForeignChildren } from "../utils/foreignChildren";
-import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, defaultScriptModule, seedScriptFields, scriptKindOfAsset, SCRIPT_REFLECT_VERSION } from "../utils/scripts";
+import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, defaultScriptModule, seedScriptFields, scriptKindOf, scriptKindOfAsset, SCRIPT_REFLECT_VERSION } from "../utils/scripts";
 import { buildScriptGraphCtx, deriveBaseType, resolveScriptVariables, dependentsOf } from "../utils/scriptGraph";
 import { pushExternalSource } from "./scriptWorkspace/externalSourceStore";
 import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation, withAnimationRef, withoutAnimationRef, extractEmbeddedClips } from "../utils/animationAssets";
@@ -103,7 +103,7 @@ import {
   ProjectMeta, SceneMeta, SceneRefs, SceneAssetData, loadProjectMeta, saveProjectMeta, loadSceneData, saveSceneData,
   deleteSceneData, migrateLegacyProject, createFreshProjectMeta,
 } from "../utils/sceneStorage";
-import { resyncScene, reinstantiate } from "../utils/sceneResync";
+import { resyncScene, reinstantiate, applyModelRigData, keepOwnMaterials } from "../utils/sceneResync";
 import { migrateSceneSprites } from "../utils/spriteMigration";
 import { captureAnimationState, restoreAnimationState } from "../utils/placedAnimation";
 import { buildAssetHashes, hashAsset, AssetLibs, ASSET_HASH_VERSION } from "../utils/assetHash";
@@ -1419,16 +1419,25 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Scripts derived under older reflection rules (before @attribute decided what the inspector shows)
   // re-derive their fields once the explorer has told us where each script lives: a class inheriting fields
-  // from another script is resolved by that path.
+  // from another script is resolved by that path. So does a script file added to a project folder outside the
+  // editor (written in VS Code, say): it comes in as its source alone, and is given here what the editor's own
+  // New Script would have: whether it is a class or a module, and the node type its class extends (through
+  // other scripts' classes), without which it could not attach to anything.
   useEffect(() => {
-    const stale = scriptAssets.filter(a => a.reflect !== SCRIPT_REFLECT_VERSION);
+    const stale = scriptAssets.filter(a => a.reflect !== SCRIPT_REFLECT_VERSION || !a.kind || !a.baseType);
     if (!stale.length || !scriptAssets.every(a => scriptPaths.has(a.id))) return;
     const ctx = buildScriptGraphCtx(scriptPathsRef.current, scriptAssets);
-    const fresh = new Map(stale.map(a => [a.id, {
-      ...a,
-      variables: scriptKindOfAsset(a) === 'module' ? [] : resolveScriptVariables(a.source, ctx.pathOf(a.id), ctx),
-      reflect: SCRIPT_REFLECT_VERSION,
-    }]));
+    const fresh = new Map(stale.map(a => {
+      const path = ctx.pathOf(a.id);
+      const kind = a.kind ?? scriptKindOf(a.source);
+      return [a.id, {
+        ...a,
+        kind,
+        baseType: a.baseType ?? deriveBaseType(a.source, path, ctx),
+        variables: kind === 'module' ? [] : resolveScriptVariables(a.source, path, ctx),
+        reflect: SCRIPT_REFLECT_VERSION,
+      }];
+    }));
     setScriptAssets(prev => prev.map(a => fresh.get(a.id) ?? a));
   }, [scriptAssets, scriptPaths]);
 
@@ -2865,6 +2874,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         withoutDirty(() => {
           const refreshed = refreshModelClips(templateRoot, modelsRef.current, animationsRef.current);
           if (refreshed) Logger.info(`Refreshed animation clips on ${refreshed} model${refreshed === 1 ? '' : 's'} in "${t.name}"`, 'Editor');
+          // And what the rig authors on the skin (foot IK, sockets, ragdoll, reactions): a template made before a
+          // rig edit is saved with it, as a placed copy gets it when its scene opens.
+          applyModelRigData(templateRoot, modelsRef.current);
         });
       }
       name = t.name;
@@ -2924,6 +2936,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         if (wasSelected) reselectId = rebuilt.id;
         count++;
       }
+      // The rebuilt bodies have no pose until an animator runs, and the editor's do not tick.
+      if (count) showBindPoseForSkinnedModels(scene);
     }
     if (count) {
       eventEmitter.current.emit('TEXTURES_CHANGED');
@@ -3768,6 +3782,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       withoutDirty(() => {
         const changed = resyncScene(editorSceneRef.current, engineMaps(), currentLibs(), undefined);
         if (changed) {
+          // A rebuilt skinned model has no pose until its animator runs, and the editor's does not tick.
+          showBindPoseForSkinnedModels(editorSceneRef.current);
           eventEmitter.current.emit('TEXTURES_CHANGED');
           eventEmitter.current.emit('SCENE_CHANGED');
           // A re-instantiated subtree invalidates the selection: the node it named no longer exists.
@@ -4261,6 +4277,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const instances = Array.from(scene.nodes).filter(n => n.getVariable(MODEL_ID_VAR) === modelId);
       for (const inst of instances) {
         const parent = inst.parent;
+        // A model inside a template copy wears what its template gave it (a variant's own material on its body),
+        // which the asset's own would replace.
+        const ownMaterials = isWithinTemplateInstance(inst) ? getMaterialIdsOf(inst) : null;
         if (!parent) continue;
         const pos = Array.from(inst.position) as [number, number, number];
         const rot = Array.from(inst.rotation) as [number, number, number];
@@ -4308,10 +4327,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // A LOD-wrapped asset keeps its root transform on the wrapper's child 0, so the edit already
           // arrives through the child and applying it here as well would double it.
           if (!modelAssetHasLodBehavior(asset)) applyModelTransformDelta(newNode, baseTrs, asset.nodeJson);
+          if (ownMaterials) keepOwnMaterials(newNode, ownMaterials, materialsRef.current);
         }
         if (wasSelected) reselectId = newId;
         count++;
       }
+      // A rebuilt skinned model has no pose until its animator runs, and the editor's do not tick.
+      if (instances.length) showBindPoseForSkinnedModels(scene);
     }
     if (count) {
       eventEmitter.current.emit('TEXTURES_CHANGED');

@@ -31,8 +31,11 @@ const HOSTED_APP = {
   devDist: path.join(__dirname, '..', '..', 'editor', 'dist'),
   /** Where electron-builder's extraResources puts that build in a packaged app. */
   packagedDist: () => path.join(process.resourcesPath, 'editor'),
-  /** The app's dev server (applications/editor/vite.config.ts pins this port with strictPort). */
-  devUrl: 'http://localhost:8080',
+  /**
+   * The app's dev server (applications/editor/vite.config.ts pins this port with strictPort). CLEO_DEV_URL points a
+   * dev run at another one: a second checkout's editor, on a port of its own, beside the usual one.
+   */
+  devUrl: process.env.CLEO_DEV_URL || 'http://localhost:8080',
 };
 
 // --- Editor window -----------------------------------------------------------------------------

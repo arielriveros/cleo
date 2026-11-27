@@ -4,6 +4,7 @@ import { join } from 'path'
 import { parseReactionSets, reactionParamKeys, MUSCLE_SPECS, PIN_SPECS, THRESHOLD_SPECS, BEHAVIOUR_SPECS } from 'cleo'
 import { assetWithReactionSets, assetReactionSets } from '../src/utils/modelClips'
 import { applyReactionSets } from '../src/utils/placedAnimation'
+import { applyModelRigData } from '../src/utils/sceneResync'
 import { hashAsset } from '../src/utils/assetHash'
 import { runtimeReactionSets, reactionsUsePose, type RigReactions } from '../src/utils/reactionSets'
 import { benchReactionSet } from '../src/features/rig/reactions/benchSet'
@@ -109,6 +110,29 @@ describe('applyReactionSets', () => {
     expect(skin.reactionSets).not.toBe(rt)
     applyReactionSets(placed, null)
     expect(skin.reactionSets).toBeUndefined()
+  })
+})
+
+describe('applyModelRigData', () => {
+  it("brings a template's own skins up to their model asset: reactions, sockets, foot IK", () => {
+    // A template made before the rig had reactions bakes a skin without them; opening it brings them in.
+    const rt = runtimeReactionSets(reactions(), poseAssets())
+    const stale: any = { joints: [] }
+    const model = (skin: any, modelId?: string): any => ({
+      getVariable: (k: string) => (k === '__modelId' ? modelId : undefined), animator: {}, model: { skin }, children: [],
+    })
+    const placed = model(stale, 'm1')
+    const other = model({ joints: [] }, 'm2')
+    const root: any = { getVariable: () => undefined, children: [{ getVariable: () => undefined, children: [placed, other] }] }
+    const sockets = [{ name: 'Grip', bone: 'RightHand' }]
+    const ikRig = { feet: [] }
+    const m1 = { id: 'm1', nodeJson: { children: [{ model: { skin: { joints: [], reactionSets: rt, sockets, ikRig } } }] } }
+    expect(applyModelRigData(root, [m1])).toBe(1)
+    expect(stale.reactionSets).toEqual(rt)
+    expect(stale.sockets).toEqual(sockets)
+    expect(stale.ikRig).toEqual(ikRig)
+    // A model whose asset is not in the library is left as it is.
+    expect(other.model.skin.reactionSets).toBeUndefined()
   })
 })
 

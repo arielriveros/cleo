@@ -3,7 +3,7 @@ import { getMaterialIdsOf, applyMaterialAsset, unlinkMaterialAt, MaterialAsset }
 import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from './screenMaterials'
 import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig, assetSockets, assetRagdollProfile, assetReactionSets, applyModelTransformDelta, readModelBaseTrs, modelAssetHasLodBehavior, modelInstanceShape, lodLevelMaterialLinks } from './models'
 import { detachForeignChildren, reattachForeignChildren, type ShapeNode } from './foreignChildren'
-import { TEMPLATE_ID_VAR, instantiateTemplate } from './templates'
+import { TEMPLATE_ID_VAR, instantiateTemplate, isWithinTemplateInstance } from './templates'
 import { applyOverrides } from './templateOverrides'
 import { applyTerrainMaterialToLayer } from './terrainMaterials'
 
@@ -164,6 +164,45 @@ export function reinstantiate(
 }
 
 /**
+ * A model rebuilt from its asset inside a template copy, given back the materials it wore (`ids`, one per submesh, as
+ * `getMaterialIdsOf` read them before the rebuild): the template's (a variant's own colour), not the asset's. A slot
+ * whose material is gone keeps the asset's.
+ */
+export function keepOwnMaterials(rebuilt: Node, ids: readonly (string | undefined)[], materials: ReadonlyMap<string, MaterialAsset> | readonly MaterialAsset[]): void {
+  const byId = materials instanceof Map ? materials : new Map((materials as readonly MaterialAsset[]).map(m => [m.id, m]))
+  const now = getMaterialIdsOf(rebuilt)
+  ids.forEach((id, slot) => {
+    const asset = id ? byId.get(id) : undefined
+    if (asset && now[slot] !== id) applyMaterialAsset(rebuilt, asset, slot)
+  })
+}
+
+/**
+ * Bring what a rig authors and a skin carries (the IK rig, the sockets, the ragdoll profile, the reaction sets) up
+ * to the model asset on every placed model under `root`, by its `__modelId`: what resyncScene does for a scene's
+ * copies, for a template's own (a template bakes its own copy of the skin, and a rig edit made after it was made
+ * reaches it nowhere else). Returns how many models it touched.
+ */
+export function applyModelRigData(root: Node, models: readonly { id: string }[]): number {
+  const byId = new Map(models.map(m => [m.id, m]))
+  let count = 0
+  const walk = (node: Node) => {
+    const id = node.getVariable(MODEL_ID_VAR)
+    const asset = id ? byId.get(id) as any : undefined
+    if (asset && (node as any).model?.skin) {
+      applyIkRig(node as any, assetIkRig(asset))
+      applySockets(node as any, assetSockets(asset))
+      applyRagdollProfile(node as any, assetRagdollProfile(asset))
+      applyReactionSets(node as any, assetReactionSets(asset))
+      count++
+    }
+    for (const child of node.children) walk(child)
+  }
+  walk(root)
+  return count
+}
+
+/**
  * Re-resolve every asset link in `scene` against the current libraries. Returns true if anything
  * changed (the caller emits TEXTURES_CHANGED / SCENE_CHANGED once). `savedHashes` gates re-application;
  * pass undefined to resync unconditionally (legacy scenes with no captured hashes).
@@ -233,6 +272,9 @@ export function resyncScene(
     // instance belongs to the pass above: rebuilding it from the model asset would replace the template's
     // subtree with a bare model and drop `__templateId` along with it.
     let live = node
+    // A model INSIDE a copy (a character's body, its weapons) is still rebuilt from a changed asset, but it wears
+    // what its template gave it: a variant's own material on its body, which the asset's would replace.
+    const ownMaterials = isWithinTemplateInstance(node) ? getMaterialIdsOf(node) : null
     // A generated LOD level derives its material from the library when it is BUILT, so an edit to one of
     // those materials made while this scene was closed needs the copy rebuilt, just like a model edit.
     const levelMaterialChanged = [...lodLevelMaterialLinks(asset).keys()].some(id => {
@@ -248,6 +290,7 @@ export function resyncScene(
           if (!modelAssetHasLodBehavior(asset)) applyModelTransformDelta(rebuilt, readModelBaseTrs(prev), asset.nodeJson)
         },
         modelInstanceShape(asset, libs.models)) ?? node
+      if (ownMaterials) keepOwnMaterials(live, ownMaterials, materialById)
       changed = true
     }
     // The ASSET owns the IK rig, so re-apply it whatever the hash says — a template bakes its own copy of
