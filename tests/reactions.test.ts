@@ -10,7 +10,9 @@ import { stepState } from '../src/physics/reactive/behaviours';
 import { defaultReactionSet, parseReactionSets, pickReactionSet, reactionParamKeys, REACTION_PRESETS } from '../src/physics/reactive/reactionSet';
 import { getChannel, resetScriptChannels } from '../src/core/events/hub';
 import { LoopbackPort } from '../src/physics/worker/ports';
-import { groundWorld, humanoidModel } from './helpers/humanoidRig';
+import { groundWorld, humanoidModel, IDLE, boneIndex } from './helpers/humanoidRig';
+import type { Animation } from '../src/animation/animatedModel';
+import { quat } from 'gl-matrix';
 import { makeBody, box } from './helpers/physicsBodies';
 import { Node } from '../src/core/scene/nodes/node';
 
@@ -300,4 +302,181 @@ describe('reactions with the physics worker', () => {
             physics.dispose();
         }, 60000);
     }
+});
+
+// What made reactions look wrong: a spine bent and twisted by world axes taken as its parent's, a get-up that turned
+// the body round to meet a clip lined up with the idle rather than with itself, a get-up that a hit could not stop,
+// foot and hand IK left planting the animation the muscles reach for, and a body that slid where it should roll.
+describe.each(BACKENDS)('reactions that look right on %s', backend => {
+    beforeAll(async () => { await acquirePhysicsBackend(backend); });
+    const made: PhysicsSystem[] = [];
+    afterEach(() => { for (const p of made.splice(0)) p.dispose(); resetScriptChannels(); });
+
+    /** Getting up from lying face down: the hips from flat on the ground (pitched forward) to standing, in 1.5 s. */
+    const getUpClip = (): Animation => {
+        const lying = quat.setAxisAngle(quat.create(), [1, 0, 0], Math.PI / 2), up = quat.create();
+        return {
+            name: 'Get Up',
+            samplers: [
+                { input: [0, 1.5], output: [...lying, ...up], interpolation: 'LINEAR' },
+                { input: [0, 1.5], output: [0, 0.2, 0, 0, 1.0, 0], interpolation: 'LINEAR' },
+            ],
+            channels: [
+                { samplerIndex: 0, targetNodeIndex: boneIndex('Hips'), targetPath: 'rotation' },
+                { samplerIndex: 1, targetNodeIndex: boneIndex('Hips'), targetPath: 'translation' },
+            ],
+        } as Animation;
+    };
+
+    /** A person facing `yaw` degrees, with a get-up clip for both faces. */
+    function person(yaw = 0) {
+        const physics = groundWorld(backend);
+        made.push(physics);
+        const node = humanoidModel([IDLE(), getUpClip()]);
+        const set = defaultReactionSet();
+        set.behaviours.getUp.clips = { faceDown: 'Get Up', faceUp: 'Get Up' };
+        (node.model as any).skin.reactionSets = { version: 1, sets: [set] };
+        node.setRotation([0, yaw, 0]);
+        node.updateTransforms(null);
+        const r = physics.reactionsOf(node)!;
+        return { physics, node, r };
+    }
+    const step = (s: { physics: PhysicsSystem; node: ModelNode }) => { s.physics.update(H); s.node.animator!.update(H); };
+    const heading = (q: { x: number; y: number; z: number; w: number }, axis: [number, number, number]) => {
+        const v = vec3.transformQuat(vec3.create(), axis, [q.x, q.y, q.z, q.w]);
+        return Math.atan2(v[0], v[2]) * 180 / Math.PI;
+    };
+    const wrap = (a: number) => ((a + 540) % 360) - 180;
+
+    it('turns a part about a WORLD axis the same whichever way its parent faces', () => {
+        for (const yaw of [0, 90, 200]) {
+            const s = person(yaw);
+            s.r.hit({ part: 'Spine', direction: [0, 0, -1], impulse: 5 });
+            const body = s.r.body!;
+            body.begin();
+            const i = body.chest, parent = body.parts[i].parent;
+            const qp = body.simRotation(parent);
+            const before = quat.multiply(quat.create(), qp as quat, body.target[i] as unknown as quat);
+            const turn = quat.setAxisAngle(quat.create(), [1, 0, 0], 0.4);
+            body.turnWorld(i, turn as unknown as number[], 1);
+            const after = quat.multiply(quat.create(), qp as quat, body.target[i] as unknown as quat);
+            const want = quat.multiply(quat.create(), turn, before);
+            expect(Math.abs(quat.dot(after, want)), `facing ${yaw}`).toBeGreaterThan(0.9999);
+        }
+    });
+
+    it('keeps the chest from twisting round on the hips when hit from the side, facing any way', () => {
+        const worst: number[] = [];
+        for (const yaw of [0, 120]) {
+            const s = person(yaw);
+            // From its left, whichever way it faces.
+            const a = yaw * Math.PI / 180, from = [-Math.cos(a), 0, Math.sin(a)];
+            let most = 0;
+            for (let f = 0; f < 150; f++) {
+                if (f === 5) s.r.hit({ part: 'Chest', direction: from as [number, number, number], impulse: 30 });
+                step(s);
+                const rg = s.r.ragdoll, body = s.r.body;
+                if (!rg || !body) continue;
+                const p = rg.parts[body.pelvis].body.quaternion, c = rg.parts[body.chest].body.quaternion;
+                // The chest's twist about the spine against the hips: their side axes' headings, in the hips' frame.
+                const rel = quat.multiply(quat.create(), quat.invert(quat.create(), [p.x, p.y, p.z, p.w]), [c.x, c.y, c.z, c.w]);
+                const twist = 2 * Math.atan2(Math.abs(rel[1]), Math.abs(rel[3])) * 180 / Math.PI;
+                most = Math.max(most, twist);
+            }
+            worst.push(most);
+        }
+        // About as far as a spine turns (its two joints' twist), and the same facing any way.
+        for (const w of worst) expect(w).toBeLessThan(45);
+        expect(Math.abs(worst[0] - worst[1])).toBeLessThan(12);
+    });
+
+    it('gets up on a clip lined up with the body: the body does not turn round to meet it', () => {
+        const s = person(30);
+        let start: number | null = null, turned = 0, states = '';
+        for (let f = 0; f < 900; f++) {
+            if (f === 3) s.r.trip();
+            step(s);
+            if (!states.endsWith(s.r.state)) states += `>${s.r.state}`;
+            const rg = s.r.ragdoll, body = s.r.body;
+            // While the skin blends from the body onto the clip's first frame.
+            if (s.r.state !== 'getUp' || !rg || !body || s.r.stateTime > 0.3) continue;
+            const h = heading(rg.parts[body.pelvis].body.quaternion, [0, 1, 0]);
+            if (start === null) start = h;
+            turned = Math.max(turned, Math.abs(wrap(h - start)));
+        }
+        expect(states).toMatch(/>getUp/);
+        expect(turned).toBeLessThan(20);
+    });
+
+    it('is knocked back down by a hit while it gets up', () => {
+        const s = person();
+        let after = '';
+        for (let f = 0; f < 900 && !after; f++) {
+            if (f === 3) s.r.trip();
+            step(s);
+            if (s.r.state === 'getUp' && s.r.stateTime > 0.5) {
+                s.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 20 });
+                after = s.r.state;
+            }
+        }
+        expect(['falling', 'stagger']).toContain(after);
+    });
+
+    it('fades foot and hand IK out while a reaction has the body, and back in after', () => {
+        const s = person();
+        const a = s.node.animator! as any;
+        let off = false;
+        for (let f = 0; f < 600; f++) {
+            if (f === 3) s.r.trip();
+            step(s);
+            if (s.r.state === 'down' && a._footIkReaction === 0 && a._handIkReaction === 0) off = true;
+        }
+        expect(off).toBe(true);
+        for (let f = 0; f < 60; f++) step(s);
+        if (s.r.state === 'animated') expect([a._footIkReaction, a._handIkReaction]).toEqual([1, 1]);
+    });
+
+    it('rolls when pushed lying down, rather than sliding', () => {
+        const s = person();
+        // On ground with grip (the Sandbox's course has 0.7): a pair takes the smaller friction.
+        s.physics.addBody(makeBody(box(50, 0.5, 50), { position: [0, -0.49, 0], friction: 0.8 }));
+        for (let f = 0; f < 400 && s.r.state !== 'down'; f++) { if (f === 3) s.r.trip(); step(s); }
+        expect(s.r.state).toBe('down');
+        const rg = s.r.ragdoll!, body = s.r.body!;
+        const pelvis = rg.parts[body.pelvis].body;
+        // Sideways to the way it lies.
+        const left = vec3.transformQuat(vec3.create(), [1, 0, 0], [pelvis.quaternion.x, pelvis.quaternion.y, pelvis.quaternion.z, pelvis.quaternion.w]);
+        left[1] = 0; vec3.normalize(left, left);
+        s.r.push([left[0] * 2.5, 0.3, left[2] * 2.5]);
+        const from = at(pelvis);
+        let turned = 0;
+        for (let f = 0; f < 60; f++) {
+            step(s);
+            const w = pelvis.angularVelocity;
+            turned += Math.hypot(w.x, w.y, w.z) * H;
+        }
+        const moved = vec3.distance(at(pelvis), from);
+        // Rolling covers its radius (about 0.13 m) of ground a radian.
+        expect(turned * 0.13).toBeGreaterThan(moved * 0.35);
+    });
+
+    it('struck by a car: the legs go first, the knees and hips bend and the arms come up round the head', () => {
+        const s = person();
+        for (let f = 0; f < 5; f++) step(s);
+        s.r.impact({ velocity: [0, 0, -8] });
+        let bent = 0, guard = Infinity;
+        for (let f = 0; f < 30; f++) {
+            step(s);
+            const rg = s.r.ragdoll, body = s.r.body;
+            if (!rg || !body) continue;
+            const leg = body.legs.L!, arm = body.arms.L!;
+            const q = (i: number) => { const b = rg.parts[i].body.quaternion; return [b.x, b.y, b.z, b.w] as quat; };
+            const knee = 2 * Math.acos(Math.min(1, Math.abs(quat.dot(q(leg.root), q(leg.mid))))) * 180 / Math.PI;
+            bent = Math.max(bent, knee);
+            if (f > 12) guard = Math.min(guard, vec3.distance(at(rg.parts[arm.end].body), at(rg.parts[body.head].body)));
+        }
+        expect(s.r.state).toBe('falling');
+        expect(bent).toBeGreaterThan(25);
+        expect(guard).toBeLessThan(0.45);
+    });
 });

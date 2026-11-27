@@ -476,6 +476,8 @@ export class Ragdoll implements PhysicsMappingSource {
                 // Hands and feet are light, short and round: on the ground they rock on their caps for
                 // seconds after everything else is still. Damping their spin costs nothing visible.
                 angularDamping: lp.mass < 0.02 ? Math.max(profile.angularDamping, 0.6) : profile.angularDamping,
+                friction: profile.friction ?? 0.8,
+                restitution: profile.restitution ?? 0.05,
                 group: RAGDOLL_GROUP,
                 mask: boneMask(profile.selfCollision),
             });

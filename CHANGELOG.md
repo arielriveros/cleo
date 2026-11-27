@@ -40,6 +40,25 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     reactions.
   - Player contract 54 (reaction sets travel in the skin).
 
+- **Reactions look like a body's.**
+  - A rifle round in the trunk stumbles a character a step or two (the set's **Stumble at**, **Stumble speed**), its
+    hand going to the wound sooner and holding it longer.
+  - Hit by a car (`reactions.impact({ velocity })`, the new **Struck** behaviour) the legs go first and the body
+    pivots over the bonnet, knees and hips bent, arms up round the head.
+  - Bodies roll on the ground instead of sliding: ragdoll parts have a surface of their own (friction 0.8, bounce
+    0.05, in the ragdoll profile), the automatic humanoid's hips and chest are capsules, and once on the ground the
+    muscles hold up little of the body's weight.
+  - No more twisted spines and hips: behaviours that turned a part about a world axis took it as the parent's
+    (`ReactionBody.turnWorld`), the muscles' targets are clamped to the joint's twist from the bind pose, the
+    humanoid twists its spine and chest 20 degrees each (its neck 40), a flinch draws the hips with the legs, and a
+    staggering character turns with its hips.
+  - Getting up lines the clip up with the body instead of turning the body round to meet it: a clip played with no
+    blend-in is there at once (it was measured as the idle), the heading comes from the hips, face up or down from
+    the hips and the chest, and the skin blends from the body onto the clip's first frame before it plays. A hit or
+    a shove while it gets up knocks it back.
+  - Foot placement, foot locking and the support hand's IK fade out while a reaction has the body and back in after,
+    starting over (`Animator.ikSuppressed`, the new `handIkSuppressed`).
+  - The time limit on a reaction counts from that reaction's start.
 - **Fix: saving a base template and reloading the scene drew the player as a ball and the NPCs in the base's
   colour.** A model inside a placed template copy, rebuilt from its changed model asset (as a Reload rebuilds every
   one), took the asset's own material instead of the one its template gave it (a variant's colour), and the rebuilt

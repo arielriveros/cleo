@@ -76,6 +76,12 @@ export interface RagdollProfile {
     angularDamping: number;
     /** Solver iterations while this ragdoll is alive. 10 (cannon's default) lets long chains sag. */
     solverIterations: number;
+    /**
+     * The parts' surface: grip and bounce. A body with grip rolls where a slick one slides (a pair takes the smaller
+     * grip and the larger bounce, so the ground's counts too). Default 0.8 and 0.05.
+     */
+    friction?: number;
+    restitution?: number;
 }
 
 export const RAGDOLL_PROFILE_DEFAULTS: Omit<RagdollProfile, 'parts'> = {
@@ -85,6 +91,8 @@ export const RAGDOLL_PROFILE_DEFAULTS: Omit<RagdollProfile, 'parts'> = {
     linearDamping: 0.02,
     angularDamping: 0.2,
     solverIterations: 20,
+    friction: 0.8,
+    restitution: 0.05,
 };
 
 export function defaultJoint(type: RagdollJointType = 'cone'): RagdollJoint {
@@ -413,9 +421,10 @@ export function autoHumanoidProfile(skin: Skin): RagdollProfile | null {
     const neckSlot = rig.has('neck') ? 'neck' : rig.has('head') ? 'head' : null;
     const torsoTop = neckSlot ? posOf(neckSlot)! : vec3.scaleAndAdd(vec3.create(), posOf('hips')!, axes.up, height * 0.3);
     const pelvisTip = hasSpine ? 'spine' : hasChest ? 'chest' : neckSlot;
+    // The trunk is rounded (capsules), as a body is: a box sits flat where a body rolls over.
     parts.push({
-        name: 'Pelvis', bone: nameOf('hips')!, tipBone: pelvisTip ? nameOf(pelvisTip) : undefined, shape: 'box',
-        radius: hipWidth * 0.8, length: Math.max(dist('hips', pelvisTip ?? 'hips'), height * 0.09), depth: hipWidth * 1.1,
+        name: 'Pelvis', bone: nameOf('hips')!, tipBone: pelvisTip ? nameOf(pelvisTip) : undefined, shape: 'capsule',
+        radius: hipWidth * 0.75, length: Math.max(dist('hips', pelvisTip ?? 'hips'), height * 0.09), depth: hipWidth * 1.1,
         massFraction: MASS.pelvis + (hasSpine ? 0 : MASS.spine) + (hasSpine || hasChest ? 0 : MASS.chest),
         joint: cone(0, 0),
     });
@@ -425,15 +434,15 @@ export function autoHumanoidProfile(skin: Skin): RagdollProfile | null {
         parts.push({
             name: 'Spine', bone: nameOf('spine')!, tipBone: tip ? nameOf(tip) : undefined, shape: 'capsule',
             radius: Math.min(shoulderWidth * 0.34, Math.max(hipWidth * 0.6, len * 0.4)),
-            massFraction: MASS.spine + (hasChest ? 0 : MASS.chest), joint: cone(25, 45, [0, 0]),
+            massFraction: MASS.spine + (hasChest ? 0 : MASS.chest), joint: cone(25, 20, [0, 0]),
         });
     }
     if (hasChest) {
         const chestLen = vec3.distance(posOf('chest')!, torsoTop);
         parts.push({
-            name: 'Chest', bone: nameOf('chest')!, tipBone: neckSlot ? nameOf(neckSlot) : undefined, shape: 'box',
-            radius: shoulderWidth * 0.42, length: Math.max(chestLen, height * 0.12), depth: shoulderWidth * 0.55,
-            massFraction: MASS.chest, joint: cone(20, 45),
+            name: 'Chest', bone: nameOf('chest')!, tipBone: neckSlot ? nameOf(neckSlot) : undefined, shape: 'capsule',
+            radius: shoulderWidth * 0.29, length: Math.max(chestLen, height * 0.12), depth: shoulderWidth * 0.55,
+            massFraction: MASS.chest, joint: cone(20, 20),
         });
     }
 
@@ -448,7 +457,7 @@ export function autoHumanoidProfile(skin: Skin): RagdollProfile | null {
         const len = topJ >= 0 ? vec3.distance(posOf(bone)!, pos[topJ]) : span + dist(bone, 'head');
         parts.push({
             name: 'Head', bone: nameOf(bone)!, ...(headTop ? { tipBone: headTop } : {}), shape: 'capsule',
-            radius: r, length: Math.max(len, r * 2), massFraction: MASS.head, joint: cone(35, 60),
+            radius: r, length: Math.max(len, r * 2), massFraction: MASS.head, joint: cone(35, 40),
         });
     }
 
@@ -550,5 +559,7 @@ export function parseRagdollProfile(raw: unknown): RagdollProfile | undefined {
         linearDamping: finiteOr(r.linearDamping, RAGDOLL_PROFILE_DEFAULTS.linearDamping),
         angularDamping: finiteOr(r.angularDamping, RAGDOLL_PROFILE_DEFAULTS.angularDamping),
         solverIterations: finiteOr(r.solverIterations, RAGDOLL_PROFILE_DEFAULTS.solverIterations),
+        friction: finiteOr(r.friction, RAGDOLL_PROFILE_DEFAULTS.friction!),
+        restitution: finiteOr(r.restitution, RAGDOLL_PROFILE_DEFAULTS.restitution!),
     };
 }

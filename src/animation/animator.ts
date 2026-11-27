@@ -1193,8 +1193,20 @@ export class Animator {
     private _physicsMapping: PhysicsMappingSource | null = null;
     private readonly _targetBones: mat4[] = [];
     private readonly _targetModel: mat4[] = [];
-    /** No foot placement while bodies carry the legs: planting an animated foot on the ground fights them. */
+    /**
+     * No foot placement or foot locking while bodies carry the legs (a reaction): planting an animated foot on the
+     * ground fights them. Faded out quickly, and back in after; what it remembered (locks, ground hits) is
+     * forgotten, so it comes back fresh.
+     */
     public ikSuppressed = false;
+    /** No support-hand IK while bodies carry the arms: a hand pinned to a weapon fights the arm's reaction. */
+    public handIkSuppressed = false;
+    /** How much of foot and hand IK is on, as the two switches above fade it (1 on, 0 off). */
+    private _footIkReaction = 1;
+    private _handIkReaction = 1;
+    /** Seconds to fade reaction-suppressed IK out, and back in. */
+    private static readonly IK_REACTION_OUT = 0.15;
+    private static readonly IK_REACTION_IN = 0.35;
 
     // When set, drives playback each frame instead of the AnimationMapping list. Parameter values are
     // live; triggers are consumed when a transition using them fires.
@@ -2223,6 +2235,7 @@ export class Animator {
             }
         }
         this._ikDelta += Math.max(0, deltaTime);
+        if (!this._isOverlay) this._fadeReactionIk(deltaTime);
         if (this._overlays.length) {
             for (const o of this._overlays) o.animator._skipPose = this._skipPose;
             this._updateOverlays(deltaTime);
@@ -2233,6 +2246,25 @@ export class Animator {
         if (!this._posedThisFrame && !this._skipPose) {
             for (const o of this._overlays) if (o.presence > 0) { this._recomputePose(); break; }
         }
+    }
+
+    /** Move the reaction IK weights toward their switches: out in IK_REACTION_OUT, in in IK_REACTION_IN. */
+    private _fadeReactionIk(deltaTime: number): void {
+        const dt = Math.max(0, deltaTime);
+        const toward = (w: number, off: boolean) => off
+            ? Math.max(0, w - dt / Animator.IK_REACTION_OUT)
+            : Math.min(1, w + dt / Animator.IK_REACTION_IN);
+        this._footIkReaction = toward(this._footIkReaction, this.ikSuppressed);
+        this._handIkReaction = toward(this._handIkReaction, this.handIkSuppressed);
+    }
+
+    /** Foot IK's memory dropped (locks, ground hits, weights, the hip drop): it starts over when it comes back. */
+    private _forgetFootIk(): void {
+        this._ikFootWeights.clear();
+        this._ikFootHits.clear();
+        this._ikFootLocks.clear();
+        this._ikPlantedShare.clear();
+        this._ikHipOffset = 0;
     }
 
     // ---- Animation LOD ------------------------------------------------------------------------------
@@ -3027,7 +3059,7 @@ export class Animator {
                 if (typeof v === 'number') w = v;
                 else if (typeof v === 'boolean') w = v ? 1 : 0;
             }
-            w = clamp(w, 0, 1) * this._overlayWeight(o) * o.presence;
+            w = clamp(w, 0, 1) * this._overlayWeight(o) * o.presence * this._handIkReaction;
             if (!(w > 1e-4)) continue;
             const chains = this._handChains(topo);
             if (!chains) return;
@@ -3157,7 +3189,10 @@ export class Animator {
         globalTransforms: Map<number, mat4>,
         topo: SkeletonTopology,
     ): boolean {
-        if (this.ikSuppressed) return false;
+        if (this._footIkReaction <= 1e-3) {
+            if (this._ikFootWeights.size || this._ikFootLocks.size || this._ikHipOffset !== 0) this._forgetFootIk();
+            return false;
+        }
         const rig = this._skin?.ikRig;
         if (!rig || !rig.feet?.length || !this._node) return false;
 
@@ -3168,7 +3203,7 @@ export class Animator {
         const checked = this._validatedRig(rig, topo);
         if (checked.feet.length === 0) return false;
 
-        const weight = this._stateIkWeight();
+        const weight = this._stateIkWeight() * this._footIkReaction;
         const tuning = ikTuning(rig);
         // Wall-clock, not playback-scaled: a foot easing onto a step reacts to the ground, not to the
         // clip. dt is 0 on a scrub, which resolves targets without advancing the smoothing.
@@ -5107,6 +5142,8 @@ export class Animator {
         slot.action = action;
         slot.presenceTarget = 1;
         slot.fadeSeconds = Math.max(1e-3, options.blendIn ?? 0.15);
+        // No blend-in: there at once, so the next pose (an update(0), say) is the clip's and not what it replaces.
+        if (typeof options.blendIn === 'number' && options.blendIn <= 1e-3) slot.presence = 1;
         if (crossFade) child._activeBlendTime = slot.fadeSeconds;
         return handle;
     }
@@ -5375,6 +5412,7 @@ export class Animator {
         if (!this._physicsMapping) return;
         this._physicsMapping = null;
         this.ikSuppressed = false;
+        this.handIkSuppressed = false;
         // Skinning matrices back to the animation's, now.
         if (this._targetBones.length === this._finalBoneMatrices.length) {
             for (let j = 0; j < this._finalBoneMatrices.length; j++) {

@@ -13,7 +13,8 @@ import { autoHumanoidProfile, parseRagdollProfile, ragdollLayout, ragdollPartPos
 import type { mat4 } from 'gl-matrix';
 import { BodySensors, type ContactList, type Raycaster } from './bodySensors';
 import { ReactionBody } from './reactionBody';
-import { BAILS, BEHAVIOURS, stepState, type ReactionBehaviour, type ReactionContext, type ReactionState, type ReactionWound } from './behaviours';
+import { BAILS, BEHAVIOURS, STRUCK, stepState, type ReactionBehaviour, type ReactionContext, type ReactionState, type ReactionWound } from './behaviours';
+import type { AnimationActionHandle } from '../../animation/animator';
 import { pickReactionSet, parseReactionSets, type ReactionSet } from './reactionSet';
 
 export type { ReactionState, ReactionWound } from './behaviours';
@@ -98,7 +99,11 @@ export class ReactionController {
     private readonly _running = new Map<ReactionBehaviour, number>();
     private _prevAnim: number[][] = [];
     private _clip: string | null = null;
-    private _getUpAction: { done: boolean; time: number; duration: number } | null = null;
+    private _getUpAction: AnimationActionHandle | null = null;
+    /** Reaction-clock seconds the current reaction began at (it left plain animation). */
+    private _reactionStart = 0;
+    /** Recovering from a get-up: the skin is the animation's already (see _base). */
+    private _recoverFromGetUp = false;
     private _landed = false;
     private _settledSent = false;
     private _clearUntil = 0;
@@ -219,10 +224,62 @@ export class ReactionController {
         this._wound(part, point, dir, impulse);
         this._emit('Hit', { part, partName: p.name, impulse, point: point as [number, number, number] });
         if (dying) { this.kill(); return; }
+        const stepping = this.set.behaviours.stepBalance.enabled;
         // How far it goes.
-        if (impulse >= T.fallImpulse) this._go('falling');
-        else if (impulse >= T.staggerImpulse && this.set.behaviours.stepBalance.enabled && this._state !== 'falling') this._go(this._state === 'animated' || this._state === 'hitReact' ? 'stagger' : this._state);
-        else if (this._state === 'animated' || this._state === 'recover') this._go('hitReact');
+        if (impulse >= T.fallImpulse) { this._go('falling'); return; }
+        // Getting up, any hit that counts knocks it back: off its feet or off balance, by how far up it got.
+        if (this._state === 'getUp') { this._go(stepping && this._standing() ? 'stagger' : 'falling'); return; }
+        const standing = this._state === 'animated' || this._state === 'hitReact' || this._state === 'recover';
+        if (impulse >= T.staggerImpulse && stepping && standing) { this._go('stagger'); return; }
+        // A round in the trunk rocks the hips back: it stumbles a step or two, the hand going to the wound.
+        const trunk = p.region === 'pelvis' || p.region === 'spine';
+        if (trunk && stepping && standing && T.stumbleImpulse > 0 && impulse >= T.stumbleImpulse) {
+            const flat = Math.hypot(dir[0], dir[2]);
+            if (flat > 1e-3) {
+                const k = T.stumbleSpeed * Math.min(1.5, impulse / Math.max(1e-3, T.stumbleImpulse * 1.5));
+                const v = [dir[0] / flat * k, 0, dir[2] / flat * k];
+                for (const q of r.parts) {
+                    const share = q.region === 'pelvis' || q.region === 'spine' ? 1 : q.region === 'legs' ? 0.6 : q.region === 'feet' ? 0 : 0.8;
+                    if (share > 0) q.body.applyImpulse([v[0] * share * q.mass, 0, v[2] * share * q.mass]);
+                }
+            }
+            this._go('stagger');
+            return;
+        }
+        if (this._state === 'animated' || this._state === 'recover') this._go('hitReact');
+    }
+
+    /**
+     * Struck by something big and moving (a car), going `velocity` (world): the legs are taken out at its speed and
+     * the trunk thrown less and upward, so the body pivots over what hit it. It braces as it goes (the Struck
+     * behaviour: knees and hips bent, arms round the head) and falls. `point`: where it was struck, for the wound.
+     */
+    public impact(opts: { velocity: ArrayLike<number>; point?: ArrayLike<number> | null }): void {
+        if (this.config.enabled === false) return;
+        const r = this._ensure();
+        if (!r) return;
+        const P = this.set.behaviours.struck.params;
+        const v = opts.velocity, speed = Math.hypot(v[0], v[1], v[2]);
+        if (!(speed > 1e-3)) return;
+        const lift = P.lift * Math.hypot(v[0], v[2]);
+        for (const p of r.parts) {
+            const legs = p.region === 'legs' || p.region === 'feet';
+            const share = legs ? P.legShare : p.region === 'pelvis' ? (P.legShare + P.trunkShare) * 0.5 : P.trunkShare;
+            const up = legs ? lift * 0.3 : lift;
+            const b = p.body.velocity;
+            b.set(b.x + v[0] * share, b.y + v[1] * share + up, b.z + v[2] * share);
+        }
+        const dir = [v[0] / speed, v[1] / speed, v[2] / speed];
+        const point = opts.point ?? null;
+        const part = this._resolvePart(point ? undefined : 'Shin L', point);
+        const q = r.parts[part];
+        const at = point ? [point[0], point[1], point[2]] : [q.body.position.x, q.body.position.y, q.body.position.z];
+        const impulse = speed * this._massScale(r) * 70;
+        this._wound(part, at, dir, impulse);
+        this._emit('Hit', { part, partName: q.name, impulse, point: at as [number, number, number] });
+        if (this._body) STRUCK.set(this._body, this._time);
+        this.sensors.reset();
+        this._go('falling');
     }
 
     /** A shove: every part (or one) given this velocity change (m/s, world). */
@@ -237,9 +294,17 @@ export class ReactionController {
             impulse += Math.hypot(velocity[0], velocity[1], velocity[2]) * p.mass;
         }
         const T = this.set.thresholds;
+        const stepping = this.set.behaviours.stepBalance.enabled;
         if (impulse >= T.fallImpulse) this._go('falling');
-        else if (impulse >= T.staggerImpulse && this.set.behaviours.stepBalance.enabled) this._go('stagger');
-        else if (this._state === 'animated') this._go('hitReact');
+        else if (this._state === 'getUp') { if (impulse >= T.minHitImpulse) this._go(stepping && this._standing() ? 'stagger' : 'falling'); }
+        else if (impulse >= T.staggerImpulse && stepping) this._go('stagger');
+        else if (this._state === 'animated' || this._state === 'recover') this._go('hitReact');
+    }
+
+    /** Far enough up off the ground to stagger rather than fall (a get-up knocked partway). */
+    private _standing(): boolean {
+        const s = this.sensors;
+        return s.uprightness > 0.7 && Number.isFinite(s.height) && s.height > 0.75;
     }
 
     /** Fall now (off a ledge, a floor giving way): the body takes over, falling as it was moving. */
@@ -325,6 +390,8 @@ export class ReactionController {
     public _preStep(dt: number): void {
         const r = this.ragdoll, body = this._body;
         if (!r || !body || r.destroyed || r.frozen) return;
+        // The get-up clip waits on its first frame while the skin blends onto it.
+        if (this._state === 'getUp' && this._getUpAction && this._stateTime < this._getUpHold()) this._getUpAction.seek(0);
         body.begin();
         this._base(body, dt);
         const ctx = this._context(dt);
@@ -361,7 +428,7 @@ export class ReactionController {
     private _transitions(): void {
         const s = this.sensors, T = this.set.thresholds, B = this.set.behaviours;
         const t = this._stateTime;
-        if (this._time > T.maxReactionSeconds && ['hitReact', 'stagger', 'falling', 'tumble'].includes(this._state)) { this._go('down'); return; }
+        if (this._time - this._reactionStart > T.maxReactionSeconds && ['hitReact', 'stagger', 'falling', 'tumble'].includes(this._state)) { this._go('down'); return; }
         switch (this._state) {
             case 'hitReact': {
                 const body = this._body!;
@@ -431,7 +498,10 @@ export class ReactionController {
         this._state = next;
         this._stateTime = 0;
         this._balancedFor = 0;
-        if (next !== 'animated' && from === 'animated') this._emit('Started', { from });
+        if (next !== 'animated' && from === 'animated') { this._reactionStart = this._time; this._emit('Started', { from }); }
+        // A get-up cut short (a hit, a push): its clip stops, and the body is the body's again.
+        if (from === 'getUp' && next !== 'recover') this._stopGetUp();
+        if (next === 'recover') this._recoverFromGetUp = from === 'getUp' && !!this._getUpAction;
         switch (next) {
             case 'hitReact':
                 break;
@@ -524,6 +594,8 @@ export class ReactionController {
         const k = set.strength * this._strength * health;
         const loose = state === 'falling' || state === 'tumble' || state === 'down' || state === 'dead';
         const pins = set.pins;
+        const G = set.behaviours.getUp.params;
+        const hold = this._getUpHold();
         for (const p of body.parts) {
             const i = p.index;
             const m = p.region === 'pelvis' ? set.muscles.spine : set.muscles[p.region as keyof typeof set.muscles];
@@ -532,12 +604,32 @@ export class ReactionController {
             body.torque[i] = m.maxTorque * k;
             body.holdUp[i] = m.gravityCompensation;
             body.friction[i] = 0;
-            // Off its feet the muscles hold what the body does rather than pull it back to standing.
+            // Off its feet the muscles hold what the body does rather than pull it back to standing. Once it is on
+            // the ground (rolling, lying) they let it lie with its weight: they hold up little of it, and tire. Not
+            // while it falls: that is when the arms and the neck must be quick.
             if (loose) body.hold(i, 1);
+            if (state === 'tumble' || state === 'down') { body.holdUp[i] *= 0.3; body.torque[i] *= 0.6; }
             let pin = 0, map = 1;
-            if (state === 'hitReact') { pin = p.region === 'legs' || p.region === 'feet' ? pins.legs : 1; if (pins.legs >= 0.99 && (p.region === 'legs' || p.region === 'feet')) map = 0; }
-            else if (state === 'getUp') pin = Math.min(1, this._stateTime / Math.max(0.05, set.behaviours.getUp.params.regainTime));
-            else if (state === 'recover') { pin = 1; map = 1 - Math.min(1, this._stateTime / Math.max(0.05, set.behaviours.getUp.params.blendTime)); }
+            if (state === 'hitReact') {
+                const legs = p.region === 'legs' || p.region === 'feet';
+                pin = legs ? pins.legs : 1;
+                // Legs held on the animation are drawn from it, and so are the hips they hang from, the trunk blending
+                // in from there: a simulated pelvis over animated legs shears the skin at the hips.
+                if (pins.legs >= 0.99) map = legs || p.region === 'pelvis' ? 0 : p.region === 'spine' && p.parent === body.pelvis ? 0.5 : 1;
+            } else if (state === 'getUp') {
+                if (hold > 0) {
+                    // On a clip: held on its first frame (lined up with the body) while the skin blends from the body
+                    // to it, the strings firm at once; then the clip plays, and the skin is the animation's.
+                    pin = Math.min(1, 0.4 + this._stateTime / Math.max(0.05, G.regainTime * 0.5));
+                    map = 1 - Math.min(1, this._stateTime / hold);
+                } else {
+                    // Without one, the strings lift the body onto the animation, and the skin is the body's.
+                    pin = Math.min(1, this._stateTime / Math.max(0.05, G.regainTime));
+                }
+            } else if (state === 'recover') {
+                pin = 1;
+                map = this._recoverFromGetUp ? 0 : 1 - Math.min(1, this._stateTime / Math.max(0.05, G.blendTime));
+            }
             body.pin[i] = pin;
             body.mapping[i] = map;
         }
@@ -597,7 +689,12 @@ export class ReactionController {
             for (let k = 0; k < 7; k++) prev[k] = body.anim[i][k];
         }
         const animator = this.node.animator;
-        if (animator) animator.ikSuppressed = this._state !== 'hitReact';
+        if (animator) {
+            // The feet planted by IK while the body carries the legs fight it: off (faded) unless only flinching.
+            // The support hand on a weapon, always: a hand reaching for a wound must not be pinned to a grip.
+            animator.ikSuppressed = this._state !== 'hitReact';
+            animator.handIkSuppressed = true;
+        }
     }
 
     private readonly _goalPose = [0, 0, 0, 0, 0, 0, 1];
@@ -706,6 +803,15 @@ export class ReactionController {
         const body = this._body!, p = body.simPosition(body.pelvis);
         const g = Number.isFinite(this.sensors.groundY) && this.sensors.height < 3 ? this.sensors.groundY : p[1] - 1;
         collider.setWorldPosition([p[0], g + this._feetOffset, p[2]]);
+        // Staggering, the animation (what the muscles reach for) turns with the hips: left facing the way it did
+        // before the hit, it twists the trunk against them.
+        if (this._state === 'stagger' && typeof (character as { setWorldYaw?: unknown }).setWorldYaw === 'function') {
+            const f = this.sensors.forward, now = this._yawNow();
+            const want = yawFromDirection(f[0], f[2]);
+            const d = ((want - now + 540) % 360) - 180;
+            const step = Math.max(-6, Math.min(6, d * 0.2));
+            if (Math.abs(step) > 0.05) (character as unknown as { setWorldYaw(y: number): void }).setWorldYaw(now + step);
+        }
     }
 
     /** Stand the character (or, without one, the model itself) at `p` on the ground, facing `yaw` degrees when given. */
@@ -741,25 +847,35 @@ export class ReactionController {
      */
     private _startGetUp(): void {
         const B = this.set.behaviours.getUp, clips = B.clips ?? {};
-        const clip = this.sensors.faceUp ? clips.faceUp ?? clips.faceDown : clips.faceDown ?? clips.faceUp;
         const animator = this.node.animator, body = this._body;
         this._getUpAction = null;
         if (!animator || !body) return;
-        const head = body.head >= 0 ? body.head : body.chest;
-        const simDir = vec3.sub(vec3.create(), body.simPosition(head), body.simPosition(body.pelvis));
+        // Face up or down by the hips and the chest together: a body on its side is neither, by one of them alone.
+        const fwdY = (i: number) => quatRotateTuple(body.simRotation(i), [0, 0, 1])[1];
+        const faceUp = fwdY(body.pelvis) + (body.chest >= 0 ? fwdY(body.chest) : 0) > 0;
+        const clip = faceUp ? clips.faceUp ?? clips.faceDown : clips.faceDown ?? clips.faceUp;
         if (clip && animator.playAction) {
             this._clip = null;
+            // Present at once (a blend-in of 0): the pose measured next is the clip's first frame.
             const action = animator.playAction(clip, { slot: REACTION_SLOT, blendIn: 0.0, blendOut: 0.2, ikWeight: 0 });
             if (!action.done) this._getUpAction = action;
         }
-        // Where the clip (or the plain animation) puts the hips and head now, against where the body has them.
+        // Where the clip (or the plain animation) puts the hips now, against where the body has them.
         animator.update(0);
         body.begin();
-        const animDir = vec3.sub(vec3.create(), [body.anim[head][0], body.anim[head][1], body.anim[head][2]], [body.anim[body.pelvis][0], body.anim[body.pelvis][1], body.anim[body.pelvis][2]]);
-        // Only when the clip lies along the ground does its hips-to-head say where to face; standing, face the body's way.
-        const lying = Math.hypot(animDir[0], animDir[2]) > Math.abs(animDir[1]);
-        const yaw = lying
-            ? this._yawNow() + (Math.atan2(simDir[0], simDir[2]) - Math.atan2(animDir[0], animDir[2])) * 180 / Math.PI
+        // The clip turned about the vertical to lie the way the body lies: its hips' long axis (hips to head) and
+        // their side axis, each weighted by how flat it lies, matched to the body's. The body does not turn.
+        const qs = body.simRotation(body.pelvis), qa = body.animRotation(body.pelvis);
+        let sx = 0, sz = 0;
+        for (const axis of [[0, 1, 0], [1, 0, 0]]) {
+            const s = quatRotateTuple(qs, axis), a = quatRotateTuple(qa, axis);
+            const w = Math.hypot(s[0], s[2]) * Math.hypot(a[0], a[2]);
+            if (w < 1e-4) continue;
+            const d = Math.atan2(s[0], s[2]) - Math.atan2(a[0], a[2]);
+            sx += w * Math.sin(d); sz += w * Math.cos(d);
+        }
+        const yaw = sx !== 0 || sz !== 0
+            ? this._yawNow() + Math.atan2(sx, sz) * 180 / Math.PI
             : yawFromDirection(this.sensors.forward[0], this.sensors.forward[2]);
         const pelvisSim = body.simPosition(body.pelvis);
         const g = Number.isFinite(this.sensors.groundY) ? this.sensors.groundY : pelvisSim[1] - 0.2;
@@ -770,6 +886,18 @@ export class ReactionController {
         const a = body.anim[body.pelvis];
         this._place([pelvisSim[0] * 2 - a[0], g, pelvisSim[2] * 2 - a[2]], yaw);
         animator.update(0);
+    }
+
+    /** Seconds the get-up clip waits on its first frame while the skin blends onto it (0: no clip, no wait). */
+    private _getUpHold(): number {
+        return this._getUpAction ? Math.max(0.15, this.set.behaviours.getUp.params.blendTime) : 0;
+    }
+
+    /** A get-up cut short: its clip faded out at once. */
+    private _stopGetUp(): void {
+        const a = this._getUpAction;
+        this._getUpAction = null;
+        if (a && !a.done) a.stop(0.12);
     }
 
     private _playClip(clip: string | null, loop = true): void {

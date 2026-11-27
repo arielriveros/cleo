@@ -38,17 +38,23 @@ it, a powered ragdoll is made from the pose it holds, and the reaction moves thr
 | State | What happens |
 |---|---|
 | animated | Plain animation. No bodies exist. |
-| hitReact | A hit it stays standing through: the animation keeps the legs, the struck part goes weak and snaps away, a hand goes to the wound. |
+| hitReact | A hit it stays standing through: the animation keeps the legs and the hips, the struck part goes weak and snaps away, a hand goes to the wound. |
 | stagger | Off balance: the legs step to stay up, tiring with each step, until it stands or falls. |
 | falling | Off its feet: it braces, covers its head, lands on bent knees or flails on a long drop. |
 | tumble | Rolling down stairs, a slope or away from a vehicle: curled up, head covered. |
 | down | Lying on the ground. It may writhe for a while if it was hurt. |
-| getUp | Getting up, face up or face down, on a get-up clip or pulled up by its strings. |
+| getUp | Getting up, face up or face down, on a get-up clip or pulled up by its strings. A hit or a shove knocks it back: it staggers, or falls if it was not up yet. |
 | recover | Back on its feet: the skin blends from the body to the animation. |
 | dead | Killed: limp, and stays down. |
 
 While a character is off its feet its Collider is turned off and follows its hips along the ground, so a
-camera that follows the character follows the body. It is turned back on where the body stands up.
+camera that follows the character follows the body. It is turned back on where the body stands up. Staggering,
+the character also turns with its hips, so the animation the muscles reach for turns with the body.
+
+While a reaction has the body, foot placement and foot locking fade out (in 0.15 s), and so does the support
+hand's IK: feet planted by IK, or a hand held on a weapon's grip, would fight the body. They fade back in (in
+0.35 s) once it is back on its animation, starting over rather than from where they were. A flinch it stands
+through keeps foot placement.
 
 Scripts hear each step as a `reaction:*` event (see [Reactions (scripting)](../scripting/reactions.md#events)).
 
@@ -129,6 +135,8 @@ What a hit, a shove or a fall must reach to move a reaction on to its next state
 |---|---|
 | **Smallest hit** | A hit softer than this, in N·s, is ignored. |
 | **Stagger at** | A hit at least this hard knocks the character off balance: it steps to stay up. |
+| **Stumble at** | A hit on the trunk at least this hard, in N·s (a rifle round), rocks the hips back: it stumbles a step or two to stay up while its hand goes to the wound. 0 turns it off. |
+| **Stumble speed** | How fast a stumbling hit sends the hips back, in m/s. |
 | **Fall at** | A hit at least this hard knocks it straight down. |
 | **Knocked out** | How far, in metres, the hips may be pushed from where the animation has them before the character falls. |
 | **Fallen** | Below this uprightness (1 standing, 0 lying) a character that is off balance counts as falling. |
@@ -278,6 +286,23 @@ braces for the ground, then tumbles.
 | **Thrown up** | How fast it is thrown upward, in m/s. |
 | **Clear for** | How long it passes through the vehicle it left. |
 
+### Struck
+
+Hit by a vehicle (a script's `impact()`, see [Reactions (scripting)](../scripting/reactions.md)): the legs are
+taken out at the vehicle's speed and the trunk is thrown less and upward, so the body pivots over what hit it. It
+braces as it goes: the knees and hips bend, the trunk curls, and the arms come up round the head (**Protect the
+head** runs with it).
+
+| Setting | What it does |
+|---|---|
+| **Knee bend** | How far the knees bend, in radians. |
+| **Hip bend** | How far the hips bend, in radians; the trunk curls a third of that. |
+| **Stiffness** | How firmly it holds the brace. |
+| **Lasts** | How long it braces; the head stays protected a little longer. |
+| **Legs taken** | How much of the vehicle's speed the legs take. |
+| **Trunk thrown** | How much of it the trunk takes: less than the legs, so the body pivots over. |
+| **Thrown up** | Upward speed given, as a share of the vehicle's. |
+
 ### Writhe
 
 Lying hurt: slow, weak movement with a hand on the wound, or a clip played softly.
@@ -312,14 +337,18 @@ body following the clip until it stands.
 | **After** | How long it lies still first. |
 | **Strength** | Muscle strength while it gets up. |
 | **Regain** | How long its strings take to pull it fully onto the clip. |
-| **Blend** | How long the skin takes to go from the body to the animation at the end. |
+| **Blend** | How long the skin takes to go from the body onto the clip's first frame at the start (and, without a clip, from the body to the animation at the end). |
 | **From the back** | Clip: the clip to get up with lying face up. |
 | **From the front** | Clip: the clip to get up with lying face down. |
 
-The character is turned to match the clip's first frame and placed where the body lies. Without clips the
-strings lift the body back onto the animation it was playing, which works but looks like a puppet; Mixamo's
-"Getting Up" (face down) and "Stand Up" (face up) imported onto the skeleton work well. A character whose
-**Gets up** is off, or that is dead or knocked out, stays down.
+Face up or face down is read from the hips and the chest together. The clip is lined up with the body, not
+the body with the clip: the character is turned about the vertical so the clip's hips lie the way the body's do,
+and placed where the body lies. The clip then waits on its first frame for **Blend** while the skin blends from
+the body onto it, and plays. Without clips the strings lift the body back onto the animation it was playing,
+which works but looks like a puppet; Mixamo's "Getting Up" (face down) and "Stand Up" (face up) imported onto the
+skeleton work well. A character whose **Gets up** is off, or that is dead or knocked out, stays down.
+
+A hit or a shove while it gets up stops the clip: it staggers if it was up far enough, and falls if not.
 
 ## Poses and clips
 
@@ -403,8 +432,11 @@ The three feel alike but are not identical: a set tuned on one may want small ch
 - **Tune on the bench at 0.25×.** Most of what makes a reaction read happens in the first half second.
 - **Raise Stiffness before Strength.** A limb that will not hold its pose is usually too soft, not too weak;
   Strength is what a hit or the ground overpowers.
-- **Keep the ragdoll's twist limits loose** (in the Ragdoll tab). A muscle cannot reach a pose its joint
-  will not allow; targets are clamped to the joint's limits.
+- **Keep the ragdoll's twist limits realistic** (in the Ragdoll tab). A muscle cannot reach a pose its joint
+  will not allow; targets are clamped to the joint's cone and its twist, measured from the bind pose. The automatic
+  humanoid twists its spine and chest 20 degrees each, its neck 40.
+- **Give the ground grip.** A body rolls on ground with grip and slides on slick ground: a pair of surfaces takes
+  the smaller friction, and the automatic humanoid's parts have 0.8.
 - **A pose slot is a shape, not a placement.** Hands and feet still go where the behaviour sends them.
 
 ## See also

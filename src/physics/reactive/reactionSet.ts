@@ -31,7 +31,7 @@ export interface MuscleSettings {
 /** What a behaviour can be: the reflexes a reaction is made of. */
 export type BehaviourId =
     | 'hitReact' | 'stepBalance' | 'catchFall' | 'protectHead' | 'landing' | 'airborne' | 'tumble' | 'vehicleBail'
-    | 'writhe' | 'relax' | 'getUp';
+    | 'struck' | 'writhe' | 'relax' | 'getUp';
 
 /** A pose a behaviour reaches for (a slot): a pose asset in the editor, its bones embedded for the game. */
 export interface ReactionPoseSlot {
@@ -125,6 +125,8 @@ export const PIN_SPECS: readonly ReactionParamSpec[] = [
 export const THRESHOLD_SPECS: readonly ReactionParamSpec[] = [
     p('minHitImpulse', 'Smallest hit', 2, 0, 100, 0.5, 'N·s', 'A hit softer than this is ignored.'),
     p('staggerImpulse', 'Stagger at', 40, 0, 1000, 1, 'N·s', 'A hit at least this hard knocks the character off balance: it steps to stay up.'),
+    p('stumbleImpulse', 'Stumble at', 13, 0, 1000, 0.5, 'N·s', 'A hit on the trunk at least this hard (a rifle round) rocks the body back: it stumbles a step or two to stay up.'),
+    p('stumbleSpeed', 'Stumble speed', 0.9, 0, 5, 0.05, 'm/s', 'How fast a stumbling hit sends the hips back.'),
     p('fallImpulse', 'Fall at', 150, 0, 2000, 5, 'N·s', 'A hit at least this hard knocks it straight down.'),
     p('knockOutDistance', 'Knocked out', 0.35, 0.05, 2, 0.01, 'm', 'How far the hips may be pushed from where the animation has them before the character falls.'),
     p('fallUprightness', 'Fallen', 0.55, 0, 1, 0.01, undefined, 'Below this uprightness (1 standing, 0 lying) a character that is off balance counts as falling.'),
@@ -143,8 +145,8 @@ export const BEHAVIOUR_SPECS: readonly BehaviourSpec[] = [
             p('weakness', 'Weakness', 0.25, 0, 1, 0.05, undefined, 'How much strength the struck part keeps at first (1 = none lost).'),
             p('weaknessTime', 'Recover in', 0.5, 0, 5, 0.05, 's', 'How long the struck part takes to get its strength back.'),
             p('snap', 'Snap', 0.4, 0, 3, 0.05, undefined, 'An extra jolt to the spine and neck, away from the hit.'),
-            p('reachDelay', 'Reach after', 0.2, 0, 2, 0.05, 's', 'How long before a hand goes to the wound.'),
-            p('holdTime', 'Hold for', 2, 0, 10, 0.1, 's', 'How long a hand holds the wound.'),
+            p('reachDelay', 'Reach after', 0.1, 0, 2, 0.05, 's', 'How long before a hand goes to the wound.'),
+            p('holdTime', 'Hold for', 2.5, 0, 10, 0.1, 's', 'How long a hand holds the wound.'),
             p('maxReach', 'Reach', 0.65, 0, 1.5, 0.01, 'm', 'The farthest a hand reaches for a wound (beyond, it does not try).'),
             p('reachStiffness', 'Reach stiffness', 3, 0, 20, 0.1, 'Hz', 'How firmly the reaching arm holds the wound.'),
             p('reachPull', 'Reach pull', 0.5, 0, 1, 0.05, undefined, 'How firmly a string draws the hand onto the wound, as a share of the strings (0: the muscles of the arm alone).'),
@@ -168,7 +170,7 @@ export const BEHAVIOUR_SPECS: readonly BehaviourSpec[] = [
             p('uprightAssist', 'Upright help', 0.6, 0, 1, 0.05, undefined, 'How much the hips and chest are helped to stay upright (gone by the last step).'),
             p('leanInto', 'Lean', 0.1, 0, 1, 0.01, 'rad', 'How far the body leans the way it is going.'),
             p('giveUpUprightness', 'Give up at', 0.6, 0, 1, 0.01, undefined, 'Below this uprightness it stops stepping and falls.'),
-            p('recoverTime', 'Recovered after', 0.5, 0, 3, 0.05, 's', 'How long it must stand balanced to be back on its animation.'),
+            p('recoverTime', 'Recovered after', 0.4, 0, 3, 0.05, 's', 'How long it must stand balanced to be back on its animation.'),
         ],
         poses: [], clips: [],
     },
@@ -247,6 +249,19 @@ export const BEHAVIOUR_SPECS: readonly BehaviourSpec[] = [
         poses: [], clips: [],
     },
     {
+        id: 'struck', label: 'Struck', doc: 'Hit by a vehicle: the legs are taken out and the body pivots over it. It braces as it goes: knees and hips bend, the trunk curls, the arms come up round the head.',
+        params: [
+            p('kneeBend', 'Knee bend', 1.1, 0, 2.2, 0.05, 'rad', 'How far the knees bend.'),
+            p('hipBend', 'Hip bend', 0.8, 0, 1.6, 0.05, 'rad', 'How far the hips bend (and the trunk curls a third of that).'),
+            p('stiffness', 'Stiffness', 3, 0, 20, 0.05, 'Hz', 'How firmly it holds the brace.'),
+            p('duration', 'Lasts', 0.7, 0, 3, 0.05, 's', 'How long it braces (the head stays protected a little longer).'),
+            p('legShare', 'Legs taken', 1, 0, 1.5, 0.05, undefined, 'How much of the vehicle\'s speed the legs take.'),
+            p('trunkShare', 'Trunk thrown', 0.45, 0, 1.5, 0.05, undefined, 'How much of it the trunk takes: less than the legs, so the body pivots over.'),
+            p('lift', 'Thrown up', 0.3, 0, 2, 0.05, undefined, 'Upward speed given, as a share of the vehicle\'s.'),
+        ],
+        poses: [], clips: [],
+    },
+    {
         id: 'writhe', label: 'Writhe', doc: 'Lying hurt: slow, weak movement, a hand on the wound (or a clip played softly).',
         params: [
             p('stiffness', 'Stiffness', 1.2, 0, 20, 0.05, 'Hz', 'How firmly it moves.'),
@@ -303,6 +318,7 @@ export const REACTION_PRESETS: { name: string; doc: string; make(): ReactionSet 
         name: 'Tough', doc: 'Strong and hard to topple: shrugs off small hits, steps more, falls later.', make: () => tune(defaultReactionSet('Tough', 'tough'), s => {
             s.strength = 1.5;
             s.thresholds.staggerImpulse = 70; s.thresholds.fallImpulse = 260; s.thresholds.knockOutDistance = 0.5;
+            s.thresholds.stumbleImpulse = 25; s.thresholds.stumbleSpeed = 0.6;
             s.behaviours.stepBalance.params.maxSteps = 6; s.behaviours.stepBalance.params.perStepReduction = 0.9;
             s.behaviours.hitReact.params.weakness = 0.5;
         }),
@@ -310,7 +326,7 @@ export const REACTION_PRESETS: { name: string; doc: string; make(): ReactionSet 
     {
         name: 'Wounded', doc: 'Already hurt: weak, topples easily and writhes when down.', make: () => tune(defaultReactionSet('Wounded', 'wounded'), s => {
             s.strength = 0.6;
-            s.thresholds.staggerImpulse = 20; s.thresholds.fallImpulse = 70;
+            s.thresholds.staggerImpulse = 20; s.thresholds.fallImpulse = 70; s.thresholds.stumbleImpulse = 8;
             s.behaviours.stepBalance.params.maxSteps = 2;
             s.behaviours.writhe.params.duration = 10;
             s.behaviours.getUp.params.delay = 3;

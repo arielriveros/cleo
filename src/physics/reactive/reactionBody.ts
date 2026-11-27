@@ -52,6 +52,12 @@ export class ReactionBody {
     public readonly parts: readonly RagdollPartInfo[];
     /** Per part, its joint's cone in body frames: the child's axis (in its own frame), the parent's, and the half-angle. */
     private readonly _cone: { child: number[]; parent: number[]; angle: number }[] = [];
+    /**
+     * Per part: its rotation in its parent's frame at the bind pose, and how far it may twist about its own axis from
+     * there (radians; 0: unclamped, as a hinge's twist is its hinge's).
+     */
+    private readonly _bindRel: number[][] = [];
+    private readonly _twist: number[] = [];
 
     constructor(public readonly ragdoll: Ragdoll) {
         const parts = this.parts = ragdoll.parts;
@@ -77,6 +83,10 @@ export class ReactionBody {
             const c = quatRotateTuple([-lc[0], -lc[1], -lc[2], lc[3]], [p.layout.childAxis[0], p.layout.childAxis[1], p.layout.childAxis[2]]);
             const q = quatRotateTuple([-lp[0], -lp[1], -lp[2], lp[3]], [p.layout.parentAxis[0], p.layout.parentAxis[1], p.layout.parentAxis[2]]);
             this._cone.push({ child: c, parent: q, angle: p.layout.coneAngle });
+            // Body frames at the bind pose are the layout rotations, so the bind relative rotation is inv(Lp)·Lc.
+            this._bindRel.push(quatMultiplyTuple([-lp[0], -lp[1], -lp[2], lp[3]], [lc[0], lc[1], lc[2], lc[3]]));
+            const hinge = p.layout.part.joint?.type === 'hinge' || !!p.layout.hingeAxis;
+            this._twist.push(p.parent >= 0 && !hinge && p.layout.twistAngle > 0 && p.layout.twistAngle < Math.PI - 1e-3 ? p.layout.twistAngle : 0);
         }
         this.pelvis = Math.max(0, parts.findIndex(p => p.parent < 0));
         this.chest = [role('chest'), role('spine'), this.pelvis].find(i => i >= 0)!;
@@ -176,6 +186,20 @@ export class ReactionBody {
     }
 
     /**
+     * A part's target turned further by `rotation` given in the WORLD (about a world axis: away from a hit, about
+     * up, the way the body leans), as its parent is simulated now. `turn` takes the parent's own frame, which is the
+     * world's only for an upright body facing +Z: given a world axis, a body facing elsewhere, or lying down, bent
+     * and twisted the wrong way.
+     */
+    public turnWorld(i: number, rotation: ArrayLike<number>, w: number): void {
+        const p = this.parts[i];
+        if (!p || p.parent < 0) return;
+        const qp = this.simRotation(p.parent);
+        const local = quatMultiplyTuple(quatMultiplyTuple(quatConjugateTuple(qp), [rotation[0], rotation[1], rotation[2], rotation[3]]), qp);
+        this.turn(i, local, w);
+    }
+
+    /**
      * Reach a limb's end for a world point: two-bone IK on the limb as simulated (its root pivot, its middle
      * joint, its end's pivot), its two parts turned toward the solution by `w`. `pole`: where the middle joint
      * should point (an elbow out and down, a knee forward); null keeps the bend the limb has. `endRotation`: the
@@ -239,7 +263,9 @@ export class ReactionBody {
      */
     public clampTarget(i: number): void {
         const p = this.parts[i], cone = this._cone[i];
-        if (!p || p.parent < 0 || !cone || !(cone.angle > 0) || cone.angle >= Math.PI - 1e-3) return;
+        if (!p || p.parent < 0 || !cone) return;
+        this._clampTwist(i);
+        if (!(cone.angle > 0) || cone.angle >= Math.PI - 1e-3) return;
         const t = this.target[i];
         const axis = quatRotateTuple(t, cone.child), ref = cone.parent;
         const cos = Math.max(-1, Math.min(1, axis[0] * ref[0] + axis[1] * ref[1] + axis[2] * ref[2]));
@@ -253,6 +279,33 @@ export class ReactionBody {
         const back = swing - limit, s = Math.sin(back / 2) / n;
         const q = quatMultiplyTuple([turnAxis[0] * s, turnAxis[1] * s, turnAxis[2] * s, Math.cos(back / 2)], t);
         t[0] = q[0]; t[1] = q[1]; t[2] = q[2]; t[3] = q[3];
+    }
+
+    /**
+     * Part `i`'s target twisted about its own axis no further from the bind pose than its joint's twist allows: a
+     * spine asked to turn a long way (a look, a reach and a snap together) turns as far as a spine does, and no
+     * muscle presses the joint into its stop and makes it shudder.
+     */
+    private _clampTwist(i: number): void {
+        const limit = this._twist[i];
+        if (!(limit > 0)) return;
+        const t = this.target[i], bind = this._bindRel[i], axis = this._cone[i].child;
+        // The target from the bind pose, in the part's own frame, split into twist about its axis and the rest.
+        const d = quatMultiplyTuple(quatConjugateTuple(bind), t);
+        const along = d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2];
+        let tw = [axis[0] * along, axis[1] * along, axis[2] * along, d[3]];
+        const n = Math.hypot(tw[0], tw[1], tw[2], tw[3]);
+        if (n < 1e-9) return;
+        tw = [tw[0] / n, tw[1] / n, tw[2] / n, tw[3] / n];
+        if (tw[3] < 0) tw = [-tw[0], -tw[1], -tw[2], -tw[3]];
+        const angle = 2 * Math.acos(Math.min(1, tw[3]));
+        const max = limit * 0.95;
+        if (angle <= max) return;
+        const swing = quatMultiplyTuple(d, quatConjugateTuple(tw));
+        const sign = (tw[0] * axis[0] + tw[1] * axis[1] + tw[2] * axis[2]) >= 0 ? 1 : -1;
+        const s = Math.sin(max / 2) * sign;
+        const clamped = quatMultiplyTuple(quatMultiplyTuple(bind, swing), [axis[0] * s, axis[1] * s, axis[2] * s, Math.cos(max / 2)]);
+        t[0] = clamped[0]; t[1] = clamped[1]; t[2] = clamped[2]; t[3] = clamped[3];
     }
 
     /** Take a pose's part rotations (posePartTargets) for the parts in `mask`, by `w`. */

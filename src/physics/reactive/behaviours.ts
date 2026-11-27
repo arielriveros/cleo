@@ -120,7 +120,7 @@ const hitReact: ReactionBehaviour = {
                 const dir = wound.impulse.map(v => v / kick);
                 const axis = [UP[1] * dir[2] - UP[2] * dir[1], UP[2] * dir[0] - UP[0] * dir[2], UP[0] * dir[1] - UP[1] * dir[0]];
                 const amount = P.snap * Math.min(1, kick / 40) * (1 - age / 0.2) * w;
-                for (const i of body.partsOf(['spine', 'neck'])) body.turn(i, axisAngle(axis, amount * 0.5), 1);
+                for (const i of body.partsOf(['spine', 'neck'])) body.turnWorld(i, axisAngle(axis, amount * 0.5), 1);
             }
             if (flinch && age < 0.5) body.pose(flinch, body.partsOf(['spine', 'neck', 'arms']), w * (1 - age / 0.5) * 0.6);
             const point = body.simPoint(wound.part, wound.local);
@@ -162,7 +162,11 @@ const hitReact: ReactionBehaviour = {
                 body.pull(arm.end, palmAt, P.reachPull * w * ramp);
                 if (ramp > 0.05) body.passThrough[arm.mid] = body.passThrough[arm.end] = 1;
                 // The chest turns a little toward the reach, as a body does reaching across itself.
-                if (across && body.chest >= 0 && body.chest !== body.pelvis) body.turn(body.chest, axisAngle(UP, -0.35 * sideSign), w * ramp);
+                // About the body's own up (its pelvis's), so a body lying down does not twist its spine for it.
+                if (across && body.chest >= 0 && body.chest !== body.pelvis) {
+                    const up = quatRotateTuple(body.simRotation(body.pelvis), UP);
+                    body.turnWorld(body.chest, axisAngle(up, -0.35 * sideSign), w * ramp);
+                }
                 for (const i of [arm.root, arm.mid, arm.end]) {
                     body.tune(i, w * ramp, { frequency: P.reachStiffness, holdUp: 1 });
                     body.pin[i] *= 1 - ramp;
@@ -256,7 +260,7 @@ const stepBalance: ReactionBehaviour = {
         const v = sense.velocity, flat = Math.hypot(v[0], v[2]);
         if (flat > 0.1 && P.leanInto > 0) {
             const axis = [v[2] / flat, 0, -v[0] / flat];
-            for (const i of body.partsOf(['spine'])) body.turn(i, axisAngle(axis, P.leanInto * 0.5 * Math.min(1, flat)), w);
+            for (const i of body.partsOf(['spine'])) body.turnWorld(i, axisAngle(axis, P.leanInto * 0.5 * Math.min(1, flat)), w);
         }
         const assist = P.uprightAssist * Math.max(0, 1 - s.steps / Math.max(1, P.maxSteps));
         body.pin[body.pelvis] = Math.max(body.pin[body.pelvis], assist * w);
@@ -323,7 +327,8 @@ const protectHead: ReactionBehaviour = {
     wants(ctx) {
         const s = ctx.sensors, i = s.impact;
         return ctx.state === 'tumble' || s.terrain === 'stairs' && !s.grounded
-            || (!!i && i.headFirst && i.time < 0.7) || s.trunkSpin > ctx.set.thresholds.tumbleAngularSpeed;
+            || (!!i && i.headFirst && i.time < 0.7) || s.trunkSpin > ctx.set.thresholds.tumbleAngularSpeed
+            || struckFor(ctx) < ctx.set.behaviours.struck.params.duration + 0.4;
     },
     update(ctx, c, w) {
         const P = c.params, body = ctx.body;
@@ -451,6 +456,34 @@ const tumble: ReactionBehaviour = {
     },
 };
 
+/** Seconds since the body was struck (ReactionController.impact), or Infinity. */
+function struckFor(ctx: ReactionContext): number {
+    const at = STRUCK.get(ctx.body);
+    return at === undefined ? Infinity : ctx.time - at;
+}
+
+/**
+ * Struck by a vehicle (ReactionController.impact): legs taken out, the body thrown over what hit it. It braces as
+ * it goes: knees and hips bend, the trunk curls a little, the arms come up round the head (protectHead runs with it).
+ */
+const struck: ReactionBehaviour = {
+    id: 'struck', states: ['falling', 'tumble'], fade: 0.06,
+    wants: (ctx, c) => struckFor(ctx) < c.params.duration,
+    update(ctx, c, w) {
+        const P = c.params, body = ctx.body;
+        for (const side of ['L', 'R'] as const) {
+            const leg = body.legs[side];
+            if (!leg) continue;
+            flex(ctx, leg.root, P.hipBend, w);
+            body.bend(leg.mid, P.kneeBend, w);
+            body.tuneAll([leg.root, leg.mid], w, { frequency: P.stiffness, holdUp: 0.5 });
+        }
+        for (const i of body.partsOf(['spine'])) flex(ctx, i, -P.hipBend * 0.35, w);
+        body.tuneAll(body.partsOf(['spine', 'neck']), w, { frequency: P.stiffness });
+    },
+};
+export const STRUCK = new WeakMap<ReactionBody, number>();
+
 /** Thrown from a vehicle: the controller's bail() sets it moving; while airborne it braces. */
 const vehicleBail: ReactionBehaviour = {
     id: 'vehicleBail', states: ['falling'], fade: 0.1,
@@ -476,7 +509,7 @@ const writhe: ReactionBehaviour = {
             for (const i of body.parts.map(p => p.index)) body.hold(i, w * 0.6);
             const phase = 2 * Math.PI * t / Math.max(0.1, P.period);
             const twist = quatRotateTuple(body.simRotation(body.pelvis), [0, 1, 0]);
-            for (const i of body.partsOf(['spine'])) body.turn(i, axisAngle(twist, P.amplitude * 0.4 * Math.sin(phase)), w);
+            for (const i of body.partsOf(['spine'])) body.turnWorld(i, axisAngle(twist, P.amplitude * 0.4 * Math.sin(phase)), w);
             for (const side of ['L', 'R'] as const) {
                 const leg = body.legs[side];
                 if (leg) body.bend(leg.mid, 0.6 + P.amplitude * Math.sin(phase + (side === 'L' ? 0 : 1.7)), w);
@@ -514,4 +547,4 @@ const getUp: ReactionBehaviour = {
 };
 
 /** Every behaviour, in the order they compose (later ones win where they overlap). */
-export const BEHAVIOURS: readonly ReactionBehaviour[] = [relax, writhe, airborne, tumble, landing, vehicleBail, catchFall, protectHead, stepBalance, getUp, hitReact];
+export const BEHAVIOURS: readonly ReactionBehaviour[] = [relax, writhe, airborne, tumble, landing, vehicleBail, struck, catchFall, protectHead, stepBalance, getUp, hitReact];

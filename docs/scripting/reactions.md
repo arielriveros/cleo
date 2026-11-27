@@ -47,8 +47,9 @@ Its `hit.node` is `null`, like terrain's, so a test for terrain should check `!h
 
 | Call | What it does |
 |---|---|
-| `hit({ point?, direction?, impulse?, part?, damage? })` | A hit, `impulse` N·s along `direction` (world) at `point`. Small hits flinch, harder ones stagger, the hardest knock it down (the set's [thresholds](../editor/reactions.md#thresholds)). `part` by index, name (`'Forearm L'`) or role (`'foreArm.L'`); default the part nearest `point`. `damage` takes that much of its health (0..1); at 0 it dies. |
+| `hit({ point?, direction?, impulse?, part?, damage? })` | A hit, `impulse` N·s along `direction` (world) at `point`. Small hits flinch, one in the trunk past **Stumble at** stumbles a step or two, harder ones stagger, the hardest knock it down (the set's [thresholds](../editor/reactions.md#thresholds)). Getting up, any hit that counts knocks it back. `part` by index, name (`'Forearm L'`) or role (`'foreArm.L'`); default the part nearest `point`. `damage` takes that much of its health (0..1); at 0 it dies. |
 | `push(velocity, part?)` | A shove: every part (or one) gets this change of velocity (m/s, world). |
+| `impact({ velocity, point? })` | Struck by a vehicle going `velocity` (m/s, world): the legs are taken out at its speed and the trunk thrown less and upward, so the body pivots over it, bracing as it goes (the [Struck](../editor/reactions.md#struck) behaviour). `point`: where it was struck, for the wound. |
 | `trip()` | The feet stop, the body goes on: it falls forward. |
 | `fall()` | Falls now, moving as it was (a floor giving way, stepping off a ledge). |
 | `bail({ velocity, exitDirection?, vehicle? })` | Thrown from a vehicle moving at `velocity`, out along `exitDirection`, passing clear of `vehicle` (anything with a `body`) for a moment. |
@@ -60,8 +61,8 @@ Its `hit.node` is `null`, like terrain's, so a test for terrain should check `!h
 | `setStrength(v)` | Multiplies every muscle from now on (1 normal). |
 
 ```ts
-// A car hits a pedestrian: thrown along the car's velocity (carVelocity, m/s), a little up.
-pedestrian.reactions?.push([carVelocity[0], 2, carVelocity[2]])
+// A car hits a pedestrian going carVelocity (m/s): legs first, over the bonnet, braced.
+pedestrian.reactions?.impact({ velocity: carVelocity })
 
 // Out of the driver's door at speed: `car` is the vehicle's node, carLeft its left in the world.
 this.reactions?.bail({ velocity: carVelocity, exitDirection: carLeft, vehicle: car })
