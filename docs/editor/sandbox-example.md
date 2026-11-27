@@ -578,20 +578,21 @@ The mannequin reacts with its whole body, with the [reactions](reactions.md) of 
 **Default** set (its **Reactions** tab), the same for the player and every NPC:
 
 - **T** trips it: its feet stop, it falls forward onto its hands, lies a moment and gets up.
-- **G** shoves it back: it steps back to keep its balance, tiring with each step, and falls if it cannot.
+- **G** shoves it back: it is carried back on its feet, its legs walking it out, and keeps its control.
 - **Bailing out** of the car at speed (above) throws it out to tumble along the ground.
 - **A shot** that strikes a character (its capsule, or a limb of a body already reacting) is its reactions'
-  (SandboxGun hands it to `physics.applyHit`), on the limb the shot meets: a flinch and a hand to the wound, a stumble
-  of a step or two for a rifle round in the trunk, a stagger, or a fall, by how hard it lands. Shoot an NPC to see
-  it. The player is not moved by shots at all (its `reactsToShots` is false): an enemy's rounds hit it, and it plays
+  (SandboxGun hands it to `physics.applyHit`), on the limb the shot meets: a sway of the upper body on whatever it is
+  doing (a free hand to the wound; a hand on a weapon stays there), a stumble for a heavy round in the trunk, a
+  stagger, or a fall, by how hard it lands and how many land at once. Shoot an NPC to see it. The player is not moved by shots at all (its `reactsToShots` is false): an enemy's rounds hit it, and it plays
   on.
 - **The car** hitting a character faster than its **Knock Speed** (2.5 m/s, closing) throws it (`struckByVehicle`,
   the reactions' `impact`): the legs are taken out first and the body pivots over the bonnet, its knees and hips
   bent and its arms up round its head, and it rolls when it lands.
 
-While a reaction has the body (it staggers, falls, lies or gets up) the stick does nothing and the weapon is put
-away; a flinch it stands through keeps it in hand. Foot placement, foot locking and the support hand's IK fade out
-while the body reacts and back in after. Nothing in the Sandbox has health: a body that falls always gets up. It gets
+On its feet (a flinch, a stumble, a stagger) a character keeps its control: it goes on walking, aiming and firing,
+its legs on their animation and its weapon in hand, while its upper body sways and a shove carries it. Off its feet
+(it falls, lies or gets up) the stick does nothing and the weapon is put away; foot placement, foot locking and the
+support hand's IK fade out while the body has it and back in after (on its feet they stay on). Nothing in the Sandbox has health: a body that falls always gets up. It gets
 up on Mixamo's *Getting Up* lying face down and *Stand Up* lying face up (the set's **Get up** clips, in
 `/Characters/Mannequin/Animation/Clips/Get Up`). The clip is turned to lie the way the body lies, and the skin blends
 from the body onto its first frame before it plays, so the body does not turn round to meet it. A hit while it gets
@@ -664,7 +665,8 @@ The player in sight sends an enemy that is going about its patrol (patrol, look,
 - **Knock-downs.** One round is a flinch. Hits add up (**Stagger Shock**, **Knockdown Shock**, fading by half every
   **Shock Half Life**): past the first it staggers, past the second, or hit in the legs running, it falls.
 - **It never dies.** Its health is kept full, a body lying longer than **Down Seconds** is got up, and one reacting
-  longer than **Stuck Seconds** is put back on its feet. While a reaction has the body the brain is **knocked**.
+  longer than **Stuck Seconds** is put back on its feet. While it is off its feet the brain is **knocked**; a flinch
+  or a stagger it stays up through keeps the brain where it was (it goes on patrolling, fighting or fleeing).
 
 `SandboxCivilian.ts` (blue) waits at a **Look Point**, its head sweeping round what is there, then walks 10 to 40 m
 off to somewhere else, often another Look Point. The player close by and in sight, on foot, is looked at for

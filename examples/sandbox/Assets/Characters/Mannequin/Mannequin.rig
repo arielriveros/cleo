@@ -1146,11 +1146,10 @@
         },
         "thresholds": {
           "minHitImpulse": 2,
-          "staggerImpulse": 40,
-          "stumbleImpulse": 13,
+          "staggerImpulse": 60,
+          "stumbleImpulse": 30,
           "stumbleSpeed": 0.9,
           "fallImpulse": 150,
-          "knockOutDistance": 0.35,
           "fallUprightness": 0.55,
           "highFallHeight": 1.5,
           "tumbleAngularSpeed": 3,
@@ -1163,32 +1162,28 @@
           "hitReact": {
             "enabled": true,
             "params": {
-              "weakness": 0.25,
-              "weaknessTime": 0.5,
+              "weakness": 0.5,
+              "weaknessTime": 0.25,
+              "trackStiffness": 6,
+              "trackStrength": 3,
+              "maxKick": 6,
               "snap": 0.4,
               "reachDelay": 0.1,
-              "holdTime": 2.5,
+              "holdTime": 1.2,
               "maxReach": 0.65,
               "reachStiffness": 3,
               "reachPull": 0.5,
               "lookTime": 1,
-              "duration": 1.2
+              "duration": 1.4
             }
           },
           "stepBalance": {
             "enabled": true,
             "params": {
-              "maxSteps": 4,
-              "stepTime": 0.3,
-              "stepHeight": 0.08,
-              "maxStepLength": 0.6,
-              "captureMargin": 0.04,
-              "legStiffness": 2.6,
-              "perStepReduction": 0.8,
-              "armStiffness": 0.6,
-              "uprightAssist": 0.6,
-              "leanInto": 0.1,
-              "giveUpUprightness": 0.6,
+              "knockTime": 0.35,
+              "leanInto": 0.15,
+              "giveUpTilt": 0.6,
+              "giveUpTime": 0.15,
               "recoverTime": 0.4
             }
           },

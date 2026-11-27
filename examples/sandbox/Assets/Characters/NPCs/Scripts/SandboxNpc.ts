@@ -126,10 +126,9 @@ export default class SandboxNpcNode extends SandboxCharacterNode {
 
     // ----- what the brain reads (its AI Brain's parameters, from this node) ---------------------------------
 
-    /** Its reactions have the body: staggering, falling, down, getting up. */
+    /** Off its feet: falling, down, getting up (a flinch or a stagger it stays up through, keeping its control, is not). */
     public get isKnocked(): boolean {
-        const reactions = this.reactions
-        return !!reactions?.reacting && reactions.state !== 'hitReact'
+        return !!this.reactions?.isDown
     }
 
     /** Where it was sent is reached, or there was nowhere to go. */

@@ -1069,15 +1069,16 @@ export default class SandboxCharacterNode extends CharacterNode {
 
     /**
      * Its reactions (the skeleton's, physics/reactive/): what sets one off is a hit, a car, or the subclass's own
-     * (`provoke`: the player's Trip and Shove keys). While a reaction has the body (it staggers, falls, lies, gets up) the body
-     * is the physics', not the stick's: nothing it is asked does anything, and its weapon is put away. A flinch it
-     * stands through keeps it in hand. True while it sits a reaction out.
+     * (`provoke`: the player's Trip and Shove keys). On its feet (a flinch, a stagger) it keeps its control: it goes on
+     * walking, aiming and firing while its upper body sways and the shove carries it. Off its feet (it falls, lies,
+     * gets up) the body is the physics', not the stick's: nothing it is asked does anything, and its weapon is put
+     * away. True while it sits a reaction out.
      */
     protected _reacting(delta: number): boolean {
         const reactions = this.reactions
         if (!reactions) return false
         if (!reactions.reacting && this.isGrounded && !this.isJumping) this.provoke(reactions)
-        if (!reactions.reacting || reactions.state === 'hitReact') return false
+        if (!reactions.isDown) return false
         this.hasMoveInput = false
         this.running = false
         this.sprinting = false
