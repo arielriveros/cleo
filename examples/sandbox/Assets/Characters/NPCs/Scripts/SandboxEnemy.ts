@@ -398,8 +398,8 @@ export default class SandboxEnemyNode extends SandboxNpcNode {
     /**
      * Firing Line's cover finder: the Cover Points within 15 m, and probes on rings round it set down on the ground;
      * hidden from the threat's eye at a crouched head's height, reachable without a long way round, not taken by
-     * another enemy. The nearest wins, with a bonus for being farther from the threat. The walks are measured only for
-     * the hidden spots, nearest first, and no more than six of them.
+     * another enemy. The nearest wins, with a bonus for being farther from the threat. Only the twelve nearest are
+     * tested for being hidden (three rays each), and the walk measured to no more than six of those.
      */
     private _bestCover(): number[] | null {
         const physics: any = this.scene?.physics
@@ -414,8 +414,8 @@ export default class SandboxEnemyNode extends SandboxNpcNode {
             const near = this.planar(me, p)
             if (near <= 15 && (!claims.has(key) || claims.get(key) === (this as any))) candidates.push({ p: [p[0], p[1], p[2]], key, near })
         }
-        for (let ring = 1; ring <= 3; ring++) for (let i = 0; i < 10; i++) {
-            const a = (i / 10 + ring * 0.07) * Math.PI * 2, r = 2.5 + ring * 3
+        for (let ring = 1; ring <= 3; ring++) for (let i = 0; i < 8; i++) {
+            const a = (i / 8 + ring * 0.07) * Math.PI * 2, r = 2.5 + ring * 3
             const x = me[0] + Math.sin(a) * r, z = me[2] + Math.cos(a) * r
             const ground = physics.raycast([x, me[1] + 2, z], [x, me[1] - 4, z], { groundOnly: true })
             if (ground && ground.normal[1] > 0.7) {
@@ -424,9 +424,9 @@ export default class SandboxEnemyNode extends SandboxNpcNode {
             }
         }
         candidates.sort((a, b) => a.near - b.near)
-        let best: { p: number[], key: string } | null = null, bestScore = -Infinity, measured = 0
+        let best: { p: number[], key: string } | null = null, bestScore = -Infinity, measured = 0, tested = 0
         for (const c of candidates) {
-            if (measured >= 6) break
+            if (measured >= 6 || tested++ >= 12) break
             if (!this._hidden(c.p, threat)) continue
             measured++
             const walk = this.pathLength(me, c.p)

@@ -336,10 +336,16 @@ export default class SandboxNpcNode extends SandboxCharacterNode {
         return cache.get(key) as T
     }
 
-    /** The length of the walk from `a` to `b` on the nav mesh (straight without one), or Infinity when there is none. */
+    /**
+     * The length of the walk from `a` to `b` on the nav mesh (straight without one), or Infinity when there is none.
+     * Each is a search out of the scene's budget a frame (its `aiDetail.pathsPerFrame`, shared with the controllers'
+     * own plans): with none left this frame, the straight line a fifth longer.
+     */
     protected pathLength(a: ArrayLike<number>, b: ArrayLike<number>): number {
         const mesh = this.navMesh()
-        if (!mesh) return Math.hypot(b[0] - a[0], b[2] - a[2])
+        const straight = Math.hypot(b[0] - a[0], b[2] - a[2])
+        if (!mesh) return straight
+        if ((this.scene as any)?.takePathSearch?.() === false) return straight * 1.2
         const path = mesh.findPath(a, b, [])
         if (!path || path.length === 0) return Infinity
         let length = 0

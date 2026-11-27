@@ -48,7 +48,7 @@ interface Setup {
 
 const planar = (a: ArrayLike<number>, b: ArrayLike<number>) => Math.hypot(a[0] - b[0], a[2] - b[2]);
 /** How often the NPCs perceive, probe and plan in the Sandbox itself (its Game Manager's `aiDetail`). */
-const SANDBOX_AI_DETAIL = { perceiveEvery: 1, probeEvery: 1, pathsPerFrame: 4 };
+const SANDBOX_AI_DETAIL = { perceiveEvery: 2, probeEvery: 2, pathsPerFrame: 2, farDistance: 35, farFactor: 3 };
 const finite = (p: ArrayLike<number>) => Number.isFinite(p[0] + p[1] + p[2]);
 const ALL = ['Civilian 1', 'Civilian 2', 'Civilian 3', 'Civilian 4', 'Civilian 5', 'Civilian 6', 'Enemy Pillars 1', 'Enemy Pillars 2', 'Enemy Crates 1', 'Enemy Crates 2'];
 /** Far from every NPC's sight: where the player waits when a test is not about it. */
@@ -104,7 +104,8 @@ async function play(setup: Setup, options: { aiDetail?: { perceiveEvery: number;
             played.lastTickMs = performance.now() - start;
             after?.();
             for (const w of watched) { const s = states.get(w)!; if (s[s.length - 1] !== w.state) s.push(w.state); }
-            if (k % TICK === TICK - 1) await new Promise(done => setImmediate(done));
+            // A quarter of a game second at most between yields: a busy tick is tens of milliseconds.
+            if (k % (TICK / 6) === TICK / 6 - 1) await new Promise(done => setImmediate(done));
         }
     };
     return { r, player, npc, named, run, watch, states, get lastTickMs() { return played.lastTickMs; } };
@@ -404,9 +405,9 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
         }, () => {
             ms.push(p.lastTickMs);
             rays.push(physics.stats.rayCount);
-            powered.push(physics.poweredRagdollCount ?? npcs.filter(n => n.reactions?.ragdoll && !n.reactions.ragdoll.frozen).length);
+            powered.push(physics.poweredRagdollCount);
             iterations.push(physics.solverIterations);
-            searches.push((p.r.scene as any).ai?.pathSearchesThisFrame ?? 0);
+            searches.push((p.r.scene as any).pathSearchesThisFrame ?? 0);
         });
         const sorted = (a: number[]) => [...a].sort((x, y) => x - y);
         const pct = (a: number[], q: number) => sorted(a)[Math.min(a.length - 1, Math.floor(a.length * q))];
@@ -418,6 +419,12 @@ describe.skipIf(!present)(`the Sandbox's NPCs (${TEST_PHYSICS})`, { timeout: 300
         };
         console.log(`[npc budget ${TEST_PHYSICS}] ${JSON.stringify(report)}`);
         expect(report.ticks).toBeGreaterThan(400);
+        // The budgets hold (measured 2026-11-27, the three backends in parallel: Jolt p50 51 ms, p95 80 ms a tick,
+        // rays p95 87; before them 66, 126 and 125). The times are the machine's, so only the counts are asserted.
+        expect(report.poweredMax, 'reacting bodies within Reacting bodies (6)').toBeLessThanOrEqual(6);
+        expect(report.searchesMax, 'path searches within pathsPerFrame').toBeLessThanOrEqual(SANDBOX_AI_DETAIL.pathsPerFrame);
+        expect(report.raysP95, 'rays a tick').toBeLessThan(150);
+        if (physics.capabilities?.islandIterations) expect(report.iterationsMax, 'the world keeps its own iterations').toBeLessThanOrEqual(10);
     });
 
     it('knocked down and shot again while it gets up, a civilian goes back down and gets up again', async () => {

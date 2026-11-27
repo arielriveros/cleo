@@ -2,8 +2,9 @@
   "version": 7,
   "engine": {
     "gravity": [0, -9.81, 0],
-    "maxSubsteps": 8,
+    "maxSubsteps": 4,
     "simulationRange": 0,
+    "maxPoweredRagdolls": 6,
     "physicsWorker": "on",
     "physicsBackend": "jolt",
     "maxFrameDelta": 0.1,

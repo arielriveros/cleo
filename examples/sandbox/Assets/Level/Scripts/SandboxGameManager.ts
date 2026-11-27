@@ -22,6 +22,10 @@ interface LightSetup {
  *   Day     the sun high in the afternoon
  *   Sunset  the sun just under the horizon: the blue hour, its glow still on the sky (the scene as authored)
  *   Night   the sun far under it: moonlight, and the car's lamps
+ *
+ * It also sets how often the NPCs' brains do their costly parts (the scene's `aiDetail`): each looks and feels
+ * for obstacles every other frame (on a frame of its own), they plan no more than two paths a frame between
+ * them, and one farther than 35 m from the camera does all of it three times less often again.
  */
 export default class SandboxGameManagerNode extends Node {
     /** The setup the scene starts in: 1 day, 2 sunset, 3 night. */
@@ -65,6 +69,7 @@ export default class SandboxGameManagerNode extends Node {
     private _cancelRelight: (() => void) | null = null
 
     onStart() {
+        this.scene.aiDetail = { perceiveEvery: 2, probeEvery: 2, pathsPerFrame: 2, farDistance: 35, farFactor: 3 }
         this.applySetup(this.startSetup)
     }
 
