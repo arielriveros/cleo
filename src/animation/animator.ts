@@ -32,6 +32,11 @@ import {
 } from '../core/conditions';
 import type { Condition, ConditionGroup, ConditionNode, ConditionOp } from '../core/conditions';
 import type { TriggerName } from '../core/scripting/fieldTypes';
+import {
+    NO_REACTION_EFFECTS, type AnimationRagdollStart, type AnimationReactionEffects, type AnimatorReactionLink,
+    type GetUpClock, type ReactionEffectsNow,
+} from './reactionLink';
+export type { AnimationRagdollStart, AnimationReactionEffects, AnimatorReactionLink, GetUpClock, ReactionEffectsNow } from './reactionLink';
 
 /** Structural view of a physics body driving a ragdoll bone, so the physics layer stays unimported. */
 export interface RagdollBodyRef {
@@ -97,6 +102,14 @@ export const NODE_BUILTINS: Record<string, {
     /** True when this value can go below zero. A state's Speed parameter clamps at 0 and freezes the clip. */
     signed?: boolean;
     read: (node: Node) => number | boolean;
+    /**
+     * A REACTION value: read from the reactions of the character this animator animates (its own model's, whatever
+     * node the parameter names), `none` where it has none (a backend without reactions, reactions off).
+     */
+    reactions?: (r: AnimatorReactionLink) => number | boolean;
+    none?: number | boolean;
+    /** Only ever rises (a count of events): a Trigger parameter linked to it fires each time it does. */
+    counter?: boolean;
 }> = {
     currentSpeed:     { type: 'number',  read: n => n.currentSpeed },
     rawSpeed:         { type: 'number',  read: n => n.rawSpeed },
@@ -129,7 +142,24 @@ export const NODE_BUILTINS: Record<string, {
     groundedTime:   { type: 'number',  read: n => n.groundedTime },
     groundDistance: { type: 'number',  read: n => n.groundDistance },
     slopeAngle:     { type: 'number',  read: n => n.slopeAngle },
+
+    // Reactions (physics/reactive/): what the character's body is doing, and the last hit it took.
+    ragdolled:   { type: 'boolean', reactions: r => r.ragdolled, read: n => !!reactionsOfNode(n)?.ragdolled },
+    canGetUp:    { type: 'boolean', reactions: r => r.canGetUp, read: n => !!reactionsOfNode(n)?.canGetUp },
+    faceUp:      { type: 'boolean', reactions: r => r.faceUp, read: n => !!reactionsOfNode(n)?.faceUp },
+    reacting:    { type: 'boolean', reactions: r => r.reacting, read: n => !!reactionsOfNode(n)?.reacting },
+    hasControl:  { type: 'boolean', reactions: r => r.hasControl, none: true, read: n => reactionsOfNode(n)?.hasControl ?? true },
+    staggering:  { type: 'boolean', reactions: r => r.staggering, read: n => !!reactionsOfNode(n)?.staggering },
+    hitAngle:    { type: 'number', signed: true, reactions: r => r.hitAngle, read: n => reactionsOfNode(n)?.hitAngle ?? 0 },
+    hitHeight:   { type: 'number', reactions: r => r.hitHeight, read: n => reactionsOfNode(n)?.hitHeight ?? 0 },
+    hitStrength: { type: 'number', reactions: r => r.hitStrength, read: n => reactionsOfNode(n)?.hitStrength ?? 0 },
+    hitCount:    { type: 'number', counter: true, reactions: r => r.hitCount, read: n => reactionsOfNode(n)?.hitCount ?? 0 },
 };
+
+/** A node's reactions, structurally (a ModelNode's or a Character's `reactions`), or null. */
+function reactionsOfNode(n: Node | null | undefined): AnimatorReactionLink | null {
+    return (n as { reactions?: AnimatorReactionLink | null } | null | undefined)?.reactions ?? null;
+}
 
 /** Name of a built-in node value. */
 export type NodeBuiltinName = keyof typeof NODE_BUILTINS;
@@ -152,8 +182,29 @@ export interface AnimationParameter {
     type: AnimationParameterType;
     /** Default value: number for 'float', boolean for 'bool'/'trigger'; fallback for 'variable'. */
     default: number | boolean;
-    /** Present only when type === 'variable': the node variable this parameter reads from. */
+    /**
+     * Type 'variable': the node variable this parameter reads from. Type 'trigger': a COUNTER it fires on (a
+     * built-in with `counter`, such as hitCount): raised once each time the count rises, and lowered again at the
+     * next frame if nothing took it, so a stale one never fires late.
+     */
     variable?: AnimationVariableBinding;
+}
+
+/** A Ragdoll state (AnimationState.ragdoll): the body is the physics' while the graph is in it. */
+export interface AnimationRagdollState {
+    /**
+     * What entering it does to a character on its feet. `fall` (default): it falls as it was moving; `trip`: its feet
+     * are taken from under it and it falls forward; `limp`: it drops out cold, no hands out, no head tucked. Entered
+     * off its feet (a hit already knocked it down) it only holds the body, which then never gets up by itself.
+     */
+    start?: AnimationRagdollStart;
+}
+
+/** A Get Up state (AnimationState.getUp): the body rises on its clip, lined up with where it lies. */
+export interface AnimationGetUpState {
+    /** The clip it plays lying on its back, and lying on its front. Either absent: the rig's reaction set's. */
+    faceUp?: string;
+    faceDown?: string;
 }
 
 export interface AnimationState {
@@ -275,6 +326,23 @@ export interface AnimationState {
      * Any State transitions and before the current state's own (see {@link AnimationStateTrigger}).
      */
     triggers?: AnimationStateTrigger[];
+    /**
+     * A RAGDOLL state (base layer only): while the graph is in it the character's body is the physics' (its
+     * reactions), entered falling (see AnimationRagdollState.start) or holding a body already down. The pose under
+     * the body is the one it was entered with, or `clipName` when set (also what shows where no body can be made).
+     * Layers are muted while it plays (AnimationLayer.overReactions), and Any State transitions and state triggers
+     * into ordinary states wait: a ragdoll is not pulled into a car.
+     */
+    ragdoll?: AnimationRagdollState;
+    /**
+     * A GET UP state (base layer only): the body rises on its clip (face up or face down, chosen as it is entered,
+     * from where the body lies), lined up with the body and blended from it; the transition's own blend, root motion
+     * and foot IK do not apply, and the character is held still. Entered before the body lies still, it waits on its
+     * first frame until it does.
+     */
+    getUp?: AnimationGetUpState;
+    /** How the body takes hits while this state plays (see AnimationReactionEffects): merged over every layer's. */
+    reactions?: AnimationReactionEffects;
     /** The state the machine starts in. Exactly one state should be the entry. */
     isEntry?: boolean;
     /** Graph-editor layout coordinates (authoring only — ignored at runtime). */
@@ -546,6 +614,11 @@ export interface AnimationLayer {
      * above do to that hand (an aim offset, sway, recoil) and however its poses are edited.
      */
     handIk?: AnimationHandIk;
+    /**
+     * Keep playing while the base layer is in a Ragdoll or Get Up state. Off (default), the layer fades out over the
+     * transition in and back over the one out: an aim or a weapon pose must not pull at a body getting up.
+     */
+    overReactions?: boolean;
 }
 
 /** A layer's support-hand IK (see {@link AnimationLayer.handIk}). */
@@ -656,6 +729,8 @@ interface Overlay {
     steadyNow: number;
     /** The layer's support-hand IK, if it has one. */
     handIk: AnimationHandIk | null;
+    /** The layer plays over Ragdoll and Get Up states (AnimationLayer.overReactions). */
+    overReactions: boolean;
 }
 
 /**
@@ -665,7 +740,8 @@ interface Overlay {
  */
 function machineShape(sm: AnimationStateMachine): string {
     const states = (list: AnimationState[]) =>
-        list.map(s => `${s.name}=${s.pose ? 'pose' : s.field ? 'field' : 'clip:' + (s.clipName ?? '')}`).join('|');
+        list.map(s => `${s.name}=${s.ragdoll ? 'ragdoll:' + (s.clipName ?? '') : s.getUp ? `getUp:${s.getUp.faceUp ?? ''}/${s.getUp.faceDown ?? ''}`
+            : s.pose ? 'pose' : s.field ? 'field' : 'clip:' + (s.clipName ?? '')}`).join('|');
     return JSON.stringify([
         sm.parameters.map(p => `${p.name}:${p.type}`),
         states(sm.states),
@@ -673,6 +749,14 @@ function machineShape(sm: AnimationStateMachine): string {
         (sm.slots ?? []).map(s => s.name),
     ]);
 }
+
+/** Whether a state is a Ragdoll state, a Get Up state, or neither. */
+function reactionKindOf(s: AnimationState | null | undefined): 'ragdoll' | 'getUp' | null {
+    return s?.ragdoll ? 'ragdoll' : s?.getUp ? 'getUp' : null;
+}
+
+/** AnimationReactionEffects.react, strictest last. */
+const REACT_RANK: Record<string, number> = { full: 0, flinch: 1, none: 2 };
 
 /** The first trigger a transition's conditions read (the one that starts what it enters), or null. */
 function firstTriggerOf(t: AnimationTransition): string | null {
@@ -1225,6 +1309,204 @@ export class Animator {
      */
     public get handIkActive(): 'left' | 'right' | null { return this._handIkActive; }
     private _handIkActive: 'left' | 'right' | null = null;
+
+    // ---- Ragdoll and Get Up states, reaction effects (reactionLink.ts) ----
+
+    /** The reaction state the base layer is in: a Ragdoll state, a Get Up state, or neither (null). */
+    public get reactionKind(): 'ragdoll' | 'getUp' | null {
+        if (this._isOverlay) return null;
+        return reactionKindOf(this._currentState);
+    }
+
+    /**
+     * How hits land on the character now: the reaction effects (AnimationState.reactions) of the base layer's state
+     * and of every layer's, merged. `react` is the strictest a state showing at least half says; `busyHands` every
+     * hand such a state names (null: none names one); `force` and `shove` the product of each state's, by how much of
+     * it shows. Worked out once a frame.
+     */
+    public get reactionEffects(): Readonly<ReactionEffectsNow> {
+        if (this._isOverlay) return NO_REACTION_EFFECTS;
+        if (this._effects && this._effectsAt === this._animatorClock) return this._effects;
+        let react = 0, said = false, L = false, R = false, force = 1, shove = 1;
+        const take = (s: AnimationState | null, w: number) => {
+            const e = s?.reactions;
+            if (!e || !(w > 0)) return;
+            if (w >= 0.5) {
+                if (e.react) react = Math.max(react, REACT_RANK[e.react] ?? 0);
+                const h = e.busyHands;
+                if (h && h !== 'auto') {
+                    said = true;
+                    if (h === 'both' || h === 'left') L = true;
+                    if (h === 'both' || h === 'right') R = true;
+                }
+            }
+            if (typeof e.force === 'number' && Number.isFinite(e.force)) force *= 1 + (clamp(e.force, 0, 10) - 1) * Math.min(1, w);
+            if (typeof e.shove === 'number' && Number.isFinite(e.shove)) shove *= 1 + (clamp(e.shove, 0, 10) - 1) * Math.min(1, w);
+        };
+        take(this._currentState, 1);
+        for (const o of this._overlays) if (o.kind === 'layer') take(o.animator._currentState, o.presence * this._overlayWeight(o));
+        const effects: ReactionEffectsNow = {
+            react: react >= 2 ? 'none' : react >= 1 ? 'flinch' : 'full',
+            busyHands: said ? { L, R } : null,
+            force: clamp(force, 0, 10), shove: clamp(shove, 0, 10),
+        };
+        this._effects = effects;
+        this._effectsAt = this._animatorClock;
+        return effects;
+    }
+
+    /**
+     * The base layer is in a Get Up state: play its clip for the side the body lies on (`faceUp`; the rig's own
+     * get-up clips, `fallback`, for a side it names none), from its first frame, and hand back its clock — what the
+     * character's reactions follow as the body rises. Null when the base is in no Get Up state or has no clip to
+     * play: the reactions then play the rig's clip in their own slot.
+     */
+    public playGetUp(faceUp: boolean, fallback?: { faceUp?: string; faceDown?: string } | null): GetUpClock | null {
+        if (this._isOverlay) return null;
+        const state = this._currentState;
+        if (!state?.getUp) return null;
+        const clip = this._getUpClip(state, faceUp, fallback);
+        if (!clip) return null;
+        if (clip !== this._currentAnimation) {
+            this._noRootMotion = true;
+            this._playClip(clip, false, false);
+            this._speed = state.speed ?? 1;
+            this._applyStateSpeed(state);
+        }
+        this._currentTime = 0;
+        this._prevEventTime = 0;
+        this._eventFromStart = true;
+        this._playing = true;
+        this._reactionHold = false;
+        return this._getUpClock();
+    }
+
+    /** Out of any Ragdoll or Get Up state at once, back to the entry state (the reactions were reset: a respawn). */
+    public endReactionStates(): void {
+        if (this._isOverlay || !this.reactionKind) return;
+        this.resetStateMachine();
+    }
+
+    /** The character's reactions, through its model (ModelNode.reactions, made on first ask), or null. */
+    private _reactionLink(): AnimatorReactionLink | null {
+        if (this._isOverlay) return null;
+        return reactionsOfNode(this._node);
+    }
+
+    /** A Get Up state's clip for a side: its own for that side, else the rig's, else the other side's. */
+    private _getUpClip(state: AnimationState, faceUp: boolean, fallback?: { faceUp?: string; faceDown?: string } | null): Animation | null {
+        const g = state.getUp ?? {}, f = fallback ?? {};
+        const up = g.faceUp || f.faceUp, down = g.faceDown || f.faceDown;
+        const name = faceUp ? (up || down) : (down || up);
+        if (!name) return null;
+        return this._animatedModel?.animations.find(a => a.name === name) ?? null;
+    }
+
+    /** The current Get Up state's clock, in real seconds; over once the state is left. */
+    private _getUpClock(): GetUpClock {
+        const self = this, token = this._stateToken;
+        const rate = () => Math.max(1e-3, self._speed);
+        const live = () => self._stateToken === token;
+        return {
+            get time() { return live() ? self._currentTime / rate() : 0; },
+            get duration() { return live() ? self._getAnimationDuration() / rate() : 0; },
+            get done() { return !live() || (!self._playing && self._currentTime >= self._getAnimationDuration() - 1e-6); },
+            seek(seconds: number) {
+                if (!live()) return;
+                self._currentTime = clamp(seconds * rate(), 0, self._getAnimationDuration());
+                self._prevEventTime = self._currentTime;
+            },
+            stop() {
+                // Knocked down again: the state waits on its first frame for the body to come to rest once more.
+                if (!live()) return;
+                self._reactionHold = true;
+                self._currentTime = 0;
+                self._prevEventTime = 0;
+                self._playing = true;
+            },
+        };
+    }
+
+    /**
+     * A Ragdoll or Get Up state was entered: tell the character's reactions, now (at the end of checkTriggers, or as
+     * update starts after a forceState), in the phase scripts already call them from. Twice at most: a reaction
+     * event's listener may force another state.
+     */
+    private _flushReactionEdge(): void {
+        if (this._isOverlay || this._reactionEdge === null || this._flushingReactions) return;
+        this._flushingReactions = true;
+        try {
+            for (let pass = 0; pass < 2 && this._reactionEdge !== null; pass++) {
+                const edge = this._reactionEdge;
+                this._reactionEdge = null;
+                const state = this._currentState;
+                const link = this._reactionLink();
+                if (!link) { this._warnNoReactions(state); break; }
+                if (edge === 'ragdoll' && state?.ragdoll) link.graphRagdoll(state.ragdoll.start ?? 'fall');
+                else if (edge === 'getUp' && state?.getUp) link.graphGetUp();
+            }
+        } finally {
+            this._flushingReactions = false;
+        }
+    }
+
+    private _warnNoReactions(state: AnimationState | null): void {
+        if (!state || this._warnedNoReactions || !this._node?.scene) return;
+        if (!(this._node.scene as { physics?: unknown }).physics) return;
+        this._warnedNoReactions = true;
+        Logger.info(
+            `Animation state "${state.name}" is a ${state.ragdoll ? 'Ragdoll' : 'Get Up'} state, but this character has no `
+            + `reactions (they run on the Jolt physics backend, with a skeleton a ragdoll fits): it plays as an ordinary `
+            + `state.`, 'Animation');
+    }
+
+    /**
+     * The pose on screen from the base layer alone (its clip or blend space, mid cross-fade as it is), held as a clip:
+     * what a Ragdoll state with no clip of its own keeps under the body. Never the bind pose: the body is made from
+     * what shows.
+     */
+    private _heldPoseClip(): Animation | null {
+        const skin = this._skin;
+        if (!skin) return null;
+        const samplers: AnimationSampler[] = [];
+        const channels: AnimationChannel[] = [];
+        const t = vec3.create(), r = quat.create(), s = vec3.create();
+        const seen = new Set<number>();
+        const add = (nodeIndex: number) => {
+            if (seen.has(nodeIndex)) return;
+            seen.add(nodeIndex);
+            const local = this._sourceLocal(nodeIndex) ?? skin.nodeTransforms?.get(nodeIndex);
+            if (!local) return;
+            decomposeTRS(local, t, r, s);
+            samplers.push({ input: [0, 1], output: [r[0], r[1], r[2], r[3], r[0], r[1], r[2], r[3]], interpolation: 'LINEAR' } as AnimationSampler);
+            channels.push({ samplerIndex: samplers.length - 1, targetNodeIndex: nodeIndex, targetPath: 'rotation' } as AnimationChannel);
+            samplers.push({ input: [0, 1], output: [t[0], t[1], t[2], t[0], t[1], t[2]], interpolation: 'LINEAR' } as AnimationSampler);
+            channels.push({ samplerIndex: samplers.length - 1, targetNodeIndex: nodeIndex, targetPath: 'translation' } as AnimationChannel);
+        };
+        for (const joint of skin.joints) add(joint.nodeIndex);
+        for (const chain of this._topology().parentChain) for (const nodeIndex of chain ?? []) add(nodeIndex);
+        return channels.length ? { name: 'ragdoll:held', samplers, channels } as Animation : null;
+    }
+
+    /** A Ragdoll or Get Up state entered since the reactions were last told (see _flushReactionEdge). */
+    private _reactionEdge: 'ragdoll' | 'getUp' | null = null;
+    private _flushingReactions = false;
+    private _warnedNoReactions = false;
+    private _warnedGetUpClip: Set<string> | null = null;
+    /** The Get Up state's clip waits on its first frame: the body is not down yet, or its rise was cut short. */
+    private _reactionHold = false;
+    /** Bumped on every state entry: a Get Up clock handed out before is over once it changes. */
+    private _stateToken = 0;
+    /** The layers' weight while the base is in a Ragdoll or Get Up state (0) or not (1), faded over `_reactionMuteFade`. */
+    private _reactionMute = 1;
+    private _reactionMuteFade = 0.2;
+    /** The base clip's root motion is off (a Get Up state's: the reactions place the character). */
+    private _noRootMotion = false;
+    /** Linked triggers: the count each last read; those raised by a count and not taken yet (lowered next frame). */
+    private readonly _counterSeen = new Map<string, number>();
+    private readonly _counterPulse = new Set<string>();
+    private _effects: ReactionEffectsNow | null = null;
+    private _effectsAt = -1;
     /** How much of foot and hand IK is on, as the two switches above fade it (1 on, 0 off). */
     private _footIkReaction = 1;
     private _handIkReaction = 1;
@@ -1615,6 +1897,7 @@ export class Animator {
         blend: boolean,
         blendOverride?: number,
         startPhase?: number,
+        restart = false,
     ): void {
         if (!this._animatedModel) return;
         // A layer coming out of an empty state shows again, as `_playClip` does for a clip.
@@ -1662,15 +1945,17 @@ export class Animator {
         this._fieldDef = field;
         this._fieldInputs = inputs ?? null;
         this._fieldEntries = null;    // rebuilt by the refresh below
-        if (!sameField) {
+        // A one-shot entered again (a second hit's flinch) starts over, its probe snapped to where it reads now; one
+        // that loops carries its phase, so a ping-ponging state does not stutter.
+        if (!sameField || restart) {
             this._fieldPhase = 0;
             this._fieldWeightState.clear();
             this._fieldSampleMeta.clear();
             this._fieldWeightsSeeded = false;
-            this._warnedMissingClips.clear();
             this._fieldDominant = null;
             this._fieldProbeSeeded = false;
         }
+        if (!sameField) this._warnedMissingClips.clear();
         // A sync group's carried phase, set before the previous phase is: the markers it skips do not fire.
         if (startPhase !== undefined && Number.isFinite(startPhase)) this._fieldPhase = ((startPhase % 1) + 1) % 1;
         this._prevFieldPhase = this._fieldPhase;
@@ -2240,6 +2525,8 @@ export class Animator {
             this._updateRagdollMatrices();
             return;
         }
+        // A Ragdoll or Get Up state forced since checkTriggers (forceState, resetStateMachine).
+        if (this._reactionEdge !== null) this._flushReactionEdge();
         this._updatePosed(deltaTime);
         // A powered ragdoll: the animation above posed the target; the bodies carry the skin from it.
         if (this._physicsMapping) this._applyPhysicsMapping();
@@ -2256,9 +2543,16 @@ export class Animator {
                 this._lodCountdown--;
                 if (this._lodCountdown > 0) this._skipPose = true;
                 else this._lodCountdown = this._lodStride;
-            } else if (this._physicsMapping?.loose) {
+            } else if (this._physicsMapping?.loose && deltaTime > 0) {
+                // Only on a frame that moves time: an update(0) is a measurement (a get-up lining its clip up with
+                // the body), and must pose.
                 this._looseSkip = !this._looseSkip;
                 if (this._looseSkip) this._skipPose = true;
+            }
+            const muted = this.reactionKind ? 0 : 1;
+            if (this._reactionMute !== muted) {
+                const step = this._reactionMuteFade > 1e-4 ? Math.max(0, deltaTime) / this._reactionMuteFade : 1;
+                this._reactionMute = muted < this._reactionMute ? Math.max(muted, this._reactionMute - step) : Math.min(muted, this._reactionMute + step);
             }
         }
         this._ikDelta += Math.max(0, deltaTime);
@@ -2387,6 +2681,8 @@ export class Animator {
         }
 
         this._deltaTime = deltaTime * this._speed;
+        // A Get Up state waiting for the body to come to rest: on its first frame.
+        if (this._reactionHold) this._deltaTime = 0;
         this._frameDelta = deltaTime;
 
         // Update blend time if blending. In playback time (a state played faster blends in faster), except for a
@@ -2537,7 +2833,7 @@ export class Animator {
         // Only the base layer moves the character: two layers both driving it would double the motion.
         // An action may ask for its travel to be EXTRACTED (pinned and handed to a script) -- even on a clip
         // not flagged root-motion, which is how an in-place import would otherwise carry its travel.
-        if (this._isOverlay ? !this._extractRoot : !animation.rootMotion) return;
+        if (this._isOverlay ? !this._extractRoot : (!animation.rootMotion || this._noRootMotion)) return;
 
         const rootName = this._findRootMotionBone(animation);
         const bone = rootName ? this._bones.get(rootName) : null;
@@ -3167,7 +3463,8 @@ export class Animator {
         if (this._isOverlay || !this._node) return;
         const sm = this._stateMachine;
         const state = sm && this._currentStateName ? this._stateByName(sm, this._currentStateName) : null;
-        const hold = !!state?.holdMovement;
+        // A Ragdoll or Get Up state holds it too: the body (the reactions) has it.
+        const hold = !!state?.holdMovement || !!state?.ragdoll || !!state?.getUp;
         let n: Node | null = this._node.parent;
         while (n && typeof (n as { animationHold?: unknown }).animationHold !== 'boolean') n = n.parent;
         if (n) (n as unknown as { animationHold: boolean }).animationHold = hold;
@@ -3196,7 +3493,9 @@ export class Animator {
             if (typeof v === 'number') return clamp(v, 0, 1);
             if (typeof v === 'boolean') return v ? 1 : 0;
         }
-        return typeof state.ikWeight === 'number' ? clamp(state.ikWeight, 0, 1) : 1;
+        // Feet are not planted on a body lying down or rising, unless the state says otherwise.
+        const kindDefault = !this._isOverlay && (state.ragdoll || state.getUp) ? 0 : 1;
+        return typeof state.ikWeight === 'number' ? clamp(state.ikWeight, 0, 1) : kindDefault;
     }
 
     // The rig's usable chains, validated once per rig object and warned about once. A rig is replaced
@@ -4045,6 +4344,7 @@ export class Animator {
             o.weight = clamp(layer.weight ?? 1, 0, 1);
             o.weightParam = layer.weightParam;
             o.handIk = layer.handIk ?? null;
+            o.overReactions = !!layer.overReactions;
             const child = o.animator;
             child._stateMachine = { parameters: [], states: layer.states, transitions: layer.transitions, groups: layer.groups, forks: layer.forks, events: sm.events };
             child._rebindCurrentState();
@@ -4106,6 +4406,9 @@ export class Animator {
         for (const p of this._stateMachine.parameters) {
             if (p.type === 'trigger') this._paramValues.set(p.name, false);
         }
+        // Linked triggers learn their counts again: what was counted before the reset fires nothing.
+        this._counterSeen.clear();
+        this._counterPulse.clear();
         const before = this._activeTrigger;
         this._activeTrigger = null;
         this._noteTriggerChange(before);
@@ -4123,7 +4426,7 @@ export class Animator {
      * Fire a momentary trigger, by name; it is consumed when the state or transition it starts fires. A
      * project's scripts are checked against the triggers its animators declare (see TriggerName).
      */
-    public setTrigger(name: TriggerName): void { this._paramValues.set(name, true); }
+    public setTrigger(name: TriggerName): void { this._paramValues.set(name, true); this._counterPulse.delete(name); }
     public resetTrigger(name: TriggerName): void { this._paramValues.set(name, false); }
     public getParam(name: string): number | boolean | undefined { return this._paramValues.get(name); }
 
@@ -4255,16 +4558,30 @@ export class Animator {
             this._extractRoot = false;
         }
         const leftState = this._currentStateName;
+        const leftKind = this._isOverlay ? null : reactionKindOf(this._currentState);
         this._noteStateChange(leftState, name);
         this._currentStateName = name;
         if (leftState !== null) this._postAnimationEvent('StateExit', { state: leftState, from: leftState, to: name, layer: this._overlayName });
         this._postAnimationEvent('StateEnter', { state: name, from: leftState, to: name, layer: this._overlayName });
         this._prevEventTime = 0;
         this._stateTime = 0;
+        this._stateToken++;
+        (this._overlayOwner ?? this)._effects = null;
+
+        if (!this._isOverlay) {
+            this._reactionHold = false;
+            this._noRootMotion = false;
+            const kind = reactionKindOf(state);
+            if (kind) this._reactionEdge = kind;
+            // The layers fade out over the transition into one, and back over the one out.
+            if (kind || leftKind) this._reactionMuteFade = Math.max(0, blendOverride ?? this._blendTime);
+            if (kind === 'ragdoll') { this._enterRagdollState(state!, blendOverride); return; }
+            if (kind === 'getUp') { this._enterGetUpState(state!, blendOverride); return; }
+        }
 
         // A field state blends several clips instead of playing one; _startField arms the cross-fade itself.
         if (state?.field) {
-            this._startField(state.field, state.fieldInputs, state.loop, true, blendOverride, carried ?? undefined);
+            this._startField(state.field, state.fieldInputs, state.loop, true, blendOverride, carried ?? undefined, !state.loop && carried === null);
             this._loopLimit = Math.max(0, Math.floor(state.loopCount ?? 0));
             this._loopsPlayed = 0;
             this._speed = state.speed ?? 1.0;
@@ -4344,6 +4661,56 @@ export class Animator {
             this._fps = stateFps(state);
             this._holdCurrentFrame();
         }
+    }
+
+    /** Into a Ragdoll state: its clip, or the pose on screen held (see AnimationState.ragdoll). */
+    private _enterRagdollState(state: AnimationState, blendOverride: number | undefined): void {
+        // The body moves the character now: no clip's root motion does.
+        this._noRootMotion = true;
+        const clip = state.clipName ? this._animatedModel?.animations.find(a => a.name === state.clipName) : undefined;
+        if (clip) {
+            this.playAnimationByName(state.clipName, state.loop, true);
+            if (blendOverride !== undefined) this._activeBlendTime = Math.max(0, blendOverride);
+            this._loopLimit = Math.max(0, Math.floor(state.loopCount ?? 0));
+            this._loopsPlayed = 0;
+            this._speed = state.speed ?? 1.0;
+            this._applyStateSpeed(state);
+            return;
+        }
+        // Built BEFORE the clip changes (_playClip rebuilds the bones it reads), and nothing is written to the bone
+        // matrices until the next pose: the body is made from what is on screen.
+        const held = this._heldPoseClip();
+        if (held) this._playClip(held, true, false);
+        this._speed = 1;
+    }
+
+    /**
+     * Into a Get Up state: the clip for the side the body lies on, from its first frame with no cross-fade (the skin
+     * blends from the body), no root motion; waiting on that frame while the body is not down yet. With no body to
+     * rise from (no reactions, a body already up), an ordinary clip state.
+     */
+    private _enterGetUpState(state: AnimationState, blendOverride: number | undefined): void {
+        const link = this._reactionLink();
+        const clip = this._getUpClip(state, link?.faceUp ?? false, link?.getUpClips);
+        if (!clip) {
+            this._warnedGetUpClip ??= new Set();
+            if (!this._warnedGetUpClip.has(state.name) && !this._clipsPending()) {
+                this._warnedGetUpClip.add(state.name);
+                Logger.warn(`Get Up state "${state.name}" has no clip to play: pick its face-up and face-down clips, or the rig's in its Reactions tab.`, 'Animation');
+            }
+            const held = this._heldPoseClip();
+            if (held) this._playClip(held, true, false);
+            return;
+        }
+        const fromBody = !!link?.ragdolled;
+        this._noRootMotion = true;
+        this._playClip(clip, false, !fromBody);
+        if (!fromBody && blendOverride !== undefined) this._activeBlendTime = Math.max(0, blendOverride);
+        this._loopLimit = 0;
+        this._loopsPlayed = 0;
+        this._speed = state.speed ?? 1.0;
+        this._applyStateSpeed(state);
+        this._reactionHold = fromBody;
     }
 
     private _warnMissingLayerClip(state: AnimationState): void {
@@ -4426,10 +4793,25 @@ export class Animator {
     private _refreshVariableParams(): void {
         const sm = this._stateMachine;
         if (!sm || !this._node) return;
+        // The character's reactions, looked up once a frame and only if a parameter reads them.
+        let link: AnimatorReactionLink | null | undefined;
+        const reactions = () => link === undefined ? (link = this._reactionLink()) : link;
         for (const p of sm.parameters) {
+            if (p.type === 'trigger') {
+                if (p.variable) this._refreshLinkedTrigger(p, reactions);
+                continue;
+            }
             if (p.type !== 'variable' || !p.variable) continue;
             const pinned = this._paramOverrides.get(p.name);
             if (pinned !== undefined) { this._paramValues.set(p.name, pinned); continue; }
+            // A reaction value: the character's own reactions, whatever node the parameter names.
+            const reactionValue = p.variable.source === 'builtin' ? NODE_BUILTINS[p.variable.varName]?.reactions : undefined;
+            if (reactionValue) {
+                const r = reactions();
+                const v = r ? reactionValue(r) : (NODE_BUILTINS[p.variable.varName].none ?? p.default);
+                this._paramValues.set(p.name, p.variable.varType === 'boolean' ? !!v : Number(v));
+                continue;
+            }
             let src = this._resolveVarNode(p.variable.nodeRef);
             let val: number | boolean = p.default;
 
@@ -4476,6 +4858,36 @@ export class Animator {
         }
     }
 
+    /**
+     * A trigger linked to a counter (AnimationParameter.variable): raised once each time the count rises (the first
+     * read only learns it); a raise nothing took is lowered at the next frame, so a hit never flinches a body later.
+     */
+    private _refreshLinkedTrigger(p: AnimationParameter, reactions: () => AnimatorReactionLink | null): void {
+        if (this._counterPulse.delete(p.name) && this._paramValues.get(p.name) === true) this._paramValues.set(p.name, false);
+        const b = p.variable!;
+        let count: number | null = null;
+        const builtin = b.source === 'builtin' ? NODE_BUILTINS[b.varName] : undefined;
+        if (builtin?.reactions) {
+            const r = reactions();
+            if (r) count = Number(builtin.reactions(r));
+        } else {
+            const src = this._resolveVarNode(b.nodeRef);
+            if (src && builtin) count = Number(builtin.read(src));
+            else if (src && canAccessVariable(src, this._node!, b.varName)) {
+                let v: unknown = src.getVariable(b.varName);
+                if (v === undefined && Object.prototype.hasOwnProperty.call(src, b.varName)) v = (src as unknown as Record<string, unknown>)[b.varName];
+                if (v !== undefined) count = Number(v);
+            }
+        }
+        if (count === null || !Number.isFinite(count)) return;
+        const seen = this._counterSeen.get(p.name);
+        this._counterSeen.set(p.name, count);
+        if (seen !== undefined && count > seen) {
+            this._paramValues.set(p.name, true);
+            this._counterPulse.add(p.name);
+        }
+    }
+
     /** Evaluate the active state's outgoing transitions and switch state when one fires. */
     private _evaluateStateMachine(): void {
         const sm = this._stateMachine;
@@ -4493,11 +4905,22 @@ export class Animator {
         // entered by directly, then the current state's own way out — so a hit or a death interrupts
         // whatever the state was about to do.
         const duration = this._getAnimationDuration();
-        for (const t of sm.transitions) if (t.from === '*' && this._tryTransition(t, duration)) return;
+        // In a Ragdoll or Get Up state only another such state is entered from anywhere: whatever else would have
+        // been (a car's EnterCar) waits for the body to be up, its trigger taken so it does not fire later.
+        const held = this._isOverlay ? false : reactionKindOf(this._currentState) !== null;
+        for (const t of sm.transitions) {
+            if (t.from !== '*') continue;
+            if (held && !this._entersReactionState(t.to)) { if (this._transitionMet(t)) this._consumeLeg(t); continue; }
+            if (this._tryTransition(t, duration)) return;
+        }
         for (const s of sm.states) {
             for (const entry of s.triggers ?? []) {
                 if (!entry.trigger || this._paramValues.get(entry.trigger) !== true) continue;
                 if (s.name === this._currentStateName && entry.restart === false) continue;
+                if (held && !reactionKindOf(s)) {
+                    this._consumeLeg({ from: '*', to: s.name, conditions: [], condition: { op: 'and', children: [{ param: entry.trigger, op: 'trigger' }] } });
+                    continue;
+                }
                 this._takeTransition({ from: '*', to: s.name, conditions: [], condition: { op: 'and', children: [{ param: entry.trigger, op: 'trigger' }] } },
                     entry.trigger, entry.blendTime);
                 return;
@@ -4507,6 +4930,14 @@ export class Animator {
         // Then the group's: a way out written once for every state in it.
         const group = this._groupOf(this._currentStateName);
         if (group) for (const t of sm.transitions) if (t.from === group.name && this._tryTransition(t, duration)) return;
+    }
+
+    /** Whether a transition's target (through a group's entry) is a Ragdoll or Get Up state. */
+    private _entersReactionState(to: string): boolean {
+        const sm = this._stateMachine;
+        if (!sm) return false;
+        const name = this._resolveTarget(to);
+        return reactionKindOf(this._stateByName(sm, name)) !== null;
     }
 
     /** The group a state belongs to on this machine, if any. */
@@ -4781,7 +5212,7 @@ export class Animator {
                 weight: clamp(layer.weight ?? 1, 0, 1), weightParam: layer.weightParam,
                 order: i + 1,
                 presence: present, presenceTarget: present, fadeSeconds: this._blendTime,
-                action: null, entries: null, steadyNow: 0, handIk: layer.handIk ?? null,
+                action: null, entries: null, steadyNow: 0, handIk: layer.handIk ?? null, overReactions: !!layer.overReactions,
             });
         });
         for (const slot of sm.slots ?? []) this._addSlot(slot, sm.layers?.length ?? 0);
@@ -4808,7 +5239,7 @@ export class Animator {
             maskSpec: def.mask ?? null, mask: null,
             weight: 1, order: after + 0.5,
             presence: 0, presenceTarget: 0, fadeSeconds: 0.15,
-            action: null, entries: null, steadyNow: 0, handIk: null,
+            action: null, entries: null, steadyNow: 0, handIk: null, overReactions: true,
         };
         this._overlays.push(overlay);
         return overlay;
@@ -4911,12 +5342,14 @@ export class Animator {
 
     // An overlay's weight this frame: its parameter's when it names one, else its own.
     private _overlayWeight(o: Overlay): number {
+        // Muted under a Ragdoll or Get Up state, unless the layer plays over them (slots never are).
+        const mute = o.kind === 'layer' && !o.overReactions ? this._reactionMute : 1;
         if (o.weightParam) {
             const v = this._paramValues.get(o.weightParam);
-            if (typeof v === 'number') return clamp(v, 0, 1);
-            if (typeof v === 'boolean') return v ? 1 : 0;
+            if (typeof v === 'number') return clamp(v, 0, 1) * mute;
+            if (typeof v === 'boolean') return (v ? 1 : 0) * mute;
         }
-        return o.weight;
+        return o.weight * mute;
     }
 
     // Blend every overlay onto a bone's base local, in order.
@@ -5635,6 +6068,8 @@ export class Animator {
             }
             for (const t of fired) consumeTriggers(this._conditionCtx, t.condition, t.conditions);
             this._publishMovementHold();
+            // A Ragdoll or Get Up state entered: the reactions take the body now, as a script's call would.
+            this._flushReactionEdge();
             return;
         }
 

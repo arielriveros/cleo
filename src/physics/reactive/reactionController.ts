@@ -8,14 +8,14 @@ import type { PhysicsBody } from '../physicsBody';
 import { LAYER } from '../collisionLayers';
 import type { Ragdoll } from '../ragdoll';
 import { resolveEvent } from '../../core/events/hub';
-import { closestSegmentSegment, quatConjugateTuple, quatMultiplyTuple, quatRotateTuple, quatToRotationVector, rotationVectorToQuat, yawFromDirection } from '../../core/math';
+import { clamp, closestSegmentSegment, planarSignedAngle, quatConjugateTuple, quatMultiplyTuple, quatRotateTuple, quatToRotationVector, rotationVectorToQuat, yawFromDirection } from '../../core/math';
 import { cachedRagdollLayout, ragdollPartPoseInto, skinRagdollProfile, type RagdollLayout } from '../ragdollProfile';
 import { physicsStats } from '../physicsStats';
 import type { mat4 } from 'gl-matrix';
 import { BodySensors, type ContactList, type Raycaster, type SensorDetail } from './bodySensors';
 import { ReactionBody } from './reactionBody';
 import { BAILS, BEHAVIOURS, STRUCK, type ReactionBehaviour, type ReactionContext, type ReactionState, type ReactionWound } from './behaviours';
-import type { AnimationActionHandle } from '../../animation/animator';
+import { NO_REACTION_EFFECTS, type AnimationRagdollStart, type AnimatorReactionLink, type GetUpClock, type ReactionEffectsNow } from '../../animation/reactionLink';
 import { pickReactionSet, parseReactionSets, type ReactionSet } from './reactionSet';
 
 export type { ReactionState, ReactionWound } from './behaviours';
@@ -118,8 +118,13 @@ const MAX_KNOCK_SPEEDS = 2;
 const KNOCK_UNLOCKS_FEET = 0.15;
 /** A part of the body that is the animation's while the character stands (kinematic on it). */
 const LOWER = (region: string) => region === 'pelvis' || region === 'legs' || region === 'feet';
+/** What a body dropped out cold (a graph's limp Ragdoll state) does not do: no hand out, no head tucked, no reach. */
+const LIMP_OFF = new Set(['hitReact', 'catchFall', 'protectHead', 'landing', 'airborne', 'tumble', 'writhe']);
+const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) as unknown as mat4;
+/** The skeleton at rest, per skin: each part's centre, long axis and half-length, and how high the body reaches. */
+const REST_BODIES = new WeakMap<object, { parts: Map<string, { c: number[]; y: number[]; half: number }>; min: number; max: number } | null>();
 
-export class ReactionController {
+export class ReactionController implements AnimatorReactionLink {
     public readonly node: ModelNode;
     private readonly _physics: PhysicsSystem;
     public set: ReactionSet;
@@ -137,7 +142,14 @@ export class ReactionController {
     private readonly _running = new Map<ReactionBehaviour, number>();
     private _prevAnim: number[][] = [];
     private _clip: string | null = null;
-    private _getUpAction: AnimationActionHandle | null = null;
+    /** The get-up's clip: a Get Up state's on the base layer (Animator.playGetUp), or the Reaction slot's action. */
+    private _getUpAction: GetUpClock | null = null;
+    /** Asked to get up (getUp()) while the graph holds the body in a Ragdoll state: CanGetUp says so. */
+    private _riseAsked = false;
+    /** Out cold (a graph's limp Ragdoll state): no protective behaviours, no firm start. */
+    private _limp = false;
+    /** The last hit, for the graph's hit parameters (AnimatorReactionLink). */
+    private readonly _lastHit = { count: 0, angle: 0, height: 0.5, strength: 0 };
     /** Reaction-clock seconds the current reaction began at (it left plain animation). */
     private _reactionStart = 0;
     /** Recovering from a get-up: the skin is the animation's already (see _base). */
@@ -202,7 +214,24 @@ export class ReactionController {
     public get hasControl(): boolean { return !this.isDown; }
     /** On its feet with a reaction running: the legs on the animation, the upper body following it. */
     public get standing(): boolean { return this._standingState(); }
-    public get faceUp(): boolean { return this.sensors.faceUp; }
+    /** Lying on its back: its hips and chest facing up together (the sensors' guess before there is a body). */
+    public get faceUp(): boolean { return this._lyingFaceUp(); }
+    /** Off its feet and the physics': falling, tumbling, lying, dead (not getting up). */
+    public get ragdolled(): boolean { const s = this._state; return s === 'falling' || s === 'tumble' || s === 'down' || s === 'dead'; }
+    /** Lying, alive and ready to rise, or asked to (getUp() while the graph holds it). */
+    public get canGetUp(): boolean { return this._state === 'down' && this._alive && (this._riseAsked || this._readyToRise()); }
+    /** Shoved back on its feet, walking it out. */
+    public get staggering(): boolean { return this._state === 'stagger'; }
+    /** Hits taken so far (each a shot, a blow, a car's), whether the body reacted or not. */
+    public get hitCount(): number { return this._lastHit.count; }
+    /** The last hit's side: where it came from against the way the character faces, degrees (front 0, its left +90). */
+    public get hitAngle(): number { return this._lastHit.angle; }
+    /** Where up the body the last hit landed, 0 (feet) to 1 (top of the head), on the skeleton at rest. */
+    public get hitHeight(): number { return this._lastHit.height; }
+    /** How hard the last hit was, 0..1 against the fall threshold. */
+    public get hitStrength(): number { return this._lastHit.strength; }
+    /** The rig's get-up clips (its reaction set's). */
+    public get getUpClips(): { faceUp?: string; faceDown?: string } { return this.set.behaviours.getUp.clips ?? {}; }
     public get alive(): boolean { return this._alive; }
     public get health(): number { return this._health; }
     public set health(v: number) { this._health = Math.max(0, Math.min(1, v)); }
@@ -289,21 +318,31 @@ export class ReactionController {
     public hit(h: ReactionHit = {}): void {
         if (this.config.enabled === false) return;
         const T = this.set.thresholds;
+        // How the graph's states have it take hits now (AnimationState.reactions): harder or softer, flinch only, none.
+        const fx = this._effectsNow();
         const dir = h.direction ? vec3.normalize(vec3.create(), [h.direction[0], h.direction[1], h.direction[2]]) : vec3.fromValues(0, 0, -1);
-        const impulse = Math.max(0, h.impulse ?? 20);
+        const impulse = Math.max(0, h.impulse ?? 20) * fx.force;
         if (h.damage) this._health = Math.max(0, this._health - h.damage);
         const dying = this._alive && this._health <= 0;
         if (impulse < T.minHitImpulse && !dying) return;
+        this._noteHit(dir, h.point ?? null, impulse, h.part);
+        if (fx.react === 'none' && !dying) {
+            // The hit counts (its event, the graph's hit parameters); the body does not take it.
+            const point = h.point ? [h.point[0], h.point[1], h.point[2]] as [number, number, number] : [0, 0, 0] as [number, number, number];
+            this._emit('Hit', { part: -1, partName: this._partNameOf(h.part), impulse, point });
+            return;
+        }
+        const full = fx.react === 'full';
         const recent = this._addRecent(impulse);
         const onFeet = this._onFeetState();
-        const falls = dying || impulse >= T.fallImpulse || (onFeet && recent >= T.fallImpulse);
+        const falls = dying || (full && (impulse >= T.fallImpulse || (onFeet && recent >= T.fallImpulse)));
         const stepping = this.set.behaviours.stepBalance.enabled;
         // A hit it would only flinch or stumble from asks for a body within the budget (PhysicsSystem.maxPoweredRagdolls);
         // refused, the hit still counts (its Hit event), and a stumble still shoves the capsule.
         const r = this._ensure(falls ? 'fall' : 'flinch');
         // Rocked back by a hard hit, a burst adding up, or a heavy round in the trunk: a stagger, kept on its feet.
         const region = this._regionOf(h.part, h.point);
-        const staggers = onFeet && stepping && !falls && (impulse >= T.staggerImpulse || recent >= T.staggerImpulse
+        const staggers = full && onFeet && stepping && !falls && (impulse >= T.staggerImpulse || recent >= T.staggerImpulse
             || ((region === 'pelvis' || region === 'spine') && T.stumbleImpulse > 0 && impulse >= T.stumbleImpulse));
         if (!r) {
             if (!this.ragdoll && this.node.animator && this._skin) {
@@ -313,13 +352,14 @@ export class ReactionController {
             if (staggers) this._knockBack(dir, impulse);
             return;
         }
-        // Off its feet first, so the whole hit lands on a body that has every part.
-        if (falls || this._state === 'getUp') this._go('falling');
+        // Off its feet first, so the whole hit lands on a body that has every part (getting up, a hit knocks it down
+        // again, unless its state takes flinches only).
+        if (falls || (this._state === 'getUp' && full)) this._go('falling');
         const kept = onFeet && this._state !== 'falling';
         let part = this._resolvePart(h.part, h.point);
         const p = r.parts[part];
         const point = h.point ? [h.point[0], h.point[1], h.point[2]] : [p.body.position.x, p.body.position.y, p.body.position.z];
-        if (kept && this._physicsCanStand()) {
+        if ((kept && this._physicsCanStand()) || (!full && this._state === 'getUp')) {
             // On its feet the struck part takes a kick, no more: what is left of the hit is the shove's. A part that is
             // the animation's (a leg, the hips) passes it to the trunk.
             if (LOWER(p.region)) part = this._body!.chest;
@@ -389,7 +429,8 @@ export class ReactionController {
         const T = this.set.thresholds, P = this.set.behaviours.stepBalance.params;
         const flat = Math.hypot(dir[0], dir[2]);
         if (flat < 1e-3) return;
-        const speed = T.stumbleSpeed * Math.min(2.5, impulse / Math.max(1, T.stumbleImpulse));
+        const speed = T.stumbleSpeed * Math.min(2.5, impulse / Math.max(1, T.stumbleImpulse)) * this._effectsNow().shove;
+        if (!(speed > 0)) return;
         this._knock([dir[0] / flat * speed, 0, dir[2] / flat * speed], P.knockTime);
     }
 
@@ -413,6 +454,19 @@ export class ReactionController {
      */
     public impact(opts: { velocity: ArrayLike<number>; point?: ArrayLike<number> | null }): void {
         if (this.config.enabled === false) return;
+        const fx = this._effectsNow();
+        if (fx.react !== 'full') {
+            // Its state takes no fall: counted, and (flinch only) a sway on its feet.
+            const v = opts.velocity, speed = Math.hypot(v[0], v[1], v[2]);
+            if (!(speed > 1e-3)) return;
+            const dir = [v[0] / speed, v[1] / speed, v[2] / speed];
+            const impulse = speed * 70 * fx.force;
+            this._noteHit(dir, opts.point ?? null, impulse, undefined);
+            if (fx.react === 'flinch') { const k = Math.min(1, MAX_KICK_SPEED / speed); this.push([v[0] * k, 0, v[2] * k]); }
+            const at = opts.point ? [opts.point[0], opts.point[1], opts.point[2]] as [number, number, number] : [0, 0, 0] as [number, number, number];
+            this._emit('Hit', { part: -1, partName: '', impulse, point: at });
+            return;
+        }
         const r = this._ensure();
         if (!r) return;
         const P = this.set.behaviours.struck.params;
@@ -432,6 +486,7 @@ export class ReactionController {
         const q = r.parts[part];
         const at = point ? [point[0], point[1], point[2]] : [q.body.position.x, q.body.position.y, q.body.position.z];
         const impulse = speed * this._massScale(r) * 70;
+        this._noteHit(dir, at, impulse, part);
         this._wound(part, at, dir, impulse);
         this._emit('Hit', { part, partName: q.name, impulse, point: at as [number, number, number] });
         if (this._body) STRUCK.set(this._body, this._time);
@@ -445,6 +500,11 @@ export class ReactionController {
      */
     public push(velocity: ArrayLike<number>, part?: number | string): void {
         if (this.config.enabled === false) return;
+        const fx = this._effectsNow();
+        if (fx.react === 'none') return;
+        const full = fx.react === 'full';
+        // Its state's Shove: carried this many times as far.
+        if (fx.shove !== 1) velocity = [velocity[0] * fx.shove, velocity[1] * fx.shove, velocity[2] * fx.shove];
         const r = this._ensure();
         if (!r) return;
         const T = this.set.thresholds;
@@ -454,16 +514,19 @@ export class ReactionController {
         for (const p of parts) impulse += speed * p.mass;
         const onFeet = this._onFeetState();
         const stepping = this.set.behaviours.stepBalance.enabled;
-        if (impulse >= T.fallImpulse || !onFeet || !stepping) {
-            if (impulse >= T.fallImpulse || this._state === 'getUp' && impulse >= T.minHitImpulse) this._go('falling');
+        const fallSized = full && impulse >= T.fallImpulse;
+        if (fallSized || !onFeet || !stepping) {
+            if (fallSized || (full && this._state === 'getUp' && impulse >= T.minHitImpulse)) this._go('falling');
             for (const p of parts) p.body.applyImpulse([velocity[0] * p.mass, velocity[1] * p.mass, velocity[2] * p.mass]);
             if (onFeet && !this._standingState() && this._state !== 'falling') this._go('hitReact');
             return;
         }
         if (!this._standingState()) this._go('hitReact');
-        // The upper body sways (no part changed by more than a kick); the capsule carries the rest.
+        // The upper body sways (no part changed by more than a kick); the capsule carries the rest (flinching only,
+        // it is not shoved).
         const v = Math.min(speed, MAX_KICK_SPEED), k = speed > 0 ? v / speed : 0;
         for (const p of parts) if (!this._body?.kinematic[p.index]) p.body.applyImpulse([velocity[0] * k * p.mass, velocity[1] * k * p.mass, velocity[2] * k * p.mass]);
+        if (!full) return;
         this._knock([velocity[0], 0, velocity[2]], this.set.behaviours.stepBalance.params.knockTime);
         if (impulse >= T.staggerImpulse) this._go('stagger');
     }
@@ -476,6 +539,7 @@ export class ReactionController {
 
     /** Trip over something: the feet stop, the body goes on, it falls forward. */
     public trip(): void {
+        if (this.config.enabled === false) return;
         const r = this._ensure();
         if (!r) return;
         const s = this.sensors, fwd = this._forward();
@@ -503,9 +567,131 @@ export class ReactionController {
         this._go('dead');
     }
 
-    /** Get up now, if it is down (and alive). */
+    /**
+     * Get up now, if it is down (and alive). While the animator's graph holds the body in a Ragdoll state, the graph
+     * decides: this makes its CanGetUp true, and its way into a Get Up state rises.
+     */
     public getUp(): void {
-        if (this._state === 'down' && this._alive) this._go('getUp');
+        if (this._state !== 'down' || !this._alive) return;
+        if (this._graphKind() === 'ragdoll') { this._riseAsked = true; return; }
+        this._go('getUp');
+    }
+
+    // ---- the animator's graph (AnimatorReactionLink) ----
+
+    /**
+     * The graph entered a Ragdoll state (AnimationState.ragdoll): on its feet the body falls as `start` says; off them
+     * it is only held (it never gets up by itself while the graph is there). A graph's own state, so the state's
+     * reaction effects do not stop it.
+     */
+    public graphRagdoll(start: AnimationRagdollStart): void {
+        if (this.config.enabled === false) return;
+        if (this._offFeet() && this._state !== 'getUp') {
+            if (start === 'limp') this._limp = true;
+            return;
+        }
+        this._limp = start === 'limp';
+        if (start === 'trip') this.trip();
+        else this.fall();
+        // Out cold: no firm start (see _base), the protective behaviours off (see _fade).
+        if (this._limp) this._fallStart = -Infinity;
+    }
+
+    /** The graph entered a Get Up state: lying and ready (or asked to), the body rises on it now; else when it is. */
+    public graphGetUp(): void {
+        if (this._state === 'down' && this._alive && (this._riseAsked || this._readyToRise())) this._go('getUp');
+    }
+
+    /** The reaction state the animator's graph is in (Animator.reactionKind), read live. */
+    private _graphKind(): 'ragdoll' | 'getUp' | null {
+        return (this.node.animator as { reactionKind?: 'ragdoll' | 'getUp' | null } | null | undefined)?.reactionKind ?? null;
+    }
+
+    /** The graph's reaction effects now (Animator.reactionEffects). */
+    private _effectsNow(): Readonly<ReactionEffectsNow> {
+        return (this.node.animator as { reactionEffects?: Readonly<ReactionEffectsNow> } | null | undefined)?.reactionEffects ?? NO_REACTION_EFFECTS;
+    }
+
+    /** Lying still long enough to rise on its own (the set's Get up delay), alive and not out cold. */
+    private _readyToRise(): boolean {
+        const B = this.set.behaviours, T = this.set.thresholds;
+        const writhing = B.writhe.enabled && this._wounds.length > 0 && this._stateTime < B.writhe.params.duration;
+        return B.getUp.enabled && this._alive && this._time >= this._unconsciousUntil && !writhing
+            && this.sensors.stillFor > T.settleTime + B.getUp.params.delay;
+    }
+
+    /** Lying on its back: the hips and the chest facing up together (one alone cannot tell a body on its side). */
+    private _lyingFaceUp(): boolean {
+        const body = this._body;
+        if (!body) return this.sensors.faceUp;
+        const fwdY = (i: number) => quatRotateTuple(body.simRotation(i), [0, 0, 1])[1];
+        return fwdY(body.pelvis) + (body.chest >= 0 ? fwdY(body.chest) : 0) > 0;
+    }
+
+    /** A hit, for the graph's hit parameters: which side it came from, how high it landed, how hard. */
+    private _noteHit(dir: ArrayLike<number>, point: ArrayLike<number> | null, impulse: number, part: number | string | undefined): void {
+        const h = this._lastHit, f = this._forward();
+        h.angle = planarSignedAngle(f, [-dir[0], -dir[1], -dir[2]], [0, 1, 0]);
+        h.strength = clamp(impulse / Math.max(1, this.set.thresholds.fallImpulse), 0, 1);
+        h.height = this._hitHeight(part, point);
+        h.count++;
+    }
+
+    /**
+     * How high up the body a hit at `point` is, 0 (the feet) to 1 (the top of the head): carried along its part onto
+     * the skeleton at rest, so a crouch or a fall does not change what a head shot is.
+     */
+    private _hitHeight(part: number | string | undefined, point: ArrayLike<number> | null): number {
+        const rest = this._restBody();
+        if (!rest || (!point && part === undefined)) return 0.5;
+        const segs = this._segments();
+        if (!segs.length) return 0.5;
+        let name = '';
+        const r = this.ragdoll && !this.ragdoll.destroyed ? this.ragdoll : null;
+        if (typeof part === 'number') name = r?.parts[part]?.name ?? this._partNameOf(part);
+        else if (typeof part === 'string') { const i = r ? r.findPart(part) : -1; name = i >= 0 ? r!.parts[i].name : part; }
+        let s = segs.find(x => x.name === name);
+        if (!s && point) {
+            let best = Infinity;
+            for (const x of segs) {
+                const k = Math.max(0, x.half - x.r);
+                const hit = closestSegmentSegment([point[0], point[1], point[2]], [point[0], point[1], point[2]],
+                    [x.c[0] - x.y[0] * k, x.c[1] - x.y[1] * k, x.c[2] - x.y[2] * k], [x.c[0] + x.y[0] * k, x.c[1] + x.y[1] * k, x.c[2] + x.y[2] * k]);
+                const d = Math.sqrt(hit.dist2) - x.r;
+                if (d < best) { best = d; s = x; }
+            }
+        }
+        const rp = s ? rest.parts.get(s.name) : undefined;
+        if (!s || !rp) return 0.5;
+        // Along the part (its middle for a hit that names the part and not the point).
+        const along = point ? clamp(((point[0] - s.c[0]) * s.y[0] + (point[1] - s.c[1]) * s.y[1] + (point[2] - s.c[2]) * s.y[2]) / (s.half || 1), -1, 1) : 0;
+        const y = rp.c[1] + rp.y[1] * along * rp.half;
+        return clamp((y - rest.min) / Math.max(1e-6, rest.max - rest.min), 0, 1);
+    }
+
+    /** The skeleton at rest, as ragdoll parts (cached per skin): what a hit's height is measured on. */
+    private _restBody(): { parts: Map<string, { c: number[]; y: number[]; half: number }>; min: number; max: number } | null {
+        const skin = this._skin;
+        if (!skin) return null;
+        if (REST_BODIES.has(skin)) return REST_BODIES.get(skin)!;
+        const layout = this._layout();
+        let out: { parts: Map<string, { c: number[]; y: number[]; half: number }>; min: number; max: number } | null = null;
+        if (layout) {
+            const parts = new Map<string, { c: number[]; y: number[]; half: number }>();
+            let min = Infinity, max = -Infinity;
+            const pose = [0, 0, 0, 0, 0, 0, 1];
+            for (const lp of layout.parts) {
+                const scale = ragdollPartPoseInto(skin, lp, IDENTITY, IDENTITY, pose);
+                const y = quatRotateTuple([pose[3], pose[4], pose[5], pose[6]], [0, 1, 0]);
+                const half = lp.length * scale / 2, rad = lp.radius * scale;
+                parts.set(lp.part.name, { c: [pose[0], pose[1], pose[2]], y, half });
+                min = Math.min(min, pose[1] - Math.abs(y[1]) * half - rad);
+                max = Math.max(max, pose[1] + Math.abs(y[1]) * half + rad);
+            }
+            if (parts.size && max > min) out = { parts, min, max };
+        }
+        REST_BODIES.set(skin, out);
+        return out;
     }
 
     /**
@@ -542,7 +728,11 @@ export class ReactionController {
         this._state = 'animated';
         this._stateTime = 0;
         this._alive = true;
+        this._riseAsked = false;
+        this._limp = false;
         this._health = Math.max(0, Math.min(1, this.config.health ?? 1));
+        // A graph holding the body in a Ragdoll or Get Up state goes back to its entry with it.
+        (this.node.animator as { endReactionStates?: () => void } | null | undefined)?.endReactionStates?.();
     }
 
     // ---- the frame (PhysicsSystem calls these) ----
@@ -670,7 +860,11 @@ export class ReactionController {
                 if (s.stillFor > T.settleTime && !this._settledSent) { this._settledSent = true; this._emit('Settled', { faceUp: s.faceUp }); }
                 if (!this._alive) { this._go('dead'); break; }
                 if (!s.grounded && s.speed > T.downSpeed * 3) { this._go('falling'); break; }
-                const wantsUp = B.getUp.enabled && this.config.getUp !== false && this._time >= this._unconsciousUntil;
+                // The animator's graph decides while it is in a Ragdoll state (it never rises by itself) or a Get Up
+                // state (it rises once ready, the model's Gets up switch notwithstanding: that is for its own get-up).
+                const graph = this._graphKind();
+                if (graph === 'getUp' && (this._riseAsked || this._readyToRise())) { this._go('getUp'); break; }
+                const wantsUp = !graph && B.getUp.enabled && this.config.getUp !== false && this._time >= this._unconsciousUntil;
                 const writhing = B.writhe.enabled && this._wounds.length > 0 && t < B.writhe.params.duration;
                 // Lying still with nothing left to do but wait: its bodies leave the world, the pose held where it lies,
                 // until it gets up or something moves it (a hit, a push: _ensure puts them back).
@@ -792,6 +986,9 @@ export class ReactionController {
         this._balancedFor = 0;
         // Off the ground's rest: its bodies back in the world (they left it lying still).
         if (from === 'down' && next !== 'dead' && this.ragdoll?.frozen) this.ragdoll.unfreeze();
+        if (from === 'down') this._riseAsked = false;
+        // Up again: out cold no more.
+        if (next === 'getUp' || next === 'recover' || next === 'animated' || next === 'hitReact' || next === 'stagger') this._limp = false;
         if (next !== 'animated' && from === 'animated') { this._reactionStart = this._time; this._emit('Started', { from }); }
         // A get-up cut short (a hit, a push): its clip stops, and the body is the body's again.
         if (from === 'getUp' && next !== 'recover') this._stopGetUp();
@@ -978,6 +1175,9 @@ export class ReactionController {
     /** Whether a hand may leave what it holds for a wound (see {@link busyHands}). */
     private _handFree(side: 'L' | 'R'): boolean {
         if (this.busyHands) return !this.busyHands[side];
+        // The graph's states (AnimationState.reactions busyHands), then the support-hand IK.
+        const fx = this._effectsNow();
+        if (fx.busyHands) return !fx.busyHands[side];
         const animator = this.node.animator as { handIkActive?: 'left' | 'right' | null } | null | undefined;
         return !animator?.handIkActive;
     }
@@ -1088,7 +1288,10 @@ export class ReactionController {
         const ctx = this._context(dt);
         for (const b of BEHAVIOURS) {
             const config = this.set.behaviours[b.id];
-            const on = config.enabled && b.states.includes(this._state) && (this._state !== 'down' || b.id !== 'relax' || !this._writhing()) && b.wants(ctx, config);
+            // Out cold (a limp Ragdoll state): relaxed as it falls too, nothing protective.
+            const limp = this._limp && (this._state === 'falling' || this._state === 'tumble' || this._state === 'down');
+            const inState = b.states.includes(this._state) || (limp && b.id === 'relax');
+            const on = config.enabled && inState && !(limp && LIMP_OFF.has(b.id)) && (this._state !== 'down' || b.id !== 'relax' || !this._writhing()) && b.wants(ctx, config);
             const was = this._running.get(b) ?? 0;
             const step = dt / Math.max(1e-3, b.fade);
             const w = on ? Math.min(1, was + step) : Math.max(0, was - step);
@@ -1210,14 +1413,21 @@ export class ReactionController {
         this._getUpAction = null;
         if (!animator || !body) return;
         // Face up or down by the hips and the chest together: a body on its side is neither, by one of them alone.
-        const fwdY = (i: number) => quatRotateTuple(body.simRotation(i), [0, 0, 1])[1];
-        const faceUp = fwdY(body.pelvis) + (body.chest >= 0 ? fwdY(body.chest) : 0) > 0;
-        const clip = faceUp ? clips.faceUp ?? clips.faceDown : clips.faceDown ?? clips.faceUp;
-        if (clip && animator.playAction) {
-            this._clip = null;
-            // Present at once (a blend-in of 0): the pose measured next is the clip's first frame.
-            const action = animator.playAction(clip, { slot: REACTION_SLOT, blendIn: 0.0, blendOut: 0.2, ikWeight: 0 });
-            if (!action.done) this._getUpAction = action;
+        const faceUp = this._lyingFaceUp();
+        // The graph's Get Up state plays it on the base layer (its clip, else the rig's), when it is in one.
+        const graphClock = animator.playGetUp?.(faceUp, clips) ?? null;
+        if (graphClock) {
+            // Nothing of the Reaction slot over it (a writhe), at once: the pose measured next is the clip's first frame.
+            if (this._clip) { animator.stopAction(REACTION_SLOT, 0); this._clip = null; }
+            this._getUpAction = graphClock;
+        } else {
+            const clip = faceUp ? clips.faceUp ?? clips.faceDown : clips.faceDown ?? clips.faceUp;
+            if (clip && animator.playAction) {
+                this._clip = null;
+                // Present at once (a blend-in of 0): the pose measured next is the clip's first frame.
+                const action = animator.playAction(clip, { slot: REACTION_SLOT, blendIn: 0.0, blendOut: 0.2, ikWeight: 0 });
+                if (!action.done) this._getUpAction = action;
+            }
         }
         // Where the clip (or the plain animation) puts the hips now, against where the body has them.
         animator.update(0);

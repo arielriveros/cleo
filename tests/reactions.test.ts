@@ -9,7 +9,7 @@ import type { ReactionController, ReactionEventInfo } from '../src/physics/react
 import { defaultReactionSet, parseReactionSets, pickReactionSet, reactionParamKeys, REACTION_PRESETS } from '../src/physics/reactive/reactionSet';
 import { getChannel, resetScriptChannels } from '../src/core/events/hub';
 import { LoopbackPort } from '../src/physics/worker/ports';
-import { groundWorld, humanoidModel, IDLE, ARM_SWING, boneIndex } from './helpers/humanoidRig';
+import { groundWorld, humanoidModel, IDLE, ARM_SWING, boneIndex, poseClip } from './helpers/humanoidRig';
 import type { Animation } from '../src/animation/animatedModel';
 import { quat } from 'gl-matrix';
 import { makeBody, box } from './helpers/physicsBodies';
@@ -811,4 +811,244 @@ describe.each(BACKENDS)('reacting bodies on a budget on %s', backend => {
         expect(flinching).toBe(1);
         expect(falling).toBeGreaterThan(4);
     });
+});
+
+// The animator's graph driving the body (Ragdoll and Get Up states, AnimationState.ragdoll/getUp): the graph follows
+// a fall through its Ragdolled parameter, holds the body down until it says, and the body rises on its Get Up state's
+// clip, on the base layer. And the reaction effects its states carry (AnimationState.reactions).
+describe('graph-driven reactions (jolt)', () => {
+    beforeAll(async () => { await acquirePhysicsBackend('jolt'); });
+    const made: PhysicsSystem[] = [];
+    afterEach(() => { for (const p of made.splice(0)) p.dispose(); resetScriptChannels(); });
+
+    /** Lying face down to standing in 1.5 s (as the get-up tests above). */
+    const getUpClip = (): Animation => {
+        const lying = quat.setAxisAngle(quat.create(), [1, 0, 0], Math.PI / 2), up = quat.create();
+        return {
+            name: 'Get Up',
+            samplers: [
+                { input: [0, 1.5], output: [...lying, ...up], interpolation: 'LINEAR' },
+                { input: [0, 1.5], output: [0, 0.2, 0, 0, 1.0, 0], interpolation: 'LINEAR' },
+            ],
+            channels: [
+                { samplerIndex: 0, targetNodeIndex: boneIndex('Hips'), targetPath: 'rotation' },
+                { samplerIndex: 1, targetNodeIndex: boneIndex('Hips'), targetPath: 'translation' },
+            ],
+        } as Animation;
+    };
+    const builtin = (name: string, varName: string, varType: 'boolean' | 'number' = 'boolean') =>
+        ({ name, type: 'variable', default: varType === 'boolean' ? false : 0, variable: { nodeRef: 'parent', varName, varType, source: 'builtin' } });
+
+    /**
+     * A graph that follows its body down (Any State into Ragdoll on Ragdolled, or on a Trip trigger), rises when `rise`
+     * says (CanGetUp, or a trigger of the test's), and is back at Idle after its Get Up.
+     */
+    const graph = (opts: { rise?: 'CanGetUp' | 'Rise'; start?: 'fall' | 'trip' | 'limp'; idle?: Record<string, unknown>; leave?: boolean } = {}) => ({
+        parameters: [
+            builtin('Ragdolled', 'ragdolled'), builtin('CanGetUp', 'canGetUp'), builtin('HitAngle', 'hitAngle', 'number'),
+            { name: 'Trip', type: 'trigger', default: false }, { name: 'Rise', type: 'trigger', default: false }, { name: 'Leave', type: 'trigger', default: false },
+            { name: 'Hit', type: 'trigger', default: false, variable: { nodeRef: 'parent', varName: 'hitCount', varType: 'number', source: 'builtin' } },
+        ],
+        states: [
+            { name: 'Idle', clipName: 'Idle', loop: true, speed: 1, isEntry: true, ...(opts.idle ?? {}) },
+            { name: 'Ragdoll', clipName: '', loop: true, speed: 1, ragdoll: { start: opts.start ?? 'trip' } },
+            { name: 'Get Up', clipName: '', loop: false, speed: 1, getUp: { faceUp: 'Get Up', faceDown: 'Get Up' } },
+        ],
+        transitions: [
+            { from: '*', to: 'Ragdoll', conditions: [{ param: 'Ragdolled', op: 'true' }], blendTime: 0.1 },
+            { from: '*', to: 'Ragdoll', conditions: [{ param: 'Trip', op: 'trigger' }], blendTime: 0.1 },
+            { from: 'Ragdoll', to: 'Get Up', conditions: opts.rise === 'Rise' ? [{ param: 'Rise', op: 'trigger' }] : [{ param: 'CanGetUp', op: 'true' }], blendTime: 0.3 },
+            ...(opts.leave ? [{ from: 'Ragdoll', to: 'Idle', conditions: [{ param: 'Leave', op: 'trigger' }], blendTime: 0.2 }] : []),
+            { from: 'Get Up', to: 'Idle', conditions: [], hasExitTime: true, exitTime: 0.95, blendTime: 0.25 },
+        ],
+        events: [],
+    }) as any;
+
+    function person(sm: any, worker = false) {
+        const physics = groundWorld('jolt');
+        made.push(physics);
+        if (worker) physics.setWorkerMode('on', () => new LoopbackPort());
+        const node = humanoidModel([IDLE(), getUpClip(), poseClip('Rig Get Up', { Spine: [[1, 0, 0], 20] }, 1.5)]);
+        const set = defaultReactionSet();
+        // The rig's own get-up: what a graph that leaves Ragdoll for an ordinary state hands the body back to.
+        set.behaviours.getUp.clips = { faceDown: 'Rig Get Up', faceUp: 'Rig Get Up' };
+        (node.model as any).skin.reactionSets = { version: 1, sets: [set] };
+        // In a scene with physics: what ModelNode.reactions (the animator's way to them) reads.
+        (node.scene as any).physics = physics;
+        const r = physics.reactionsOf(node)!;
+        node.animator!.setStateMachine(sm);
+        return { physics, node, r, a: node.animator! };
+    }
+    const step = (s: { physics: PhysicsSystem; node: ModelNode }) => {
+        s.physics.update(H);
+        s.node.animator!.checkTriggers();
+        s.node.animator!.update(H);
+        s.physics.endFrame?.(H);
+    };
+    const trace = (list: string[], v: string) => { if (list[list.length - 1] !== v) list.push(v); };
+
+    it('follows a fall into its Ragdoll state, holds the body down until it says, and the body rises on its Get Up clip', () => {
+        const s = person(graph({ rise: 'Rise' }));
+        const body: string[] = [], states: string[] = [];
+        for (let f = 0; f < 600; f++) {
+            if (f === 3) s.r.trip();
+            step(s);
+            trace(body, s.r.state); trace(states, s.a.currentStateName!);
+        }
+        // Six seconds lying, ready long since: the graph holds it.
+        expect(s.r.state).toBe('down');
+        expect(s.r.canGetUp).toBe(true);
+        expect(states).toEqual(['Idle', 'Ragdoll']);
+        s.a.setTrigger('Rise');
+        let slotted = false;
+        for (let f = 0; f < 600 && !(s.r.state === 'animated' && s.a.currentStateName === 'Idle'); f++) {
+            step(s);
+            trace(body, s.r.state); trace(states, s.a.currentStateName!);
+            // On the base layer: nothing in the Reaction slot.
+            if (((s.a as any)._overlays as any[]).some(o => o.kind === 'slot' && o.action && o.presence > 0)) slotted = true;
+        }
+        expect(body.join('>')).toMatch(/falling>.*down>getUp>recover>animated$/);
+        expect(states).toEqual(['Idle', 'Ragdoll', 'Get Up', 'Idle']);
+        expect(slotted).toBe(false);
+    });
+
+    it('enters on its feet as the state starts it, and adds nothing to a body already falling', () => {
+        const s = person(graph());
+        const trip = vi.spyOn(s.r, 'trip');
+        step(s);
+        s.a.setTrigger('Trip');
+        step(s);
+        expect(s.a.currentStateName).toBe('Ragdoll');
+        expect(trip).toHaveBeenCalledTimes(1);
+        expect(s.r.state).toBe('falling');
+        // Knocked down by a hit: the graph follows, and starts nothing more.
+        const t = person(graph());
+        const trip2 = vi.spyOn(t.r, 'trip'), fall2 = vi.spyOn(t.r, 'fall');
+        step(t);
+        t.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 400 });
+        for (let f = 0; f < 5; f++) step(t);
+        expect(t.a.currentStateName).toBe('Ragdoll');
+        expect(trip2).not.toHaveBeenCalled();
+        expect(fall2).not.toHaveBeenCalled();
+    });
+
+    it('a hit while it rises knocks it back into Ragdoll, and it rises again', () => {
+        const s = person(graph());
+        const states: string[] = [];
+        let hitDuring = false;
+        for (let f = 0; f < 1800 && !(hitDuring && s.r.state === 'animated' && s.a.currentStateName === 'Idle'); f++) {
+            if (f === 3) s.a.setTrigger('Trip');
+            if (!hitDuring && s.r.state === 'getUp' && s.r.stateTime > 0.4) { s.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 20 }); hitDuring = true; }
+            step(s);
+            trace(states, s.a.currentStateName!);
+        }
+        expect(hitDuring).toBe(true);
+        expect(states.join('>')).toBe('Idle>Ragdoll>Get Up>Ragdoll>Get Up>Idle');
+    });
+
+    it("left for an ordinary state, it hands the get-up back to the rig's clip in its own slot", () => {
+        const s = person(graph({ rise: 'Rise', leave: true }));
+        for (let f = 0; f < 300; f++) { if (f === 3) s.a.setTrigger('Trip'); step(s); }
+        expect(s.r.state).toBe('down');
+        s.a.setTrigger('Leave');
+        let slot = false;
+        for (let f = 0; f < 900 && s.r.state !== 'animated'; f++) {
+            step(s);
+            if (s.r.state === 'getUp' && (s.r as any)._getUpAction?.slot === 'Reaction') slot = true;
+        }
+        expect(slot).toBe(true);
+        expect(s.r.state).toBe('animated');
+    });
+
+    it("a script's getUp() while the graph holds it asks the graph; reset() takes the graph back to its entry", () => {
+        const s = person(graph({ rise: 'CanGetUp' }));
+        // Knocked out for good: never ready on its own.
+        for (let f = 0; f < 300; f++) { if (f === 3) { s.a.setTrigger('Trip'); } if (f === 4) s.r.knockOut(1e9); step(s); }
+        expect([s.r.state, s.a.currentStateName, s.r.canGetUp]).toEqual(['down', 'Ragdoll', false]);
+        s.r.getUp();
+        expect(s.r.canGetUp).toBe(true);
+        for (let f = 0; f < 3; f++) step(s);
+        expect(s.a.currentStateName).toBe('Get Up');
+        s.r.reset();
+        expect(s.a.currentStateName).toBe('Idle');
+        expect(s.r.state).toBe('animated');
+    });
+
+    it('limp: drops out cold, nothing protective running as it falls', () => {
+        const s = person(graph({ start: 'limp' }));
+        let protective = false;
+        for (let f = 0; f < 120; f++) {
+            if (f === 3) s.a.setTrigger('Trip');
+            step(s);
+            for (const id of ['catchFall', 'protectHead', 'landing', 'airborne']) if ((s.r.behaviours.get(id) ?? 0) > 0) protective = true;
+        }
+        expect(['falling', 'tumble', 'down']).toContain(s.r.state);
+        expect(protective).toBe(false);
+    });
+
+    it("its states' reaction effects: none keeps it on its animation while the hit still counts, flinch never staggers or falls", () => {
+        const none = person(graph({ idle: { reactions: { react: 'none' } } }));
+        step(none);
+        none.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 400 });
+        expect(none.a.getParam('Hit')).toBe(false);
+        none.a.checkTriggers();
+        expect(none.a.getParam('Hit')).toBe(true);
+        for (let f = 0; f < 30; f++) step(none);
+        expect([none.r.state, none.r.hitCount, none.a.currentStateName]).toEqual(['animated', 1, 'Idle']);
+
+        const flinch = person(graph({ idle: { reactions: { react: 'flinch' } } }));
+        const seen = new Set<string>();
+        for (let f = 0; f < 90; f++) {
+            if (f === 3) flinch.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 45 });
+            if (f === 30) flinch.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 400 });
+            step(flinch);
+            seen.add(flinch.r.state);
+        }
+        expect(seen.has('hitReact')).toBe(true);
+        expect(seen.has('stagger') || seen.has('falling')).toBe(false);
+    });
+
+    it('a shove of 0 carries it nowhere, and both hands busy reach for no wound', () => {
+        const s = person(graph({ idle: { reactions: { shove: 0, busyHands: 'both' } } }));
+        const p0 = vec3.clone(s.node.worldPosition as vec3);
+        for (let f = 0; f < 60; f++) {
+            if (f === 3) s.r.hit({ part: 'Spine', direction: [0, 0, -1], impulse: 45 });
+            step(s);
+        }
+        expect(vec3.distance(p0, s.node.worldPosition as vec3)).toBeLessThan(0.02);
+        expect(s.r.wounds.length).toBeGreaterThan(0);
+        expect(s.r.wounds.every(w => w.hand === null)).toBe(true);
+    });
+
+    it('tells the graph where each hit came from and how high it landed', () => {
+        const s = person(graph());
+        step(s);
+        // Facing +Z: a shot travelling -Z came from in front; one travelling +X from its right (-X).
+        s.r.hit({ part: 'Spine', direction: [0, 0, -1], impulse: 5 });
+        step(s);
+        expect(Math.abs(s.a.getParam('HitAngle') as number)).toBeLessThan(1);
+        expect(s.r.hitHeight).toBeGreaterThan(0.45);
+        expect(s.r.hitHeight).toBeLessThan(0.85);
+        s.r.hit({ part: 'Head', direction: [1, 0, 0], impulse: 5 });
+        step(s);
+        expect(s.a.getParam('HitAngle') as number).toBeCloseTo(-90, 0);
+        expect(s.r.hitHeight).toBeGreaterThan(0.85);
+        s.r.hit({ part: 'Spine', direction: [-1, 0, 0], impulse: 5 });
+        expect(s.r.hitAngle).toBeCloseTo(90, 0);
+        s.r.hit({ part: 'Spine', direction: [0, 0, 1], impulse: 5 });
+        expect(Math.abs(s.r.hitAngle)).toBeCloseTo(180, 0);
+    });
+
+    it('with the physics worker: follows the fall, holds, and rises on its Get Up as inline', () => {
+        const s = person(graph(), true);
+        const states: string[] = [];
+        for (let f = 0; f < 1500 && !(states.includes('Get Up') && s.r.state === 'animated' && s.a.currentStateName === 'Idle'); f++) {
+            if (f === 3) s.a.setTrigger('Trip');
+            step(s);
+            trace(states, s.a.currentStateName!);
+        }
+        expect(s.physics.executor).toBe('worker');
+        expect(states).toEqual(['Idle', 'Ragdoll', 'Get Up', 'Idle']);
+        expect(s.r.state).toBe('animated');
+    }, 60000);
 });

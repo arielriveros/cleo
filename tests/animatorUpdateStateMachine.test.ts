@@ -143,3 +143,26 @@ describe('Animator.updateStateMachine', () => {
         expect(a.posedLocal(99)).toBeNull();
     });
 });
+
+describe('Animator.updateStateMachine and reaction states', () => {
+    it('re-enters when a state becomes (or stops being) a Ragdoll or Get Up state, or a Get Up its clips', () => {
+        const a = makeAnimator();
+        const base = machine(10, 0);
+        a.setStateMachine(base);
+        const withKind = (patch: Partial<AnimationState>) => ({ ...base, states: [{ ...base.states[0], ...patch }] });
+        expect(a.updateStateMachine(withKind({ reactions: { react: 'none' } }))).toBe(true);
+        expect(a.updateStateMachine(withKind({ ragdoll: { start: 'fall' } }))).toBe(false);
+        expect(a.updateStateMachine(withKind({ ragdoll: { start: 'trip' } }))).toBe(true);
+        expect(a.updateStateMachine(withKind({ ragdoll: undefined, getUp: { faceUp: 'Walk' } }))).toBe(false);
+        expect(a.updateStateMachine(withKind({ getUp: { faceUp: 'Idle' } }))).toBe(false);
+    });
+
+    it("carries a layer's Plays over reactions in place", () => {
+        const a = makeAnimator();
+        const base = machine(10, 0);
+        a.setStateMachine(base);
+        const layers = base.layers!.map((l, i) => i === 0 ? { ...l, overReactions: true } : l);
+        expect(a.updateStateMachine({ ...base, layers })).toBe(true);
+        expect(((a as any)._overlays as any[])[0].overReactions).toBe(true);
+    });
+});

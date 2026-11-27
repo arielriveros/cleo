@@ -370,6 +370,13 @@ export type {
     AnimationHandIk,
     AnimationActionOptions,
     AnimationActionHandle,
+    AnimationRagdollState,
+    AnimationGetUpState,
+    AnimationRagdollStart,
+    AnimationReactionEffects,
+    AnimatorReactionLink,
+    GetUpClock,
+    ReactionEffectsNow,
 } from "./animation/animator";
 export { Sprite, gridTileset, legacySheetTileset, remapLegacyFrame, isInlineTilesetId, INLINE_TILESET_PREFIX } from "./graphics/sprite";
 export type { SpriteOptions, SpriteSide, SpriteBlend } from "./graphics/sprite";
