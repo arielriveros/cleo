@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useEditorSessions } from '../EditorSessionsContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
-import type { Animator, AnimationVariableBinding, AnimationParameterType, AnimationParameter, AnimationStateTrigger, AnimationTransition } from 'cleo'
-import { NODE_BUILTINS, isConditionGroup } from 'cleo'
+import type { Animator, AnimationVariableBinding, AnimationParameterType, AnimationParameter, AnimationStateTrigger, AnimationTransition, AnimationReactionEffects, AnimationRagdollStart, AnimationState } from 'cleo'
+import { NODE_BUILTINS, isConditionGroup, parseReactionSets, pickReactionSet } from 'cleo'
+import { FallIcon, GetUpIcon, KnockOutIcon, TripIcon } from '../rig/reactions/reactionIcons'
+import { useReactionsSupported } from '../rig/reactions/reactionsSupport'
 import { AccessibleVariable, UNSIGNED_BUILTINS } from './skeleton'
 import FieldDebugReadout from './FieldDebugReadout'
 import type { AnimationFieldAsset } from '../../utils/animationFields'
@@ -181,9 +183,9 @@ export function VariablesPanel() {
                 : p.type === 'bool'
                   ? <Toggle checked={!!p.default} onChange={c => setParam(i, { default: c })} />
                   : p.type === 'trigger'
-                    ? <span className='text-ui-xs text-dim w-[56px] text-center'>—</span>
+                    ? <CounterPicker value={p.variable} onPick={b => setParam(i, { variable: b })} />
                     : <VariablePicker vars={accessVars} value={p.variable}
-                        onPick={b => setParam(i, { variable: b, default: b?.varType === 'boolean' ? false : 0 })} />}
+                        onPick={b => setParam(i, { variable: b, default: builtinDefault(b) })} />}
               <Button variant='remove' size='sm' onClick={() => removeParam(i)}>✕</Button>
             </div>
           ))}
@@ -253,7 +255,7 @@ function PoseSection() {
 function SelectedState() {
   const {
     sm, selection, setSelection, clips, setState, removeState, stateIndex, links, animationFields, fieldOf, poseAssets,
-    activeLayer, addTriggerParam, groups, groupOf, moveToGroup, fullSm,
+    activeLayer, addTriggerParam, groups, groupOf, moveToGroup, fullSm, target,
   } = useStateMachine()
   if (selection?.kind !== 'state') return null
   const i = stateIndex(selection.name)
@@ -266,22 +268,37 @@ function SelectedState() {
   const byParam = !!s.speedParam
   const linked = links.filter(l => l.a === s.name || l.b === s.name)
 
-  // `fieldId` is the clip-vs-blend-space discriminator and the runtime prefers it over clipName, so
-  // switching to Clip must clear it and the embedded copy riding with it.
-  const playsField = !!s.fieldId
-  const playsPose = !playsField && !!(s.poseRef || s.pose)
+  // A Ragdoll or Get Up state (base layer only) plays the body, not a clip: it outranks the rest. `fieldId` is the
+  // clip-vs-blend-space discriminator and the runtime prefers it over clipName, so switching to Clip must clear it
+  // and the embedded copy riding with it.
+  const onBase = activeLayer === 0
+  const playsRagdoll = onBase && !!s.ragdoll
+  const playsGetUp = onBase && !playsRagdoll && !!s.getUp
+  const reactionKind = playsRagdoll || playsGetUp
+  const playsField = !reactionKind && !!s.fieldId
+  const playsPose = !reactionKind && !playsField && !!(s.poseRef || s.pose)
   const field = fieldOf(s.fieldId)
   const allPoses = poseAssets.flatMap(a => a.poses.map(p => ({ asset: a, pose: p })))
-  const setPlays = (kind: 'clip' | 'field' | 'pose') => {
-    if (kind === 'clip') setState(i, { fieldId: undefined, field: undefined, fieldInputs: undefined, poseRef: undefined, pose: undefined })
+  const noKind = { ragdoll: undefined, getUp: undefined }
+  const setPlays = (kind: 'clip' | 'field' | 'pose' | 'ragdoll' | 'getUp') => {
+    if (kind === 'clip') setState(i, { ...noKind, fieldId: undefined, field: undefined, fieldInputs: undefined, poseRef: undefined, pose: undefined })
     // Switching to a field drops any speed PARAMETER: the blend already matches speed, so keeping the
     // binding applies it twice. The fixed `speed` is kept.
-    else if (kind === 'field') setState(i, { clipName: '', fieldId: animationFields[0]?.id ?? '', fieldInputs: {}, speedParam: undefined, poseRef: undefined, pose: undefined })
+    else if (kind === 'field') setState(i, { ...noKind, clipName: '', fieldId: animationFields[0]?.id ?? '', fieldInputs: {}, speedParam: undefined, poseRef: undefined, pose: undefined })
+    // The body: no clip of its own (a Ragdoll holds the pose it is entered with), no blend space, no pose.
+    else if (kind === 'ragdoll') setState(i, {
+      ragdoll: { start: 'fall' }, getUp: undefined, clipName: '', fieldId: undefined, field: undefined, fieldInputs: undefined,
+      speedParam: undefined, poseRef: undefined, pose: undefined,
+    })
+    else if (kind === 'getUp') setState(i, {
+      getUp: {}, ragdoll: undefined, clipName: '', loop: false, fieldId: undefined, field: undefined, fieldInputs: undefined,
+      speedParam: undefined, poseRef: undefined, pose: undefined,
+    })
     // A pose is held, not played: no clip, no field. It is embedded from its asset on Apply.
     else {
       const first = allPoses[0]
       setState(i, {
-        clipName: '', fieldId: undefined, field: undefined, fieldInputs: undefined, speedParam: undefined,
+        ...noKind, clipName: '', fieldId: undefined, field: undefined, fieldInputs: undefined, speedParam: undefined,
         poseRef: first ? { assetId: first.asset.id, poseId: first.pose.id } : undefined, pose: undefined,
       })
     }
@@ -358,14 +375,25 @@ function SelectedState() {
           })
         }}>
         <span className='text-ui-xs text-muted w-[42px] shrink-0'>Plays</span>
-        <SegmentedControl<'clip' | 'field' | 'pose'>
-          size='sm' value={playsField ? 'field' : playsPose ? 'pose' : 'clip'} onChange={setPlays}
+        <SegmentedControl<'clip' | 'field' | 'pose' | 'ragdoll' | 'getUp'>
+          size='sm' value={playsRagdoll ? 'ragdoll' : playsGetUp ? 'getUp' : playsField ? 'field' : playsPose ? 'pose' : 'clip'} onChange={setPlays}
           options={[
             { value: 'clip', label: 'Clip', title: 'Play a single animation clip' },
             { value: 'field', label: 'Blend Space', title: 'Blend several clips by speed, direction or any parameter' },
             { value: 'pose', label: 'Pose', title: 'Hold a static pose from a Pose asset — on a masked layer, a hand grip over locomotion' },
+            // The body's own states: base layer only.
+            ...(onBase ? [
+              { value: 'ragdoll' as const, label: <span className='inline-block w-3.5 h-3.5 align-[-2px]'><FallIcon /></span>,
+                title: 'Ragdoll: while the graph is here the body is the physics’ (the character’s reactions). Entered on its feet it falls; entered when a hit has already knocked it down it holds the body, which never gets up by itself.' },
+              { value: 'getUp' as const, label: <span className='inline-block w-3.5 h-3.5 align-[-2px]'><GetUpIcon /></span>,
+                title: 'Get up: the body rises on a clip (face up or face down, picked as it is entered), lined up with where it lies and blended from it.' },
+            ] : []),
           ]} />
       </AssetDropRow>
+
+      {playsRagdoll && <RagdollRows state={s} clips={clips} onChange={patch => setState(i, patch)} />}
+      {playsGetUp && <GetUpRows state={s} clips={clips} rigClips={rigGetUpClips(target)} onChange={patch => setState(i, patch)} />}
+      {reactionKind && <ReactionStateLints state={s} />}
 
       {playsPose && (allPoses.length === 0
         ? <p className='text-ui-xs text-warning'>No poses yet — make one in Cleo Creator ▸ Motion.</p>
@@ -385,7 +413,7 @@ function SelectedState() {
         <p className={hintClass}>No clip on a layer means this state adds nothing — the layer fades out while it is here.</p>
       )}
 
-      {!playsField && !playsPose && (
+      {!playsField && !playsPose && !reactionKind && (
         <Select className={cn(tight, 'flex-1 min-w-0')} title='Animation clip' value={s.clipName} onChange={e => setState(i, { clipName: e.target.value })}>
           <option value=''>(no clip)</option>
           {clips.map(c => <option key={c} value={c}>{c}</option>)}
@@ -421,7 +449,7 @@ function SelectedState() {
           </>}
         </>)}
 
-      <div className='flex items-center gap-2'>
+      {!reactionKind && <div className='flex items-center gap-2'>
         <Toggle label='loop' checked={s.loop} onChange={c => setState(i, { loop: c })} className='text-ui-xs' />
         {s.loop && (
           <label className='flex items-center gap-1 text-ui-xs' title='How many times to play the clip. 0 = forever.'>
@@ -431,7 +459,7 @@ function SelectedState() {
             <span className='text-dim'>{(s.loopCount ?? 0) === 0 ? '∞' : ''}</span>
           </label>
         )}
-      </div>
+      </div>}
 
       {/* Speed: a fixed rate, or read live from a parameter (e.g. run faster the faster you move).
           On a FIELD state this is a multiplier on top of the blend, not the blend's input — see below. */}
@@ -470,7 +498,7 @@ function SelectedState() {
           {speedParams.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
         </Select>
       </div>
-      {!playsField && !playsPose && (
+      {!playsField && !playsPose && !reactionKind && (
         <div className='flex items-center gap-1'>
           <span className='text-ui-xs text-muted w-[42px] shrink-0'
             title='Clip seconds to start from: one segment of a longer clip, such as the second attack of a combo authored as one animation.'>Start at</span>
@@ -480,7 +508,7 @@ function SelectedState() {
         </div>
       )}
       {/* Stop motion: the state's clips held at this many poses a second. Empty plays smooth. */}
-      {!playsPose && (
+      {!playsPose && !reactionKind && (
         <div className='flex items-center gap-1'>
           <span className='text-ui-xs text-muted w-[42px] shrink-0'
             title={'Stop motion: show this state’s clip (every clip of a blend space, together) as this many held poses a '
@@ -520,7 +548,7 @@ function SelectedState() {
       {/* Foot IK weight. On by default and usually left alone — a foot whose ground ray finds nothing fades
           itself out, so mid-air already looks right with no authoring. This is for the exceptions: a state
           whose animation should be trusted verbatim, or one gated on a grounded/falling parameter. */}
-      <div className='flex items-center gap-1 text-ui-xs'
+      {!reactionKind && <div className='flex items-center gap-1 text-ui-xs'
         title={'How strongly foot placement applies during this state. 1 is fully on, 0 leaves the animation exactly as '
           + 'authored. Feet with no ground under them fade out by themselves, so this is rarely needed.'}>
         <span className='text-muted'>feet</span>
@@ -569,10 +597,10 @@ function SelectedState() {
               onChange={c => setState(i, { holdMovement: c || undefined })} />
           </span>
         )}
-      </div>
+      </div>}
 
       {/* Sync group: a hand-over between two states of one carries the stride (AnimationState.syncGroup). */}
-      <div className='flex items-center gap-1 text-ui-xs'
+      {!reactionKind && <div className='flex items-center gap-1 text-ui-xs'
         title={'States in one sync group hand over in step: the state entered starts at the phase of the cycle the one '
           + 'left was at, and through the cross-fade the two move as one. For blend spaces whose phase 0 is the same '
           + 'foot’s plant (a walk and a stair climb, say). On a layer, a state in the group the base layer’s state is '
@@ -585,7 +613,7 @@ function SelectedState() {
               .map(x => x.syncGroup).filter((g): g is string => !!g))].map(value => ({ value }))}
             onChange={v => setState(i, { syncGroup: v.trim() || undefined })} />
         </div>
-      </div>
+      </div>}
 
       {/* Steady (AnimationState.meshSpace), on an override layer: the pose keeps its own model-space turn at the
           top of the layer's mask, so one held pose sits still over every gait. */}
@@ -602,6 +630,8 @@ function SelectedState() {
           <span className='text-dim'>0 rides the hips, 1 holds still</span>
         </div>
       )}
+
+      <ReactionEffectsRows value={s.reactions} onChange={reactions => setState(i, { reactions })} />
 
       <SectionTitle title='Links' className='mt-1' />
       {linked.length === 0
@@ -962,13 +992,14 @@ function SelectedSummary() {
 
 // ---- Selected transition (a LINK: up to one transition each way) -------------------------------------
 function SelectedTransition() {
-  const { selection, linkOf, addTransition, setTransition, removeTransition, groups, isFork } = useStateMachine()
+  const { selection, linkOf, addTransition, setTransition, removeTransition, groups, isFork, sm, activeLayer } = useStateMachine()
   if (selection?.kind !== 'transition') return null
   const link = linkOf(selection.a, selection.b)
   if (!link) return null
   // A transition into a fork (or into a group entered through one) only fires on through one of its ways out.
   const entryName = (n: string) => { const g = groups.find(x => x.name === n); return g ? entryOf(g) ?? n : n }
   const intoFork = (t: AnimationTransition | null) => !!t && isFork(entryName(t.to))
+  const intoGetUp = (to: string) => !!sm.states.find(x => x.name === entryName(to))?.getUp && activeLayer === 0
 
   // Nothing transitions INTO "any state", so a link to it has one direction only.
   const dirs: { from: string; to: string; t: typeof link.forward }[] = [
@@ -1057,6 +1088,9 @@ function SelectedTransition() {
                 onChange={v => setTransition(from, to, { blendTime: v === undefined ? undefined : Math.max(0, v) })} />
               <span className='text-dim'>s {t.blendTime === undefined ? (intoFork(t) ? '(the way out’s)' : '(default)') : intoFork(t) ? '(when the way out sets none)' : ''}</span>
             </label>
+            {intoGetUp(to) && (
+              <p className={hintClass}>Into a Get Up state the skin blends from the body, over the rig’s get-up blend: this blend is not used.</p>
+            )}
             {/* The blunt fix for a state pair that ping-pongs. A blend covers a change visually, but the
                 machine can still change its mind mid-blend and re-arm from a pose that barely moved — which
                 reads as a spasm. This stops it changing its mind at all for a while. */}
@@ -1166,12 +1200,168 @@ function BoolDriver({ name, initial, onSet }: { name: string; initial: boolean; 
  * variables by access group. The option key must include `source` — a built-in and a script field can
  * share a name and nodeRef.
  */
+/** A Linked parameter's starting value: the built-in's own where it has no reactions (HasControl: true), else 0/off. */
+function builtinDefault(b: AnimationVariableBinding | undefined): number | boolean {
+  const none = b?.source === 'builtin' ? NODE_BUILTINS[b.varName]?.none : undefined
+  if (none !== undefined) return none
+  return b?.varType === 'boolean' ? false : 0
+}
+
+/**
+ * A trigger's source: fired by a script (none), or by a counter the engine keeps, each time it rises — Each hit (the
+ * character's reactions' hit count) fires the trigger on every hit it takes.
+ */
+function CounterPicker({ value, onPick }: { value?: AnimationVariableBinding; onPick: (b: AnimationVariableBinding | undefined) => void }) {
+  const counters = Object.entries(NODE_BUILTINS).filter(([, d]) => d.counter).map(([name]) => name)
+  const label: Record<string, string> = { hitCount: 'Each hit' }
+  return (
+    <Select className={cn(tight, 'w-[96px]')} value={value?.varName ?? ''}
+      title='What fires this trigger: a script (by name), or each time a count the engine keeps rises — Each hit fires it on every hit the character takes (its reactions)'
+      onChange={e => onPick(e.target.value ? { nodeRef: 'parent', varName: e.target.value, varType: 'number', source: 'builtin' } : undefined)}>
+      <option value=''>(script)</option>
+      {value?.varName && !counters.includes(value.varName) && <option value={value.varName}>{value.varName} (missing)</option>}
+      {counters.map(c => <option key={c} value={c}>{label[c] ?? c}</option>)}
+    </Select>
+  )
+}
+
+/** The rig's own get-up clips (its reaction set's), what a Get Up state naming none plays. */
+function rigGetUpClips(target: { node?: unknown } | null | undefined): { faceUp?: string; faceDown?: string } {
+  const skin = (target?.node as { model?: { skin?: { reactionSets?: unknown } } } | undefined)?.model?.skin
+  return pickReactionSet(parseReactionSets(skin?.reactionSets)).behaviours.getUp.clips ?? {}
+}
+
+/** A Ragdoll state's own rows: how it starts on a character on its feet, and the clip it plays without a body. */
+function RagdollRows({ state, clips, onChange }: { state: AnimationState; clips: string[]; onChange: (patch: Partial<AnimationState>) => void }) {
+  const start = state.ragdoll?.start ?? 'fall'
+  return (
+    <>
+      <div className='flex items-center gap-1'>
+        <span className='text-ui-xs text-muted w-[42px] shrink-0'
+          title='What entering this state does to a character on its feet. Entered when a hit has already knocked it down, it adds nothing: it only holds the body.'>Starts</span>
+        <SegmentedControl<AnimationRagdollStart> size='sm' value={start}
+          onChange={v => onChange({ ragdoll: { ...state.ragdoll, start: v } })}
+          options={[
+            { value: 'fall', label: <span className='inline-block w-3.5 h-3.5 align-[-2px]'><FallIcon /></span>, title: 'Fall: it falls the way it was moving, catching itself, protecting its head' },
+            { value: 'trip', label: <span className='inline-block w-3.5 h-3.5 align-[-2px]'><TripIcon /></span>, title: 'Trip: its feet are taken from under it and it falls forward' },
+            { value: 'limp', label: <span className='inline-block w-3.5 h-3.5 align-[-2px]'><KnockOutIcon /></span>, title: 'Limp: it drops out cold, no hands out, no head tucked (a knockout, a death)' },
+          ]} />
+      </div>
+      <Select className={cn(tight, 'flex-1 min-w-0')} value={state.clipName}
+        title='The pose under the body: none holds the pose it was entered with. Also what shows where no body can be made (no reactions on this backend).'
+        onChange={e => onChange({ clipName: e.target.value })}>
+        <option value=''>(holds the pose it is entered with)</option>
+        {clips.map(c => <option key={c} value={c}>{c}</option>)}
+      </Select>
+      <p className={hintClass}>
+        The graph stays here as long as it likes: the body never gets up by itself. Take it to a <b>Get Up</b> state on
+        <b> CanGetUp</b> (a Linked reaction built-in), and in from <b>Any State</b> on <b>Ragdolled</b> to follow a hit’s fall.
+      </p>
+    </>
+  )
+}
+
+/** A Get Up state's own rows: its clip for each side the body can lie on. */
+function GetUpRows({ state, clips, rigClips, onChange }: {
+  state: AnimationState; clips: string[]; rigClips: { faceUp?: string; faceDown?: string }; onChange: (patch: Partial<AnimationState>) => void
+}) {
+  const row = (side: 'faceUp' | 'faceDown', label: string, title: string) => (
+    <div className='flex items-center gap-1'>
+      <span className='text-ui-xs text-muted w-[42px] shrink-0' title={title}>{label}</span>
+      <Select className={cn(tight, 'flex-1 min-w-0')} value={state.getUp?.[side] ?? ''}
+        onChange={e => onChange({ getUp: { ...state.getUp, [side]: e.target.value || undefined } })}>
+        <option value=''>{rigClips[side] ? `(the rig’s: ${rigClips[side]})` : '(the rig’s: none)'}</option>
+        {clips.map(c => <option key={c} value={c}>{c}</option>)}
+      </Select>
+    </div>
+  )
+  return (
+    <>
+      {row('faceUp', 'On back', 'The clip it rises on lying on its back')}
+      {row('faceDown', 'On front', 'The clip it rises on lying on its front')}
+      <p className={hintClass}>
+        Picked as it is entered, from where the body lies, and lined up with it. Entered before the body lies still it
+        waits on its first frame. No root motion, no foot placement; the character is held until it leaves.
+      </p>
+    </>
+  )
+}
+
+/** What a Ragdoll or Get Up state is missing to work: a clip to rise on, a way out, a way to rise. */
+function ReactionStateLints({ state }: { state: AnimationState }) {
+  const { sm, target } = useStateMachine()
+  const out = sm.transitions.filter(t => t.from === state.name)
+  const lints: string[] = []
+  if (state.getUp) {
+    const rig = rigGetUpClips(target)
+    if (!state.getUp.faceUp && !state.getUp.faceDown && !rig.faceUp && !rig.faceDown) lints.push('No clip to rise on: pick one above, or the rig’s get-up clips in its Reactions tab.')
+  }
+  if (state.ragdoll && !out.some(t => sm.states.find(x => x.name === t.to)?.getUp)) lints.push('No way into a Get Up state: the body lies here until the graph leaves.')
+  if (!out.length) lints.push('No way out of this state.')
+  return <>{lints.map(l => <p key={l} className='text-ui-xs text-warning'>{l}</p>)}</>
+}
+
+/**
+ * How the body takes hits while this state plays (AnimationState.reactions), merged with the layers' states: the
+ * strictest React, every busy hand, the forces multiplied. Reactions run on Jolt: on another backend the rows say so.
+ */
+function ReactionEffectsRows({ value, onChange }: { value?: AnimationReactionEffects; onChange: (next: AnimationReactionEffects | undefined) => void }) {
+  const { supported, backendName } = useReactionsSupported()
+  const v = value ?? {}
+  const set = (patch: Partial<AnimationReactionEffects>) => {
+    const next: AnimationReactionEffects = { ...v, ...patch }
+    if (!next.react || next.react === 'full') delete next.react
+    if (!next.busyHands || next.busyHands === 'auto') delete next.busyHands
+    if (next.force === undefined || next.force === 1) delete next.force
+    if (next.shove === undefined || next.shove === 1) delete next.shove
+    onChange(Object.keys(next).length ? next : undefined)
+  }
+  return (
+    <>
+      <SectionTitle title='Reactions' className='mt-1' doc='editor/animation#reaction-effects' />
+      {!supported && (
+        <p className='text-ui-xs text-warning'>Reactions run only on the Jolt physics backend; this project runs on {backendName}, so these do nothing.</p>
+      )}
+      <div className='flex items-center gap-1'>
+        <span className='text-ui-xs text-muted w-[42px] shrink-0' title='How the body takes hits, shoves and impacts while this state plays'>React</span>
+        <SegmentedControl<'full' | 'flinch' | 'none'> size='sm' value={v.react ?? 'full'} onChange={react => set({ react })}
+          options={[
+            { value: 'full', label: 'Full', title: 'As the rig’s reaction set says: flinches, staggers, falls' },
+            { value: 'flinch', label: 'Flinch', title: 'Flinches only: never staggered or knocked down' },
+            { value: 'none', label: 'None', title: 'The body does not react. The hit still counts: its Hit event, and the hit parameters' },
+          ]} />
+      </div>
+      <div className='flex items-center gap-1'>
+        <span className='text-ui-xs text-muted w-[42px] shrink-0' title='Hands that stay on what they hold (a weapon, a wheel) rather than reach for a wound'>Hands</span>
+        <Select className={cn(tight, 'flex-1 min-w-0')} value={v.busyHands ?? 'auto'}
+          onChange={e => set({ busyHands: e.target.value as AnimationReactionEffects['busyHands'] })}>
+          <option value='auto' title='Both busy while a support-hand IK holds a weapon, else free'>Auto</option>
+          <option value='both'>Both busy</option>
+          <option value='right'>Right busy</option>
+          <option value='left'>Left busy</option>
+          <option value='none'>Both free</option>
+        </Select>
+      </div>
+      <div className='flex items-center gap-1'>
+        <span className='text-ui-xs text-muted w-[42px] shrink-0' title='Hits land this many times as hard: a braced crouch 0.6, a weak spot 1.5'>Force ×</span>
+        <OptionalNumberInput className={cn(tight, 'w-[56px]')} step='0.1' min='0' placeholder='1' value={v.force}
+          onChange={force => set({ force: force === undefined ? undefined : clamp(force, 0, 10) })} />
+        <span className='text-ui-xs text-muted w-[42px] shrink-0 ml-1' title='Shoves carry it this many times as far'>Shove ×</span>
+        <OptionalNumberInput className={cn(tight, 'w-[56px]')} step='0.1' min='0' placeholder='1' value={v.shove}
+          onChange={shove => set({ shove: shove === undefined ? undefined : clamp(shove, 0, 10) })} />
+      </div>
+    </>
+  )
+}
+
 function VariablePicker({ vars, value, onPick }: {
   vars: AccessibleVariable[]
   value?: AnimationVariableBinding
   onPick: (b: AnimationVariableBinding | undefined) => void
 }) {
-  const key = (source: string, nodeRef: string, varName: string) => `${source}|${nodeRef}|${varName}`
+  // A reaction built-in reads the character's reactions whatever node it names: one entry, keyed by its name alone.
+  const key = (source: string, nodeRef: string, varName: string) =>
+    `${source}|${source === 'builtin' && NODE_BUILTINS[varName]?.reactions ? 'reactions' : nodeRef}|${varName}`
   const current = value ? key(value.source ?? 'variable', value.nodeRef, value.varName) : ''
   const groups: Record<AccessibleVariable['group'], AccessibleVariable[]> = { 'Built-in': [], Self: [], Parent: [], Scene: [] }
   for (const v of vars) groups[v.group].push(v)

@@ -26,6 +26,7 @@ import {
   moveTransition as moveTransitionIn,
 } from './forks'
 import { clearView, pruneReroutes, renameInReroutes, withPoints, type ReroutePoint } from './reroutes'
+import { addHitLayer as addHitLayerTo, addKnockDown as addKnockDownTo } from './reactionPresets'
 import { machineRecorder, selectionHolds, viewIn, type MachineEditOpts, type MachineView } from './machineHistory'
 import { useHistory } from '../HistoryContext'
 
@@ -121,6 +122,10 @@ interface StateMachineContextValue {
   setEventActions: (next: EventActionBinding[]) => void
   /** Add a trigger parameter of this name unless the machine has one (a state's trigger, typed in). */
   addTriggerParam: (name: string) => void
+  /** Ragdoll and Get Up states on the base layer, wired to follow the body down and up (reactionPresets.ts). */
+  addKnockDown: (at?: { x: number; y: number }) => void
+  /** An additive hit-reaction layer playing `fieldId` on every hit (reactionPresets.ts). */
+  addHitLayer: (fieldId?: string) => void
 
   addState: (pos?: { x: number; y: number }) => void
   setState: (i: number, patch: Partial<AnimationState>) => void
@@ -582,6 +587,18 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       : { ...prev, parameters: [...prev.parameters, { name, type: 'trigger', default: false }] }, { label: 'Add parameter' })
   }
 
+  // ---- Reaction presets ----
+  const addKnockDown = (at?: { x: number; y: number }) => {
+    const made = addKnockDownTo(smRef.current, at)
+    update(() => made.machine, { label: 'Add knock-down states' })
+    setActiveLayer(0)
+    setSelection({ kind: 'state', name: made.ragdoll })
+  }
+  const addHitLayer = (fieldId?: string) => {
+    update(prev => addHitLayerTo(prev, { fieldId }).machine, { label: 'Add hit reaction layer' })
+    setActiveLayer((fullSm.layers?.length ?? 0) + 1)
+  }
+
   // ---- States ----
   const addState = (pos?: { x: number; y: number }) => {
     const name = uniqueName('State', takenNames(sm))
@@ -972,7 +989,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     boneMasks, poseAssets, controller, saveAsController, detachController,
     selection, setSelection, graphView, setGraphView, simulate, setSimulate: setSimulateLive,
     apply, paramOf,
-    addParam, setParam, removeParam, setEventActions, addTriggerParam,
+    addParam, setParam, removeParam, setEventActions, addTriggerParam, addKnockDown, addHitLayer,
     addState, setState, removeState, stateIndex, commitLayout, tidyView, setReroutes, deleteElements,
     groups, groupOf, createGroup, setGroup, removeGroup, moveToGroup, openGroup, setOpenGroup: showGroup,
     forks, isFork, addFork, setFork, removeFork, dissolveFork, moveTransition,
@@ -1013,7 +1030,8 @@ export function uniqueName(base: string, existing: string[]): string {
 
 // Keep a parameter's default value + binding consistent when the type changes.
 export function normalizeParam(p: AnimationParameter): AnimationParameter {
-  if (p.type !== 'variable' && p.variable) { const { variable, ...rest } = p; p = rest }
+  // A trigger keeps a counter it fires on (AnimationParameter.variable); a number or a toggle has none.
+  if (p.type !== 'variable' && p.variable && !(p.type === 'trigger' && p.variable.source === 'builtin')) { const { variable, ...rest } = p; p = rest }
   if (p.type === 'float' && typeof p.default !== 'number') return { ...p, default: 0 }
   if ((p.type === 'bool' || p.type === 'trigger') && typeof p.default !== 'boolean') return { ...p, default: false }
   if (p.type === 'variable') {

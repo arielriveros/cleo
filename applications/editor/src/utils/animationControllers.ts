@@ -58,15 +58,26 @@ export function layersOf(sm: AnimationStateMachine): { states: AnimationState[] 
 export function machineClipNames(sm: AnimationStateMachine | null | undefined): string[] {
   if (!sm) return []
   const names = new Set<string>()
-  for (const layer of layersOf(sm)) for (const s of layer.states) if (s.clipName) names.add(s.clipName)
+  for (const layer of layersOf(sm)) for (const s of layer.states) {
+    if (s.clipName) names.add(s.clipName)
+    // A Get Up state's clips, one per side the body can lie on.
+    if (s.getUp?.faceUp) names.add(s.getUp.faceUp)
+    if (s.getUp?.faceDown) names.add(s.getUp.faceDown)
+  }
   return Array.from(names)
 }
 
 /** Rename clips through `overrides` in every layer's states. Entries mapping a clip to '' are ignored. */
 export function applyClipOverrides(sm: AnimationStateMachine, overrides: Record<string, string> | undefined): AnimationStateMachine {
   if (!overrides || !Object.keys(overrides).length) return sm
-  const swap = (states: AnimationState[]) =>
-    states.map(s => (s.clipName && overrides[s.clipName] ? { ...s, clipName: overrides[s.clipName] } : s))
+  const to = (clip: string | undefined) => (clip && overrides[clip] ? overrides[clip] : clip)
+  const swap = (states: AnimationState[]) => states.map(s => {
+    let next = s.clipName && overrides[s.clipName] ? { ...s, clipName: overrides[s.clipName] } : s
+    if (s.getUp && (to(s.getUp.faceUp) !== s.getUp.faceUp || to(s.getUp.faceDown) !== s.getUp.faceDown)) {
+      next = { ...next, getUp: { ...s.getUp, ...(s.getUp.faceUp ? { faceUp: to(s.getUp.faceUp) } : {}), ...(s.getUp.faceDown ? { faceDown: to(s.getUp.faceDown) } : {}) } }
+    }
+    return next
+  })
   return {
     ...sm,
     states: swap(sm.states),

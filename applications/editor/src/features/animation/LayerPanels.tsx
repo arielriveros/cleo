@@ -1,6 +1,7 @@
 import { useStateMachine } from './StateMachineContext'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { Button, cn, SegmentedControl, Select, Slider, TextInput } from '@cleo/app-kit/ui'
+import { Button, cn, SegmentedControl, Select, Slider, TextInput, Toggle } from '@cleo/app-kit/ui'
+import { FallIcon } from '../rig/reactions/reactionIcons'
 import type { AnimationBlendMode } from 'cleo'
 import type { ReactNode } from 'react'
 import { useAssetDrop } from '../../utils/useAssetDrop'
@@ -122,6 +123,15 @@ export function LayerSection() {
           </Select>
         </AssetDropRow>
         {maskMissing && <p className='text-ui-xs text-warning'>That mask was deleted, so this layer affects nothing until another is picked.</p>}
+
+        {/* Under a Ragdoll or Get Up state the layers fade out (an aim must not pull at a body getting up), unless
+            one plays over them (AnimationLayer.overReactions). */}
+        <span className='self-start' title={'Plays over Ragdoll and Get Up states. Off (the default), the layer fades out while '
+          + 'the base layer is in one, and back in after, so a weapon or aim pose does not pull at a body lying or getting up.'}>
+          <Toggle doc={false} checked={!!layer.overReactions} className='text-ui-xs'
+            label={<span className='inline-block w-3.5 h-3.5 align-[-2px]'><FallIcon /></span>}
+            onChange={c => setLayer(activeLayer, { overReactions: c || undefined })} />
+        </span>
 
         {/* Support-hand IK (AnimationLayer.handIk): after every layer, one hand reaches where this layer's own
             pose puts it relative to the other, so an aim offset or recoil on the gun hand cannot pull it off. */}

@@ -79,9 +79,11 @@ export interface GraphNodeModel {
   subtitle?: string
   /** Red subtitle, for a reference that no longer resolves. */
   subtitleMissing?: boolean
-  /** A glyph before the title, for a state whose kind the name cannot convey. */
-  glyph?: string
+  /** A glyph before the title, for a state whose kind the name cannot convey (a character or an icon). */
+  glyph?: ReactNode
   glyphTitle?: string
+  /** Small icons at the end of the title row, each with its tooltip (a state's reaction effects). */
+  marks?: { icon: ReactNode; title: string }[]
   /** Small right-aligned readout. */
   badge?: string
   badgeTitle?: string
@@ -231,8 +233,9 @@ interface NodeData extends Record<string, unknown> {
   label: string
   subtitle: string
   subtitleMissing: boolean
-  glyph?: string
+  glyph?: ReactNode
   glyphTitle?: string
+  marks?: { icon: ReactNode; title: string }[]
   badge?: string
   badgeTitle?: string
   badgeTone: BadgeTone
@@ -271,10 +274,13 @@ function GraphNode({ data, selected }: NodeProps) {
       <div className='px-2 py-1 border-b border-border flex items-center gap-1'>
         {d.isEntry && <span className='text-ui-2xs px-1 rounded bg-success text-fg' title='Entry state'>▶</span>}
         <span className='text-ui font-semibold truncate flex-1' title={d.label}>{d.label}</span>
+        {d.marks?.map((m, k) => <span key={k} className='inline-block w-3 h-3 shrink-0 text-warning' title={m.title}>{m.icon}</span>)}
       </div>
       <div className='px-2 py-1 text-ui-xs text-muted flex items-center justify-between gap-1'>
         <span className={`truncate ${d.subtitleMissing ? 'text-danger-fg' : ''}`} title={d.subtitle}>
-          {d.glyph && <span className='mr-1 text-primary' title={d.glyphTitle}>{d.glyph}</span>}
+          {d.glyph && (typeof d.glyph === 'string'
+            ? <span className='mr-1 text-primary' title={d.glyphTitle}>{d.glyph}</span>
+            : <span className='mr-1 text-primary inline-block w-3 h-3 align-[-2px]' title={d.glyphTitle}>{d.glyph}</span>)}
           {d.subtitle}
         </span>
         {d.badge && (
@@ -523,6 +529,7 @@ function Flow(props: MachineGraphProps) {
         subtitleMissing: !!n.subtitleMissing,
         glyph: n.glyph,
         glyphTitle: n.glyphTitle,
+        marks: n.marks,
         badge: n.badge,
         badgeTitle: n.badgeTitle,
         badgeTone: n.badgeTone ?? 'dim',

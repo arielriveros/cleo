@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { mat4 } from 'gl-matrix'
 import {
-  BEHAVIOUR_SPECS, MUSCLE_REGIONS, MUSCLE_SPECS, PHYSICS_BACKENDS, PIN_SPECS, REACTION_PRESETS, THRESHOLD_SPECS, defaultReactionSet, parseReactionSet,
+  BEHAVIOUR_SPECS, MUSCLE_REGIONS, MUSCLE_SPECS, PIN_SPECS, REACTION_PRESETS, THRESHOLD_SPECS, defaultReactionSet, parseReactionSet,
   type BehaviourConfig, type BehaviourId, type MuscleRegion, type ReactionParamSpec, type ReactionSet,
 } from 'cleo'
 import {
@@ -21,6 +21,7 @@ import { poseDeltaOf } from '../boneTrs'
 import { pinKey, useCreatorPins } from '../../creator/creatorPins'
 import type { RigReactions } from '../../../utils/reactionSets'
 import { benchStore, type BenchActWhat, type BenchState, type BenchTool } from './benchStore'
+import { useReactionsSupported } from './reactionsSupport'
 import { BENCH_SCENARIOS, type BenchScenario } from './scenarios'
 import ReactionTimeline from './ReactionTimeline'
 import {
@@ -57,7 +58,7 @@ function SpecSlider({ spec, value, onChange, disabled }: { spec: ReactionParamSp
 }
 
 export default function ReactionsPanel() {
-  const { editorScene, skeletonTargetId, instance } = useCleoEngine()
+  const { editorScene, skeletonTargetId } = useCleoEngine()
   const { asset, patch } = useRig()
   const { animations, poseAssets } = useAssetLibrary()
   const writePose = usePoseAssetEdit()
@@ -66,9 +67,7 @@ export default function ReactionsPanel() {
   const [rename, setRename] = useState(false)
   // Reactions run on Jolt alone (PhysicsCapabilities.reactions): on another backend the tab still shows the sets,
   // every control off, under a warning that says why.
-  const physics = instance?.physics
-  const supported = !physics || (physics.capabilities ? physics.capabilities.reactions : physics.backend === 'jolt')
-  const backendName = physics ? PHYSICS_BACKENDS.find(b => b.request === physics.backend)?.label ?? physics.backend : ''
+  const { supported, backendName } = useReactionsSupported()
 
   const reactions: RigReactions | undefined = asset?.reactions
   const sets = reactions?.sets ?? []
@@ -317,6 +316,12 @@ export default function ReactionsPanel() {
                     </div>
                   )
                 })}
+                {spec.id === 'getUp' && spec.clips.length > 0 && (
+                  <Hint className='mt-1'>
+                    What it rises on by itself. An animator graph with a Get Up state rises on that state’s clips instead
+                    (these when it names none).
+                  </Hint>
+                )}
                 {spec.clips.map(slot => (
                   <div key={slot.slot} className='flex items-center gap-1 mt-1' title={slot.doc}>
                     <span className='text-ui-sm w-24 shrink-0'>{slot.label}</span>

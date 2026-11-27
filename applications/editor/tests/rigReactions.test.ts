@@ -181,10 +181,13 @@ describe('docs/editor/reactions.md', () => {
 })
 
 describe('the Reactions tab off Jolt', () => {
-  const panel = () => readFileSync(join(__dirname, '..', 'src', 'features', 'rig', 'reactions', 'ReactionsPanel.tsx'), 'utf8')
+  const source = (...p: string[]) => readFileSync(join(__dirname, '..', 'src', 'features', ...p), 'utf8')
+  const panel = () => source('rig', 'reactions', 'ReactionsPanel.tsx')
   it("warns that reactions run on Jolt alone and turns every control off, by the running world's capability", () => {
     const src = panel()
-    expect(src).toContain('physics.capabilities.reactions')
+    // The running world's capability, in the hook the animator's reaction rows share.
+    expect(source('rig', 'reactions', 'reactionsSupport.ts')).toContain('physics.capabilities.reactions')
+    expect(src).toContain('useReactionsSupported()')
     expect(src).toMatch(/Reactions run only on the Jolt physics backend/)
     // Native controls off through the fieldset, the custom ones (sliders, toggles) through inert.
     expect(src).toMatch(/<fieldset disabled=\{!supported\}/)
@@ -193,5 +196,13 @@ describe('the Reactions tab off Jolt', () => {
     const body = src.slice(src.indexOf('<SectionTitle'))
     expect(body.indexOf('<fieldset')).toBeLessThan(body.indexOf('Customize'))
     expect(body.lastIndexOf('</fieldset>')).toBeGreaterThan(body.lastIndexOf('</Collapsable>'))
+  })
+
+  it("the animator's reaction rows say it too, and Ragdoll and Get Up are offered on the base layer alone", () => {
+    const src = source('animation', 'StateMachineEditor.tsx')
+    expect(src).toContain('useReactionsSupported()')
+    expect(src).toMatch(/Reactions run only on the Jolt physics backend/)
+    expect(src).toMatch(/\.\.\.\(onBase \? \[/)
+    expect(src).toContain('const onBase = activeLayer === 0')
   })
 })

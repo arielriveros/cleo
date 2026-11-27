@@ -132,6 +132,8 @@ export interface AccessibleVariable {
   source: 'variable' | 'builtin'
   /** Built-ins only: one line explaining what the value means, shown as the option's tooltip. */
   hint?: string
+  /** A count that only rises (hitCount): what a Trigger parameter can fire on. */
+  counter?: boolean
 }
 
 /**
@@ -162,6 +164,18 @@ const BUILTIN_HINTS: Record<string, string> = {
   groundedTime: 'Seconds grounded continuously; 0 while airborne. Use it to stop a landing state firing again mid-run.',
   groundDistance: 'Distance from the collider to the ground below, or −1 when unknown. Needs a Ground Probe on the body (its Collider).',
   slopeAngle: 'Tilt of the ground under the node, degrees from level. Reads 0 while airborne.',
+
+  // Reactions (Jolt): the character's body, read from its reactions whatever node the parameter names.
+  ragdolled: 'True while the body is the physics’: falling, tumbling, lying, dead. False once a get-up starts. From Any State into a Ragdoll state on it, the graph follows a hit’s fall.',
+  canGetUp: 'True while the body lies still and alive, ready to rise (the rig’s Get up delay), or once a script asks with reactions.getUp(). The way from a Ragdoll state into a Get Up state.',
+  faceUp: 'True while the body lies on its back (its hips and chest facing up).',
+  reacting: 'True while any reaction has the body: a flinch, a stagger, a fall.',
+  hasControl: 'True while the character keeps its control: on its feet, flinching or staggering. True where there are no reactions. A hit-reaction layer’s weight.',
+  staggering: 'True while it is shoved back on its feet, walking it out.',
+  hitAngle: 'Where the last hit came from against the way the character faces, degrees: 0 in front, −90 its right, +90 its left, ±180 behind (counter-clockwise, like planarAngle). A hit-reaction blend space’s x axis: make it wrap.',
+  hitHeight: 'Where up the body the last hit landed: 0 the feet, 1 the top of the head, on the skeleton at rest (a crouch does not change what a head shot is).',
+  hitStrength: 'How hard the last hit was, 0 to 1 against the reaction set’s fall threshold.',
+  hitCount: 'Hits taken so far, whether the body reacted or not. A Trigger parameter set to fire on Each hit fires on every one.',
 }
 
 /**
@@ -234,6 +248,8 @@ export function accessibleNodeVariables(
    */
   const builtins = (nodeRef: string, label: string) => {
     for (const [name, def] of Object.entries(NODE_BUILTINS)) {
+      // Listed once below: a reaction value is the character's whichever node names it.
+      if (def.reactions) continue
       out.push({
         nodeRef, group: 'Built-in', nodeLabel: label, varName: name,
         varType: def.type, source: 'builtin', hint: BUILTIN_HINTS[name],
@@ -258,6 +274,13 @@ export function accessibleNodeVariables(
   builtins('self', 'Self')
   const parent = sourceNode.parent
   if (parent) builtins('parent', `Parent (${parent.name})`)
+  for (const [name, def] of Object.entries(NODE_BUILTINS)) {
+    if (!def.reactions) continue
+    out.push({
+      nodeRef: parent ? 'parent' : 'self', group: 'Built-in', nodeLabel: 'Reactions', varName: name,
+      varType: def.type, source: 'builtin', hint: BUILTIN_HINTS[name], ...(def.counter ? { counter: true } : {}),
+    })
+  }
   // Must be stored as the RELATIONSHIP 'bodied', never that node's id: re-adding a character, rebuilding a
   // template instance or re-placing from an asset all regenerate node ids, and a stale id binding silently
   // reads its default forever. 'bodied' resolves per frame to whatever is actually moving.

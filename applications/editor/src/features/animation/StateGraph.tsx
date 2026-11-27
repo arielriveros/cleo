@@ -2,15 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { useStateMachine, OP_LABEL, effectiveType, ANY_STATE, linkKey } from './StateMachineContext'
 import {
-  BoltIcon, Button, ChevronLeftIcon, cn, JOINED_DIVIDER_CLASS, JOINED_GROUP_CLASS, SegmentedControl,
+  BoltIcon, Button, ChevronLeftIcon, cn, JOINED_DIVIDER_CLASS, JOINED_GROUP_CLASS, MenuItem, Popover, SegmentedControl,
 } from '@cleo/app-kit/ui'
+import { FallIcon, GetUpIcon, HitIcon } from '../rig/reactions/reactionIcons'
 import MachineGraph, { GraphTidyButton } from '../../components/MachineGraph'
 import { LayerPicker } from './LayerPanels'
 import type { GraphLinkModel, GraphMenuItem, GraphNodeModel, LinkPointRef } from '../../components/MachineGraph'
 import { addedPoint, movedPoint, pointsOf, removedPoint, rerouteKey, toggledPoint, type ReroutePoint } from './reroutes'
 import { tidyLayout } from './tidyLayout'
 import { isConditionGroup } from 'cleo'
-import type { AnimationTransition, AnimationCondition, AnimationConditionNode } from 'cleo'
+import type { AnimationTransition, AnimationCondition, AnimationConditionNode, AnimationReactionEffects } from 'cleo'
 import { graphPlan, inPort, outPort, realName, entryOf, PROXY_PREFIX, SELF_PREFIX, type PlanLink } from './stateGroups'
 import { GroupIcon, IntoGroupIcon, OutOfGroupIcon, UngroupIcon, EntryIcon, ForkIcon, DissolveIcon } from './groupIcons'
 import { rankOf, waysIn, waysOut } from './forks'
@@ -46,6 +47,21 @@ import { rankOf, waysIn, waysOut } from './forks'
 const AUTO_COLS = 4
 const AUTO_DX = 210
 const AUTO_DY = 120
+
+/** How a Ragdoll state starts a character on its feet, as its node says it. */
+const RAGDOLL_START: Record<string, string> = { fall: 'falls', trip: 'trips', limp: 'drops limp' }
+
+/** A state's reaction effects in a line (its node's mark), or '' for none. */
+function effectsTitle(e: AnimationReactionEffects | undefined): string {
+  if (!e) return ''
+  const parts: string[] = []
+  if (e.react === 'flinch') parts.push('flinches only')
+  if (e.react === 'none') parts.push('does not react')
+  if (e.busyHands && e.busyHands !== 'auto') parts.push({ both: 'both hands busy', left: 'left hand busy', right: 'right hand busy', none: 'both hands free' }[e.busyHands])
+  if (typeof e.force === 'number' && e.force !== 1) parts.push(`hits ×${e.force}`)
+  if (typeof e.shove === 'number' && e.shove !== 1) parts.push(`shoves ×${e.shove}`)
+  return parts.length ? `Reactions here: ${parts.join(', ')}` : ''
+}
 /** How far left and right of an opened group's states its stand-ins sit, and how far apart they stack. */
 const PROXY_DX = 260
 const PROXY_DY = 90
@@ -100,7 +116,7 @@ export default function StateGraph() {
     addState, setState, addTransition, apply, stateIndex, commitLayout, deleteElements, paramOf,
     removeState, animationFields, fieldOf, fullSm, activeLayer,
     groups, groupOf, createGroup, setGroup, removeGroup, moveToGroup, openGroup, setOpenGroup,
-    forks, isFork, addFork, setFork, removeFork, dissolveFork, tidyView, setReroutes,
+    forks, isFork, addFork, setFork, removeFork, dissolveFork, tidyView, setReroutes, addKnockDown, addHitLayer,
   } = useStateMachine()
   // The highlighted state is the ACTIVE layer's: the base reads `currentStateName`, a layer its own.
   const layerName = activeLayer > 0 ? fullSm.layers?.[activeLayer - 1]?.name ?? null : null
@@ -184,23 +200,31 @@ export default function StateGraph() {
     const s = sm.states[i]
     if (!s) return null
     const field = s.fieldId ? fieldOf(s.fieldId) : undefined
-    const playsField = !!s.fieldId
-    const playsPose = !playsField && !!(s.poseRef || s.pose)
+    // The body's own states (base layer only) outrank what a state plays.
+    const ragdoll = activeLayer === 0 && !!s.ragdoll
+    const getUp = activeLayer === 0 && !ragdoll && !!s.getUp
+    const playsField = !ragdoll && !getUp && !!s.fieldId
+    const playsPose = !ragdoll && !getUp && !playsField && !!(s.poseRef || s.pose)
     // Stop motion (AnimationState.fps); a pose has no clock to step.
-    const stepped = !playsPose && typeof s.fps === 'number' && s.fps > 0
+    const stepped = !playsPose && !ragdoll && typeof s.fps === 'number' && s.fps > 0
     // The ⊞ badge is what distinguishes a blend state from a clip state; the name alone does not.
-    const what = playsField ? (field?.name || '(missing field)')
+    const what = ragdoll ? (s.clipName ? `ragdoll over ${s.clipName}` : `ragdoll · ${RAGDOLL_START[s.ragdoll?.start ?? 'fall']}`)
+      : getUp ? `rises · ${s.getUp?.faceUp || 'rig’s'} / ${s.getUp?.faceDown || 'rig’s'}`
+      : playsField ? (field?.name || '(missing field)')
       : playsPose ? `pose: ${s.pose?.name ?? 'pose'}`
       : s.clipName ? `${s.clipName}${s.startTime ? ` @${s.startTime}s` : ''}`
       : (activeLayer > 0 ? '(empty — adds nothing)' : '(no clip)')
+    const effects = effectsTitle(s.reactions)
     return {
       id: s.name,
       ...posOf(i),
       isEntry: !!s.isEntry,
       subtitle: what,
       subtitleMissing: playsField && !field?.name,
-      glyph: playsField ? '⊞' : undefined,
-      glyphTitle: 'Animation field (blend space)',
+      glyph: ragdoll ? <FallIcon /> : getUp ? <GetUpIcon /> : playsField ? '⊞' : undefined,
+      glyphTitle: ragdoll ? 'Ragdoll state: the body is the physics’ while the graph is here'
+        : getUp ? 'Get Up state: the body rises on its clip, face up or face down' : 'Animation field (blend space)',
+      marks: effects ? [{ icon: <HitIcon />, title: effects }] : undefined,
       // A rate read from a parameter is shown by NAME. It is the single most common reason a state
       // looks right in a preview (which always runs at rate 1) and wrong in Play, so it has to be
       // legible without selecting the node. Highlighted on a field state, where it multiplies an
@@ -569,6 +593,26 @@ export default function StateGraph() {
                 ? `Tidy ${openGroup}: its states in columns the way its lines run (its reroute points are cleared)`
                 : 'Tidy: the graph in columns the way its lines run, from Any State and the entry (the reroute points are cleared)'} />
           </div>
+          {/* The usual wiring for a body the physics takes, and a layer that flinches on every hit (reactionPresets.ts). */}
+          <Popover title='Reaction presets: knock-down states, a hit-reaction layer' align='left'
+            triggerClassName={cn(iconButton, 'shrink-0 rounded border border-control')}
+            trigger={<span className='w-4 h-4 inline-block'><FallIcon /></span>}
+            className='min-w-[260px] p-1'>
+            {close => (
+              <>
+                <MenuItem icon={<span className='w-4 h-4 inline-block'><FallIcon /></span>}
+                  hint='A Ragdoll and a Get Up state on the base layer: in from anywhere when the body leaves its feet (Ragdolled), up once it can (CanGetUp), back to the entry state'
+                  onClick={() => { close(); setOpenGroup(null); addKnockDown({ x: anyPos.x + AUTO_DX, y: anyPos.y + AUTO_DY * 3 }) }}>
+                  Knock-down states
+                </MenuItem>
+                <MenuItem icon={<span className='w-4 h-4 inline-block'><HitIcon /></span>}
+                  hint='An additive layer that flinches on every hit (the Hit trigger), playing a blend space over where the hit came from (HitAngle) and how high it landed (HitHeight), while the character keeps its control'
+                  onClick={() => { close(); addHitLayer(animationFields.find(f => /hit/i.test(f.name))?.id) }}>
+                  Hit reaction layer
+                </MenuItem>
+              </>
+            )}
+          </Popover>
           {openGroup && (
             <div className={cn(JOINED_GROUP_CLASS, 'items-center text-ui-xs shrink-0 whitespace-nowrap')}>
               <button type='button' className={iconButton} title='Back to the whole layer'
