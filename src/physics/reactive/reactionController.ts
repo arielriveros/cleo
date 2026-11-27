@@ -95,6 +95,23 @@ const MAX_KICK_SPEED = 1.2;
 const TRACKED = 6 * Math.PI / 180;
 /** A hit's impulse counts toward a stagger or a fall for this long (s): a burst adds up. */
 const RECENT_HITS = 1;
+/**
+ * How long a kinematic part takes to catch up with its animation when it has drifted from it (s), and the fastest
+ * that correction moves and turns it (m/s, rad/s): on top of the animation's own motion. Slow enough to stay steady
+ * with the physics worker's step or two of latency.
+ */
+const KINEMATIC_CATCH_UP = 0.1;
+const MAX_CATCH_UP_SPEED = 2;
+const MAX_CATCH_UP_SPIN = 6;
+/** The same with the physics worker, whose pose is older still: gentler, so a stale gap is never chased. */
+const KINEMATIC_CATCH_UP_WORKER = 0.5;
+const MAX_CATCH_UP_SPEED_WORKER = 0.5;
+const MAX_CATCH_UP_SPIN_WORKER = 2;
+function clampLength(v: number[], max: number): number[] {
+    const n = Math.hypot(v[0], v[1], v[2]);
+    if (!Number.isFinite(n)) return [0, 0, 0];
+    return n > max ? [v[0] * max / n, v[1] * max / n, v[2] * max / n] : v;
+}
 /** A part of the body that is the animation's while the character stands (kinematic on it). */
 const LOWER = (region: string) => region === 'pelvis' || region === 'legs' || region === 'feet';
 
@@ -526,13 +543,18 @@ export class ReactionController {
     }
 
     /**
-     * The legs and hips on their animation: each kinematic part given the velocity that takes it, over this step, to
-     * where the animation will have it a frame on (its pose, moved on by its own motion: the animator poses after the
-     * physics steps). Far from it (a teleport), put there.
+     * The legs and hips on their animation: each kinematic part moved at the animation's own velocity (its motion
+     * between frames), plus a correction that takes up what it has drifted from where the animation will have it a
+     * frame on, over KINEMATIC_CATCH_UP seconds and no faster than a cap. Never the whole gap in one step: with the
+     * physics worker the pose read here is a step or two old (the one in flight is not back yet), and a velocity
+     * sized to close that stale gap overshoots by the steps still to land, more every frame: the hips flung off and
+     * the upper body, jointed to them, stretched after them. Far from it (a teleport), put there.
      */
     private _driveKinematic(body: ReactionBody, dt: number): void {
         if (!(dt > 1e-4)) return;
-        const r = this.ragdoll!;
+        const worker = this._physics.executor === 'worker';
+        const k = 1 / Math.max(dt, worker ? KINEMATIC_CATCH_UP_WORKER : KINEMATIC_CATCH_UP);
+        const maxSpeed = worker ? MAX_CATCH_UP_SPEED_WORKER : MAX_CATCH_UP_SPEED, maxSpin = worker ? MAX_CATCH_UP_SPIN_WORKER : MAX_CATCH_UP_SPIN;
         for (const p of body.parts) {
             const i = p.index;
             if (!body.kinematic[i]) continue;
@@ -540,18 +562,20 @@ export class ReactionController {
             const tx = a[0] + v[0] * dt, ty = a[1] + v[1] * dt, tz = a[2] + v[2] * dt;
             const qa = rotationVectorToQuat([v[3] * dt, v[4] * dt, v[5] * dt]);
             const qt = quatMultiplyTuple(qa, [a[3], a[4], a[5], a[6]]);
-            if (Math.hypot(tx - s[0], ty - s[1], tz - s[2]) > 0.3) {
+            const ex = tx - s[0], ey = ty - s[1], ez = tz - s[2];
+            if (Math.hypot(ex, ey, ez) > 0.3) {
                 b.position.set(a[0], a[1], a[2]);
                 b.quaternion.set(a[3], a[4], a[5], a[6]);
                 b.velocity.set(v[0], v[1], v[2]);
                 b.angularVelocity.set(v[3], v[4], v[5]);
                 continue;
             }
-            b.velocity.set((tx - s[0]) / dt, (ty - s[1]) / dt, (tz - s[2]) / dt);
-            const w = quatToRotationVector(quatMultiplyTuple(qt, quatConjugateTuple([s[3], s[4], s[5], s[6]])));
-            b.angularVelocity.set(w[0] / dt, w[1] / dt, w[2] / dt);
+            const c = clampLength([ex * k, ey * k, ez * k], maxSpeed);
+            b.velocity.set(v[0] + c[0], v[1] + c[1], v[2] + c[2]);
+            const e = quatToRotationVector(quatMultiplyTuple(qt, quatConjugateTuple([s[3], s[4], s[5], s[6]])));
+            const w = clampLength([e[0] * k, e[1] * k, e[2] * k], maxSpin);
+            b.angularVelocity.set(v[3] + w[0], v[4] + w[1], v[5] + w[2]);
         }
-        void r;
     }
 
     /** After the physics step: measure the body, move between states, fade behaviours, follow with the Collider. */

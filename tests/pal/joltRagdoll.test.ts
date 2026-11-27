@@ -67,7 +67,10 @@ describe('Jolt ragdoll tools in the physics layer', () => {
             expect(velocity(w, h)[1]).toBeLessThan(-1);
         });
 
-        it('a body switched kinematic and moved by its velocity steps in the worker as in the world itself, and comes back', () => {
+        // Switched after its copy was made, and before (the copy then built from a kinematic description, which must
+        // keep the body's mass to be dynamic again: it stayed kinematic, flying on at its last velocity, its joints
+        // stretched after it).
+        for (const switchAt of [5, 0]) it(`a body switched kinematic (frame ${switchAt}) and moved by its velocity steps in the worker as in the world itself, and comes back`, () => {
             const scene = (w: PhysicsWorld) => {
                 body(w, { kind: 'box', halfExtents: [20, 0.5, 20] }, [0, -0.5, 0], { mass: 0 });
                 const leg = body(w, { kind: 'box', halfExtents: [0.1, 0.4, 0.1] }, [0, 1, 0], { mass: 5 });
@@ -82,9 +85,9 @@ describe('Jolt ragdoll tools in the physics layer', () => {
             made.push(replica.world);
             for (let frame = 0; frame < 120; frame++) {
                 for (const [w, s] of [[inline, a], [original, b]] as const) {
-                    if (frame === 5) w.setBodyType!(s.leg, 'kinematic');
-                    if (frame >= 5 && frame < 90) w.setLinearVelocity(s.leg, 1.2, 0, 0.4 * Math.sin(frame * 0.1));
-                    if (frame >= 5 && frame < 90) w.setAngularVelocity(s.leg, 0, 0.8, 0);
+                    if (frame === switchAt) w.setBodyType!(s.leg, 'kinematic');
+                    if (frame >= switchAt && frame < 90) w.setLinearVelocity(s.leg, 1.2, 0, 0.4 * Math.sin(frame * 0.1));
+                    if (frame >= switchAt && frame < 90) w.setAngularVelocity(s.leg, 0, 0.8, 0);
                     if (frame === 90) w.setBodyType!(s.leg, 'dynamic');
                     w.setJointTarget(s.j, aboutX(0.4 * Math.sin(frame * 0.05)), [0.02 * Math.cos(frame * 0.05), 0, 0]);
                 }
@@ -103,6 +106,8 @@ describe('Jolt ragdoll tools in the physics layer', () => {
                 expect(pose(original, b[key]), key).toEqual(pose(inline, a[key]));
                 expect(velocity(original, b[key]), key).toEqual(velocity(inline, a[key]));
             }
+            // Dynamic again in the copy too: it fell to the ground.
+            expect(pose(original, b.leg)[1]).toBeLessThan(0.6);
         });
     });
 

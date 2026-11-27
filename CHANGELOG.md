@@ -95,6 +95,11 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   without. Opening a template brings them up to its model's, and saving it keeps them.
 - **Fix: linking a material to a model with a one-entry material list left the list naming the old material.** The
   node then matched the old material's edits and missed its own.
+- **Fix: with the physics worker, a character shot on its feet stretched its upper body away from its hips without
+  end.** Its hips, kinematic on the animation, were sped toward the animation from a pose the worker had not caught
+  up to yet, faster every frame; and a part made kinematic before the worker copied it was copied without its mass,
+  so it could never be dynamic again and flew on at its last speed. The hips now move at the animation's own speed
+  with a gentle, capped catch-up, and a kinematic copy keeps its mass (and is reported back).
 - **A character reacting on its feet keeps its control, and its reactions follow what it is doing.** A flinch or
   a stagger no longer takes the character out of the game: it keeps its Collider and its control (`hasControl`),
   so it goes on walking, aiming and firing. On its feet a reaction is physical animation: the legs and hips

@@ -650,6 +650,34 @@ describe('physical animation on its feet (jolt)', () => {
         expect(worst).toBeLessThan(0.025);
     });
 
+    // The physics worker reads the bodies a step or two late, and builds its copy of a body from its description as
+    // it is then. Shot walking, the hips chased that stale pose ever faster and the copy of a part made kinematic
+    // before it was copied could not be dynamic again: the upper body stretched off after the hips without end.
+    for (const worker of [false, true]) it(`shot walking, keeps its upper body on its hips and falls whole after${worker ? ' (physics worker)' : ''}`, () => {
+        const s = person();
+        if (worker) s.physics.setWorkerMode('on', () => new LoopbackPort());
+        let worstNeck = 0, fastestHips = 0, rest = -1, lowest = Infinity;
+        for (let f = 0; f < 150; f++) {
+            if (f < 40) { const p = s.node.position; s.node.setPosition([p[0], p[1], p[2] + 4 * H]); s.node.updateTransforms(null); }
+            if (f === 5) s.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 14 });
+            if (f === 40) s.r.hit({ part: 'Chest', direction: [0, 0, -1], impulse: 200 });
+            step(s);
+            const b = s.r.body;
+            if (!b) continue;
+            const pelvis = s.r.ragdoll!.parts[b.pelvis].body, chest = s.r.ragdoll!.parts[b.chest].body;
+            const d = Math.hypot(chest.position.x - pelvis.position.x, chest.position.y - pelvis.position.y, chest.position.z - pelvis.position.z);
+            if (rest < 0) rest = d;
+            worstNeck = Math.max(worstNeck, Math.abs(d - rest));
+            if (s.r.state === 'hitReact') fastestHips = Math.max(fastestHips, Math.hypot(pelvis.velocity.x, pelvis.velocity.y, pelvis.velocity.z));
+            if (f > 40) lowest = Math.min(lowest, pelvis.position.y);
+        }
+        // The chest stays a chest's length from the hips; the hips move at the walk, not after a stale pose.
+        expect(worstNeck).toBeLessThan(0.05);
+        expect(fastestHips).toBeLessThan(5.5);
+        // Knocked down after the flinch, the hips reach the ground.
+        expect(lowest).toBeLessThan(0.4);
+    });
+
     it("lets a hand on a weapon stay there: a busy hand never reaches for a wound", () => {
         const s = person();
         s.r.busyHands = { L: true, R: true };

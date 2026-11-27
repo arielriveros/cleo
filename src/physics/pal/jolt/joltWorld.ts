@@ -1132,8 +1132,11 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
         // A body sliding across two triangles is not bumped by the edge between them (cannon's heightfield
         // patch, Rapier's FIX_INTERNAL_EDGES).
         cs.mEnhancedInternalEdgeRemoval = type === 'dynamic';
-        const mass = type === 'dynamic' ? desc.mass : 0;
-        if (type === 'dynamic') {
+        // A body with a mass described kinematic is a dynamic one made kinematic (setBodyType: a copy in the worker is
+        // built from its description as it is now): its mass kept, for when it is dynamic again, and reported back.
+        const switchable = type === 'kinematic' && desc.mass > 0;
+        const mass = type === 'dynamic' || switchable ? desc.mass : 0;
+        if (type === 'dynamic' || switchable) {
             cs.mOverrideMassProperties = J.EOverrideMassProperties_MassAndInertiaProvided;
             const mp = this._massOf(cs.GetShape(), mass, desc.inertia);
             cs.mMassPropertiesOverride = mp;
@@ -1174,6 +1177,7 @@ export class JoltWorld implements DescribedWorld<JoltJointRecord> {
             handle, body, id: body.GetID().GetIndexAndSequenceNumber(), ptr: J.getPointer(body), desc, configVersion: 0, type, mass, sensor, dofs,
             colliderDescs: colliders, centerOfMass, group, mask, response: desc.collisionResponse ?? true, reports: !!desc.reportContacts,
             friction, restitution, enabled: true, parts: null, radius: 0, written: null,
+            ...(switchable ? { switched: true, retyped: true } : {}),
             ...(selfGroup !== undefined ? { selfGroup } : {}),
         };
         this._entries.set(handle, entry);
